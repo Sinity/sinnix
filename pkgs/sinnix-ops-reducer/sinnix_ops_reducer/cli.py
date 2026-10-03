@@ -163,6 +163,8 @@ def capabilities_command(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
+    status = view.get("census_status") or {}
+    print(f"Census: {status.get('status', 'unavailable')}; collected at {status.get('ts', 'unknown')}; {len(status.get('coverage_gaps') or [])} coverage gaps")
     for group in view["groups"]:
         print(f"\n{group['label']} ({len(group['rows'])}) — {group['note']}")
         for row in group["rows"]:

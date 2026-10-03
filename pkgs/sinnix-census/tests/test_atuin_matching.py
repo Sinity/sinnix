@@ -133,32 +133,6 @@ def test_live_wal_records_and_punctuated_home_are_read(
         assert result is not None and result["neutral-tool"]["n"] == 1
 
 
-def test_polylogue_evidence_is_cached_by_query_and_window(monkeypatch):
-    census._POLYLOGUE_EVIDENCE.clear()
-    calls = []
-
-    class Result:
-        text = '{"items": [{"id": "one"}]}'
-
-    def fake_run(command, **_kwargs):
-        calls.append(command)
-        return Result()
-
-    monkeypatch.setattr(census, "run", fake_run)
-    assert census.polylogue_evidence("shared", 90) == {"n": 1, "last": None}
-    assert census.polylogue_evidence("shared", 90) == {"n": 1, "last": None}
-    assert census.polylogue_evidence("shared", 30) == {"n": 1, "last": None}
-    assert len(calls) == 2
-    assert calls[0][-1] == "shared since:90d"
-    assert calls[1][-1] == "shared since:30d"
-
-
-@pytest.mark.parametrize(
-    "body", ['{"error":"unavailable"}', '{"items":"invalid"}', '"unavailable"']
-)
-def test_unavailable_polylogue_response_is_not_measured_zero(monkeypatch, body):
-    census._POLYLOGUE_EVIDENCE.clear()
-    monkeypatch.setattr(
-        census, "run", lambda *_args, **_kwargs: type("Result", (), {"text": body})()
-    )
-    assert census.polylogue_evidence("neutral", 90) is None
+def test_prose_mentions_cannot_prove_invocation():
+    assert census.verdict({"polylogue": {"n": 5}}, [], False) == "unknown"
+    assert census.verdict({"polylogue": {"n": 5}}, ["docs/example.md"], False) == "referenced-only"

@@ -276,7 +276,8 @@ def render_capability_sections(view: dict) -> tuple[str, int]:
             "</section>",
             0,
         )
-    html = ""
+    status = view.get("census_status") or {}
+    html = f"<p>Census: {esc(status.get('status', 'unavailable'))}; collected at {esc(str(status.get('ts', 'unknown')))}; {len(status.get('coverage_gaps') or [])} coverage gaps.</p>"
     counted = 0
     for group in view.get("groups", []):
         rows = []

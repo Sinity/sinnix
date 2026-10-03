@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # @sinnix-package
 # description: Evidence-joined usage census across sinnix-owned artifact classes
-# runtimeInputs: python3 systemd gnugrep
+# runtimeInputs: python3 systemd gnugrep curl git
 # pythonPackages: @sinnix-lib
 
 """Join declaration inventories against usage evidence.
@@ -46,16 +46,19 @@ index makes possible for the first time.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import shlex
+import uuid
 import os
 import re
 import sqlite3
 import sys
 import time
-from contextlib import closing
 from pathlib import Path
+from contextlib import closing
 
-from sinnix_lib.ledger import append_jsonl
+from sinnix_lib.lock import flock
 from sinnix_lib.process import run
 
 HOME = Path.home()
@@ -68,64 +71,76 @@ CAPABILITY_INDEX = Path("/etc/sinnix/capability-index.json")
 
 # ---------- evidence sources ----------
 
-def atuin_evidence(names: list[str], since_ns: int) -> dict | None:
+def atuin_evidence(names: list[str], since_ns: int, until_ns: int | None = None) -> dict | None:
+    """Literal shell-history matches, including quoted arguments, NOT executions.
+
+    One read-only aggregate per public invocation; LIKE wildcards are escaped.
+    History retention, import provenance and caller identity are unknown.
+    """
     db = HOME / ".local/share/atuin/history.db"
-    if not db.exists():
-        return None
-    out: dict[str, dict] = {}
+    out = {}
     try:
-        # This is live storage: immutable mode would ignore committed WAL records.
-        with closing(sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
+        with closing(sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)) as conn:
             conn.execute("BEGIN")
+            bounds = conn.execute("SELECT min(timestamp), max(timestamp) FROM history").fetchone()
             for name in names:
                 row = conn.execute(
-                    "SELECT count(*), max(timestamp) FROM history WHERE timestamp > ?"
+                    "SELECT count(*), max(timestamp) FROM history WHERE timestamp >= ? AND timestamp <= ?"
                     " AND instr(' ' || command || ' ', ?) > 0",
-                    (since_ns, f" {name} "),
+                    (since_ns, until_ns or time.time_ns(), f" {name} "),
                 ).fetchone()
-                out[name] = {"n": row[0], "last": row[1] and int(row[1] // 1_000_000_000)}
+                out[name] = {"n": row[0], "last": int(row[1] // 1_000_000_000) if row[1] else None,
+                             "status": "partial", "type": "shell-history-match", "caller_identity": "unknown",
+                             "time_basis": "history.timestamp ns", "retention": "unknown",
+                             "earliest_retained": bounds[0], "latest_retained": bounds[1],
+                             "since_ns": since_ns, "until_ns": until_ns,
+                             "limitation": "literal matches may be quoted arguments or imported history; not invocation proof"}
     except sqlite3.Error:
         return None
     return out
 
 
-_POLYLOGUE_EVIDENCE: dict[tuple[str, int], dict | None] = {}
+def gateway_evidence(path: Path, since: int, until: int, limit: int = 1000) -> dict:
+    """Bounded existing audit metadata only. Never select payload_json.
 
-
-def polylogue_evidence(name: str, window_days: int) -> dict | None:
-    key = (name, window_days)
-    if key in _POLYLOGUE_EVIDENCE:
-        return _POLYLOGUE_EVIDENCE[key]
-    # Stable-interface rule: CLI only, never polylogue's sqlite (schema churns).
-    # `search` was renamed to the query-first `find QUERY` dispatch; root
-    # flags (--json/--limit) precede the subcommand, and results come back
-    # as {"items": [...]} rather than a bare list or {"results": [...]}.
-    query = f"{name} since:{window_days}d"
-    out = run(["polylogue", "--json", "--limit", "5", "find", query], timeout=60).text
-    if out is None:
-        _POLYLOGUE_EVIDENCE[key] = None
-        return None
+    Latest sequence prefix is bounded and may omit earlier in-window events;
+    no cursor, archive scan, new authority or retention mutation is needed.
+    """
+    result = {"status": "unavailable", "source": "gateway-audit", "actions": {},
+              "since": since, "until": until, "time_basis": "occurred_at epoch seconds",
+              "caller_identity": "unknown", "retention": "unknown", "limit": limit,
+              "limitation": "gateway routes only; no mapping to scripts, skills or MCP launches"}
     try:
-        data = json.loads(out)
-    except json.JSONDecodeError:
-        _POLYLOGUE_EVIDENCE[key] = None
-        return None
-    if isinstance(data, dict):
-        items = data.get("items")
-    elif isinstance(data, list):
-        items = data
-    else:
-        items = None
-    if not isinstance(items, list):
-        _POLYLOGUE_EVIDENCE[key] = None
-        return None
-    evidence = {"n": len(items), "last": None}
-    _POLYLOGUE_EVIDENCE[key] = evidence
-    return evidence
+        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)) as conn:
+            events = conn.execute(
+                "SELECT event_id, occurred_at, operation, outcome FROM events ORDER BY sequence DESC LIMIT ?",
+                (limit + 1,),
+            ).fetchall()
+        capped = len(events) > limit
+        result.update(status="partial", capped=capped, count_basis="lower-bound" if capped else "retained-audit-rows",
+                      earliest_observed=min((e[1] for e in events[:limit]), default=None),
+                      latest_observed=max((e[1] for e in events[:limit]), default=None))
+        seen = set()
+        for receipt, occurred, action, outcome in events[:limit]:
+            if (not isinstance(occurred, (int, float)) or not isinstance(action, str)
+                    or re.fullmatch(r"[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)+", action) is None
+                    or outcome not in {"ok", "error"}):
+                raise ValueError("unsupported audit metadata")
+            if receipt in seen or not since <= occurred <= until:
+                continue
+            seen.add(receipt)
+            entry = result["actions"].setdefault(action, {"n": 0, "outcomes": {}, "last": None})
+            entry["n"] += 1
+            entry["outcomes"][outcome] = entry["outcomes"].get(outcome, 0) + 1
+            entry["last"] = max(entry["last"] or 0, occurred)
+    except (OSError, sqlite3.Error, ValueError, TypeError):
+        result.update(status="unavailable", actions={}, reason="missing-or-unsupported-audit")
+    return result
 
 
-def journal_count(unit: str, days: int, manager_user: bool, pattern: str | None = None) -> int | None:
-    argv = ["journalctl", f"--since=-{days}d", "-u", unit, "-o", "cat"]
+def journal_count(unit: str, days: int, manager_user: bool, pattern: str | None = None, until: int | None = None) -> int | None:
+    until = until or int(time.time())
+    argv = ["journalctl", f"--since=@{until - days * 86400}", f"--until=@{until}", "-u", unit, "-o", "cat"]
     if manager_user:
         argv.insert(1, "--user")
     out = run(argv, timeout=60).text
@@ -136,7 +151,7 @@ def journal_count(unit: str, days: int, manager_user: bool, pattern: str | None 
     return sum(1 for line in out.splitlines() if line.strip())
 
 
-def lane_freshness(path_str: str | None, since_epoch: int) -> dict | None:
+def lane_freshness(path_str: str | None, since_epoch: int, until_epoch: int | None = None) -> dict | None:
     """A capture lane's evidence isn't a shell/agent/journal event -- it is
     whether the path it owns has been written to inside the window. `None`
     means "cannot tell" (missing path, permission error), never "unused"."""
@@ -154,34 +169,43 @@ def lane_freshness(path_str: str | None, since_epoch: int) -> dict | None:
             return None
     except OSError:
         return None
-    return {"n": 1 if last >= since_epoch else 0, "last": int(last)}
+    return {"n": 1 if since_epoch <= last <= (until_epoch or time.time()) else 0, "last": int(last)}
+
+
+STATIC_COVERAGE = {}
 
 
 def static_refs(name: str) -> list[str]:
     refs: list[str] = []
-    out = run(["grep", "-rl", "--include=*.nix", name, str(REPO / "modules"), str(REPO / "flake")], timeout=60).text
+    statuses = []
+    probe = run(["grep", "-rlIF", "--exclude-dir=.git", "--exclude-dir=__pycache__", "--exclude-dir=.pytest_cache", "--exclude-dir=.venv", "--exclude-dir=node_modules", "--", name, *[str(REPO / d) for d in ("modules", "flake", "scripts", "pkgs", "dots", "docs", ".agentctl")]], timeout=60)
+    out = probe.text
+    statuses.append("available" if probe.returncode in (0, 1) and not probe.error else "partial")
     if out:
         refs += [p.removeprefix(str(REPO) + "/") for p in out.splitlines()]
-    etc = run(["grep", "-rl", name, "/etc/systemd/system"], timeout=30).text
+    etc_probe = run(["grep", "-rlF", "--", name, "/etc/systemd/system"], timeout=30)
+    etc = etc_probe.text
+    statuses.append("available" if etc_probe.returncode in (0, 1) and not etc_probe.error else "partial")
     if etc:
-        refs += ["/etc/systemd/system"]
-    return refs
+        refs += etc.splitlines()
+    STATIC_COVERAGE[name] = statuses
+    return sorted(set(r for r in refs if r != f"scripts/{name}"))
 
 
 # ---------- declaration inventories ----------
 
-def load_capability_index() -> dict[str, list[dict]] | None:
+def load_capability_index(data: dict | None = None) -> dict[str, list[dict]] | None:
     """/etc/sinnix/capability-index.json, grouped by kind, or None.
 
     None covers both "host predates the index" and "malformed/wrong schema" --
-    every index-sourced class below then contributes zero rows for this run
-    rather than raising or guessing. A stderr note in main() makes that
-    degradation visible instead of silent.
+    index-sourced classes carry a machine-readable snapshot coverage gap.
+    Malformed rows and duplicate identities reject the inventory as a whole.
     """
-    try:
-        data = json.loads(CAPABILITY_INDEX.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
+    if data is None:
+        try:
+            data = json.loads(CAPABILITY_INDEX.read_text())
+        except (OSError, json.JSONDecodeError):
+            return None
     if not isinstance(data, dict) or data.get("schema") != "sinnix-capability-index-v1":
         return None
     rows = data.get("rows")
@@ -189,8 +213,11 @@ def load_capability_index() -> dict[str, list[dict]] | None:
         return None
     by_kind: dict[str, list[dict]] = {}
     for row in rows:
-        if isinstance(row, dict) and row.get("kind") and row.get("name"):
-            by_kind.setdefault(row["kind"], []).append(row)
+        if not isinstance(row, dict) or not isinstance(row.get("kind"), str) or not isinstance(row.get("name"), str):
+            return None
+        if any(r["name"] == row["name"] for r in by_kind.get(row["kind"], [])):
+            return None
+        by_kind.setdefault(row["kind"], []).append(row)
     return by_kind
 
 
@@ -201,7 +228,8 @@ def declared_scripts() -> dict[str, dict]:
     for path in sorted((REPO / "scripts").iterdir()):
         if not path.is_file():
             continue
-        head = path.read_text(errors="ignore")[:600]
+        with path.open(errors="ignore") as stream:
+            head = stream.read(2048)
         if "@sinnix-package" not in head:
             continue
         edges = []
@@ -210,21 +238,6 @@ def declared_scripts() -> dict[str, dict]:
             edges = [tok[1:] for tok in m.group(1).split() if tok.startswith("@")]
         scripts[path.name] = {"declared_in": f"scripts/{path.name}", "edges": edges}
     return scripts
-
-
-def declared_mcp_servers(index: dict[str, list[dict]] | None) -> dict[str, dict]:
-    if index is None:
-        return {}
-    return {
-        row["name"]: {"declared_in": row.get("owner") or "flake/data/mcp-registry.nix"}
-        for row in index.get("mcp-server", [])
-    }
-
-
-def declared_skills(index: dict[str, list[dict]] | None) -> dict[str, dict]:
-    if index is None:
-        return {}
-    return {row["name"]: {"declared_in": row.get("owner") or "dots/_ai/skills"} for row in index.get("skill", [])}
 
 
 def declared_models() -> dict[str, dict]:
@@ -246,15 +259,16 @@ def declared_secrets() -> dict[str, dict]:
     return {p.stem: {"declared_in": "secret/"} for p in sorted(SECRET_DIR.glob("*.age"))}
 
 
-def declared_services() -> dict[str, dict]:
+def declared_services(inv: dict | None = None) -> dict[str, dict]:
     # Not index-sourced: see the module docstring -- the index's
     # service/ai-backend rows are a strict subset of the runtime inventory's
     # surfaces (backup/diagnostics/config-drift jobs and several feature-owned
     # surfaces register outside `sinnix.services.*`).
-    try:
-        inv = json.loads(INVENTORY.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
+    if inv is None:
+        try:
+            inv = json.loads(INVENTORY.read_text())
+        except (OSError, json.JSONDecodeError):
+            return {}
     return {
         name: {"declared_in": "runtime-inventory", "unit": s.get("unit"),
                "manager": s.get("manager", "system"), "kind": s.get("kind", "service"),
@@ -263,254 +277,204 @@ def declared_services() -> dict[str, dict]:
     }
 
 
-def declared_features(index: dict[str, list[dict]] | None) -> dict[str, dict]:
-    if index is None:
-        return {}
-    return {
-        row["name"]: {"declared_in": row.get("owner"), "enabled": bool(row.get("enabled"))}
-        for row in index.get("feature", [])
-    }
-
-
-def declared_commands(index: dict[str, list[dict]] | None) -> dict[str, dict]:
-    if index is None:
-        return {}
-    return {row["name"]: {"declared_in": row.get("owner")} for row in index.get("command", [])}
-
-
-def declared_capture_lanes(index: dict[str, list[dict]] | None) -> dict[str, dict]:
-    if index is None:
-        return {}
-    return {
-        row["name"]: {"declared_in": row.get("owner"), "path": row.get("path")}
-        for row in index.get("capture-lane", [])
-    }
-
-
-def declared_agent_lanes(index: dict[str, list[dict]] | None) -> dict[str, dict]:
-    if index is None:
-        return {}
-    return {row["name"]: {"declared_in": row.get("owner")} for row in index.get("agent-lane", [])}
-
-
 # ---------- census ----------
 
+CLASSES = {"scripts": "script", "mcp-servers": "mcp-server", "skills": "skill",
+           "features": "feature", "commands": "command", "capture-lanes": "capture-lane",
+           "agent-lanes": "agent-lane", "services": "service", "models": "model", "secrets": "secret"}
+
+
 def verdict(ev: dict, refs: list[str], reachable: bool) -> str:
-    atuin, poly = ev.get("atuin"), ev.get("polylogue")
-    jd = ev.get("journald")
-    interactive = bool(atuin and atuin.get("n"))
-    agent = bool(poly and poly.get("n"))
-    daemon = bool(jd)
-    if interactive or daemon:
-        return "active"
-    if agent:
-        return "agent-only"
+    if (ev.get("gateway") or {}).get("n"):
+        return "attempt-observed"
+    if (ev.get("atuin") or {}).get("n"):
+        return "shell-match-observed"
     if refs or reachable:
         return "referenced-only"
-    if atuin is None and poly is None and jd is None:
-        return "unknown"
-    return "unused-in-window"
+    return "unknown"
+
+
+def append_snapshot(path: Path, snapshot: dict) -> None:
+    """One completed observation per append, preserving even a torn old tail."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = (json.dumps(snapshot, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    with flock(path.with_name(path.name + ".lock")):
+        fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            end = os.lseek(fd, 0, os.SEEK_END)
+            if end and os.pread(fd, 1, end - 1) != b"\n":
+                os.write(fd, b"\n")
+            offset = 0
+            while offset < len(payload):
+                count = os.write(fd, payload[offset:])
+                if count <= 0:
+                    raise OSError("incomplete snapshot append")
+                offset += count
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
 
 def main() -> int:
+    global CAPABILITY_INDEX
     ap = argparse.ArgumentParser()
     ap.add_argument("--window-days", type=int, default=90)
-    ap.add_argument(
-        "--classes",
-        default="scripts,mcp-servers,skills,models,secrets,services,features,commands,capture-lanes,agent-lanes",
-    )
+    ap.add_argument("--classes", default=",".join(CLASSES))
     ap.add_argument("--jsonl-out", default=str(CAPTURES / "usage-census.jsonl"))
     ap.add_argument("--no-write", action="store_true")
+    ap.add_argument("--json", action="store_true", help="print the same complete snapshot without raw evidence")
+    ap.add_argument("--index", type=Path, default=CAPABILITY_INDEX)
+    ap.add_argument("--gateway-audit", type=Path, default=None)
     args = ap.parse_args()
-
-    now = int(time.time())
-    since_ns = (now - args.window_days * 86400) * 1_000_000_000
-    since_epoch = now - args.window_days * 86400
+    if args.window_days <= 0:
+        ap.error("window-days must be positive")
     wanted = set(args.classes.split(","))
-    rows: list[dict] = []
-
-    index = load_capability_index()
-    index_dependent = {"mcp-servers", "skills", "features", "commands", "capture-lanes", "agent-lanes"}
-    if index is None and wanted & index_dependent:
-        print(
-            f"sinnix-census: no usable capability index at {CAPABILITY_INDEX}; "
-            f"skipping index-derived classes: {', '.join(sorted(wanted & index_dependent))}",
-            file=sys.stderr,
-        )
-
-    if "scripts" in wanted:
-        scripts = declared_scripts()
-        atuin = atuin_evidence(list(scripts), since_ns)
-        used_roots: set[str] = set()
-        pending: list[tuple[str, dict, dict]] = []
-        for name, meta in scripts.items():
-            ev = {
-                "atuin": atuin.get(name) if atuin else None,
-                "polylogue": polylogue_evidence(name, args.window_days),
-                "journald": None,
-            }
-            refs = static_refs(name)
-            pending.append((name, meta, {"ev": ev, "refs": refs}))
-            if (ev["atuin"] and ev["atuin"]["n"]) or (ev["polylogue"] and ev["polylogue"]["n"]):
-                used_roots.add(name)
-        # reachability over @-edges from used roots
-        changed = True
-        while changed:
-            changed = False
-            for name, meta, _ in pending:
-                if name in used_roots:
-                    for edge in meta["edges"]:
-                        target = edge if edge in scripts else f"sinnix-{edge}"
-                        if target in scripts and target not in used_roots:
-                            used_roots.add(target)
-                            changed = True
-        for name, meta, data in pending:
-            reachable = name in used_roots and not (
-                (data["ev"]["atuin"] and data["ev"]["atuin"]["n"])
-                or (data["ev"]["polylogue"] and data["ev"]["polylogue"]["n"])
-            )
-            rows.append({
-                "class": "scripts", "name": name, "declared_in": meta["declared_in"],
-                "evidence": data["ev"], "static_refs": data["refs"][:6],
-                "used_via_edges": reachable,
-                "verdict": verdict(data["ev"], data["refs"], reachable),
-            })
-
-    if "mcp-servers" in wanted:
-        for name, meta in declared_mcp_servers(index).items():
-            ev = {"atuin": None, "polylogue": polylogue_evidence(f"mcp__{name}__", args.window_days), "journald": None}
-            rows.append({"class": "mcp-servers", "name": name, **meta,
-                         "evidence": ev, "static_refs": [],
-                         "verdict": verdict(ev, [], False)})
-
-    if "skills" in wanted:
-        for name, meta in declared_skills(index).items():
-            ev = {"atuin": None, "polylogue": polylogue_evidence(name, args.window_days), "journald": None}
-            rows.append({"class": "skills", "name": name, **meta,
-                         "evidence": ev, "static_refs": [],
-                         "verdict": verdict(ev, [], False)})
-
-    if "models" in wanted:
-        ollama_log = run(["journalctl", f"--since=-{args.window_days}d", "-u", "ollama", "-o", "cat"], timeout=90).text or ""
-        for name, meta in declared_models().items():
-            hits = ollama_log.count(name)
-            ev = {"atuin": None, "polylogue": None,
-                  "journald": {"n": hits} if hits else None}
-            rows.append({"class": "models", "name": name, **meta,
-                         "evidence": ev, "static_refs": [],
-                         "verdict": verdict(ev, [], False)})
-
-    if "secrets" in wanted:
-        for name, meta in declared_secrets().items():
-            refs = static_refs(name)
-            ev = {"atuin": None, "polylogue": None, "journald": None}
-            # OPERATOR RULE: secrets are NEVER pruning candidates — losing
-            # key material is irreversible in a way no other class is.
-            # Rows are informational inventory only.
-            rows.append({"class": "secrets", "name": name, **meta,
-                         "evidence": ev, "static_refs": refs[:6],
-                         "never_prune": True,
-                         "verdict": "referenced-only" if refs else "informational-no-static-consumers"})
-
-    if "services" in wanted:
-        for name, meta in declared_services().items():
-            unit = meta.get("unit") or ""
-            # `kind` is always a real systemd unit type and `unit` always
-            # ends in it -- AGENTS.md's runtime-governance invariant, so the
-            # unit suffix alone tells journalctl-eligibility without needing
-            # a separate field.
-            kind = unit.rsplit(".", 1)[-1] if "." in unit else meta.get("kind", "service")
-            n = None
-            if kind in ("service", "timer", "socket", "target"):
-                # journalctl accepts the full unit name for all these kinds;
-                # timers/sockets log their trigger/incoming events too.
-                n = journal_count(unit, args.window_days, meta.get("manager") == "user",
-                                  r"Started|Starting|Triggering|Incoming|Listening|Reached")
-            elif kind == "scope":
-                # Transient scopes are named by prefix, not by a unit that
-                # journalctl can be asked about directly.
-                n = None
-            ev = {"atuin": None, "polylogue": None, "journald": {"n": n} if n else None}
-            rows.append({"class": "services", "name": name,
-                         "declared_in": meta["declared_in"],
-                         "evidence": ev, "static_refs": [],
-                         "verdict": verdict(ev, [], False)})
-
-    if "features" in wanted:
-        features = declared_features(index)
-        # A feature isn't invoked by its dotted id ("cli.docling"); the shell
-        # or agent evidence that exists for it, if any, is under the leaf
-        # name ("docling").
-        leaves = {name: name.rsplit(".", 1)[-1] for name in features}
-        atuin = atuin_evidence(sorted(set(leaves.values())), since_ns)
-        for name, meta in features.items():
-            leaf = leaves[name]
-            ev = {
-                "atuin": atuin.get(leaf) if atuin else None,
-                "polylogue": polylogue_evidence(leaf, args.window_days),
-                "journald": None,
-            }
-            # Reachable = the host actually turned it on; an enabled feature
-            # with no direct evidence still reads as "present", not "unused".
-            rows.append({"class": "features", "name": name, **meta,
-                         "evidence": ev, "static_refs": [],
-                         "verdict": verdict(ev, [], meta.get("enabled", False))})
-
-    if "commands" in wanted:
-        commands = declared_commands(index)
-        atuin = atuin_evidence(list(commands), since_ns)
-        for name, meta in commands.items():
-            ev = {
-                "atuin": atuin.get(name) if atuin else None,
-                "polylogue": polylogue_evidence(name, args.window_days),
-                "journald": None,
-            }
-            rows.append({"class": "commands", "name": name, **meta,
-                         "evidence": ev, "static_refs": [],
-                         "verdict": verdict(ev, [], False)})
-
-    if "capture-lanes" in wanted:
-        for name, meta in declared_capture_lanes(index).items():
-            fresh = lane_freshness(meta.get("path"), since_epoch)
-            ev = {"atuin": None, "polylogue": None, "journald": None, "filesystem": fresh}
-            if fresh is None:
-                v = "unknown"
-            elif fresh["n"]:
-                v = "active"
-            else:
-                v = "unused-in-window"
-            rows.append({"class": "capture-lanes", "name": name, **meta,
-                         "evidence": ev, "static_refs": [], "verdict": v})
-
-    if "agent-lanes" in wanted:
-        lanes = declared_agent_lanes(index)
-        atuin = atuin_evidence(list(lanes), since_ns)
-        for name, meta in lanes.items():
-            ev = {
-                "atuin": atuin.get(name) if atuin else None,
-                "polylogue": polylogue_evidence(name, args.window_days),
-                "journald": None,
-            }
-            rows.append({"class": "agent-lanes", "name": name, **meta,
-                         "evidence": ev, "static_refs": [],
-                         "verdict": verdict(ev, [], False)})
-
-    stamp = {"ts": now, "window_days": args.window_days}
+    if wanted - CLASSES.keys():
+        ap.error("unsupported classes")
+    collection_ns = time.time_ns()
+    now = collection_ns // 1_000_000_000
+    until_epoch = collection_ns / 1_000_000_000
+    since = now - args.window_days * 86400
+    CAPABILITY_INDEX = args.index
+    try:
+        index_data = json.loads(args.index.read_text())
+    except (OSError, ValueError):
+        index_data = {}
+    index = load_capability_index(index_data)
+    revision = index_data.get("revision") if isinstance(index_data, dict) else None
+    digest = hashlib.sha256(json.dumps(index_data, sort_keys=True, separators=(",", ":")).encode()).hexdigest() if index is not None else None
+    gaps = []
+    rows = []
+    audit_path = args.gateway_audit
+    if audit_path is None:
+        try:
+            config = json.loads(Path("/etc/sinnix/agent-gateway.json").read_text())
+            audit_path = Path(config["stateDir"]) / "audit/events.sqlite3"
+        except (OSError, ValueError, KeyError, TypeError):
+            audit_path = HOME / ".local/state/sinnix/agent-gateway/operator/audit/events.sqlite3"
+    gateway = gateway_evidence(audit_path, since, until_epoch)
+    try:
+        runtime_bytes = INVENTORY.read_bytes()
+        runtime_data = json.loads(runtime_bytes)
+        runtime_digest = hashlib.sha256(runtime_bytes).hexdigest()
+    except (OSError, ValueError):
+        runtime_data, runtime_digest = {}, None
+    catalog = {}
+    loaders = {"scripts": declared_scripts, "services": lambda: declared_services(runtime_data),
+               "secrets": declared_secrets, "models": declared_models}
+    for cls in sorted(wanted):
+        print(f"sinnix-census: collecting {cls}", file=sys.stderr)
+        if cls in loaders:
+            try:
+                catalog[cls] = loaders[cls]()
+            except (OSError, ValueError, TypeError, AttributeError):
+                catalog[cls] = {}
+            if not catalog[cls]:
+                gaps.append({"class": cls, "source": "declaration", "status": "unavailable-or-empty",
+                             "reason": "empty inventory cannot establish owner availability"})
+        else:
+            if index is None:
+                gaps.append({"class": cls, "source": "capability-index", "status": "unavailable"})
+            if index is not None and CLASSES[cls] not in index:
+                gaps.append({"class": cls, "source": "capability-index", "status": "unavailable-or-empty",
+                             "reason": "declaration kind absent from supplied inventory"})
+            catalog[cls] = {r["name"]: {"declared_in": r.get("owner"), "enabled": r.get("enabled"),
+                                      "path": r.get("path"), "invoke": r.get("invoke")}
+                            for r in (index or {}).get(CLASSES[cls], [])}
+    identities = {(r["kind"], r["name"]): r for group in (index or {}).values() for r in group}
+    shell_names = {}
+    for cls, items in catalog.items():
+        for name, meta in items.items():
+            declaration = identities.get((CLASSES[cls], name), {})
+            # Public dispatch spelling comes from the index, never guessed leaf aliases.
+            invoke = declaration.get("invoke") or meta.get("invoke")
+            spellings = [name] if cls in {"scripts", "commands", "agent-lanes"} else []
+            if cls in {"scripts", "commands", "agent-lanes"} and isinstance(invoke, str):
+                spellings.append(invoke)
+            shell_names[(cls, name)] = sorted(set(spellings))
+    atuin = atuin_evidence(sorted({n for names in shell_names.values() for n in names}), since * 10**9, collection_ns)
+    for cls, items in catalog.items():
+        for name, meta in items.items():
+            ev = {"atuin": None, "gateway": None, "journald": None, "filesystem": None}
+            spellings = shell_names[(cls, name)]
+            if atuin is not None and spellings:
+                matches = [atuin[n] for n in spellings]
+                ev["atuin"] = {**matches[0], "n": sum(m["n"] for m in matches),
+                               "last": max((m["last"] or 0 for m in matches), default=0) or None,
+                               "identities": spellings, "count_basis": "literal-spelling-matches; may overlap"}
+            refs = static_refs(name) if cls in {"scripts", "secrets"} else []
+            declaration = identities.get((CLASSES[cls], name), {})
+            invoke = declaration.get("invoke") or meta.get("invoke")
+            # Only an exact declared typed call maps an action onto a capability.
+            try:
+                tokens = shlex.split(invoke) if isinstance(invoke, str) else []
+            except ValueError:
+                tokens = []
+            if len(tokens) == 3 and tokens[:2] == ["sinnix-agent-gateway", "call"]:
+                hit = gateway["actions"].get(tokens[2])
+                if hit:
+                    ev["gateway"] = {**hit, "action": tokens[2], "status": gateway["status"],
+                                     "count_basis": gateway.get("count_basis"), "caller_identity": "unknown"}
+            if cls == "services" and meta.get("unit"):
+                n = journal_count(meta["unit"], args.window_days, meta.get("manager") == "user",
+                                  r"Started|Starting|Triggering|Incoming|Listening|Reached", until=until_epoch)
+                ev["journald"] = {"n": n, "type": "activation-log-match", "status": "partial" if n is not None else "unavailable",
+                                  "retention": "unknown", "time_basis": "journal realtime within snapshot since/until"}
+            if cls == "capture-lanes":
+                fresh = lane_freshness(meta.get("path"), since, until_epoch)
+                ev["filesystem"] = {"status": "partial" if fresh else "unavailable", "type": "producer-path-mtime",
+                                    "scope": "path and immediate children only; not client use", **(fresh or {})}
+            coverage = [{"source": "typed-invocations", "status": "partial" if ev["gateway"] else "unavailable",
+                         "reason": "only exact declared gateway call mappings; other routes unknown"},
+                        {"source": "polylogue", "status": "unsupported", "reason": "prose mentions are not invocation evidence"},
+                        {"source": "agentctl", "status": "unavailable", "reason": "no indexed exact capability mapping; spool not scanned"}]
+            if refs or cls in {"scripts", "secrets"}:
+                coverage.append({"source": "static-references", "status": "partial",
+                                 "reason": "literal scoped search; indirect consumers unknown",
+                                 "reads": STATIC_COVERAGE.get(name, [])})
+            if spellings and atuin is None:
+                coverage.append({"source": "atuin", "status": "unavailable"})
+            rows.append({"class": cls, "name": name, **meta, "invoke": invoke, "evidence": ev,
+                         "static_refs": refs, "static_ref_scope": "literal substrings in repository modules, flake, scripts, pkgs, dots, docs, .agentctl and /etc/systemd/system; not complete indirect consumers",
+                         "coverage_gaps": coverage, "used_via_edges": False,
+                         "never_prune": cls == "secrets", "verdict": verdict(ev, refs, False)})
+    # Declared build dependencies are references even when their parent has no observed use.
+    scripts = catalog.get("scripts", {})
+    incoming = {}
+    for parent, meta in scripts.items():
+        for edge in meta.get("edges", []):
+            target = edge if edge in scripts else f"sinnix-{edge}"
+            if target in scripts:
+                incoming.setdefault(target, []).append(parent)
+    roots = {r["name"] for r in rows if r["class"] == "scripts" and r["verdict"] in {"shell-match-observed", "attempt-observed"}}
+    reachable = set(roots)
+    while True:
+        more = {target for target, parents in incoming.items() if any(p in reachable for p in parents)}
+        if more <= reachable:
+            break
+        reachable |= more
+    for row in rows:
+        if row["class"] == "scripts":
+            row["dependency_consumers"] = incoming.get(row["name"], [])
+            row["used_via_edges"] = row["name"] in reachable - roots
+            row["verdict"] = verdict(row["evidence"], row["static_refs"], bool(row["dependency_consumers"]))
+    snapshot = {"schema": "sinnix-usage-census-v2", "snapshot_id": str(uuid.uuid4()), "complete": True,
+                "ts": now, "collected_at": int(time.time()), "since": since, "until": until_epoch,
+                "window_days": args.window_days, "declaration_revision": revision, "index_digest": digest,
+                "declaration_sources": {"scripts": {n: m for n, m in catalog.get("scripts", {}).items()},
+                                        "runtime_inventory": {"path": str(INVENTORY),
+                                                              "digest": runtime_digest},
+                                        "repository_revision": run(["git", "-C", str(REPO), "rev-parse", "HEAD"], timeout=5).text},
+                "classes": sorted(wanted), "coverage_gaps": gaps, "gateway": gateway,
+                "row_count": len(rows), "rows": rows}
     if not args.no_write:
-        out = Path(args.jsonl_out)
-        for row in rows:
-            append_jsonl(out, {**stamp, **row})
-
-    order = {"unused-in-window": 0, "no-static-consumers": 1, "unknown": 2,
-             "referenced-only": 3, "agent-only": 4, "active": 5}
-    rows.sort(key=lambda r: (order.get(r["verdict"], 9), r["class"], r["name"]))
-    width = max((len(r["name"]) for r in rows), default=10)
-    for row in rows:
-        print(f"{row['verdict']:<22} {row['class']:<14} {row['name']:<{width}}")
-    counts: dict[str, int] = {}
-    for row in rows:
-        counts[row["verdict"]] = counts.get(row["verdict"], 0) + 1
-    print("\n" + json.dumps(counts))
+        append_snapshot(Path(args.jsonl_out), snapshot)
+    if args.json:
+        print(json.dumps(snapshot, sort_keys=True))
+    else:
+        for row in sorted(rows, key=lambda r: (r["verdict"], r["class"], r["name"])):
+            print(f"{row['verdict']:<24} {row['class']:<14} {row['name']}")
+        print(json.dumps({"rows": len(rows), "coverage_gaps": gaps}))
     return 0
 
 

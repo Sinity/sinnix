@@ -22,6 +22,8 @@ Three real contracts here, none of them a restatement of the code:
 from __future__ import annotations
 
 import json
+import hashlib
+import time
 from typing import Any
 
 from sinnix_ops_reducer import capabilities, pages
@@ -85,7 +87,7 @@ CENSUS_LINES = [
         "name": "polylogued",
         "evidence": {"atuin": None, "polylogue": None, "journald": {"n": 40}},
         "static_refs": [],
-        "verdict": "active",
+        "verdict": "unknown",
     },
     {
         "ts": 100,
@@ -98,7 +100,7 @@ CENSUS_LINES = [
             "journald": None,
         },
         "static_refs": ["modules/services/census.nix"],
-        "verdict": "unused-in-window",
+        "verdict": "referenced-only",
     },
     {
         "ts": 50,
@@ -107,14 +109,22 @@ CENSUS_LINES = [
         "name": "sinnix-census",
         "evidence": {"atuin": {"n": 9, "last": 1}, "polylogue": None, "journald": None},
         "static_refs": [],
-        "verdict": "active",
+        "verdict": "shell-match-observed",
     },
 ]
 
 
-def write_census(tmp_path, rows=CENSUS_LINES):
+def write_census(tmp_path, rows=CENSUS_LINES, index=INDEX):
     path = tmp_path / "usage-census.jsonl"
-    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    selected = {}
+    for row in sorted(rows, key=lambda r: r["ts"]):
+        selected[(row["class"], row["name"])] = row
+    snapshot = {"schema": "sinnix-usage-census-v2", "complete": True, "ts": int(time.time()),
+                "window_days": 90, "row_count": len(selected), "rows": list(selected.values()),
+                "snapshot_id": "fixture", "classes": sorted({r["class"] for r in selected.values()}),
+                "declaration_revision": index["revision"], "coverage_gaps": [],
+                "index_digest": hashlib.sha256(json.dumps(index, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
+    path.write_text(json.dumps(snapshot) + "\n", encoding="utf-8")
     return path
 
 
@@ -127,14 +137,14 @@ def write_index(tmp_path, index=INDEX):
 def test_service_census_joins_through_the_surface_name(tmp_path) -> None:
     view = capabilities.build(write_index(tmp_path), write_census(tmp_path))
     rows = {row["name"]: row for row in view["rows"]}
-    assert rows["polylogue"]["census"]["verdict"] == "active"
-    assert rows["polylogue"]["census"]["journal_lines"] == 40
+    assert rows["polylogue"]["census"]["verdict"] == "unknown"
+    assert rows["polylogue"]["census"]["activation_matches"] == 40
 
 
 def test_the_newest_census_run_wins(tmp_path) -> None:
     view = capabilities.build(write_index(tmp_path), write_census(tmp_path))
     census = {row["name"]: row["census"] for row in view["rows"]}
-    assert census["sinnix-census"]["verdict"] == "unused-in-window"
+    assert census["sinnix-census"]["verdict"] == "referenced-only"
     assert census["sinnix-census"]["static_refs"] == 1
 
 
@@ -198,7 +208,7 @@ def test_new_kinds_get_census_verdicts_through_the_kind_to_class_map(tmp_path) -
                 "journald": None,
             },
             "static_refs": [],
-            "verdict": "active",
+            "verdict": "shell-match-observed",
         },
         {
             "ts": 1,
@@ -211,7 +221,7 @@ def test_new_kinds_get_census_verdicts_through_the_kind_to_class_map(tmp_path) -
                 "journald": None,
             },
             "static_refs": [],
-            "verdict": "active",
+            "verdict": "shell-match-observed",
         },
         {
             "ts": 1,
@@ -225,7 +235,7 @@ def test_new_kinds_get_census_verdicts_through_the_kind_to_class_map(tmp_path) -
                 "filesystem": {"n": 1, "last": 2},
             },
             "static_refs": [],
-            "verdict": "active",
+            "verdict": "unknown",
         },
         {
             "ts": 1,
@@ -238,18 +248,18 @@ def test_new_kinds_get_census_verdicts_through_the_kind_to_class_map(tmp_path) -
                 "journald": None,
             },
             "static_refs": [],
-            "verdict": "active",
+            "verdict": "shell-match-observed",
         },
     ]
     view = capabilities.build(
-        write_index(tmp_path, index), write_census(tmp_path, census_lines)
+        write_index(tmp_path, index), write_census(tmp_path, census_lines, index)
     )
     census = {row["name"]: row["census"] for row in view["rows"]}
-    assert census["cli.docling"]["verdict"] == "active"
-    assert census["switch"]["verdict"] == "active"
-    assert census["a11y"]["verdict"] == "active"
+    assert census["cli.docling"]["verdict"] == "shell-match-observed"
+    assert census["switch"]["verdict"] == "shell-match-observed"
+    assert census["a11y"]["verdict"] == "unknown"
     assert census["a11y"]["path_written_in_window"] == 1
-    assert census["claude"]["verdict"] == "active"
+    assert census["claude"]["verdict"] == "shell-match-observed"
     assert view["censused"] == 4
 
 
@@ -295,7 +305,7 @@ def test_the_page_shows_disabled_capabilities_marked_off(tmp_path) -> None:
     html = render_capabilities({"host": "fixture"}, view, "now")
     assert "airvpn-seed" in html
     assert ">off<" in html
-    assert "unused-in-window" in html
+    assert "referenced-only" in html
     # Every kind present in the merged view reaches the document.
     for group in view["groups"]:
         assert group["label"] in html, group["kind"]
@@ -330,3 +340,126 @@ def test_capabilities_is_a_page_route_and_renders_from_the_shell() -> None:
     # Unique to this page: a route that fell through to the dashboard would
     # still be a complete document, and the assertion above would not notice.
     assert "Capability index unavailable" in html
+
+
+def test_incomplete_snapshot_and_removed_row_cannot_mix_runs(tmp_path):
+    path = write_census(tmp_path)
+    first = json.loads(path.read_text())
+    second = {**first, 'snapshot_id': 'second', 'rows': [next(r for r in first['rows'] if r['class'] == 'services')], 'row_count': 1}
+    path.write_text(path.read_text() + json.dumps(second) + '\n' + '{"schema":"sinnix-usage-census-v2"')
+    view = capabilities.build(write_index(tmp_path), path)
+    assert view['census_status']['snapshot_id'] == 'second'
+    assert view['census_status']['ignored_incomplete_tail']
+    assert view['censused'] == 1
+    assert next(r for r in view['rows'] if r['name'] == 'sinnix-census')['census'] is None
+
+
+def test_legacy_and_new_declaration_are_historical(tmp_path):
+    path = tmp_path / 'legacy.jsonl'
+    path.write_text(json.dumps(CENSUS_LINES[1]) + '\n')
+    view = capabilities.build(write_index(tmp_path), path)
+    assert view['censused'] == 0
+    assert view['census_status']['status'] == 'historical-or-unavailable'
+    path = write_census(tmp_path)
+    view = capabilities.build(write_index(tmp_path, {**INDEX, 'revision': 'new'}), path)
+    assert view['censused'] == 0
+    assert view['census_status']['status'] == 'declaration-mismatch'
+    # A new index with the same revision still requires the exact declaration digest.
+    view = capabilities.build(write_index(tmp_path, {**INDEX, 'rows': INDEX['rows'][:1]}), path)
+    assert view['census_status']['status'] == 'declaration-mismatch'
+
+
+def test_stale_and_malformed_snapshot_are_not_current(tmp_path):
+    path = write_census(tmp_path)
+    snapshot = json.loads(path.read_text())
+    snapshot['ts'] = int(time.time()) - 15 * 86400
+    path.write_text(json.dumps(snapshot) + '\n')
+    view = capabilities.build(write_index(tmp_path), path)
+    assert view['census_status']['status'] == 'stale'
+    assert view['censused'] == 0
+    snapshot['rows'].append({'class': 'scripts', 'name': 'duplicate'})
+    path.write_text(json.dumps(snapshot) + '\n')
+    assert not capabilities.load_census(path)
+
+
+def test_cli_and_page_preserve_selected_snapshot_gaps(tmp_path, capsys):
+    from sinnix_ops_reducer.cli import capabilities_command
+    index_path = write_index(tmp_path)
+    census_path = write_census(tmp_path)
+    snap = json.loads(census_path.read_text())
+    snap['coverage_gaps'] = [{'class': 'skills', 'status': 'unavailable'}]
+    census_path.write_text(json.dumps(snap) + '\n')
+    assert capabilities_command(['--index', str(index_path), '--census', str(census_path), '--json']) == 0
+    view = json.loads(capsys.readouterr().out)
+    assert view['census_status']['snapshot_id'] == 'fixture'
+    assert view['census_status']['coverage_gaps'] == snap['coverage_gaps']
+    html = render_capabilities({'host': 'fixture'}, view, 'now')
+    assert '1 inventory/observation gaps' in html
+    assert 'shell invocations' not in html
+    assert capabilities_command(['--index', str(index_path), '--census', str(census_path)]) == 0
+    assert 'Census: selected' in capsys.readouterr().out
+
+
+def test_wrapper_and_cheatsheet_use_the_same_selected_observation(tmp_path, monkeypatch):
+    import importlib.util
+    import os
+    import subprocess
+    from importlib.machinery import SourceFileLoader
+    from pathlib import Path
+    import sys
+    root = Path(__file__).resolve().parents[3]
+    index = write_index(tmp_path)
+    report = write_census(tmp_path)
+    launcher = tmp_path / 'sinnix-ops-reducer'
+    launcher.write_text(f'#!{sys.executable}\nfrom sinnix_ops_reducer.cli import capabilities_command\nimport sys\nraise SystemExit(capabilities_command(sys.argv[2:]+["--index",{str(index)!r},"--census",{str(report)!r}]))\n')
+    launcher.chmod(0o755)
+    monkeypatch.setenv('PATH', str(tmp_path) + os.pathsep + os.environ['PATH'])
+    monkeypatch.setenv('PYTHONPATH', str(root / 'pkgs/sinnix-ops-reducer') + os.pathsep + str(root / 'pkgs/sinnix-lib'))
+    result = subprocess.run(['bash', str(root / 'scripts/sinnix-capabilities'), '--json'], capture_output=True, text=True, check=True)
+    wrapper = json.loads(result.stdout)
+    loader = SourceFileLoader('fixture_cheatsheet', str(root / 'scripts/sinnix-cheatsheet'))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    view = module.collect_capabilities()
+    assert view['census_status']['snapshot_id'] == wrapper['census_status']['snapshot_id'] == 'fixture'
+    html, count = module.render_capability_sections(view)
+    assert 'Census: selected' in html and count > 0
+
+
+def test_runtime_inventory_fingerprint_mismatch_is_historical(tmp_path):
+    report = write_census(tmp_path)
+    snapshot = json.loads(report.read_text())
+    inventory = tmp_path / 'runtime.json'; inventory.write_text('{}')
+    snapshot['declaration_sources'] = {'runtime_inventory': {'digest': hashlib.sha256(b'{}').hexdigest()}}
+    report.write_text(json.dumps(snapshot) + '\n')
+    assert capabilities.build(write_index(tmp_path), report, runtime_inventory_path=inventory)['censused'] == 2
+    inventory.write_text('{"surfaces":{}}')
+    view = capabilities.build(write_index(tmp_path), report, runtime_inventory_path=inventory)
+    assert view['censused'] == 0 and view['census_status']['status'] == 'declaration-mismatch'
+
+
+def test_source_limits_and_raw_argument_exclusion_survive_reader_projection(tmp_path):
+    path = write_census(tmp_path)
+    snapshot = json.loads(path.read_text())
+    target = next(r for r in snapshot['rows'] if r['class'] == 'scripts')
+    target['evidence']['atuin'].update(status='partial', retention='unknown', since_ns=100,
+                                     until_ns=200, raw_arguments='PRIVATE', transcript='PRIVATE')
+    path.write_text(json.dumps(snapshot) + '\n')
+    view = capabilities.build(write_index(tmp_path), path)
+    row = next(r for r in view['rows'] if r['name'] == 'sinnix-census')['census']
+    assert row['sources']['atuin']['retention'] == 'unknown'
+    assert row['sources']['atuin']['status'] == 'partial'
+    assert row['sources']['atuin']['since_ns'] == 100
+    assert 'PRIVATE' not in json.dumps(view)
+
+
+
+def test_malformed_declaration_fingerprint_degrades_without_crashing(tmp_path):
+    report = write_census(tmp_path)
+    snapshot = json.loads(report.read_text())
+    snapshot['declaration_sources'] = {'runtime_inventory': 'unsupported-shape'}
+    report.write_text(json.dumps(snapshot) + '\n')
+    view = capabilities.build(write_index(tmp_path), report)
+    assert view['censused'] == 0
+    assert view['census_status']['status'] == 'historical-or-unavailable'

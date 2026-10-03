@@ -145,8 +145,12 @@ The reducer adds the two things Nix cannot know:
 - **The usage census** (`sinnix census`, weekly), joined by name — and, for
   services, by every runtime surface the module declared, since the census
   enumerates services from the runtime inventory where `polylogue` the service
-  is `polylogued` the surface. A capability that reads `unused-in-window` has
-  been declared and never used since the window opened.
+  is `polylogued` the surface. The reader selects one complete snapshot tied to the current declaration
+  digest and revision. Legacy rows, torn writes, mismatched declarations and
+  observations older than two weekly periods remain historical. Shell history
+  matches, service activation and path freshness are separate observations;
+  absent typed route coverage means usage is unknown, never permission to remove.
+  The CLI, hub and cheatsheet carry the same snapshot status and coverage gaps.
 
 There are no buttons. Discovering a capability is not an action verb, and the
 things you would do with one already have a page or a shell.

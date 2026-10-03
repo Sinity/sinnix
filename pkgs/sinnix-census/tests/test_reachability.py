@@ -78,14 +78,14 @@ def run_census(repo: Path, home: Path, jsonl_out: Path) -> list[dict]:
         text=True,
         cwd=str(repo),
     )
-    return [json.loads(line) for line in jsonl_out.read_text().splitlines()]
+    return json.loads(jsonl_out.read_text().splitlines()[-1])["rows"]
 
 
 def _by_name(rows: list[dict]) -> dict[str, dict]:
     return {row["name"]: row for row in rows if row["class"] == "scripts"}
 
 
-def test_transitive_edges_reach_two_hops_and_orphan_stays_unused(tmp_path):
+def test_transitive_edges_reach_two_hops_and_orphan_stays_unknown(tmp_path):
     repo = tmp_path / "repo"
     scripts_dir = repo / "scripts"
     scripts_dir.mkdir(parents=True)
@@ -106,7 +106,7 @@ def test_transitive_edges_reach_two_hops_and_orphan_stays_unused(tmp_path):
 
     rows = _by_name(run_census(repo, home, tmp_path / "out.jsonl"))
 
-    assert rows["sinnix-root"]["verdict"] == "active"
+    assert rows["sinnix-root"]["verdict"] == "shell-match-observed"
 
     # One-hop propagation.
     assert rows["sinnix-mid"]["used_via_edges"] is True
@@ -123,7 +123,7 @@ def test_transitive_edges_reach_two_hops_and_orphan_stays_unused(tmp_path):
 
     # Not referenced by any edge and never run: must not inherit usedness.
     assert rows["sinnix-orphan"]["used_via_edges"] is False
-    assert rows["sinnix-orphan"]["verdict"] == "unused-in-window"
+    assert rows["sinnix-orphan"]["verdict"] == "unknown"
 
 
 def test_edge_to_nonexistent_target_does_not_crash_or_falsely_propagate(tmp_path):
@@ -144,5 +144,5 @@ def test_edge_to_nonexistent_target_does_not_crash_or_falsely_propagate(tmp_path
 
     rows = _by_name(run_census(repo, home, tmp_path / "out.jsonl"))
 
-    assert rows["sinnix-root"]["verdict"] == "active"
+    assert rows["sinnix-root"]["verdict"] == "shell-match-observed"
     assert set(rows) == {"sinnix-root"}

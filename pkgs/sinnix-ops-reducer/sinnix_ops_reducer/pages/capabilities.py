@@ -30,12 +30,13 @@ def verdict_badge(census: dict[str, Any] | None) -> str:
         return ""
     verdict = str(census.get("verdict") or "unknown")
     tone = VERDICT_TONES.get(verdict, "muted")
-    runs = census.get("shell_runs")
+    runs = census.get("shell_matches")
     title = (
-        f"usage census verdict over the last {census.get('window_days') or '?'} days"
+        f"census observation collected at {census.get('ts')}; window {census.get('window_days') or '?'} days"
     )
     if runs:
-        title += f"; {runs} shell invocations"
+        title += f"; {runs} shell history matches (not invocation proof)"
+    title += f"; caller identity unknown; {len(census.get('coverage_gaps') or [])} coverage gaps"
     return f'<span class="badge {tone}" title="{esc(title)}">{esc(verdict)}</span>'
 
 
@@ -131,16 +132,18 @@ def render_capabilities(
     never_used = sum(
         1
         for entry in rows
-        if (entry.get("census") or {}).get("verdict") == "unused-in-window"
+        if (entry.get("census") or {}).get("verdict") == "unknown"
     )
     off = sum(1 for entry in rows if entry.get("enabled") is False)
 
+    status = view.get("census_status") or {}
+    missing += f'<p class="sub">Census: {esc(status.get("status", "unavailable"))}; collected at {esc(status.get("ts", "unknown"))}; {len(status.get("coverage_gaps") or [])} inventory/observation gaps.</p>'
     body = missing + (
         '<div class="tiles">'
         + tile(str(len(rows)), "capabilities")
         + tile(str(len(groups)), "kinds", "info")
         + tile(str(view.get("censused") or 0), "with a usage verdict")
-        + tile(str(never_used), "unused in window", "warn" if never_used else "")
+        + tile(str(never_used), "usage unknown", "warn" if never_used else "")
         + tile(str(off), "declared but off", "muted")
         + "</div>"
     )
@@ -152,7 +155,7 @@ def render_capabilities(
         "descriptions, the command and MCP registries, SKILL.md frontmatter, "
         "the runtime inventory. Usage verdicts come from the weekly census "
         "(<code>sinnix census</code>); a capability with no verdict is one the "
-        "census does not cover.</p>"
+        "census does not currently cover. Shell matches, service activation and producer freshness do not prove client use.</p>"
         '<input class="filter" id="filter" type="search" '
         'placeholder="filter by name, description, invocation, or verdict" '
         'autocomplete="off" autocapitalize="off" spellcheck="false">'
