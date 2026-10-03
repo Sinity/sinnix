@@ -373,6 +373,159 @@ drain_ambient_adb() {
   echo "ambient: drained $pulled new chunk(s) over adb, repaired $repaired truncated"
 }
 
+# Preserve and audit BCR call recordings.
+#
+# BCR writes a staging recording under its app-specific external directory and
+# then copies it through Android's document provider to /sdcard/sinnix-calls.
+# The staging file is the archive authority: a document-provider copy can be
+# shorter if that final copy is interrupted. Nothing here deletes phone data.
+#
+# A valid Ogg/Opus file can still contain exact zeroes for an entire call when
+# the vendor VOICE_CALL route fails. Decode every newly observed recording at
+# intake so "BCR produced a file" is never confused with "call audio exists".
+drain_bcr_calls_adb() {
+  local remote_dir export_dir dest debug_dir ledger seen remote name
+  local remote_size local_size bytes export_size duration rate channels
+  local levels mean max dead truncated_export log_remote log_name display
+  local listing staging quoted_remote quoted_export transfer_ok decode_ok
+  local failed=0
+  local pulled=0 repaired=0 audited=0 silent=0 broken=0
+
+  adb_resolve || return 1
+  remote_dir="/sdcard/Android/data/com.chiller3.bcr/files"
+  export_dir="/sdcard/sinnix-calls"
+  dest="$LAKE_ROOT/calls"
+  debug_dir="$dest/debug"
+  ledger="$dest/levels.jsonl"
+  mkdir -p "$dest" "$debug_dir"
+  touch "$ledger"
+  seen=$(jq -r '"\(.file) \(.bytes // 0)"' "$ledger" 2>/dev/null | sort -u)
+
+  # BCR updates the staging file while a call is active. One quiet minute is
+  # enough to distinguish a completed file from the current recording.
+  if ! listing=$(adb_any shell find "$remote_dir" -maxdepth 1 -type f -name "'*.oga'" -mmin +1 2>/dev/null); then
+    echo "bcr: staging inventory failed" >&2
+    return 1
+  fi
+  while IFS= read -r remote; do
+    [ -n "$remote" ] || continue
+    name=${remote##*/}
+    printf -v quoted_remote '%q' "$remote"
+    if ! remote_size=$(adb_any shell "stat -c %s $quoted_remote" 2>/dev/null </dev/null); then
+      failed=$((failed + 1))
+      continue
+    fi
+    remote_size=${remote_size//$'\r'/}
+    case "$remote_size" in '' | *[!0-9]*) failed=$((failed + 1)); continue ;; esac
+    local_size=0
+    if [ -f "$dest/$name" ]; then
+      local_size=$(stat -c %s "$dest/$name")
+    fi
+    if [ "$local_size" -ne "$remote_size" ]; then
+      staging=$(mktemp "$dest/.incoming.XXXXXX")
+      transfer_ok=false
+      if adb_any pull "$remote" "$staging" >/dev/null 2>&1; then
+        bytes=$(stat -c %s "$staging")
+        if [ "$bytes" -eq "$remote_size" ]; then
+          mv -f "$staging" "$dest/$name"
+          transfer_ok=true
+          if [ "$local_size" -eq 0 ]; then
+            pulled=$((pulled + 1))
+          else
+            repaired=$((repaired + 1))
+          fi
+        fi
+      fi
+      if [ "$transfer_ok" = false ]; then
+        rm -f "$staging"
+        failed=$((failed + 1))
+        continue
+      fi
+    fi
+    bytes=$(stat -c %s "$dest/$name")
+
+    # BCR's sidecar names the requested AudioRecord source and format. Keep it
+    # beside the archived call so a future routing regression is diagnosable.
+    log_remote="${remote%.oga}.log.txt"
+    log_name="${name%.oga}.log.txt"
+    if [ ! -e "$debug_dir/$log_name" ] \
+        && adb_any shell "test -f $(printf '%q' "$log_remote")" >/dev/null 2>&1; then
+      adb_any pull "$log_remote" "$debug_dir/$log_name" >/dev/null 2>&1 || true
+    fi
+
+    if printf '%s\n' "$seen" | grep -qxF "$name $bytes"; then
+      continue
+    fi
+
+    duration=$(ffprobe -v error -show_entries format=duration \
+      -of default=nw=1:nk=1 "$dest/$name" 2>/dev/null </dev/null || true)
+    rate=$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate \
+      -of default=nw=1:nk=1 "$dest/$name" 2>/dev/null </dev/null || true)
+    channels=$(ffprobe -v error -select_streams a:0 -show_entries stream=channels \
+      -of default=nw=1:nk=1 "$dest/$name" 2>/dev/null </dev/null || true)
+    decode_ok=true
+    levels=$(ffmpeg -nostdin -hide_banner -nostats -i "$dest/$name" \
+      -af volumedetect -f null - 2>&1 \
+      | awk '/mean_volume:/ {mean=$(NF-1)} /max_volume:/ {max=$(NF-1)} END {print mean, max}' \
+      ) || decode_ok=false
+    mean=${levels% *}
+    max=${levels#* }
+
+    dead=false
+    if [ "$max" = "-inf" ]; then
+      dead=true
+    elif [ -n "$max" ] && awk -v v="$max" 'BEGIN { exit !(v <= -90.0) }'; then
+      dead=true
+    fi
+
+    printf -v quoted_export '%q' "$export_dir/$name"
+    export_size=$(adb_any shell "stat -c %s $quoted_export" 2>/dev/null </dev/null | tr -d '\r' || true)
+    case "$export_size" in *[!0-9]*) export_size= ;; esac
+    truncated_export=false
+    if [ -n "$export_size" ] && [ "$export_size" -lt "$remote_size" ]; then
+      truncated_export=true
+    fi
+
+    if [ "$decode_ok" = false ] || [ -z "$duration" ] || [ -z "$max" ]; then
+      broken=$((broken + 1))
+      continue
+    fi
+    [ "$dead" = false ] || silent=$((silent + 1))
+
+    jq -nc \
+      --arg file "$name" --argjson bytes "${bytes:-0}" \
+      --argjson staging_bytes "${remote_size:-0}" --arg export_bytes "${export_size:-}" \
+      --arg duration "${duration:-}" --arg rate "${rate:-}" --arg channels "${channels:-}" \
+      --arg mean "${mean:-}" --arg max "${max:-}" --argjson dead "$dead" \
+      --argjson truncated_export "$truncated_export" \
+      --arg checked_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{file: $file, bytes: $bytes, staging_bytes: $staging_bytes,
+        export_bytes: ($export_bytes | tonumber? // null),
+        duration_seconds: ($duration | tonumber? // null),
+        sample_rate: ($rate | tonumber? // null),
+        channels: ($channels | tonumber? // null),
+        mean_db: ($mean | tonumber? // null), max_db: ($max | tonumber? // null),
+        captured_nothing: $dead, export_truncated: $truncated_export,
+        checked_at: $checked_at}' >>"$ledger"
+    audited=$((audited + 1))
+
+    # BCR filenames may contain a phone number or contact. Logs and operator
+    # output identify the call only by its timestamp/direction prefix.
+    display=${name%%_IN_*}
+    display=${display%%_OUT_*}
+    if [ "$dead" = true ]; then
+      echo "BCR WARNING: $display captured DIGITAL SILENCE (${duration:-?}s)" >&2
+    elif [ "$truncated_export" = true ]; then
+      echo "BCR WARNING: $display export copy is truncated; full staging copy preserved" >&2
+    fi
+  done <<<"${listing//$'\r'/}"
+
+  echo "bcr: synced $pulled new call(s), repaired $repaired partial copy/copies, audited $audited; $silent silent, $broken undecodable, $failed transfer/inventory failures"
+  if [ "$silent" -gt 0 ] || [ "$broken" -gt 0 ] || [ "$failed" -gt 0 ]; then
+    return 2
+  fi
+}
+
 nix_userland_identity() {
   NIX_APP_UID=$(adb_any shell pm list packages -U com.termux.nix 2>/dev/null \
     | sed -n 's/.*uid:\([0-9][0-9]*\).*/\1/p' | tr -d '\r')
@@ -478,10 +631,12 @@ sinnix-phone <command>
   shell [cmd]   Termux shell over the tailnet (interactive when no cmd)
   mirror        scrcpy screen mirror/control over the tailnet
   screenshot    grab the current screen to /realm/tmp/work/
-  logcat        pull the phone's system log into the lake (adb; the one
-                lane the app cannot push, and the timer's job)
+  logcat        pull the phone's system log and preserve BCR calls over adb;
+                this is the scheduled foreign-app/system drain
   ambient-audit decode every undecoded ambient chunk in the lake and record
                 its real duration and level
+  bcr-sync      preserve completed BCR calls from its staging directory and
+                audit every new recording for digital silence/truncated export
   pull-ambient  rescue chunks the app could not upload (the app ships them
                 itself; this is for when that is failing)
   adb-connect   (re)attach adb over the tailnet
@@ -927,15 +1082,10 @@ screenshot)
   echo "$out"
   ;;
 logcat)
-  # The phone's system log, and the only lane still pulled rather than pushed.
-  #
-  # Everything else the phone produces it ships itself through
-  # sinnix-phone-dispatcher: spooled on the device, acknowledged by hash,
-  # deleted locally only against that acknowledgement. The log cannot join
-  # them -- reading it needs READ_LOGS, which Android grants to system and
-  # privileged apps only, and no amount of appop juggling gets a sideloaded
-  # app there on a locked bootloader. So it stays adb, which has the
-  # compensating virtue of working over USB when no network does.
+  # System log and BCR recordings are the two deliberate pulls. The Sinnix
+  # capture app pushes its own data, but logcat needs READ_LOGS and BCR is a
+  # separate privileged app whose staging file is more authoritative than its
+  # document-provider export.
   if ! adb_any get-state >/dev/null 2>&1; then
     echo "logcat: no adb transport — adbd's TCP mode does not survive a reboot"
     echo "        restore it over USB with: sinnix-phone adb-restore"
@@ -943,19 +1093,26 @@ logcat)
   fi
   ensure_device_capture_settings
   drain_logcat_adb
+  bcr_rc=0
+  drain_bcr_calls_adb || bcr_rc=$?
 
-  # This is now the only thing prime runs against the phone on a schedule, so
-  # it also carries the one question prime can answer better than the phone
-  # can: are the app's uploads landing? A phone whose uploads fail keeps
-  # recording, so the backlog is the honest signal — chunks piling up means
-  # capture is working and delivery is not, which is exactly the failure that
-  # used to hide behind "no audio yet".
+  # This scheduled probe also checks whether the capture app's uploads land.
   backlog=$(adb_any shell 'ls /sdcard/sinnix-ambient/*.m4a 2>/dev/null | wc -l' 2>/dev/null | tr -d '\r')
   if [ -n "${backlog:-}" ] && [ "$backlog" -gt 12 ]; then
     echo "logcat: WARNING -- $backlog finished chunks still on the phone; uploads are not landing." >&2
     echo "  Ask the app why: adb shell grep chunk_upload_blocked in today's events file." >&2
     echo "  Recover them by hand with: sinnix-phone pull-ambient" >&2
   fi
+  if [ "$bcr_rc" -ne 0 ]; then
+    exit "$bcr_rc"
+  fi
+  ;;
+bcr-sync)
+  if ! adb_any get-state >/dev/null 2>&1; then
+    echo "bcr-sync: no adb transport" >&2
+    exit 1
+  fi
+  drain_bcr_calls_adb
   ;;
 health-sync)
   # Fresh resource-id bounds support the English and Polish app layouts.
@@ -1019,6 +1176,7 @@ ambient-audit)
     # truncated file, which is precisely the file worth recording.
     duration=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$chunk" 2>/dev/null </dev/null || true)
     rate=$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate -of default=nw=1:nk=1 "$chunk" 2>/dev/null </dev/null || true)
+    decode_ok=true
     levels=$(ffmpeg -nostdin -hide_banner -nostats -i "$chunk" -af volumedetect -f null - 2>&1 |
       awk '/mean_volume:/ {mean=$(NF-1)} /max_volume:/ {max=$(NF-1)} END {print mean, max}' || true)
     mean=${levels% *}

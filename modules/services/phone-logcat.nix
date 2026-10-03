@@ -1,17 +1,16 @@
-# The one thing the phone cannot push: its own system log.
+# The two phone surfaces that cannot use the Sinnix app's durable dispatcher:
+# Android's system log and BCR's call-recording staging area.
 #
-# This unit is what is left of sinnix-phone-drain. Everything that drain used
-# to move -- ambient chunks, the event log, outbox intents and blobs, the
-# camera and Downloads mirrors, and prime's own glance/steering/receipts/decks
-# going the other way -- is now pushed or pulled by the app itself through
-# sinnix-phone-dispatcher, spooled on the device and acknowledged by hash.
-# Durability moved to the side that holds the data.
+# Ambient chunks, events, outbox data, media mirrors, and prime's inbound data
+# are pushed or pulled by the Sinnix app itself through sinnix-phone-dispatcher,
+# spooled on-device and acknowledged by hash. Durability moved to the side that
+# holds those data.
 #
-# `logcat` did not move, and cannot: reading another app's log needs
-# READ_LOGS, which Android grants to system and privileged apps only, and this
-# app is neither on a locked-bootloader device. So the log stays a pull over
-# adb -- a transport that works over USB when no network does -- on a timer,
-# which is exactly what this unit is and all it is.
+# logcat needs READ_LOGS. BCR is a separate privileged app, and its app-specific
+# staging copy can be more complete than the later document-provider export.
+# Both therefore stay an adb pull -- a transport that also works over USB when
+# the network does not. New BCR calls are decoded at intake so digital silence
+# becomes a failed scheduled run instead of a false-success recording.
 {
   mkServiceModule,
   lib,
@@ -24,7 +23,7 @@ let
 in
 mkServiceModule {
   name = "phone-logcat";
-  description = "Scheduled phone system-log pull over adb";
+  description = "Scheduled phone log and BCR-call preservation over adb";
   docs = "docs/phone.md";
   extraOptions = {
     intervalSec = lib.mkOption {
@@ -51,6 +50,13 @@ mkServiceModule {
         cadenceSeconds = 1800;
         staleAfterSeconds = 86400;
       }
+      {
+        # Calls are irregular, so freshness is event-driven. The timer only
+        # discovers completed files when adb is reachable.
+        name = "phone-calls";
+        path = "/realm/machine/phone/calls";
+        eventDriven = true;
+      }
     ];
   };
   configFn = _: {
@@ -69,7 +75,7 @@ mkServiceModule {
   job =
     { cfg, ... }:
     {
-      description = "Pull the phone's system log into the data lake";
+      description = "Pull the phone's system log and preserve BCR calls";
       manager = "user";
       execStart = "${scriptPkgs.sinnix-phone}/bin/sinnix-phone logcat";
       timer = {

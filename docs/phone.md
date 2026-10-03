@@ -170,22 +170,23 @@ lie.
 
 ### Contracts
 
-| File                                      | Direction | Writer → route → reader                                    |
-| ----------------------------------------- | --------- | ---------------------------------------------------------- |
-| `ambient-*.m4a`                           | out       | AmbientService → `POST /chunk?lane=ambient` → lake         |
-| `sensor-*.bin` + `.json`                  | out       | SensorChunkWriter → `POST /chunk?lane=outbox` → lake       |
-| `status.json`                             | out       | app → `app-status`, tile, capture screen (adb, on demand)  |
-| `events/events-*.jsonl`                   | out       | every screen → `POST /events?day=&offset=` → lake day file |
-| `outbox/intent-*.json`                    | out       | app → `POST /intent` → executed, receipt back              |
-| `outbox/{voice,trace,shared}-*` + `.json` | out       | app → `POST /chunk?lane=outbox` → lake                     |
-| `/sdcard/{DCIM,Download}`                 | out       | MediaMirror → `POST /chunk?lane={camera,download}` → lake  |
-| `epoch.json`                              | local     | instruments only                                           |
-| `inbox/glance.json`                       | in        | built on request → `GET /inbox/file` → home + widget       |
-| `inbox/steering.json`                     | in        | built on request → `GET /inbox/file` → steering trio       |
-| `inbox/receipts/*.json`                   | in        | dispatcher → fetch + confirm → notification, then deleted  |
-| `inbox/notify/*.json`                     | in        | prime → fetch + confirm → notification, then deleted       |
-| `inbox/decks/*`                           | in        | prime → fetch (retained, not consumed) → instrument shelf  |
-| logcat                                    | **in**    | `sinnix phone logcat` over adb → lake                      |
+| File                                                 | Direction | Writer → route → reader                                     |
+| ---------------------------------------------------- | --------- | ----------------------------------------------------------- |
+| `ambient-*.m4a`                                      | out       | AmbientService → `POST /chunk?lane=ambient` → lake          |
+| `sensor-*.bin` + `.json`                             | out       | SensorChunkWriter → `POST /chunk?lane=outbox` → lake        |
+| `status.json`                                        | out       | app → `app-status`, tile, capture screen (adb, on demand)   |
+| `events/events-*.jsonl`                              | out       | every screen → `POST /events?day=&offset=` → lake day file  |
+| `outbox/intent-*.json`                               | out       | app → `POST /intent` → executed, receipt back               |
+| `outbox/{voice,trace,shared}-*` + `.json`            | out       | app → `POST /chunk?lane=outbox` → lake                      |
+| `/sdcard/{DCIM,Download}`                            | out       | MediaMirror → `POST /chunk?lane={camera,download}` → lake   |
+| `epoch.json`                                         | local     | instruments only                                            |
+| `inbox/glance.json`                                  | in        | built on request → `GET /inbox/file` → home + widget        |
+| `inbox/steering.json`                                | in        | built on request → `GET /inbox/file` → steering trio        |
+| `inbox/receipts/*.json`                              | in        | dispatcher → fetch + confirm → notification, then deleted   |
+| `inbox/notify/*.json`                                | in        | prime → fetch + confirm → notification, then deleted        |
+| `inbox/decks/*`                                      | in        | prime → fetch (retained, not consumed) → instrument shelf   |
+| logcat                                               | **in**    | `sinnix phone logcat` over adb → lake                       |
+| BCR staging `*.oga` (export: `/sdcard/sinnix-calls`) | out       | BCR → scheduled adb preservation/audit → `phone-calls` lake |
 
 The two device directories stay deliberately separate. `/sdcard/sinnix-ambient`
 is the uploader's: each closed chunk is POSTed, sha256-verified against what
@@ -207,14 +208,18 @@ continuously; Android may still choose the delivered rate.
 
 ### What is still a pull, and why
 
-**The system log.** Reading it needs `READ_LOGS`, which Android grants to
-system and privileged apps only; a sideloaded app on a locked bootloader
-cannot hold it at any appop scope. `sinnix.services.phone-logcat` is what is
-left of the drain: an adb pull on a 1800s timer, which also has the
-compensating virtue of working over USB when no network does. It carries one
-other check, because it is the only thing prime still runs against the phone
-on a schedule: a backlog of finished chunks on the device means capture is
-working and delivery is not.
+**The system log and BCR calls.** Reading the log needs `READ_LOGS`, which
+Android grants to system and privileged apps only; the Sinnix capture app
+cannot hold it at any appop scope. BCR is privileged but is a separate app,
+and its app-specific staging recording is the authoritative copy: the later
+document-provider export can be truncated. `sinnix.services.phone-logcat`
+therefore keeps one 1800s adb pull for both foreign surfaces, with the useful
+property that USB still works when the network does not. Every newly preserved
+BCR call is decoded immediately; duration, sample rate and level are recorded
+under `/realm/machine/phone/calls/levels.jsonl`, and a digital-silence
+recording fails that timer run instead of masquerading as a success. The same
+scheduled probe still warns when finished ambient chunks pile up on-device,
+which means capture is working and delivery is not.
 
 **The media mirror has a stated blind spot.** It ships files newer than an
 mtime watermark seeded from what the lane already holds, because asking prime

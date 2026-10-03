@@ -86,3 +86,7 @@ id_ed25519*
 .beads/proxieddb/
 *.gate.lock*
 .pytest_cache/
+
+# Harness-owned skill imports and its recoverable trash stay local.
+dots/_ai/skills/synced/
+dots/_ai/skills/.trash/
