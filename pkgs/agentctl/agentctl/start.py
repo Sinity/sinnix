@@ -326,8 +326,8 @@ def check_result_contract(
     if worker.get("self_review_required") is True and "self_review" not in value:
         raise BatchRefusal(
             "result_self_review",
-            "this dispatch requires self_review: the checklists re-read, the "
-            "review passes run, and one narrated row per checklist item",
+            "this dispatch requires self_review: guidance used, actual review "
+            "count, and a compact summary item with evidence and residuals",
         )
     binding_errors = _v2_binding_errors(worker, value)
     if binding_errors:
@@ -584,7 +584,7 @@ def _prepare(
                     scope_authority=list(scope_authority(snapshot.beads)),
                     bead_revisions=_bead_revisions(snapshot.beads),
                     evidence_binding=_evidence_binding(snapshot.beads),
-                    # The prompt written above demands a narrated self-review;
+                    # The prompt written above requires a compact self-review;
                     # recorded with it so filing enforces what was dispatched.
                     self_review_required=True,
                 )

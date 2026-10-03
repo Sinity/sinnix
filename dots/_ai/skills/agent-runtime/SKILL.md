@@ -41,10 +41,10 @@ terminal, then a retry.
 A paused pool is an admission hold. Run `agentctl backpressure tick` and wait
 for the release before dispatching more; running jobs continue.
 
-Agents spawned inside a Claude or Codex session are not pueue jobs, and their
-memory scope is small. Their gates, type checks, test runs, and builds go
-through `agentctl job start` (with `--workspace <worktree>`), never inside the
-agent's own process.
+Agents spawned inside a Claude or Codex session are not pueue jobs. Heavy
+gates, broad type checks, suites, and builds use `agentctl job start` with
+`--workspace <worktree>`. Bounded low-memory import/static probes and small
+diagnostics may run directly; avoid launching a managed job for every tiny check.
 
 In Codex, a `functions.exec` call that returns a `session_id` is still
 running and continues through `write_stdin`; the outer "Script completed"
@@ -89,25 +89,18 @@ fast-forward), and closes the tasks its acceptance record satisfies.
 ## Worker toolbelt
 
 Batch workers have `lane` on PATH. `lane task` prints the packet. `lane
-verify` runs the descriptor's focused profile through `agentctl job start`
-when one is declared. `lane done <result.json>` requires a clean tree,
+verify` runs the descriptor's focused profile without arguments. For an
+operation requiring a selector, use `agentctl job start <project> <operation>
+--workspace <worktree> -- <selector>` explicitly. `lane done <result.json>` requires a clean tree,
 validates the result, checks `candidate_sha` against `HEAD`, and prints it as
 the final message; it never pushes.
 
 ## Before reporting work finished
 
-Run this checklist loudly (global rules, Reporting):
-
-1. Each heavy step ran as a declared operation; name its job ID.
-2. Each job you started is terminal and you read its result
-   (`agentctl job result <id>`); quote the exit status or result line.
-3. A batch counts as done only at `landed`, with its merge commit on the
-   default branch (`git merge-base --is-ancestor <sha> origin/<default>`).
-4. A failed or refused step was retried only after its named cause was read
-   and fixed.
-5. The worktrees you own are cleaned by recorded state or named as kept, with
-   the reason.
-6. No watch, timer, or cron job you started outlives its purpose.
+Report the actual terminal result of work you claim finished, with useful job
+IDs and any remaining blockers. A batch is landed when its merge is on the
+default branch. Preserve WIP, name worktrees kept for continuation, and stop
+watches you own when their purpose ends. No per-item narration is needed.
 
 ## Failures
 

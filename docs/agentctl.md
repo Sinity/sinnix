@@ -136,7 +136,7 @@ agentctl evidence list <project> --cursor <next_cursor> --json
 agentctl evidence get <evidence_id> --project <project> --json
 ```
 
-The result must name a candidate SHA, its Beads tasks, and the author's narrated `self_review`. A version-two result uses `execution = "native"` and must copy the Beads row revision, acceptance digest, and `{ac_id, text}` dispatch snapshot. A legacy result remains retained when a historical dispatch has no binding, but cannot automatically close a Bead. AgentCTL binds the exact owner acceptance field when structured criteria are unavailable; it never substitutes worker prose for that snapshot.
+The result must name a candidate SHA, its Beads tasks, and the author's compact `self_review`. A version-two result uses `execution = "native"` and must copy the Beads row revision, acceptance digest, and `{ac_id, text}` dispatch snapshot. A legacy result remains retained when a historical dispatch has no binding, but cannot automatically close a Bead. AgentCTL binds the exact owner acceptance field when structured criteria are unavailable; it never substitutes worker prose for that snapshot.
 
 Each native verification claim must use a durable AgentCTL job receipt, `agentctl://jobs/<id>/<launch-reference>`, rather than a pass string. Filing resolves that exact launch reference in the selected project, then records whether the job terminated successfully and its execution checkout receipt had unchanged clean endpoints at the candidate SHA. The submitted result remains a claim. The receipt observation is the checked fact.
 
@@ -639,7 +639,7 @@ outcome. The codes:
 | `project`                      | the run belongs to another project                                                  |
 | `publish_rejected`             | the push was rejected for a reason a refresh cannot fix                             |
 | `result_evidence_binding`      | a v2 worker result differs from its dispatch-time stable acceptance binding         |
-| `result_self_review`           | the dispatch requires a narrated `self_review` and the result has none              |
+| `result_self_review`           | the dispatch requires `self_review` and the result has none                       |
 | `result_attempt`               | the result does not belong to the worker's current dispatch attempt                 |
 | `result_already_filed`         | the worker already has an accepted result for this attempt                          |
 | `review_failed`                | the review task did not succeed                                                     |
@@ -662,10 +662,10 @@ outcome. The codes:
 A worker exits with the JSON document `worker.schema.json` describes:
 `candidate_sha` (the submitted commit), `beads` with each acceptance
 criterion marked `satisfied`, `unsatisfied` or `superseded` with evidence,
-`unresolved` findings, `verification` receipts, and `self_review`: the
-checklist sources the worker re-read, the number of review passes it ran
-(the last one clean), and one narrated row per checklist item, with
-`applies: false` marking an item that did not apply and why. The dispatch,
+`unresolved` findings, `verification` receipts, and `self_review`: guidance
+used, the number of reviews actually run, and a compact review summary with
+evidence and residuals. One item suffices; no per-item narration or clean-pass
+restart loop is required. The dispatch,
 not the document, requires it: `batch start` records
 `self_review_required: true` on the worker with its prompt, whose
 `result_contract` then says `"self_review": "required"`, and filing a result

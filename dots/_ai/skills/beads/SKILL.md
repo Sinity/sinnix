@@ -50,19 +50,11 @@ commits and never belong on a feature branch.
 
 ## Closing
 
-Close when the acceptance criteria are met. Before closing, run this
-checklist loudly (global rules, Reporting) and put it in the closing note:
-
-1. Each criterion is satisfied with evidence (the exact command and its
-   result line, or the PR and merge SHA), deferred to a named successor, or
-   misframed with the reason.
-2. The change is on the default branch, not only on a feature or stacked
-   branch: `git merge-base --is-ancestor <merge-sha> origin/<default>`.
-3. A claim that the code already does it cites `path:line` at the current
-   head.
-4. An operational criterion without its live evidence stays open.
-5. Review findings on the change were fixed in it, not filed as follow-ups;
-   a successor holds only separate scope.
+Close when acceptance criteria are met under the project's delivery rules.
+Leave a compact evidence note: the commit or PR and useful result, or current
+code evidence for an already-completed task. Operational criteria stay open
+until their live evidence exists. Record known failures and unrelated follow-up
+scope honestly without blocking other completed tasks or narrating a checklist.
 
 Split unfinished scope into a successor rather than stretching the closure.
 A close refused by an open blocker means close the blocker first, or

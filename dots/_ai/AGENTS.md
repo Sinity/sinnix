@@ -18,16 +18,11 @@ named below, not in instructions.
 - Decide from the evidence that settles the question. Keep observations,
   inferences, and unverified claims apart. When blocked, name the missing
   evidence.
-- Write code in coherent batches. Read the requirements and the call paths,
-  write the whole connected change (callers, tests, docs, generated files),
-  then verify once. A test run after every small edit spends the speed an agent
-  has; run a quick probe only to settle a concrete uncertainty.
-- Work exhaustively. When a review, a test, or reading turns up a defect, find
-  every sibling before acting: the same class on other routes, callers, and
-  records, and inside your own earlier fixes. Fix them all in one batch. A
-  review lists everything it can find in one pass instead of stopping at the
-  first defect. Every valid finding against your change is fixed in it; moving
-  one into a follow-up does not reduce the work.
+- Work in coherent batches, including connected callers and docs. Use a quick
+  probe to settle a concrete uncertainty; verify when the change is coherent.
+- Fix relevant defects and check likely sibling sites. Keep ordinary known
+  failures and unfinished scope visible without blocking unrelated progress.
+  Expand the work only when the defect threatens the requested outcome.
 - When a replacement ships, remove its predecessor together with its callers,
   commands, docs, and tests. Do not keep a compatibility path beside it.
   Unfinished code is not obsolete: deleting it needs a shipped replacement, a
@@ -50,13 +45,9 @@ instructions, skills, and memory.
 - Read exit statuses directly. Capture large output and inspect it on purpose;
   a pipeline's final status says nothing about earlier stages, so never pipe
   verification through `tail` or a summarizing filter.
-- Run a checklist loudly: for each item, a tick (or N/A with its reason), then
-  a sentence or short paragraph on how it applied to this change, with evidence
-  where there is any (a command and its result line, `path:line`, a grep
-  count). Considering each item is the point; a bare tick records nothing.
 - Before compaction or stopping mid-work, leave a handoff, and on re-entry
-  verify its records against their owners instead of trusting a summary. Load
-  `handoff` for both checklists.
+  verify the live facts needed for the next action. Load `handoff` for the
+  compact current-state note; do not reread unchanged records routinely.
 
 ## Filesystem and private data
 
@@ -115,27 +106,23 @@ running agents in parallel.
   them.
 - Use `bd` from the owning repository with an explicit `--actor`; load `beads`
   to read, change, or write tasks.
-- Run focused checks for the contract you changed. Affected or full suites need
-  an explicit operator request. Tests exercise behavior, invariants, and
-  reproduced failures, never prose wording or refactoring detail. Fix inherited
-  failures forward, and report exactly what ran.
-- Before every push, the agent that wrote the change reviews its whole diff
-  against the base in its own context: re-read the checklist (the project's
-  review guide, which its `AGENTS.md` names, and the generic list in the
-  `orchestrate` skill's `references/worker-contract.md`), run it loudly, fix
-  everything it finds, and repeat until a pass is clean. A subagent may give a
-  second opinion on a named question; the author keeps ownership. Stage
-  explicit paths. Never bypass hooks or branch protection.
+- For ordinary fixes, briefly review the actual delta and use a cheap import,
+  static check, or small discriminating test when useful. Run broader regression
+  at integration milestones or for a concrete risk, not after every patch.
+  Preserve required CI checks and assertions. Report failures and untested
+  areas honestly; ordinary known reds need not block unrelated work.
+- The author owns correctness review. Review a coherent delivery once, then
+  review changed deltas and affected invariants after fixes. Use project guides
+  for relevant risks; no narrated per-item checklist or restart from the top.
+  A second reviewer needs a named unresolved question. Stage explicit paths.
+  Never bypass hooks or branch protection.
 - Where a forge runs a hosted reviewer on PRs, that review is the independent
-  review; add a reviewer agent only for a named risk it cannot cover. Push a
-  fix batch only when no hosted review is running on the current head, and
-  carry every open finding in it. A PR merges when its required statuses
-  pass, the hosted review has completed on the exact head, and every review
-  thread is answered with a fix commit or a concrete refutation and then
-  resolved. Where the forge enforces these
-  (required statuses, conversation resolution), merge with
+  review; add a reviewer agent only for a named risk it cannot cover. Answer
+  findings with a fix or a concrete refutation. Follow the repository's actual
+  required statuses and review-resolution rules. Where the forge enforces these,
+  merge with
   `gh pr merge --auto --squash --match-head-commit <sha>` and let it gate.
-  Findings that arrive after a merge become a follow-up commit or Bead.
+  Findings outside this delivery or arriving after a merge become a follow-up.
   For Codex, review state is the Code Review row of its summary comment; its
   separate security-review usage-limit notice is unrelated.
 - A partial delivery leaves its unmet acceptance criteria open.
@@ -152,6 +139,9 @@ running agents in parallel.
   (`nix develop --command switch|boot|test-vm` from a Sinnix checkout), state
   the affected services and files, then verify the activated revision and the
   direct live effect. An edited source proves nothing about what is installed.
+- Resets, deployment, paid vector preservation, and data-loss risks require
+  evidence appropriate to their consequence. Keep those checks at the actual
+  operational boundary rather than applying them to every source patch.
 
 ## History and memory
 

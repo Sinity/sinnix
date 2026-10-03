@@ -116,7 +116,6 @@ store_after_payload=$(jq -n --arg c "$store_after_heredoc" '{tool_input:{command
 store_after_deny=$(run_hook "$hooks_dir/pretooluse-bash.sh" "$store_after_payload")
 printf '%s' "$store_after_deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
 
-test -z "$(PATH="$test_root/bin" run_hook "$hooks_dir/sessionstart-polylogue-recall.sh" '{}')"
 test -z "$(PATH="$test_root/bin" run_hook "$hooks_dir/sessionstart-sinex-recall.sh" '{}')"
 
 cat >"$test_root/bin/sinexctl" <<'EOF'

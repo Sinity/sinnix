@@ -120,11 +120,6 @@
           },
           {
             "type": "command",
-            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-polylogue-recall.sh",
-            "timeout": 5
-          },
-          {
-            "type": "command",
             "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-sinex-recall.sh",
             "timeout": 5
           },

@@ -75,15 +75,14 @@ make them and show the diff without asking again. Obtain direction for
 ambiguous destructive changes or live activation beyond the request.
 
 1. Resolve the active files, links, generated sources, and loaded state.
-2. Inventory global and project instructions, memory indexes, skills, agent
-   definitions, hooks, and relevant settings. Measure what agents actually
-   invoke (session logs, Polylogue) before judging a skill's value.
+2. Inspect the surfaces implicated by the friction. Use observed invocations
+   when needed to judge a skill's value; a small instruction fix does not need
+   a complete setup census.
 3. Check claims against current code and observed sessions: contradictions,
    duplicated authorities, stale mechanisms, broken pointers, procedures that
    cost turns without changing outcomes.
 4. Fix by decision value: merge overlapping owners, delete what no longer
    changes behavior, move each rule to the narrowest scope that needs it.
-5. Verify: validate changed skills (`skill-authoring`), probe changed routing
-   with a positive and a negative request, review the full diff for private
-   data, and confirm the installed surface through its owner. Report whether
-   each change is source-only, published, or active.
+5. Verify changed structure and references, check routing when its description
+   changed, review the delta for private data, and confirm the installed surface
+   through its owner. Report whether the change is source-only or active.

@@ -23,11 +23,11 @@ craft is in `writing-for-agents`; this skill covers the package.
    Put variant detail, long examples, and checklists in `references/`, linked
    one level deep; put executables in `scripts/`. No README, changelog, or
    install notes, and no copy of the global or repository instructions.
-4. Validate: `scripts/validate_skill.py /realm/project/sinnix/dots/_ai/skills`
+4. Validate: `dots/_ai/skills/skill-authoring/scripts/validate_skill.py dots/_ai/skills`
    checks frontmatter, duplicate names, description length, file size, and
    links. It says nothing about whether the advice is right.
-5. Probe routing with the trigger and near-miss requests; record the request,
-   the skill selected, and why.
+5. When the name or description changes, check routing with a trigger and
+   near miss. Body-only edits need relevant structure/reference checks.
 6. Regenerate the environment reference after any change to the skill set or a
    description: from the Sinnix root, `nix run .#sinnix-agent-environment-doc
 -- --output docs/agent-environment.md`. An executable

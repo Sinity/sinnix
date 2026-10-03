@@ -31,9 +31,8 @@ USAGE_SCHEMA: dict[str, Any] = {
     },
 }
 
-# The worker's own review of its final diff, narrated per checklist item: the
-# checklist sources it re-read, how many passes it ran (the last one clean),
-# and for each item whether it applied and how. Landing copies it into the PR
+# The worker's own review of its change: guidance used, actual review count,
+# and a compact summary (one item is sufficient). Landing copies it into the PR
 # body, so it is public text. It is required by the dispatch, not by the
 # document: a worker whose record carries `self_review_required` must file it
 # (`start.check_result_contract`), and native evidence always must.

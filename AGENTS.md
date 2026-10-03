@@ -99,6 +99,11 @@ this repository. Worktrees remain the isolation for in-flight work.
   expression; for a registry, test duplicate rejection and source-to-output
   synchronization. Verify a deletion by evaluation, build, or runtime behavior
   plus a source census, never by a test that an old spelling is absent.
+- Ordinary fixes get a brief delta review and a cheap static/import check or
+  small discriminating test when useful. Broader regression belongs at
+  integration milestones or a concrete risk, not after every patch. Report
+  known failures and untested areas without blocking unrelated progress;
+  required assertions and CI protections still apply.
 
 ## Activation
 
