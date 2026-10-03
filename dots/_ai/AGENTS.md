@@ -20,9 +20,11 @@ named below, not in instructions.
   evidence.
 - Work in coherent batches, including connected callers and docs. Use a quick
   probe to settle a concrete uncertainty; verify when the change is coherent.
-- Fix relevant defects and check likely sibling sites. Keep ordinary known
-  failures and unfinished scope visible without blocking unrelated progress.
-  Expand the work only when the defect threatens the requested outcome.
+- Fix cheap, well-understood related or nearby defects while context is loaded,
+  with proportionate checks and a brief note. No separate ticket, plan, or
+  review cycle for a small correction. Separate work only for substantial
+  investigation, new architectural dependencies, conflicting ownership, or
+  material delivery delay. Keep remaining failures and unfinished scope visible.
 - When a replacement ships, remove its predecessor together with its callers,
   commands, docs, and tests. Do not keep a compatibility path beside it.
   Unfinished code is not obsolete: deleting it needs a shipped replacement, a
@@ -122,7 +124,8 @@ running agents in parallel.
   required statuses and review-resolution rules. Where the forge enforces these,
   merge with
   `gh pr merge --auto --squash --match-head-commit <sha>` and let it gate.
-  Findings outside this delivery or arriving after a merge become a follow-up.
+  Substantial findings outside this delivery or arriving after a merge become
+  a follow-up; cheap nearby corrections belong in the current work.
   For Codex, review state is the Code Review row of its summary comment; its
   separate security-review usage-limit notice is unrelated.
 - A partial delivery leaves its unmet acceptance criteria open.

@@ -27,9 +27,11 @@ names, and exits with one result document.
    committed. AgentCTL records paths outside the estimate for review, and
    landing detects conflicts with other workers' branches. You may add
    `scope_expansion` (paths, assigned Bead, reason) to explain extra paths.
-   Fix relevant defects and check likely sibling sites in the same batch.
-   Report unrelated discoveries and ordinary known failures without making
-   them prerequisites for the assigned work.
+   Fix cheap, well-understood related or nearby defects while context is loaded,
+   with proportionate checks and a brief note, including likely sibling sites.
+   No separate ticket, plan, or review cycle for a small correction. Separate
+   only substantial investigation, new architectural dependencies, conflicting
+   ownership, or material delivery delay. Report remaining failures honestly.
 3. **Verify the change.** Run the snapshot's `verification_commands` when the
    task names them, through the route in step 7, after the owned source patch
    is coherent. Run a shared selector once for all assigned Beads that name
@@ -59,8 +61,8 @@ names, and exits with one result document.
    `batch land` closes them from the acceptance record. Queued workers are
    constrained to that boundary; external and native harnesses must follow it
    directly and report any inability to do so.
-6. **Keep the work tied to the assigned Beads.** Put unrelated discoveries in
-   `unresolved` for the coordinator.
+6. **Keep the work tied to the assigned Beads.** Put discoveries that remain
+   after cheap nearby corrections in `unresolved` for the coordinator.
 7. **Run heavy work as declared operations.** Gates, broad type checks, test
    suites, and builds run through the project's declared AgentCTL operations
    (Polylogue: `verify_quick`, `pytest_focused`), started with
