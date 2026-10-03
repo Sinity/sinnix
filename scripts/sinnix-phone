@@ -397,9 +397,9 @@ drain_bcr_calls_adb() {
   dest="$LAKE_ROOT/calls"
   debug_dir="$dest/debug"
   ledger="$dest/levels.jsonl"
-  mkdir -p "$dest" "$debug_dir"
-  touch "$ledger"
-  seen=$(jq -r '"\(.file) \(.bytes // 0)"' "$ledger" 2>/dev/null | sort -u)
+  mkdir -p "$dest" "$debug_dir" || return 1
+  touch "$ledger" || return 1
+  seen=$(jq -r '"\(.file) \(.bytes // 0)"' "$ledger" 2>/dev/null | sort -u) || return 1
 
   # BCR updates the staging file while a call is active. One quiet minute is
   # enough to distinguish a completed file from the current recording.
@@ -419,15 +419,15 @@ drain_bcr_calls_adb() {
     case "$remote_size" in '' | *[!0-9]*) failed=$((failed + 1)); continue ;; esac
     local_size=0
     if [ -f "$dest/$name" ]; then
-      local_size=$(stat -c %s "$dest/$name")
+      local_size=$(stat -c %s "$dest/$name") || return 1
     fi
     if [ "$local_size" -ne "$remote_size" ]; then
-      staging=$(mktemp "$dest/.incoming.XXXXXX")
+      staging=$(mktemp "$dest/.incoming.XXXXXX") || return 1
       transfer_ok=false
       if adb_any pull "$remote" "$staging" >/dev/null 2>&1; then
-        bytes=$(stat -c %s "$staging")
+        bytes=$(stat -c %s "$staging") || return 1
         if [ "$bytes" -eq "$remote_size" ]; then
-          mv -f "$staging" "$dest/$name"
+          mv -f "$staging" "$dest/$name" || { rm -f "$staging"; return 1; }
           transfer_ok=true
           if [ "$local_size" -eq 0 ]; then
             pulled=$((pulled + 1))
@@ -442,7 +442,7 @@ drain_bcr_calls_adb() {
         continue
       fi
     fi
-    bytes=$(stat -c %s "$dest/$name")
+    bytes=$(stat -c %s "$dest/$name") || return 1
 
     # BCR's sidecar names the requested AudioRecord source and format. Keep it
     # beside the archived call so a future routing regression is diagnosable.
@@ -506,7 +506,7 @@ drain_bcr_calls_adb() {
         channels: ($channels | tonumber? // null),
         mean_db: ($mean | tonumber? // null), max_db: ($max | tonumber? // null),
         captured_nothing: $dead, export_truncated: $truncated_export,
-        checked_at: $checked_at}' >>"$ledger"
+        checked_at: $checked_at}' >>"$ledger" || return 1
     audited=$((audited + 1))
 
     # BCR filenames may contain a phone number or contact. Logs and operator
