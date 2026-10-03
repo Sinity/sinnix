@@ -278,6 +278,8 @@ def render_capability_sections(view: dict) -> tuple[str, int]:
         )
     status = view.get("census_status") or {}
     html = f"<p>Census: {esc(status.get('status', 'unavailable'))}; collected at {esc(str(status.get('ts', 'unknown')))}; {len(status.get('coverage_gaps') or [])} coverage gaps.</p>"
+    if view.get("census_details"):
+        html += "<details><summary>Snapshot coverage</summary><ul>" + "".join(f"<li>{esc(line)}</li>" for line in view["census_details"]) + "</ul></details>"
     counted = 0
     for group in view.get("groups", []):
         rows = []
@@ -301,6 +303,12 @@ def render_capability_sections(view: dict) -> tuple[str, int]:
             f"<span class='count'>({len(rows)}, {esc(group['note'])})</span></h2>"
             + render_table(
                 ["Name", "Invoke", "Description", "Usage", "Declared in"], rows
+            )
+            + "".join(
+                f"<details><summary>{esc(entry.get('name') or '')}: evidence</summary><ul>"
+                + "".join(f"<li>{esc(line)}</li>" for line in entry.get("evidence_details") or [])
+                + "</ul></details>"
+                for entry in group["rows"] if entry.get("evidence_details")
             )
             + "</section>"
         )

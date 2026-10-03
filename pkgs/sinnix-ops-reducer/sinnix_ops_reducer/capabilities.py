@@ -11,7 +11,8 @@ import json
 import hashlib
 import time
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Callable
+import sys
 
 SCHEMA = "sinnix-capability-index-v1"
 DEFAULT_INDEX = Path("/etc/sinnix/capability-index.json")
@@ -87,30 +88,86 @@ class Census(dict):
         self.metadata = metadata or {"status": "unavailable", "coverage_gaps": [{"source": "census", "status": "unavailable"}]}
 
 
-def load_census(path: Path | None) -> Census:
-    """Read at most 16 MiB of the append-only report tail; select a whole run.
+def reverse_records(stream, progress=None, cancelled=None, chunk_size=64 * 1024):
+    """Yield records newest first, retaining only the current complete record.
 
-    A torn tail is ignored. No per-name mixing, legacy resurrection, or full
-    historical ledger read. If no complete observation fits, report the gap.
+    An unterminated tail is discarded chunk by chunk, even if it is very large.
+    None marks that discarded tail. Cancellation is checked between reads and
+    record decodes; KeyboardInterrupt also propagates normally.
+    """
+    stream.seek(0, 2)
+    size = position = stream.tell()
+    scanned = 0
+    fragments = []
+    terminated = False
+    if position:
+        stream.seek(position - 1)
+        terminated = stream.read(1) == b"\n"
+        if terminated:
+            position -= 1
+    while position:
+        if cancelled and cancelled():
+            raise InterruptedError("census read cancelled")
+        start = max(0, position - chunk_size)
+        stream.seek(start)
+        chunk = stream.read(position - start)
+        scanned += len(chunk)
+        if progress:
+            progress(scanned, size)
+        pieces = chunk.split(b"\n")
+        for suffix in reversed(pieces[1:]):
+            if cancelled and cancelled():
+                raise InterruptedError("census read cancelled")
+            if terminated:
+                fragments.append(suffix)
+                yield b"".join(reversed(fragments))
+            else:
+                yield None
+            fragments = []
+            terminated = True
+        if terminated:
+            fragments.append(pieces[0])
+        position = start
+    if terminated and fragments:
+        yield b"".join(reversed(fragments))
+    elif size and not terminated:
+        yield None
+
+
+def load_census(path: Path | None, *, progress: Callable[[int, int], None] | None = None,
+                cancelled: Callable[[], bool] | None = None) -> Census:
+    """Select a whole completed observation by actual JSONL boundaries.
+
+    Read backwards in chunks, stopping at the first supported complete run.
+    There is no byte cutoff masquerading as absence; only one candidate record
+    is assembled at a time, and torn tails do not accumulate in memory.
     """
     if path is None:
         return Census()
-    budget = 16 * 1024 * 1024
+    scanned = total = 0
+    reported = 0
+    def report(read, size):
+        nonlocal scanned, total, reported
+        scanned, total = read, size
+        if progress:
+            progress(read, size)
+        elif read - reported >= 4 * 1024 * 1024:
+            print(f"sinnix capabilities: scanned {read} of {size} census bytes", file=sys.stderr)
+            reported = read
     try:
         with path.open("rb") as stream:
-            stream.seek(0, 2)
-            size = stream.tell()
-            start = max(0, size - budget)
-            stream.seek(start)
-            data = stream.read(budget)
+            return _select_census(reverse_records(stream, report, cancelled), lambda: (scanned, total))
+    except InterruptedError:
+        return Census(metadata={"status": "cancelled", "bytes_scanned": scanned,
+                                "coverage_gaps": [{"source": "census", "status": "cancelled", "reason": "observation selection cancelled; no absence inferred"}]})
     except OSError:
         return Census()
-    lines = data.splitlines(keepends=True)
-    if start:
-        lines = lines[1:]  # may begin in the middle of a record
+
+
+def _select_census(records, scan_counts) -> Census:
     invalid = False
-    for line in reversed(lines):
-        if not line.endswith(b"\n"):
+    for line in records:
+        if line is None:
             invalid = True
             continue
         try:
@@ -142,16 +199,17 @@ def load_census(path: Path | None) -> Census:
             key = (row["class"], row["name"])
             if key in selected or row["class"] not in value["classes"]:
                 break
-            selected[key] = {**row, "ts": value["ts"], "window_days": value.get("window_days")}
+            selected[key] = {**row, "ts": value["ts"], "window_days": value.get("window_days"),
+                             "since": value.get("since"), "until": value.get("until")}
         else:
             meta = {k: value.get(k) for k in ("snapshot_id", "ts", "collected_at", "since", "until", "window_days",
                                             "declaration_revision", "declaration_sources", "index_digest", "classes", "coverage_gaps")}
             meta.update(status="selected", ignored_incomplete_tail=invalid,
-                        tail_bounded=start > 0, age_seconds=max(0, int(time.time()) - value["ts"]))
+                        bytes_scanned=scan_counts()[0], ledger_bytes=scan_counts()[1], age_seconds=max(0, int(time.time()) - value["ts"]))
             return Census(selected, meta)
         invalid = True
-    return Census(metadata={"status": "historical-or-unavailable", "tail_bounded": start > 0,
-                            "coverage_gaps": [{"source": "census", "status": "unavailable", "reason": "no complete supported snapshot in bounded tail; legacy rows are historical"}]})
+    return Census(metadata={"status": "historical-or-unavailable", "bytes_scanned": scan_counts()[0],
+                            "coverage_gaps": [{"source": "census", "status": "unavailable", "reason": "no complete supported snapshot in ledger; legacy rows are historical"}]})
 
 
 def _evidence(row: dict[str, Any]) -> dict[str, Any]:
@@ -175,8 +233,40 @@ def _evidence(row: dict[str, Any]) -> dict[str, Any]:
         "static_refs": len(row.get("static_refs") or []), "consumer_paths": row.get("static_refs") or [],
         "dependency_consumers": row.get("dependency_consumers") or [],
         "window_days": row.get("window_days"), "ts": row.get("ts"),
+        "since": row.get("since"), "until": row.get("until"),
         "coverage_gaps": row.get("coverage_gaps") or [], "caller_identity": "unknown",
     }
+
+
+def coverage_lines(value: dict[str, Any]) -> list[str]:
+    """Readable gap reasons from the same projection used by every surface."""
+    return [f"{gap.get('source') or gap.get('class') or 'coverage'}: {gap.get('status', 'unknown')} — {gap.get('reason') or 'coverage not established'}"
+            for gap in value.get("coverage_gaps") or [] if isinstance(gap, dict)]
+
+
+def evidence_lines(census: dict[str, Any] | None) -> list[str]:
+    if not census:
+        return []
+    lines = [f"Collected at {census.get('ts', 'unknown')}; window {census.get('since') or '?'} to {census.get('until') or '?'} ({census.get('window_days') or '?'} days); caller identity unknown"]
+    for name, source in (census.get("sources") or {}).items():
+        if not source:
+            continue
+        fields = [f"{key}={source[key]}" for key in ("status", "type", "n", "time_basis", "since_ns", "until_ns", "earliest_retained", "latest_retained", "retention", "count_basis", "last", "action") if source.get(key) is not None]
+        lines.append(f"{name}: " + "; ".join(fields))
+        outcomes = source.get("outcomes") or {}
+        if outcomes:
+            lines.append(f"{name} outcomes: " + ", ".join(f"{key}={count}" for key, count in sorted(outcomes.items())))
+        for key in ("limitation", "scope"):
+            if source.get(key):
+                lines.append(f"{name}: {source[key]}")
+    lines.extend(coverage_lines(census))
+    lines.extend(f"Reference: {path}" for path in census.get("consumer_paths") or [])
+    lines.extend(f"Declared dependency consumer: {name}" for name in census.get("dependency_consumers") or [])
+    if census.get("static_ref_scope"):
+        lines.append(f"Reference scope: {census['static_ref_scope']}")
+    if census.get("never_prune"):
+        lines.append("Secret inventory: never prune")
+    return lines
 
 
 def census_for(
@@ -227,6 +317,7 @@ def merge(
             continue
         merged = dict(row)
         merged["census"] = census_for(row, census)
+        merged["evidence_details"] = evidence_lines(merged["census"])
         rows.append(merged)
     rows.sort(
         key=lambda item: (
@@ -262,6 +353,7 @@ def merge(
         "groups": groups,
         "counts": {group["kind"]: len(group["rows"]) for group in groups},
         "census_status": meta,
+        "census_details": coverage_lines(meta),
         "censused": sum(1 for row in rows if row.get("census")),
     }
 

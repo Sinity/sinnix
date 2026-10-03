@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..capabilities import VERDICT_TONES
+from ..capabilities import VERDICT_TONES, evidence_lines, coverage_lines
 from .probes import unit_states
 from .services import unit_status
 from .shell import badge, card, esc, page, row, tile
@@ -59,6 +59,9 @@ def capability_row(entry: dict[str, Any], states: dict[str, dict[str, str]]) -> 
         meta.append(status)
     meta.append(enabled_badge(entry.get("enabled")))
     meta.append(verdict_badge(entry.get("census")))
+    details = evidence_lines(entry.get("census"))
+    if details:
+        meta.append('<details><summary>Evidence</summary><ul>' + "".join(f"<li>{esc(line)}</li>" for line in details) + "</ul></details>")
     invoke = entry.get("invoke")
     if invoke:
         meta.append(f"<code>{esc(invoke)}</code>")
@@ -138,6 +141,9 @@ def render_capabilities(
 
     status = view.get("census_status") or {}
     missing += f'<p class="sub">Census: {esc(status.get("status", "unavailable"))}; collected at {esc(status.get("ts", "unknown"))}; {len(status.get("coverage_gaps") or [])} inventory/observation gaps.</p>'
+    gaps = coverage_lines(status)
+    if gaps:
+        missing += '<details><summary>Snapshot coverage</summary><ul>' + "".join(f"<li>{esc(line)}</li>" for line in gaps) + "</ul></details>"
     body = missing + (
         '<div class="tiles">'
         + tile(str(len(rows)), "capabilities")

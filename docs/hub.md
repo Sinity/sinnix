@@ -146,7 +146,11 @@ The reducer adds the two things Nix cannot know:
   services, by every runtime surface the module declared, since the census
   enumerates services from the runtime inventory where `polylogue` the service
   is `polylogued` the surface. The reader selects one complete snapshot tied to the current declaration
-  digest and revision. Legacy rows, torn writes, mismatched declarations and
+  digest and revision. It reads backward by record boundaries with progress
+  and cancellation, including large observations and interrupted tails.
+  Expand a capability’s evidence to see source limits, typed outcomes,
+  reference paths and named coverage gaps; CLI and cheatsheet share that
+  projection. Legacy rows, torn writes, mismatched declarations and
   observations older than two weekly periods remain historical. Shell history
   matches, service activation and path freshness are separate observations;
   absent typed route coverage means usage is unknown, never permission to remove.

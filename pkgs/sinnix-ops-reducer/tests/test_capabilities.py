@@ -463,3 +463,83 @@ def test_malformed_declaration_fingerprint_degrades_without_crashing(tmp_path):
     view = capabilities.build(write_index(tmp_path), report)
     assert view['censused'] == 0
     assert view['census_status']['status'] == 'historical-or-unavailable'
+
+
+def test_record_larger_than_old_tail_limit_is_selected_without_scanning_history(tmp_path):
+    path = write_census(tmp_path)
+    snapshot = json.loads(path.read_text())
+    snapshot['padding'] = 'x' * (17 * 1024 * 1024)
+    encoded = (json.dumps(snapshot) + '\n').encode()
+    history = b'{"legacy":true}\n' * 150_000
+    path.write_bytes(history + encoded)
+    progress = []
+    census = capabilities.load_census(path, progress=lambda read, total: progress.append((read, total)))
+    assert census.metadata['snapshot_id'] == 'fixture'
+    assert len(census) == 2
+    assert progress[-1][0] <= len(encoded) + 64 * 1024
+    assert progress[-1][0] < progress[-1][1]
+    assert all(0 < after[0] - before[0] <= 64 * 1024 for before, after in zip(progress, progress[1:]))
+
+
+def test_long_interrupted_tail_is_discarded_in_chunks_and_previous_snapshot_survives(tmp_path):
+    import tracemalloc
+    path = write_census(tmp_path)
+    snapshot = path.read_bytes()
+    history = b'{"legacy":true}\n' * 150_000
+    tail = b'{"torn": "' + b'x' * (18 * 1024 * 1024)
+    path.write_bytes(history + snapshot + tail)
+    progress = []
+    tracemalloc.start()
+    try:
+        census = capabilities.load_census(path, progress=lambda read, total: progress.append((read, total)))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert census.metadata['snapshot_id'] == 'fixture'
+    assert census.metadata['ignored_incomplete_tail']
+    assert progress[-1][0] < progress[-1][1]
+    assert peak < 2 * 1024 * 1024  # the torn tail must never accumulate as a record
+    cancelled = capabilities.load_census(path, cancelled=lambda: True)
+    assert cancelled.metadata['status'] == 'cancelled'
+    assert not cancelled
+    assert 'no absence inferred' in cancelled.metadata['coverage_gaps'][0]['reason']
+
+
+def test_evidence_reasons_outcomes_and_paths_are_visible_in_all_human_consumers(tmp_path, capsys):
+    import importlib.util
+    from importlib.machinery import SourceFileLoader
+    from pathlib import Path
+    from sinnix_ops_reducer.cli import capabilities_command
+    report = write_census(tmp_path)
+    snapshot = json.loads(report.read_text())
+    snapshot.update(since=100, until=200)
+    snapshot['coverage_gaps'] = [{'source': 'models', 'status': 'unavailable', 'reason': 'model owner unreachable'}]
+    target = next(row for row in snapshot['rows'] if row['class'] == 'scripts')
+    target['coverage_gaps'] = [{'source': 'agentctl', 'status': 'unavailable', 'reason': 'no indexed exact capability mapping'}]
+    target['static_refs'] = ['scripts/real-consumer']
+    target['evidence']['gateway'] = {'n': 2, 'status': 'partial', 'count_basis': 'lower-bound',
+                                     'action': 'files.read', 'outcomes': {'ok': 1, 'error': 1}}
+    target['evidence']['atuin'].update(status='partial', retention='unknown', since_ns=100, until_ns=200,
+                                     limitation='literal history matches are not invocations')
+    report.write_text(json.dumps(snapshot) + '\n')
+    index = write_index(tmp_path)
+    view = capabilities.build(index, report)
+    page = render_capabilities({'host': 'fixture'}, view, 'now')
+    assert capabilities_command(['--index', str(index), '--census', str(report)]) == 0
+    cli = capsys.readouterr().out
+    root = Path(__file__).resolve().parents[3]
+    loader = SourceFileLoader('evidence_cheatsheet', str(root / 'scripts/sinnix-cheatsheet'))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    cheatsheet, _ = module.render_capability_sections(view)
+    for rendered in (page, cli, cheatsheet):
+        for evidence in ('agentctl: unavailable', 'no indexed exact capability mapping',
+                         'models: unavailable', 'model owner unreachable',
+                         'gateway outcomes: error=1, ok=1', 'lower-bound',
+                         'Reference: scripts/real-consumer', 'window 100 to 200',
+                         'since_ns=100', 'retention=unknown', 'not invocations'):
+            assert evidence in rendered, evidence
+    for html in (page, cheatsheet):
+        assert '<details>' in html and '<summary>' in html
+        assert '<details open' not in html  # concise until the reader expands evidence
