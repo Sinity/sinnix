@@ -584,7 +584,7 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
         timeout_seconds = definition["timeout_seconds"]
         if not valid_timeout_seconds(timeout_seconds, kind="declared-operation"):
             raise ProjectConfigError(
-                f"operations.{name}.timeout_seconds must be between 1 and "
+                f"operations.{name}.timeout_seconds must be 0 (no runtime deadline) or between 1 and "
                 f"{MAX_DECLARED_OPERATION_TIMEOUT_SECONDS}"
             )
         fields["timeout_seconds"] = timeout_seconds

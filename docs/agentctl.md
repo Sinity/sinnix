@@ -639,7 +639,7 @@ outcome. The codes:
 | `project`                      | the run belongs to another project                                                  |
 | `publish_rejected`             | the push was rejected for a reason a refresh cannot fix                             |
 | `result_evidence_binding`      | a v2 worker result differs from its dispatch-time stable acceptance binding         |
-| `result_self_review`           | the dispatch requires `self_review` and the result has none                       |
+| `result_self_review`           | the dispatch requires `self_review` and the result has none                         |
 | `result_attempt`               | the result does not belong to the worker's current dispatch attempt                 |
 | `result_already_filed`         | the worker already has an accepted result for this attempt                          |
 | `review_failed`                | the review task did not succeed                                                     |
@@ -764,7 +764,7 @@ schedule = "*-*-* 03:17:00"
 
 An operation declares `description`, `exec` (argv, no shell), `pool` (a
 pueue group), `result` (`exit`, `json`, `pytest`), `timeout_seconds` (1 to
-28,800; default 3,600), `checkout` (see below), `arguments` (`none`, or
+28,800, or 0 for execution until completion or explicit cancellation; default 3,600), `checkout` (see below), `arguments` (`none`, or
 `required` when the operation cannot execute without a caller-supplied
 selector; a focused profile may name a `required` operation, whose worker
 command must include a selector after `--`), `schedule`

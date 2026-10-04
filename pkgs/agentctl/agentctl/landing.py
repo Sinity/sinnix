@@ -945,10 +945,12 @@ def _await_verification(
     it from the job's start. A job still not terminal once it has run for its
     timeout plus the wrapper's grace is `verify_running`, a retryable refusal:
     landing again reuses the same task rather than submitting another check.
+    A zero runtime deadline keeps observing that same job until it settles;
+    an observation interval never becomes an execution budget.
     """
-    limit = timeout_seconds + VERIFY_EXIT_GRACE_SECONDS
+    limit = timeout_seconds + VERIFY_EXIT_GRACE_SECONDS if timeout_seconds else None
     first_seen: float | None = None
-    wait_for = limit
+    wait_for = limit if limit is not None else VERIFY_EXIT_GRACE_SECONDS
     while True:
         waited = launch.wait(job_id, timeout_seconds=wait_for, reference=reference)
         # `launch.wait` can return the last non-terminal view at the instant
@@ -972,19 +974,19 @@ def _await_verification(
             )
         if not waited.get("started_at"):
             first_seen = None
-            wait_for = limit
+            wait_for = limit if limit is not None else VERIFY_EXIT_GRACE_SECONDS
             continue
         if first_seen is None:
             first_seen = time.monotonic()
         ran = _run_seconds(waited, first_seen)
-        if ran >= limit:
+        if limit is not None and ran >= limit:
             raise BatchRefusal(
                 "verify_running",
                 f"{profile} task {job_id} is still {waited.get('phase')} after "
                 f"{int(ran)}s of its {timeout_seconds:g}s budget; "
                 "landing again waits for the same task",
             )
-        wait_for = limit - ran
+        wait_for = limit - ran if limit is not None else VERIFY_EXIT_GRACE_SECONDS
 
 
 def _worktree_attestation(path: Path) -> dict[str, Any]:

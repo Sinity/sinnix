@@ -1038,7 +1038,9 @@ def _project(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                     row["name"],
                     row["pool"],
                     row["result"],
-                    f"{row['timeout_seconds']}s",
+                    f"{row['timeout_seconds']}s"
+                    if row["timeout_seconds"]
+                    else "until cancelled",
                     row["schedule"] or "-",
                     row["description"],
                 )

@@ -431,11 +431,17 @@ def _wait_for_unit(unit: str, timeout_seconds: int) -> dict[str, str] | None:
 
     Failed property queries are not evidence that the service completed. Bound
     the wait by the declared service runtime plus a short reporting grace so a
-    broken systemd connection cannot strand the pueue wrapper indefinitely.
+    broken systemd connection cannot strand a bounded operation indefinitely.
+    Explicit no-deadline operations retain unresolved ownership until an actual
+    terminal unit observation, including after transient property-query failures.
     """
-    deadline = time.monotonic() + timeout_seconds + UNIT_OBSERVATION_GRACE_SECONDS
+    deadline = (
+        time.monotonic() + timeout_seconds + UNIT_OBSERVATION_GRACE_SECONDS
+        if timeout_seconds
+        else None
+    )
     delay = UNIT_POLL_INITIAL_SECONDS
-    while time.monotonic() < deadline:
+    while deadline is None or time.monotonic() < deadline:
         properties = _unit_snapshot(unit)
         if properties is not None:
             load_state = properties.get("LoadState")
@@ -526,7 +532,7 @@ def _service_command(
     log_path: Path,
 ) -> list[str]:
     properties = [
-        f"RuntimeMaxSec={launch['timeout_seconds']}",
+        f"RuntimeMaxSec={launch['timeout_seconds'] or 'infinity'}",
         "Type=exec",
         "ExitType=cgroup",
         "KillMode=control-group",
@@ -598,11 +604,21 @@ def _run_bare(
         start_new_session=True,
     )
     try:
-        status = process.wait(timeout=launch["timeout_seconds"])
+        status = process.wait(timeout=launch["timeout_seconds"] or None)
     except subprocess.TimeoutExpired:
         os.killpg(process.pid, signal.SIGKILL)
         process.wait()
         return Outcome.TIMEOUT, TIMEOUT_EXIT_CODE
+    except BaseException:
+        # The foreground caller also owns an operation without a deadline.
+        # Settle its original process group before propagating cancellation.
+        if process.poll() is None:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass  # The original group exited between observation and kill.
+        process.wait()
+        raise
     return (Outcome.SUCCESS, 0) if status == 0 else (Outcome.FAILED, status)
 
 

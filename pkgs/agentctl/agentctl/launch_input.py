@@ -244,8 +244,15 @@ def read_input(path: Path) -> dict[str, Any]:
     if value["result_kind"] not in RESULT_KINDS:
         raise QueueInputError(f"unknown result kind: {value['result_kind']!r}")
     timeout = value["timeout_seconds"]
-    if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
-        raise QueueInputError("launch input timeout_seconds must be a positive integer")
+    if (
+        not isinstance(timeout, int)
+        or isinstance(timeout, bool)
+        or timeout < 0
+        or (timeout == 0 and value.get("kind") != "declared-operation")
+    ):
+        raise QueueInputError(
+            "launch input timeout_seconds must be positive, or zero for a declared operation"
+        )
     pool = value.get("pool")
     if pool is not None and (
         not isinstance(pool, str) or POOL_NAME.fullmatch(pool) is None

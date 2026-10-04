@@ -33,5 +33,7 @@ def valid_timeout_seconds(value: object, *, kind: str) -> bool:
     return (
         isinstance(value, int)
         and not isinstance(value, bool)
-        and 1 <= value <= maximum_timeout_seconds(kind)
+        and (0 if kind == "declared-operation" else 1)
+        <= value
+        <= maximum_timeout_seconds(kind)
     )
