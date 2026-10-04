@@ -811,6 +811,31 @@ assert lib.assertMsg (
             assert "nested/event" not in manifest
             os.utime(source / "held-directory", ns=(1, 2))
             assert sealer._manifest(source) == sealer._manifest(source)
+
+            retry_source = root / "retry-source"
+            retry_source.mkdir()
+            (retry_source / "a-stable").write_text("stable")
+            (retry_source / "z-changing").write_text("first")
+            retry_destination = root / "retry-sealed"
+            real_clone = sealer._clone_file
+            calls = []
+
+            def clone_then_change(source, relative, destination, expected):
+                calls.append(relative)
+                real_clone(source, relative, destination, expected)
+                if calls == ["a-stable"]:
+                    (source / "z-changing").write_text("second")
+
+            sealer._clone_file = clone_then_change
+            sys.argv = ["seal", str(retry_source), str(retry_destination)]
+            assert sealer.main() == 0
+            assert calls.count("a-stable") == 1
+            assert calls.count("z-changing") == 2
+            assert (retry_destination / "a-stable").read_text() == "stable"
+            assert (retry_destination / "z-changing").read_text() == "second"
+            saved_manifest = retry_destination.with_name(retry_destination.name + ".manifest.json")
+            import json
+            assert json.loads(saved_manifest.read_text()) == sealer._manifest(retry_source)
             PY
             cmp "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4242.ndjson" \
               <(printf '%s\n' '{"event":"captured"}' '{"event":"appended-after-seal"}')
@@ -830,6 +855,7 @@ assert lib.assertMsg (
           && unit.serviceConfig.MemoryHigh == "3G"
           && unit.serviceConfig.MemoryMax == "5G"
           && unit.serviceConfig.MemorySwapMax == 0
+          && unit.serviceConfig.Slice == "borgdrain.slice"
           && lib.hasInfix "deadline=$(( $(date +%s) + 40 * 60 ))" script
           && lib.hasInfix "timeout --signal=TERM --kill-after=15s" script
         ) "Metadata image capture must bound each label and memory pressure";

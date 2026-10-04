@@ -207,8 +207,10 @@
       stage_relative_root=${lib.escapeShellArg (lib.removePrefix "/" polylogueStateRoot)}
       stage_hooks="$stage_root/$stage_relative_root/hooks"
       staged_hook_source="$stage_root/./$stage_relative_root/hooks"
+      echo "polylogue state backup phase: sealing hooks"
       ${pkgs.python3}/bin/python3 ${./seal-polylogue-hooks.py} \
         ${lib.escapeShellArg "${polylogueStateRoot}/hooks"} "$stage_hooks"
+      echo "polylogue state backup phase: creating archive"
       with_borg_lock borg create \
         --compression auto,zstd,1 \
         --lock-wait ${toString borgLockWaitSec} \

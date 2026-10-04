@@ -218,6 +218,9 @@
     serviceConfig = {
       TimeoutStartSec = "85min";
       TimeoutStopSec = "15s";
+      # Its working set exceeds background.slice's 2G soft limit. Reuse the
+      # bounded backup slice instead of raising every maintenance job's budget.
+      Slice = "borgdrain.slice";
       MemoryHigh = "3G";
       MemoryMax = "5G";
       MemorySwapMax = 0;

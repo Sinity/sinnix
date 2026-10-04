@@ -210,6 +210,9 @@ def _sync_once(
                 if dst.exists() and dst.is_dir() and not dst.is_symlink():
                     _remove_node(dst)
                 _clone_file(source, relative, dst, record)
+                # Reuse verified clones if another file changes during this pass.
+                # The durable manifest is still published only after a stable pass.
+                old_manifest[relative] = record
         else:
             unchanged = (
                 old_manifest.get(relative) == record
