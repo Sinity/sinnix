@@ -943,6 +943,8 @@ Section 4):
                         whatever the answer turned out to be.
 """
 
+LEDGER_MEMORY_LIMIT = "768MiB"
+
 LEDGER_SQL = r"""
 -- JSON readers are supplied by the declared DuckDB runtime. No extension
 -- installation or home-directory cache is part of ledger materialization.
@@ -1104,6 +1106,11 @@ def ledger_run(index_dir: Path) -> int:
     # content.duckdb needs ATTACHing, as a view rather than a copy, so a
     # re-run of either scanner remains the only place that table is written.
     full_sql = f"""
+-- Keep buffer memory below the service's 1G soft limit and allow the
+-- prefix/window join to spill beside the database on /realm.
+SET memory_limit = '{LEDGER_MEMORY_LIMIT}';
+SET threads = 2;
+SET preserve_insertion_order = false;
 {precise_drops}
 ATTACH '{content_db}' AS ctn (READ_ONLY);
 CREATE OR REPLACE VIEW files AS

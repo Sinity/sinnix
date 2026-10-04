@@ -288,6 +288,47 @@ def test_component_prefix_and_legacy_sha_judgments_are_not_overextended(
     ]
 
 
+def test_nested_prefix_ledger_completes_with_a_bounded_buffer(tmp_path, monkeypatch):
+    fs = load()
+    db = tmp_path / "inventory.duckdb"
+    ctn = tmp_path / "content.duckdb"
+    sql(db, "CREATE TABLE nodes AS SELECT '/scope/' || repeat('branch/', 8) "
+        "|| 'dir-' || i::VARCHAR AS path FROM range(30000) r(i)")
+    sql(ctn, "CREATE TABLE files AS SELECT 'sinnix-fs-content-v2' AS schema, "
+        "'/scope/' || repeat('branch/', 8) || 'file-' || i::VARCHAR AS path, "
+        "4 AS bytes, repeat('a', 64) AS sha256, 'sha256-full' AS fingerprint_kind, "
+        "NULL::VARCHAR AS error FROM range(30000) r(i)")
+    judgments = [
+        {"target": "prefix:/scope/" + "branch/" * depth,
+         "field": field, "value": f"depth-{depth}", "confidence": 1.0,
+         "observation": "known", "method": "operator",
+         "evidence": "bounded memory fixture", "ts": "2026-01-01T00:00:00Z"}
+        for depth in range(9)
+        for field in ["subject", "owner", "lifecycle", "role", "topic", "preservation"]
+    ]
+    (tmp_path / "judgments.jsonl").write_text(
+        "".join(json.dumps(j) + "\n" for j in judgments)
+    )
+    monkeypatch.setattr(fs, "LEDGER_MEMORY_LIMIT", "256MiB", raising=False)
+    original_runner = fs.run_duckdb_file
+
+    def many_core_defaults(db, statement, name):
+        return original_runner(
+            db, "SET memory_limit='256MiB'; SET threads=24; "
+            "SET preserve_insertion_order=true;\n" + statement, name
+        )
+
+    monkeypatch.setattr(fs, "run_duckdb_file", many_core_defaults)
+    assert fs.ledger_run(tmp_path) == 0
+    assert sql(db, "SELECT count(*) AS n FROM inherited_judgments") == [{"n": 360000}]
+    assert sql(db, "SELECT DISTINCT value FROM inherited_judgments") == [
+        {"value": "depth-8"}
+    ]
+    assert sql(db, "SELECT state,paths FROM coverage") == [
+        {"state": "classified", "paths": 60000}
+    ]
+
+
 def test_missing_content_root_is_an_unavailable_row_not_an_empty_result(tmp_path):
     fs = load()
     out = tmp_path / "files.jsonl"
