@@ -836,6 +836,97 @@ assert lib.assertMsg (
             saved_manifest = retry_destination.with_name(retry_destination.name + ".manifest.json")
             import json
             assert json.loads(saved_manifest.read_text()) == sealer._manifest(retry_source)
+
+            resume_source = root / "resume-source"
+            resume_source.mkdir()
+            (resume_source / "a-stable").write_text("stable across interruption")
+            (resume_source / "z-blocked").write_text("finish later")
+            resume_destination = root / "resume-sealed"
+            calls = []
+
+            def interrupt_after_stable(source, relative, destination, expected):
+                calls.append(relative)
+                if relative == "z-blocked":
+                    raise OSError("synthetic interruption")
+                real_clone(source, relative, destination, expected)
+
+            sealer._clone_file = interrupt_after_stable
+            sys.argv = ["seal", str(resume_source), str(resume_destination)]
+            assert sealer.main() == 1
+            resume_manifest = resume_destination.with_name(
+                resume_destination.name + ".manifest.json"
+            )
+            assert not resume_manifest.exists()
+            assert calls.count("a-stable") == 1
+            try:
+                os.getxattr(resume_destination / "a-stable", sealer.SOURCE_RECORD_XATTR)
+                checkpoint_supported = True
+            except OSError as error:
+                assert error.errno == sealer.errno.EOPNOTSUPP
+                checkpoint_supported = False
+            calls.clear()
+
+            def trace_clone(source, relative, destination, expected):
+                calls.append(relative)
+                real_clone(source, relative, destination, expected)
+
+            sealer._clone_file = trace_clone
+            assert sealer.main() == 0
+            assert calls == (["z-blocked"] if checkpoint_supported else ["a-stable", "z-blocked"])
+            assert json.loads(resume_manifest.read_text()) == sealer._manifest(resume_source)
+            for item in resume_source.iterdir():
+                assert (resume_destination / item.name).read_bytes() == item.read_bytes()
+
+            # Invalid checkpoints and changed sources must be recloned.
+            if checkpoint_supported:
+                os.setxattr(resume_destination / "a-stable", sealer.SOURCE_RECORD_XATTR, b"invalid")
+            (resume_source / "z-blocked").write_text("source changed")
+            resume_manifest.unlink()
+            calls.clear()
+            assert sealer.main() == 0
+            assert calls == ["a-stable", "z-blocked"]
+            for item in resume_source.iterdir():
+                assert (resume_destination / item.name).read_bytes() == item.read_bytes()
+
+            # A failed file barrier must not publish a reusable clone or manifest.
+            barrier_source = root / "barrier-source"
+            barrier_source.mkdir()
+            (barrier_source / "event").write_text("durable event")
+            barrier_destination = root / "barrier-sealed"
+            real_fsync = os.fsync
+            import stat
+
+            def reject_file_barrier(fd):
+                if stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise OSError(sealer.errno.EIO, "synthetic durability failure")
+                real_fsync(fd)
+
+            sealer._clone_file = real_clone
+            os.fsync = reject_file_barrier
+            sys.argv = ["seal", str(barrier_source), str(barrier_destination)]
+            assert sealer.main() == 1
+            assert not (barrier_destination / "event").exists()
+            assert not barrier_destination.with_name(barrier_destination.name + ".manifest.json").exists()
+            os.fsync = real_fsync
+            assert sealer.main() == 0
+            assert (barrier_destination / "event").read_bytes() == (barrier_source / "event").read_bytes()
+
+            manifest_probe = root / "manifest-probe.json"
+            barriers = []
+
+            def record_manifest_barriers(fd):
+                if stat.S_ISDIR(os.fstat(fd).st_mode):
+                    assert manifest_probe.exists()
+                    barriers.append("directory")
+                else:
+                    assert stat.S_IMODE(os.fstat(fd).st_mode) == 0o600
+                    barriers.append("file")
+                real_fsync(fd)
+
+            os.fsync = record_manifest_barriers
+            sealer._write_manifest(manifest_probe, {"verified": {"kind": "file"}})
+            os.fsync = real_fsync
+            assert barriers == ["file", "directory"]
             PY
             cmp "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4242.ndjson" \
               <(printf '%s\n' '{"event":"captured"}' '{"event":"appended-after-seal"}')

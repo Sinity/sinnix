@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import json
 import os
@@ -13,6 +14,7 @@ import tempfile
 from pathlib import Path
 
 FICLONE = 0x40049409
+SOURCE_RECORD_XATTR = "user.sinnix-hook-source-v1"
 MAX_SEAL_ATTEMPTS = 5
 
 
@@ -132,6 +134,38 @@ def _open_source_file(root: Path, relative: str) -> int:
         os.close(directory_fd)
 
 
+def _fsync_directory(path: Path) -> None:
+    fd = _open_directory_path(path)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _cached_file_matches(
+    path: Path, expected: dict[str, object], completed_record: bool
+) -> bool:
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            info = os.fstat(fd)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_size != expected["size"]
+                or info.st_mtime_ns != expected["mtime_ns"]
+                or stat.S_IMODE(info.st_mode) != expected["mode"]
+            ):
+                return False
+            # A completed manifest remains valid for pre-checkpoint cache files.
+            return completed_record or json.loads(
+                os.getxattr(fd, SOURCE_RECORD_XATTR)
+            ) == expected
+        finally:
+            os.close(fd)
+    except (OSError, ValueError):
+        return False
+
+
 def _clone_file(
     source: Path,
     relative: str,
@@ -166,6 +200,19 @@ def _clone_file(
             os.fchown(output_fd, before.st_uid, before.st_gid)
             os.fchmod(output_fd, int(expected["mode"]))
             os.utime(output_fd, ns=(before.st_atime_ns, before.st_mtime_ns))
+            # Persist origin metadata with the clone, before its existing
+            # durability barrier. A later invocation can reuse this verified
+            # inode even if the whole-tree pass was interrupted.
+            try:
+                os.setxattr(
+                    output_fd, SOURCE_RECORD_XATTR,
+                    json.dumps(expected, sort_keys=True, separators=(",", ":")).encode(),
+                )
+            except OSError as error:
+                # Without xattrs, retain the original whole-manifest reuse
+                # rule. Never treat an untagged partial clone as verified.
+                if error.errno != errno.EOPNOTSUPP:
+                    raise
             os.fsync(output_fd)
         finally:
             os.close(output_fd)
@@ -182,6 +229,7 @@ def _clone_file(
         if temporary.stat().st_size != before.st_size:
             raise OSError(f"reflink size mismatch: {relative}")
         os.replace(temporary, destination)
+        _fsync_directory(destination.parent)
     finally:
         os.close(source_fd)
         temporary.unlink(missing_ok=True)
@@ -199,12 +247,8 @@ def _sync_once(
                 _remove_node(dst)
             dst.mkdir(parents=True, exist_ok=True)
         elif record["kind"] == "file":
-            unchanged = (
-                old_manifest.get(relative) == record
-                and dst.is_file()
-                and not dst.is_symlink()
-                and dst.stat().st_size == record["size"]
-                and dst.stat().st_mtime_ns == record["mtime_ns"]
+            unchanged = _cached_file_matches(
+                dst, record, old_manifest.get(relative) == record
             )
             if not unchanged:
                 if dst.exists() and dst.is_dir() and not dst.is_symlink():
@@ -261,6 +305,7 @@ def _sync_once(
             )
             os.chmod(directory, int(record["mode"]))
             os.utime(directory, ns=(int(record["mtime_ns"]), int(record["mtime_ns"])))
+            _fsync_directory(directory)
     return source_manifest
 
 
@@ -269,12 +314,13 @@ def _write_manifest(path: Path, manifest: dict[str, dict[str, object]]) -> None:
     temporary = Path(temporary_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            os.fchmod(stream.fileno(), 0o600)
             json.dump(manifest, stream, sort_keys=True, separators=(",", ":"))
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
-        os.chmod(temporary, 0o600)
         os.replace(temporary, path)
+        _fsync_directory(path.parent)
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -341,6 +387,7 @@ def main() -> int:
                     else:
                         current = _manifest(source)
                     if current == manifest:
+                        _fsync_directory(destination)
                         _write_manifest(manifest_path, manifest)
                         print(
                             f"sealed Polylogue hook tree on attempt {attempt + 1}: {source} -> {destination}"
