@@ -8,14 +8,92 @@ import fcntl
 import json
 import os
 import shutil
+import signal
 import stat
 import sys
 import tempfile
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 FICLONE = 0x40049409
 SOURCE_RECORD_XATTR = "user.sinnix-hook-source-v1"
 MAX_SEAL_ATTEMPTS = 5
+
+
+# Diagnostics stay aggregate and path-free; counters are logical bytes, not
+# device I/O. The existing durability operations and their ordering are unchanged.
+_metrics: dict[str, Any] | None = None
+
+
+def _count(name: str, value: int = 1) -> None:
+    if _metrics is not None:
+        counters = _metrics["counters"]
+        counters[name] = counters.get(name, 0) + value
+
+
+def _report(event: str, *, force: bool = False) -> None:
+    if _metrics is None:
+        return
+    now = time.monotonic()
+    if not force and now - _metrics["reported_at"] < 60:
+        return
+    active = _metrics["active"]
+    record = {
+        "event": event,
+        "wall_seconds": round(now - _metrics["started_at"], 6),
+        "counters": _metrics["counters"],
+        "phase_seconds": _metrics["phase_seconds"],
+        "phase_calls": _metrics["phase_calls"],
+        "active_phase": active[0] if active else None,
+        "active_seconds": round(now - active[1], 6) if active else 0,
+    }
+    try:
+        print(
+            "polylogue hook seal metrics: " + json.dumps(record, sort_keys=True),
+            flush=True,
+        )
+    except OSError:
+        # A logging sink failure must not change sealing or cleanup semantics.
+        pass
+    _metrics["reported_at"] = now
+
+
+@contextmanager
+def _phase(name: str) -> Iterator[None]:
+    if _metrics is None:
+        yield
+        return
+    started = time.monotonic()
+    previous = _metrics["active"]
+    _metrics["active"] = (name, started)
+    _report("progress")
+    try:
+        yield
+    finally:
+        seconds = _metrics["phase_seconds"]
+        calls = _metrics["phase_calls"]
+        seconds[name] = round(seconds.get(name, 0) + time.monotonic() - started, 6)
+        calls[name] = calls.get(name, 0) + 1
+        _metrics["active"] = previous
+        _report("progress")
+
+
+def _termination_report(signum: int, _frame: object) -> None:
+    # Preserve default SIGTERM termination (including retained interrupted
+    # clones), rather than raising an exception or running a new cleanup path.
+    try:
+        _report("terminated", force=True)
+    finally:
+        signal.signal(signum, signal.SIG_DFL)
+        signal.raise_signal(signum)
+
+
+def _fsync_file(fd: int) -> None:
+    with _phase("file_fsync"):
+        os.fsync(fd)
 
 
 def _directory_flags() -> int:
@@ -48,6 +126,13 @@ def _file_record(info: os.stat_result) -> dict[str, object]:
 
 
 def _manifest(root: Path) -> dict[str, dict[str, object]]:
+    with _phase("scan"):
+        result = _collect_manifest(root)
+    _count("scanned_entries", len(result))
+    return result
+
+
+def _collect_manifest(root: Path) -> dict[str, dict[str, object]]:
     result: dict[str, dict[str, object]] = {}
     root_fd = _open_directory_path(root)
 
@@ -137,7 +222,8 @@ def _open_source_file(root: Path, relative: str) -> int:
 def _fsync_directory(path: Path) -> None:
     fd = _open_directory_path(path)
     try:
-        os.fsync(fd)
+        with _phase("directory_fsync"):
+            os.fsync(fd)
     finally:
         os.close(fd)
 
@@ -196,24 +282,32 @@ def _clone_file(
             int(expected["mode"]),
         )
         try:
-            fcntl.ioctl(output_fd, FICLONE, source_fd)
-            os.fchown(output_fd, before.st_uid, before.st_gid)
-            os.fchmod(output_fd, int(expected["mode"]))
-            os.utime(output_fd, ns=(before.st_atime_ns, before.st_mtime_ns))
-            # Persist origin metadata with the clone, before its existing
-            # durability barrier. A later invocation can reuse this verified
-            # inode even if the whole-tree pass was interrupted.
-            try:
-                os.setxattr(
-                    output_fd, SOURCE_RECORD_XATTR,
-                    json.dumps(expected, sort_keys=True, separators=(",", ":")).encode(),
-                )
-            except OSError as error:
-                # Without xattrs, retain the original whole-manifest reuse
-                # rule. Never treat an untagged partial clone as verified.
-                if error.errno != errno.EOPNOTSUPP:
-                    raise
-            os.fsync(output_fd)
+            _count("clone_attempts")
+            with _phase("reflink"):
+                fcntl.ioctl(output_fd, FICLONE, source_fd)
+            _count("cloned_files")
+            _count("cloned_logical_bytes", before.st_size)
+            with _phase("metadata_checkpoint"):
+                os.fchown(output_fd, before.st_uid, before.st_gid)
+                os.fchmod(output_fd, int(expected["mode"]))
+                os.utime(output_fd, ns=(before.st_atime_ns, before.st_mtime_ns))
+                # Persist origin metadata with the clone, before its existing
+                # durability barrier. A later invocation can reuse this verified
+                # inode even if the whole-tree pass was interrupted.
+                try:
+                    os.setxattr(
+                        output_fd,
+                        SOURCE_RECORD_XATTR,
+                        json.dumps(
+                            expected, sort_keys=True, separators=(",", ":")
+                        ).encode(),
+                    )
+                except OSError as error:
+                    # Without xattrs, retain the original whole-manifest reuse
+                    # rule. Never treat an untagged partial clone as verified.
+                    if error.errno != errno.EOPNOTSUPP:
+                        raise
+            _fsync_file(output_fd)
         finally:
             os.close(output_fd)
         after = os.fstat(source_fd)
@@ -230,6 +324,7 @@ def _clone_file(
             raise OSError(f"reflink size mismatch: {relative}")
         os.replace(temporary, destination)
         _fsync_directory(destination.parent)
+        _count("durable_clones")
     finally:
         os.close(source_fd)
         temporary.unlink(missing_ok=True)
@@ -247,9 +342,13 @@ def _sync_once(
                 _remove_node(dst)
             dst.mkdir(parents=True, exist_ok=True)
         elif record["kind"] == "file":
-            unchanged = _cached_file_matches(
-                dst, record, old_manifest.get(relative) == record
-            )
+            with _phase("cache_validation"):
+                unchanged = _cached_file_matches(
+                    dst, record, old_manifest.get(relative) == record
+                )
+            if unchanged:
+                _count("reused_files")
+                _count("reused_logical_bytes", int(record["size"]))
             if not unchanged:
                 if dst.exists() and dst.is_dir() and not dst.is_symlink():
                     _remove_node(dst)
@@ -318,14 +417,14 @@ def _write_manifest(path: Path, manifest: dict[str, dict[str, object]]) -> None:
             json.dump(manifest, stream, sort_keys=True, separators=(",", ":"))
             stream.write("\n")
             stream.flush()
-            os.fsync(stream.fileno())
+            _fsync_file(stream.fileno())
         os.replace(temporary, path)
         _fsync_directory(path.parent)
     finally:
         temporary.unlink(missing_ok=True)
 
 
-def main() -> int:
+def _seal() -> int:
     if len(sys.argv) != 3:
         print(f"usage: {sys.argv[0]} SOURCE_HOOKS DESTINATION_HOOKS", file=sys.stderr)
         return 64
@@ -337,7 +436,8 @@ def main() -> int:
         if destination.is_symlink():
             raise OSError(f"hook cache root must not be a symlink: {destination}")
         with lock_path.open("a+b") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+            with _phase("lock_wait"):
+                fcntl.flock(lock, fcntl.LOCK_EX)
             destination.mkdir(parents=True, exist_ok=True)
             # The state root is the mount authority. If it is unavailable,
             # fail closed; a missing hooks directory inside an available root
@@ -362,6 +462,7 @@ def main() -> int:
             except FileNotFoundError:
                 old_manifest = {}
             for attempt in range(MAX_SEAL_ATTEMPTS):
+                _count("attempts")
                 try:
                     if source_absent:
                         manifest = {}
@@ -400,6 +501,30 @@ def main() -> int:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"could not seal Polylogue hook tree: {error}", file=sys.stderr)
         return 1
+
+
+def main() -> int:
+    global _metrics
+    now = time.monotonic()
+    _metrics = {
+        "started_at": now,
+        "reported_at": now,
+        "active": None,
+        "counters": {},
+        "phase_seconds": {},
+        "phase_calls": {},
+    }
+    previous = signal.getsignal(signal.SIGTERM)
+    if previous == signal.SIG_DFL:
+        signal.signal(signal.SIGTERM, _termination_report)
+    _report("start", force=True)
+    try:
+        result = _seal()
+        _report("complete" if result == 0 else "failed", force=True)
+        return result
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+        _metrics = None
 
 
 if __name__ == "__main__":
