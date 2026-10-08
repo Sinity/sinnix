@@ -763,11 +763,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791478685,
-        "narHash": "sha256-zZBeXTUmAubdfHK7KO1r5maJPDSV7HFo60e4xirIDi4=",
+        "lastModified": 1791495247,
+        "narHash": "sha256-EGPcWS9hLXt9An2mppXh6WVT3Fz1j3K+DzsXoccQLlE=",
         "ref": "master",
-        "rev": "380f3364047bf4df258364b808a147213c04f21f",
-        "revCount": 653,
+        "rev": "91c59c988a161f5b6ad43839b38afb84427dc663",
+        "revCount": 655,
         "type": "git",
         "url": "https://github.com/Sinity/sinity-lynchpin.git"
       },
@@ -1397,11 +1397,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791492786,
-        "narHash": "sha256-2KYn7NCz+xrWqAiijqZh4M3tfpjYD2HD/7GuG8ibWHo=",
+        "lastModified": 1791495222,
+        "narHash": "sha256-nOzHXaVhP4tC8r+ju95yU5t95i9T2SSu+LPdBKYWuMo=",
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "8f4ceb3ed40dc989cde01399c293824c76337607",
+        "rev": "2357b0511e006b26a8127ce5687e0c4541048f19",
         "type": "github"
       },
       "original": {
