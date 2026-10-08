@@ -21,6 +21,7 @@ def lake(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "TRANSCRIPT_DIR", tmp_path / "transcripts")
     monkeypatch.setattr(module, "LEDGER", module.TRANSCRIPT_DIR / "transcribed.jsonl")
     monkeypatch.setattr(module, "models_present", lambda: True)
+    monkeypatch.setenv("SINNIX_PHONE_LAKE", str(tmp_path / "phone"))
     calls = []
 
     def transcribe(path):
@@ -28,8 +29,8 @@ def lake(tmp_path, monkeypatch):
         return {"file": str(path), "speech_seconds": 1, "text": path.read_text()}
 
     monkeypatch.setattr(module, "transcribe_file", transcribe)
-    phone = module.MACHINE / "phone" / "ambient" / "same.opus"
-    mic = module.ACTIVITY / "audio" / "src-mic" / "same.opus"
+    phone = tmp_path / "phone" / "ambient" / "same.opus"
+    mic = module.ACTIVITY / "audio" / "recording" / "src-mic" / "same.opus"
     for path, text in ((phone, "room"), (mic, "desk")):
         path.parent.mkdir(parents=True)
         path.write_text(text)

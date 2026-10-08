@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.layout import capture_lane_path
 from sinnix_lib.ledger import utc_ts
 
 SCHEMA = "sinnix.phone.deck/1"
@@ -299,7 +300,7 @@ def lake_facts() -> list[tuple[str, float, str]]:
         if n:
             facts.append(("ambient chunks measured into the levels ledger", n, "records"))
 
-    transcripts = ACTIVITY / "audio" / "transcripts"
+    transcripts = capture_lane_path(ACTIVITY, "transcripts")
     if transcripts.is_dir():
         n = sum(_count_lines(p) for p in transcripts.glob("2*.jsonl"))
         if n:

@@ -46,6 +46,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
+from sinnix_lib.layout import capture_lane_path
 from sinnix_lib.ledger import append_jsonl, utc_ts
 
 SCHEMA = "sinnix.transcript/1"
@@ -58,7 +59,7 @@ EMBEDDING = MODEL_ROOT / "nemo_en_titanet_small.onnx"
 
 ACTIVITY = Path(os.environ.get("SINNIX_ACTIVITY_ROOT", "/realm/activity"))
 MACHINE = Path(os.environ.get("SINNIX_MACHINE_ROOT", "/realm/device/sinnix-prime"))
-TRANSCRIPT_DIR = ACTIVITY / "audio" / "transcripts"
+TRANSCRIPT_DIR = capture_lane_path(ACTIVITY, "transcripts")
 LEDGER = TRANSCRIPT_DIR / "transcribed.jsonl"
 
 # Threads for the recogniser. The measurement above used 12 on a 16-core part;
@@ -325,7 +326,7 @@ def lanes() -> dict[str, Path]:
         "phone": Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/device/shared/phone")) / "ambient",
         "voice": Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/device/shared/phone")) / "outbox",
     }
-    audio = ACTIVITY / "audio" / "recordings"
+    audio = capture_lane_path(ACTIVITY, "audio")
     if audio.is_dir():
         for d in sorted(audio.iterdir()):
             if d.is_dir() and (d.name.startswith("src-") or d.name.startswith("snk-")):
