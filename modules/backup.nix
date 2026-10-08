@@ -127,6 +127,7 @@ let
     "${sinexBeadsArchivePath}/config.yaml"
     "${sinexBeadsArchivePath}/${sinexBeadsDatabaseRelativePath}/sinex/.dolt"
     elicitStateArchivePath
+    "library/model/control-vector"
   ];
   # A six-hour snapshot can take about an hour to archive after acquisition.
   # Keep data age distinct from the last-success wall clock.
@@ -689,12 +690,17 @@ let
     # measured: borg stops recursing into an excluded directory, so a `+`
     # pattern for the subtree never gets the chance to match, and the archive
     # ends at `media` with nothing beneath it.
-    # Model weights are re-acquirable, so the exact library/model root is
-    # excluded and classified noncanonical. Tags in other realm subtrees do
-    # not exclude them; their contents stay covered until explicitly classified.
+    # Acquired weight stores keep their existing exclusion policy. Authored
+    # control vectors and unclassified new model children stay covered.
+    # The model home itself is never an exclusion boundary.
     # Steam's exclusion names steamapps directly to retain userdata.
     "library/game/steam/steamapps"
-    "library/model"
+    "library/model/ollama"
+    "library/model/gguf"
+    "library/model/sherpa"
+    "library/model/photoprism"
+    "library/model/sd-checkpoints"
+    "library/model/tts"
     # Historical snapshots retain these native addresses.
     "library/games/steam/steamapps"
     "library/models"
@@ -783,7 +789,12 @@ let
   );
   realmNoncanonical = lib.intersectLists realmExcludes [
     "library/game/steam/steamapps"
-    "library/model"
+    "library/model/ollama"
+    "library/model/gguf"
+    "library/model/sherpa"
+    "library/model/photoprism"
+    "library/model/sd-checkpoints"
+    "library/model/tts"
     # Historical snapshots retain these native addresses.
     "library/games/steam/steamapps"
     "library/models"

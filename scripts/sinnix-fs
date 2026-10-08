@@ -1,25 +1,16 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Filesystem index pipeline — directory inventory, content scan and judgment ledger (inventory/content/ledger/run)
+# description: Publish and query coherent filesystem-index generations
 # runtimeInputs: python3 duckdb coreutils file
 # pythonPackages: @sinnix-lib
 
-"""sinnix-fs — the filesystem index pipeline, as one CLI.
+"""Publish coherent filesystem inventories and judgment materializations.
 
-Three stages, previously three scripts, always run in sequence by
-`sinnix-fs-index.service`: `inventory` walks directories into a mechanical
-scan, `content` indexes document-bearing files (hashes, titles, excerpts),
-and `ledger` materializes the hand-authored judgment ledger against both
-scans. They share one process shape (JSONL -> DuckDB -> Parquet, run
-through the duckdb CLI via a scratch script file) and one `--out-dir` /
-`--index-dir` on disk, which is why they are one script now: splitting them
-never bought independent invocation, only duplicated the mechanics. `run`
-is the three in sequence, sharing one out-dir -- the service's actual entry
-point.
-
-Each subcommand's own docstring below (`INVENTORY_DOC`, `CONTENT_DOC`,
-`LEDGER_DOC`) carries the design rationale that used to live at the top of
-its standalone file; read it via `sinnix-fs <subcommand> --help`.
+`run` scans into a private generation. `ledger` reuses retained scans and
+refreshes classifications. One atomic pointer publishes databases, Parquet
+files and a validated manifest. Authored ledgers remain outside generations.
+`status` and `query` inspect one reopened generation; judgments actions read
+or append authored definitions directly without scanning payloads.
 """
 
 from __future__ import annotations
@@ -40,6 +31,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import shutil
+import uuid
 from collections import Counter, deque
 from pathlib import Path
 
@@ -80,7 +73,7 @@ def run_duckdb_file(db: Path, sql: str, script_name: str) -> subprocess.Complete
 
 
 def duckdb_query(db: Path, sql: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["duckdb", str(db), "-noheader", "-list", "-c", sql],
+    return subprocess.run(["duckdb", "-readonly", str(db), "-noheader", "-list", "-c", sql],
                           text=True, capture_output=True, check=False)
 
 
@@ -97,9 +90,8 @@ def materialize_pair(
 ) -> str:
     """Build and validate a database/Parquet pair before replacing either output.
 
-    The two final names remain a compatibility contract for existing readers.
-    Staging prevents a failed rerun from destroying their prior generation;
-    readers can only observe a mixed pair during the two final renames.
+    This helper operates inside a private unpublished generation. The owner
+    exposes all validated artifacts together through its generation pointer.
     """
     db.parent.mkdir(parents=True, exist_ok=True)
     if db.parent != parquet.parent:
@@ -331,6 +323,7 @@ def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_ev
                 "biggest_files": [{"bytes": b, "name": n} for b, n in biggest[:5]],
                 "child_dirs": [e.name for e in dirs[:40]],
                 "prune_reason": prune_reason,
+                "error": None,
             }
             out.write(json.dumps(safe(record), ensure_ascii=False) + "\n")
             written += 1
@@ -357,9 +350,8 @@ def inventory_materialize(jsonl: Path, db: Path, parquet: Path) -> None:
     single pass that can be interrupted.
     """
     sql = f"""
-INSTALL json; LOAD json;
 DROP TABLE IF EXISTS nodes;
-CREATE TABLE nodes AS SELECT * FROM read_json_auto('{jsonl}', ignore_errors=true);
+CREATE TABLE nodes AS SELECT * FROM read_json_auto({sql_string(jsonl)}, ignore_errors=false);
 
 -- Recursive rollup: every node accumulates its own bytes plus its descendants'.
 --
@@ -398,21 +390,10 @@ CREATE VIEW inventory AS
 SELECT n.*, r.total_bytes, r.subtree_dirs, r.subtree_complete, r.incomplete_reason
 FROM nodes n LEFT JOIN rollup r USING (path);
 
-COPY (SELECT * FROM inventory) TO '{parquet}' (FORMAT PARQUET);
+COPY (SELECT * FROM inventory) TO {sql_string(parquet)} (FORMAT PARQUET);
 """
     rows = materialize_pair(db, parquet, lambda staged_parquet: sql.replace(str(parquet), str(staged_parquet)), "inventory")
     print(f"sinnix-fs inventory: materialized {rows} rows -> {db}, {parquet}")
-
-
-def cmd_inventory(args: argparse.Namespace) -> int:
-    roots = args.root or DEFAULT_ROOTS
-    out_dir = Path(args.out_dir)
-    jsonl = out_dir / "nodes.jsonl"
-
-    inventory_scan(roots, args.max_depth, jsonl, args.progress_every)
-    if not args.scan_only:
-        inventory_materialize(jsonl, out_dir / "inventory.duckdb", out_dir / "nodes.parquet")
-    return 0
 
 
 # =====================================================================
@@ -545,6 +526,7 @@ CONTENT_EXCLUDE_PREFIXES = (
     "/realm/library/model/",
     "/realm/library/dataset/",
     "/realm/state/cache/",
+    "/realm/state/fs-index/",
     "/realm/tmp/shell/",
     "/realm/worktree/",
     "/nix/store/",
@@ -896,51 +878,17 @@ COPY (SELECT * FROM files) TO {sql_string(parquet)} (FORMAT PARQUET);
     print(f"sinnix-fs content: materialized {rows} rows -> {db}, {parquet}")
 
 
-def cmd_content(args: argparse.Namespace) -> int:
-    roots = args.root or DEFAULT_ROOTS
-    out_dir = Path(args.out_dir)
-    jsonl = out_dir / "files.jsonl"
-    content_walk(roots, jsonl, args.progress_every)
-    content_materialize(jsonl, out_dir / "content.duckdb", out_dir / "files.parquet")
-    return 0
-
-
 # =====================================================================
 # ledger
 # =====================================================================
 
-LEDGER_DOC = """Turn judgments.jsonl from a file agents write into a file agents can query.
+LEDGER_DOC = """Refresh classifications against one retained scan generation.
 
-`sinnix-fs inventory` and `sinnix-fs content` produce the mechanical scan
-(nodes/files: what is on disk). Alongside them, an append-only ledger of
-per-path judgments (subject, owner, provenance, lifecycle...) has existed
-since the system charter pass on 2026-08-16 -- but nothing had ever loaded it
-into either DuckDB file, so "what fraction of the system is classified" was a
-question with no way to answer it. This closes that gap in SQL, not new
-scanning code: everything here reads data that was already on disk.
-
-Three views, corresponding to the charter's design (system-charter-2026-08-16
-Section 4):
-
-  resolved_judgments   latest-wins per (target, field), except that a
-                        method='operator' row is only ever superseded by
-                        another operator row -- an agent's rule-based guess
-                        never overrides a human decision, no matter which
-                        came later.
-
-  inherited_judgments  every path in nodes/files joined to whichever
-                        judgment target -- a literal sha256: row, or the
-                        LONGEST matching prefix: row -- actually governs it.
-                        This is what lets ~200 prefix judgments classify
-                        millions of files without reading them.
-
-  coverage             the four disjoint states the charter names, per
-                        field: classified (has a judgment) / unclassifiable
-                        (resolved to observation='unknown') / exempt
-                        (not_applicable or withheld) / not_yet_examined (no
-                        row reaches this path at all). Only the last one is
-                        the work queue -- the other three are all "examined",
-                        whatever the answer turned out to be.
+Authored judgments remain unchanged. Shared validation and ranking govern direct
+lookup and SQL: operator precedence, timestamp ordering, explicit conflicting
+ties, component-aware prefixes and full-digest-only joins. Invalid historical
+definitions remain in the raw ledger and are excluded from effective results.
+The validated databases, Parquet and manifest publish through one atomic pointer.
 """
 
 LEDGER_MEMORY_LIMIT = "768MiB"
@@ -951,22 +899,10 @@ LEDGER_SQL = r"""
 
 DROP TABLE IF EXISTS judgments;
 CREATE TABLE judgments AS
-SELECT * FROM read_json_auto('{judgments_jsonl}', ignore_errors=true);
-
--- Latest-wins per (target, field), with the operator-override exception: a
--- method='operator' row can only be superseded by another operator row. Rank
--- operator rows above rule/model rows regardless of timestamp, then by ts
--- within each tier.
+SELECT * FROM read_json({judgments_jsonl}, columns={ledger_columns}, ignore_errors=false);
 DROP VIEW IF EXISTS resolved_judgments;
 CREATE VIEW resolved_judgments AS
-SELECT * EXCLUDE (rk) REPLACE (CASE WHEN field = 'role' THEN CASE value {role_cases} ELSE value END ELSE value END AS value) FROM (
-    SELECT *,
-           row_number() OVER (
-               PARTITION BY target, field
-               ORDER BY (method = 'operator') DESC, ts DESC
-           ) AS rk
-    FROM judgments
-) WHERE rk = 1;
+SELECT * FROM effective_judgments;
 
 -- Prefix inheritance. A path's judgment is its own sha256: row if one
 -- exists, else the LONGEST prefix: row whose prefix it starts with. DuckDB
@@ -981,13 +917,8 @@ SELECT target, field, value, confidence, observation, method, evidence, ts,
 FROM resolved_judgments
 WHERE target LIKE 'prefix:%';
 
--- all_paths / inherited_judgments / coverage are TABLES, not views: they
--- read from `files`, which lives behind a cross-database ATTACH that does
--- not persist once this duckdb session exits. A view here would work for
--- the rest of this script and then silently break -- "table ctn.files does
--- not exist" -- for every later, ordinary `duckdb inventory.duckdb -c ...`
--- query. Materializing means re-running `sinnix-fs ledger` is how you
--- refresh them, same contract as the rollup in `sinnix-fs inventory`.
+-- Published relations are local tables. Every reopened reader uses the same
+-- generation without depending on the writer's temporary content attachment.
 DROP TABLE IF EXISTS all_paths;
 CREATE TABLE all_paths AS
 SELECT path, sha256 FROM (
@@ -1041,6 +972,7 @@ WITH subject_state AS (
            CASE
              WHEN ij.field IS NULL THEN 'not_yet_examined'
              WHEN ij.observation = 'not_applicable' OR ij.observation = 'withheld' THEN 'exempt'
+             WHEN ij.observation = 'ambiguous' THEN 'ambiguous'
              WHEN ij.observation = 'unknown' THEN 'unclassifiable'
              ELSE 'classified'
            END AS state
@@ -1054,23 +986,29 @@ FROM subject_state GROUP BY state ORDER BY paths DESC;
 
 LEDGER_OBJECT_KIND = {
     "resolved_judgments": "VIEW", "prefix_judgments": "VIEW",
+    "files": "TABLE", "effective_judgments": "TABLE",
     "all_paths": "TABLE", "inherited_judgments": "TABLE", "coverage": "TABLE",
 }
 
 
-def ledger_run(index_dir: Path) -> int:
-    judgments = index_dir / "judgments.jsonl"
+def ledger_run(index_dir: Path, judgments_path: Path | None = None) -> int:
+    judgments = judgments_path or index_dir / "judgments.jsonl"
     inv_db = index_dir / "inventory.duckdb"
     content_db = index_dir / "content.duckdb"
     for p in (judgments, inv_db, content_db):
         if not p.exists():
-            print(f"sinnix-fs ledger: missing {p} -- run sinnix-fs inventory and "
-                  f"sinnix-fs content first", file=sys.stderr)
+            print(f"sinnix-fs ledger: missing {p} -- build a scan generation with "
+                  f"sinnix-fs run first", file=sys.stderr)
             return 1
 
-    from sinnix_lib.taxonomy import LEGACY_ROLES
-    role_cases = " ".join(f"WHEN '{old}' THEN '{new}'" for old, new in LEGACY_ROLES.items())
-    sql = LEDGER_SQL.format(judgments_jsonl=str(judgments), role_cases=role_cases)
+    from sinnix_lib.judgments import effective_target_judgments
+    ledger = read_judgments(judgments)
+    columns = "{target:'VARCHAR', field:'VARCHAR', value:'JSON', confidence:'DOUBLE', observation:'VARCHAR', method:'VARCHAR', evidence:'VARCHAR', ts:'VARCHAR'}"
+    effective = index_dir / ".effective.jsonl"
+    with atomic_text_writer(effective, fsync=False, mode=0o600) as handle:
+        for record in effective_target_judgments(ledger):
+            handle.write(json.dumps(record) + "\n")
+    sql = LEDGER_SQL.format(judgments_jsonl=sql_string(judgments), ledger_columns=columns)
     # A prior run may have left an object with the same name as a different
     # kind (view vs table) -- DROP ... IF EXISTS does not suppress a type
     # mismatch, only a missing name, so a plain drop-then-create can fail
@@ -1113,17 +1051,25 @@ def ledger_run(index_dir: Path) -> int:
 SET memory_limit = '{LEDGER_MEMORY_LIMIT}';
 SET threads = 2;
 SET preserve_insertion_order = false;
+ATTACH {sql_string(content_db)} AS ctn (READ_ONLY);
+BEGIN TRANSACTION;
 {precise_drops}
-ATTACH '{content_db}' AS ctn (READ_ONLY);
-CREATE OR REPLACE VIEW files AS
+DROP TABLE IF EXISTS files;
+CREATE TABLE files AS
 SELECT path, CASE WHEN error IS NULL AND {exact_clause}
   AND regexp_full_match(sha256, '[0-9a-fA-F]{{64}}')
-  THEN sha256 ELSE NULL END AS sha256 FROM ctn.files;
+  THEN lower(sha256) ELSE NULL END AS sha256 FROM ctn.files;
+CREATE OR REPLACE TABLE effective_judgments AS
+SELECT * FROM read_json({sql_string(effective)}, columns={columns}, ignore_errors=false);
 {sql}
+COMMIT;
 .print
 SELECT * FROM coverage;
 """
-    proc = run_duckdb_file(inv_db, full_sql, ".ledger.sql")
+    try:
+        proc = run_duckdb_file(inv_db, full_sql, ".ledger.sql")
+    finally:
+        effective.unlink(missing_ok=True)
     if proc.returncode != 0:
         print(f"sinnix-fs ledger: duckdb failed: {proc.stderr}", file=sys.stderr)
         return 1
@@ -1133,33 +1079,180 @@ SELECT * FROM coverage;
     return 0
 
 
+DERIVED_FILES = ("nodes.jsonl", "files.jsonl", "inventory.duckdb", "content.duckdb", "nodes.parquet", "files.parquet")
+RELATIONS = {
+    "inventory.duckdb": ("nodes", "rollup", "inventory", "files", "judgments", "resolved_judgments", "prefix_judgments", "all_paths", "inherited_judgments", "coverage"),
+    "content.duckdb": ("files", "duplicates", "sampled_duplicate_candidates", "scattered_names", "population"),
+}
+
+
+def resolve_generation(index_dir: Path) -> Path:
+    pointer = index_dir / "current"
+    if not pointer.is_symlink():
+        raise ValueError("no published generation; restore retained scan inputs explicitly")
+    generation = pointer.resolve(strict=True)
+    if generation.parent != (index_dir / "generations").resolve():
+        raise ValueError("generation pointer escapes its owning store")
+    manifest = json.loads((generation / "manifest.json").read_text())
+    if manifest.get("schema") != "sinnix.fs-generation.v1" or manifest.get("generation") != generation.name:
+        raise ValueError("invalid generation manifest")
+    return generation
+
+
+def validate_generation(stage: Path) -> dict:
+    counts = {}
+    # Every call starts a fresh process, so none can borrow writer attachments.
+    for database, relations in RELATIONS.items():
+        for relation in relations:
+            result = duckdb_query(stage / database, f"SELECT count(*) FROM {relation}")
+            if result.returncode or not result.stdout.strip().isdigit():
+                raise ValueError(f"reopened {database}.{relation} failed: {result.stderr}")
+            counts[database + "." + relation] = int(result.stdout.strip())
+    for database, parquet, relation in (("inventory.duckdb", "nodes.parquet", "nodes"), ("content.duckdb", "files.parquet", "files")):
+        result = duckdb_query(stage / database, f"SELECT count(*) FROM read_parquet({sql_string(stage / parquet)})")
+        if result.returncode or result.stdout.strip() != str(counts[database + "." + relation]):
+            raise ValueError(f"Parquet mismatch: {parquet}")
+    return counts
+
+
+def source_identity(path: Path) -> dict:
+    info = path.stat()
+    return {"path": str(path), "size": info.st_size, "mtime_ns": info.st_mtime_ns,
+            "observed_at": dt.datetime.fromtimestamp(info.st_mtime, dt.timezone.utc).isoformat()}
+
+
+def generation_coverage(path: Path) -> dict:
+    result = duckdb_query(path / "inventory.duckdb", "SELECT count(*) FILTER (WHERE error IS NOT NULL) || ',' || count(*) FILTER (WHERE prune_reason IS NOT NULL) FROM nodes")
+    if result.returncode:
+        raise ValueError(f"coverage check failed: {result.stderr}")
+    errors, pruned = map(int, result.stdout.strip().split(','))
+    return {"incomplete": bool(errors or pruned), "directory_errors": errors,
+            "pruned_directories": pruned,
+            "scope": "generic metadata and bounded content scan; native payload coverage remains owner-specific"}
+
+
+def publish_generation(index_dir: Path, *, roots=None, retained_inputs: Path | None = None) -> int:
+    """Publish one validated derived generation; authored ledgers stay outside."""
+    index_dir.mkdir(parents=True, exist_ok=True)
+    generations = index_dir / "generations"
+    generations.mkdir(mode=0o700, exist_ok=True)
+    with (index_dir / "publication.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        name = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:12]
+        stage = generations / (".building-" + name)
+        stage.mkdir(mode=0o700)
+        try:
+            ledger = read_judgments(index_dir / "judgments.jsonl")
+            if roots is None:
+                previous = retained_inputs or resolve_generation(index_dir)
+                for filename in DERIVED_FILES:
+                    source = previous / filename
+                    # Reflink retains scan evidence without borrowing mutable DB pages.
+                    result = subprocess.run(["cp", "--reflink=auto", "--preserve=mode,timestamps", str(source), str(stage / filename)], check=False)
+                    if result.returncode:
+                        raise ValueError(f"cannot preserve {source}")
+                prior_manifest = previous / "manifest.json"
+                scan = json.loads(prior_manifest.read_text())["scan"] if prior_manifest.exists() else {
+                    "kind": "retained-inputs", "fresh": False,
+                    "inputs": [source_identity(previous / n) for n in ("nodes.jsonl", "files.jsonl")],
+                    "exclusions": "historical exclusions were not recorded; no fresh coverage claim",
+                }
+            else:
+                started = dt.datetime.now(dt.timezone.utc).isoformat()
+                inventory_scan(roots, -1, stage / "nodes.jsonl", 2000)
+                inventory_materialize(stage / "nodes.jsonl", stage / "inventory.duckdb", stage / "nodes.parquet")
+                content_walk(roots, stage / "files.jsonl", 5000)
+                content_materialize(stage / "files.jsonl", stage / "content.duckdb", stage / "files.parquet")
+                scan = {"kind": "fresh", "started_at": started, "finished_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+                        "roots": roots, "content_exclusions": list(CONTENT_EXCLUDE_PREFIXES),
+                        "excluded_components": sorted(CONTENT_EXCLUDE_DIR_PARTS)}
+            if content_views_refresh(stage / "content.duckdb"):
+                raise ValueError("content comparison view refresh failed")
+            # Freeze the exact reviewed ledger for this build without making it authored state.
+            ledger_copy = stage / ".judgments-input.jsonl"
+            shutil.copyfile(index_dir / "judgments.jsonl", ledger_copy)
+            if read_judgments(ledger_copy)["sha256"] != ledger["sha256"]:
+                raise ValueError("judgment ledger changed before build")
+            if ledger_run(stage, ledger_copy):
+                raise ValueError("ledger construction failed")
+            ledger_copy.unlink()
+            counts = validate_generation(stage)
+            if read_judgments(index_dir / "judgments.jsonl")["sha256"] != ledger["sha256"]:
+                raise ValueError("judgment ledger changed during build")
+            manifest = {"schema": "sinnix.fs-generation.v1", "generation": name,
+                        "published_at": dt.datetime.now(dt.timezone.utc).isoformat(), "scan": scan,
+                        "ledger_sha256": ledger["sha256"], "ledger_records": ledger["records"],
+                        "invalid_definitions": ledger["issues"], "relations": counts,
+                        "coverage": generation_coverage(stage),
+                        "artifacts": {n: {**source_identity(stage / n), "path": n} for n in DERIVED_FILES}}
+            (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+            for filename in (*DERIVED_FILES, "manifest.json"):
+                _fsync_file(stage / filename)
+            descriptor = os.open(stage, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            final = generations / name
+            os.replace(stage, final)
+            descriptor = os.open(generations, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            pointer = index_dir / (".current-" + name)
+            pointer.symlink_to(Path("generations") / name)
+            os.replace(pointer, index_dir / "current")
+            descriptor = os.open(index_dir, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            with atomic_text_writer(index_dir / "last-attempt.json", fsync=True, mode=0o600) as handle:
+                json.dump({"status": "published", "generation": name}, handle)
+            print(json.dumps(manifest))
+            return 0
+        except (Exception, SystemExit) as exc:
+            with atomic_text_writer(index_dir / "last-attempt.json", fsync=True, mode=0o600) as handle:
+                json.dump({"status": "failed", "candidate": str(stage), "reason": str(exc)}, handle)
+            # Failed candidates remain private, preserving the reason and partial work.
+            raise
+
+
 def cmd_ledger(args: argparse.Namespace) -> int:
-    return ledger_run(args.index_dir)
+    return publish_generation(args.index_dir, retained_inputs=args.retained_inputs)
 
-
-# =====================================================================
-# run — the fs-index service's entry point
-# =====================================================================
 
 def cmd_run(args: argparse.Namespace) -> int:
-    """inventory, then content, then ledger, sharing one out-dir.
+    """Build a fresh scan and publish one coherent generation."""
+    return publish_generation(Path(args.out_dir), roots=args.root or DEFAULT_ROOTS)
 
-    This is what `sinnix-fs-index.service` invokes: the ledger step reads
-    the scan's own DuckDB output, so the three stages always run in this
-    order against the same directory.
-    """
-    roots = args.root or DEFAULT_ROOTS
-    out_dir = Path(args.out_dir)
 
-    nodes_jsonl = out_dir / "nodes.jsonl"
-    inventory_scan(roots, -1, nodes_jsonl, 2000)
-    inventory_materialize(nodes_jsonl, out_dir / "inventory.duckdb", out_dir / "nodes.parquet")
+def cmd_status(args: argparse.Namespace) -> int:
+    result = {}
+    attempt = args.index_dir / "last-attempt.json"
+    if attempt.exists():
+        result["last_attempt"] = json.loads(attempt.read_text())
+    try:
+        generation = resolve_generation(args.index_dir)
+        manifest = json.loads((generation / "manifest.json").read_text())
+        validate_generation(generation)
+        result.update(valid=True, generation=str(generation), scan=manifest["scan"],
+                      classifications_stale=read_judgments(args.index_dir / "judgments.jsonl")["sha256"] != manifest["ledger_sha256"],
+                      invalid_definitions=manifest["invalid_definitions"],
+                      coverage=generation_coverage(generation),
+                      coverage_limitation="bounded generic inspection; native stores and exclusions require owner evidence")
+    except (OSError, ValueError) as exc:
+        result.update(valid=False, reason=str(exc))
+    print(json.dumps(result, indent=2))
+    return 0 if result["valid"] and not result["classifications_stale"] else 1
 
-    files_jsonl = out_dir / "files.jsonl"
-    content_walk(roots, files_jsonl, 5000)
-    content_materialize(files_jsonl, out_dir / "content.duckdb", out_dir / "files.parquet")
 
-    return ledger_run(out_dir)
+def cmd_query(args: argparse.Namespace) -> int:
+    generation = resolve_generation(args.index_dir)
+    # DuckDB enforces read-only SQL, including multi-statement requests.
+    proc = subprocess.run(["duckdb", "-readonly", "-json", str(generation / args.database), "-c", args.sql], check=False)
+    return proc.returncode
 
 
 
@@ -1292,53 +1385,34 @@ def main() -> int:
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="command", required=True)
 
-    inv = sub.add_parser(
-        "inventory", description=INVENTORY_DOC,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="Walk filesystems into a directory-level inventory (JSONL + DuckDB/Parquet)",
-    )
-    inv.add_argument("--root", action="append", default=None,
-                      help=f"Filesystem root to walk (repeatable). Default: {DEFAULT_ROOTS}")
-    inv.add_argument("--out-dir", default="/realm/state/fs-index")
-    inv.add_argument("--max-depth", type=int, default=-1,
-                      help="Stop descending past this depth; -1 for unlimited")
-    inv.add_argument("--progress-every", type=int, default=2000)
-    inv.add_argument("--scan-only", action="store_true")
-    inv.set_defaults(func=cmd_inventory)
-
-    con = sub.add_parser(
-        "content", description=CONTENT_DOC,
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="Index content-bearing files (hashes, titles, excerpts) across the system",
-    )
-    con.add_argument("--root", action="append", default=None,
-                      help=f"Filesystem root to walk (repeatable). Default: {DEFAULT_ROOTS}")
-    con.add_argument("--out-dir", default="/realm/state/fs-index")
-    con.add_argument("--progress-every", type=int, default=5000)
-    con.set_defaults(func=cmd_content)
-
     led = sub.add_parser(
         "ledger", description=LEDGER_DOC,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="Materialize the judgment ledger into resolved judgments, prefix inheritance and a coverage report",
     )
     led.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"),
-                      help="directory holding judgments.jsonl, inventory.duckdb, content.duckdb")
+                      help="owner directory containing authored ledgers and the current generation pointer")
+    led.add_argument("--retained-inputs", type=Path, help="Explicit recovery source of dated scan artifacts")
     led.set_defaults(func=cmd_ledger)
 
     run = sub.add_parser(
         "run", description=cmd_run.__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        help="Run inventory, content and ledger in sequence, sharing one out-dir",
+        help="Build and publish one fresh filesystem-index generation",
     )
     run.add_argument("--root", action="append", default=None,
                       help=f"Filesystem root to walk (repeatable). Default: {DEFAULT_ROOTS}")
     run.add_argument("--out-dir", default="/realm/state/fs-index")
     run.set_defaults(func=cmd_run)
 
-    views = sub.add_parser("content-views", help="Correct derived full-hash/sample comparison views without rescanning")
-    views.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"))
-    views.set_defaults(func=lambda a: content_views_refresh(a.index_dir / "content.duckdb"))
+    status = sub.add_parser("status", help="Validate a reopened generation and distinguish stale classifications or failed publication")
+    status.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"))
+    status.set_defaults(func=cmd_status)
+    query = sub.add_parser("query", help="Run read-only SQL against one resolved generation")
+    query.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"))
+    query.add_argument("--database", choices=list(RELATIONS), default="inventory.duckdb")
+    query.add_argument("sql")
+    query.set_defaults(func=cmd_query)
     judgments = sub.add_parser("judgments", help="Read or import authored classifications without scanning or materializing")
     judgments.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"))
     actions = judgments.add_subparsers(dest="action", required=True)

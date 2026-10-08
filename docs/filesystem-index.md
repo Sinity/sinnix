@@ -12,15 +12,15 @@ The legacy v1 scanner put both algorithms in a column named `sha256`. Importing 
 
 Before and after each fingerprint, lstat/fstat identity and modification metadata are compared. Symlinks and nonregular files are not opened as payloads; nonblocking, no-follow reads prevent ordinary stream substitution from hanging fingerprinting. Empty files remain represented. Content excerpts have their own bounded-read budget. These checks detect ordinary races; they are not cryptographic claims about a hostile filesystem or guarantees that data has not changed since a historical observation.
 
-## View-only repair
+## Coherent generations
 
-From the declared project environment, the source command is:
+`run --out-dir INDEX` builds fresh scan artifacts in a private generation directory. `ledger --index-dir INDEX` reuses unchanged scan artifacts and refreshes classifications. Neither command mutates a published generation. All databases, Parquet files and promised relations are validated after reopening before one atomic `current` pointer is published. A failed attempt retains its private candidate and the previous complete generation.
 
-```sh
-PYTHONPATH=pkgs/sinnix-lib python3 scripts/sinnix-fs content-views --index-dir /path/to/index
-```
+Authored `judgments.jsonl` and `lake_refs.jsonl` remain in the owner directory, outside derived generations. Recovery explicitly selects retained scan artifacts with `ledger --retained-inputs PATH`; the resulting manifest records their original dates and does not claim a fresh scan. The manifest records exclusions for fresh scans, ledger identity and invalid historical definitions. Historical invalid definitions remain unchanged in the authored ledger and are excluded from effective results.
 
-This transaction replaces only the two comparison views in `content.duckdb`. It recognizes the legacy and typed column layouts; it does not rescan payloads, rewrite the `files` table, edit JSONL/Parquet, or rebuild authored/inherited judgments. Do not break an active writer's database lock to run it. Updating source does not activate a NixOS service or replace an older packaged scanner; a later legacy rebuild can restore its legacy views until the package is updated normally.
+Use `status --index-dir INDEX` to inspect validity, classification freshness, scan dates and the last publication attempt. Use `query --index-dir INDEX 'SELECT * FROM coverage'` for read-only SQL. Each query resolves the pointer once and opens that generation read-only. `files` is a persistent local relation in the inventory database. No relation requires a writer-session attachment. Superseded generations remain retained; cleanup requires owner review of active readers.
+
+The former independent `inventory`, `content` and `content-views` output commands are retired. Database and Parquet publication is part of the generation lifecycle.
 
 ## Collection boundaries, not invisible data
 
@@ -34,7 +34,7 @@ This remains bounded generic content inspection, not a claim that every native r
 
 Authored judgment and reference ledgers are not regenerable simply because they share a directory with derived indexes. Ledger materialization uses the JSON readers already supplied by the declared DuckDB runtime; it does not install extensions or require a per-user extension cache at runtime. Prefix inheritance matches the named path or descendants separated by `/`, not lexical lookalikes. Content-addressed judgment joins use only full-file digests, never legacy large-file samples.
 
-Materialization uses explicit nullable schema columns. Malformed JSON fails staged publication rather than being silently skipped. Existing artifacts remain in place when staging or validation fails; there is no claim that several separately published filesystem artifacts form one global transaction.
+Materialization uses explicit nullable schema columns. Malformed JSON fails staged publication rather than being silently skipped. A generation publishes as one pointer after staging and validation. Existing generations remain in place on failure.
 
 The focused tests under `pkgs/sinnix-fs/tests` use synthetic small files and isolated real DuckDB databases. Counterexamples include equal head/tail/size with a different middle, legacy sample demotion, in-flight changes, missing roots, FIFOs, aliases, malformed JSON, quoted filesystem paths, non-traversed collections, and prefix siblings. Test dependencies belong to the existing Nix script-suite declaration, not an undeclared host installation.
 
@@ -48,7 +48,7 @@ PYTHONPATH=pkgs/sinnix-lib python3 scripts/sinnix-fs judgments --index-dir /path
 PYTHONPATH=pkgs/sinnix-lib python3 scripts/sinnix-fs judgments --index-dir /path/to/index report
 ```
 
-`explain` separates topic, role, maintenance_owner and preservation facets from legacy fields. Resolution uses operator precedence within a target, then decision time, followed by the most-specific matching path for each field. An explicit unknown child rule masks broader assumptions. Equal-ranked disagreements are returned as ambiguous rather than selected by row order. This is the conservative direct-lookup contract; existing SQL materializations are not refreshed by the call.
+`explain` separates topic, role, maintenance_owner and preservation facets from legacy fields. Resolution uses operator precedence within a target, then decision time, followed by the most-specific matching path for each field. An explicit unknown child rule masks broader assumptions. Equal-ranked disagreements are returned as ambiguous rather than selected by row order. SQL uses the same validation, timestamp ordering and equal-rank ambiguity semantics. Existing materializations are not refreshed by direct lookup.
 
 The reply includes source lines, full decisions, record hashes and ledger identity. Lexical resolution deliberately does not dereference aliases, assert path existence, hash contents, or match content-addressed decisions from a guessed digest. `audit --check-paths` explicitly opts into location metadata checks, without enumerating descendants. Absent historical paths remain history; they are not automatically rewritten to similarly named current directories.
 

@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Preserve and independently verify a retained Git object store before relocating it
+# runtimeInputs: python3 git
+
+"""Repair an explicitly selected retained bare Git store, preserving ref evidence."""
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("store", type=Path)
+    parser.add_argument("objects", type=Path)
+    parser.add_argument("destination", type=Path)
+    parser.add_argument("receipt", type=Path)
+    args = parser.parse_args()
+    store, objects = args.store.resolve(strict=True), args.objects.resolve(strict=True)
+    if not objects.is_dir() or not (store / "objects").is_dir() or not (store / "HEAD").is_file():
+        raise ValueError("explicit bare store and object directory required")
+    if args.destination.exists() or args.receipt.exists():
+        raise ValueError("destination or receipt already exists; inspect prior work")
+    def git(*argv):
+        return subprocess.run(["git", "-C", str(store), *argv], text=True, capture_output=True, check=True).stdout
+    receipt = args.receipt
+    receipt.mkdir(mode=0o700, parents=True)
+    original_head = (store / "HEAD").read_bytes()
+    refs = git("for-each-ref", "--format=%(refname) %(objectname)")
+    alternate = store / "objects/info/alternates"
+    original_alternates = alternate.read_bytes()
+    (receipt / "HEAD.before").write_bytes(original_head)
+    (receipt / "refs.before").write_text(refs)
+    (receipt / "alternates.before").write_bytes(original_alternates)
+    alternate.write_text(str(objects) + "\n")
+    # Check every recorded ref and detached HEAD before attempting packaging.
+    reachable = git("rev-list", "--objects", "--all", "HEAD")
+    (receipt / "reachable.before").write_text(reachable)
+    git("bundle", "create", str(receipt / "reachable.bundle"), "--all", "HEAD")
+    git("bundle", "verify", str(receipt / "reachable.bundle"))
+    # -a imports borrowed reachable objects. Keep old packs and loose objects.
+    git("repack", "-a")
+    alternate.unlink()
+    try:
+        checked = git("fsck", "--full")
+        if (git("rev-list", "--objects", "--all", "HEAD") != reachable
+                or git("for-each-ref", "--format=%(refname) %(objectname)") != refs
+                or (store / "HEAD").read_bytes() != original_head):
+            raise ValueError("reachable objects or recorded refs changed during packaging")
+    except BaseException:
+        alternate.write_text(str(objects) + "\n")
+        raise
+    (receipt / "fsck.log").write_text(checked)
+    args.destination.parent.mkdir(parents=True, exist_ok=True)
+    os.rename(store, args.destination)
+    result = {"store": str(store), "destination": str(args.destination),
+              "refs_unchanged": True, "head_unchanged": True, "independent_objects_verified": True,
+              "reachable_objects": len(reachable.splitlines()), "bundle": str(receipt / "reachable.bundle")}
+    (receipt / "result.json").write_text(json.dumps(result, indent=2) + "\n")
+    print(json.dumps(result))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

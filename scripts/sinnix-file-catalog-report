@@ -184,8 +184,17 @@ def render_asset(asset: dict, by_id: dict, judgments: dict | None = None) -> str
         f'<p>{esc(asset["description"])}</p>',
         f'<p>{path_link(asset["current_path"])}</p><div class="tags">{tags}</div>',
     ]
-    if asset.get("location_status") == "unavailable":
+    if asset.get("location_status") in {"unavailable", "missing", "offline_mount", "denied", "inaccessible", "wrong_type"}:
         parts.append('<p><strong>Location unavailable.</strong> The retained address is historical; no new physical identity is asserted.</p>')
+    location = asset.get("current_location")
+    if location:
+        parts.append(f'<p>Latest location observation: {esc(location["observed_at"])}. Content continuity: {esc(location["content_continuity"])}.</p>')
+    for revision in asset.get("revisions", []):
+        parts.append(f'<details><summary>Earlier revision {esc(revision["revision_id"])}</summary>')
+        parts.append(f'<p>{esc(revision.get("description", ""))}</p>')
+        for inspection in revision["inspections"]:
+            parts.append(f'<p>{esc(inspection["method"])}: {esc(inspection["scope"])}. {esc(inspection["basis"])}</p>')
+        parts.append('</details>')
     if judgments is not None:
         from sinnix_lib.judgments import resolve_judgments
         current = resolve_judgments(judgments, asset["current_path"])

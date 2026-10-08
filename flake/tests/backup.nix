@@ -13,6 +13,7 @@ let
       "${defaultBeadsPath}/metadata.json"
       "${defaultBeadsPath}/config.yaml"
       "${defaultBeadsPath}/dolt/sinex/.dolt"
+      "library/model/control-vector"
     ];
   };
 in
@@ -27,6 +28,13 @@ assert lib.assertMsg (
     "${defaultBeadsPath}/metadata.json"
     "state/**"
   ]
+  && lib.all protectedPathMatches [
+    "library"
+    "library/model"
+    "library/model/control-vector"
+    "library/model/**"
+  ]
+  && !protectedPathMatches "library/model/ollama"
   && !protectedPathMatches "project/sinex/.beads"
 ) "Realm exclusions must reject the canonical Sinex task store and every ancestor";
 {
@@ -593,7 +601,8 @@ assert lib.assertMsg (
             && lib.hasInfix "file:///outer-realm/backup/borg-realm-v2" drillScript
             && lib.hasInfix "borg check --repository-only --max-duration \"$MAX_DURATION\" \"$repo\"" drillScript
             && audit.serviceConfig.TimeoutStartSec == "5h"
-            && auditTimer.timerConfig.OnCalendar == "*-*-* 06:35:00"
+            && auditTimer.timerConfig.OnCalendar == "*-*-* *:35:00"
+            && lib.hasInfix "status=deferred reason=borg-lock-contention remains_due=true" audit.script
           )
           "Weekly Borg verification must keep its CRC budgets and drill semantics while ending before the next archive window";
         assert lib.assertMsg (lib.all

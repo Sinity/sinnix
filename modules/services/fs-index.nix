@@ -1,11 +1,6 @@
-# A queryable index of what is actually on this machine's disks, kept
-# current. `sinnix-fs inventory` (directories) and `sinnix-fs content`
-# (document files) produced a real 2026-08-16 scan, but nothing invoked
-# either of them -- the index was a one-shot, already stale the day after
-# it was built. `sinnix-fs ledger` then materializes the judgment ledger
-# against that scan into resolved judgments, prefix inheritance and a
-# coverage report. `sinnix-fs run` does all three in sequence, because the
-# ledger step reads the scan's own output tables.
+# Fresh scans publish validated database and Parquet generations through one
+# atomic pointer. Ledger-only refreshes reuse the last verified scan; authored
+# judgments and reference ledgers stay outside that derived lifecycle.
 {
   mkServiceModule,
   config,

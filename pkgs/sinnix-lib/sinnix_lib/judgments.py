@@ -105,6 +105,42 @@ def read_judgments(path: Path) -> dict:
             "records": total, "valid": valid, "issues": issues}
 
 
+def judgment_rank(entry: dict) -> tuple[bool, float]:
+    return entry["record"]["method"] == "operator", entry["timestamp"]
+
+
+def judgment_signature(entry: dict) -> str:
+    record = entry["record"]
+    value = record["value"]
+    status = record.get("observation") or "known"
+    if record["field"] == "role" and status == "known" and isinstance(value, str):
+        value = LEGACY_ROLES.get(value, value)
+    return json.dumps([value, status], sort_keys=True)
+
+
+def effective_target_judgments(ledger: dict) -> list[dict]:
+    """SQL and lexical resolution share validation, rank and ambiguity."""
+    groups = {}
+    for entry in ledger["valid"]:
+        groups.setdefault((entry["kind"], entry["address"], entry["record"]["field"]), []).append(entry)
+    output = []
+    for (kind, address, field), entries in sorted(groups.items()):
+        rank = max(map(judgment_rank, entries))
+        selected = [e for e in entries if judgment_rank(e) == rank]
+        record = dict(selected[0]["record"])
+        record["target"] = kind + ":" + address
+        record["ts"] = dt.datetime.fromtimestamp(rank[1], dt.timezone.utc).isoformat()
+        record["observation"] = record.get("observation") or "known"
+        if len({judgment_signature(e) for e in selected}) > 1:
+            record["observation"] = "ambiguous"
+            record["value"] = None
+        elif field == "role" and record["observation"] == "known" and isinstance(record["value"], str):
+            record["value"] = LEGACY_ROLES.get(record["value"], record["value"])
+        record["winning_records"] = [e["record_sha256"] for e in selected]
+        output.append(record)
+    return output
+
+
 def resolve_judgments(ledger: dict, path: str) -> dict:
     """Per target: operator tier, then decision time. Per field: specificity.
 
@@ -121,21 +157,13 @@ def resolve_judgments(ledger: dict, path: str) -> dict:
         grouped.setdefault((prefix, entry["record"]["field"]), []).append(entry)
     candidates = {}
     for (prefix, field), entries in grouped.items():
-        rank = lambda e: (e["record"]["method"] == "operator", e["timestamp"])
-        best = max(map(rank, entries))
-        selected = [e for e in entries if rank(e) == best]
+        best = max(map(judgment_rank, entries))
+        selected = [e for e in entries if judgment_rank(e) == best]
         candidates.setdefault(field, []).append((prefix, selected))
     output = {}
     for field, options in sorted(candidates.items()):
         prefix, selected = max(options, key=lambda item: len(item[0]))
-        def signature(entry):
-            record = entry["record"]
-            value = record["value"]
-            status = record.get("observation") or "known"
-            if field == "role" and status == "known" and isinstance(value, str):
-                value = LEGACY_ROLES.get(value, value)
-            return json.dumps([value, status], sort_keys=True)
-        signatures = {signature(entry) for entry in selected}
+        signatures = {judgment_signature(entry) for entry in selected}
         evidence = [{"line": e["line"], "record_sha256": e["record_sha256"],
                      "decision": e["record"]} for e in sorted(selected,key=lambda e:e["line"])]
         if len(signatures) > 1:

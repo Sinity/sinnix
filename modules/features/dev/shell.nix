@@ -75,7 +75,7 @@ mkFeatureModule {
               enableCompletion = true;
               # Existing agent sessions can pass the retired bytecode cache
               # address to new shells after a repository move.
-              envExtra = ''
+              envExtra = lib.optionalString (sinnixCfg.projects.entries ? polylogue) ''
                 if [ "''${PYTHONPYCACHEPREFIX:-}" = /realm/project/polylogue/.cache/pycache ] || [ "''${PYTHONPYCACHEPREFIX:-}" = /realm/projects/polylogue/repo/.cache/pycache ]; then
                   export PYTHONPYCACHEPREFIX=${lib.escapeShellArg "${sinnixCfg.projects.entries.polylogue.path}/.cache/pycache"}
                 fi

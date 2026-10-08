@@ -21,6 +21,10 @@
       "backup": "Owner-managed backup repositories.",
       "archive": "Retained cold material and native historical packages.",
       "inbox": "Acquired material awaiting assignment."
+    },
+    "/neo-outer-realm": {
+      "content": "Retained reference and media collections, preserving native package names.",
+      "inbox": "Owner-managed acquisition and import queues."
     }
   },
   "optional": {
@@ -30,6 +34,9 @@
       ".hidden"
     ],
     "/outer-realm": [
+      ".Trash-1000"
+    ],
+    "/neo-outer-realm": [
       ".Trash-1000"
     ]
   },

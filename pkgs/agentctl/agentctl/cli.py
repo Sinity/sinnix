@@ -744,7 +744,7 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         )
         return EXIT_OK
     if verb == "clean":
-        project = resolve_project(config, arguments.project)
+        project = _select_project(config, arguments.project, arguments.selector)
         cleaned = batch.clean(config, project)
         kept = [f"{row['branch']}: {row['reason']}" for row in cleaned["kept"]]
         out.write(

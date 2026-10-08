@@ -25,6 +25,10 @@ def audit(manifest: dict) -> dict:
     external = [Path(root) for root in manifest.get("external_roots", [])]
     if any(not root.is_absolute() for root in external):
         raise ValueError("external roots must be absolute")
+    try:
+        mounted = {line.split()[4].replace("\\040", " ") for line in Path("/proc/self/mountinfo").read_text().splitlines()}
+    except OSError:
+        mounted = set()
     rows = []
     for name in manifest["documents"]:
         document = Path(name)
@@ -46,7 +50,7 @@ def audit(manifest: dict) -> dict:
             if not destination.is_absolute():
                 destination = document.parent / destination
             destination = Path(os.path.abspath(destination))
-            offline = any(destination.is_relative_to(root) for root in external)
+            offline = any(destination.is_relative_to(root) and str(root) not in mounted for root in external)
             rows.append({"document": str(document), "target": target,
                          "destination": str(destination),
                          "status": "external-unprobed" if offline else "ok" if destination.exists() else "missing"})

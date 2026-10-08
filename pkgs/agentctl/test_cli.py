@@ -414,6 +414,15 @@ def test_project_verbs_read_the_catalog(
     assert "nightly" in capsys.readouterr().out
 
 
+def test_batch_cleanup_refuses_unknown_positional_owner(
+    cli_config: Config, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(cli_config.project_roots[0])
+    monkeypatch.setattr(cli.batch, "clean", lambda *_: pytest.fail("wrong owner cleanup"))
+    assert cli.main(["batch", "clean", "nowhere"]) == cli.EXIT_REFUSED
+    assert "could not resolve an AgentCTL project for nowhere" in capsys.readouterr().err
+
+
 def test_events_tail_prints_the_last_lines_filtered_by_project(
     cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:

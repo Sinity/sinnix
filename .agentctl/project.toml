@@ -200,3 +200,45 @@ exec = ["sinnix-navigation-audit", "--manifest", "/realm/report/catalog/navigati
 pool = "normal"
 result = "exit"
 cache = "none"
+
+[operations.fs_index_restore]
+description = "Restore a coherent filesystem-index generation from explicit dated scan artifacts"
+exec = ["env", "PYTHONPATH=pkgs/sinnix-lib", "python3", "scripts/sinnix-fs", "ledger", "--index-dir", "/realm/state/fs-index", "--retained-inputs"]
+arguments = "required"
+pool = "bulk"
+result = "exit"
+cache = "none"
+timeout_seconds = 7200
+
+[operations.fs_index_scan]
+description = "Scan managed filesystems and publish one coherent index generation"
+exec = ["env", "PYTHONPATH=pkgs/sinnix-lib", "python3", "scripts/sinnix-fs", "run", "--out-dir", "/realm/state/fs-index"]
+pool = "bulk"
+result = "exit"
+cache = "none"
+timeout_seconds = 21600
+
+[operations.git_store_repair]
+description = "Preserve refs and package borrowed reachable Git objects independently"
+exec = ["python3", "scripts/sinnix-git-store-repair"]
+arguments = "required"
+pool = "normal"
+result = "exit"
+cache = "none"
+timeout_seconds = 1800
+
+[operations.verify_report_navigation]
+description = "Verify report-index links in local and served contexts"
+exec = ["nix", "build", "--no-link", ".#checks.x86_64-linux.report-navigation-suite"]
+pool = "normal"
+result = "exit"
+cache = "tree+environment"
+
+[operations.clean_terminal_worktrees]
+description = "Release terminal managed worktrees through their lifecycle owner, retaining evidence and uncertain work"
+exec = ["agentctl", "batch", "clean", "--json", "--project"]
+arguments = "required"
+pool = "normal"
+result = "exit"
+cache = "none"
+timeout_seconds = 3600

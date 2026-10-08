@@ -45,7 +45,9 @@ def resolve_historical_path(catalog: dict, path: str, *, asset_id: str | None = 
         for address in [current, *asset.get("previous_paths", [])]:
             address = normalized(address)
             if path == address or (asset["kind"] == "collection" and path.startswith(address.rstrip("/") + "/")):
-                matches.append((len(address), None if asset.get("location_status") == "unavailable"
+                matches.append((len(address), None if asset.get("location_status") in {
+                    "unavailable", "missing", "denied", "offline_mount", "wrong_type", "inaccessible"
+                }
                                 else current + path[len(address):]))
     if not matches:
         raise ValueError(f"path has no catalog identity history: {path}")

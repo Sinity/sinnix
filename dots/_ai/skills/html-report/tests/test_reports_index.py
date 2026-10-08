@@ -137,3 +137,18 @@ def test_table_has_a_separate_accessible_horizontal_scroll_region(tmp_path):
     )
     assert "</table></div>" in page
     assert ".table-wrap{max-width:100%;overflow-x:auto}" in page
+
+
+def test_served_navigation_resolves_projection_and_labels_private_entrance(tmp_path):
+    source = tmp_path / "private.md"
+    source.write_text("private")
+    site = tmp_path / "site"
+    site.mkdir()
+    config(site, source)
+    out = site / "index.html"
+    assert mod.build(site, out, served=True) == 0
+    assert "file://" not in out.read_text()
+    assert "local entrance; use Copy path" in out.read_text()
+    (site / "selected.md").symlink_to(source)
+    assert mod.build(site, out, served=True) == 0
+    assert 'href="selected.md"' in out.read_text()

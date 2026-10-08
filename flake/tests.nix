@@ -48,6 +48,7 @@ in
     ./tests/script-suites.nix
     ./tests/phone-bcr.nix
     ./tests/file-catalog.nix
+    ./tests/report-navigation.nix
     ./tests/pkg-suites.nix
     ./tests/ops-reducer.nix
     ./tests/quota.nix

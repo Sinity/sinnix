@@ -166,9 +166,9 @@
       TimeoutStopSec = "15s";
     };
     timer = {
-      # A missed lock window retries the next day; a successful comparison
-      # makes the other daily wakes no-ops until its seven-day age expires.
-      onCalendar = "*-*-* 06:35:00";
+      # A due comparison retries hourly. A current successful receipt makes
+      # later wakes no-ops until its seven-day age expires.
+      onCalendar = "*-*-* *:35:00";
       persistent = false;
     };
     path = with pkgs; [
@@ -184,8 +184,13 @@
         ${realmCoveragePolicy} 604800 >/dev/null 2>&1; then
         exit 0
       fi
-      acquire_borg_global_lock_or_fail "realm independent full audit"
       install -d -m 0755 ${lib.escapeShellArg borgDrainStateRoot}
+      if ! acquire_borg_global_lock_or_fail "realm independent full audit"; then
+        printf '{"status":"deferred","reason":"borg-lock-contention","epoch":%s}\n' "$(date +%s)" \
+          | publish_backup_marker ${lib.escapeShellArg "${borgDrainStateRoot}/realm.independent-full-audit-attempt.json"}
+        echo "backup_phase=independent_full_audit status=deferred reason=borg-lock-contention remains_due=true"
+        exit 0
+      fi
       audit="$(${snapshotCoverage} audit \
         ${lib.escapeShellArg "${borgDrainStateRoot}/realm.latest-archived"} \
         ${lib.escapeShellArg realmSnapshots} ${realmCoveragePolicy})"

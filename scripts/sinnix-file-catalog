@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # @sinnix-package
 # description: Maintain an evidence catalog of files and collections
-# runtimeInputs: python3
+# runtimeInputs: python3 util-linux btrfs-progs
 # pythonPackages: @sinnix-lib
 
 """Small, portable file evidence catalog.
@@ -21,6 +21,8 @@ import fcntl
 import hashlib
 import json
 import stat
+import subprocess
+import os
 import sys
 import uuid
 from pathlib import Path
@@ -62,18 +64,33 @@ def identity(path: Path) -> dict[str, Any]:
         s = path.stat()
     except OSError as e:
         raise CatalogError(f"current_path does not exist or is inaccessible: {path}: {e}")
-    return {
+    observed = {
         "device": s.st_dev,
         "inode": s.st_ino,
         "size": s.st_size,
         "mtime_ns": s.st_mtime_ns,
         "mode": stat.S_IMODE(s.st_mode),
     }
+    try:
+        mount = subprocess.run(["findmnt", "-T", str(path), "-n", "-o", "FSTYPE,UUID"], text=True, capture_output=True, timeout=5, check=False)
+        fields = mount.stdout.split()
+        if mount.returncode == 0 and len(fields) == 2:
+            observed["filesystem_uuid"] = fields[1]
+            if fields[0] == "btrfs":
+                subvolume = subprocess.run(["btrfs", "inspect-internal", "rootid", str(path)], text=True, capture_output=True, timeout=5, check=False)
+                if subvolume.returncode == 0 and subvolume.stdout.strip().isdigit():
+                    observed["btrfs_subvolume_id"] = int(subvolume.stdout.strip())
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return observed
 
 
 def same_identity(a: Any, b: Any, kind: str = "file") -> bool:
     if not isinstance(a, dict) or not isinstance(b, dict):
         return False
+    if all(a.get(key) is not None and b.get(key) is not None for key in ("filesystem_uuid", "btrfs_subvolume_id")):
+        keys = ("filesystem_uuid", "btrfs_subvolume_id", "inode") if kind == "collection" else ("filesystem_uuid", "btrfs_subvolume_id", "inode", "size", "mtime_ns", "mode")
+        return all(a.get(k) == b.get(k) for k in keys)
     keys = ("device", "inode") if kind == "collection" else ("device", "inode", "size", "mtime_ns", "mode")
     return all(a.get(k) == b.get(k) for k in keys)
 
@@ -197,7 +214,7 @@ def check_asset(asset: Any, *, require_path: bool = True, require_identity: bool
         path = Path(asset["current_path"])
         check_path_kind(path, asset["kind"])
         actual = identity(path)
-        if not same_identity(asset["identity"], actual, asset["kind"]):
+        if not same_identity(asset.get("current_location", {}).get("identity", asset["identity"]), actual, asset["kind"]):
             raise CatalogError(f"identity mismatch for {asset['current_path']}")
 
 
@@ -567,6 +584,83 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     return 0
 
 
+def location_diagnosis(path: Path, kind: str) -> dict:
+    try:
+        info = path.stat()
+        if not (stat.S_ISDIR(info.st_mode) if kind == "collection" else stat.S_ISREG(info.st_mode)):
+            return {"status": "wrong_type", "reason": "configured object type differs"}
+        return {"status": "available", "identity": identity(path)}
+    except PermissionError as exc:
+        return {"status": "denied", "reason": str(exc)}
+    except FileNotFoundError as exc:
+        # External packages require their mount. Do not call an offline mount missing data.
+        external = next((root for root in (Path('/outer-realm'), Path('/neo-outer-realm'), Path('/mnt')) if path.is_relative_to(root)), None)
+        if external is not None and not os.path.ismount(external):
+            return {"status": "offline_mount", "reason": str(external)}
+        return {"status": "missing", "reason": str(exc)}
+    except OSError as exc:
+        return {"status": "inaccessible", "reason": str(exc)}
+
+
+def cmd_observe(args: argparse.Namespace) -> int:
+    """Explicit reviewed metadata observations or revisions, never guessed continuity."""
+    path = Path(args.catalog)
+    rows = observation_list(read_json(Path(args.observations)))
+    with locked(path):
+        if hashlib.sha256(path.read_bytes()).hexdigest() != args.expected_sha256:
+            raise CatalogError("stale catalog digest; review current observations before mutation")
+        catalog = load_catalog(path, paths=False)
+        assets = {a['id']: a for a in catalog['assets']}
+        seen = set()
+        for row in rows:
+            if row.get('id') in seen:
+                raise CatalogError("duplicate asset observation")
+            seen.add(row.get('id'))
+            asset = assets[row['id']]
+            action = row.get('action')
+            if action not in ('metadata', 'content_revision', 'collection_replacement', 'unavailable'):
+                raise CatalogError("explicit observation action required")
+            if not all(isinstance(row.get(k), str) and row[k].strip() for k in ('actor', 'basis', 'reason')):
+                raise CatalogError("actor, basis and reason required")
+            diagnosis = location_diagnosis(Path(asset['current_path']), asset['kind'])
+            observation = {"observed_at": now(), "actor": row['actor'], "basis": row['basis'], "reason": row['reason'],
+                           "action": action, "path": asset['current_path'], **diagnosis,
+                           "content_continuity": "unverified"}
+            if action == 'unavailable':
+                if diagnosis['status'] == 'available':
+                    raise CatalogError("unavailable observation has a live source")
+                asset.setdefault('location_observations', []).append(observation)
+                asset['location_status'] = diagnosis['status']
+                continue
+            if diagnosis['status'] != 'available':
+                raise CatalogError("cannot observe an unavailable source as available")
+            if row.get('expected_identity') != diagnosis['identity']:
+                raise CatalogError("source metadata differs from reviewed observation")
+            if action != 'metadata':
+                if (action == 'collection_replacement') != (asset['kind'] == 'collection'):
+                    raise CatalogError("revision action does not match asset type")
+                previous_id = asset.get('revision_id', str(uuid.uuid4()))
+                asset.setdefault('revisions', []).append({"revision_id": previous_id,
+                    "identity": copy.deepcopy(asset['identity']), "inspections": copy.deepcopy(asset['inspections']),
+                    "coverage": copy.deepcopy(asset.get('coverage')), "retired_at": now(),
+                    "description": asset['description'],
+                    "content_evidence": {key: copy.deepcopy(asset[key]) for key in ('enrichment', 'visible_text', 'outline', 'claims') if key in asset}})
+                for key in ('enrichment', 'visible_text', 'outline', 'claims'):
+                    asset.pop(key, None)
+                asset['description'] = "Current revision has a location metadata observation. Earlier descriptions and content inspections remain in revision history."
+                asset['revision_id'] = str(uuid.uuid4())
+                asset['identity'] = diagnosis['identity']
+                asset['inspections'] = [{"method": "metadata", "scope": "current location metadata only", "basis": row['basis']}]
+                asset['coverage'] = {"status": "metadata_only", "scope": "current revision; payload not inspected", "unit": "object", "discovered_count": None, "inspected_count": 0}
+            asset.setdefault('location_observations', []).append(observation)
+            asset['current_location'] = observation
+            asset['location_status'] = 'available'
+        validate_catalog(catalog, check_paths=False)
+        write_catalog(path, catalog)
+    print(json.dumps({"observations": len(rows), "catalog_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}))
+    return 0
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     """Report every location mismatch without reading payloads or changing identity.
 
@@ -579,31 +673,18 @@ def cmd_audit(args: argparse.Namespace) -> int:
     for asset in catalog["assets"]:
         p = Path(asset["current_path"])
         row: dict[str, Any] = {"id": asset["id"], "path": str(p), "kind": asset["kind"]}
-        try:
-            actual = identity(p)
-            check_path_kind(p, asset["kind"])
-            keys = ("device", "inode") if asset["kind"] == "collection" else (
-                "device", "inode", "size", "mtime_ns", "mode"
-            )
-            differences = [key for key in keys if asset["identity"][key] != actual[key]]
-            row["status"] = (
-                "match" if not differences else
-                "device_only_mismatch" if differences == ["device"] else
-                "identity_mismatch"
-            )
+        diagnosis = location_diagnosis(p, asset['kind'])
+        if diagnosis['status'] != 'available':
+            row.update(diagnosis)
+        else:
+            actual = diagnosis['identity']
+            recorded = asset.get('current_location', {}).get('identity', asset['identity'])
+            keys = ("device", "inode") if asset['kind'] == 'collection' else ("device", "inode", "size", "mtime_ns", "mode")
+            differences = [key for key in keys if recorded[key] != actual[key]]
+            row['status'] = 'match' if not differences else 'device_only_mismatch' if differences == ['device'] else 'identity_mismatch'
+            row['content_continuity'] = asset.get('current_location', {}).get('content_continuity', 'not_reverified')
             if differences:
-                row["differences"] = {
-                    key: {"recorded": asset["identity"][key], "observed": actual[key]}
-                    for key in differences
-                }
-        except FileNotFoundError:
-            row["status"] = "missing"
-        except PermissionError:
-            row["status"] = "unavailable"
-            row["reason"] = "permission denied"
-        except (CatalogError, OSError) as exc:
-            row["status"] = "unavailable"
-            row["reason"] = str(exc)
+                row['differences'] = {key: {'recorded': recorded[key], 'observed': actual[key]} for key in differences}
         counts[row["status"]] = counts.get(row["status"], 0) + 1
         if row["status"] != "match" or args.all:
             rows.append(row)
@@ -648,6 +729,10 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("resolve", help="Resolve recorded historical addresses without filesystem aliases")
     p.add_argument("path"); p.add_argument("--id"); p.set_defaults(func=cmd_resolve)
     p = sub.add_parser("validate"); p.set_defaults(func=lambda a: (load_catalog(Path(a.catalog)) or 0) and 0)
+    p = sub.add_parser("observe", help="Append reviewed location observations or revisions, retaining prior inspections")
+    p.add_argument("observations")
+    p.add_argument("--expected-sha256", required=True)
+    p.set_defaults(func=cmd_observe)
     p = sub.add_parser("audit", help="Read-only, all-asset metadata mismatch report; never repairs identity")
     p.add_argument("--all", action="store_true", help="Include matching assets as well as findings")
     p.set_defaults(func=cmd_audit)

@@ -102,7 +102,7 @@ def explicitly_superseded(text: str) -> bool:
     )
 
 
-def render_navigation(reports_dir: Path, out: Path, manifest: Path | None = None) -> tuple[str, list[dict]]:
+def render_navigation(reports_dir: Path, out: Path, manifest: Path | None = None, served: bool = False) -> tuple[str, list[dict]]:
     """Read optional links-only configuration; native resources remain authoritative.
 
     navigation.json may be a symlink to an independently maintained private
@@ -118,6 +118,11 @@ def render_navigation(reports_dir: Path, out: Path, manifest: Path | None = None
         raise ValueError("navigation.json requires schema_version=1 and groups")
     if len(data["groups"]) > 32:
         raise ValueError("navigation.json has too many groups")
+    published = {}
+    if served:
+        for entry in reports_dir.rglob("*"):
+            if entry.is_file() and not entry.name.startswith("."):
+                published.setdefault(str(entry.resolve()), quote(os.path.relpath(entry, out.parent)))
     sections, groups = [], []
     total = 0
     esc = html_mod.escape
@@ -166,11 +171,17 @@ def render_navigation(reports_dir: Path, out: Path, manifest: Path | None = None
                 href, cls = quote(os.path.relpath(target, out.parent)), ""
             except ValueError:
                 href, cls = target.as_uri(), "local-link"
+            if served:
+                href = published.get(str(target.resolve()))
+                link = (f'<a href="{esc(href, quote=True)}">{esc(item["title"])}</a> '
+                        if href else f'<span>{esc(item["title"])} (local entrance; use Copy path)</span> ')
+            else:
+                link = f'<a class="{cls}" href="{esc(href, quote=True)}">{esc(item["title"])}</a> '
             items.append({**item, "status": status})
             rendered.append(
                 f'<li class="nav-item" data-search="{esc(" ".join((group["title"], item["title"], raw_path, role, note)).casefold(), quote=True)}">'
-                f'<a class="{cls}" href="{esc(href, quote=True)}">{esc(item["title"])}</a> '
-                f'<span class="nav-role">{esc(role)}</span>'
+                + link
+                + f'<span class="nav-role">{esc(role)}</span>'
                 f'<button type="button" class="copy-path" data-path="{esc(raw_path, quote=True)}" aria-label="Copy path: {esc(item["title"], quote=True)}">Copy path</button>'
                 f'<div class="nav-path">{esc(raw_path)}</div>'
                 + (f'<div class="nav-note">{esc(note)}</div>' if note else "")
@@ -240,8 +251,8 @@ def report_meta(p: Path) -> dict:
     }
 
 
-def build(reports_dir: Path, out: Path, navigation_out: Path | None = None, navigation: Path | None = None) -> int:
-    nav_html, nav_groups = render_navigation(reports_dir, out, navigation)
+def build(reports_dir: Path, out: Path, navigation_out: Path | None = None, navigation: Path | None = None, served: bool = False) -> int:
+    nav_html, nav_groups = render_navigation(reports_dir, out, navigation, served)
     files = sorted(
         [
             p
@@ -370,9 +381,10 @@ def main() -> int:
         default=None,
         help="Also publish a Markdown projection of navigation.json",
     )
+    ap.add_argument("--served", action="store_true", help="Link only published files; label private and local entrances")
     args = ap.parse_args()
     out = args.out or (args.reports_dir / "index.html")
-    return build(args.reports_dir, out, args.navigation_markdown, args.navigation)
+    return build(args.reports_dir, out, args.navigation_markdown, args.navigation, args.served)
 
 
 if __name__ == "__main__":
