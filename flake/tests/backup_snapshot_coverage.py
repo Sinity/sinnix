@@ -930,6 +930,7 @@ if command=='borg':
     if args[:2]==['list','--json'] and (root/'fail-proof-list').exists(): sys.exit(2)
     os.execv(REAL_BORG, [REAL_BORG,*args])
 if command=='systemctl':
+    if args[0]=='stop': sys.exit(0)
     lane={'borgbackup-job-persist.service':'persist', 'borgbackup-job-realm.service':'realm'}[args[-1]]
     if lane=='persist' and (root/'fail-persist-unit').exists(): sys.exit(1)
     sys.exit(subprocess.run(['bash',str(root/(lane+'.sh'))],env=os.environ).returncode)
@@ -1769,6 +1770,16 @@ else: sys.exit(1)
                     ["systemctl", "start", "borgbackup-job-realm.service"],
                     ["systemctl", "start", "borgbackup-job-persist.service"],
                 ],
+            )
+            self.assertEqual(
+                calls[-3], ["systemctl", "stop", "borgbackup-verify.service"]
+            )
+            self.assertFalse(
+                any(
+                    call[1] == "stop"
+                    and "borgbackup-coverage-audit-realm.service" in call
+                    for call in calls
+                )
             )
             (root / "fail-persist-unit").unlink()
             run("coordinator")

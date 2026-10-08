@@ -89,9 +89,9 @@
       ];
     };
     serviceConfig = {
-      # One wake archives at most one snapshot, then prunes only after proof.
-      # A timeout before proof retains the queue; a later wake resumes prune.
-      TimeoutStartSec = "4h";
+      # A multi-terabyte backfill runs under idle I/O and bandwidth caps.
+      # One wake archives one snapshot; only accepted proof permits pruning.
+      TimeoutStartSec = "24h";
       TimeoutStopSec = "15s";
     };
     path = with pkgs; [
@@ -129,7 +129,8 @@
       "borgbackup-job-realm.service"
     ];
     serviceConfig = {
-      TimeoutStartSec = "8h15m";
+      # Cover the Realm and persist budgets plus coordination overhead.
+      TimeoutStartSec = "28h15m";
       TimeoutStopSec = "15s";
     };
     path = [ pkgs.systemd ];
@@ -138,9 +139,10 @@
         echo "Fresh snapshot admission window closed"
         exit 0
       fi
-      # An unfinished independent check can be retried. Stop it before
-      # draining, so it cannot hold the Borg lock across this backup window.
-      systemctl stop borgbackup-verify.service borgbackup-coverage-audit-realm.service
+      # Partial repository checks can resume at a later window. Independent
+      # full comparisons retain their lock and snapshot until they finish;
+      # lock-busy drains keep snapshots queued without acknowledging them.
+      systemctl stop borgbackup-verify.service
       failed=0
       if ! systemctl start borgbackup-job-realm.service; then
         echo "Realm snapshot drain failed; continuing to persist" >&2

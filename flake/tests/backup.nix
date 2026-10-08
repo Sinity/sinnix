@@ -243,6 +243,10 @@ assert lib.assertMsg (
               to = "true";
             }
             {
+              from = "systemctl stop";
+              to = "$TMPDIR/mock-bin/systemctl stop";
+            }
+            {
               from = "systemctl start";
               to = "$TMPDIR/mock-bin/systemctl start";
             }
@@ -600,7 +604,7 @@ assert lib.assertMsg (
             && lib.hasInfix "file:///outer-realm/backup/borg-persist-v1" drillScript
             && lib.hasInfix "file:///outer-realm/backup/borg-realm-v2" drillScript
             && lib.hasInfix "borg check --repository-only --max-duration \"$MAX_DURATION\" \"$repo\"" drillScript
-            && audit.serviceConfig.TimeoutStartSec == "5h"
+            && audit.serviceConfig.TimeoutStartSec == "36h"
             && auditTimer.timerConfig.OnCalendar == "*-*-* *:35:00"
             && lib.hasInfix "status=deferred reason=borg-lock-contention remains_due=true" audit.script
           )
@@ -608,20 +612,23 @@ assert lib.assertMsg (
         assert lib.assertMsg (lib.all
           (name: backupRuntimeEval.config.systemd.services.${name}.serviceConfig.TimeoutStartSec == "4h")
           [
-            "borgbackup-job-realm"
             "borgbackup-job-persist"
             "borgbackup-root-snapshots"
           ]
         ) "Snapshot backlog drains must have a finite per-wake deadline";
         assert lib.assertMsg (
           backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.serviceConfig.TimeoutStartSec
-          == "8h15m"
+          == "28h15m"
+          &&
+            backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.TimeoutStartSec
+            == "24h"
           &&
             backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.unitConfig.PropagatesStopTo
             == [
               "borgbackup-job-persist.service"
               "borgbackup-job-realm.service"
             ]
+          && !(lib.hasInfix "stop borgbackup-verify.service borgbackup-coverage-audit-realm.service" backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.script)
           && !(builtins.hasAttr "borgbackup-job-persist" backupRuntimeEval.config.systemd.timers)
           && !(builtins.hasAttr "borgbackup-job-realm" backupRuntimeEval.config.systemd.timers)
           && builtins.hasAttr "borgbackup-drain-coordinator" backupRuntimeEval.config.systemd.timers
