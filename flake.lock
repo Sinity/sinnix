@@ -763,11 +763,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791446429,
-        "narHash": "sha256-+zZ7JfjA1Zq57U0kxB7vgeqod4aSYJB3dukRyzgQfE8=",
+        "lastModified": 1791452767,
+        "narHash": "sha256-SKrJE3akfEpBzj2UDwkqkwufaSaZrCA+3q+rkuyCbNw=",
         "ref": "master",
-        "rev": "1a2ac399670c6bea87d139821e504b4a7277bc67",
-        "revCount": 645,
+        "rev": "205fcb3a7c47a52c6f099f5c591cdda4981613ae",
+        "revCount": 648,
         "type": "git",
         "url": "https://github.com/Sinity/sinity-lynchpin.git"
       },
@@ -1589,11 +1589,11 @@
         "nixpkgs": "nixpkgs_6"
       },
       "locked": {
-        "lastModified": 1788943336,
-        "narHash": "sha256-78ptnkvlPSCjJ4xes3EbD7Opkq0QmvXXazB4theFXD0=",
+        "lastModified": 1791452854,
+        "narHash": "sha256-NVO49YRYwAshcbZ03gFdY8lfDknPvnBAkeAsvoMVrA8=",
         "ref": "master",
-        "rev": "72b822c6341e9b9441d2826cf09b55f90d6453f2",
-        "revCount": 2458,
+        "rev": "ca668e77089013927d5ad633407b34edbd6724b5",
+        "revCount": 2481,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       },
@@ -1628,12 +1628,12 @@
         "rev": "40da3a6c8416b268af6f0016966c3ba2dcbaa40f",
         "revCount": 6,
         "type": "git",
-        "url": "file:///realm/projects/steering/repo"
+        "url": "file:///realm/project/steering/repo"
       },
       "original": {
         "ref": "master",
         "type": "git",
-        "url": "file:///realm/projects/steering/repo"
+        "url": "file:///realm/project/steering/repo"
       }
     },
     "stylix": {

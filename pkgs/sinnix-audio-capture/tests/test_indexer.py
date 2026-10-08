@@ -150,7 +150,7 @@ def _fake_vad(monkeypatch):
 
 
 def _write_segment(capture_root: Path, name: str) -> Path:
-    channel_dir = capture_root / "audio" / "recordings" / "mic"
+    channel_dir = capture_root / "audio" / "recording" / "mic"
     channel_dir.mkdir(parents=True, exist_ok=True)
     path = channel_dir / name
     path.write_bytes(b"x")
@@ -222,7 +222,7 @@ def test_historical_raw_reference_still_suppresses_duplicate_after_rename(tmp_pa
     (lane / f"audio-index-{stamp}.jsonl").write_text(json.dumps({"raw_ref": original}) + "\n")
     catalog = tmp_path / "catalog.json"
     catalog.write_text(json.dumps({"assets": [{"id": "audio", "kind": "collection",
-        "current_path": str(tmp_path / "audio" / "recordings"),
+        "current_path": str(tmp_path / "audio" / "recording"),
         "previous_paths": [str(tmp_path / "old-audio")]}]}))
     assert indexer.run_index_pass(capture_root=tmp_path, channels=("mic",), since_ts=0,
                                   catalog_path=catalog) == 0

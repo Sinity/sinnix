@@ -14,7 +14,7 @@ next, not on supervising progress.
 ## Choose the route
 
 - **Native agents** for investigation, bounded help, and cohesive
-  implementation. Give each one its own worktree (under `/realm/worktrees/`)
+  implementation. Give each one its own worktree (under `/realm/worktree/`)
   or a disjoint area of a shared checkout; the coordinator integrates.
   - In Claude Code, prefer forks (`subagent_type: "fork"`) for
     implementation: they inherit the conversation and the parent model. A

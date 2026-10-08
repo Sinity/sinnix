@@ -41,7 +41,7 @@ for ((i = 1; i <= $#; i++)); do
   fi
 done
 if [[ "${*: -1}" == ls ]]; then
-  cwd="${KITTY_TEST_CWD:-/realm/projects/sinnix/repo/work/lynchpin}"
+  cwd="${KITTY_TEST_CWD:-/realm/project/sinnix/repo/work/lynchpin}"
   printf '%s\n' "[{\"id\":1,\"is_focused\":false,\"tabs\":[{\"is_focused\":false,\"windows\":[{\"is_focused\":true,\"title\":\"same\",\"foreground_processes\":[{\"pid\":200,\"cwd\":\"$cwd\"}]}]}]},{\"id\":2,\"is_focused\":true,\"tabs\":[{\"is_focused\":true,\"windows\":[{\"is_focused\":true,\"title\":\"same\",\"foreground_processes\":[{\"pid\":200,\"cwd\":\"$cwd\"}]}]}]}]"
 else
   printf '%s\n' "$*" >>"$KITTY_TEST_LOG"
@@ -59,7 +59,7 @@ EOF
 
 cat >"$test_root/bin/readlink" <<'EOF'
 #!/usr/bin/env bash
-printf '%s\n' "${KITTY_TEST_CWD:-/realm/projects/sinnix/repo/work/lynchpin}"
+printf '%s\n' "${KITTY_TEST_CWD:-/realm/project/sinnix/repo/work/lynchpin}"
 EOF
 
 cat >"$test_root/bin/notify-send" <<'EOF'

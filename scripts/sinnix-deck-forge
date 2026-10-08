@@ -49,7 +49,7 @@ STATE_DIR = Path(os.environ.get("SINNIX_PHONE_STATE_DIR", "/realm/state/sinnix-p
 DECKS_DIR = STATE_DIR / "inbox" / "decks"
 
 ACTIVITY = Path(os.environ.get("SINNIX_ACTIVITY_ROOT", "/realm/activity"))
-MACHINE = Path(os.environ.get("SINNIX_MACHINE_ROOT", "/realm/devices/sinnix-prime"))
+MACHINE = Path(os.environ.get("SINNIX_MACHINE_ROOT", "/realm/device/sinnix-prime"))
 KEYBIND_MANIFEST = Path(os.environ.get("SINNIX_KEYBIND_MANIFEST", "/realm/activity/desktop/keyboard/keybinds/manifest.json"))
 
 ATUIN_DB = Path(os.environ.get("ATUIN_DB", Path.home() / ".local/share/atuin/history.db"))
@@ -287,13 +287,13 @@ def lake_facts() -> list[tuple[str, float, str]]:
         distinct = len(set(cmds))
         facts.append(("distinct shell command lines you have run", distinct, "commands"))
 
-    ambient = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/devices/shared/phone")) / "ambient"
+    ambient = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/device/shared/phone")) / "ambient"
     if ambient.is_dir():
         n = sum(1 for p in ambient.iterdir() if p.suffix == ".m4a")
         if n:
             facts.append(("five-minute ambient audio chunks on the phone right now", n, "chunks"))
 
-    levels = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/devices/shared/phone")) / "ambient-levels.jsonl"
+    levels = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/device/shared/phone")) / "ambient-levels.jsonl"
     if levels.is_file():
         n = _count_lines(levels)
         if n:

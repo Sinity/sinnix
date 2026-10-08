@@ -67,11 +67,11 @@ now_ms() {
 
 guess_project_root() {
   local cwd="$1"
-  if [[ "$cwd" == /realm/projects/* ]]; then
-    local suffix="${cwd#/realm/projects/}"
+  if [[ "$cwd" == /realm/project/* ]]; then
+    local suffix="${cwd#/realm/project/}"
     local name="${suffix%%/*}"
     if [[ -n "$name" ]]; then
-      printf '/realm/projects/%s/repo' "$name"
+      printf '/realm/project/%s/repo' "$name"
       return 0
     fi
   fi

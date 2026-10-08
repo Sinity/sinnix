@@ -56,7 +56,7 @@ instructions, skills, and memory.
 Host `sinnix-prime`. Root storage is wear-limited; heavy work belongs on
 `/realm`.
 
-- `/realm/projects/`: subject homes; active repositories live in each home’s `repo/`. `/realm/worktrees/`: isolated
+- `/realm/project/`: subject homes; active repositories live in each home’s `repo/`. `/realm/worktree/`: isolated
   checkouts and compile-heavy work.
 - `/realm/`: subject folders and service storage; read `/realm/INVENTORY.md`
   and mutate through the owning tools. `/realm/state/`: live service state and
@@ -91,7 +91,7 @@ running agents in parallel.
   runs as a declared operation:
   `agentctl job start <project> <operation> [options] [-- <declared args>]`.
   Take syntax from `agentctl <verb> --help` and
-  `/realm/projects/sinnix/repo/docs/agentctl.md`. On an error, read the message and
+  `/realm/project/sinnix/repo/docs/agentctl.md`. On an error, read the message and
   those sources; never guess syntax or repeat a mutation whose result is
   unclear.
 - Act on recorded job IDs, task IDs, and worktree paths, not inferred process
@@ -150,7 +150,7 @@ running agents in parallel.
 
 - Session history: Polylogue, or `claude-sessions` for raw Claude transcripts.
   Cross-source history: Lynchpin. Host evidence: the runtime inventory,
-  `sinnix-observe`, `/realm/activity/`, `/realm/devices/sinnix-prime/`. Operator stream:
+  `sinnix-observe`, `/realm/activity/`, `/realm/device/sinnix-prime/`. Operator stream:
   `/realm/personal/journal/raw-log.md`.
 - Project memory (`~/.claude/projects/<project>/memory/MEMORY.md`) is a short
   index of stable facts and pointers. Verify recalled mechanisms against

@@ -38,7 +38,7 @@ RUN = {
             "worker_id": "fixture-7",
             "beads": ["fixture-7", "fixture-8"],
             "branch": f"batch/{RUN_ID}/fixture-7",
-            "worktree": f"/realm/worktrees/fixture-batch-{RUN_ID}-fixture-7",
+            "worktree": f"/realm/worktree/fixture-batch-{RUN_ID}-fixture-7",
             "stage": "running",
             "job_id": "41",
             "job_launch_reference": "fixture-worker-abcd1234",

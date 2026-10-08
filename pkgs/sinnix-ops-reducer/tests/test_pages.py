@@ -49,7 +49,7 @@ MANIFEST: dict[str, Any] = {
 
 def test_project_of_names_checkouts_and_worktrees() -> None:
     assert project_of("/realm/project/sinex/crates") == "sinex"
-    assert project_of("/realm/worktrees/agent-123/src") == "agent-123"
+    assert project_of("/realm/worktree/agent-123/src") == "agent-123"
     assert project_of("/var/tmp") is None
 
 
@@ -152,7 +152,7 @@ def test_work_page_renders_the_queue_jobs_and_lanes_and_interrupts_live_jobs() -
                         "phase": "running",
                         "terminal": False,
                         "exit_code": None,
-                        "path": "/realm/worktrees/sinnix-feature-packet-sinnix-1",
+                        "path": "/realm/worktree/sinnix-feature-packet-sinnix-1",
                         "enqueued_at": "2026-08-23T10:00:00+00:00",
                         "started_at": "2026-08-23T10:00:05+00:00",
                         "ended_at": None,

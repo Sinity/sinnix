@@ -9,7 +9,7 @@ description: Run, watch, recover, or clean AgentCTL work — declared operations
 worktrunk for batch worktrees, GitHub for publication, Beads for tasks, systemd
 for fixed services and timers. It holds no campaign state, so neither should
 you. `agentctl <verb> --help` gives the installed syntax and
-`/realm/projects/sinnix/repo/docs/agentctl.md` the output and exit-code contract.
+`/realm/project/sinnix/repo/docs/agentctl.md` the output and exit-code contract.
 A capability you need but cannot find is a task against the substrate; the
 extension point is a declared operation in the project's
 `.agentctl/project.toml`.

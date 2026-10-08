@@ -397,7 +397,7 @@ def test_resume_prompt_names_the_worktree_branch_and_base(project_root: Path) ->
         bead=bead("fx-solo", "Solo bead"),
         branch="feature/packet/fx-solo",
         base="origin/master",
-        worktree=Path("/realm/worktrees/fixture-feature-packet-fx-solo"),
+        worktree=Path("/realm/worktree/fixture-feature-packet-fx-solo"),
         contract={"schema_version": 1, "attempt": 2},
     )
 

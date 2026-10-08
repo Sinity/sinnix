@@ -140,7 +140,7 @@ mkServiceModule {
         {
           manager = "user";
           resourceClass = "capture";
-          execStart = "${audioPkg}/bin/sinnix-audio-capture index --capture-root ${lakeRoot} --ffmpeg-bin ${ffmpegBin} --catalog /realm/reports/catalog/catalog.json";
+          execStart = "${audioPkg}/bin/sinnix-audio-capture index --capture-root ${lakeRoot} --ffmpeg-bin ${ffmpegBin} --catalog /realm/report/catalog/catalog.json";
           serviceConfig = {
             ReadWritePaths = [
               audioDir

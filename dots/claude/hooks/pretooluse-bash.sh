@@ -66,7 +66,7 @@ for index, token in enumerate(tokens):
             if option in replace_flags or any(option.startswith(flag + "=") for flag in replace_flags):
                 deny("bd update replace-writes blocked: use --append-notes for note history, --design-file or --body-file for file-backed updates, or read-modify-write when replacing a field is intentional.")
         sys.exit(0)
-    if cwd == "/realm/worktrees" or cwd.startswith("/realm/worktrees/"):
+    if cwd == "/realm/worktree" or cwd.startswith("/realm/worktree/"):
         end = index + 1
         while end < len(tokens) and tokens[end] not in separators:
             end += 1

@@ -352,7 +352,7 @@ def main():
     play.add_argument("--height", type=int, default=1080)
     play.add_argument("--cold", action="store_true")
     choose = sub.add_parser("choose", help="choose a local video in the desktop menu and launch it in DeoVR")
-    choose.add_argument("root", nargs="?", default="/realm/library/videos")
+    choose.add_argument("root", nargs="?", default="/realm/library/video")
     choose.add_argument("--stereo", choices=["sbs", "tb", "off"], default="sbs")
     choose.add_argument("--projection", choices=["flat", "dome", "sphere"], default="flat")
     choose.add_argument("--codec", choices=["h264", "h265", "av1"], default="h264")

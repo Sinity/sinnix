@@ -40,6 +40,10 @@ case "$*" in
     printf '[{"focused":true,"width":1920,"height":1080,"specialWorkspace":{"name":"%s"}}]\n' "$special"
     ;;
   "-j clients")
+    if [ "${HYPR_COLD_LAUNCH:-0}" = 1 ] && [ ! -e "$HYPR_APP_STARTED" ]; then
+      printf '[]\n'
+      exit 0
+    fi
     printf '%s\n' '[{"address":"0xabc","class":"rawlog-capture","at":[100,100],"size":[900,500]}]'
     ;;
   "eval hl.dispatch(hl.dsp.workspace.toggle_special(\"scratch_term\"))")
@@ -97,3 +101,18 @@ SCRATCHPAD_CONFIG_DIR="$config_dir" PATH="$fixture_bin:$PATH" "$toggle_helper" r
 [ "$(cat "$HYPR_SPECIAL_STATE")" = "special:scratch_rawlog" ]
 SCRATCHPAD_CONFIG_DIR="$config_dir" PATH="$fixture_bin:$PATH" "$toggle_helper" rawlog
 [ ! -s "$HYPR_SPECIAL_STATE" ]
+
+# A cold launch must outlive the ephemeral toggle controller's scope.
+cat >"$fixture_bin/uwsm" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+[ "$1 $2 $3 $4" = "app -t service --" ]
+shift 4
+[ "$1" = false ]
+touch "$HYPR_APP_STARTED"
+EOF
+sed -i "1c#!$(command -v bash)" "$fixture_bin/uwsm"
+chmod +x "$fixture_bin/uwsm"
+export HYPR_COLD_LAUNCH=1 HYPR_APP_STARTED=$TMPDIR/app-started
+SCRATCHPAD_CONFIG_DIR="$config_dir" PATH="$fixture_bin:$PATH" "$toggle_helper" rawlog
+[ -e "$HYPR_APP_STARTED" ]

@@ -1,9 +1,9 @@
 # Advanced Taskwarrior Configuration
-# Location: /realm/projects/sinnix/repo/dots/taskwarrior/taskrc
+# Location: /realm/project/sinnix/repo/dots/taskwarrior/taskrc
 
 # Data and Hooks
 data.location=~/.task
-hooks.location=/realm/projects/sinnix/repo/dots/taskwarrior/hooks
+hooks.location=/realm/project/sinnix/repo/dots/taskwarrior/hooks
 
 # User Defined Attributes (UDAs)
 uda.estimate.type=duration
@@ -75,7 +75,7 @@ context.deep=+energy:high and -next
 context.quick=+energy:low or estimate.below:15min
 
 # Color Theme (custom 256-color)
-include /realm/projects/sinnix/repo/dots/taskwarrior/themes/custom-dark.theme
+include /realm/project/sinnix/repo/dots/taskwarrior/themes/custom-dark.theme
 
 # Report: Next Actions (GTD)
 report.next.description=Most urgent tasks

@@ -166,7 +166,7 @@ def _directory_boundary_refusal(runtime: Runtime, source: Path) -> str | None:
         Path("/"),
         Path("/realm"),
         Path("/realm/state"),
-        Path("/realm/worktrees"),
+        Path("/realm/worktree"),
         Path.home().resolve(),
         *(project.path.resolve() for project in runtime.config.projects.values()),
     }
@@ -174,7 +174,7 @@ def _directory_boundary_refusal(runtime: Runtime, source: Path) -> str | None:
         return "directory is a broad, mount, project, home, or owner-managed root; directory moves are refused"
     if source.is_mount():
         return "directory is a mount point; directory moves are refused"
-    for root in (Path("/realm/state"), Path("/realm/worktrees")):
+    for root in (Path("/realm/state"), Path("/realm/worktree")):
         if root in source.parents:
             return "directory lies under owner-managed state or worktrees; directory moves are refused"
     return None
@@ -693,7 +693,7 @@ ACTIONS: tuple[Action, ...] = (
             Example(
                 title="Find one old path",
                 input={
-                    "roots": [{"path": "/realm/projects/sinnix/repo"}],
+                    "roots": [{"path": "/realm/project/sinnix/repo"}],
                     "old_paths": ["/realm/data/old-note.md"],
                 },
             ),

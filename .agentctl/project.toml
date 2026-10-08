@@ -12,7 +12,7 @@ inherit = ["HOME", "USER", "LANG", "TERM", "SSH_AUTH_SOCK", "XDG_RUNTIME_DIR", "
 unset = ["PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "_PYTHON_SYSCONFIGDATA_NAME", "_PYTHON_HOST_PLATFORM", "PYTHONPYCACHEPREFIX"]
 
 [workspace]
-root = "/realm/worktrees"
+root = "/realm/worktree"
 default_base = "origin/master"
 verify = { candidate = "check" }
 publish = "master"
@@ -120,7 +120,7 @@ timeout_seconds = 28800
 
 [operations.sinex_cache_prebuild]
 description = "Build and cache the pinned Sinex revision after an input move"
-exec = ["sinnix-sinex-cache-prebuild", "--flake-dir", "/realm/projects/sinnix/repo", "--system", "x86_64-linux"]
+exec = ["sinnix-sinex-cache-prebuild", "--flake-dir", "/realm/project/sinnix/repo", "--system", "x86_64-linux"]
 pool = "bulk"
 result = "exit"
 timeout_seconds = 7200

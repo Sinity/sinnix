@@ -119,7 +119,7 @@ in
             target = ".config/task/taskrc";
             rewrites = [
               {
-                from = "/realm/projects/sinnix/repo";
+                from = "/realm/project/sinnix/repo";
                 to = toString repoFixtureRoot;
               }
             ];
@@ -129,7 +129,7 @@ in
             target = ".config/timewarrior/timewarrior.cfg";
             rewrites = [
               {
-                from = "/realm/projects/sinnix/repo";
+                from = "/realm/project/sinnix/repo";
                 to = toString repoFixtureRoot;
               }
             ];
@@ -145,7 +145,7 @@ in
             target = ".zshrc";
             rewrites = [
               {
-                from = "/realm/projects/sinnix/repo";
+                from = "/realm/project/sinnix/repo";
                 to = toString repoFixtureRoot;
               }
             ];

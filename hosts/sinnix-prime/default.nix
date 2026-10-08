@@ -160,7 +160,7 @@
       activationProfile = "user-mile";
       environment = "prod";
       filesystem.watchPaths = [
-        "/realm/projects"
+        "/realm/project"
         "/realm/inbox/download"
       ];
     };

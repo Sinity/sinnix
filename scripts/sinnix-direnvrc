@@ -12,10 +12,10 @@ _sinnix_project_root() {
   fi
 
   case "$PWD" in
-    /realm/projects/*)
+    /realm/project/*)
       local rest
-      rest="${PWD#/realm/projects/}"
-      printf '/realm/projects/%s/repo\n' "${rest%%/*}"
+      rest="${PWD#/realm/project/}"
+      printf '/realm/project/%s/repo\n' "${rest%%/*}"
       ;;
     *) return 1 ;;
   esac
@@ -47,15 +47,15 @@ _sinnix_project_kind() {
   project_root="$(_sinnix_project_identity_root)" || return 1
 
   case "$project_root" in
-    /realm/projects/sinnix/repo) printf '%s\n' sinnix ;;
-    /realm/projects/sinity-lynchpin/repo) printf '%s\n' lynchpin ;;
-    /realm/projects/sinex/repo | /realm/projects/sinex-*/repo) printf '%s\n' sinex ;;
-    /realm/projects/polylogue/repo | /realm/projects/polylogue-*/repo) printf '%s\n' polylogue ;;
-    /realm/projects/scribe-tap/repo) printf '%s\n' rust-project ;;
-    /realm/projects/intercept-bounce/repo) printf '%s\n' rust-project ;;
-    /realm/projects/knowledge-extract/repo) printf '%s\n' python-project ;;
+    /realm/project/sinnix/repo) printf '%s\n' sinnix ;;
+    /realm/project/sinity-lynchpin/repo) printf '%s\n' lynchpin ;;
+    /realm/project/sinex/repo | /realm/project/sinex-*/repo) printf '%s\n' sinex ;;
+    /realm/project/polylogue/repo | /realm/project/polylogue-*/repo) printf '%s\n' polylogue ;;
+    /realm/project/scribe-tap/repo) printf '%s\n' rust-project ;;
+    /realm/project/intercept-bounce/repo) printf '%s\n' rust-project ;;
+    /realm/project/knowledge-extract/repo) printf '%s\n' python-project ;;
     /realm/archive/knowledgebase) printf '%s\n' data-project ;;
-    /realm/projects/*)
+    /realm/project/*)
       if [ -e "$project_root/flake.nix" ] \
         || [ -e "$project_root/Cargo.toml" ] \
         || [ -e "$project_root/pyproject.toml" ] \
@@ -185,8 +185,8 @@ _sinnix_ensure_sinex_dev_watcher() {
   fi
 
   bin="$(command -v sinnix-sinex-dev-db 2>/dev/null || true)"
-  if [ -z "$bin" ] && [ -x /realm/projects/sinnix/repo/scripts/sinnix-sinex-dev-db ]; then
-    bin=/realm/projects/sinnix/repo/scripts/sinnix-sinex-dev-db
+  if [ -z "$bin" ] && [ -x /realm/project/sinnix/repo/scripts/sinnix-sinex-dev-db ]; then
+    bin=/realm/project/sinnix/repo/scripts/sinnix-sinex-dev-db
   fi
   [ -n "$bin" ] || return 0
 

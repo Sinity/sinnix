@@ -45,11 +45,11 @@ _sinnix_capture_now_ms() {
 
 _sinnix_capture_guess_project_root() {
   local cwd="$1"
-  if [[ "$cwd" == /realm/projects/* ]]; then
-    local suffix="${cwd#/realm/projects/}"
+  if [[ "$cwd" == /realm/project/* ]]; then
+    local suffix="${cwd#/realm/project/}"
     local name="${suffix%%/*}"
     if [[ -n "$name" ]]; then
-      print -r -- "/realm/projects/$name/repo"
+      print -r -- "/realm/project/$name/repo"
       return 0
     fi
   fi

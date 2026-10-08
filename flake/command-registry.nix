@@ -545,7 +545,7 @@ let
   '';
   hostSmokeAllScript = ''
     ${resolveFlakeDir}
-    artifact_root="''${SINNIX_HOST_SMOKE_ROOT:-/realm/devices/sinnix-prime/host-smoke}"
+    artifact_root="''${SINNIX_HOST_SMOKE_ROOT:-/realm/device/sinnix-prime/host-smoke}"
     run_id="$(${pkgs.coreutils}/bin/date -u +%Y%m%dT%H%M%SZ)-$$"
     run_dir="$artifact_root/$run_id"
     mkdir -p "$run_dir"
@@ -632,7 +632,7 @@ in
     check-master = {
       description = "Verify committed master on explicit request";
       script = ''
-        _flake_dir='git+file:///realm/projects/sinnix/repo?ref=master'
+        _flake_dir='git+file:///realm/project/sinnix/repo?ref=master'
         ${loadCheckTargets "checks"}
         ${pkgs.nix}/bin/nix build --no-link --accept-flake-config "''${checks_targets[@]}"
       '';

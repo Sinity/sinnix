@@ -1,6 +1,6 @@
 # enrichment-loop: timer -> state dump -> claude -p (enrichment-pass skill)
 # -> versioned derived outputs. Independent of the sinex/polylogue stores:
-# read-only on every input, writes only under /realm/reports/enrichment/
+# read-only on every input, writes only under /realm/report/enrichment/
 # (outputs) and /realm/state/cursors/enrichment/ (watermark) -- both persistent /realm
 # NVMe paths, not the ephemeral root subvolume, so tmpfiles rules suffice and
 # no impermanence entry is needed.
@@ -22,7 +22,7 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   dump = scriptPkgs.sinnix-enrich-dump;
   stateDir = "/realm/state/cursors/enrichment";
-  outputRoot = "/realm/reports/enrichment";
+  outputRoot = "/realm/report/enrichment";
 in
 mkServiceModule {
   name = "enrichment-loop";
@@ -79,7 +79,7 @@ mkServiceModule {
           outputRoot
           # bd rewrites its store on export, so a read-only steering
           # workspace makes that input fail rather than be absent.
-          "/realm/projects/steering/repo"
+          "/realm/project/steering/repo"
         ]
         ++ lib.sinnix.systemd.agentRuntimeWritePaths {
           home = homeDir;

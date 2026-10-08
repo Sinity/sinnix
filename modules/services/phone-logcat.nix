@@ -46,7 +46,7 @@ mkServiceModule {
       # here is "the cable is out and the phone has rebooted", not a fault.
       {
         name = "phone-logcat";
-        path = "/realm/devices/shared/phone/logcat";
+        path = "/realm/device/shared/phone/logcat";
         cadenceSeconds = 1800;
         staleAfterSeconds = 86400;
       }
@@ -54,7 +54,7 @@ mkServiceModule {
         # Calls are irregular, so freshness is event-driven. The timer only
         # discovers completed files when adb is reachable.
         name = "phone-calls";
-        path = "/realm/devices/shared/phone/calls";
+        path = "/realm/device/shared/phone/calls";
         eventDriven = true;
       }
     ];

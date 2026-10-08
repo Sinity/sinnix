@@ -5,8 +5,8 @@
 set -euo pipefail
 
 if [ -z "${SINEX_RUNTIME_TARGET_CONFIG:-}" ] \
-  && [ -r /realm/projects/sinex/repo/.sinex/state/runtime-target.json ]; then
-  export SINEX_RUNTIME_TARGET_CONFIG=/realm/projects/sinex/repo/.sinex/state/runtime-target.json
+  && [ -r /realm/project/sinex/repo/.sinex/state/runtime-target.json ]; then
+  export SINEX_RUNTIME_TARGET_CONFIG=/realm/project/sinex/repo/.sinex/state/runtime-target.json
 fi
 if [ -n "${SINEX_MCP_SERVER_BIN:-}" ]; then
   exec "$SINEX_MCP_SERVER_BIN" "$@"
@@ -14,7 +14,7 @@ fi
 if command -v sinex-mcp-server >/dev/null 2>&1; then
   exec sinex-mcp-server "$@"
 fi
-sinex_checkout=/realm/projects/sinex/repo
+sinex_checkout=/realm/project/sinex/repo
 sinex_checkout_hash="$(
   printf '%s' "$sinex_checkout" \
     | sha256sum \
@@ -25,5 +25,5 @@ sinex_warm_bin="/var/cache/sinex/$sinex_user/$sinex_checkout_hash/target/debug/s
 if [ -x "$sinex_warm_bin" ]; then
   exec "$sinex_warm_bin" "$@"
 fi
-cd /realm/projects/sinex/repo
+cd /realm/project/sinex/repo
 exec nix develop --command sinex-mcp-server "$@"

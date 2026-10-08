@@ -15,7 +15,7 @@ if ! command -v sinexctl >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; the
 fi
 
 cwd="${CLAUDE_PROJECT_DIR:-${CODEX_WORKING_DIR:-${PWD}}}"
-sinex_root="${SINEX_ROOT:-/realm/projects/sinex/repo}"
+sinex_root="${SINEX_ROOT:-/realm/project/sinex/repo}"
 window="${SINEX_SESSIONSTART_RECALL_WINDOW:-2h}"
 limit="${SINEX_SESSIONSTART_RECALL_LIMIT:-8}"
 timeout_secs="${SINEX_SESSIONSTART_RECALL_TIMEOUT_SECS:-4}"

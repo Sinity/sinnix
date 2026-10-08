@@ -27,10 +27,10 @@ mkFeatureModule {
       # One declaration serves both XDG defaults and conventional home paths.
       # Compatibility links never become a second copy of the personal corpus.
       corpusEntrances = {
-        Documents = "${config.sinnix.paths.realmRoot}/documents";
+        Documents = "${config.sinnix.paths.realmRoot}/document";
         Pictures = "${config.sinnix.paths.photosRoot}";
         Projects = "${config.sinnix.projects.root}";
-        Videos = "${config.sinnix.paths.realmRoot}/library/videos";
+        Videos = "${config.sinnix.paths.realmRoot}/library/video";
       };
     in
     {

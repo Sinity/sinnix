@@ -126,7 +126,7 @@ def test_action_fixtures_are_attested_and_idempotent_across_restart(
         "phase": "running",
         "terminal": False,
         "exit_code": None,
-        "path": "/realm/worktrees/sinnix-feature-packet-sinnix-1",
+        "path": "/realm/worktree/sinnix-feature-packet-sinnix-1",
     }
     state = {"jobs": [job]}
     reducer = Reducer(
@@ -335,7 +335,7 @@ def test_interrupt_uses_agentctl_and_records_its_cancellation_truth(
         "phase": "running",
         "terminal": False,
         "exit_code": None,
-        "path": "/realm/worktrees/sinnix-feature-packet-sinnix-1",
+        "path": "/realm/worktree/sinnix-feature-packet-sinnix-1",
     }
     reducer = Reducer(
         tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
@@ -386,7 +386,7 @@ def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_system(
         {
             "job_id": f"unrelated-{i}",
             "schema_version": 3,
-            "worktree": f"/realm/worktrees/unrelated-{i}",
+            "worktree": f"/realm/worktree/unrelated-{i}",
             "execution": {
                 "pid": 1000 + i,
                 "proc_start": "1",

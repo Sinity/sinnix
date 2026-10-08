@@ -25,7 +25,7 @@ mkServiceModule {
   extraOptions = {
     repoRoot = lib.mkOption {
       type = lib.types.str;
-      default = "/realm/projects/sinity-lynchpin/repo";
+      default = "/realm/project/sinity-lynchpin/repo";
       description = ''
         Absolute path to the lynchpin checkout. The materialization CLI is
         repo-rooted: it reads/writes `.lynchpin/` relative to this directory.

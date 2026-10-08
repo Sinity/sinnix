@@ -133,7 +133,7 @@ def test_checkout_listing_skips_a_worktree_removed_during_the_read(
     """Fails if one worktree vanishing mid-listing fails the whole read.
 
     Batch workers remove worktrees continually; 61 projects.get calls in one
-    night failed with "cannot change to '/realm/worktrees/…'".
+    night failed with "cannot change to '/realm/worktree/…'".
     """
     project, linked = project_with_worktrees(tmp_path, 2)
     projects = ProjectService(

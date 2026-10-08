@@ -56,7 +56,7 @@ in
             };
             devicesRoot = mkOption {
               type = types.str;
-              default = "${config.realmRoot}/devices";
+              default = "${config.realmRoot}/device";
             };
             machineRoot = mkOption {
               type = types.str;
@@ -75,12 +75,12 @@ in
             };
             documentsRoot = mkOption {
               type = types.str;
-              default = "${config.realmRoot}/documents";
+              default = "${config.realmRoot}/document";
               description = "Personal documents, including finance, career, insurance and device records.";
             };
             photosRoot = mkOption {
               type = types.str;
-              default = "${config.personalRoot}/photos";
+              default = "${config.personalRoot}/photo";
             };
             libraryRoot = mkOption {
               type = types.str;
@@ -89,12 +89,12 @@ in
             };
             datasetsRoot = mkOption {
               type = types.str;
-              default = "${config.realmRoot}/library/datasets";
+              default = "${config.realmRoot}/library/dataset";
               description = "Third-party reference corpora acquired for compute (reddit dumps, hf-datasets): re-acquirable, ownership='others'.";
             };
             modelsRoot = mkOption {
               type = types.str;
-              default = "${config.realmRoot}/library/models";
+              default = "${config.realmRoot}/library/model";
               description = "Model weights used by workstation services and analysis tools.";
             };
             stateRoot = mkOption {
@@ -115,7 +115,7 @@ in
             };
             projectRoot = mkOption {
               type = types.str;
-              default = "${config.realmRoot}/projects/sinnix/repo";
+              default = "${config.realmRoot}/project/sinnix/repo";
             };
             dotsRoot = mkOption {
               type = types.str;
@@ -134,7 +134,7 @@ in
           options = {
             root = mkOption {
               type = types.str;
-              default = "/realm/projects";
+              default = "/realm/project";
             };
             privateCatalogFile = mkOption {
               type = types.str;
@@ -310,7 +310,7 @@ in
       # checkout, so it belongs in the data lake rather than per-checkout state.
       # Every worktree and lane inherits this, which is what makes cross-lane
       # comparison possible at all.
-      POLYLOGUE_VERIFY_HISTORY_PATH = "/realm/projects/polylogue/sources/development/verify-history.jsonl";
+      POLYLOGUE_VERIFY_HISTORY_PATH = "/realm/project/polylogue/source/development/verify-history.jsonl";
       SINNIX_ROOT = cfg.projects.entries.sinnix.path;
       RAWLOG_FILE = "${cfg.paths.journalRoot}/raw-log.md";
     };

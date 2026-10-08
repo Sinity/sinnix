@@ -674,9 +674,9 @@ let
     # regenerable members carry their own provenance. Precious-small media
     # (books, videos, substack, edu, music-audio-features, web-content)
     # deliberately stays in coverage.
-    # steamapps, not library/games/steam: the games are 98G of the 103G and Steam
+    # steamapps, not library/game/steam: the games are 98G of the 103G and Steam
     # re-downloads them, but the remaining ~5G is client state that CONTAINS
-    # library/games/steam/userdata -- Steam Cloud save files and game recordings, which
+    # library/game/steam/userdata -- Steam Cloud save files and game recordings, which
     # no reinstall recreates.
     #
     # While the plain-path patterns were inert, userdata was being backed up by
@@ -689,10 +689,13 @@ let
     # measured: borg stops recursing into an excluded directory, so a `+`
     # pattern for the subtree never gets the chance to match, and the archive
     # ends at `media` with nothing beneath it.
-    # Model weights are re-acquirable, so the exact library/models root is
+    # Model weights are re-acquirable, so the exact library/model root is
     # excluded and classified noncanonical. Tags in other realm subtrees do
     # not exclude them; their contents stay covered until explicitly classified.
     # Steam's exclusion names steamapps directly to retain userdata.
+    "library/game/steam/steamapps"
+    "library/model"
+    # Historical snapshots retain these native addresses.
     "library/games/steam/steamapps"
     "library/models"
     # Regenerable-cache root (sinex cargo/dev caches via the
@@ -709,7 +712,7 @@ let
     # 23G of podman OCI layers (the graphroot set in services/ml-containers.nix,
     # deliberately on /realm rather than the wear-limited root). Images are
     # re-pullable by digest and the modules that use them pin those digests, so
-    # this is the same class as library/models and the caches above -- it simply
+    # this is the same class as library/model and the caches above -- it simply
     # was not named, and had been replicating in full. Checked before
     # excluding: the whole 23G is overlay/ image layers, and volumes/ is
     # EMPTY -- these containers keep their data on bind mounts under
@@ -727,6 +730,7 @@ let
     # dataset stays covered. inbox/ is deliberately absent -- downloads land
     # there (196 GB in the same archive) and exist nowhere else.
     "tmp"
+    "worktree"
     "worktrees"
     ".pytest_cache"
     "project/.pytest_cache"
@@ -778,12 +782,16 @@ let
     ++ chromeCacheRoots
   );
   realmNoncanonical = lib.intersectLists realmExcludes [
+    "library/game/steam/steamapps"
+    "library/model"
+    # Historical snapshots retain these native addresses.
     "library/games/steam/steamapps"
     "library/models"
     "state/cache"
     "health/genome/cache"
     "state/containers"
     "tmp"
+    "worktree"
     "worktrees"
     # Pytest writes these caches from subprocess runs rooted at /realm and
     # /realm/project. Borg excludes them through **/.pytest_cache; these

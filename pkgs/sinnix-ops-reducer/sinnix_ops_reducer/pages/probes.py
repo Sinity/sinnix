@@ -100,7 +100,7 @@ def project_of(path: str | None) -> str | None:
     if not path:
         return None
     parts = Path(path).parts
-    for anchor in ("project", "worktrees"):
+    for anchor in ("project", "worktree"):
         if anchor in parts:
             index = parts.index(anchor)
             if index + 1 < len(parts):

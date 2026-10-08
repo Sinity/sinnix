@@ -81,12 +81,13 @@ PY
 }
 
 spawn_window() {
+  # The controller runs in an ephemeral uwsm scope. Give the application its
+  # own service so it survives when this toggle command exits.
+  local properties=()
   if [ -n "${WORKDIR:-}" ]; then
-    (cd "$WORKDIR" && "${COMMAND[@]}") &
-  else
-    "${COMMAND[@]}" &
+    properties=(-p "WorkingDirectory=$WORKDIR")
   fi
-  disown
+  uwsm app -t service "${properties[@]}" -- "${COMMAND[@]}"
 }
 
 wait_for_window() {

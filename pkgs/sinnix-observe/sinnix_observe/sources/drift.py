@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-REPORT = Path("/realm/devices/sinnix-prime/config-drift.jsonl")
+REPORT = Path("/realm/device/sinnix-prime/config-drift.jsonl")
 # The producer runs every five minutes. Three missed intervals make the
 # snapshot stale while allowing ordinary timer scheduling and brief load.
 MAX_REPORT_AGE_SECONDS = 15 * 60

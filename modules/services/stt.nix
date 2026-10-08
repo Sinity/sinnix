@@ -138,7 +138,7 @@ mkAiService {
               Group = "users";
               # Half a gigabyte of weights is not source and does not belong in
               # the store; sinnix already keeps model files under
-              # /realm/library/models. Fetched once, verified every start.
+              # /realm/library/model. Fetched once, verified every start.
               ExecStartPre = "${scriptPkgs.sinnix-stt}/bin/sinnix-stt models";
               ExecStart = lib.concatStringsSep " " [
                 "${scriptPkgs.sinnix-stt}/bin/sinnix-stt"

@@ -176,7 +176,7 @@ belong to [chatgpt-conversations](../chatgpt-conversations/SKILL.md).
 - For deterministic automation loops, prefer `send-await` over blind sleeps.
 - A non-interactive caller without `KITTY_LISTEN_ON` resolves the live `terminal` instance socket before falling back to another live per-user Kitty socket. This keeps remote control working from systemd and MCP processes that have no controlling TTY.
 - `send-await` defaults to `--extent last_cmd_output` to avoid false positives from echoed input.
-- For window layout/navigation primitives, reuse existing system scripts in `/realm/projects/sinnix/repo/scripts`:
+- For window layout/navigation primitives, reuse existing system scripts in `/realm/project/sinnix/repo/scripts`:
   - `kitty-grid` for deterministic grid placement
   - `kitty-hypr-nav` for directional focus/move/resize between Kitty and Hyprland
 - For ready-made automation examples, see `references/control-recipes.md`.

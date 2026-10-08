@@ -76,7 +76,7 @@ def publish_text(path: Path, text: str) -> None:
 
 SCHEMA = "sinnix-elicit-v1"
 BASE_DIR = Path(os.environ.get("SINNIX_ELICIT_DIR", "/realm/state/elicit"))
-REPORTS_DIR = Path(os.environ.get("SINNIX_HUB_REPORTS_DIR", "/realm/reports"))
+REPORTS_DIR = Path(os.environ.get("SINNIX_HUB_REPORTS_DIR", "/realm/report"))
 FEEDBACK_DIR = Path(os.environ.get("SINNIX_HUB_FEEDBACK_DIR", "/realm/state/hub-feedback"))
 
 

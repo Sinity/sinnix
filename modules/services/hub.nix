@@ -125,7 +125,7 @@ mkServiceModule {
 
     reportsDir = lib.mkOption {
       type = lib.types.str;
-      default = "/realm/reports/site";
+      default = "/realm/report/site";
       description = "Explicit report publication projection served under /reports/; catalog sources remain private.";
     };
 
@@ -510,7 +510,7 @@ mkServiceModule {
           captures = [
             {
               name = "phone-ambient";
-              path = "/realm/devices/shared/phone/ambient";
+              path = "/realm/device/shared/phone/ambient";
               cadenceSeconds = 300;
               staleAfterSeconds = 7200;
               producerProgressPath = phoneAmbientProgressPath;
@@ -546,7 +546,7 @@ mkServiceModule {
               # was concerned. That directory keeps its files as history;
               # nothing writes it any more, so it is no longer declared.
               name = "phone-events";
-              path = "/realm/devices/shared/phone/events";
+              path = "/realm/device/shared/phone/events";
               cadenceSeconds = 20;
               staleAfterSeconds = 1800;
             }

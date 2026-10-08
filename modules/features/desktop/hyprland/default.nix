@@ -14,6 +14,7 @@ let
   # Helpers for home-manager config
   repoRoot = config.sinnix.paths.projectRoot;
   journalRoot = config.sinnix.paths.journalRoot;
+  ircRoot = config.sinnix.paths.capturePaths.irc;
 
   # Scratchpad configuration (single source of truth)
   scratchpadData = import ./scratchpads.nix {
@@ -351,7 +352,7 @@ in
             Service = {
               Type = "forking";
               ExecStartPre = "-${pkgs.tmux}/bin/tmux -S /tmp/tmux-weechat-%U kill-server";
-              ExecStart = "${pkgs.tmux}/bin/tmux -S /tmp/tmux-weechat-%U new-session -d -s weechat-persistent ${pkgs.weechat}/bin/weechat";
+              ExecStart = "${pkgs.tmux}/bin/tmux -S /tmp/tmux-weechat-%U new-session -d -s weechat-persistent ${pkgs.weechat}/bin/weechat --run-command '/set logger.file.path ${ircRoot};/save logger'";
               ExecStartPost = "${pkgs.tmux}/bin/tmux -S /tmp/tmux-weechat-%U set-option -t weechat-persistent destroy-unattached off";
               ExecStop = "${pkgs.tmux}/bin/tmux -S /tmp/tmux-weechat-%U kill-server";
               Restart = "always";

@@ -432,7 +432,7 @@ let
         pkgs.libnotify
       ];
       text = ''
-        export SINNIX_STEERING_STATE_DIR="''${SINNIX_STEERING_STATE_DIR:-/realm/projects/steering/repo}"
+        export SINNIX_STEERING_STATE_DIR="''${SINNIX_STEERING_STATE_DIR:-/realm/project/steering/repo}"
         export SINNIX_STEERING_EXPORT_DIR="''${SINNIX_STEERING_EXPORT_DIR:-/realm/activity/shared/steering}"
         export SINNIX_RANK_ROOT="''${SINNIX_RANK_ROOT:-/realm/activity/shared/ranking}"
         exec python3 ${inputs.steering}/sinnix-steer "$@"

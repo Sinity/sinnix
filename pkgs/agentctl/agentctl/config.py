@@ -24,9 +24,9 @@ from .projects import (
 from .prompts import PromptError
 
 DEFAULT_CONFIG_PATH = Path("/etc/sinnix/agentctl.json")
-DEFAULT_PROJECT_PARENTS = (Path("/realm/projects"), Path("/realm/worktrees"))
+DEFAULT_PROJECT_PARENTS = (Path("/realm/project"), Path("/realm/worktree"))
 # Where this workstation keeps the shared skills when no agentctl.json says.
-DEFAULT_SKILLS_DIR = Path("/realm/projects/sinnix/repo/dots/_ai/skills")
+DEFAULT_SKILLS_DIR = Path("/realm/project/sinnix/repo/dots/_ai/skills")
 
 
 class ConfigError(ValueError):

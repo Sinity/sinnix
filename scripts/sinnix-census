@@ -58,8 +58,8 @@ from sinnix_lib.ledger import append_jsonl
 from sinnix_lib.process import run
 
 HOME = Path.home()
-REPO = Path(os.environ.get("SINNIX_REPO", "/realm/projects/sinnix/repo"))
-CAPTURES = Path("/realm/devices/sinnix-prime")
+REPO = Path(os.environ.get("SINNIX_REPO", "/realm/project/sinnix/repo"))
+CAPTURES = Path("/realm/device/sinnix-prime")
 SECRET_DIR = Path("/realm/state/secrets/sinnix/secret")
 INVENTORY = Path("/etc/sinnix/runtime-inventory.json")
 CAPABILITY_INDEX = Path("/etc/sinnix/capability-index.json")

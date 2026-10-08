@@ -204,7 +204,7 @@ def main() -> None:
         default=Path(
             os.environ.get(
                 "SINNIX_AMBIENT_PRODUCT",
-                "/realm/projects/shared/analysis/lynchpin/ambient_intelligence.json",
+                "/realm/project/shared/analysis/lynchpin/ambient_intelligence.json",
             )
         ),
     )

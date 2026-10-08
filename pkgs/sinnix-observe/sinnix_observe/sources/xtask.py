@@ -14,10 +14,10 @@ def sinex_history_db() -> Path | None:
     override = os.environ.get("SINNIX_OBSERVE_SINEX_DB")
     if override:
         return Path(override)
-    sinex_root = Path(os.environ.get("SINEX_ROOT", "/realm/projects/sinex/repo"))
+    sinex_root = Path(os.environ.get("SINEX_ROOT", "/realm/project/sinex/repo"))
     candidates = [
         sinex_root / ".sinex/state/xtask-history.db",
-        Path("/realm/projects/sinex/repo/.sinex/state/xtask-history.db"),
+        Path("/realm/project/sinex/repo/.sinex/state/xtask-history.db"),
     ]
     for candidate in candidates:
         if candidate.exists():

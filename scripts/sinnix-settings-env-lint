@@ -19,7 +19,7 @@ SECRET_KEY = re.compile(r"(?:secret|token|password|passwd|credential|api[_-]?key
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", type=Path, default=Path("/realm/projects"))
+    parser.add_argument("--root", type=Path, default=Path("/realm/project"))
     parser.add_argument(
         "--intentional-prefix",
         action="append",

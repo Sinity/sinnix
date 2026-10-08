@@ -17,7 +17,7 @@ from pathlib import Path
 
 def store_path() -> Path:
     state_dir = Path(
-        os.environ.get("SINNIX_STEERING_STATE_DIR", "/realm/projects/steering/repo")
+        os.environ.get("SINNIX_STEERING_STATE_DIR", "/realm/project/steering/repo")
     )
     return state_dir / "steering.sqlite"
 

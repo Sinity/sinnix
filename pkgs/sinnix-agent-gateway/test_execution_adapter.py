@@ -275,7 +275,7 @@ RUN_DOCUMENT = {
             "id": "fixture-1",
             "beads": ["fixture-1", "fixture-2"],
             "branch": "batch/fixture-run/fixture-1",
-            "worktree": "/realm/worktrees/fixture-batch-fixture-run-fixture-1",
+            "worktree": "/realm/worktree/fixture-batch-fixture-run-fixture-1",
             "backend": "claude",
             "model": "policy",
             "effort": "medium",

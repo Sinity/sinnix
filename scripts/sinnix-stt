@@ -50,14 +50,14 @@ from sinnix_lib.ledger import append_jsonl, utc_ts
 
 SCHEMA = "sinnix.transcript/1"
 
-MODEL_ROOT = Path(os.environ.get("SINNIX_STT_MODEL_ROOT", "/realm/library/models/sherpa"))
+MODEL_ROOT = Path(os.environ.get("SINNIX_STT_MODEL_ROOT", "/realm/library/model/sherpa"))
 PARAKEET = MODEL_ROOT / "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8"
 SILERO = MODEL_ROOT / "silero_vad.onnx"
 SEGMENTATION = MODEL_ROOT / "sherpa-onnx-pyannote-segmentation-3-0" / "model.onnx"
 EMBEDDING = MODEL_ROOT / "nemo_en_titanet_small.onnx"
 
 ACTIVITY = Path(os.environ.get("SINNIX_ACTIVITY_ROOT", "/realm/activity"))
-MACHINE = Path(os.environ.get("SINNIX_MACHINE_ROOT", "/realm/devices/sinnix-prime"))
+MACHINE = Path(os.environ.get("SINNIX_MACHINE_ROOT", "/realm/device/sinnix-prime"))
 TRANSCRIPT_DIR = ACTIVITY / "audio" / "transcripts"
 LEDGER = TRANSCRIPT_DIR / "transcribed.jsonl"
 
@@ -70,7 +70,7 @@ RELEASES = "https://github.com/k2-fsa/sherpa-onnx/releases/download"
 
 #: The model set, as (destination, url, kind). Fetched rather than vendored in
 #: the Nix store: half a gigabyte of weights is not source, and sinnix
-#: already keeps model files under /realm/library/models.
+#: already keeps model files under /realm/library/model.
 MODEL_SET = [
     (
         PARAKEET,
@@ -322,8 +322,8 @@ def lanes() -> dict[str, Path]:
     the retired roots are simply not in the pattern.
     """
     found: dict[str, Path] = {
-        "phone": Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/devices/shared/phone")) / "ambient",
-        "voice": Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/devices/shared/phone")) / "outbox",
+        "phone": Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/device/shared/phone")) / "ambient",
+        "voice": Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/device/shared/phone")) / "outbox",
     }
     audio = ACTIVITY / "audio" / "recordings"
     if audio.is_dir():

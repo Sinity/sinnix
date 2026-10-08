@@ -730,7 +730,7 @@ require = ["POLYLOGUE_ARCHIVE_ROOT"]
 POLYLOGUE_ARCHIVE_ROOT = "/realm/state/polylogue"
 
 [workspace]
-root = "/realm/worktrees"
+root = "/realm/worktree"
 default_base = "origin/master"
 agent_memory_max = "10G"
 verify = { focused = "verify_quick", candidate = "hosted:verify", corpus = "verify_all" }

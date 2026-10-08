@@ -779,7 +779,7 @@ class ProducerReceiptFixture(unittest.TestCase):
                         decoded
                         | {
                             "borg_excludes": [
-                                "run/borgbackup-snapshot-inputs/realm/projects/build/repo"
+                                "run/borgbackup-snapshot-inputs/realm/project/build/repo"
                             ],
                         }
                     )

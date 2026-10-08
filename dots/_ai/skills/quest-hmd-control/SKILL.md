@@ -36,7 +36,7 @@ authenticated network ADB transport without opening a media port on the LAN:
 ```sh
 sinnix quest video open /path/movie.mp4
 sinnix quest video open --clipboard
-sinnix quest video choose /realm/library/videos --stereo off
+sinnix quest video choose /realm/library/video --stereo off
 sinnix quest video status
 sinnix quest video seek +10
 sinnix quest video speed 1.25

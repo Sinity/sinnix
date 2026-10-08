@@ -1182,7 +1182,7 @@ ACTIONS: tuple[Action, ...] = (
             Example(
                 title="Run on a worktree",
                 input={
-                    "checkout": {"path": "/realm/worktrees/sinnix-example"},
+                    "checkout": {"path": "/realm/worktree/sinnix-example"},
                     "operation": "lint",
                     "idempotency_key": "lint-worktree-1",
                 },

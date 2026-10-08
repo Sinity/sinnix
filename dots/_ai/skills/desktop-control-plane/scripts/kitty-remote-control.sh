@@ -214,7 +214,7 @@ launch_agent_here() {
     ;;
   esac
 
-  local fallback_cwd="${SINNIX_AGENT_FALLBACK_CWD:-${SINNIX_PROJECT_ROOT:-/realm/projects/sinnix/repo}}"
+  local fallback_cwd="${SINNIX_AGENT_FALLBACK_CWD:-${SINNIX_PROJECT_ROOT:-/realm/project/sinnix/repo}}"
   [[ -d $fallback_cwd ]] || fallback_cwd="$HOME"
   local active_json active_class kitty_pid runtime_dir socket_path kitty_json focused_json foreground_json
   local foreground_pid foreground_cwd kitty_start foreground_start proc_cwd

@@ -28,8 +28,8 @@ mkServiceModule {
     let
       username = config.sinnix.user.name;
       stateDir = "/realm/state/syncthing";
-      mediaDir = "/realm/personal/photos/phone-sync";
-      questMediaDir = "/realm/personal/photos/quest-3/videoshots";
+      mediaDir = "/realm/personal/photo/phone-sync";
+      questMediaDir = "/realm/personal/photo/quest-3/videoshots";
     in
     {
       # nixpkgs owns syncthing.service, so the surface's `background` class

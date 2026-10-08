@@ -382,7 +382,7 @@ def test_units_stay_distinct_when_their_launch_inputs_share_a_name() -> None:
     stem = "pytest-slot-4242"
     long_stem = "x" * 400
     units = {
-        unit_for(f"/realm/worktrees/{name}/.cache/verify/{stem}.json", "pytest")
+        unit_for(f"/realm/worktree/{name}/.cache/verify/{stem}.json", "pytest")
         for name in ("checkout-a", "checkout-b")
     } | {
         unit_for(f"/inputs/{long_stem}{suffix}.json", "pytest")
@@ -420,7 +420,7 @@ def test_path_properties_bound_what_the_unit_can_reach(
         unit_properties=[
             "ReadOnlyPaths=/realm/project/x",
             "ReadWritePaths=/realm/project/x/.git",
-            "InaccessiblePaths=-/realm/worktrees/x-other",
+            "InaccessiblePaths=-/realm/worktree/x-other",
         ],
     )
 
@@ -430,7 +430,7 @@ def test_path_properties_bound_what_the_unit_can_reach(
     for setting in (
         "ReadOnlyPaths=/realm/project/x",
         "ReadWritePaths=/realm/project/x/.git",
-        "InaccessiblePaths=-/realm/worktrees/x-other",
+        "InaccessiblePaths=-/realm/worktree/x-other",
     ):
         assert argv[argv.index(setting) - 1] == "-p"
 

@@ -135,7 +135,7 @@ def test_probe_reports_uncovered_devices_of_both_kinds(tmp_path: Path):
     assert detail["excluded"] == [f"source:{FIIO_IN}"]
 
     for kind, name in (("source", YETI_IN), ("sink", FIIO_OUT)):
-        seg = tmp_path / "audio" / "recordings" / channel_name(kind, name) / "audio-x.opus.partial"
+        seg = tmp_path / "audio" / "recording" / channel_name(kind, name) / "audio-x.opus.partial"
         seg.parent.mkdir(parents=True)
         seg.write_bytes(b"x")
     code, detail = probe_coverage(
@@ -202,7 +202,7 @@ class _FakeRecorder:
 def _supervisor(tmp_path: Path, **kwargs) -> DeviceSupervisor:
     sup = DeviceSupervisor(capture_root=tmp_path, **kwargs)
     sup._start = lambda device: sup._recorders.__setitem__(  # noqa: SLF001
-        device.key, _FakeRecorder(device, tmp_path / "audio" / "recordings" / device.channel)
+        device.key, _FakeRecorder(device, tmp_path / "audio" / "recording" / device.channel)
     )
     return sup
 

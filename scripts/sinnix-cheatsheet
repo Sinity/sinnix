@@ -43,7 +43,7 @@ from pathlib import Path
 from sinnix_lib.atomic import atomic_publish
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUTPUT = Path("/realm/reports/cheatsheet.html")
+DEFAULT_OUTPUT = Path("/realm/report/cheatsheet.html")
 
 
 def esc(s: str) -> str:

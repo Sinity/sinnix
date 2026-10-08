@@ -1410,7 +1410,7 @@ ACTIONS = ACTIONS + (
             Example(
                 title="Grep a string in a project",
                 input={
-                    "roots": [{"path": "/realm/projects/sinnix/repo"}],
+                    "roots": [{"path": "/realm/project/sinnix/repo"}],
                     "content_regex": "screenshot_probe",
                     "context_lines": 1,
                 },

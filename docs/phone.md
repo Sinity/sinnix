@@ -216,7 +216,7 @@ document-provider export can be truncated. `sinnix.services.phone-logcat`
 therefore keeps one 1800s adb pull for both foreign surfaces, with the useful
 property that USB still works when the network does not. Every newly preserved
 BCR call is decoded immediately; duration, sample rate and level are recorded
-under `/realm/devices/shared/phone/calls/levels.jsonl`, and a digital-silence
+under `/realm/device/shared/phone/calls/levels.jsonl`, and a digital-silence
 recording fails that timer run instead of masquerading as a success. The same
 scheduled probe still warns when finished ambient chunks pile up on-device,
 which means capture is working and delivery is not.

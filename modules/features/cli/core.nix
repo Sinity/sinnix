@@ -31,14 +31,14 @@ mkFeatureModule {
         {
           inherit config;
           unitName = "sinnix-worktree-reap";
-          description = "Remove orphaned worktree directories under /realm/worktrees";
+          description = "Remove orphaned worktree directories under /realm/worktree";
         }
         {
           manager = "user";
           resourceClass = "background";
           script = ''
             set -uo pipefail
-            root=/realm/worktrees
+            root=/realm/worktree
             [ -d "$root" ] || exit 0
             for d in "$root"/*; do
               [ -d "$d" ] || continue
@@ -170,10 +170,10 @@ mkFeatureModule {
               # System services running as this user do not inherit XDG_RUNTIME_DIR.
               settings.shared.runtime_directory = userRuntimeDirectory;
             };
-            # Worktrees for every repo land under /realm/worktrees as
+            # Worktrees for every repo land under /realm/worktree as
             # <repo>-<branch>; project hooks live in each repo's .config/wt.toml.
             xdg.configFile."worktrunk/config.toml".text = ''
-              worktree-path = "/realm/worktrees/{{ repo }}-{{ branch | sanitize }}"
+              worktree-path = "/realm/worktree/{{ repo }}-{{ branch | sanitize }}"
 
               [list]
               json-schema = 2

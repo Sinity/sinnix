@@ -78,7 +78,7 @@ RUNNING = {
         "worker": "fixture-7",
     },
     "group": "agent",
-    "checkout": {"path": "/realm/worktrees/fixture-feature-packet-fixture-7"},
+    "checkout": {"path": "/realm/worktree/fixture-feature-packet-fixture-7"},
     "state": {"phase": "running", "terminal": False, "exit_code": None},
     "enqueued_at": "2026-09-05T10:00:00+00:00",
 }

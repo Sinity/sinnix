@@ -43,20 +43,20 @@ assert_allowed 'echo before; bd update sinnix-test --append-notes "new note"'
 
 assert_checkout_denied() {
   local command="$1"
-  run_hook_at /realm/worktrees/example "$command" | jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("wrong-checkout guard"))' >/dev/null
+  run_hook_at /realm/worktree/example "$command" | jq -e '.hookSpecificOutput.permissionDecision == "deny" and (.hookSpecificOutput.permissionDecisionReason | contains("wrong-checkout guard"))' >/dev/null
 }
 
 assert_checkout_allowed() {
   local command="$1"
-  test -z "$(run_hook_at /realm/worktrees/example "$command")"
+  test -z "$(run_hook_at /realm/worktree/example "$command")"
 }
 
 assert_checkout_denied 'git commit -m "checkpoint"'
 assert_checkout_denied 'echo before; git commit -m "checkpoint"'
 assert_checkout_denied 'bd export'
 assert_checkout_denied 'bd export -o issues.jsonl'
-assert_checkout_allowed 'git -C /realm/projects/sinnix/repo commit -m "checkpoint"'
-assert_checkout_allowed 'bd -C /realm/projects/sinnix/repo export'
+assert_checkout_allowed 'git -C /realm/project/sinnix/repo commit -m "checkpoint"'
+assert_checkout_allowed 'bd -C /realm/project/sinnix/repo export'
 assert_checkout_allowed 'bd export -o /realm/tmp/issues.jsonl'
 assert_checkout_allowed 'echo "git commit and bd export"'
 assert_checkout_allowed 'git status'

@@ -47,7 +47,7 @@ Commands:
       from the label, then searches exact name, the name with collision
       suffixes like " (1)" added or removed, and finally a de-parenthesized
       core substring. Default roots: /realm/inbox, /realm/tmp,
-      /realm/accounts, the user and /realm trash directories, and $HOME.
+      /realm/account, the user and /realm trash directories, and $HOME.
 
   artifacts <page-id>
       List rendered generated-file preview controls with their control index.
@@ -561,7 +561,7 @@ locate_attachment() {
   [[ ${#roots[@]} -gt 0 ]] || roots=(
     /realm/inbox
     /realm/tmp
-    /realm/accounts
+    /realm/account
     "$HOME/.local/share/Trash"
     /realm/.Trash-1000
     "$HOME"

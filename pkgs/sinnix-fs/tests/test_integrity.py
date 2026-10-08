@@ -437,8 +437,8 @@ def test_scan_exclusion_is_a_component_boundary_not_a_lexical_prefix():
     assert fs.content_excluded("/realm/tmp")
     assert fs.content_excluded("/realm/tmp/work/anything")
     assert fs.content_excluded("/realm/tmp-other") is None
-    assert fs.content_excluded("/realm/library/images")
-    assert fs.content_excluded("/realm/library/images-extra") is None
+    assert fs.content_excluded("/realm/library/image")
+    assert fs.content_excluded("/realm/library/image-extra") is None
 
 
 def test_generated_directory_exclusion_keeps_a_boundary_record(tmp_path):

@@ -696,7 +696,7 @@ in
             dry_home="$TMPDIR/codex-skills-dry-run"
             mkdir -p "$dry_home/.codex/skills"
             touch "$dry_home/.codex/skills/app-installed-skill"
-            ln -s /realm/project/sinnix/dots/_ai/skills/agent-runtime "$dry_home/.codex/skills/agent-runtime"
+            ln -s /realm/projects/sinnix/repo/dots/_ai/skills/agent-runtime "$dry_home/.codex/skills/agent-runtime"
             ln -s /private/owner/skill "$dry_home/.codex/skills/private-skill"
             (
               export HOME="$dry_home"
@@ -973,15 +973,15 @@ in
             ! codex_uses_profile app-server
             ! codex_uses_profile doctor
             ! codex_uses_profile debug
-            ! codex_uses_profile -C /realm/projects/sinnix/repo app-server --stdio
+            ! codex_uses_profile -C /realm/project/sinnix/repo app-server --stdio
             ! codex_uses_profile -c features.hooks=true app-server --stdio
-            codex_uses_profile -C /realm/projects/sinnix/repo exec
+            codex_uses_profile -C /realm/project/sinnix/repo exec
             codex_uses_profile "app-server please help"
             ! codex_uses_profile --profile local sandbox bash -c 'exit 0'
             test "$SINNIX_CODEX_PROFILE" = local
             ! codex_uses_profile -p deepseek exec
             test "$SINNIX_CODEX_PROFILE" = deepseek
-            ! codex_uses_profile -C /realm/projects/sinnix/repo --profile local exec
+            ! codex_uses_profile -C /realm/project/sinnix/repo --profile local exec
             codex_uses_profile -c 'prompt=--profile' exec
 
             "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
@@ -1133,7 +1133,7 @@ in
             assert operation["exec"] == [
                 "sinnix-sinex-cache-prebuild",
                 "--flake-dir",
-                "/realm/projects/sinnix/repo",
+                "/realm/project/sinnix/repo",
                 "--system",
                 "x86_64-linux",
             ]

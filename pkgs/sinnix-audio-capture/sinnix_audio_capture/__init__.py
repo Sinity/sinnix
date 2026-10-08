@@ -31,6 +31,6 @@ Shape of the lane:
 Out of scope for this package: bulk transcription runs on the shared STT hub
 and consumes the speech spans + raw_ref pointers indexer.py emits; pyannote
 diarization and a speaker-embedding registry are not implemented. Transcript
-and diarization output belongs under /realm/activity/audio/recordings/processed/ (regenerable,
+and diarization output belongs under /realm/activity/audio/recording/processed/ (regenerable,
 borg-excluded), never under captures/.
 """

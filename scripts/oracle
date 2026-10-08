@@ -43,10 +43,10 @@ fi
 mkdir -p "$(dirname "$OUTPUT")"
 
 RAWLOG=${RAWLOG_FILE:-/realm/personal/journal/raw-log.md}
-PACK_DIR=/realm/projects/sinity-lynchpin/repo/.agent/scratch/current-state-packs
+PACK_DIR=/realm/project/sinity-lynchpin/repo/.agent/scratch/current-state-packs
 
 GH_REPOS=(Sinity/sinnix Sinity/sinex Sinity/polylogue Sinity/knowledgebase Sinity/scribe-tap Sinity/intercept-bounce)
-GIT_REPOS=(/realm/projects/sinex/repo /realm/projects/polylogue/repo /realm/projects/sinity-lynchpin/repo /realm/projects/sinnix/repo)
+GIT_REPOS=(/realm/project/sinex/repo /realm/project/polylogue/repo /realm/project/sinity-lynchpin/repo /realm/project/sinnix/repo)
 
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/oracle.XXXXXXXX")"
 trap 'rm -rf -- "$scratch"' EXIT

@@ -30,7 +30,7 @@ hard failure):
     for "convenient access" (old one-off visits are what the URL-ledger /
     lynchpin are for, not a keybind).
   - Bookmarks: raindrop processed export
-    (/realm/accounts/raindrop/processed/bookmarks.csv) AND live Chrome
+    (/realm/account/raindrop/processed/bookmarks.csv) AND live Chrome
     bookmarks (~/.config/chrome-ws/Default/Bookmarks, Chrome's own JSON
     format, walked recursively for the folder tree).
   - Clipboard: capture-clipboard's own JSONL lane
@@ -73,7 +73,7 @@ from pathlib import Path
 HISTORY_PATH = Path(
     "/realm/activity/browser/history/gestalt/derived/full_history.ndjson"
 )
-RAINDROP_CSV = Path("/realm/accounts/raindrop/processed/bookmarks.csv")
+RAINDROP_CSV = Path("/realm/account/raindrop/processed/bookmarks.csv")
 CHROME_BOOKMARKS = Path.home() / ".config/chrome-ws/Default/Bookmarks"
 CLIPBOARD_DIR = Path("/realm/activity/desktop/clipboard/clipboard")
 READING_STACK_PATH = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "sinnix/reading-stack.json"
