@@ -13,6 +13,7 @@ import unittest
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, TypedDict
+from unittest.mock import patch
 
 from devtools import pytest_slot as slot
 from devtools.worker_memory import (
@@ -202,7 +203,8 @@ class PytestAdmissionTests(unittest.TestCase):
         slot.resize_worker_argument = _bind_resize(meminfo, paths)
         slot.subprocess.Popen = boom
         try:
-            returncode = slot._run_launch(launch)
+            with patch.object(slot, "ISOLATED_ARCHIVE_PARENT", root / "archives"):
+                returncode = slot._run_launch(launch)
         finally:
             slot.resize_worker_argument = original_resize
             slot.subprocess.Popen = original_popen
