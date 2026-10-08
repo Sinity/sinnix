@@ -161,8 +161,9 @@
       ];
     };
     serviceConfig = {
-      # The independent comparison yields before the next archive window.
-      TimeoutStartSec = "5h";
+      # A full canonical comparison can span archive windows under backup I/O
+      # limits. Keep a bounded budget and hold the pruning lock throughout.
+      TimeoutStartSec = "36h";
       TimeoutStopSec = "15s";
     };
     timer = {
