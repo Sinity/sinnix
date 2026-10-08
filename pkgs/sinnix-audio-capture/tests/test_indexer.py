@@ -150,7 +150,7 @@ def _fake_vad(monkeypatch):
 
 
 def _write_segment(capture_root: Path, name: str) -> Path:
-    channel_dir = capture_root / "audio" / "mic"
+    channel_dir = capture_root / "audio" / "recordings" / "mic"
     channel_dir.mkdir(parents=True, exist_ok=True)
     path = channel_dir / name
     path.write_bytes(b"x")
@@ -158,7 +158,7 @@ def _write_segment(capture_root: Path, name: str) -> Path:
 
 
 def _lane_records(capture_root: Path) -> list[str]:
-    lane_dir = capture_root / "audio-index"
+    lane_dir = capture_root / "audio" / "index"
     return [
         line
         for path in sorted(lane_dir.glob("audio-index-2*.jsonl"))
@@ -208,3 +208,21 @@ def test_index_pass_still_indexes_a_segment_it_has_not_seen(
 
     assert added == 1
     assert len(_lane_records(tmp_path)) == 2
+
+
+def test_historical_raw_reference_still_suppresses_duplicate_after_rename(tmp_path, monkeypatch):
+    import json
+    import time
+    _fake_vad(monkeypatch)
+    segment = _write_segment(tmp_path, "audio-mic-20260812T100000Z.opus")
+    original = str(tmp_path / "old-audio" / "mic" / segment.name)
+    lane = tmp_path / "audio" / "index"
+    lane.mkdir(parents=True)
+    stamp = time.strftime("%Y%m%d", time.gmtime())
+    (lane / f"audio-index-{stamp}.jsonl").write_text(json.dumps({"raw_ref": original}) + "\n")
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps({"assets": [{"id": "audio", "kind": "collection",
+        "current_path": str(tmp_path / "audio" / "recordings"),
+        "previous_paths": [str(tmp_path / "old-audio")]}]}))
+    assert indexer.run_index_pass(capture_root=tmp_path, channels=("mic",), since_ts=0,
+                                  catalog_path=catalog) == 0

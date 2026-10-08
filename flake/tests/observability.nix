@@ -90,7 +90,7 @@
               '2026-05-03T12:00:25Z',
               25.0,
               'success',
-              '/realm/project/sinex',
+              '/realm/projects/sinex/repo',
               null,
               'scope-fixture',
               'foreground',
@@ -166,7 +166,7 @@
             2026-05-03T12:00:11Z	polylogued	/user.slice/user-1000.slice/user@1000.service/app.slice/polylogued.service	30.0	268435456	20971520	1.5	0.0
             EOF
             cat > "$TMPDIR/below-process.tsv" <<'EOF'
-            2026-05-03T12:00:10Z	1001	cargo	S	/user.slice/user-1000.slice/user@1000.service/build.slice/sinex.scope	104857600	536870912	120.0	cargo check --workspace /realm/project/sinex
+            2026-05-03T12:00:10Z	1001	cargo	S	/user.slice/user-1000.slice/user@1000.service/build.slice/sinex.scope	104857600	536870912	120.0	cargo check --workspace /realm/projects/sinex/repo
             2026-05-03T12:00:11Z	1002	polylogued	S	/user.slice/user-1000.slice/user@1000.service/app.slice/polylogued.service	20971520	268435456	30.0	polylogued run --host 127.0.0.1 --port 8765
             EOF
 

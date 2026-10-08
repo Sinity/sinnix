@@ -7,13 +7,14 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from sinnix_lib.layout import capture_lane_path
 
 from sinnix_capture.cli import main
 
 
 def _records(root: Path, lane: str) -> list[dict]:
     rows = []
-    for path in sorted((root / lane).glob(f"{lane}-*.jsonl")):
+    for path in sorted(capture_lane_path(root, lane).glob(f"{lane}-*.jsonl")):
         if path.name == f"{lane}-index.jsonl":
             continue
         rows += [json.loads(line) for line in path.read_text().splitlines() if line]
@@ -91,10 +92,10 @@ def test_import_clipse_text_images_and_orphans(tmp_path: Path) -> None:
     assert rows[3]["payload"]["orphan"] is True
     assert Path(rows[3]["raw_ref"]).read_bytes() == orphan
     # Records are filed under their recorded day, not the import day.
-    assert (root / "clipboard" / "clipboard-20260201.jsonl").exists()
+    assert (root / "desktop" / "clipboard" / "clipboard-20260201.jsonl").exists()
     index = [
         json.loads(line)
-        for line in (root / "clipboard" / "clipboard-index.jsonl")
+        for line in (root / "desktop" / "clipboard" / "clipboard-index.jsonl")
         .read_text()
         .splitlines()
     ]

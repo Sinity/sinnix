@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Timewarrior Taskwarrior Integration Hook
-# Location: /realm/project/sinnix/dots/timewarrior/extensions/on-modify.timewarrior
+# Location: /realm/projects/sinnix/repo/dots/timewarrior/extensions/on-modify.timewarrior
 #
 # This hook script integrates Taskwarrior with Timewarrior.
 # When a task is started in Taskwarrior, time tracking begins in Timewarrior.

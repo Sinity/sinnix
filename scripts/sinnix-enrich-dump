@@ -93,9 +93,9 @@ note_input_error() {
 }
 
 # bd rewrites its own store on every call (dolt reimport, lockfile,
-# last-touched), so the unit needs /realm/project/steering writable too.
-if [[ -d /realm/project/steering/.beads ]]; then
-  if ! bd_err="$(bd export -C /realm/project/steering -o "$BUNDLE/steering-export.jsonl" 2>&1)"; then
+# last-touched), so the unit needs /realm/projects/steering/repo writable too.
+if [[ -d /realm/projects/steering/repo/.beads ]]; then
+  if ! bd_err="$(bd export -C /realm/projects/steering/repo -o "$BUNDLE/steering-export.jsonl" 2>&1)"; then
     note_input_error steering-export "$(tail -c 500 <<<"$bd_err")"
     rm -f "$BUNDLE/steering-export.jsonl"
   fi
@@ -136,8 +136,8 @@ fi
 # locations, and markdown as well as json -- the packs directory has only ever
 # held .md, so globbing .json alone could never match anything.
 LYNCHPIN_DIRS=(
-  "/realm/project/sinity-lynchpin/.agent/scratch/current-state-packs"
-  "/realm/project/sinity-lynchpin/.lynchpin/generated"
+  "/realm/projects/sinity-lynchpin/repo/.agent/scratch/current-state-packs"
+  "/realm/projects/sinity-lynchpin/repo/.lynchpin/generated"
 )
 latest=""
 for d in "${LYNCHPIN_DIRS[@]}"; do

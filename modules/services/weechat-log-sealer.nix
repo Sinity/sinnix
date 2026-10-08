@@ -45,7 +45,7 @@ mkServiceModule {
       captures = [
         {
           name = "comms-irc";
-          path = "${config.sinnix.paths.activityRoot}/irc";
+          path = "${config.sinnix.paths.capturePaths.irc}";
           eventDriven = true;
           staleAfterSeconds = 3600;
         }
@@ -54,7 +54,7 @@ mkServiceModule {
   job =
     { cfg, config, ... }:
     let
-      ircRoot = "${config.sinnix.paths.activityRoot}/irc";
+      ircRoot = "${config.sinnix.paths.capturePaths.irc}";
     in
     {
       # Unit predates the sinnix- prefix; keep its name.

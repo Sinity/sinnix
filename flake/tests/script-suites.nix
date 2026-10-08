@@ -169,6 +169,7 @@
           name = "lake-lint";
           suiteDir = ../../pkgs/lake-lint/tests;
           scripts = [ "lake-lint" ];
+          extraPythonPackages = [ sinnix-lib ];
         };
         stt-lake-suite = mkScriptSuite {
           name = "sinnix-stt";

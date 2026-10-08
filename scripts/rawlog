@@ -7,10 +7,10 @@ set -euo pipefail
 # Quick append-only logger for the raw-log stream.
 # Usage: rawlog [message...]
 #
-# Default target: /realm/journal/raw-log.md.
+# Default target: /realm/personal/journal/raw-log.md.
 # Override with RAWLOG_FILE=/some/path/file.md.
 
-LOG_FILE=${RAWLOG_FILE:-/realm/journal/raw-log.md}
+LOG_FILE=${RAWLOG_FILE:-/realm/personal/journal/raw-log.md}
 LOG_DIR=$(dirname "$LOG_FILE")
 PICKER=${PICKER:-tofi}
 RECENT_COUNT=${RECENT_COUNT:-5}

@@ -962,15 +962,15 @@ in
             ! codex_uses_profile app-server
             ! codex_uses_profile doctor
             ! codex_uses_profile debug
-            ! codex_uses_profile -C /realm/project/sinnix app-server --stdio
+            ! codex_uses_profile -C /realm/projects/sinnix/repo app-server --stdio
             ! codex_uses_profile -c features.hooks=true app-server --stdio
-            codex_uses_profile -C /realm/project/sinnix exec
+            codex_uses_profile -C /realm/projects/sinnix/repo exec
             codex_uses_profile "app-server please help"
             ! codex_uses_profile --profile local sandbox bash -c 'exit 0'
             test "$SINNIX_CODEX_PROFILE" = local
             ! codex_uses_profile -p deepseek exec
             test "$SINNIX_CODEX_PROFILE" = deepseek
-            ! codex_uses_profile -C /realm/project/sinnix --profile local exec
+            ! codex_uses_profile -C /realm/projects/sinnix/repo --profile local exec
             codex_uses_profile -c 'prompt=--profile' exec
 
             "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
@@ -1122,7 +1122,7 @@ in
             assert operation["exec"] == [
                 "sinnix-sinex-cache-prebuild",
                 "--flake-dir",
-                "/realm/project/sinnix",
+                "/realm/projects/sinnix/repo",
                 "--system",
                 "x86_64-linux",
             ]

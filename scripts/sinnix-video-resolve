@@ -15,8 +15,8 @@
 # the download layer, used here as the primary de-dup mechanism.
 set -euo pipefail
 
-LEDGER_PARQUET="${SINNIX_URL_LEDGER_PARQUET:-/realm/activity/url-ledger/url_ledger.parquet}"
-ARCHIVE_ROOT="${SINNIX_VIDEO_ARCHIVE_ROOT:-/realm/activity/video-resolve}"
+LEDGER_PARQUET="${SINNIX_URL_LEDGER_PARQUET:-/realm/activity/browser/coverage/url_ledger.parquet}"
+ARCHIVE_ROOT="${SINNIX_VIDEO_ARCHIVE_ROOT:-/realm/activity/browser/recovery}"
 DL_ARCHIVE="$ARCHIVE_ROOT/.yt-dlp-archive"
 # Compatibility record from the first resolver implementation. It remains
 # append-only, but no longer suppresses retries because it contains failures

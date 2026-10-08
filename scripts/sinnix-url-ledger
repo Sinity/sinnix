@@ -79,8 +79,8 @@ def publish_text(path: Path, text: str, *, fsync: bool = True) -> None:
 
 
 DEFAULT_ACTIVITY_ROOT = Path("/realm/activity")
-DEFAULT_DERIVED_ROOT = DEFAULT_ACTIVITY_ROOT
-DEFAULT_HISTORY_PATH = DEFAULT_ACTIVITY_ROOT / "webhistory" / "gestalt" / "derived" / "full_history.ndjson"
+DEFAULT_DERIVED_ROOT = DEFAULT_ACTIVITY_ROOT / "browser"
+DEFAULT_HISTORY_PATH = DEFAULT_ACTIVITY_ROOT / "browser" / "history" / "gestalt" / "derived" / "full_history.ndjson"
 
 # ---------------------------------------------------------------------------
 # Conservative URL normalization: strip fragment + tracking params only,
@@ -971,7 +971,7 @@ COPY (
 def add_common_paths(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--state-root",
-        default=str(DEFAULT_ACTIVITY_ROOT / "url-ledger" / "state"),
+        default=str(Path("/realm/state/url-ledger")),
         help="Directory for urls.jsonl / resolution.jsonl (default: %(default)s)",
     )
 
@@ -989,7 +989,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     resolve = sub.add_parser("resolve", help="Query CDX/Memento providers for unresolved URLs")
     add_common_paths(resolve)
-    resolve.add_argument("--cdx-raw-root", default=str(DEFAULT_ACTIVITY_ROOT / "url-ledger" / "cdx-raw"))
+    resolve.add_argument("--cdx-raw-root", default=str(DEFAULT_ACTIVITY_ROOT / "browser" / "coverage" / "sources" / "cdx"))
     resolve.add_argument(
         "--provider",
         action="append",
@@ -1012,7 +1012,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     build = sub.add_parser("build", help="Join urls.jsonl + resolution.jsonl -> duckdb/parquet product")
     add_common_paths(build)
-    build.add_argument("--derived-root", default=str(DEFAULT_DERIVED_ROOT / "url-ledger"))
+    build.add_argument("--derived-root", default=str(DEFAULT_DERIVED_ROOT / "coverage"))
     build.add_argument("--window-days", type=int, default=30, help="Coverage window in days (default: %(default)s)")
     build.add_argument("--duckdb-bin", default="duckdb")
     build.set_defaults(func=cmd_build)
@@ -1022,8 +1022,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--url-field", default="url")
     run.add_argument("--time-field", default="iso_time")
     add_common_paths(run)
-    run.add_argument("--cdx-raw-root", default=str(DEFAULT_ACTIVITY_ROOT / "url-ledger" / "cdx-raw"))
-    run.add_argument("--derived-root", default=str(DEFAULT_DERIVED_ROOT / "url-ledger"))
+    run.add_argument("--cdx-raw-root", default=str(DEFAULT_ACTIVITY_ROOT / "browser" / "coverage" / "sources" / "cdx"))
+    run.add_argument("--derived-root", default=str(DEFAULT_DERIVED_ROOT / "coverage"))
     run.add_argument("--provider", action="append", choices=list(PROVIDERS))
     run.add_argument("--max-requests", type=int, default=200000)
     run.add_argument("--max-seconds", type=int, default=7200)

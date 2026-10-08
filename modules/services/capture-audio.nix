@@ -32,18 +32,13 @@ let
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   audioPkg = scriptPkgs.sinnix-audio-capture;
-  # The whole audio family (audio + audio-devices + audio-topology +
-  # audio-index) shares one --capture-root argument with the CLI deriving
-  # each lane's subdirectory internally (pkgs/sinnix-audio-capture), so it
-  # cannot be split across activityRoot/machineRoot without CLI surgery.
-  # Kept whole under activityRoot per the charter's dominant-container rule
-  # (2026-08-17 subject recut) -- audio-devices/audio-topology would
-  # otherwise sit in machineRoot per the charter's literal table.
+  # Stable producer identities map to physical homes through the same layout
+  # manifest used by the capture packages and the filesystem inventory.
   lakeRoot = config.sinnix.paths.activityRoot;
-  audioDir = "${lakeRoot}/audio";
-  devicesDir = "${lakeRoot}/audio-devices";
-  topologyDir = "${lakeRoot}/audio-topology";
-  indexDir = "${lakeRoot}/audio-index";
+  audioDir = "${config.sinnix.paths.capturePaths.audio}";
+  devicesDir = "${config.sinnix.paths.capturePaths.audio-devices}";
+  topologyDir = "${config.sinnix.paths.capturePaths.audio-topology}";
+  indexDir = "${config.sinnix.paths.capturePaths.audio-index}";
 
   cfg = config.sinnix.services.capture-audio;
   mkExcludeArgs =
@@ -145,7 +140,7 @@ mkServiceModule {
         {
           manager = "user";
           resourceClass = "capture";
-          execStart = "${audioPkg}/bin/sinnix-audio-capture index --capture-root ${lakeRoot} --ffmpeg-bin ${ffmpegBin}";
+          execStart = "${audioPkg}/bin/sinnix-audio-capture index --capture-root ${lakeRoot} --ffmpeg-bin ${ffmpegBin} --catalog /realm/reports/catalog/catalog.json";
           serviceConfig = {
             ReadWritePaths = [
               audioDir

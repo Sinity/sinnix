@@ -23,6 +23,7 @@
             mkdir -p scripts pkgs/sinnix-file-catalog/tests
             cp ${../../scripts/sinnix-file-catalog} scripts/sinnix-file-catalog
             cp ${../../scripts/sinnix-file-catalog-report} scripts/sinnix-file-catalog-report
+            cp ${../../scripts/sinnix-report-site} scripts/sinnix-report-site
             chmod +x scripts/*
             patchShebangs scripts
             cp ${../../pkgs/sinnix-file-catalog/tests}/*.py pkgs/sinnix-file-catalog/tests/

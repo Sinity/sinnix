@@ -13,7 +13,7 @@ this skill owns the writing and the audit.
 
 ## Where text lives
 
-- Global instructions (`/realm/project/sinnix/dots/_ai/AGENTS.md`, linked
+- Global instructions (`/realm/projects/sinnix/repo/dots/_ai/AGENTS.md`, linked
   into each agent's home) hold cross-project rules. A repository's `AGENTS.md`
   is its only project instruction file and holds its stable semantics; Claude
   Code, Codex, and Gemini all read it, so no `CLAUDE.md` accompanies it.

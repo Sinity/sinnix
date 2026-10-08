@@ -140,7 +140,9 @@ let
     sinnix-lib = externalPackages.sinnix-lib;
     beads = externalPackages.beads;
   };
-  agentctlToolingPackage = agentctlPackage.overridePythonAttrs (_: { doCheck = false; });
+  agentctlToolingPackage = agentctlPackage.overridePythonAttrs (_: {
+    doCheck = false;
+  });
   agentGatewayPackage = pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix {
     polylogue-contract-source = inputs.polylogue;
     lynchpin-contract-source = inputs.lynchpin;
@@ -148,13 +150,17 @@ let
     sinnix-lib = externalPackages.sinnix-lib;
     agentctl = agentctlPackage;
   };
-  agentGatewayToolingPackage = (pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix {
-    polylogue-contract-source = inputs.polylogue;
-    lynchpin-contract-source = inputs.lynchpin;
-    beads-owner = externalPackages.beads;
-    sinnix-lib = externalPackages.sinnix-lib;
-    agentctl = agentctlToolingPackage;
-  }).overridePythonAttrs (_: { doCheck = false; });
+  agentGatewayToolingPackage =
+    (pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix {
+      polylogue-contract-source = inputs.polylogue;
+      lynchpin-contract-source = inputs.lynchpin;
+      beads-owner = externalPackages.beads;
+      sinnix-lib = externalPackages.sinnix-lib;
+      agentctl = agentctlToolingPackage;
+    }).overridePythonAttrs
+      (_: {
+        doCheck = false;
+      });
 
   mkSanitizedPythonWrapper =
     {
@@ -426,8 +432,9 @@ let
         pkgs.libnotify
       ];
       text = ''
-        export SINNIX_STEERING_EXPORT_DIR="''${SINNIX_STEERING_EXPORT_DIR:-/realm/activity/steering}"
-        export SINNIX_RANK_ROOT="''${SINNIX_RANK_ROOT:-/realm/activity/ranking}"
+        export SINNIX_STEERING_STATE_DIR="''${SINNIX_STEERING_STATE_DIR:-/realm/projects/steering/repo}"
+        export SINNIX_STEERING_EXPORT_DIR="''${SINNIX_STEERING_EXPORT_DIR:-/realm/activity/shared/steering}"
+        export SINNIX_RANK_ROOT="''${SINNIX_RANK_ROOT:-/realm/activity/shared/ranking}"
         exec python3 ${inputs.steering}/sinnix-steer "$@"
       '';
       meta.description = "Steering store CLI — intentions, forecasts, activities, rituals";

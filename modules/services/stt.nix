@@ -95,7 +95,7 @@ mkAiService {
       {
         systemd.tmpfiles.rules = [
           "d ${modelDir} 0755 ${user} users -"
-          "d ${config.sinnix.paths.activityRoot}/transcripts 0755 ${user} users -"
+          "d ${config.sinnix.paths.capturePaths.transcripts} 0755 ${user} users -"
         ];
 
         environment.systemPackages = [ scriptPkgs.sinnix-stt ];
@@ -113,7 +113,7 @@ mkAiService {
           captures = [
             {
               name = "transcripts";
-              path = "${config.sinnix.paths.activityRoot}/transcripts";
+              path = "${config.sinnix.paths.capturePaths.transcripts}";
               # Deliberately unbudgeted. The lake pass runs on lakeIntervalSec,
               # but it only writes when the VAD gate found speech in newly
               # landed audio, so a quiet stretch --

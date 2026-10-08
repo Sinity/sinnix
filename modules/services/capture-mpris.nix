@@ -22,7 +22,7 @@ let
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   lakeRoot = config.sinnix.paths.activityRoot;
-  mprisDir = "${lakeRoot}/mpris";
+  mprisDir = "${config.sinnix.paths.capturePaths.mpris}";
   cfg = config.sinnix.services.capture-mpris;
   monitorPython = pkgs.python3.withPackages (_: [ scriptPkgs.sinnix-lib ]);
 

@@ -14,6 +14,7 @@ import json
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from sinnix_lib.layout import capture_lane_path
 
 import pytest
 from sinnix_capture.cli import main
@@ -63,7 +64,7 @@ class Lane:
     def __init__(self, tmp_path: Path, lane: str = "clipboard") -> None:
         self.root = tmp_path / "captures"
         self.lane = lane
-        self.lane_dir = self.root / lane
+        self.lane_dir = capture_lane_path(self.root, lane)
         self.types_file = tmp_path / "types"
         self.content_file = tmp_path / "content"
         self.window_file = tmp_path / "window.json"
@@ -319,7 +320,7 @@ def test_the_watch_payload_is_drained_before_anything_else(
 def test_blob_store_concurrently_publishes_one_complete_digest(tmp_path: Path) -> None:
     body = b"concurrent content-addressed blob"
     digest = hashlib.sha256(body).hexdigest()
-    lane_dir = tmp_path / "clipboard"
+    lane_dir = tmp_path / "desktop" / "clipboard"
 
     with ThreadPoolExecutor(max_workers=8) as pool:
         paths = list(pool.map(lambda _: store_blob(lane_dir, body, digest), range(8)))

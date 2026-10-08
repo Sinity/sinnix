@@ -118,14 +118,14 @@ in
               | timeout 5 "$watch"
             unset DRAIN_MARKER
 
-            index_file="$TMPDIR/captures/clipboard/clipboard-index.jsonl"
+            index_file="$TMPDIR/captures/desktop/clipboard/clipboard-index.jsonl"
             test "$(wc -l < "$index_file")" -eq 1
-            envelope_file="$(find "$TMPDIR/captures/clipboard" -maxdepth 1 -name 'clipboard-*.jsonl' | head -n1)"
+            envelope_file="$(find "$TMPDIR/captures/desktop/clipboard" -maxdepth 1 -name 'clipboard-*.jsonl' | head -n1)"
             jq -e '.payload.size == 3145728' "$envelope_file" >/dev/null
 
             # Reset the isolated fixture after the large-payload case; the
             # remaining assertions exercise the plain text/binary flow.
-            rm -rf "$TMPDIR/captures/clipboard" "$TMPDIR/state"
+            rm -rf "$TMPDIR/captures/desktop/clipboard" "$TMPDIR/state"
             mkdir -p "$TMPDIR/state"
             printf 'hello from the fixture' > "$FIXTURE_DIR/content"
             "$watch"
@@ -136,7 +136,7 @@ in
 
             test "$(wc -l < "$index_file")" -eq 1
 
-            envelope_file="$(find "$TMPDIR/captures/clipboard" -maxdepth 1 -name 'clipboard-*.jsonl' | head -n1)"
+            envelope_file="$(find "$TMPDIR/captures/desktop/clipboard" -maxdepth 1 -name 'clipboard-*.jsonl' | head -n1)"
             jq -e '
               .schema == "sinnix-capture-v1" and
               .lane == "clipboard" and

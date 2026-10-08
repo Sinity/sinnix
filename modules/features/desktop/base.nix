@@ -28,8 +28,8 @@ mkFeatureModule {
       # Compatibility links never become a second copy of the personal corpus.
       corpusEntrances = {
         Documents = "${config.sinnix.paths.realmRoot}/documents";
-        Pictures = "${config.sinnix.paths.realmRoot}/photos";
-        Projects = "${config.sinnix.paths.realmRoot}/project";
+        Pictures = "${config.sinnix.paths.photosRoot}";
+        Projects = "${config.sinnix.projects.root}";
         Videos = "${config.sinnix.paths.realmRoot}/library/videos";
       };
     in

@@ -697,7 +697,7 @@ ACTIONS: tuple[Action, ...] = (
             ),
             Example(
                 title="Checkout containing a path",
-                input={"target": {"path": "/realm/project/sinnix/flake.nix"}},
+                input={"target": {"path": "/realm/projects/sinnix/repo/flake.nix"}},
             ),
         ),
     ),

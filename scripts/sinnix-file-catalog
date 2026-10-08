@@ -18,6 +18,7 @@ from collections import Counter
 import copy
 import datetime as _dt
 import fcntl
+import hashlib
 import json
 import stat
 import sys
@@ -26,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.catalog_paths import normalized, relocate_path, resolve_historical_path
 
 SCHEMA_VERSION = 1
 REQUIRED_INSPECTION = ("method", "scope", "basis")
@@ -447,6 +449,124 @@ def cmd_relocate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_prepare_relocation(args: argparse.Namespace) -> int:
+    """Bind a metadata transaction to a catalog digest and pre-rename identities."""
+    path = Path(args.catalog)
+    with locked(path):
+        raw = path.read_bytes()
+        catalog = load_catalog(path, paths=False)
+        moves = read_json(Path(args.moves))
+        if not isinstance(moves, list) or not moves:
+            raise CatalogError("moves must be a nonempty list of source/destination objects")
+        for move in moves:
+            normalized(move["source"])
+            normalized(move["destination"])
+            if move["source"] == move["destination"]:
+                raise CatalogError("source and destination must differ")
+        rows, unavailable = [], []
+        paths = set()
+        for asset in catalog["assets"]:
+            old = asset["current_path"]
+            destination = relocate_path(old, moves)
+            if destination in paths:
+                raise CatalogError(f"relocation would collide at {destination}")
+            paths.add(destination)
+            if destination == old:
+                continue
+            source = Path(old)
+            if not source.exists() and args.retain_unavailable:
+                unavailable.append({"id": asset["id"], "source": old, "destination": destination,
+                                    "reason": "Already unavailable before cutover; no physical continuity or new current location asserted."})
+                continue
+            check_path_kind(source, asset["kind"])
+            observed = identity(source)
+            continuity = same_identity(asset["identity"], observed, asset["kind"])
+            if not continuity and not args.record_existing_drift:
+                raise CatalogError(f"existing identity drift: {old}; audit and explicitly record it first")
+            rows.append({"id": asset["id"], "source": old, "destination": destination,
+                         "before": observed, "catalog_identity": asset["identity"],
+                         "prior_identity_matches": continuity,
+                         "source_reused_as_container": destination.startswith(old.rstrip("/") + "/")})
+        receipt = {"schema": "sinnix.catalog-relocation.v1", "prepared_at": now(),
+                   "catalog_sha256": hashlib.sha256(raw).hexdigest(), "moves": moves, "assets": rows,
+                   "unavailable": unavailable}
+        output = Path(args.output)
+        if output.exists():
+            raise CatalogError(f"refusing to overwrite relocation receipt: {output}")
+        atomic_publish(output, (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode(),
+                       fsync=True, mode=0o600)
+    return 0
+
+
+def cmd_relocate_batch(args: argparse.Namespace) -> int:
+    """Publish all metadata changes once; a failed check leaves the catalog intact."""
+    path = Path(args.catalog)
+    receipt = read_json(Path(args.receipt))
+    if receipt.get("schema") != "sinnix.catalog-relocation.v1":
+        raise CatalogError("unsupported relocation receipt")
+    with locked(path):
+        if hashlib.sha256(path.read_bytes()).hexdigest() != receipt["catalog_sha256"]:
+            raise CatalogError("stale catalog digest; prepare a new receipt before renaming")
+        catalog = load_catalog(path, paths=False)
+        by_id = {asset["id"]: asset for asset in catalog["assets"]}
+        expected = {asset["id"] for asset in catalog["assets"]
+                    if relocate_path(asset["current_path"], receipt["moves"]) != asset["current_path"]}
+        rows = receipt["assets"]
+        unavailable = receipt.get("unavailable", [])
+        combined = [*rows, *unavailable]
+        if len(combined) != len({row["id"] for row in combined}) or {row["id"] for row in combined} != expected:
+            raise CatalogError("receipt must include every affected asset exactly once")
+        for row in unavailable:
+            asset = by_id[row["id"]]
+            if asset["current_path"] != row["source"]:
+                raise CatalogError("stale unavailable-asset exception")
+            if Path(row["source"]).exists() or Path(row["destination"]).exists():
+                raise CatalogError("unavailable-asset exception now has a live candidate; inspect its identity")
+            asset["location_status"] = "unavailable"
+            asset.setdefault("location_observations", []).append({"at": now(), **row})
+        for row in rows:
+            asset = by_id[row["id"]]
+            old, destination = normalized(row["source"]), normalized(row["destination"])
+            if asset["current_path"] != old or asset["identity"] != row["catalog_identity"]:
+                raise CatalogError(f"stale receipt for {row['id']}")
+            if relocate_path(old, receipt["moves"]) != destination:
+                raise CatalogError(f"receipt destination disagrees with moves: {destination}")
+            if Path(old).exists() or Path(old).is_symlink():
+                source = Path(old)
+                reused = (row.get("source_reused_as_container") and destination.startswith(old.rstrip("/") + "/")
+                          and source.is_dir() and not source.is_symlink()
+                          and not same_identity(row["before"], identity(source), "collection"))
+                if not reused:
+                    raise CatalogError(f"old address still exists: {old}")
+            current = Path(destination)
+            check_path_kind(current, asset["kind"])
+            actual = identity(current)
+            if not same_identity(row["before"], actual, asset["kind"]):
+                raise CatalogError(f"pre/post rename identity mismatch: {destination}")
+            asset.setdefault("previous_paths", []).append(old)
+            asset.setdefault("relocations", []).append({
+                "at": now(), "source": old, "destination": destination,
+                "before": row["before"], "after": actual,
+                "prior_catalog_identity": row["catalog_identity"],
+                "prior_identity_matches": row["prior_identity_matches"],
+                "basis": "Same object verified immediately before and after external rename; older observation retained without a continuity claim when mismatched.",
+            })
+            asset["current_path"] = destination
+            # Hashes are attributed observations, never silently certified for a
+            # changed object. Keep them in prior_catalog_identity in that case.
+            extras = {key: value for key, value in asset["identity"].items() if key not in actual}
+            asset["identity"] = {**actual, **(extras if row["prior_identity_matches"] else {})}
+        validate_catalog(catalog, check_paths=False)
+        write_catalog(path, catalog)
+    return 0
+
+
+def cmd_resolve(args: argparse.Namespace) -> int:
+    catalog = load_catalog(Path(args.catalog), paths=False)
+    print(resolve_historical_path(catalog, args.path, asset_id=args.id))
+    return 0
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     """Report every location mismatch without reading payloads or changing identity.
 
@@ -516,13 +636,24 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--kind", choices=("file", "collection")); p.set_defaults(func=cmd_coverage)
     p = sub.add_parser("show"); p.add_argument("id"); p.set_defaults(func=cmd_show)
     p = sub.add_parser("relocate"); p.add_argument("id"); p.add_argument("new_path"); p.set_defaults(func=cmd_relocate)
+    p = sub.add_parser("prepare-relocation", help="Capture bounded pre-rename identities and a catalog digest")
+    p.add_argument("moves"); p.add_argument("--output", required=True)
+    p.add_argument("--record-existing-drift", action="store_true",
+                   help="Retain mismatched older identities as attributed history; certify only this rename")
+    p.add_argument("--retain-unavailable", action="store_true",
+                   help="Keep already absent records as explicit unavailable history, without asserting a new identity")
+    p.set_defaults(func=cmd_prepare_relocation)
+    p = sub.add_parser("relocate-batch", help="Atomically publish a prepared metadata relocation after external renames")
+    p.add_argument("receipt"); p.set_defaults(func=cmd_relocate_batch)
+    p = sub.add_parser("resolve", help="Resolve recorded historical addresses without filesystem aliases")
+    p.add_argument("path"); p.add_argument("--id"); p.set_defaults(func=cmd_resolve)
     p = sub.add_parser("validate"); p.set_defaults(func=lambda a: (load_catalog(Path(a.catalog)) or 0) and 0)
     p = sub.add_parser("audit", help="Read-only, all-asset metadata mismatch report; never repairs identity")
     p.add_argument("--all", action="store_true", help="Include matching assets as well as findings")
     p.set_defaults(func=cmd_audit)
     args = parser.parse_args(argv)
     try: return args.func(args)
-    except (CatalogError, OSError) as e: return fail(str(e))
+    except (ValueError, OSError, KeyError, TypeError) as e: return fail(str(e))
 
 
 if __name__ == "__main__":

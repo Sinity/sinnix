@@ -86,3 +86,11 @@ A claim's status is copied from its observation; rendering does not independentl
 The document-type selector contains the types actually present in the catalog. It is a retrieval filter, not a replacement for the controlled collection-role ledger. Filters combine with record kind, method, coverage and text search; reset and relationship/hash navigation clear the type filter consistently. The page computes each static record's search text and method list once at initialization instead of reading its large evidence text again for every keystroke.
 
 The renderer remains an offline projection of one JSON catalog. It sends no annotations, changes no source payloads, and preserves the complete catalog in its safe application/json block. Output-generation timestamps are distinct from individual inspection timestamps and from the original documents' publication dates.
+
+## Coordinated placement changes
+
+`prepare-relocation MOVES --output RECEIPT` binds every affected asset to the catalog digest and its observed pre-move identity. `relocate-batch RECEIPT` verifies every destination and publishes the catalog once. A stale catalog, collision or changed payload refuses the entire metadata transaction. `--record-existing-drift` explicitly retains earlier identity evidence without certifying its hashes for the currently observed object. `--retain-unavailable` records already absent historical assets without inventing a new current location.
+
+`resolve HISTORICAL-PATH` uses retained collection boundaries and path history to resolve references without filesystem aliases. An address reused for a different cataloged object requires `--id ASSET-UUID`; unavailable records remain unavailable.
+
+The report renderer accepts `--judgments` for authoritative current classifications, displayed separately from original asset observations. Shared role definitions normalize legacy categories while retaining their attributed wording. Raw catalog and navigation sources stay private. `sinnix-report-site` publishes an explicit manifest of individual files; it refuses directory links, unsafe URLs and sources beneath declared private roots. Subject homes own canonical analyses, while the site holds the selected publication projection.

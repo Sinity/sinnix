@@ -42,8 +42,8 @@ let
   };
   mcpLynchpinBin = pkgs.writeShellScriptBin "mcp-lynchpin" ''
     set -euo pipefail
-    export LYNCHPIN_REPO_ROOT=/realm/project/sinity-lynchpin
-    export LYNCHPIN_LOCAL_ROOT=/realm/project/sinity-lynchpin/.lynchpin
+    export LYNCHPIN_REPO_ROOT=/realm/projects/sinity-lynchpin/repo
+    export LYNCHPIN_LOCAL_ROOT=/realm/projects/sinity-lynchpin/repo/.lynchpin
     export PYTHONPATH="$LYNCHPIN_REPO_ROOT''${PYTHONPATH:+:$PYTHONPATH}"
     exec ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.mcp.cli "$@"
   '';

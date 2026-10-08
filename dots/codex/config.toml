@@ -25,31 +25,31 @@ trust_level = "trusted"
 # not cover its sub-repos. Declare persistent trust here: activation merges
 # this source with registry-generated MCP entries and copies the result into
 # the home profile. A runtime edit alone does not update its owning source.
-[projects."/realm/project/sinex"]
+[projects."/realm/projects/sinex/repo"]
 trust_level = "trusted"
 
-[projects."/realm/project/sinnix"]
+[projects."/realm/projects/sinnix/repo"]
 trust_level = "trusted"
 
-[projects."/realm/project/sinity-lynchpin"]
+[projects."/realm/projects/sinity-lynchpin/repo"]
 trust_level = "trusted"
 
-[projects."/realm/project/polylogue"]
+[projects."/realm/projects/polylogue/repo"]
 trust_level = "trusted"
 
-[projects."/realm/project/scribe-tap"]
+[projects."/realm/projects/scribe-tap/repo"]
 trust_level = "trusted"
 
-[projects."/realm/project/intercept-bounce"]
+[projects."/realm/projects/intercept-bounce/repo"]
 trust_level = "trusted"
 
-[projects."/realm/project/knowledge-extract"]
+[projects."/realm/projects/knowledge-extract/repo"]
 trust_level = "trusted"
 
 [projects."/realm/archive/knowledgebase"]
 trust_level = "trusted"
 
-[projects."/realm/activity/irc"]
+[projects."/realm/activity/communication/irc"]
 trust_level = "trusted"
 
 [projects."/neo-outer-realm/content/media"]

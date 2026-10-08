@@ -50,7 +50,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/realm/project/sinnix/dots/claude/hooks/pretooluse-agent-model.sh",
+            "command": "/realm/projects/sinnix/repo/dots/claude/hooks/pretooluse-agent-model.sh",
             "timeout": 5
           }
         ]
@@ -60,7 +60,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/realm/project/sinnix/dots/claude/hooks/pretooluse-bash.sh",
+            "command": "/realm/projects/sinnix/repo/dots/claude/hooks/pretooluse-bash.sh",
             "timeout": 3
           }
         ]
@@ -115,17 +115,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-acknowledged-outages.sh",
+            "command": "/realm/projects/sinnix/repo/dots/claude/hooks/sessionstart-acknowledged-outages.sh",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-sinex-recall.sh",
+            "command": "/realm/projects/sinnix/repo/dots/claude/hooks/sessionstart-sinex-recall.sh",
             "timeout": 5
           },
           {
             "type": "command",
-            "command": "/realm/project/sinnix/dots/claude/hooks/sessionstart-steering.sh",
+            "command": "/realm/projects/sinnix/repo/dots/claude/hooks/sessionstart-steering.sh",
             "timeout": 8
           },
           {
@@ -161,7 +161,7 @@
   },
   "statusLine": {
     "type": "command",
-    "command": "bash /realm/project/sinnix/dots/claude/statusline-command.sh"
+    "command": "bash /realm/projects/sinnix/repo/dots/claude/statusline-command.sh"
   },
   "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,

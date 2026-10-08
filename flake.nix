@@ -76,7 +76,7 @@
     };
 
     lynchpin = {
-      url = "git+file:///realm/project/sinity-lynchpin?ref=master";
+      url = "git+https://github.com/Sinity/sinity-lynchpin.git?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.polylogueSrc.follows = "polylogue";
     };
@@ -95,7 +95,7 @@
     # wrapper (flake/scripts.nix), so the whole steering concern lives in
     # one place. Non-flake: it is a workspace, not a project with outputs.
     steering = {
-      url = "git+file:///realm/project/steering?ref=master";
+      url = "git+file:///realm/projects/steering/repo?ref=master";
       flake = false;
     };
 

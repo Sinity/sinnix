@@ -30,7 +30,7 @@ BD_TIMEOUT = 8.0
 BD_HEAD_LIMIT = 5
 TITLE_MAX = 88
 
-STEERING_BEADS_DIR = Path("/realm/project/steering/.beads")
+STEERING_BEADS_DIR = Path("/realm/projects/steering/repo/.beads")
 
 
 def default_static_inventory_path() -> Path:

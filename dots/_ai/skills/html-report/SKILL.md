@@ -30,9 +30,11 @@ only for the interaction patterns the artifact needs.
    Never imply that `file://` input was received. Publish or send the file only
    when an exposed tool and the current authority permit it. Otherwise return
    the local path and say what was not published.
-6. Place one-shot reports beside the deliverable. Place living or
-   cross-referenced reports in `/realm/reports/` and refresh its
-   index with the bundled generator.
+6. Keep canonical reports beside their subject. Publish explicitly selected
+   files and companion assets through `/realm/reports/site/` with
+   `sinnix-report-site`; never link whole subject directories. Private catalog
+   and navigation sources live in `/realm/reports/catalog/`. Refresh the site
+   index with the bundled generator and its explicit `--navigation` input.
 
 ## Verification
 

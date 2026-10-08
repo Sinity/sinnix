@@ -25,7 +25,7 @@ let
   captureCli = scriptPkgs.sinnix-capture;
   listener = scriptPkgs.sinnix-capture-notifications-listener;
   lane = "notifications";
-  laneDir = "${config.sinnix.paths.activityRoot}/${lane}";
+  laneDir = config.sinnix.paths.capturePaths.${lane};
 in
 mkServiceModule (mkCaptureLane {
   name = "capture-notifications";

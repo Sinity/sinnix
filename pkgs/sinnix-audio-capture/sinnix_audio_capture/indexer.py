@@ -46,6 +46,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from sinnix_lib.layout import capture_lane_path
+
 from .segment import hour_bucket_start
 
 INDEX_LANE = "audio-index"
@@ -75,7 +77,7 @@ def discover_channels(capture_root: Path) -> list[str]:
     directories in the lake (`legacy/`, `archive/`, `raw/`) are never
     walked.
     """
-    audio_dir = Path(capture_root) / "audio"
+    audio_dir = capture_lane_path(capture_root, "audio")
     if not audio_dir.is_dir():
         return []
     return sorted(
@@ -227,7 +229,7 @@ def _speech_spans_for_segment(model, pcm16_bytes: bytes) -> list[SpeechSpan]:
     ]
 
 
-def already_indexed_refs(capture_root: Path, *, since_ts: float) -> set[str]:
+def already_indexed_refs(capture_root: Path, *, since_ts: float, catalog: dict | None = None) -> set[str]:
     """Segment paths this lane has already written an envelope for.
 
     The lookback window is NOT a de-duplication mechanism, and treating it as
@@ -247,7 +249,7 @@ def already_indexed_refs(capture_root: Path, *, since_ts: float) -> set[str]:
     Only the lane files that can overlap the window are read, so this stays
     cheap as the lane grows.
     """
-    lane_dir = Path(capture_root) / INDEX_LANE
+    lane_dir = capture_lane_path(capture_root, INDEX_LANE)
     if not lane_dir.is_dir():
         return set()
     # One day of slack on each side: segments are bucketed by their own start
@@ -277,6 +279,9 @@ def already_indexed_refs(capture_root: Path, *, since_ts: float) -> set[str]:
                         # reason to re-index the whole window.
                         continue
                     if ref:
+                        if catalog is not None:
+                            from sinnix_lib.catalog_paths import resolve_historical_path
+                            ref = resolve_historical_path(catalog, ref)
                         refs.add(ref)
         except FileNotFoundError:
             continue
@@ -290,6 +295,7 @@ def run_index_pass(
     since_ts: float,
     ffmpeg_bin: str = "ffmpeg",
     writer_factory=None,
+    catalog_path: Path | None = None,
 ) -> int:
     """Live entry point (`sinnix-audio-capture index`). Returns the number
     of segments indexed. `channels=None` indexes every channel directory
@@ -301,12 +307,13 @@ def run_index_pass(
 
     if channels is None:
         channels = tuple(discover_channels(capture_root))
-    seen = already_indexed_refs(Path(capture_root), since_ts=since_ts)
+    catalog = json.loads(catalog_path.read_text()) if catalog_path is not None else None
+    seen = already_indexed_refs(Path(capture_root), since_ts=since_ts, catalog=catalog)
     writer = writer_factory()
     model = _load_model()
     indexed = 0
     for channel in channels:
-        channel_dir = Path(capture_root) / "audio" / channel
+        channel_dir = capture_lane_path(capture_root, "audio") / channel
         for segment_path in list_segments(channel_dir, since_ts=since_ts):
             # raw_ref is written as str(segment_path) below; compare on the
             # same string so a pass never re-decodes what it already recorded.

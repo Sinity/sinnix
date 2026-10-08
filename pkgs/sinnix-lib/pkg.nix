@@ -26,5 +26,9 @@ python3Packages.buildPythonPackage {
     "sinnix_lib.spool"
     "sinnix_lib.systemd"
     "sinnix_lib.values"
+    "sinnix_lib.layout"
+    "sinnix_lib.judgments"
+    "sinnix_lib.taxonomy"
+    "sinnix_lib.catalog_paths"
   ];
 }

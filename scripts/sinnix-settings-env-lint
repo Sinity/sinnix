@@ -19,7 +19,7 @@ SECRET_KEY = re.compile(r"(?:secret|token|password|passwd|credential|api[_-]?key
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root", type=Path, default=Path("/realm/project"))
+    parser.add_argument("--root", type=Path, default=Path("/realm/projects"))
     parser.add_argument(
         "--intentional-prefix",
         action="append",
@@ -59,7 +59,7 @@ def audit(args: argparse.Namespace) -> tuple[dict[str, object], int]:
     if not root.is_dir():
         return {"schema": SCHEMA, "root": str(root), "findings": [], "error": "root_not_directory"}, 2
 
-    for repo in sorted(path for path in root.iterdir() if path.is_dir()):
+    for repo in sorted(path / "repo" for path in root.iterdir() if (path / "repo").is_dir()):
         settings = repo / ".claude" / "settings.json"
         if not settings.is_file():
             continue

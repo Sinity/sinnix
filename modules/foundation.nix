@@ -11,6 +11,9 @@
 let
   inherit (lib) types mkOption;
   cfg = config.sinnix;
+  filesystemLayout = builtins.fromJSON (
+    builtins.readFile ../pkgs/sinnix-lib/sinnix_lib/filesystem-layout.json
+  );
 in
 {
   options.sinnix = {
@@ -40,9 +43,24 @@ in
               default = "${config.realmRoot}/activity";
               description = "Personal activity records: app focus, terminal, media playback, notifications, browsing, messages, transcripts, and ranking sessions.";
             };
+            capturePaths = mkOption {
+              type = types.attrsOf types.str;
+              default = lib.mapAttrs (
+                _: relative: "${config.activityRoot}/${relative}"
+              ) filesystemLayout.activity_lanes;
+              description = "Physical activity homes keyed by stable producer identity, from the shared layout manifest.";
+            };
+            personalRoot = mkOption {
+              type = types.str;
+              default = "${config.realmRoot}/personal";
+            };
+            devicesRoot = mkOption {
+              type = types.str;
+              default = "${config.realmRoot}/devices";
+            };
             machineRoot = mkOption {
               type = types.str;
-              default = "${config.realmRoot}/machine";
+              default = "${config.devicesRoot}/sinnix-prime";
               description = "Host/device telemetry: machine-telemetry, syslog, netflow, router, monitor DDC, audio device/topology streams, the phone app's own lane.";
             };
             healthRoot = mkOption {
@@ -52,7 +70,7 @@ in
             };
             journalRoot = mkOption {
               type = types.str;
-              default = "${config.realmRoot}/journal";
+              default = "${config.personalRoot}/journal";
               description = "The operator journal and its historical entries.";
             };
             documentsRoot = mkOption {
@@ -62,7 +80,7 @@ in
             };
             photosRoot = mkOption {
               type = types.str;
-              default = "${config.realmRoot}/photos";
+              default = "${config.personalRoot}/photos";
             };
             libraryRoot = mkOption {
               type = types.str;
@@ -97,7 +115,7 @@ in
             };
             projectRoot = mkOption {
               type = types.str;
-              default = "${config.realmRoot}/project/sinnix";
+              default = "${config.realmRoot}/projects/sinnix/repo";
             };
             dotsRoot = mkOption {
               type = types.str;
@@ -116,7 +134,7 @@ in
           options = {
             root = mkOption {
               type = types.str;
-              default = "/realm/project";
+              default = "/realm/projects";
             };
             privateCatalogFile = mkOption {
               type = types.str;
@@ -188,7 +206,7 @@ in
               );
               default = {
                 sinnix = {
-                  path = "${config.root}/sinnix";
+                  path = "${config.root}/sinnix/repo";
                   remote = "https://github.com/Sinity/sinnix.git";
                   devtoolsEntrypoint = "nix develop";
                   taskAuthority = {
@@ -198,7 +216,7 @@ in
                   };
                 };
                 sinex = {
-                  path = "${config.root}/sinex";
+                  path = "${config.root}/sinex/repo";
                   remote = "https://github.com/Sinity/sinex.git";
                   taskAuthority = {
                     workspace = "${cfg.paths.stateRoot}/tasks/sinex/.beads";
@@ -207,7 +225,7 @@ in
                   };
                 };
                 polylogue = {
-                  path = "${config.root}/polylogue";
+                  path = "${config.root}/polylogue/repo";
                   remote = "https://github.com/Sinity/polylogue.git";
                   taskAuthority = {
                     workspace = "${cfg.paths.stateRoot}/tasks/polylogue/.beads";
@@ -216,7 +234,7 @@ in
                   };
                 };
                 lynchpin = {
-                  path = "${config.root}/sinity-lynchpin";
+                  path = "${config.root}/sinity-lynchpin/repo";
                   remote = "https://github.com/Sinity/sinity-lynchpin.git";
                   taskAuthority = {
                     workspace = "${cfg.paths.stateRoot}/tasks/lynchpin/.beads";
@@ -292,7 +310,7 @@ in
       # checkout, so it belongs in the data lake rather than per-checkout state.
       # Every worktree and lane inherits this, which is what makes cross-lane
       # comparison possible at all.
-      POLYLOGUE_VERIFY_HISTORY_PATH = "/realm/activity/dev/polylogue/verify-history.jsonl";
+      POLYLOGUE_VERIFY_HISTORY_PATH = "/realm/projects/polylogue/sources/development/verify-history.jsonl";
       SINNIX_ROOT = cfg.projects.entries.sinnix.path;
       RAWLOG_FILE = "${cfg.paths.journalRoot}/raw-log.md";
     };

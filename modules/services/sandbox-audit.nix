@@ -12,7 +12,7 @@
 let
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-  auditLane = "${config.sinnix.paths.activityRoot}/audit";
+  auditLane = "${config.sinnix.paths.capturePaths.audit}";
   auditState = "/realm/state/cursors/audit-drain";
   # sinnix-oa9j: auditd's own log_file defaults to /var/log/audit on the
   # wear-limited root SSD. The pre-fix rule set left ~6.9G of ENOENT execve

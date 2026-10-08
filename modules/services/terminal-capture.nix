@@ -14,8 +14,7 @@
 let
   username = config.sinnix.user.name;
   repoRoot = config.sinnix.paths.projectRoot;
-  lakeRoot = config.sinnix.paths.activityRoot;
-  recordingsDir = "${lakeRoot}/asciinema";
+  recordingsDir = "${config.sinnix.paths.capturePaths.asciinema}";
 in
 mkServiceModule {
   name = "terminal-capture";

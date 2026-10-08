@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: f675f4b922a0ece676d9cbfe14b2b23454f981e2b39ec65f29ac5ceb9c8a7782 -->
+<!-- gateway-catalog-sha256: 5ac70b15c11ce8f9db54808b67b84ded97c7c7f8fe27da29eec925bb3d504bc6 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `f675f4b922a0ece676d9cbfe14b2b23454f981e2b39ec65f29ac5ceb9c8a7782`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `5ac70b15c11ce8f9db54808b67b84ded97c7c7f8fe27da29eec925bb3d504bc6`.
 
 ## Invocation
 
@@ -1607,7 +1607,7 @@ Grep a string in a project:
   "context_lines": 1,
   "roots": [
     {
-      "path": "/realm/project/sinnix"
+      "path": "/realm/projects/sinnix/repo"
     }
   ]
 }
@@ -2689,7 +2689,7 @@ Find one old path:
   ],
   "roots": [
     {
-      "path": "/realm/project/sinnix"
+      "path": "/realm/projects/sinnix/repo"
     }
   ]
 }
@@ -2958,7 +2958,7 @@ Checkout containing a path:
 ```json
 {
   "target": {
-    "path": "/realm/project/sinnix/flake.nix"
+    "path": "/realm/projects/sinnix/repo/flake.nix"
   }
 }
 ```
@@ -18962,7 +18962,7 @@ New window in a project:
 
 ```json
 {
-  "cwd": "/realm/project/sinnix",
+  "cwd": "/realm/projects/sinnix/repo",
   "idempotency_key": "open-1"
 }
 ```
@@ -26916,7 +26916,7 @@ Resume work in a checkout:
     "README.md"
   ],
   "related_limit": 3,
-  "repo_path": "/realm/project/sinnix"
+  "repo_path": "/realm/projects/sinnix/repo"
 }
 ```
 

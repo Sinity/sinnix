@@ -763,18 +763,18 @@
         ]
       },
       "locked": {
-        "lastModified": 1789261763,
-        "narHash": "sha256-Eg0iLHe7vH3rB4b0QEFZtc6FocZNfGWtIl5Zt79WDUs=",
+        "lastModified": 1791444008,
+        "narHash": "sha256-wVhWF1VZ425OmEg4Q6YY94xABkaDQFIfIkWY33XcWwc=",
         "ref": "master",
-        "rev": "842e7a1e943aea766e95d824c2db934f07dd0447",
-        "revCount": 463,
+        "rev": "42472ccf0ad8292ca7f36cdc26e4941a3295a908",
+        "revCount": 644,
         "type": "git",
-        "url": "file:///realm/project/sinity-lynchpin"
+        "url": "https://github.com/Sinity/sinity-lynchpin.git"
       },
       "original": {
         "ref": "master",
         "type": "git",
-        "url": "file:///realm/project/sinity-lynchpin"
+        "url": "https://github.com/Sinity/sinity-lynchpin.git"
       }
     },
     "mk-shell-bin": {
@@ -1628,12 +1628,12 @@
         "rev": "40da3a6c8416b268af6f0016966c3ba2dcbaa40f",
         "revCount": 6,
         "type": "git",
-        "url": "file:///realm/project/steering"
+        "url": "file:///realm/projects/steering/repo"
       },
       "original": {
         "ref": "master",
         "type": "git",
-        "url": "file:///realm/project/steering"
+        "url": "file:///realm/projects/steering/repo"
       }
     },
     "stylix": {

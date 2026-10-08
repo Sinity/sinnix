@@ -168,8 +168,9 @@ def test_missing_timezone_is_explicit_invalid_definition(tmp_path):
 
 
 def test_oversize_input_refused(tmp_path, monkeypatch):
+    from sinnix_lib import judgments
     fs = load()
-    monkeypatch.setattr(fs, "JUDGMENT_LIMIT_BYTES", 10)
+    monkeypatch.setattr(judgments, "JUDGMENT_LIMIT_BYTES", 10)
     p = tmp_path / "large"
     p.write_bytes(b"x" * 11)
     with pytest.raises(ValueError, match="read bound"):
@@ -299,7 +300,7 @@ def test_canonical_roles_preserve_original_details_and_other_facets(tmp_path, ca
     incoming = tmp_path / "normalization.jsonl"
     new = decision(
         field="role",
-        value="capture",
+        value="source",
         detail="very specific legacy capture",
         ts="2026-02-01T00:00:00Z",
     )
@@ -315,7 +316,7 @@ def test_canonical_roles_preserve_original_details_and_other_facets(tmp_path, ca
     resolved = fs.resolve_judgments(
         fs.read_judgments(tmp_path / "judgments.jsonl"), "/a/child"
     )
-    assert resolved["role"]["value"] == "capture"
+    assert resolved["role"]["value"] == "source"
     assert resolved["role"]["details"] == ["very specific legacy capture"]
     assert resolved["preservation"]["value"] == "do not delete"
     assert resolved["maintenance_owner"]["value"] == "actual owner"
@@ -328,7 +329,7 @@ def test_unknown_new_role_refuses_the_entire_import(tmp_path):
     old = p.read_bytes()
     source = tmp_path / "incoming.jsonl"
     source.write_text(
-        json.dumps(decision("/b", field="role", value="capture"))
+        json.dumps(decision("/b", field="role", value="source"))
         + "\n"
         + json.dumps(decision("/c", field="role", value="invented novel category"))
         + "\n"
@@ -397,11 +398,11 @@ def test_role_audit_reads_only_effective_winners_and_does_not_erase_history(tmp_
         tmp_path,
         [
             decision(field="role", value="legacy spelling"),
-            decision(field="role", value="capture", ts="2026-02-01T00:00:00Z"),
+            decision(field="role", value="source", ts="2026-02-01T00:00:00Z"),
         ],
     )
     summary = fs.effective_role_audit(ls, ["/a", "/a/child"])
-    assert summary["counts"] == {"capture": 2} and not summary["noncanonical"]
+    assert summary["counts"] == {"source": 2} and not summary["noncanonical"]
     assert len(ls["valid"]) == 2
 
 
@@ -411,7 +412,7 @@ def test_ambiguous_roles_are_not_folded_into_known_categories(tmp_path):
         fs,
         tmp_path,
         [
-            decision(field="role", value="capture"),
+            decision(field="role", value="source"),
             decision(field="role", value="analysis"),
         ],
     )
@@ -421,7 +422,7 @@ def test_ambiguous_roles_are_not_folded_into_known_categories(tmp_path):
 
 def test_unknown_role_masks_inheritance_without_forcing_a_category(tmp_path, capsys):
     fs = load()
-    ledger(fs, tmp_path, [decision(field="role", value="capture")])
+    ledger(fs, tmp_path, [decision(field="role", value="source")])
     source = tmp_path / "new.jsonl"
     source.write_text(
         json.dumps(
@@ -441,7 +442,7 @@ def test_unknown_role_masks_inheritance_without_forcing_a_category(tmp_path, cap
     assert fs.resolve_judgments(current, "/a/b/child")["role"]["status"] == "unknown"
 
 
-@pytest.mark.parametrize("value", [["capture"], {"category": "capture"}, 42, None])
+@pytest.mark.parametrize("value", [["source"], {"category": "capture"}, 42, None])
 def test_known_role_requires_a_string_code(tmp_path, value):
     fs = load()
     ls = ledger(fs, tmp_path, [decision(field="role", value=value)])
@@ -454,16 +455,16 @@ def test_grouped_role_report_retains_detail_and_filters_paths(tmp_path, capsys):
         fs,
         tmp_path,
         [
-            decision("/a", field="role", value="capture", detail="sensor capture"),
+            decision("/a", field="role", value="source", detail="sensor capture"),
             decision("/b", field="role", value="analysis"),
         ],
     )
     args = SimpleNamespace(
-        action="report", index_dir=tmp_path, group_by="role", role="capture"
+        action="report", index_dir=tmp_path, group_by="role", role="source"
     )
     assert fs.cmd_judgments(args) == 0
     text = capsys.readouterr().out
-    assert "## capture" in text and "sensor capture" in text
+    assert "## source" in text and "sensor capture" in text
     assert "| /a |" in text and "| /b |" not in text
 
 
@@ -473,8 +474,8 @@ def test_equal_category_with_distinct_detail_preserves_both_sources(tmp_path):
         fs,
         tmp_path,
         [
-            decision(field="role", value="capture", detail="source A"),
-            decision(field="role", value="capture", detail="source B"),
+            decision(field="role", value="source", detail="source A"),
+            decision(field="role", value="source", detail="source B"),
         ],
     )
     got = fs.resolve_judgments(ls, "/a")["role"]
@@ -496,7 +497,7 @@ def test_vocabulary_needs_no_ledger_or_target_access(tmp_path, monkeypatch, caps
         fs.cmd_judgments(SimpleNamespace(action="vocabulary", index_dir=tmp_path)) == 0
     )
     out = json.loads(capsys.readouterr().out)
-    assert set(out["roles"]) == set(fs.ROLE_VOCABULARY) and "git-origin" in out["roles"]
+    assert set(out["roles"]) == set(fs.ROLE_VOCABULARY) and "workspace" in out["roles"]
 
 
 def test_operator_role_is_not_replaced_by_later_normalization(tmp_path, capsys):
@@ -508,7 +509,7 @@ def test_operator_role_is_not_replaced_by_later_normalization(tmp_path, capsys):
     )
     source = tmp_path / "new.jsonl"
     source.write_text(
-        json.dumps(decision(field="role", value="capture", ts="2026-02-01T00:00:00Z"))
+        json.dumps(decision(field="role", value="source", ts="2026-02-01T00:00:00Z"))
         + "\n"
     )
     assert (
@@ -529,7 +530,7 @@ def test_ambiguous_role_makes_definition_audit_nonzero(tmp_path, capsys):
         fs,
         tmp_path,
         [
-            decision(field="role", value="capture"),
+            decision(field="role", value="source"),
             decision(field="role", value="analysis"),
         ],
     )

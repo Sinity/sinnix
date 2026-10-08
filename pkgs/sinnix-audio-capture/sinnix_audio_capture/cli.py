@@ -73,6 +73,7 @@ def _cmd_index(args: argparse.Namespace) -> int:
         channels=None if args.channels is None else tuple(args.channels),
         since_ts=since_ts,
         ffmpeg_bin=args.ffmpeg_bin,
+        catalog_path=args.catalog,
     )
     logging.getLogger("sinnix_audio_capture.cli").info("indexed %d segment(s)", indexed)
     return 0
@@ -160,6 +161,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Only index segments modified within this many hours (timer's own lookback window)",
     )
     index_parser.add_argument("--ffmpeg-bin", default="ffmpeg")
+    index_parser.add_argument("--catalog", type=Path, help="Explicit identity catalog for retained historical raw references")
     index_parser.set_defaults(func=_cmd_index)
 
     pause_parser = subparsers.add_parser(

@@ -27,7 +27,7 @@ transparency_mode = "glass"
 [shell.screenshot]
 save_to_file = true
 copy_to_clipboard = true
-directory = "/realm/activity/screenshot"
+directory = "/realm/activity/desktop/screenshots"
 filename_pattern = "%Y-%m-%d-At-%Hh%Mm%Ss"
 freeze_screen = false
 confirm_region = false
@@ -150,7 +150,7 @@ background_opacity = 0.96
 
 # Notes are plain Markdown in the notes folder; the plugin is a view over them.
 [plugin_settings."noctalia/notes"]
-notes_dir = "/realm/notes"
+notes_dir = "/realm/personal/notes"
 extension = "md"
 
 # User-invoked workbenches: centrally placed, not anchored to a bar corner.

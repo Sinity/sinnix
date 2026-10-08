@@ -47,7 +47,7 @@ mkFeatureModule {
       ...
     }:
     let
-      lakeRoot = config.sinnix.paths.activityRoot;
+      capturePaths = config.sinnix.paths.capturePaths;
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       videoDownloader = pkgs.symlinkJoin {
         name = "sinnix-yt-dlp";
@@ -67,7 +67,7 @@ mkFeatureModule {
           }:
           {
             home.sessionVariables = {
-              MPV_SCREENSHOT_DIR = "${lakeRoot}/screenshot/mpv";
+              MPV_SCREENSHOT_DIR = "${capturePaths.screenshot}/mpv";
             };
 
             home.packages = with pkgs; [
@@ -94,7 +94,7 @@ mkFeatureModule {
                 osd-duration = 2000;
                 screenshot-format = "png";
                 screenshot-png-compression = 9;
-                screenshot-template = "${lakeRoot}/screenshot/mpv/%F-%P-%n";
+                screenshot-template = "${capturePaths.screenshot}/mpv/%F-%P-%n";
                 save-position-on-quit = true;
                 resume-playback = "yes";
                 hdr-compute-peak = false;

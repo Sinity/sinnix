@@ -60,6 +60,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from sinnix_lib.layout import capture_lane_path
+
 from sinnix_lib.atomic import atomic_publish
 
 from .recorder import run_capture_stream
@@ -308,7 +310,7 @@ def probe_coverage(
     devices = list_devices(pw_dump_bin, run=run)
     if devices is None:
         return 2, {"error": "pw-dump unavailable"}
-    audio_dir = Path(capture_root) / "audio"
+    audio_dir = capture_lane_path(capture_root, "audio")
     now = now_fn()
     covered: list[str] = []
     uncovered: list[str] = []
@@ -365,7 +367,7 @@ class _DeviceRecorder(threading.Thread):
 
     @property
     def output_dir(self) -> Path:
-        return self._capture_root / "audio" / self.device.channel
+        return capture_lane_path(self._capture_root, "audio") / self.device.channel
 
     def _note_child(self, proc: subprocess.Popen | None) -> None:
         self._child = proc
@@ -724,7 +726,7 @@ def run_devices(
     # Before any recorder opens a segment: whatever `.partial` files exist now
     # were left by a previous process, and only this window can tell them apart
     # from live ones.
-    for path in promote_orphan_partials(Path(capture_root) / "audio"):
+    for path in promote_orphan_partials(capture_lane_path(capture_root, "audio")):
         print(f"promoted orphaned segment {path.name}", flush=True)
 
     supervisor = DeviceSupervisor(

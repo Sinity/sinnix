@@ -171,7 +171,7 @@ def render_enrichment(asset: dict) -> str:
     return '\n'.join(parts)
 
 
-def render_asset(asset: dict, by_id: dict) -> str:
+def render_asset(asset: dict, by_id: dict, judgments: dict | None = None) -> str:
     asset_id = asset["id"]
     inspections = asset["inspections"]
     methods = sorted({item["method"] for item in inspections})
@@ -184,8 +184,18 @@ def render_asset(asset: dict, by_id: dict) -> str:
         f'<p>{esc(asset["description"])}</p>',
         f'<p>{path_link(asset["current_path"])}</p><div class="tags">{tags}</div>',
     ]
-    if asset.get("facets"):
+    if asset.get("location_status") == "unavailable":
+        parts.append('<p><strong>Location unavailable.</strong> The retained address is historical; no new physical identity is asserted.</p>')
+    if judgments is not None:
+        from sinnix_lib.judgments import resolve_judgments
+        current = resolve_judgments(judgments, asset["current_path"])
+        parts.append('<p><strong>Current classification</strong> · ledger precedence and explicit uncertainty</p>')
         parts.append('<dl class="meta">' + ''.join(
+            f'<dt>{esc(key.replace("_", " "))}</dt><dd>{esc(value.get("value") if value["status"] == "known" else value["status"])}'
+            f'{(" · " + esc("; ".join(value["details"]))) if value.get("details") else ""}</dd>'
+            for key, value in current.items()) + '</dl>')
+    if asset.get("facets"):
+        parts.append('<p><strong>Recorded observations</strong> · original wording retained</p><dl class="meta">' + ''.join(
             f'<dt>{esc(key.replace("_", " "))}</dt><dd>{esc(value)}</dd>'
             for key, value in asset["facets"].items()) + '</dl>')
     if asset.get("coverage"):
@@ -246,7 +256,7 @@ def render_asset(asset: dict, by_id: dict) -> str:
     return "\n".join(parts)
 
 
-def render(catalog: dict, source: Path, template: str, command: str) -> str:
+def render(catalog: dict, source: Path, template: str, command: str, judgments: dict | None = None) -> str:
     if catalog.get("schema_version") != 1 or not isinstance(catalog.get("assets"), list):
         raise ValueError("expected schema_version 1 catalog with assets")
     assets = catalog["assets"]
@@ -284,7 +294,7 @@ def render(catalog: dict, source: Path, template: str, command: str) -> str:
                 f'<td><a href="#asset-{esc(target["id"])}">{esc(target["title"])}</a></td>'
                 f'<td>{esc(relation["basis"])}</td></tr>'
             )
-    cards = '\n'.join(render_asset(asset, by_id) for asset in sorted(assets, key=lambda a: a["title"].casefold()))
+    cards = '\n'.join(render_asset(asset, by_id, judgments) for asset in sorted(assets, key=lambda a: a["title"].casefold()))
     # The canonical data is embedded losslessly, but cannot terminate its script element.
     data = json.dumps(catalog, ensure_ascii=False).replace("<", "\\u003c").replace("&", "\\u0026")
     return f'''{preamble}
@@ -334,14 +344,21 @@ def main() -> None:
     parser.add_argument("--catalog", type=Path, required=True)
     parser.add_argument("--template", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--judgments", type=Path, help="Explicit authored classification ledger; source catalog observations remain unchanged")
     args = parser.parse_args()
     source = args.catalog.resolve()
     catalog = json.loads(source.read_text(encoding="utf-8"))
-    command = shlex.join([
+    command_args = [
         sys.executable, str(Path(__file__).resolve()), "--catalog", str(source),
         "--template", str(args.template.resolve()), "--output", str(args.output.resolve()),
-    ])
-    output = render(catalog, source, args.template.read_text(encoding="utf-8"), command)
+    ]
+    judgments = None
+    if args.judgments is not None:
+        from sinnix_lib.judgments import read_judgments
+        judgments = read_judgments(args.judgments)
+        command_args.extend(["--judgments", str(args.judgments.resolve())])
+    command = shlex.join(command_args)
+    output = render(catalog, source, args.template.read_text(encoding="utf-8"), command, judgments)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     atomic_publish(args.output, output.encode("utf-8"), fsync=True, mode=0o600)
     print(args.output)

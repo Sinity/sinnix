@@ -110,7 +110,7 @@ PHONE_TS_IP="${SINNIX_PHONE_IP:-$(resolve_phone_host || true)}"
 PHONE_SSH_PORT="${SINNIX_PHONE_SSH_PORT:-8022}"
 PHONE_USER="${SINNIX_PHONE_USER:-u0_a460}"
 ADB_TARGET="${PHONE_TS_IP}:5555"
-LAKE_ROOT="${SINNIX_PHONE_LAKE:-/realm/machine/phone}"
+LAKE_ROOT="${SINNIX_PHONE_LAKE:-/realm/devices/shared/phone}"
 PHONE_STATE="${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}"
 
 # -F /dev/null + explicit identity, not ~/.ssh/config: under a sandboxed
@@ -563,7 +563,7 @@ CHROOT_MODULE_ID=sinnix_debian_chroot
 CHROOT_MODULE_ROOT=/data/adb/modules/$CHROOT_MODULE_ID
 
 chroot_module_source() {
-  local sinnix_dir="${SINNIX_FLAKE_DIR:-/realm/project/sinnix}"
+  local sinnix_dir="${SINNIX_FLAKE_DIR:-/realm/projects/sinnix/repo}"
   printf '%s\n' "$sinnix_dir/devices/android/magisk/sinnix-debian-chroot"
 }
 
@@ -817,7 +817,7 @@ app-install)
   echo "installing to ${serial:-unknown device} ($(adb_any shell getprop ro.serialno 2>/dev/null | tr -d '\r'))"
   install_log="$(mktemp)"
   install_ok=1
-  if ! ANDROID_SERIAL="$serial" nix run "${SINNIX_FLAKE_DIR:-/realm/project/sinnix}#sinnix-phone-app-install" 2>&1 | tee "$install_log"; then
+  if ! ANDROID_SERIAL="$serial" nix run "${SINNIX_FLAKE_DIR:-/realm/projects/sinnix/repo}#sinnix-phone-app-install" 2>&1 | tee "$install_log"; then
     install_ok=0
   fi
   # Success wins over any earlier refusal line. `adb install` retries through
@@ -909,7 +909,7 @@ nix-switch)
   nix_userland_identity
   flake_ref="${1:-}"
   if [ -z "$flake_ref" ]; then
-    sinnix_dir="${SINNIX_FLAKE_DIR:-/realm/project/sinnix}"
+    sinnix_dir="${SINNIX_FLAKE_DIR:-/realm/projects/sinnix/repo}"
     revision=$(git -C "$sinnix_dir" rev-parse origin/master)
     flake_ref="github:Sinity/sinnix/$revision#redmi-note-11"
   fi

@@ -15,6 +15,8 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+
+from sinnix_lib.layout import capture_lane_path
 from typing import Any
 
 import numpy as np
@@ -126,7 +128,7 @@ def write_frame(
     <frame_path>` (the shared JSONL envelope writer every capture lane
     uses). Returns the frame path on success, None if the writer failed
     (logged to stderr, never silently dropped)."""
-    frames_dir = capture_root / lane / "frames"
+    frames_dir = capture_lane_path(capture_root, lane) / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
     frame_path = frames_dir / filename
     atomic_publish(frame_path, webp_bytes, fsync=True, mode=0o600)

@@ -559,7 +559,7 @@ _SESSION_EXAMPLES: dict[str, Example] = {
     "sessions.resume": Example(
         title="Resume work in a checkout",
         input={
-            "repo_path": "/realm/project/sinnix",
+            "repo_path": "/realm/projects/sinnix/repo",
             "recent_files": ["README.md"],
             "related_limit": 3,
         },

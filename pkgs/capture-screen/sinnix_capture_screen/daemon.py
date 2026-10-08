@@ -48,6 +48,8 @@ import sys
 import time
 from pathlib import Path
 
+from sinnix_lib.layout import capture_lane_path
+
 from sinnix_lib.atomic_json import write_json_atomic
 
 from . import capture, hypr
@@ -122,7 +124,7 @@ def run(args: argparse.Namespace) -> int:
         )
         return 1
 
-    throttle_state_path = args.capture_root / args.lane / "throttle-state.json"
+    throttle_state_path = capture_lane_path(args.capture_root, args.lane) / "throttle-state.json"
     throttle_state_path.parent.mkdir(parents=True, exist_ok=True)
     throttle = DailyThrottleGuard(
         ceiling_bytes=args.daily_ceiling_bytes,

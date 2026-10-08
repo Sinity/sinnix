@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "roots": {
+    "/realm": {
+      "personal": "Journal, personal notes, photographs and creative work.",
+      "projects": "Project homes: repo, notes, analysis, snapshots and history as needed.",
+      "devices": "Device dossiers and observations, including the workstation.",
+      "activity": "Captured activity grouped by medium, retaining producer provenance.",
+      "health": "Health sources, records and analyses.",
+      "documents": "Administrative and authored documents.",
+      "accounts": "Account records and provider acquisitions.",
+      "library": "Reference material, datasets, models and reusable resources.",
+      "reports": "Private catalog sources and an explicit published site projection.",
+      "inbox": "Unassigned intake; review retains uncertain material without a disposal claim.",
+      "archive": "Cold or cross-subject history and maintenance evidence.",
+      "state": "Owner-managed live service state.",
+      "worktrees": "Isolated checkouts and compile-heavy work.",
+      "tmp": "Managed execution scratch."
+    },
+    "/outer-realm": {
+      "backup": "Owner-managed backup repositories.",
+      "archive": "Retained cold material and native historical packages.",
+      "inbox": "Acquired material awaiting assignment."
+    }
+  },
+  "optional": {
+    "/realm": [
+      ".Trash-1000",
+      ".btrfs",
+      ".hidden"
+    ],
+    "/outer-realm": [
+      ".Trash-1000"
+    ]
+  },
+  "activity_lanes": {
+    "audio": "audio/recordings",
+    "audio-devices": "audio/devices",
+    "audio-topology": "audio/topology",
+    "audio-index": "audio/index",
+    "transcripts": "audio/transcripts",
+    "webhistory": "browser/history",
+    "browser-nav-edges": "browser/navigation",
+    "reading-stack": "browser/reading",
+    "url-ledger": "browser/coverage",
+    "video-resolve": "browser/recovery",
+    "a11y": "desktop/accessibility",
+    "clipboard": "desktop/clipboard",
+    "keylog": "desktop/keyboard",
+    "primary": "desktop/selection",
+    "notifications": "desktop/notifications",
+    "screenshot": "desktop/screenshots",
+    "screen-frames": "desktop/frames",
+    "screen-recordings": "desktop/recordings",
+    "replay": "desktop/replay",
+    "mpris": "desktop/media",
+    "shell": "terminal/shell",
+    "asciinema": "terminal/asciinema",
+    "kitty-scrollback": "terminal/scrollback",
+    "irc": "communication/irc",
+    "mail": "communication/mail",
+    "calendar": "shared/calendar",
+    "activitywatch": "shared/activitywatch",
+    "ranking": "shared/ranking",
+    "steering": "shared/steering",
+    "spotify": "audio/spotify",
+    "dev": "development",
+    "audit": "shared/audit"
+  }
+}

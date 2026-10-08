@@ -1,97 +1,54 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 # @sinnix-package
-# description: Assert the level-1 node sets of /realm and /outer-realm match the taxonomy exactly, in both directions
-# runtimeInputs: bash coreutils
-#
-# The root inventory and this manifest describe the same physical layout.
-# Unexpected nodes, missing required nodes, and aliases at canonical roots fail.
-set -euo pipefail
+# description: Assert root nodes match the shared filesystem taxonomy in both directions
+# runtimeInputs: python3
+# pythonPackages: @sinnix-lib
 
-status=0
+import os
+from pathlib import Path
+import sys
 
-# The roots are absolute by contract. LAKE_LINT_ROOT_PREFIX exists so the
-# suite can exercise this manifest against a fixture tree; production leaves
-# it empty.
-prefix="${LAKE_LINT_ROOT_PREFIX:-}"
+from sinnix_lib.layout import OPTIONAL, ROOTS
 
-# A directory carrying CACHEDIR.TAG is a tool's regenerable cache, not a
-# taxonomy node - the same property the backup policy uses to classify this
-# class. Foreign test runners drop them into roots they do not own (a
-# polylogue subprocess test resolves its rootdir to /realm and writes
-# /realm/.pytest_cache), and this lint gates every lane's verification, so a
-# gate that turns red for a cache is a gate that gets ignored. A renamed data
-# node never carries the tag.
-is_tool_cache() {
-  # A marker name alone is not a cache declaration. Match the standard
-  # signature and never exempt a symlink to some other collection.
-  [ -d "$1" ] && [ ! -L "$1" ] && [ -f "$1/CACHEDIR.TAG" ] &&
-    [ ! -L "$1/CACHEDIR.TAG" ] &&
-    [ "$(head -c 43 -- "$1/CACHEDIR.TAG")" = "Signature: 8a477f597d28d172789f06886806bc55" ]
-}
 
-# check_root <root> -- <required nodes...> -- <optional nodes...>
-# Required: must exist on disk and be named here. Optional: allowed if
-# present (markers, trash, mount scaffolding), never required.
-check_root() {
-  local root="$prefix$1"
-  shift
-  local -a required=() optional=()
-  local mode=required
-  for a in "$@"; do
-    if [ "$a" = "--" ]; then
-      mode=optional
-      continue
-    fi
-    if [ "$mode" = required ]; then required+=("$a"); else optional+=("$a"); fi
-  done
-  [ -d "$root" ] || {
-    echo "lake-lint: SKIP $root (not present)" >&2
-    return 0
-  }
-  local entry base ok
-  for entry in "$root"/* "$root"/.[!.]* "$root"/..?*; do
-    [ -e "$entry" ] || [ -L "$entry" ] || continue
-    base="$(basename "$entry")"
-    ok=1
-    for a in "${required[@]}" "${optional[@]}"; do
-      if [ "$base" = "$a" ]; then
-        ok=0
-        break
-      fi
-    done
-    if [ "$ok" -ne 0 ] && ! is_tool_cache "$entry"; then
-      echo "lake-lint: UNEXPECTED node: $entry"
-      status=1
-    fi
-  done
-  for a in "${required[@]}"; do
-    if [ -L "$root/$a" ]; then
-      echo "lake-lint: SYMLINK at canonical node: $root/$a"
-      status=1
-    elif [ ! -e "$root/$a" ]; then
-      echo "lake-lint: MISSING required node: $root/$a"
-      status=1
-    elif [ "$a" = "INVENTORY.md" ] && [ ! -f "$root/$a" ]; then
-      echo "lake-lint: WRONG TYPE (expected regular file): $root/$a"
-      status=1
-    elif [ "$a" != "INVENTORY.md" ] && [ ! -d "$root/$a" ]; then
-      echo "lake-lint: WRONG TYPE (expected directory): $root/$a"
-      status=1
-    fi
-  done
-}
+def is_tool_cache(path: Path) -> bool:
+    tag = path / "CACHEDIR.TAG"
+    if path.is_symlink() or not path.is_dir() or tag.is_symlink() or not tag.is_file():
+        return False
+    with tag.open("rb") as handle:
+        return handle.read(43) == b"Signature: 8a477f597d28d172789f06886806bc55"
 
-# Human-facing subjects and service-owned storage have distinct homes.
-check_root /realm \
-  project activity accounts archive documents health journal library machine \
-  notes photos probable-junk reports state worktrees tmp inbox INVENTORY.md \
-  -- .btrfs .Trash-1000 .hidden
 
-check_root /outer-realm \
-  backup archive inbox INVENTORY.md \
-  -- .Trash-1000
+def main() -> int:
+    status = 0
+    prefix = os.environ.get("LAKE_LINT_ROOT_PREFIX", "")
+    for absolute, subjects in ROOTS.items():
+        root = Path(prefix + absolute)
+        if not root.is_dir():
+            print(f"lake-lint: SKIP {root} (not present)", file=sys.stderr)
+            continue
+        required = {*subjects, "INVENTORY.md"}
+        for path in sorted(root.iterdir()):
+            if path.name not in required | OPTIONAL[absolute] and not is_tool_cache(path):
+                print(f"lake-lint: UNEXPECTED node: {path}")
+                status = 1
+        for name in sorted(required):
+            path = root / name
+            if path.is_symlink():
+                print(f"lake-lint: SYMLINK at canonical node: {path}")
+            elif not path.exists():
+                print(f"lake-lint: MISSING required node: {path}")
+            elif name == "INVENTORY.md" and not path.is_file():
+                print(f"lake-lint: WRONG TYPE (expected regular file): {path}")
+            elif name != "INVENTORY.md" and not path.is_dir():
+                print(f"lake-lint: WRONG TYPE (expected directory): {path}")
+            else:
+                continue
+            status = 1
+    if status == 0:
+        print("lake-lint: all roots match taxonomy")
+    return status
 
-if [ "$status" -eq 0 ]; then
-  echo "lake-lint: all roots match taxonomy"
-fi
-exit "$status"
+
+if __name__ == "__main__":
+    raise SystemExit(main())

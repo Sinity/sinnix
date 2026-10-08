@@ -3,7 +3,7 @@
 # cockpit. What it is, why it exists, and what every surface shows:
 # docs/steering.md.
 #
-# Store: sqlite at /realm/project/steering/steering.sqlite (created by
+# Store: sqlite at /realm/projects/steering/repo/steering.sqlite (created by
 # sinnix-steer on first run; the CLI source lives in the steering workspace
 # itself, consumed via the `steering` flake input). This lives on
 # the persistent /realm NVMe volume, not under the ephemeral root subvolume,
@@ -24,12 +24,11 @@
 }@args:
 let
   username = config.sinnix.user.name;
-  lakeRoot = config.sinnix.paths.activityRoot;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   steer = scriptPkgs.sinnix-steer;
   cockpit = scriptPkgs.sinnix-cockpit;
-  stateDir = "/realm/project/steering";
-  exportDir = "${lakeRoot}/steering";
+  stateDir = "/realm/projects/steering/repo";
+  exportDir = "${config.sinnix.paths.capturePaths.steering}";
 in
 mkServiceModule {
   name = "steering";

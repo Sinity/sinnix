@@ -126,7 +126,7 @@ Examples:
   sinnix-chrome-control inject-text <id> --selector '[contenteditable=true]' --text-file /path/to/prompt.txt
   sinnix-chrome-control click <id> --selector 'button.submit'
   sinnix-chrome-control navigate <id> --url 'https://example.com'
-  sinnix-chrome-control load-extension --path /realm/project/polylogue/browser-extension
+  sinnix-chrome-control load-extension --path /realm/projects/polylogue/repo/browser-extension
 USAGE
 }
 

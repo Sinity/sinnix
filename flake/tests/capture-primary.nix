@@ -119,10 +119,10 @@ in
             printf '{"class": "firefox", "title": "test page"}' > "$FIXTURE_DIR/activewindow.json"
             "$watch"
 
-            index_file="$TMPDIR/captures/primary/primary-index.jsonl"
+            index_file="$TMPDIR/captures/desktop/selection/primary-index.jsonl"
             test "$(wc -l < "$index_file")" -eq 1
 
-            envelope_file="$(find "$TMPDIR/captures/primary" -maxdepth 1 -name 'primary-2*.jsonl' | head -n1)"
+            envelope_file="$(find "$TMPDIR/captures/desktop/selection" -maxdepth 1 -name 'primary-2*.jsonl' | head -n1)"
             jq -e '
               .schema == "sinnix-capture-v1" and
               .lane == "primary" and

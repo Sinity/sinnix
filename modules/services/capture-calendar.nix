@@ -43,7 +43,7 @@
 }@args:
 let
   username = config.sinnix.user.name;
-  laneDir = "${config.sinnix.paths.activityRoot}/calendar";
+  laneDir = "${config.sinnix.paths.capturePaths.calendar}";
   stateDir = "/realm/state/capture-calendar";
   secretPaths = config.sinnix.secrets.paths;
   cfg = config.sinnix.services.capture-calendar;

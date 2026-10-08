@@ -49,11 +49,11 @@ STATE_DIR = Path(os.environ.get("SINNIX_PHONE_STATE_DIR", "/realm/state/sinnix-p
 DECKS_DIR = STATE_DIR / "inbox" / "decks"
 
 ACTIVITY = Path(os.environ.get("SINNIX_ACTIVITY_ROOT", "/realm/activity"))
-MACHINE = Path(os.environ.get("SINNIX_MACHINE_ROOT", "/realm/machine"))
-KEYBIND_MANIFEST = Path(os.environ.get("SINNIX_KEYBIND_MANIFEST", "/realm/activity/keylog/keybinds/manifest.json"))
+MACHINE = Path(os.environ.get("SINNIX_MACHINE_ROOT", "/realm/devices/sinnix-prime"))
+KEYBIND_MANIFEST = Path(os.environ.get("SINNIX_KEYBIND_MANIFEST", "/realm/activity/desktop/keyboard/keybinds/manifest.json"))
 
 ATUIN_DB = Path(os.environ.get("ATUIN_DB", Path.home() / ".local/share/atuin/history.db"))
-KEYLOG = ACTIVITY / "keylog" / "logs"
+KEYLOG = ACTIVITY / "desktop" / "keyboard" / "logs"
 
 
 def write_deck(deck: dict, *, dry_run: bool = False) -> Path | None:
@@ -287,19 +287,19 @@ def lake_facts() -> list[tuple[str, float, str]]:
         distinct = len(set(cmds))
         facts.append(("distinct shell command lines you have run", distinct, "commands"))
 
-    ambient = MACHINE / "phone" / "ambient"
+    ambient = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/devices/shared/phone")) / "ambient"
     if ambient.is_dir():
         n = sum(1 for p in ambient.iterdir() if p.suffix == ".m4a")
         if n:
             facts.append(("five-minute ambient audio chunks on the phone right now", n, "chunks"))
 
-    levels = MACHINE / "phone" / "ambient-levels.jsonl"
+    levels = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/devices/shared/phone")) / "ambient-levels.jsonl"
     if levels.is_file():
         n = _count_lines(levels)
         if n:
             facts.append(("ambient chunks measured into the levels ledger", n, "records"))
 
-    transcripts = ACTIVITY / "transcripts"
+    transcripts = ACTIVITY / "audio" / "transcripts"
     if transcripts.is_dir():
         n = sum(_count_lines(p) for p in transcripts.glob("2*.jsonl"))
         if n:
@@ -571,7 +571,7 @@ def cmd_typing(args: argparse.Namespace) -> int:
     if profile is None:
         print("forge: no usable keystroke captures; skipping the typing analysis", file=sys.stderr)
         return 0
-    out_dir = Path(os.environ.get("SINNIX_TYPING_OUTPUT", "/realm/activity/keylog/analysis"))
+    out_dir = Path(os.environ.get("SINNIX_TYPING_OUTPUT", "/realm/activity/desktop/keyboard/analysis"))
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / f"{dt.datetime.now(dt.timezone.utc).date().isoformat()}.json"
     dest.write_text(json.dumps(profile, indent=2) + "\n", encoding="utf-8")

@@ -111,8 +111,8 @@ let
         ]
         ++ readActions "lynchpin_ops" [ "receipt" ];
       env = {
-        LYNCHPIN_REPO_ROOT = "/realm/project/sinity-lynchpin";
-        LYNCHPIN_LOCAL_ROOT = "/realm/project/sinity-lynchpin/.lynchpin";
+        LYNCHPIN_REPO_ROOT = "/realm/projects/sinity-lynchpin/repo";
+        LYNCHPIN_LOCAL_ROOT = "/realm/projects/sinity-lynchpin/repo/.lynchpin";
       };
       clients = [
         "codex"

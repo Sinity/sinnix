@@ -23,6 +23,8 @@ import time
 from contextlib import nullcontext
 from pathlib import Path
 
+from sinnix_lib.layout import capture_lane_path
+
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.lock import flock
 
@@ -212,7 +214,7 @@ def capture_selection(
         size = len(content)
         if is_binary_mime(mime):
             raw_ref: str | None = str(
-                store_blob(Path(capture_root) / lane, content, digest)
+                store_blob(capture_lane_path(capture_root, lane), content, digest)
             )
             payload = {
                 "category": "binary",

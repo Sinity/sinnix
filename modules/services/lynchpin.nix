@@ -25,7 +25,7 @@ mkServiceModule {
   extraOptions = {
     repoRoot = lib.mkOption {
       type = lib.types.str;
-      default = "/realm/project/sinity-lynchpin";
+      default = "/realm/projects/sinity-lynchpin/repo";
       description = ''
         Absolute path to the lynchpin checkout. The materialization CLI is
         repo-rooted: it reads/writes `.lynchpin/` relative to this directory.
@@ -90,7 +90,7 @@ mkServiceModule {
           captures = [
             {
               name = "webhistory";
-              path = "${config.sinnix.paths.activityRoot}/webhistory";
+              path = "${config.sinnix.paths.capturePaths.webhistory}";
               eventDriven = true;
               # Two days against a daily timer: one missed run is tolerable,
               # two is worth surfacing. The hard deadline is far longer --

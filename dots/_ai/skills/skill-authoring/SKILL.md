@@ -5,7 +5,7 @@ description: Create, restructure, validate, or retire a shared agent skill — r
 
 # Skill authoring
 
-Shared skills live in `/realm/project/sinnix/dots/_ai/skills/<name>/`. Claude
+Shared skills live in `/realm/projects/sinnix/repo/dots/_ai/skills/<name>/`. Claude
 and Hermes read that directory through a live link, so text edits apply on the
 next read. Codex gets one link per skill, created at Sinnix activation, so a
 new, renamed, or deleted skill reaches Codex only after `switch`. The prose

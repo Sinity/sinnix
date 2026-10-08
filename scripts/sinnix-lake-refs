@@ -21,9 +21,9 @@ import sys
 from pathlib import Path
 
 REPOS = {
-    "sinnix": Path("/realm/project/sinnix"),
-    "lynchpin": Path("/realm/project/sinity-lynchpin"),
-    "polylogue": Path("/realm/project/polylogue"),
+    "sinnix": Path("/realm/projects/sinnix/repo"),
+    "lynchpin": Path("/realm/projects/sinity-lynchpin/repo"),
+    "polylogue": Path("/realm/projects/polylogue/repo"),
 }
 
 PATH_RE = re.compile(r"/realm/[A-Za-z0-9_./+-]*[A-Za-z0-9_/+-]")

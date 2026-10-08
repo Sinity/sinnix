@@ -39,7 +39,7 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   a11yDaemon = scriptPkgs.sinnix-capture-a11y;
   lakeRoot = config.sinnix.paths.activityRoot;
-  laneDir = "${lakeRoot}/a11y";
+  laneDir = "${config.sinnix.paths.capturePaths.a11y}";
   cfg = config.sinnix.services.capture-a11y;
 in
 mkServiceModule (mkCaptureLane {

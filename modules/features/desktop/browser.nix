@@ -111,7 +111,7 @@ mkFeatureModule {
           captures = [
             {
               name = "browser-nav-edges";
-              path = "${activityRoot}/browser-nav-edges";
+              path = "${config.sinnix.paths.capturePaths.browser-nav-edges}";
               eventDriven = true;
               requiredPayloadFields = [
                 "source_url"
@@ -122,7 +122,7 @@ mkFeatureModule {
             # the bar shows the stack through the sinnix-cockpit plugin.
             {
               name = "reading-stack";
-              path = "${activityRoot}/reading-stack";
+              path = "${config.sinnix.paths.capturePaths.reading-stack}";
               eventDriven = true;
               requiredPayloadFields = [
                 "event"

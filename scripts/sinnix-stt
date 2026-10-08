@@ -57,8 +57,8 @@ SEGMENTATION = MODEL_ROOT / "sherpa-onnx-pyannote-segmentation-3-0" / "model.onn
 EMBEDDING = MODEL_ROOT / "nemo_en_titanet_small.onnx"
 
 ACTIVITY = Path(os.environ.get("SINNIX_ACTIVITY_ROOT", "/realm/activity"))
-MACHINE = Path(os.environ.get("SINNIX_MACHINE_ROOT", "/realm/machine"))
-TRANSCRIPT_DIR = ACTIVITY / "transcripts"
+MACHINE = Path(os.environ.get("SINNIX_MACHINE_ROOT", "/realm/devices/sinnix-prime"))
+TRANSCRIPT_DIR = ACTIVITY / "audio" / "transcripts"
 LEDGER = TRANSCRIPT_DIR / "transcribed.jsonl"
 
 # Threads for the recogniser. The measurement above used 12 on a 16-core part;
@@ -322,10 +322,10 @@ def lanes() -> dict[str, Path]:
     the retired roots are simply not in the pattern.
     """
     found: dict[str, Path] = {
-        "phone": MACHINE / "phone" / "ambient",
-        "voice": MACHINE / "phone" / "outbox",
+        "phone": Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/devices/shared/phone")) / "ambient",
+        "voice": Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/devices/shared/phone")) / "outbox",
     }
-    audio = ACTIVITY / "audio"
+    audio = ACTIVITY / "audio" / "recordings"
     if audio.is_dir():
         for d in sorted(audio.iterdir()):
             if d.is_dir() and (d.name.startswith("src-") or d.name.startswith("snk-")):

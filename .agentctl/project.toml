@@ -120,7 +120,7 @@ timeout_seconds = 28800
 
 [operations.sinex_cache_prebuild]
 description = "Build and cache the pinned Sinex revision after an input move"
-exec = ["sinnix-sinex-cache-prebuild", "--flake-dir", "/realm/project/sinnix", "--system", "x86_64-linux"]
+exec = ["sinnix-sinex-cache-prebuild", "--flake-dir", "/realm/projects/sinnix/repo", "--system", "x86_64-linux"]
 pool = "bulk"
 result = "exit"
 timeout_seconds = 7200
@@ -179,3 +179,17 @@ pool = "normal"
 result = "exit"
 cache = "none"
 timeout_seconds = 1800
+
+[operations.agent_environment_doc]
+description = "Render the declared agent environment reference"
+exec = ["nix", "run", ".#sinnix-agent-environment-doc", "--", "--output", "docs/agent-environment.md"]
+pool = "normal"
+result = "exit"
+timeout_seconds = 1800
+
+[operations.build_system]
+description = "Build the declared workstation configuration without activation"
+exec = ["env", "SINNIX_SECRET_DECLARATIONS=/realm/state/secrets/sinnix/runtime.nix", "nix", "build", "--impure", "--no-link", ".#nixosConfigurations.sinnix-prime.config.system.build.toplevel"]
+pool = "bulk"
+result = "exit"
+timeout_seconds = 14400

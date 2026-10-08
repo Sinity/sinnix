@@ -42,11 +42,11 @@ if [[ -z "$OUTPUT" ]]; then
 fi
 mkdir -p "$(dirname "$OUTPUT")"
 
-RAWLOG=${RAWLOG_FILE:-/realm/journal/raw-log.md}
-PACK_DIR=/realm/project/sinity-lynchpin/.agent/scratch/current-state-packs
+RAWLOG=${RAWLOG_FILE:-/realm/personal/journal/raw-log.md}
+PACK_DIR=/realm/projects/sinity-lynchpin/repo/.agent/scratch/current-state-packs
 
 GH_REPOS=(Sinity/sinnix Sinity/sinex Sinity/polylogue Sinity/knowledgebase Sinity/scribe-tap Sinity/intercept-bounce)
-GIT_REPOS=(/realm/project/sinex /realm/project/polylogue /realm/project/sinity-lynchpin /realm/project/sinnix)
+GIT_REPOS=(/realm/projects/sinex/repo /realm/projects/polylogue/repo /realm/projects/sinity-lynchpin/repo /realm/projects/sinnix/repo)
 
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/oracle.XXXXXXXX")"
 trap 'rm -rf -- "$scratch"' EXIT

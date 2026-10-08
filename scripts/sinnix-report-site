@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Build an explicit file-only report publication projection
+# runtimeInputs: python3
+# pythonPackages: @sinnix-lib
+
+"""Stage a new report site from a private allowlist; never publish directories.
+
+The output must not exist. The caller may inspect and atomically publish the
+staged directory. Nothing in the canonical source trees is changed.
+"""
+
+import argparse
+import json
+from pathlib import Path, PurePosixPath
+
+
+def build(manifest: dict, output: Path) -> None:
+    if manifest.get("schema_version") != 1 or not isinstance(manifest.get("files"), list):
+        raise ValueError("publication manifest requires schema_version 1 and files")
+    if output.exists() or output.is_symlink():
+        raise ValueError(f"publication output already exists: {output}")
+    private = [Path(root).resolve() for root in manifest.get("private_roots", [])]
+    entries = []
+    urls = set()
+    for row in manifest["files"]:
+        url, source = row["url"], Path(row["source"])
+        parts = PurePosixPath(url)
+        if (not url or parts.is_absolute() or str(parts) != url
+                or any(part in {".", ".."} or part.startswith(".") for part in parts.parts)
+                or "\\" in url or any(ord(c) < 32 for c in url)):
+            raise ValueError(f"unsafe publication URL: {url!r}")
+        if url in urls:
+            raise ValueError(f"duplicate publication URL: {url}")
+        urls.add(url)
+        if not source.is_absolute() or not source.is_file():
+            raise ValueError(f"publication source must be an existing absolute file: {source}")
+        resolved = source.resolve()
+        if any(resolved.is_relative_to(root) for root in private):
+            raise ValueError(f"publication source is inside a private source tree: {source}")
+        entries.append((parts, resolved))
+    # Refuse file/directory URL collisions before creating anything.
+    for url in urls:
+        if any(str(parent) in urls for parent in PurePosixPath(url).parents if str(parent) != "."):
+            raise ValueError(f"file/directory publication collision: {url}")
+    output.mkdir(parents=True, mode=0o755)
+    for url, source in entries:
+        link = output / str(url)
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(source)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--publication", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    args = parser.parse_args()
+    raw = args.publication.read_bytes()
+    if len(raw) > 4 << 20:
+        raise ValueError("publication manifest exceeds 4 MiB bound")
+    build(json.loads(raw), args.output)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

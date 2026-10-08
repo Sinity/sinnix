@@ -5,7 +5,7 @@ Prior = LOC x thin-test-coverage x churn x past-defect-density, minus
 recently-swept penalty. Machines rank, models judge. Consumers: the
 overseer's hunt dispatch; the sweep ledger lives beside the output.
 
-Usage: defect_priors.py [--repo /realm/project/polylogue] [--top 25]
+Usage: defect_priors.py [--repo /realm/projects/polylogue/repo] [--top 25]
 Sweep ledger (optional): .agent/scratch/sweep-ledger.jsonl in the repo,
 rows {"module": "polylogue/foo.py", "lens": "...", "commit": "...",
 "date": "..."} - a module swept at a commit is penalized until it churns.
@@ -31,7 +31,7 @@ def sh(args: list[str], cwd: Path) -> str:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--repo", default="/realm/project/polylogue")
+    ap.add_argument("--repo", default="/realm/projects/polylogue/repo")
     ap.add_argument("--top", type=int, default=25)
     args = ap.parse_args()
     repo = Path(args.repo)

@@ -760,7 +760,7 @@ in
                 # service-level and scoped to the single configured repo.
                 "GIT_CONFIG_COUNT=1"
                 "GIT_CONFIG_KEY_0=safe.directory"
-                "GIT_CONFIG_VALUE_0=/realm/project/sinex"
+                "GIT_CONFIG_VALUE_0=/realm/projects/sinex/repo"
                 # Event-engine policies are exposed as runtime env vars, not
                 # Nix module options.
                 "SINEX_EVENT_ENGINE_REJECT_INITIAL_REPLAY=false"

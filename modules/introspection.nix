@@ -9,7 +9,7 @@
 }:
 let
   cfg = config.sinnix;
-  inherit (cfg.paths) activityRoot machineRoot;
+  inherit (cfg.paths) machineRoot;
 
   # ── Collect enabled features ────────────────────────────────────────
   collectEnabled =
@@ -93,16 +93,16 @@ let
       stateVersion = config.system.stateVersion;
       inherit enabledFeatures enabledServices;
       captures.directories = {
-        asciinema = "${activityRoot}/asciinema";
-        screenshot = "${activityRoot}/screenshot";
-        audio = "${activityRoot}/audio";
-        keylog = "${activityRoot}/keylog";
+        asciinema = "${config.sinnix.paths.capturePaths.asciinema}";
+        screenshot = "${config.sinnix.paths.capturePaths.screenshot}";
+        audio = "${config.sinnix.paths.capturePaths.audio}";
+        keylog = "${config.sinnix.paths.capturePaths.keylog}";
         syslog = "${machineRoot}/syslog";
         machine = machineRoot;
-        activitywatch = "${activityRoot}/activitywatch";
-        shell = "${activityRoot}/shell";
-        webhistory = "${activityRoot}/webhistory";
-        kitty-scrollback = "${activityRoot}/kitty-scrollback";
+        activitywatch = "${config.sinnix.paths.capturePaths.activitywatch}";
+        shell = "${config.sinnix.paths.capturePaths.shell}";
+        webhistory = "${config.sinnix.paths.capturePaths.webhistory}";
+        kitty-scrollback = "${config.sinnix.paths.capturePaths.kitty-scrollback}";
       };
       firewallPorts = {
         tcp = config.networking.firewall.allowedTCPPorts;
@@ -113,6 +113,8 @@ let
 
 in
 {
+  environment.etc."sinnix/filesystem-layout.json".source =
+    ../pkgs/sinnix-lib/sinnix_lib/filesystem-layout.json;
   environment.etc."sinnix/config.json" = {
     text = builtins.toJSON configDump;
     mode = "0444";

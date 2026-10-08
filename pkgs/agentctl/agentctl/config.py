@@ -24,9 +24,9 @@ from .projects import (
 from .prompts import PromptError
 
 DEFAULT_CONFIG_PATH = Path("/etc/sinnix/agentctl.json")
-DEFAULT_PROJECT_PARENTS = (Path("/realm/project"), Path("/realm/worktrees"))
+DEFAULT_PROJECT_PARENTS = (Path("/realm/projects"), Path("/realm/worktrees"))
 # Where this workstation keeps the shared skills when no agentctl.json says.
-DEFAULT_SKILLS_DIR = Path("/realm/project/sinnix/dots/_ai/skills")
+DEFAULT_SKILLS_DIR = Path("/realm/projects/sinnix/repo/dots/_ai/skills")
 
 
 class ConfigError(ValueError):
@@ -273,9 +273,10 @@ def resolve_project_root(selector: str | None, *, cwd: Path | None = None) -> Pa
         if selected.is_dir():
             candidates.append(selected.resolve())
         candidates.extend(
-            parent / selector
+            candidate
             for parent in DEFAULT_PROJECT_PARENTS
-            if (parent / selector).is_dir()
+            for candidate in (parent / selector / "repo", parent / selector)
+            if candidate.is_dir()
         )
     else:
         candidates.extend((current, *current.parents))

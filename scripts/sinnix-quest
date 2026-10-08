@@ -8,7 +8,7 @@ set -euo pipefail
 STATE_DIR="${SINNIX_QUEST_STATE_DIR:-/realm/state/sinnix-quest}"
 HOST_CACHE="$STATE_DIR/last-host"
 QUEST_MODEL="${SINNIX_QUEST_MODEL:-Quest 3}"
-MEDIA_DIR="${SINNIX_QUEST_MEDIA_DIR:-/realm/photos/quest-3/videoshots}"
+MEDIA_DIR="${SINNIX_QUEST_MEDIA_DIR:-/realm/personal/photos/quest-3/videoshots}"
 ARCHIVE_DIR="${SINNIX_QUEST_ARCHIVE_DIR:-/realm/archive/quest-3/videoshots}"
 BACKUP_MARKER="${SINNIX_QUEST_BACKUP_MARKER:-/persist/root/.cache/borg-drain/realm.last-success}"
 MEDIA_PORT="${SINNIX_QUEST_MEDIA_PORT:-9790}"

@@ -88,7 +88,7 @@ let
   # (absorbed from an earlier standalone receiver unit, sinnix-tjqi). Host/
   # device telemetry's subject root, not this module's own reportsDir/
   # feedbackDir -- see modules/foundation.nix.
-  phoneLaneRoot = config.sinnix.paths.machineRoot;
+  phoneLaneRoot = "${config.sinnix.paths.devicesRoot}/shared";
   phoneAmbientProgressPath = "${config.sinnix.paths.stateRoot}/sinnix-phone/ambient-progress";
   phoneStreamPort = helpers.data.ports.phoneStream;
 in
@@ -125,8 +125,8 @@ mkServiceModule {
 
     reportsDir = lib.mkOption {
       type = lib.types.str;
-      default = "/realm/reports";
-      description = "Directory of generated HTML reports served under /reports/.";
+      default = "/realm/reports/site";
+      description = "Explicit report publication projection served under /reports/; catalog sources remain private.";
     };
 
     feedbackDir = lib.mkOption {
@@ -510,7 +510,7 @@ mkServiceModule {
           captures = [
             {
               name = "phone-ambient";
-              path = "/realm/machine/phone/ambient";
+              path = "/realm/devices/shared/phone/ambient";
               cadenceSeconds = 300;
               staleAfterSeconds = 7200;
               producerProgressPath = phoneAmbientProgressPath;
@@ -546,7 +546,7 @@ mkServiceModule {
               # was concerned. That directory keeps its files as history;
               # nothing writes it any more, so it is no longer declared.
               name = "phone-events";
-              path = "/realm/machine/phone/events";
+              path = "/realm/devices/shared/phone/events";
               cadenceSeconds = 20;
               staleAfterSeconds = 1800;
             }

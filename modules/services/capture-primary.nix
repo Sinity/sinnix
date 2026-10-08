@@ -35,7 +35,7 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   captureCli = scriptPkgs.sinnix-capture;
 
-  laneDir = "${config.sinnix.paths.activityRoot}/primary";
+  laneDir = "${config.sinnix.paths.capturePaths.primary}";
   blobDir = "${laneDir}/blobs";
   stateDir = "${config.sinnix.paths.stateRoot}/cursors/capture-primary";
 

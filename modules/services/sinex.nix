@@ -6,7 +6,7 @@
 #     Runs as the sinex system user on the /realm NVMe data volume. PostgreSQL
 #     production data lives beside it under /var/lib/sinex/postgresql.
 #
-#   Development state: /realm/project/sinex/.sinex/state/ (workspace-local)
+#   Development state: /realm/projects/sinex/repo/.sinex/state/ (workspace-local)
 #     xtask (sinex dev runner) defaults to SINEX_STATE_DIR which points at
 #     the workspace-local path. Do not accumulate sinex state in home dirs
 #     (~/.local/state/sinex, ~/.config/sinex, ~/.config/xtask,

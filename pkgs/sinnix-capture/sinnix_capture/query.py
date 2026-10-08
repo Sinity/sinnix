@@ -10,16 +10,22 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from sinnix_lib.layout import ACTIVITY_LANES, capture_lane_path
+
 
 def discover_lanes(capture_root: Path | str) -> list[str]:
     root = Path(capture_root)
     if not root.is_dir():
         return []
-    return sorted(p.name for p in root.iterdir() if p.is_dir())
+    # Known physical homes may be nested; do not expose medium containers as lanes.
+    containers = {relative.split("/")[0] for relative in ACTIVITY_LANES.values()}
+    known = {lane for lane in ACTIVITY_LANES if capture_lane_path(root, lane).is_dir()}
+    custom = {p.name for p in root.iterdir() if p.is_dir() and p.name not in containers}
+    return sorted(known | custom)
 
 
 def lane_delta(capture_root: Path | str, lane: str, since_ts: float = 0.0) -> dict:
-    index_path = Path(capture_root) / lane / f"{lane}-index.jsonl"
+    index_path = capture_lane_path(capture_root, lane) / f"{lane}-index.jsonl"
     records_since = 0
     newest_ts: float | None = None
     gap_records = 0

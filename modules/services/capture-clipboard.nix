@@ -30,7 +30,7 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   captureCli = scriptPkgs.sinnix-capture;
 
-  laneDir = "${config.sinnix.paths.activityRoot}/clipboard";
+  laneDir = "${config.sinnix.paths.capturePaths.clipboard}";
   blobDir = "${laneDir}/blobs";
   stateDir = "${config.sinnix.paths.stateRoot}/cursors/capture-clipboard";
 

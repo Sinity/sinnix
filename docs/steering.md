@@ -42,7 +42,7 @@ reason).
 
 ## What the store holds
 
-Everything lives in the steering workspace, `/realm/project/steering` — its
+Everything lives in the steering workspace, `/realm/projects/steering/repo` — its
 own git repo, consumed by sinnix as the `steering` flake input. Two carriers:
 
 **1. Intentions** — a second Beads database with the `me-` prefix (the

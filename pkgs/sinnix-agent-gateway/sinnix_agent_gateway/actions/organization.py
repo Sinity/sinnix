@@ -693,7 +693,7 @@ ACTIONS: tuple[Action, ...] = (
             Example(
                 title="Find one old path",
                 input={
-                    "roots": [{"path": "/realm/project/sinnix"}],
+                    "roots": [{"path": "/realm/projects/sinnix/repo"}],
                     "old_paths": ["/realm/data/old-note.md"],
                 },
             ),

@@ -496,7 +496,7 @@ let
       exit 1
     fi
 
-    ${pkgs.findutils}/bin/find /realm/machine/below/store -type f | ${pkgs.gnugrep}/bin/grep -q .
+    ${pkgs.findutils}/bin/find /realm/state/below/store -type f | ${pkgs.gnugrep}/bin/grep -q .
 
     session_id="inactive"
     if [ "$(${pkgs.systemd}/bin/systemctl is-active transmission.service)" = "active" ]; then
@@ -545,7 +545,7 @@ let
   '';
   hostSmokeAllScript = ''
     ${resolveFlakeDir}
-    artifact_root="''${SINNIX_HOST_SMOKE_ROOT:-/realm/machine/host-smoke}"
+    artifact_root="''${SINNIX_HOST_SMOKE_ROOT:-/realm/devices/sinnix-prime/host-smoke}"
     run_id="$(${pkgs.coreutils}/bin/date -u +%Y%m%dT%H%M%SZ)-$$"
     run_dir="$artifact_root/$run_id"
     mkdir -p "$run_dir"
@@ -632,7 +632,7 @@ in
     check-master = {
       description = "Verify committed master on explicit request";
       script = ''
-        _flake_dir='git+file:///realm/project/sinnix?ref=master'
+        _flake_dir='git+file:///realm/projects/sinnix/repo?ref=master'
         ${loadCheckTargets "checks"}
         ${pkgs.nix}/bin/nix build --no-link --accept-flake-config "''${checks_targets[@]}"
       '';

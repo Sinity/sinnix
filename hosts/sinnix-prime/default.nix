@@ -144,7 +144,7 @@
       collectIntervalSec = 5;
       # Keep telemetry on /realm so the root filesystem stays slim. Same
       # subtree as machine-telemetry and activitywatch captures.
-      storeDir = "/realm/machine/below";
+      storeDir = "/realm/state/below";
     };
     sinex = {
       prepareHost = true;
@@ -160,7 +160,7 @@
       activationProfile = "user-mile";
       environment = "prod";
       filesystem.watchPaths = [
-        "/realm/project"
+        "/realm/projects"
         "/realm/inbox/download"
       ];
     };

@@ -30,7 +30,7 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   screenDaemon = scriptPkgs.sinnix-capture-screen;
   lakeRoot = config.sinnix.paths.activityRoot;
-  laneDir = "${lakeRoot}/screen-frames";
+  laneDir = "${config.sinnix.paths.capturePaths.screen-frames}";
   cfg = config.sinnix.services.capture-screen;
 in
 mkServiceModule (mkCaptureLane {

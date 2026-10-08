@@ -25,6 +25,8 @@ import socket
 import time
 from pathlib import Path
 
+from sinnix_lib.layout import capture_lane_path
+
 from sinnix_lib import ledger
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.lock import flock
@@ -74,7 +76,7 @@ class CaptureWriter:
     ) -> None:
         self.lane = lane
         self.host = host or socket.gethostname()
-        self.lane_dir = Path(capture_root) / lane
+        self.lane_dir = capture_lane_path(capture_root, lane)
         self.lane_dir.mkdir(parents=True, exist_ok=True)
         self._seq_path = self.lane_dir / f"{lane}.seq"
         self._seq_lock_path = self.lane_dir / f"{lane}.seq.lock"

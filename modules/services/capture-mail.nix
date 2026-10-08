@@ -41,7 +41,7 @@
 }@args:
 let
   username = config.sinnix.user.name;
-  maildirDir = "${config.sinnix.paths.activityRoot}/mail";
+  maildirDir = "${config.sinnix.paths.capturePaths.mail}";
   secretPaths = config.sinnix.secrets.paths;
   cfg = config.sinnix.services.capture-mail;
 

@@ -114,9 +114,9 @@ def test_absent_roots_are_skipped_not_failed(tmp_path):
 def test_canonical_node_cannot_be_an_alias(tmp_path):
     prefix = tmp_path / "lake"
     build_lake(prefix)
-    node = prefix / "realm" / "journal"
+    node = prefix / "realm" / "personal"
     node.rmdir()
-    node.symlink_to(prefix / "realm" / "notes", target_is_directory=True)
+    node.symlink_to(prefix / "realm" / "projects", target_is_directory=True)
     result = run(prefix)
     assert result.returncode == 1
     assert f"SYMLINK at canonical node: {node}" in result.stdout

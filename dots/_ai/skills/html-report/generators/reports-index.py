@@ -102,13 +102,13 @@ def explicitly_superseded(text: str) -> bool:
     )
 
 
-def render_navigation(reports_dir: Path, out: Path) -> tuple[str, list[dict]]:
+def render_navigation(reports_dir: Path, out: Path, manifest: Path | None = None) -> tuple[str, list[dict]]:
     """Read optional links-only configuration; native resources remain authoritative.
 
     navigation.json may be a symlink to an independently maintained private
     manifest. probe=false avoids waking offline/automounted storage.
     """
-    manifest = reports_dir / "navigation.json"
+    manifest = manifest or reports_dir / "navigation.json"
     if not manifest.exists():
         return "", []
     if manifest.stat().st_size > 1024 * 1024:
@@ -240,8 +240,8 @@ def report_meta(p: Path) -> dict:
     }
 
 
-def build(reports_dir: Path, out: Path, navigation_out: Path | None = None) -> int:
-    nav_html, nav_groups = render_navigation(reports_dir, out)
+def build(reports_dir: Path, out: Path, navigation_out: Path | None = None, navigation: Path | None = None) -> int:
+    nav_html, nav_groups = render_navigation(reports_dir, out, navigation)
     files = sorted(
         [
             p
@@ -363,6 +363,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("reports_dir", type=Path)
     ap.add_argument("--out", type=Path, default=None)
+    ap.add_argument("--navigation", type=Path, help="Explicit private navigation source, independent of the served site")
     ap.add_argument(
         "--navigation-markdown",
         type=Path,
@@ -371,7 +372,7 @@ def main() -> int:
     )
     args = ap.parse_args()
     out = args.out or (args.reports_dir / "index.html")
-    return build(args.reports_dir, out, args.navigation_markdown)
+    return build(args.reports_dir, out, args.navigation_markdown, args.navigation)
 
 
 if __name__ == "__main__":

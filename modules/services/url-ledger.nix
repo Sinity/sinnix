@@ -12,10 +12,10 @@
 }@args:
 let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-  stateDir = "${config.sinnix.paths.activityRoot}/url-ledger/state";
-  derivedDir = "${config.sinnix.paths.activityRoot}/url-ledger";
-  historyPath = "${config.sinnix.paths.activityRoot}/webhistory/gestalt/derived/full_history.ndjson";
-  cdxRawRoot = "${config.sinnix.paths.activityRoot}/url-ledger/cdx-raw";
+  stateDir = "${config.sinnix.paths.stateRoot}/url-ledger";
+  derivedDir = "${config.sinnix.paths.capturePaths.url-ledger}";
+  historyPath = "${config.sinnix.paths.capturePaths.webhistory}/gestalt/derived/full_history.ndjson";
+  cdxRawRoot = "${config.sinnix.paths.capturePaths.url-ledger}/sources/cdx";
 in
 mkServiceModule {
   name = "url-ledger";

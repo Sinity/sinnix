@@ -67,3 +67,22 @@ def test_validated_staged_pair_replaces_both_public_artifacts(tmp_path, monkeypa
     assert db.read_text() == "new database"
     assert parquet.read_text() == "new parquet"
     assert list(tmp_path.iterdir()) == [db, parquet]
+
+
+def test_ledger_view_normalizes_role_without_changing_raw_evidence(tmp_path):
+    import json
+    import subprocess
+    from sinnix_lib.taxonomy import LEGACY_ROLES
+    fs = load_script()
+    source = tmp_path / "judgments.jsonl"
+    source.write_text(json.dumps({"target": "prefix:/sample", "field": "role", "value": "capture", "method": "operator", "ts": "2026-01-01"}) + "\n")
+    sql = fs.LEDGER_SQL.format(judgments_jsonl=str(source), role_cases=" ".join(
+        f"WHEN '{old}' THEN '{new}'" for old, new in LEGACY_ROLES.items()))
+    # Exercise the actual source and resolution statements, before census joins.
+    sql = sql.split("DROP VIEW IF EXISTS prefix_judgments;")[0]
+    result = subprocess.run(["duckdb", ":memory:", "-json", "-c", sql +
+        "SELECT value FROM resolved_judgments; SELECT value FROM judgments;"],
+        text=True, capture_output=True)
+    assert result.returncode == 0, result.stderr
+    assert '"value":"source"' in result.stdout
+    assert '"value":"capture"' in result.stdout

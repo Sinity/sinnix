@@ -19,6 +19,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from sinnix_lib.layout import capture_lane_path
+
 from .selection import store_blob
 from .writer import CaptureWriter
 
@@ -68,7 +70,7 @@ def import_clipse(
     if not isinstance(items, list):
         raise ValueError("clipse history has no clipboardHistory list")
     writer = CaptureWriter(capture_root, lane)
-    lane_dir = Path(capture_root) / lane
+    lane_dir = capture_lane_path(capture_root, lane)
     report = ImportReport()
     referenced: set[Path] = set()
 
