@@ -143,8 +143,10 @@ in
           pkgs.runCommand "sinnix-polylogue-pytest-admission-check"
             {
               nativeBuildInputs = [
-                pkgs.python3
-                polyloguePackage
+                (polyloguePackage.pythonModule.withPackages (ps: [
+                  polyloguePackage
+                  ps.pytest-testmon
+                ]))
               ];
             }
             ''
