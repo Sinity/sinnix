@@ -40,6 +40,12 @@ STYLE = """
 
 SCRIPT = r"""
 (()=>{
+ if(location.protocol==='http:'||location.protocol==='https:'){
+  document.querySelectorAll('a[href^="file:"]').forEach(link=>{
+   const label=document.createElement('span');label.className=link.className;
+   label.textContent=link.textContent+' (local path)';link.replaceWith(label);
+  });
+ }
  const rows=[...document.querySelectorAll('.asset')];
  const indexedRows=rows.map(row=>({row,text:row.textContent.toLocaleLowerCase(),methods:JSON.parse(row.dataset.methods)}));
  const q=document.getElementById('catalog-query');

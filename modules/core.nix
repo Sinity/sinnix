@@ -103,7 +103,8 @@ in
         "d /realm/state/cache 0755 ${username} users -"
         "d /realm/state/cursors 0755 ${username} users -"
         "d /realm/state/db-dumps 0755 ${username} users -"
-        "d /realm/tmp/work 0700 ${username} users 30d"
+        # Scratch owners decide removal; age alone does not establish disposability.
+        "d /realm/tmp/work 0700 ${username} users -"
         "d ${paths.realmRoot}/account 0755 ${username} users -"
         "d ${paths.personalRoot} 0700 ${username} users -"
         "d ${paths.devicesRoot} 0755 ${username} users -"
