@@ -14,13 +14,20 @@ if [ ! -x "$RAWLOG_CAPTURE_BIN" ]; then
   exit 1
 fi
 
+if [ "${RAWLOG_FILE:-}" = /realm/journal/raw-log.md ]; then
+  export RAWLOG_FILE=/realm/personal/journal/raw-log.md
+fi
+
 while true; do
   started_at=${SECONDS}
   # Clear screen and scrollback so the warm scratchpad does not retain old gum
   # render buffers across many captures.
   printf '\033[H\033[2J\033[3J'
-  "$RAWLOG_CAPTURE_BIN"
-  status=$?
+  if "$RAWLOG_CAPTURE_BIN"; then
+    status=0
+  else
+    status=$?
+  fi
   runtime=$((SECONDS - started_at))
   case "$status" in
     0)
