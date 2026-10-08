@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Control the Quest 3 through its USB bootstrap or authenticated LAN ADB transport
-# runtimeInputs: bash coreutils android-tools scrcpy iproute2 gawk systemd @sinnix-quest-player
+# runtimeInputs: bash coreutils android-tools scrcpy iproute2 gawk systemd @sinnix-quest-player @sinnix-remote-command
 
 set -euo pipefail
 
@@ -13,6 +13,13 @@ ARCHIVE_DIR="${SINNIX_QUEST_ARCHIVE_DIR:-/realm/archive/quest-3/videoshots}"
 BACKUP_MARKER="${SINNIX_QUEST_BACKUP_MARKER:-/persist/root/.cache/borg-drain/realm.last-success}"
 MEDIA_PORT="${SINNIX_QUEST_MEDIA_PORT:-9790}"
 TRANSPORT="${SINNIX_QUEST_TRANSPORT:-auto}"
+
+adb_shell_args() {
+  local target="$1" command
+  shift
+  command=$(sinnix-remote-command "$@") || return
+  ANDROID_SERIAL="$target" adb shell -T "$command"
+}
 
 usage() {
   cat <<'EOF'
@@ -281,13 +288,13 @@ media() {
           *) echo "refusing non-Videoshots path: $remote" >&2; return 2 ;;
         esac
         local_path="$MEDIA_DIR/${remote##*/}"
-        remote_hash="$(ANDROID_SERIAL="$target" adb shell sha256sum "$remote" | awk '{ print $1 }' | tr -d '\r')"
+        remote_hash="$(adb_shell_args "$target" sh -c 'sha256sum < "$1"' sh "$remote" | awk '{ print $1 }' | tr -d '\r')"
         [[ "$remote_hash" =~ ^[0-9a-f]{64}$ ]] || {
           echo "could not hash headset file: $remote" >&2
           return 1
         }
         if [ -e "$local_path" ]; then
-          local_hash="$(sha256sum "$local_path" | awk '{ print $1 }')"
+          local_hash="$(sha256sum <"$local_path" | awk '{ print $1 }')"
           [ "$local_hash" = "$remote_hash" ] || {
             echo "destination exists with a different hash: $local_path" >&2
             return 1
@@ -297,7 +304,7 @@ media() {
         fi
         partial_path="$local_path.partial-$$"
         ANDROID_SERIAL="$target" adb pull "$remote" "$partial_path"
-        local_hash="$(sha256sum "$partial_path" | awk '{ print $1 }')"
+        local_hash="$(sha256sum <"$partial_path" | awk '{ print $1 }')"
         [ "$local_hash" = "$remote_hash" ] || {
           echo "copy hash mismatch; retained partial copy: $partial_path" >&2
           return 1
@@ -315,15 +322,15 @@ media() {
       for source_path in "$@"; do
         [ -f "$source_path" ] || { echo "not a regular ingress file: $source_path" >&2; return 2; }
         case "$source_path" in "$MEDIA_DIR"/*) ;; *) echo "refusing non-ingress archive source: $source_path" >&2; return 2 ;; esac
-        local_hash="$(sha256sum "$source_path" | awk '{ print $1 }')"
+        local_hash="$(sha256sum <"$source_path" | awk '{ print $1 }')"
         archive_path="$ARCHIVE_DIR/${local_hash}-${source_path##*/}"
         if [ -e "$archive_path" ]; then
-          [ "$(sha256sum "$archive_path" | awk '{ print $1 }')" = "$local_hash" ] || { echo "archive collision: $archive_path" >&2; return 1; }
+          [ "$(sha256sum <"$archive_path" | awk '{ print $1 }')" = "$local_hash" ] || { echo "archive collision: $archive_path" >&2; return 1; }
           echo "already archived: $archive_path"
           continue
         fi
         cp --reflink=auto --preserve=timestamps "$source_path" "$archive_path"
-        [ "$(sha256sum "$archive_path" | awk '{ print $1 }')" = "$local_hash" ] || { echo "archive hash mismatch: $archive_path" >&2; return 1; }
+        [ "$(sha256sum <"$archive_path" | awk '{ print $1 }')" = "$local_hash" ] || { echo "archive hash mismatch: $archive_path" >&2; return 1; }
         echo "archived: $archive_path"
       done
       ;;
@@ -342,20 +349,35 @@ media() {
         backup_epoch="$(stat -c %Y "$BACKUP_MARKER")"
       fi
       now="$(date +%s)"
-      while IFS='|' read -r epoch remote; do
+      local listing
+      listing=$(mktemp) || return 1
+      if ! adb_shell_args "$target" find /sdcard/Oculus/Videoshots -maxdepth 1 -type f -print0 >"$listing"; then
+        rm -f "$listing"
+        echo "headset media inventory failed" >&2
+        return 1
+      fi
+      while IFS= read -r -d '' remote; do
         [ -n "$remote" ] || continue
+        case "$remote" in /sdcard/Oculus/Videoshots/*) ;; *) echo "skip non-Videoshots path" >&2; continue ;; esac
+        case "$remote" in *".."*) echo "skip unsafe media path" >&2; continue ;; esac
+        epoch=$(adb_shell_args "$target" stat -c %Y "$remote" | tr -d '\r') || { echo "skip unavailable media timestamp" >&2; continue; }
+        case "$epoch" in ''|*[!0-9]*) echo "skip invalid media timestamp" >&2; continue ;; esac
         [ $(( now - epoch )) -ge 2592000 ] || continue
-        remote_hash="$(ANDROID_SERIAL="$target" adb shell sha256sum "$remote" | awk '{ print $1 }' | tr -d '\r')"
+        remote_hash="$(adb_shell_args "$target" sh -c 'sha256sum < "$1"' sh "$remote" | awk '{ print $1 }' | tr -d '\r')"
         [[ "$remote_hash" =~ ^[0-9a-f]{64}$ ]] || { echo "skip unhashable headset file: $remote" >&2; continue; }
-        archive_path="$(find "$ARCHIVE_DIR" -maxdepth 1 -type f -name "${remote_hash}-*" -print -quit)"
+        archive_path=
+        IFS= read -r -d '' archive_path < <(find "$ARCHIVE_DIR" -maxdepth 1 -type f -name "${remote_hash}-*" -print0 -quit) || true
         [ -n "$archive_path" ] || { echo "skip unarchived: $remote"; continue; }
+        local_hash=$(sha256sum <"$archive_path" | awk '{ print $1 }') || { echo "skip unreadable archive: $remote"; continue; }
+        [ "$local_hash" = "$remote_hash" ] || { echo "skip archive hash mismatch: $remote"; continue; }
         if [ "$apply" = 1 ] && [ "$(stat -c %Y "$archive_path")" -le "$backup_epoch" ]; then
-          ANDROID_SERIAL="$target" adb shell rm -f "$remote"
+          adb_shell_args "$target" rm -f -- "$remote"
           echo "removed verified 30-day source copy: $remote"
         else
           echo "eligible: $remote"
         fi
-      done < <(ANDROID_SERIAL="$target" adb shell 'find /sdcard/Oculus/Videoshots -maxdepth 1 -type f -printf "%T@|%p\\n" 2>/dev/null' | tr -d '\r' | awk -F'|' '{ print int($1) "|" $2 }')
+      done <"$listing"
+      rm -f "$listing"
       ;;
     serve)
       target="$(usb_serial)"

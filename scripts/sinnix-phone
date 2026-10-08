@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Reach the phone over the tailnet — status, shell, screen mirror, media pull, clipboard push
-# runtimeInputs: bash python3 coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl tailscale debootstrap zip @sinnix-phone-dispatcher
+# runtimeInputs: bash python3 coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl tailscale debootstrap zip @sinnix-phone-dispatcher @sinnix-remote-command
 
 #
 # The phone (Redmi Note 11, Evolution X with Magisk) is a tailnet peer with two control
@@ -152,8 +152,7 @@ mkdir -p "${SINNIX_PHONE_SSH_CONTROL_DIR:-$HOME/.cache/sinnix-phone-ssh}"
 # an array) -- computed once at top level so every case branch can use it,
 # including a `"$0" subcmd` re-invocation, which is a separate process.
 rsync_ssh="ssh ${ssh_phone_opts[*]}"
-# shellcheck disable=SC2029  # client-side expansion is intended: callers
-# (clip-push) build the remote command with their own already-expanded args.
+# Raw command text is reserved for fixed scripts and the explicit shell command.
 ssh_phone() { ssh "${ssh_phone_opts[@]}" "${PHONE_USER}@${PHONE_TS_IP}" "$@"; }
 adb_phone() { ANDROID_SERIAL="$ADB_TARGET" adb "$@"; }
 
@@ -209,6 +208,12 @@ adb_resolve() {
 adb_any() {
   adb_resolve || return 1
   ANDROID_SERIAL="$ADB_RESOLVED" adb "$@"
+}
+
+adb_shell_args() {
+  local command
+  command=$(sinnix-remote-command "$@") || return
+  adb_any shell -T "$command"
 }
 
 # The grants the app needs that only shell-uid can make. RECORD_AUDIO is
@@ -343,15 +348,22 @@ drain_logcat_adb() {
 # phone -- the rsync path's `--ignore-existing` semantics, kept deliberately so
 # whichever transport ran last does not change what the other one will do.
 drain_ambient_adb() {
-  local dest name local_size remote_size pulled=0 repaired=0
+  local dest name remote listing local_size remote_size pulled=0 repaired=0
   adb_resolve || return 1
   dest="$LAKE_ROOT/ambient"
   mkdir -p "$dest"
-  while IFS= read -r name; do
+  listing=$(mktemp "$dest/.inventory.XXXXXX") || return 1
+  if ! adb_shell_args find /sdcard/sinnix-ambient -maxdepth 1 -type f -print0 >"$listing"; then
+    rm -f "$listing"
+    echo "ambient: inventory failed" >&2
+    return 1
+  fi
+  while IFS= read -r -d '' remote; do
+    name=${remote##*/}
     case "$name" in
       '' | *.part | status.json*) continue ;;
     esac
-    remote_size=$(adb_any shell "stat -c %s '/sdcard/sinnix-ambient/$name'" 2>/dev/null </dev/null | tr -d '\r')
+    remote_size=$(adb_shell_args stat -c %s "$remote" 2>/dev/null </dev/null | tr -d '\r')
     if [ -e "$dest/$name" ]; then
       # A closed chunk never changes, so a lake copy smaller than the phone's
       # is a transfer that was cut short, not a different recording. Skipping
@@ -369,7 +381,8 @@ drain_ambient_adb() {
     if adb_any pull "/sdcard/sinnix-ambient/$name" "$dest/$name" >/dev/null 2>&1; then
       pulled=$((pulled + 1))
     fi
-  done < <(adb_any shell 'ls /sdcard/sinnix-ambient/' 2>/dev/null | tr -d '\r')
+  done <"$listing"
+  rm -f "$listing"
   echo "ambient: drained $pulled new chunk(s) over adb, repaired $repaired truncated"
 }
 
@@ -387,7 +400,7 @@ drain_bcr_calls_adb() {
   local remote_dir export_dir dest debug_dir ledger seen remote name
   local remote_size local_size bytes export_size duration rate channels
   local levels mean max dead truncated_export log_remote log_name display
-  local listing staging quoted_remote quoted_export transfer_ok decode_ok
+  local listing staging transfer_ok decode_ok
   local failed=0
   local pulled=0 repaired=0 audited=0 silent=0 broken=0
 
@@ -399,19 +412,20 @@ drain_bcr_calls_adb() {
   ledger="$dest/levels.jsonl"
   mkdir -p "$dest" "$debug_dir" || return 1
   touch "$ledger" || return 1
-  seen=$(jq -r '"\(.file) \(.bytes // 0)"' "$ledger" 2>/dev/null | sort -u) || return 1
+  seen=$(jq -c -s 'map({file, bytes: (.bytes // 0)})' "$ledger") || return 1
 
   # BCR updates the staging file while a call is active. One quiet minute is
   # enough to distinguish a completed file from the current recording.
-  if ! listing=$(adb_any shell find "$remote_dir" -maxdepth 1 -type f -name "'*.oga'" -mmin +1 2>/dev/null); then
+  listing=$(mktemp "$dest/.inventory.XXXXXX") || return 1
+  if ! adb_shell_args find "$remote_dir" -maxdepth 1 -type f -name '*.oga' -mmin +1 -print0 >"$listing"; then
+    rm -f "$listing"
     echo "bcr: staging inventory failed" >&2
     return 1
   fi
-  while IFS= read -r remote; do
+  while IFS= read -r -d '' remote; do
     [ -n "$remote" ] || continue
     name=${remote##*/}
-    printf -v quoted_remote '%q' "$remote"
-    if ! remote_size=$(adb_any shell "stat -c %s $quoted_remote" 2>/dev/null </dev/null); then
+    if ! remote_size=$(adb_shell_args stat -c %s "$remote" 2>/dev/null </dev/null); then
       failed=$((failed + 1))
       continue
     fi
@@ -449,11 +463,12 @@ drain_bcr_calls_adb() {
     log_remote="${remote%.oga}.log.txt"
     log_name="${name%.oga}.log.txt"
     if [ ! -e "$debug_dir/$log_name" ] \
-        && adb_any shell "test -f $(printf '%q' "$log_remote")" >/dev/null 2>&1; then
+        && adb_shell_args test -f "$log_remote" >/dev/null 2>&1; then
       adb_any pull "$log_remote" "$debug_dir/$log_name" >/dev/null 2>&1 || true
     fi
 
-    if printf '%s\n' "$seen" | grep -qxF "$name $bytes"; then
+    if printf '%s' "$seen" | jq -e --arg file "$name" --argjson bytes "$bytes" \
+        'any(.[]; .file == $file and .bytes == $bytes)' >/dev/null; then
       continue
     fi
 
@@ -478,8 +493,7 @@ drain_bcr_calls_adb() {
       dead=true
     fi
 
-    printf -v quoted_export '%q' "$export_dir/$name"
-    export_size=$(adb_any shell "stat -c %s $quoted_export" 2>/dev/null </dev/null | tr -d '\r' || true)
+    export_size=$(adb_shell_args stat -c %s "$export_dir/$name" 2>/dev/null </dev/null | tr -d '\r' || true)
     case "$export_size" in *[!0-9]*) export_size= ;; esac
     truncated_export=false
     if [ -n "$export_size" ] && [ "$export_size" -lt "$remote_size" ]; then
@@ -518,7 +532,8 @@ drain_bcr_calls_adb() {
     elif [ "$truncated_export" = true ]; then
       echo "BCR WARNING: $display export copy is truncated; full staging copy preserved" >&2
     fi
-  done <<<"${listing//$'\r'/}"
+  done <"$listing"
+  rm -f "$listing"
 
   echo "bcr: synced $pulled new call(s), repaired $repaired partial copy/copies, audited $audited; $silent silent, $broken undecodable, $failed transfer/inventory failures"
   if [ "$silent" -gt 0 ] || [ "$broken" -gt 0 ] || [ "$failed" -gt 0 ]; then
@@ -533,7 +548,7 @@ nix_userland_identity() {
     echo "Nix-on-Droid is not installed" >&2
     return 1
   }
-  NIX_APP_CONTEXT=$(adb_any shell su "$NIX_APP_UID" -c \
+  NIX_APP_CONTEXT=$(adb_shell_args su "$NIX_APP_UID" -c \
     '/system/bin/ls -Zd /data/data/com.termux.nix/files/home' 2>/dev/null \
     | awk '{print $1}' | tr -d '\r')
   case "$NIX_APP_CONTEXT" in
@@ -555,8 +570,8 @@ nix_userland_fix_labels() {
     /data/data/com.termux.nix/files/usr/usr
     /data/data/com.termux.nix/files/usr/nix/var/nix/profiles
   )
-  adb_any shell su "$NIX_APP_UID" -c "/system/bin/find ${roots[*]} -print0" \
-    | adb_any shell su -c "xargs -0 chcon -h '$NIX_APP_CONTEXT'"
+  adb_shell_args su "$NIX_APP_UID" -c "$(sinnix-remote-command /system/bin/find "${roots[@]}" -print0)" \
+    | adb_shell_args su -c "$(sinnix-remote-command xargs -0 chcon -h "$NIX_APP_CONTEXT")"
 }
 
 CHROOT_MODULE_ID=sinnix_debian_chroot
@@ -598,7 +613,7 @@ chroot_build() (
 )
 
 chroot_root() {
-  adb_any shell su -c "$1"
+  adb_shell_args su -c "$1"
 }
 
 
@@ -859,7 +874,7 @@ touch $termux_prefix/var/service/ambient/down; \
 sv d $termux_prefix/var/service/ambient >/dev/null 2>&1; \
 sv k $termux_prefix/var/service/ambient >/dev/null 2>&1; \
 termux-microphone-record -q >/dev/null 2>&1; true"
-  if adb_any shell "run-as com.termux sh -c '$termux_retire'" >/dev/null 2>&1; then
+  if adb_shell_args run-as com.termux sh -c "$termux_retire" >/dev/null 2>&1; then
     echo "  Termux ambient service is down and will stay down across reboots"
   elif ssh_phone "$termux_retire" >/dev/null 2>&1; then
     echo "  Termux ambient service is down and will stay down across reboots"
@@ -913,11 +928,10 @@ nix-switch)
     revision=$(git -C "$sinnix_dir" rev-parse origin/master)
     flake_ref="github:Sinity/sinnix/$revision#redmi-note-11"
   fi
-  printf -v quoted_flake '%q' "$flake_ref"
-  adb_any shell su "$NIX_APP_UID" -c \
-    "TMPDIR=/data/data/com.termux.nix/files/usr/tmp /data/data/com.termux.nix/files/usr/bin/login nix-on-droid switch --flake $quoted_flake"
+  adb_shell_args su "$NIX_APP_UID" -c \
+    "$(sinnix-remote-command env TMPDIR=/data/data/com.termux.nix/files/usr/tmp /data/data/com.termux.nix/files/usr/bin/login nix-on-droid switch --flake "$flake_ref")"
   nix_userland_fix_labels
-  adb_any shell su "$NIX_APP_UID" -c \
+  adb_shell_args su "$NIX_APP_UID" -c \
     '/data/data/com.termux.nix/files/usr/bin/login nvim --version' | head -n 1
   ;;
 nix-fix-labels)
@@ -964,10 +978,10 @@ chroot)
     exit 1
   }
   if [ "$#" -eq 0 ]; then
-    adb_any shell -t su -c "$CHROOT_MODULE_ROOT/run.sh"
+    adb_any shell -t "$(sinnix-remote-command su -c "$CHROOT_MODULE_ROOT/run.sh")"
   else
-    printf -v chroot_command '%q ' "$@"
-    adb_any shell -t su -c "$CHROOT_MODULE_ROOT/run.sh $chroot_command"
+    chroot_command=$(sinnix-remote-command "$@")
+    adb_any shell -t "$(sinnix-remote-command su -c "$CHROOT_MODULE_ROOT/run.sh $chroot_command")"
   fi
   ;;
 chroot-verify)
@@ -1246,9 +1260,11 @@ clip-push)
   mime="$(wl-paste --list-types 2>/dev/null | head -1)"
   case "$mime" in
     text/*|"")
-      text="$(wl-paste -n 2>/dev/null || true)"
-      [ -n "$text" ] || exit 0
-      ssh_phone "termux-clipboard-set" -- "$text" 2>/dev/null || true
+      if ! clipboard_command=$(wl-paste -n | sinnix-remote-command --stdin-last termux-clipboard-set --); then
+        echo "clip-push: clipboard could not be encoded" >&2
+        exit 1
+      fi
+      ssh_phone "$clipboard_command"
       ;;
     *) : ;; # non-text clipboard (image, etc.) -- nothing to push
   esac

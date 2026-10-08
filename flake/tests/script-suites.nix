@@ -77,6 +77,23 @@
     in
     {
       checks = {
+        device-remote-command-suite = mkScriptSuite {
+          name = "sinnix-device-control";
+          suiteDir = ../../pkgs/sinnix-device-control/tests;
+          scripts = [
+            "sinnix-phone"
+            "sinnix-quest"
+            "sinnix-remote-command"
+          ];
+          nativeBuildInputs = [
+            pkgs.bash
+            pkgs.dash
+            pkgs.findutils
+            pkgs.gawk
+            pkgs.ffmpeg
+            pkgs.jq
+          ];
+        };
         audio-mic-suite = mkScriptSuite {
           name = "audio-mic";
           suiteDir = ../../scripts/tests/audio-mic;

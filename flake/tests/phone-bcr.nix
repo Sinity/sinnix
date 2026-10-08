@@ -20,7 +20,7 @@
             ];
           }
           ''
-            python ${./phone-bcr.py} ${../../scripts/sinnix-phone}
+            python ${./phone-bcr.py} ${../../scripts/sinnix-phone} ${../../scripts/sinnix-remote-command}
             touch "$out"
           '';
     };

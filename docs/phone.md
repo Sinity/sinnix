@@ -37,6 +37,14 @@ links out to it rather than repeating it.
 | Transport routes + unit        | `modules/services/hub.nix` (`/phone/v1/*`)                                    |
 | System-log pull (the one pull) | `modules/services/phone-logcat.nix`                                           |
 
+The phone and Quest scripts encode literal arguments before SSH or ADB joins
+them into a remote command. `sinnix-remote-command` uses POSIX shell quoting,
+including at both layers of `su -c` commands. Device shells must accept that
+syntax. Clipboard stdin preserves trailing newlines; NUL is rejected before
+sending because shell arguments cannot represent it. Capture and Quest media
+inventories use NUL separators to preserve filenames containing newlines.
+The explicit `shell` commands continue to accept operator-authored command text.
+
 ## Build
 
 A normal Android project — Kotlin, Compose, AndroidX, Gradle — made

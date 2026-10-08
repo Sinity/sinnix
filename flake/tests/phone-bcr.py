@@ -1,14 +1,21 @@
 """Exercise BCR intake with real decoding and a controlled ADB transport."""
+
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 source = Path(sys.argv[1]).read_text()
-function = source[source.index("drain_bcr_calls_adb() {"):source.index("nix_userland_identity() {")]
-mock = r'''
+function = source[
+    source.index("drain_bcr_calls_adb() {") : source.index("nix_userland_identity() {")
+]
+builder = source[
+    source.index("adb_shell_args() {") : source.index("# The grants the app needs")
+]
+mock = r"""
+sinnix-remote-command() { python3 "$BCR_ENCODER" "$@"; }
 adb_resolve() { return 0; }
 adb_any() {
   case "$1" in
@@ -20,14 +27,16 @@ adb_any() {
       cp "$BCR_FIXTURE" "$3"
       ;;
     shell)
-      case "$2" in
-        find)
+      shift
+      [ "$1" = -T ] && shift
+      case "$1" in
+        find*)
           [ "$BCR_MODE" != "inventory-failed" ] || return 1
-          printf '%s\n' '/sdcard/Android/data/com.chiller3.bcr/files/neutral call.oga'
+          printf '%s\0' '/sdcard/Android/data/com.chiller3.bcr/files/neutral call.oga'
           ;;
         stat*)
           # Confirm the device shell receives an escaped path with spaces.
-          [[ "$2" == *'neutral\ call.oga'* ]] || return 1
+          [[ "$1" == *"'"*'neutral call.oga'*"'"* ]] || return 1
           stat -c %s "$BCR_FIXTURE"
           ;;
         test*) return 1 ;;
@@ -37,20 +46,44 @@ adb_any() {
     *) return 1 ;;
   esac
 }
-'''
+"""
 with tempfile.TemporaryDirectory() as scratch:
     root = Path(scratch)
     fixture = root / "fixture.oga"
-    subprocess.run([
-        "ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i",
-        "sine=frequency=440:duration=0.2", "-c:a", "libopus", str(fixture),
-    ], check=True)
-    harness = "set -euo pipefail\n" + mock + function + "\ndrain_bcr_calls_adb\n"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=440:duration=0.2",
+            "-c:a",
+            "libopus",
+            str(fixture),
+        ],
+        check=True,
+    )
+    harness = (
+        "set -euo pipefail\n" + mock + builder + function + "\ndrain_bcr_calls_adb\n"
+    )
+
     def run(mode, lake):
-        return subprocess.run(["bash", "-c", harness], env={
-            **os.environ, "BCR_MODE": mode, "BCR_FIXTURE": str(fixture),
-            "LAKE_ROOT": str(lake),
-        }, capture_output=True, text=True)
+        return subprocess.run(
+            ["bash", "-c", harness],
+            env={
+                **os.environ,
+                "BCR_MODE": mode,
+                "BCR_FIXTURE": str(fixture),
+                "LAKE_ROOT": str(lake),
+                "BCR_ENCODER": sys.argv[2],
+            },
+            capture_output=True,
+            text=True,
+        )
+
     lake = root / "lake"
     result = run("normal", lake)
     assert result.returncode == 0, result.stderr + result.stdout
@@ -78,4 +111,6 @@ with tempfile.TemporaryDirectory() as scratch:
     result = run("normal", broken)
     assert result.returncode != 0
     assert (broken / "calls" / "levels.jsonl").read_text() == ""
-print("BCR intake: real decode, repeat, cut transfer, recovery, inventory and corrupt audio passed")
+print(
+    "BCR intake: real decode, repeat, cut transfer, recovery, inventory and corrupt audio passed"
+)

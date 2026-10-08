@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Encode literal arguments for the POSIX shell used by SSH and Android ADB
+# runtimeInputs: python3
+
+"""Internal device transport encoder; emits one remote command string.
+
+SSH and ADB shell join local arguments before the remote shell parses them.
+POSIX single quoting works with Android's shell and Termux's login shell;
+Bash's printf %q does not. Stdin mode preserves trailing newlines and rejects
+NUL before any remote effect. argv and POSIX shells cannot represent NUL.
+"""
+
+import os
+import shlex
+import sys
+
+arguments = sys.argv[1:]
+if arguments[:1] == ["--stdin-last"]:
+    arguments = arguments[1:]
+    if not arguments:
+        sys.exit("remote command: expected a command before the stdin argument")
+    value = sys.stdin.buffer.read()
+    if b"\0" in value:
+        sys.exit("remote command: NUL cannot be represented by a shell argument")
+    arguments.append(os.fsdecode(value))
+if not arguments:
+    sys.exit("remote command: expected a command")
+sys.stdout.write(shlex.join(arguments))
