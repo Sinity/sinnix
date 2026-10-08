@@ -1212,9 +1212,9 @@ def publish_generation(index_dir: Path, *, roots=None, retained_inputs: Path | N
                 json.dump({"status": "published", "generation": name}, handle)
             print(json.dumps(manifest))
             return 0
-        except (Exception, SystemExit) as exc:
+        except (Exception, SystemExit, KeyboardInterrupt) as exc:
             with atomic_text_writer(index_dir / "last-attempt.json", fsync=True, mode=0o600) as handle:
-                json.dump({"status": "failed", "candidate": str(stage), "reason": str(exc)}, handle)
+                json.dump({"status": "failed", "candidate": str(stage), "reason": str(exc) or type(exc).__name__}, handle)
             # Failed candidates remain private, preserving the reason and partial work.
             raise
 
@@ -1232,16 +1232,32 @@ def cmd_status(args: argparse.Namespace) -> int:
     result = {}
     attempt = args.index_dir / "last-attempt.json"
     if attempt.exists():
-        result["last_attempt"] = json.loads(attempt.read_text())
+        try:
+            result["last_attempt"] = json.loads(attempt.read_text())
+        except (OSError, ValueError) as exc:
+            result["last_attempt_error"] = str(exc)
+    result["unpublished_candidates"] = [str(p) for p in sorted(
+        (args.index_dir / "generations").glob(".building-*")) if p.is_dir()]
+    lock = args.index_dir / "publication.lock"
+    result["publication_in_progress"] = False
+    if lock.exists():
+        with lock.open("r") as handle:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except BlockingIOError:
+                result["publication_in_progress"] = True
     try:
         generation = resolve_generation(args.index_dir)
         manifest = json.loads((generation / "manifest.json").read_text())
         validate_generation(generation)
         result.update(valid=True, generation=str(generation), scan=manifest["scan"],
-                      classifications_stale=read_judgments(args.index_dir / "judgments.jsonl")["sha256"] != manifest["ledger_sha256"],
                       invalid_definitions=manifest["invalid_definitions"],
                       coverage=generation_coverage(generation),
                       coverage_limitation="bounded generic inspection; native stores and exclusions require owner evidence")
+        try:
+            result["classifications_stale"] = read_judgments(args.index_dir / "judgments.jsonl")["sha256"] != manifest["ledger_sha256"]
+        except (OSError, ValueError) as exc:
+            result.update(classifications_stale=True, current_ledger_error=str(exc))
     except (OSError, ValueError) as exc:
         result.update(valid=False, reason=str(exc))
     print(json.dumps(result, indent=2))

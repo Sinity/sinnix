@@ -16,7 +16,7 @@ def load_script():
 
 
 def test_failed_materialization_keeps_the_previous_complete_pair(tmp_path, monkeypatch):
-    """A DuckDB failure occurs before either fixed reader-facing name moves.
+    """A DuckDB failure preserves both existing artifacts inside staging.
 
     Mutation: restore either old ``db.unlink()`` or direct final-Parquet COPY
     and the corresponding old artifact disappears or is overwritten before
@@ -83,8 +83,8 @@ def test_ledger_view_normalizes_role_without_changing_raw_evidence(tmp_path):
     assert '"capture"' in result.stdout
 
 
-@pytest.mark.parametrize("failure", ["ledger", "pointer"])
-def test_failed_generation_preserves_one_reader_generation(tmp_path, monkeypatch, failure):
+@pytest.mark.parametrize("failure", ["ledger", "pointer", "schema", "malformed", "memory", "disk", "interrupted"])
+def test_failed_generation_preserves_one_reader_generation(tmp_path, monkeypatch, capsys, failure):
     import json
     fs = load_script()
     root = tmp_path / "input"
@@ -96,20 +96,57 @@ def test_failed_generation_preserves_one_reader_generation(tmp_path, monkeypatch
     assert fs.publish_generation(index, roots=[str(root)]) == 0
     original = fs.resolve_generation(index)
     assert fs.validate_generation(original)
-    if failure == "ledger":
-        monkeypatch.setattr(fs, "ledger_run", lambda *args: 1)
-    else:
-        replace = fs.os.replace
-        def fail_pointer(source, destination, **kwargs):
-            if Path(destination) == index / "current":
-                raise OSError("injected pointer publication failure")
-            return replace(source, destination, **kwargs)
-        monkeypatch.setattr(fs.os, "replace", fail_pointer)
-    with pytest.raises((ValueError, OSError)):
-        fs.publish_generation(index)
+    capsys.readouterr()
+    with monkeypatch.context() as faults:
+        if failure == "ledger":
+            faults.setattr(fs, "ledger_run", lambda *args: 1)
+        elif failure == "pointer":
+            replace = fs.os.replace
+            def fail_pointer(source, destination, **kwargs):
+                if Path(destination) == index / "current":
+                    raise OSError("injected pointer publication failure")
+                return replace(source, destination, **kwargs)
+            faults.setattr(fs.os, "replace", fail_pointer)
+        elif failure == "malformed":
+            with (index / "judgments.jsonl").open("a") as handle:
+                handle.write("{broken JSON\n")
+        else:
+            errors = {"schema": ValueError("injected schema failure"),
+                      "memory": MemoryError("injected memory exhaustion"),
+                      "disk": OSError(28, "injected disk exhaustion"),
+                      "interrupted": KeyboardInterrupt()}
+            def fail(*args):
+                raise errors[failure]
+            faults.setattr(fs, "validate_generation" if failure == "schema" else "ledger_run", fail)
+        with pytest.raises((ValueError, OSError, MemoryError, KeyboardInterrupt)):
+            fs.publish_generation(index)
     assert fs.resolve_generation(index) == original
     assert fs.validate_generation(original)
     assert json.loads((index / "last-attempt.json").read_text())["status"] == "failed"
+    capsys.readouterr()
+    assert fs.cmd_status(SimpleNamespace(index_dir=index)) == (1 if failure == "malformed" else 0)
+    status = json.loads(capsys.readouterr().out)
+    assert status["valid"] is True
+    assert status["publication_in_progress"] is False
+    if failure == "malformed":
+        assert status["classifications_stale"] is True and status["current_ledger_error"]
+
+
+def test_status_exposes_interrupted_and_active_candidates(tmp_path, monkeypatch, capsys):
+    import json
+    import fcntl
+    fs = load_script()
+    index = tmp_path / "index"
+    candidate = index / "generations/.building-interrupted"
+    candidate.mkdir(parents=True)
+    assert fs.cmd_status(SimpleNamespace(index_dir=index)) == 1
+    status = json.loads(capsys.readouterr().out)
+    assert status["unpublished_candidates"] == [str(candidate)]
+    assert status["publication_in_progress"] is False
+    with (index / "publication.lock").open("w") as writer:
+        fcntl.flock(writer, fcntl.LOCK_EX)
+        assert fs.cmd_status(SimpleNamespace(index_dir=index)) == 1
+        assert json.loads(capsys.readouterr().out)["publication_in_progress"] is True
 
 
 def test_sql_and_direct_resolution_share_time_ambiguity_unknown_and_invalid(tmp_path):
