@@ -1833,7 +1833,7 @@ def _under(path: Path, root: Path) -> bool:
 
 
 def _process_users(path: Path) -> list[str]:
-    """Current-directory users outside pueue's authority."""
+    """Current-directory and open-file users outside pueue's authority."""
     users: list[str] = []
     proc = Path("/proc")
     try:
@@ -1869,7 +1869,96 @@ def _process_users(path: Path) -> list[str]:
             ) from error
         if _under(cwd, path):
             users.append(f"pid {entry.name} cwd {cwd}")
+            continue
+        try:
+            targets = _process_open_files(entry)
+        except PermissionError:
+            try:
+                owner = entry.stat().st_uid
+            except FileNotFoundError:
+                continue
+            # As with cwd, foreign users outside our inspection authority
+            # are not represented as observed holders or observed non-holders.
+            if owner != os.getuid():
+                continue
+            targets = _stable_privileged_open_files(entry)
+        for target in targets:
+            if target.is_absolute() and _under(target, path):
+                users.append(f"pid {entry.name} open file {target}")
+                break
     return users
+
+
+def _process_open_files(entry: Path) -> list[Path]:
+    targets: list[Path] = []
+    try:
+        descriptors = tuple((entry / "fd").iterdir())
+        for descriptor in descriptors:
+            try:
+                targets.append(Path(os.readlink(descriptor)))
+            except FileNotFoundError:
+                # A descriptor closed while the process was being inspected.
+                continue
+    except FileNotFoundError:
+        return []
+    except PermissionError:
+        raise
+    except OSError as error:
+        if error.errno in {errno.ENOENT, errno.ESRCH}:
+            return []
+        raise BatchError(
+            f"cannot inspect process {entry.name} open files: {error}"
+        ) from error
+    return targets
+
+
+def _privileged_open_files(entry: Path) -> list[Path]:
+    try:
+        completed = subprocess.run(
+            [
+                "sudo",
+                "-n",
+                "find",
+                str(entry / "fd"),
+                "-maxdepth",
+                "1",
+                "-type",
+                "l",
+                "-printf",
+                "%l\\0",
+            ],
+            capture_output=True,
+            timeout=CALL_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise BatchError(
+            f"cannot inspect process {entry.name} open files: {error}"
+        ) from error
+    if completed.returncode != 0:
+        raise BatchError(
+            f"cannot inspect process {entry.name} open files: {os.fsdecode(completed.stderr).strip()}"
+        )
+    return [
+        Path(os.fsdecode(target)) for target in completed.stdout.split(b"\0") if target
+    ]
+
+
+def _stable_privileged_open_files(entry: Path) -> list[Path]:
+    start = _process_starttime(entry)
+    if start is None:
+        return []
+    try:
+        targets = _privileged_open_files(entry)
+    except BatchError:
+        if _process_starttime(entry) is None:
+            return []
+        raise
+    end = _process_starttime(entry)
+    if end is None:
+        return []
+    if end != start:
+        raise BatchError(f"process {entry.name} changed during open-file probe")
+    return targets
 
 
 def _process_starttime(entry: Path) -> str | None:

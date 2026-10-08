@@ -611,6 +611,10 @@ checkout was already absent. Branch deletion refuses a concurrent ref change.
 Declared receipts are retained in private
 runtime state before removal. One that is kept is printed with the reason.
 Already-absent checkouts are reported separately and are never counted as removals.
+Process checks include current directories and open file descriptors, so a
+process working elsewhere can still retain a checkout. Unreadable same-user
+processes require a successful privileged probe; refusal keeps the checkout.
+Foreign processes that cannot be inspected remain outside this observation.
 Run state, never age: a live run's worktrees and an
 operator's own are untouched.
 

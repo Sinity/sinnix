@@ -3,6 +3,7 @@
   python3Packages,
   bash,
   coreutils,
+  findutils,
   git,
   gh,
   beads,
@@ -23,6 +24,8 @@ let
   # Importing this Python package does not execute its command-line wrapper.
   runtimeDependencies = [
     bash
+    coreutils
+    findutils
     git
     gh
     beads

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import threading
 from pathlib import Path
 
@@ -18,6 +19,135 @@ from agentctl.worktrunk import (
     worktrunk_remove,
 )
 from conftest import write_project
+
+
+@pytest.mark.parametrize("probe", ["direct", "privileged", "refused"])
+def test_cleanup_keeps_an_open_file_holder_outside_the_checkout(
+    tmp_path: Path, config: Config, monkeypatch: pytest.MonkeyPatch, probe: str
+) -> None:
+    root = _repository(tmp_path / "repo")
+    write_project(root, worktrees=tmp_path / "worktrees")
+    project = load_project_adapter(root)
+    target = tmp_path / "worktrees" / "lane"
+    branch = "batch/run/worker"
+    worktrunk_create(root, branch, path=target, base="master")
+    held = target / "held\nfile.txt"
+    held.write_text("neutral fixture\n")
+    subprocess.run(["git", "-C", str(target), "add", "--", held.name], check=True)
+    _commit(target, "fixture file")
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import sys; f=open(sys.argv[1]); print('ready', flush=True); sys.stdin.read()",
+            str(held),
+        ],
+        cwd=tmp_path,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    # Limit the census to this real process, keeping the real procfs reads.
+    original = Path.iterdir
+    monkeypatch.setattr(
+        Path,
+        "iterdir",
+        lambda path: (
+            iter([Path(f"/proc/{process.pid}")])
+            if path == Path("/proc")
+            else original(path)
+        ),
+    )
+    monkeypatch.setattr(landing, "_task_users", lambda _path: [])
+    if probe != "direct":
+        original_open_files = landing._process_open_files
+
+        def denied(entry: Path) -> list[Path]:
+            if entry.name == str(process.pid):
+                raise PermissionError("fixture denial")
+            return original_open_files(entry)
+
+        def privileged(entry: Path) -> list[Path]:
+            if probe == "refused":
+                raise landing.BatchError("fixture privileged denial")
+            return [held]
+
+        monkeypatch.setattr(landing, "_process_open_files", denied)
+        monkeypatch.setattr(landing, "_privileged_open_files", privileged)
+    try:
+        assert process.stdout is not None
+        assert process.stdout.readline().strip() == "ready"
+        result = landing._drop_branch(
+            config,
+            project,
+            branch,
+            base="master",
+            recorded_path=target,
+        )
+        assert result is not None
+        if probe == "refused":
+            assert "fixture privileged denial" in result
+        else:
+            assert "open file" in result and str(held) in result
+        assert target.is_dir()
+        assert process.poll() is None
+    finally:
+        process.communicate("done", timeout=5)
+    assert (
+        landing._drop_branch(
+            config,
+            project,
+            branch,
+            base="master",
+            recorded_path=target,
+        )
+        is None
+    )
+    assert not target.exists()
+
+
+def test_privileged_open_files_preserve_newlines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "held\r\nfile"
+    monkeypatch.setattr(
+        landing.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args[0],
+            returncode=0,
+            stdout=os.fsencode(target) + b"\0",
+            stderr=b"",
+        ),
+    )
+    assert landing._privileged_open_files(tmp_path / "123") == [target]
+
+
+def test_privileged_open_files_refuse_reused_pid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    times = iter(("before", "after"))
+    monkeypatch.setattr(landing, "_process_starttime", lambda _entry: next(times))
+    monkeypatch.setattr(landing, "_privileged_open_files", lambda _entry: [])
+    with pytest.raises(landing.BatchError, match="changed during open-file probe"):
+        landing._stable_privileged_open_files(tmp_path / "123")
+
+
+def test_privileged_open_files_refusal_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        landing.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=args[0],
+            returncode=1,
+            stdout=b"",
+            stderr=b"sudo denied",
+        ),
+    )
+    with pytest.raises(landing.BatchError, match="sudo denied"):
+        landing._privileged_open_files(tmp_path / "123")
 
 
 def _repository(root: Path) -> Path:
