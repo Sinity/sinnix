@@ -1,4 +1,4 @@
-"""Drive patched Polylogue pytest admission (sinnix-do66).
+"""Exercise the pinned upstream Polylogue pytest admission contract.
 
 Anti-vacuity: restoring ``max(1, ...)`` in ``width_within`` /
 ``memory_bounded_worker_cap``, or launching from ``_run_held`` /
@@ -156,7 +156,10 @@ class PytestAdmissionTests(unittest.TestCase):
             returncode, receipt = slot._run_held(
                 ["python", "-m", "pytest", "-n", "8", "tests"],
                 cwd=str(root),
-                env={"PATH": os.environ.get("PATH", "")},
+                env={
+                    "PATH": os.environ.get("PATH", ""),
+                    "POLYLOGUE_PYTEST_ADMISSION_DIR": str(root / "admission"),
+                },
                 stdout=None,
                 on_exit=lambda: None,
             )
@@ -164,9 +167,11 @@ class PytestAdmissionTests(unittest.TestCase):
             slot.resize_worker_argument = original_resize
             slot.subprocess.Popen = original_popen
         self.assertEqual(returncode, slot.EX_TEMPFAIL)
-        self.assertEqual(receipt["status"], slot.RESOURCE_NOT_READY)
+        self.assertEqual(receipt["status"], "deferred")
+        self.assertEqual(receipt["diagnosis"], slot.RESOURCE_NOT_READY)
         self.assertEqual(receipt["sizing"]["workers"], 0)
         self.assertEqual(receipt["sizing"]["admission"], "resource_not_ready")
+        self.assertEqual(receipt["sizing"]["admission_ledger"]["holders"], 0)
 
     def test_queued_launch_defers_before_popen_on_a_46_mib_cgroup(self) -> None:
         root = Path(os.environ["TMPDIR"]) / "queued"
@@ -179,7 +184,7 @@ class PytestAdmissionTests(unittest.TestCase):
             json.dumps(
                 {
                     "argv": ["python", "-m", "pytest", "-n", "8", "tests"],
-                    "environment": {},
+                    "environment": {"POLYLOGUE_PYTEST_ADMISSION_DIR": str(root / "admission")},
                     "working_directory": str(root),
                     "log_path": str(log),
                 }
@@ -203,8 +208,11 @@ class PytestAdmissionTests(unittest.TestCase):
             slot.subprocess.Popen = original_popen
         self.assertEqual(returncode, slot.EX_TEMPFAIL)
         result = json.loads((root / "run.result.json").read_text(encoding="utf-8"))
-        self.assertEqual(result["status"], slot.RESOURCE_NOT_READY)
+        self.assertEqual(result["status"], "deferred")
+        self.assertEqual(result["diagnosis"], slot.RESOURCE_NOT_READY)
         self.assertEqual(result["sizing"]["workers"], 0)
+        self.assertEqual(result["sizing"]["admission"], "resource_not_ready")
+        self.assertEqual(result["sizing"]["admission_ledger"]["holders"], 0)
 
 
 if __name__ == "__main__":
