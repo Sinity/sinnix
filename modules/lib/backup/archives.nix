@@ -214,7 +214,7 @@
       with_borg_lock borg create \
         --compression auto,zstd,1 \
         --lock-wait ${toString borgLockWaitSec} \
-        ${mkBorgExcludeArgs polylogueStateRoot polylogueDbExcludes} \
+        ${mkBorgExcludeArgs polylogueStateRoot (polylogueDbExcludes ++ [ ".salvage-internals-20261008" ])} \
         --exclude ${lib.escapeShellArg "${polylogueStateRoot}/hooks/**"} \
         "::$archive_name" \
         ${lib.escapeShellArg polylogueStateRoot} \

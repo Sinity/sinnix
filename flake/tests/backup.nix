@@ -201,6 +201,8 @@ assert lib.assertMsg (
           "Polylogue state Borg job must exclude the configured source.db path, not a bare filename";
         assert lib.assertMsg (lib.hasInfix "--exclude ${root}/source.db-wal " script)
           "Polylogue state Borg job must exclude source.db's WAL sidecar to avoid a torn copy";
+        assert lib.assertMsg (lib.hasInfix "--exclude ${root}/.salvage-internals-20261008 " script)
+          "Polylogue state Borg job must leave the inert campaign salvage directory unread";
         assert lib.assertMsg (!lib.hasInfix "embeddings.db.retired" script)
           "Polylogue state Borg job must not name retired database siblings in its exclude list -- they must stay covered by this direct-path job";
         assert lib.assertMsg (lib.hasInfix "/tmp/sentinel-polylogue-root/hooks/**" script)

@@ -1232,6 +1232,7 @@ else: sys.exit(1)
                 "live-cas/objects/ab/cdef": "synthetic CAS",
                 "live-polylogue/blob/objects/cd/ef01": "synthetic blob",
                 "live-polylogue/source.db": "mutable database",
+                "live-polylogue/.salvage-internals-20261008/embeddings.db": "inert synthetic salvage",
                 "live-polylogue/hooks/codex-session-live.jsonl": '{"event":"sealed-before-create"}\n',
                 "live-polylogue/hooks/carriers/codex/2026-09-27/4242.ndjson": '{"event":"carrier-before-create"}\n',
             }.items():
@@ -1261,6 +1262,8 @@ else: sys.exit(1)
                     text=True,
                 ).splitlines()
                 member = next(path for path in entries if path.endswith(source))
+                if repo == "borg-polylogue-state-v1":
+                    self.assertFalse(any("/.salvage-internals-20261008" in path for path in entries))
                 contents = subprocess.check_output(
                     [
                         "borg",
