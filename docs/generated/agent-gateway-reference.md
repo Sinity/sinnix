@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 7c69b1c59182e1bb47882fcb8a7fcec9c041dc966966c07aa05f72794a2893ae -->
+<!-- gateway-catalog-sha256: 2134914ce1c8553987b0c0e7e118c08ae91855c3a57c906397673f77aab27345 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `7c69b1c59182e1bb47882fcb8a7fcec9c041dc966966c07aa05f72794a2893ae`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `2134914ce1c8553987b0c0e7e118c08ae91855c3a57c906397673f77aab27345`.
 
 ## Invocation
 
@@ -24270,6 +24270,18 @@ Input schema:
     "RawRead": {
       "additionalProperties": false,
       "properties": {
+        "expected_observation": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "max_bytes": {
           "default": 64000,
           "maximum": 64000,
@@ -24973,6 +24985,18 @@ Input schema:
     "RawRead": {
       "additionalProperties": false,
       "properties": {
+        "expected_observation": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "max_bytes": {
           "default": 64000,
           "maximum": 64000,
@@ -26274,6 +26298,18 @@ Input schema:
       "default": null,
       "description": "Unix timestamp after which the call is refused."
     },
+    "expected_observation": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "max_bytes": {
       "default": 64000,
       "maximum": 64000,
@@ -26554,6 +26590,18 @@ Input schema:
       ],
       "default": null,
       "description": "Unix timestamp after which the call is refused."
+    },
+    "expected_observation": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "max_bytes": {
       "default": 64000,

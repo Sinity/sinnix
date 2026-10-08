@@ -213,6 +213,7 @@ class RawRead(Request):
     reference: Text
     offset: Offset = 0
     max_bytes: Annotated[int, Field(ge=4, le=64_000)] = 64_000
+    expected_observation: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")] | None = None
 
 class RawTimeline(Request):
     operation: Literal["sessions.raw.timeline"] = "sessions.raw.timeline"

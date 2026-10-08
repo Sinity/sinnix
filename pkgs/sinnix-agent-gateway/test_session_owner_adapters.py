@@ -39,7 +39,12 @@ def make_server(tmp_path, principal, monkeypatch):
         ),
         (
             "sessions.raw.read",
-            {"reference": "codex:fixture.jsonl", "offset": 4, "max_bytes": 8},
+            {
+                "reference": "codex:fixture.jsonl",
+                "offset": 4,
+                "max_bytes": 8,
+                "expected_observation": "0" * 64,
+            },
             "sessions.raw.read",
         ),
         (
