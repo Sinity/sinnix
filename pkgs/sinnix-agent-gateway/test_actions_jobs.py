@@ -404,12 +404,39 @@ def test_cancel_checks_the_phase_and_surfaces_reap_survivors(
             "target": {"job_id": 41},
             "expected_phase": "running",
             "idempotency_key": "c2",
+            "reason": "stop requested",
         },
     )["data"]
     assert cancelled["previous_phase"] == "running"
     assert cancelled["cancelled"] == "killed" and cancelled["scope_stopped"] is False
     assert cancelled["survivors"] == [4242] and cancelled["warnings"]
     assert cancelled["job"]["state"]["phase"] == "cancelled"
+    cancel_call = next(c for c in fake.calls if c.operation == "job.cancel")
+    assert cancel_call.arguments["actor"] == "gateway:operator"
+    assert cancel_call.arguments["reason"] == "stop requested"
+
+    fake.responses["job.cancel"] = {
+        **RUNNING,
+        "state": {"phase": "cancelled", "terminal": True},
+        "cancel_requested": True,
+        "already_terminal": False,
+        "cancellation_state": "stopped",
+        "unit": "fixture.service",
+        "cancellation": {
+            "actor": "gateway:operator",
+            "reason": "stop requested",
+            "attempt": 1,
+        },
+    }
+    owner_only = call(
+        server, "jobs.cancel", {"target": {"job_id": 41}, "idempotency_key": "c3"}
+    )["data"]
+    assert (
+        owner_only["scope_unit"] == "fixture.service"
+        and owner_only["scope_stopped"] is True
+    )
+    assert owner_only["survivors"] is None
+    assert owner_only["job"]["cancellation"]["actor"] == "gateway:operator"
 
     fake.responses["job.retry"] = {
         **RUNNING,

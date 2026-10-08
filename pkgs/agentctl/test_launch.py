@@ -6,6 +6,7 @@ import fcntl
 import hashlib
 import json
 import os
+import pwd
 import subprocess
 import threading
 from dataclasses import replace
@@ -471,6 +472,128 @@ def test_cancel_marks_then_stops_the_unit_then_kills_the_task(
     assert cancelled["unresolved"] is True
     assert cancelled["unit"] == unit
     assert cancelled["phase"] == "cancelled"
+
+
+def test_running_cancel_records_request_before_stopping_and_keeps_retry_identity(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    recording_systemctl: Callable[[], list[list[str]]],
+) -> None:
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    task = fake_pueue.task(started["job_id"])
+    document = read_launch(config, task)
+    first = artifacts.begin(document, str(launch.launch_input_path(task)))
+
+    cancelled = launch.cancel(
+        config,
+        started["job_id"],
+        actor="fixture-worker",
+        reason="stop requested",
+        settle_seconds=0,
+    )
+    request = json.loads(
+        artifacts.cancellation_path(Path(document["log_path"]), 1).read_text()
+    )
+    assert (
+        request["actor"] == "fixture-worker" and request["reason"] == "stop requested"
+    )
+    assert request["uid"] == os.getuid() and request["attempt"] == 1
+    assert request["requested_at"]
+    assert cancelled["cancellation"] == request
+    assert cancelled["already_terminal"] is False
+    assert (
+        launch.get_job(started["job_id"], config, attempt=1)["cancellation"] == request
+    )
+
+    outcome = Path(first["log_path"]).with_name("output.outcome")
+    outcome.write_text(json.dumps({"outcome": "cancelled", "exit_code": 130}))
+    fake_pueue.restart(started["job_id"])
+    fake_pueue.running(started["job_id"])
+    fake_pueue._set(started["job_id"], started_at="2026-09-03T08:00:02+00:00")
+    second = artifacts.begin(document, str(launch.launch_input_path(task)))
+    assert second["attempt"] == 2
+    launch.cancel(
+        config,
+        started["job_id"],
+        actor="fixture-reviewer",
+        reason="second request",
+        settle_seconds=0,
+    )
+    assert (
+        launch.get_job(started["job_id"], config, attempt=1)["cancellation"] == request
+    )
+    assert (
+        launch.get_job(started["job_id"], config, attempt=2)["cancellation"]["actor"]
+        == "fixture-reviewer"
+    )
+
+
+def test_cancel_refuses_to_stop_when_request_evidence_cannot_be_written(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    recording_systemctl: Callable[[], list[list[str]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    original = launch.write_input
+
+    def deny_request(path: Path, document: object) -> None:
+        if path.name.endswith(".cancel-request.json"):
+            raise PermissionError("fixture request storage denied")
+        original(path, document)
+
+    monkeypatch.setattr(launch, "write_input", deny_request)
+    with pytest.raises(JobError, match="cannot record cancellation requester"):
+        launch.cancel(
+            config,
+            started["job_id"],
+            actor="fixture-worker",
+            reason="stop requested",
+            settle_seconds=0,
+        )
+    assert not fake_pueue.killed
+    assert not any("stop" in call for call in recording_systemctl())
+
+
+def test_default_cancel_actor_uses_os_identity_not_user_environment(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    fake_pueue.queue(started["job_id"])
+    monkeypatch.setenv("USER", "unverified-label")
+    cancelled = launch.cancel(config, started["job_id"])
+    assert cancelled["cancellation"]["actor"] == pwd.getpwuid(os.getuid()).pw_name
+    assert cancelled["cancellation"]["reason"] is None
+    assert (
+        launch.get_job(started["job_id"], config, started["reference"])["cancellation"]
+        == cancelled["cancellation"]
+    )
+
+
+def test_cancel_request_round_trips_the_declared_unicode_limit(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+) -> None:
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    fake_pueue.queue(started["job_id"])
+    reason = "\U0001f642" * 4096
+    cancelled = launch.cancel(
+        config, started["job_id"], actor="fixture-worker", reason=reason
+    )
+    observed = launch.get_job(started["job_id"], config, started["reference"])
+    assert observed["cancellation"]["reason"] == reason
+    assert observed["cancellation"] == cancelled["cancellation"]
+    assert observed["attempt_count"] == 0
 
 
 def test_cancel_waits_for_inflight_service_creation_then_stops_unit(

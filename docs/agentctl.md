@@ -240,6 +240,17 @@ pytest-heavy and bulk slices have fixed memory, swap, CPU and IO budgets,
 `MemorySwapMax=0`, and are killed by systemd-oomd at their own memory
 pressure; they do not choose capacity from instantaneous free RAM.
 
+`job cancel --actor <requester> --reason <reason>` retains the latest request
+for the selected attempt before stopping it. The default actor is the OS user;
+the observed UID is recorded separately from that declared label. An omitted
+reason remains unknown. Running requests survive wrapper failure and are copied
+into its outcome when it settles; retries preserve earlier requests. Queued
+cancellations remain launch dispositions and do not create execution attempts.
+`job get` exposes request metadata separately from cancellation success. Gateway
+cancellations use their gateway principal label and pass the supplied
+reason to the same owner route. Managed cancellation refuses if it cannot retain
+the requester evidence.
+
 `agentctl-backpressure.timer` runs `agentctl backpressure tick`: it pauses one
 eligible group per minute while known host `full` IO or memory stall stays
 above threshold and resumes only an agentctl-owned pause once its closing

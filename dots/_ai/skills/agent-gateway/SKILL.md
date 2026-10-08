@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 2134914ce1c8553987b0c0e7e118c08ae91855c3a57c906397673f77aab27345 -->
+<!-- gateway-catalog-sha256: 995fc05bb71f1acb01cefd6d87a5faa8be87678dcd5608e5e421dff5b6c22f6c -->
 
 # Agent Gateway
 
@@ -161,7 +161,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 ### operate
 
 - `beads.operate` — Beads maintenance: publish the export snapshot, push or pull sync, create, list or restore backups.
-- `jobs.cancel` — Pass expected_phase to refuse when the job already moved on. Survivors lists PIDs that outlived the reap.
+- `jobs.cancel` — Pass expected_phase to refuse when the job already moved on. The owner retains reason with the gateway principal label before stopping the job. Request metadata is separate from completion; survivors is null when the owner did not report a process inspection.
 - `jobs.retry` — Re-run a terminal job in place with the same launch input and id (pueue restart).
 - `jobs.clean` — Refused while the job is still queued or running; cancel it first.
 - `desktop.operate` — Pointer clicks, drags and scrolls need a virtual pointer tool (ydotool) on the host and fail unavailable without one; cursor moves always work. Window targets are natural locators; ambiguity returns candidates.
@@ -185,4 +185,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `2134914ce1c8553987b0c0e7e118c08ae91855c3a57c906397673f77aab27345`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `995fc05bb71f1acb01cefd6d87a5faa8be87678dcd5608e5e421dff5b6c22f6c`.

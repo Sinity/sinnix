@@ -641,7 +641,8 @@ def _mask_logs(paths: Sequence[Path], values: tuple[bytes, ...]) -> None:
 
 def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     """Run one queued command, retaining complete output for this invocation."""
-    marker = cancel_marker_for(launch["log_path"])
+    declared_log_path = Path(launch["log_path"])
+    marker = cancel_marker_for(declared_log_path)
     launch = artifacts.begin(launch, launch_input)
     log_path = Path(launch["log_path"])
     spool_path = (
@@ -688,11 +689,14 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
                 log.write(f"candidate cleanup deferred: {error}\n".encode())
 
     def refused() -> int:
-        record = {
+        record: dict[str, Any] = {
             "outcome": "refused",
             "exit_code": REFUSED_EXIT_CODE,
             "attempt": launch["attempt"],
         }
+        request = artifacts.cancellation(declared_log_path, launch["attempt"])
+        if request:
+            record["cancellation"] = request
         atomic_publish(
             outcome_path_for(log_path),
             json.dumps(record, sort_keys=True).encode(),
@@ -943,6 +947,9 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             ],
         },
     }
+    request = artifacts.cancellation(declared_log_path, launch["attempt"])
+    if request:
+        record["cancellation"] = request
     if scratch_dir is not None:
         # Measured now, while the unit has exited and nothing else writes
         # there; the record outlives the directory, which goes with the job.

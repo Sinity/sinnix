@@ -237,6 +237,12 @@ def parser() -> argparse.ArgumentParser:
             )
         if name == "cancel":
             one.add_argument(
+                "--actor", help="declared requester; defaults to the OS user"
+            )
+            one.add_argument(
+                "--reason", help="reason retained with cancellation evidence"
+            )
+            one.add_argument(
                 "--expected-attempt",
                 type=int,
                 help="refuse if the selected launch has advanced to another attempt",
@@ -612,6 +618,8 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             arguments.job_id,
             reference=arguments.reference,
             expected_attempt=arguments.expected_attempt,
+            actor=arguments.actor,
+            reason=arguments.reason,
         )
         out.write(job, f"{out.job_line(job)}; {job['state']}")
         return EXIT_REFUSED if job["state"] == "failed" else EXIT_OK

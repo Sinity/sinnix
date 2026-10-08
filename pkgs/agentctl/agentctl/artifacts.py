@@ -22,6 +22,27 @@ CANONICAL_NAMES = {
 }
 
 
+def cancellation_path(log: Path, attempt: int) -> Path:
+    # A request can precede allocation. A numeric directory would consume the
+    # runner's next attempt number, so retain intent beside those directories.
+    return root_for(log) / f"{attempt}.cancel-request.json"
+
+
+def cancellation(log: Path, attempt: int) -> dict[str, Any] | None:
+    path = cancellation_path(log, attempt)
+    try:
+        with path.open("rb") as handle:
+            raw = handle.read(65537)
+    except FileNotFoundError:
+        return None
+    if len(raw) > 65536:
+        raise ValueError("cancellation request exceeds its record limit")
+    record = json.loads(raw)
+    if not isinstance(record, dict) or record.get("attempt") != attempt:
+        raise ValueError("cancellation request does not name this attempt")
+    return record
+
+
 def root_for(log: Path) -> Path:
     return log.with_suffix(".attempts")
 

@@ -167,6 +167,7 @@ def job_payload(job: Mapping[str, Any]) -> dict[str, Any]:
                 "next_attempt_offset",
                 "queue_present",
                 "outcome",
+                "cancellation",
                 "reused",
                 "queue",
                 "queue_unavailable",
@@ -526,11 +527,19 @@ class LocalJobs:
 
     def _cancel(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         job_id = _require_int(arguments, "job_id")
-        job = launch.cancel(self.config, job_id, reference=_launch_reference(arguments))
+        job = launch.cancel(
+            self.config,
+            job_id,
+            reference=_launch_reference(arguments),
+            actor=arguments.get("actor"),
+            reason=arguments.get("reason"),
+        )
         return {
             **job_payload(job),
             "cancel_requested": True,
-            "already_terminal": bool(job.get("terminal")),
+            "already_terminal": bool(job.get("already_terminal")),
+            "cancellation_state": job.get("state"),
+            "unit": job.get("unit"),
         }
 
     def _list(self, arguments: Mapping[str, Any]) -> dict[str, Any]:

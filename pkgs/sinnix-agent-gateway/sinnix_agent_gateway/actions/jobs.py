@@ -90,6 +90,10 @@ class JobView(GatewayModel):
     next_attempt_offset: int | None = None
     queue_present: bool | None = None
     attempt_outcome: dict[str, Any] | None = None
+    cancellation: dict[str, Any] | None = Field(
+        default=None,
+        description="Recorded cancellation request, distinct from its execution outcome.",
+    )
     enqueued_at: str | None = None
     started_at: str | None = None
     ended_at: str | None = None
@@ -293,6 +297,7 @@ def _job_view(payload: Mapping[str, Any]) -> JobView:
             if key in payload
         },
         attempt_outcome=payload.get("outcome"),
+        cancellation=payload.get("cancellation"),
         enqueued_at=payload.get("enqueued_at"),
         started_at=payload.get("started_at"),
         ended_at=payload.get("ended_at"),
@@ -689,6 +694,11 @@ def _queues(runtime: Runtime, inp: QueuesInput) -> QueuePage:
 
 class CancelInput(MutationControls):
     target: JobLocator
+    reason: str | None = Field(
+        default=None,
+        max_length=4096,
+        description="Reason retained by the job owner with the requester identity.",
+    )
     expected_phase: str | None = Field(
         default=None,
         min_length=1,
@@ -705,13 +715,14 @@ class CancelResult(GatewayModel):
     cancel_requested: bool
     already_terminal: bool
     cancelled: str | None = Field(
-        default=None, description="killed, dropped, terminal or forgotten."
+        default=None,
+        description="The owner's cancellation state, such as stopped, removed, terminal, failed or unresolved.",
     )
     scope_unit: str | None = None
     scope_stopped: bool | None = None
-    survivors: list[int] = Field(
-        default_factory=list,
-        description="PIDs that outlived the reap; not empty means the cancel is incomplete.",
+    survivors: list[int] | None = Field(
+        default=None,
+        description="Owner-observed process survivors; null means the owner did not inspect or report them.",
     )
     warnings: list[str] = Field(default_factory=list)
     affordances: list[str] = Field(default_factory=list)
@@ -738,7 +749,14 @@ def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
                 "phase": before.state.phase,
             },
         )
-    raw = _job(runtime, "job.cancel", job_id, reference)
+    raw = _job(
+        runtime,
+        "job.cancel",
+        job_id,
+        reference,
+        actor=f"gateway:{runtime.principal.name}",
+        reason=inp.reason,
+    )
     if not isinstance(raw.get("cancel_requested"), bool):
         raise ProtocolError(
             "owner_failed",
@@ -746,7 +764,15 @@ def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
         )
     reaped = raw.get("reaped") if isinstance(raw.get("reaped"), Mapping) else {}
     scope = reaped.get("scope") if isinstance(reaped.get("scope"), Mapping) else {}
-    survivors = [int(pid) for pid in scope.get("survivors") or []]
+    survivors = (
+        [int(pid) for pid in scope["survivors"]]
+        if isinstance(scope.get("survivors"), list)
+        else None
+    )
+    owner_state = raw.get("cancellation_state")
+    scope_stopped = scope.get("stopped")
+    if scope_stopped is None and owner_state in {"stopped", "failed"}:
+        scope_stopped = owner_state == "stopped"
     warnings = (
         [f"{len(survivors)} processes survived the reap; the job's scope is not empty"]
         if survivors
@@ -760,9 +786,9 @@ def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
         job=cancelled_view,
         cancel_requested=raw["cancel_requested"],
         already_terminal=bool(raw.get("already_terminal")),
-        cancelled=raw.get("cancelled"),
-        scope_unit=scope.get("unit"),
-        scope_stopped=scope.get("stopped"),
+        cancelled=raw.get("cancelled") or owner_state,
+        scope_unit=scope.get("unit") or raw.get("unit"),
+        scope_stopped=scope_stopped,
         survivors=survivors,
         warnings=warnings,
         affordances=["jobs.get", "jobs.logs", "jobs.retry"],
@@ -1098,7 +1124,7 @@ ACTIONS: tuple[Action, ...] = (
         name="jobs.cancel",
         family=VerbFamily.OPERATE,
         owner="systemd-jobs",
-        summary="Kill one job (or drop it from the queue) and reap its scope's cgroup.",
+        summary="Cancel one job through its queue and systemd owner.",
         Input=CancelInput,
         Output=CancelResult,
         handler=_cancel,
@@ -1107,7 +1133,7 @@ ACTIONS: tuple[Action, ...] = (
         affordances=("jobs.get", "jobs.logs", "jobs.retry"),
         aliases=("kill", "stop job", "abort"),
         supports_precondition=True,
-        documentation="Pass expected_phase to refuse when the job already moved on. Survivors lists PIDs that outlived the reap.",
+        documentation="Pass expected_phase to refuse when the job already moved on. The owner retains reason with the gateway principal label before stopping the job. Request metadata is separate from completion; survivors is null when the owner did not report a process inspection.",
         examples=(
             Example(
                 title="Cancel a running job",

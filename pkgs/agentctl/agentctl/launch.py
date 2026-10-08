@@ -13,6 +13,7 @@ import fcntl
 import hashlib
 import json
 import os
+import pwd
 import re
 import shlex
 import stat
@@ -1619,6 +1620,26 @@ def _job_detail(
     if disposition:
         view["disposition"] = disposition
         view.update(_disposition_view(disposition, attempt=attempt, receipt=receipt))
+    if launch_input.get("log_path"):
+        queued_cancel = (
+            attempt is None and disposition and disposition.get("started") is False
+        )
+        request_attempt = 0 if queued_cancel else view["attempt"]
+        if (
+            attempt is None
+            and not queued_cancel
+            and task.started_at is not None
+            and (
+                request_attempt == 0
+                or (not task.terminal and not _unfinished_attempt(config, task))
+            )
+        ):
+            request_attempt += 1
+        request = artifacts.cancellation(
+            Path(launch_input["log_path"]), request_attempt
+        )
+        if request:
+            view["cancellation"] = request
     return view
 
 
@@ -1945,10 +1966,23 @@ def cancel(
     *,
     reference: str | None = None,
     expected_attempt: int | None = None,
+    actor: str | None = None,
+    reason: str | None = None,
     settle_seconds: float | None = None,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, Any]:
     """Optionally compare an attempt token while holding its allocation lock."""
+    actor = actor if actor is not None else pwd.getpwuid(os.getuid()).pw_name
+    if not isinstance(actor, str) or not actor.strip() or len(actor) > 256:
+        raise JobError("cancellation actor must be nonempty and at most 256 characters")
+    if reason is not None and (not isinstance(reason, str) or len(reason) > 4096):
+        raise JobError("cancellation reason must be at most 4096 characters")
+    request = {
+        "actor": actor.strip(),
+        "uid": os.getuid(),
+        "reason": reason,
+        "requested_at": datetime.now(UTC).isoformat(),
+    }
     if expected_attempt is None:
         return _cancel(
             config,
@@ -1956,6 +1990,7 @@ def cancel(
             reference=reference,
             settle_seconds=settle_seconds,
             sleep=sleep,
+            cancellation=request,
         )
     if reference is None:
         raise JobError("expected_attempt requires a stable launch reference")
@@ -1980,7 +2015,21 @@ def cancel(
             settle_seconds=settle_seconds,
             sleep=sleep,
             allocation_locked=True,
+            cancellation=request,
         )
+
+
+def _record_cancellation(
+    document: Mapping[str, Any], attempt: int, request: Mapping[str, Any]
+) -> dict[str, Any]:
+    record = {**request, "attempt": attempt}
+    try:
+        path = artifacts.cancellation_path(Path(document["log_path"]), attempt)
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        write_input(path, record)
+    except OSError as error:
+        raise JobError(f"cannot record cancellation requester: {error}") from error
+    return record
 
 
 def _retain_disposition(
@@ -2027,6 +2076,7 @@ def _cancel_not_started(
     view: Mapping[str, Any],
     *,
     allocation_locked: bool = False,
+    cancellation: Mapping[str, Any],
 ) -> dict[str, Any] | None:
     """Drop a queued launch and retain cancelled/not-started, or give up.
 
@@ -2041,6 +2091,8 @@ def _cancel_not_started(
     except JobError:
         owned = False
     document = _launch_input(config, task) or {}
+    if owned:
+        view = {**view, "cancellation": _record_cancellation(document, 0, cancellation)}
     log = document.get("log_path")
     lock_root = None
     marker = None
@@ -2158,6 +2210,7 @@ def _cancel(
     settle_seconds: float | None = None,
     sleep: Callable[[float], None] = time.sleep,
     allocation_locked: bool = False,
+    cancellation: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Make the task not run: drop it while queued, stop its unit while running.
 
@@ -2175,13 +2228,17 @@ def _cancel(
     task_id = task.task_id
     view = job_view(task)
     if task.terminal:
-        return {**view, "state": "terminal", "unit": None}
+        return {**view, "state": "terminal", "unit": None, "already_terminal": True}
     if task.started_at is None:
         stopped = _cancel_not_started(
-            config, task, view, allocation_locked=allocation_locked
+            config,
+            task,
+            view,
+            allocation_locked=allocation_locked,
+            cancellation=cancellation,
         )
         if stopped is not None:
-            return stopped
+            return {**stopped, "already_terminal": False}
         live = pueue.task(task_id)
         if live is None:
             raise JobError(
@@ -2209,6 +2266,9 @@ def _cancel(
             latest = records[-1]["attempt"] if records else 0
             active_attempt = (
                 latest if latest and _unfinished_attempt(config, task) else latest + 1
+            )
+            request = _record_cancellation(
+                _launch_input(config, task) or {}, active_attempt, cancellation
             )
             write_input(marker, {"attempt": active_attempt})
             if unit is not None:
@@ -2250,6 +2310,8 @@ def _cancel(
         **({"unresolved": True} if state == "unresolved" else {}),
         "unit": unit,
         **_outcome(config, current if current is not None else task),
+        "already_terminal": False,
+        **({"cancellation": request} if log is not None else {}),
     }
 
 

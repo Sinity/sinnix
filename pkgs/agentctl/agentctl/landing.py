@@ -2304,9 +2304,19 @@ def abandon(
                 worker.get("pending_launch") or worker.get("task_reference"),
             )
             if task is not None and not task.terminal:
-                launch.cancel(config, task.task_id)
+                launch.cancel(
+                    config,
+                    task.task_id,
+                    actor=run.actor,
+                    reason=reason or "batch abandoned",
+                )
         if landing_task is not None and not landing_task.terminal:
-            launch.cancel(config, landing_task.task_id)
+            launch.cancel(
+                config,
+                landing_task.task_id,
+                actor=run.actor,
+                reason=reason or "batch abandoned",
+            )
         for bead_id in run.beads:
             try:
                 beads.unclaim(bead_id, actor=run.actor)

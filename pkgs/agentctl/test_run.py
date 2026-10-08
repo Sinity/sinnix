@@ -470,7 +470,7 @@ def test_a_declared_scratch_is_created_exported_measured_and_removed(
             "sh",
             "-c",
             'test "$TMPDIR" = "$AGENTCTL_SCRATCH" '
-            '&& temporary=$(mktemp) '
+            "&& temporary=$(mktemp) "
             '&& dd if=/dev/zero of="$temporary" bs=1024 count=4 '
             "2>/dev/null "
             '&& printf \'{"scratch": "%s", "temporary": "%s"}\' "$AGENTCTL_SCRATCH" "$temporary"',
@@ -665,6 +665,47 @@ def test_a_cancel_marker_turns_a_stopped_unit_into_a_cancellation(
     assert outcome_of(tmp_path)["outcome"] == "cancelled"
     assert not marker.exists()
     assert events(tmp_path)[-1]["outcome"] == "cancelled"
+
+
+def test_runner_outcome_retains_request_after_consuming_cancel_marker(
+    tmp_path: Path,
+    fake_systemd: FakeSystemd,
+    fake_pueue: FakePueue,
+) -> None:
+    from agentctl import artifacts
+
+    request = {
+        "attempt": 1,
+        "actor": "fixture-worker",
+        "reason": "stop requested",
+        "uid": 1000,
+        "requested_at": "2026-01-01T00:00:00+00:00",
+    }
+    log = tmp_path / "job-a.log"
+    destination = artifacts.cancellation_path(log, 1)
+    destination.parent.mkdir()
+    destination.write_text(json.dumps(request))
+    marker = cancel_marker_for(log)
+    marker.write_text(json.dumps({"attempt": 1}))
+    launch = write_launch(tmp_path, pool="pytest")
+    assert main([str(launch)]) == CANCELLED_EXIT_CODE
+    assert outcome_of(tmp_path)["cancellation"] == request
+    assert not marker.exists()
+
+
+def test_refused_attempt_retains_cancel_request_without_claiming_cancellation(
+    tmp_path: Path,
+) -> None:
+    from agentctl import artifacts
+
+    request = {"attempt": 1, "actor": "fixture-worker", "reason": "stop requested"}
+    destination = artifacts.cancellation_path(tmp_path / "job-a.log", 1)
+    destination.parent.mkdir()
+    destination.write_text(json.dumps(request))
+    launch = write_launch(tmp_path, working_directory=str(tmp_path / "missing"))
+    assert main([str(launch)]) == REFUSED_EXIT_CODE
+    assert outcome_of(tmp_path)["outcome"] == "refused"
+    assert outcome_of(tmp_path)["cancellation"] == request
 
 
 def test_cancel_during_preparation_prevents_service_creation(

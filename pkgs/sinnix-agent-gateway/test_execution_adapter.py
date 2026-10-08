@@ -463,6 +463,40 @@ def test_job_operations_pass_the_launch_reference_through_to_agentctl(
     assert seen["retry"][0][0] is adapter.config
 
 
+@pytest.mark.parametrize("already_terminal", [False, True])
+def test_cancel_keeps_requester_and_does_not_infer_prior_terminal_state(
+    adapter: LocalJobs,
+    monkeypatch: pytest.MonkeyPatch,
+    already_terminal: bool,
+) -> None:
+    seen = {}
+    request = {"actor": "gateway:operator", "reason": "stop requested", "attempt": 1}
+
+    def cancel(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        seen.update(kwargs)
+        return {
+            **JOB_ROW,
+            "phase": "cancelled",
+            "terminal": True,
+            "already_terminal": already_terminal,
+            "cancellation": request,
+            "state": "stopped",
+            "unit": "fixture.service",
+        }
+
+    monkeypatch.setattr(launch, "cancel", cancel)
+    answer = adapter.cancel(
+        job_id=41, actor="gateway:operator", reason="stop requested"
+    )
+    assert seen["actor"] == "gateway:operator" and seen["reason"] == "stop requested"
+    assert answer["already_terminal"] is already_terminal
+    assert answer["cancellation"] == request
+    assert (
+        answer["unit"] == "fixture.service"
+        and answer["cancellation_state"] == "stopped"
+    )
+
+
 def test_a_launch_reference_that_is_a_path_is_refused(adapter: LocalJobs) -> None:
     """It names one file under the state directory; a path would leave it."""
     with pytest.raises(JobOwnerError) as refused:

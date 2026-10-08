@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 2134914ce1c8553987b0c0e7e118c08ae91855c3a57c906397673f77aab27345 -->
+<!-- gateway-catalog-sha256: 995fc05bb71f1acb01cefd6d87a5faa8be87678dcd5608e5e421dff5b6c22f6c -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `2134914ce1c8553987b0c0e7e118c08ae91855c3a57c906397673f77aab27345`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `995fc05bb71f1acb01cefd6d87a5faa8be87678dcd5608e5e421dff5b6c22f6c`.
 
 ## Invocation
 
@@ -99,7 +99,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `jobs.logs`                  | `get`     | `systemd-jobs`     | `operator` | A byte range of a job's bounded log (workload output, then the wrapper's stderr).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `jobs.wait`                  | `wait`    | `systemd-jobs`     | `operator` | outcome is terminal, running or queued; running and queued are continuations, never failures, and carry queue: the group's occupancy and the job's place in it. Pass output_offset (the previous output.next_offset) to receive only new log bytes. The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.                                                                                                                                                       |
 | `jobs.queues`                | `query`   | `systemd-jobs`     | `operator` | shell-quick and shell-long are the shell.run lanes. A running job marked promoted has outlived its pool's promotion horizon and no longer holds a slot against new work. Reads only unfinished tasks, so it stays cheap however long the queue history is.                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `jobs.cancel`                | `operate` | `systemd-jobs`     | `operator` | Pass expected_phase to refuse when the job already moved on. Survivors lists PIDs that outlived the reap.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `jobs.cancel`                | `operate` | `systemd-jobs`     | `operator` | Pass expected_phase to refuse when the job already moved on. The owner retains reason with the gateway principal label before stopping the job. Request metadata is separate from completion; survivors is null when the owner did not report a process inspection.                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `jobs.retry`                 | `operate` | `systemd-jobs`     | `operator` | Re-run a terminal job in place with the same launch input and id (pueue restart).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `jobs.clean`                 | `operate` | `systemd-jobs`     | `operator` | Refused while the job is still queued or running; cancel it first.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `operations.run`             | `run`     | `systemd-jobs`     | `operator` | Queue one project-declared operation in its declared pool on the root or a worktree.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -12632,7 +12632,7 @@ The shell lanes:
 
 ### `jobs.cancel`
 
-Pass expected_phase to refuse when the job already moved on. Survivors lists PIDs that outlived the reap.
+Pass expected_phase to refuse when the job already moved on. The owner retains reason with the gateway principal label before stopping the job. Request metadata is separate from completion; survivors is null when the owner did not report a process inspection.
 
 Family: `operate`. Owner: `systemd-jobs`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
@@ -12757,15 +12757,15 @@ Input schema:
     "reason": {
       "anyOf": [
         {
-          "maxLength": 2000,
-          "minLength": 1,
+          "maxLength": 4096,
           "type": "string"
         },
         {
           "type": "null"
         }
       ],
-      "default": null
+      "default": null,
+      "description": "Reason retained by the job owner with the requester identity."
     },
     "request_id": {
       "anyOf": [
