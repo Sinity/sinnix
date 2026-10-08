@@ -127,12 +127,12 @@ mkFeatureModule {
             refusals, or POSITIVE to amplify the steered trait, via
             llama.cpp --control-vector.
 
-          Output is written under ${interpDir}/../control-vectors/.
+          Output is written under ${config.sinnix.paths.collectionPaths.library-model-control-vector}/.
           USAGE
             exit 2
           fi
           model="$1"; dataset="$2"; outname="$3"; layers="''${4:-"-5:-18"}"
-          outdir="${config.sinnix.paths.modelsRoot}/control-vectors"
+          outdir="${config.sinnix.paths.collectionPaths.library-model-control-vector}"
           mkdir -p "$outdir"
           export HF_HOME="${interpDir}/hf"
           export UV_CACHE_DIR="${interpDir}/uv-cache"

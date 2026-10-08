@@ -8,6 +8,9 @@ MANIFEST = json.loads(files(__package__).joinpath("filesystem-layout.json").read
 ROOTS = MANIFEST["roots"]
 OPTIONAL = {root: set(nodes) for root, nodes in MANIFEST["optional"].items()}
 ACTIVITY_LANES = MANIFEST["activity_lanes"]
+MACHINE_LANES = MANIFEST["machine_lanes"]
+COLLECTION_PATHS = MANIFEST["collection_paths"]
+RETIRED_PATHS = MANIFEST["retired_paths"]
 
 
 def capture_lane_path(root: Path | str, lane: str) -> Path:
@@ -15,6 +18,11 @@ def capture_lane_path(root: Path | str, lane: str) -> Path:
     if not lane or "/" in lane or lane in {".", ".."}:
         raise ValueError("lane must be a single nonempty path component")
     return Path(root) / ACTIVITY_LANES.get(lane, lane)
+
+
+def machine_lane_path(root: Path | str, lane: str) -> Path:
+    """Resolve a declared machine lane without inventing a new destination."""
+    return Path(root) / MACHINE_LANES[lane]
 
 
 def inventory_structure(root: str) -> str:

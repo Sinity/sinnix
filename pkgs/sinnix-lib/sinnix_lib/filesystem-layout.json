@@ -3,7 +3,7 @@
   "roots": {
     "/realm": {
       "personal": "Journal, personal notes, photographs and creative work.",
-      "project": "Project homes: repo, notes, analysis, snapshots and history as needed.",
+      "project": "Project homes: repo, note, analysis, snapshot and history as needed.",
       "device": "Device dossiers and observations, including the workstation.",
       "activity": "Captured activity grouped by medium, retaining producer provenance.",
       "health": "Health sources, records and analyses.",
@@ -66,5 +66,38 @@
     "spotify": "audio/spotify",
     "dev": "development",
     "audit": "shared/audit"
-  }
+  },
+  "machine_lanes": {
+    "experiment": "experiment",
+    "peripheral": "peripheral"
+  },
+  "collection_paths": {
+    "account-lastpass": "account/lastpass",
+    "library-model-control-vector": "library/model/control-vector",
+    "library-model-embedding": "library/model/embedding",
+    "library-model-tagger": "library/model/tagger",
+    "library-dataset-corpus": "library/dataset/corpus",
+    "library-dataset-huggingface": "library/dataset/huggingface",
+    "library-dataset-twitter-archive": "library/dataset/twitter-archive",
+    "archive-backup": "archive/backup",
+    "archive-conversation": "archive/conversation",
+    "archive-repository-bundle": "archive/repository-bundle",
+    "archive-knowledgebase-reference": "archive/knowledgebase-reference"
+  },
+  "retired_paths": [
+    "document/lastpass",
+    "library/model/control-vectors",
+    "library/model/embeddings",
+    "library/model/taggers",
+    "library/dataset/corpora",
+    "library/dataset/hf-datasets",
+    "library/dataset/twitter-archives",
+    "archive/backups",
+    "archive/conversations",
+    "archive/repository-bundles",
+    "archive/knowledgebase-references",
+    "device/sinnix-prime/experiments",
+    "device/sinnix-prime/peripherals",
+    "activity/dev"
+  ]
 }

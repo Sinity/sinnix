@@ -94,3 +94,18 @@ The renderer remains an offline projection of one JSON catalog. It sends no anno
 `resolve HISTORICAL-PATH` uses retained collection boundaries and path history to resolve references without filesystem aliases. An address reused for a different cataloged object requires `--id ASSET-UUID`; unavailable records remain unavailable.
 
 The report renderer accepts `--judgments` for authoritative current classifications, displayed separately from original asset observations. Shared role definitions normalize legacy categories while retaining their attributed wording. Raw catalog and navigation sources stay private. `sinnix-report-site` publishes an explicit manifest of individual files; it refuses directory links, unsafe URLs and sources beneath declared private roots. Subject homes own canonical analyses, while the site holds the selected publication projection.
+
+## Current navigation checks
+
+`sinnix-navigation-audit --manifest /path/navigation-audit.json` checks local
+Markdown links in explicitly selected current entrance documents. The JSON
+manifest has `schema_version: 1`, an absolute-path `documents` list, and an
+optional absolute-path `external_roots` list. External roots are reported as
+unprobed without accessing them. Remote links and code examples are excluded;
+missing local destinations return a nonzero exit status. The tool is read-only
+and does not scan imported packages or historical reports.
+
+The workstation's private manifest is owned by the report catalog. Run its
+declared `navigation_audit` operation after moving managed collections or
+editing current entrances. `lake-lint` separately verifies declared managed
+containers and rejects recreation of retired paths.

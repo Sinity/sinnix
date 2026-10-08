@@ -1,0 +1,74 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Audit local links in explicitly selected current Markdown entrances
+# runtimeInputs: python3
+# pythonPackages: @sinnix-lib
+
+"""Read-only local link audit; native packages and historical reports are not scanned."""
+
+import argparse
+import json
+import os
+import re
+from pathlib import Path
+from urllib.parse import unquote, urlsplit
+
+from sinnix_lib.note_links import prose_mask
+
+INLINE = re.compile(r"!?\[[^\]\n]*\]\(\s*(<[^>\n]+>|(?:\\.|[^\s()])+(?:\([^()]*\)(?:\\.|[^\s()])*)*)[^\n)]*\)")
+REFERENCE = re.compile(r"^\s{0,3}\[[^\]\n]+\]:\s*(<[^>\n]+>|\S+)", re.M)
+
+
+def audit(manifest: dict) -> dict:
+    if manifest.get("schema_version") != 1 or not isinstance(manifest.get("documents"), list):
+        raise ValueError("expected navigation audit manifest version 1 with documents")
+    external = [Path(root) for root in manifest.get("external_roots", [])]
+    if any(not root.is_absolute() for root in external):
+        raise ValueError("external roots must be absolute")
+    rows = []
+    for name in manifest["documents"]:
+        document = Path(name)
+        if not document.is_absolute() or not document.is_file():
+            rows.append({"document": str(document), "status": "missing-document"})
+            continue
+        text = prose_mask(document.read_text(encoding="utf-8"))
+        for match in (*INLINE.finditer(text), *REFERENCE.finditer(text)):
+            target = match.group(1).strip("<>")
+            parsed = urlsplit(target)
+            if parsed.scheme and parsed.scheme != "file":
+                continue
+            if parsed.netloc and parsed.netloc != "localhost":
+                continue
+            if not parsed.path:
+                continue
+            decoded = re.sub(r"\\([() ])", r"\1", unquote(parsed.path))
+            destination = Path(decoded)
+            if not destination.is_absolute():
+                destination = document.parent / destination
+            destination = Path(os.path.abspath(destination))
+            offline = any(destination.is_relative_to(root) for root in external)
+            rows.append({"document": str(document), "target": target,
+                         "destination": str(destination),
+                         "status": "external-unprobed" if offline else "ok" if destination.exists() else "missing"})
+    failed = sum(row["status"] in {"missing", "missing-document"} for row in rows)
+    return {"schema_version": 1, "documents": len(manifest["documents"]), "links": rows, "failures": failed}
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args()
+    result = audit(json.loads(args.manifest.read_text()))
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        for row in result["links"]:
+            if row["status"] in {"missing", "missing-document"}:
+                print(f"{row['document']}: {row['status']}: {row.get('target', '')}")
+        print(f"navigation-audit: {result['documents']} documents, {result['failures']} failures")
+    return 1 if result["failures"] else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -447,7 +447,7 @@ mkServiceModule {
       )
       {
         systemd.tmpfiles.rules = [
-          "d ${dataDir}/experiments 0775 ${username} users -"
+          "d ${config.sinnix.paths.machinePaths.experiment} 0775 ${username} users -"
           "d ${dataDir}/legacy 0775 ${username} users -"
           "d ${backupRoot} 0700 ${username} users -"
           "d ${backupSnapshotRoot} 0700 ${username} users -"

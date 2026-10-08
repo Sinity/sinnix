@@ -63,6 +63,26 @@ in
               default = "${config.devicesRoot}/sinnix-prime";
               description = "Host/device telemetry: machine-telemetry, syslog, netflow, router, monitor DDC, audio device/topology streams, the phone app's own lane.";
             };
+            machinePaths = mkOption {
+              type = types.attrsOf types.str;
+              default = lib.mapAttrs (
+                _: relative: "${config.machineRoot}/${relative}"
+              ) filesystemLayout.machine_lanes;
+              description = "Managed machine destinations from the shared layout manifest.";
+            };
+            collectionPaths = mkOption {
+              type = types.attrsOf types.str;
+              default = lib.mapAttrs (
+                _: relative:
+                if lib.hasPrefix "library/model/" relative then
+                  "${config.modelsRoot}/${lib.removePrefix "library/model/" relative}"
+                else if lib.hasPrefix "library/dataset/" relative then
+                  "${config.datasetsRoot}/${lib.removePrefix "library/dataset/" relative}"
+                else
+                  "${config.realmRoot}/${relative}"
+              ) filesystemLayout.collection_paths;
+              description = "Managed outer collection containers, excluding native package internals.";
+            };
             healthRoot = mkOption {
               type = types.str;
               default = "${config.realmRoot}/health";
@@ -76,7 +96,7 @@ in
             documentsRoot = mkOption {
               type = types.str;
               default = "${config.realmRoot}/document";
-              description = "Personal documents, including finance, career, insurance and device records.";
+              description = "Subject-organized records and workflows, including finance, career and insurance.";
             };
             photosRoot = mkOption {
               type = types.str;
@@ -85,12 +105,12 @@ in
             libraryRoot = mkOption {
               type = types.str;
               default = "${config.realmRoot}/library";
-              description = "Books, media, reference datasets, models, packaged code, and game libraries.";
+              description = "Books, media, reference datasets, models and game libraries.";
             };
             datasetsRoot = mkOption {
               type = types.str;
               default = "${config.realmRoot}/library/dataset";
-              description = "Third-party reference corpora acquired for compute (reddit dumps, hf-datasets): re-acquirable, ownership='others'.";
+              description = "Third-party reference datasets with acquisition-specific preservation requirements.";
             };
             modelsRoot = mkOption {
               type = types.str;
@@ -310,6 +330,7 @@ in
       # checkout, so it belongs in the data lake rather than per-checkout state.
       # Every worktree and lane inherits this, which is what makes cross-lane
       # comparison possible at all.
+      POLYLOGUE_RETIRED_VERIFY_HISTORY_PATHS = "/realm/activity/dev/polylogue/verify-history.jsonl:/realm/activity/development/polylogue/verify-history.jsonl:/realm/projects/polylogue/source/development/verify-history.jsonl";
       POLYLOGUE_VERIFY_HISTORY_PATH = "/realm/project/polylogue/source/development/verify-history.jsonl";
       SINNIX_ROOT = cfg.projects.entries.sinnix.path;
       RAWLOG_FILE = "${cfg.paths.journalRoot}/raw-log.md";

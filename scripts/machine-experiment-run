@@ -27,6 +27,7 @@ from typing import Any
 
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.ledger import utc_ts
+from sinnix_lib.layout import machine_lane_path
 from sinnix_lib.process import run
 from sinnix_lib.values import read_text
 
@@ -368,7 +369,7 @@ def main() -> int:
             return 75
 
     host = socket.gethostname()
-    root = Path(args.root) if args.root else Path("/realm/device/sinnix-prime") / "experiments"
+    root = Path(args.root) if args.root else machine_lane_path("/realm/device/sinnix-prime", "experiment")
     run_id = f"{dt.datetime.now(dt.UTC).strftime('%Y%m%dT%H%M%SZ')}-{args.workload}-{uuid.uuid4().hex[:8]}"
     run_dir = root / run_id
     run_dir.mkdir(parents=True, exist_ok=False)

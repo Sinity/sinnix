@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import sys
 
-from sinnix_lib.layout import OPTIONAL, ROOTS
+from sinnix_lib.layout import COLLECTION_PATHS, MACHINE_LANES, OPTIONAL, RETIRED_PATHS, ROOTS
 
 
 def is_tool_cache(path: Path) -> bool:
@@ -45,6 +45,21 @@ def main() -> int:
             else:
                 continue
             status = 1
+    realm = Path(prefix + "/realm")
+    if realm.is_dir():
+        managed = list(COLLECTION_PATHS.values()) + [
+            f"device/sinnix-prime/{relative}" for relative in MACHINE_LANES.values()
+        ]
+        for relative in managed:
+            path = realm / relative
+            if path.is_symlink() or not path.is_dir():
+                print(f"lake-lint: INVALID managed directory: {path}")
+                status = 1
+        for relative in RETIRED_PATHS:
+            path = realm / relative
+            if path.exists() or path.is_symlink():
+                print(f"lake-lint: RETIRED managed path recreated: {path}")
+                status = 1
     if status == 0:
         print("lake-lint: all roots match taxonomy")
     return status

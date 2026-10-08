@@ -193,3 +193,10 @@ exec = ["env", "SINNIX_SECRET_DECLARATIONS=/realm/state/secrets/sinnix/runtime.n
 pool = "bulk"
 result = "exit"
 timeout_seconds = 14400
+
+[operations.navigation_audit]
+description = "Audit current entrance links against the private explicit manifest"
+exec = ["sinnix-navigation-audit", "--manifest", "/realm/report/catalog/navigation-audit.json"]
+pool = "normal"
+result = "exit"
+cache = "none"

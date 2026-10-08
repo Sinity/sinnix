@@ -24,6 +24,8 @@
             cp ${../../scripts/sinnix-file-catalog} scripts/sinnix-file-catalog
             cp ${../../scripts/sinnix-file-catalog-report} scripts/sinnix-file-catalog-report
             cp ${../../scripts/sinnix-report-site} scripts/sinnix-report-site
+            cp ${../../scripts/sinnix-navigation-audit} scripts/sinnix-navigation-audit
+            cp ${../../scripts/lake-lint} scripts/lake-lint
             chmod +x scripts/*
             patchShebangs scripts
             cp ${../../pkgs/sinnix-file-catalog/tests}/*.py pkgs/sinnix-file-catalog/tests/
