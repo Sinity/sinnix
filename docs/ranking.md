@@ -159,7 +159,7 @@ sinnix-rank-keybinds inventory                 # what is bound right now
 sinnix-rank-keybinds sync                      # register them as items
 sinnix-rank compare keybinds                   # operator comparisons
 sinnix-rank-keybinds usage --source atuin      # bounded, labelled prior
-sinnix-rank-keybinds manifest --output /realm/activity/keylog/keybinds/manifest.json
+sinnix-rank-keybinds manifest --output /realm/activity/desktop/keyboard/keybinds/manifest.json
 sinnix-deck-forge keybinds                     # a phone recall deck
 ```
 

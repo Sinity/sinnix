@@ -64,7 +64,6 @@
     "ranking": "shared/ranking",
     "steering": "shared/steering",
     "spotify": "audio/spotify",
-    "dev": "development",
     "audit": "shared/audit"
   },
   "machine_lanes": {
@@ -98,6 +97,8 @@
     "archive/knowledgebase-references",
     "device/sinnix-prime/experiments",
     "device/sinnix-prime/peripherals",
-    "activity/dev"
+    "activity/dev",
+    "activity/development",
+    "activity/keylog"
   ]
 }

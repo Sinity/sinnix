@@ -7,7 +7,7 @@
 }:
 let
   username = config.sinnix.user.name;
-  keylogRoot = "${config.sinnix.paths.activityRoot}/keylog";
+  keylogRoot = config.sinnix.paths.capturePaths.keylog;
   interceptTools = pkgs.interception-tools;
   capsPlugin = pkgs.interception-tools-plugins.caps2esc;
   interceptBouncePkg =
