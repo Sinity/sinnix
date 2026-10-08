@@ -1,6 +1,6 @@
 # Filesystem index: scope and integrity
 
-`sinnix-fs` owns a directory inventory, bounded content observations, and materialized views of separately authored judgments. It is not a storage owner, an application-archive replacement, or an automatic deduplicator.
+`sinnix-fs` owns a directory inventory, bounded content observations, and materialized views of separately authored judgments. It is not a storage owner, an application-archive replacement, or an automatic deduplicator. On the installed workstation, invoke it through `sinnix fs`; service units use the `sinnix-fs` package binary.
 
 ## Content identity
 
