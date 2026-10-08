@@ -501,6 +501,13 @@ mkFeatureModule {
                     codex_name="$(basename "$codex_entry")"
                     codex_target="$(readlink -f "$codex_entry" || true)"
                     codex_raw_target="$(readlink "$codex_entry" || true)"
+                    # The approved repository relocation changes links owned
+                    # by Sinnix. Match the complete former target, never an
+                    # arbitrary broken user or plugin link.
+                    if [ "$codex_raw_target" = "/realm/project/sinnix/dots/_ai/skills/$codex_name" ]; then
+                      run rm "$codex_entry"
+                      continue
+                    fi
                     # Remove only broken links from the former Sinnix skill
                     # tree. A broken user-owned link is still private state.
                     if [ "$codex_raw_target" = "${dotsRoot}/codex/skills/$codex_name" ] && [ ! -e "$codex_entry" ]; then

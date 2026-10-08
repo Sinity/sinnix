@@ -73,6 +73,13 @@ mkFeatureModule {
             programs.zsh = {
               enable = true;
               enableCompletion = true;
+              # Existing agent sessions can pass the retired bytecode cache
+              # address to new shells after a repository move.
+              envExtra = ''
+                if [ "''${PYTHONPYCACHEPREFIX:-}" = /realm/project/polylogue/.cache/pycache ]; then
+                  export PYTHONPYCACHEPREFIX=${lib.escapeShellArg "${sinnixCfg.projects.entries.polylogue.path}/.cache/pycache"}
+                fi
+              '';
               autosuggestion.enable = true;
               syntaxHighlighting.enable = true;
               history = {

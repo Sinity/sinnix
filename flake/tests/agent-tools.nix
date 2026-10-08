@@ -696,6 +696,8 @@ in
             dry_home="$TMPDIR/codex-skills-dry-run"
             mkdir -p "$dry_home/.codex/skills"
             touch "$dry_home/.codex/skills/app-installed-skill"
+            ln -s /realm/project/sinnix/dots/_ai/skills/agent-runtime "$dry_home/.codex/skills/agent-runtime"
+            ln -s /private/owner/skill "$dry_home/.codex/skills/private-skill"
             (
               export HOME="$dry_home"
               run() { :; }
@@ -703,6 +705,15 @@ in
             )
             test -f "$dry_home/.codex/skills/app-installed-skill"
             test ! -e "$dry_home/.codex/skills/agent-runtime"
+            test -L "$dry_home/.codex/skills/agent-runtime"
+            (
+              export HOME="$dry_home"
+              run() { "$@"; }
+              source ${agentToolsCodexSkillsActivation}
+            )
+            test ! -L "$dry_home/.codex/skills/agent-runtime"
+            test -L "$dry_home/.codex/skills/private-skill"
+            test -f "$dry_home/.codex/skills/app-installed-skill"
             # A pending migration means the previous rewrite may have reached
             # disk without recording completion. It is intentionally a hard
             # preservation state, not an invitation to strip matching values
