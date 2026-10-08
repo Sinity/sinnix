@@ -107,8 +107,7 @@ mkServiceModule {
 
       model = lib.mkOption {
         type = lib.types.str;
-        # Matches the model of the preserved embedding vectors, so restoring
-        # them makes existing text reusable without provider calls.
+        # Model used if embedding generation is explicitly enabled.
         default = "voyage-4";
         description = "Voyage embedding model for Polylogue.";
       };
@@ -226,9 +225,8 @@ mkServiceModule {
             memoryHigh = polyloguedMemoryHigh;
             memoryMax = polyloguedMemoryMax;
           };
-          # The daemon runs the free-threaded build; the PATH CLI stays the
-          # standard-CPython polylogue-cli wrapper — without this the two
-          # collide on bin/polylogue in the home profile.
+          # Install the package through the shared package declaration to
+          # avoid a second bin/polylogue entry in the home profile.
           installPackage = false;
           autoStart = cfg.daemon.autoStart;
 
