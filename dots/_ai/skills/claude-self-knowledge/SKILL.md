@@ -35,6 +35,11 @@ launcher profiles in `flake/data/agent-lanes.nix`. Instructions and skills are
 live links, effective on the next read; generated settings and profiles
 change at activation. Resolve `~/.claude/` links before editing anything.
 
+The launchers declare `CLAUDE_CONFIG_DIR=$HOME/.config/claude`, with global
+`.claude.json` inside that persisted directory so atomic replacement works.
+Explicit custom roots remain supported. Check the active launch environment
+before attributing a write failure to the declared layout.
+
 ## Dispatch and context
 
 - Know whether a tool creates a fresh context or a fork, which model controls

@@ -44,6 +44,95 @@ class ClaudeStateTest(unittest.TestCase):
         self.run_migration()
         self.assertEqual(self.settings.stat().st_ino, inode)
 
+    def test_global_config_migrates_without_changing_bytes(self):
+        source = self.home / "persisted-global.json"
+        original = b'{ "mcpServers": {}, "fixture": "unchanged" }\n'
+        source.write_bytes(original)
+        state.reconcile(self.home, self.managed, self.seed, self.hook, source)
+        target = self.config / ".claude.json"
+        self.assertEqual(target.read_bytes(), original)
+        self.assertEqual(source.read_bytes(), original)
+        self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+        saved = next(self.config.glob(".sinnix-migration-*/.claude.json"))
+        self.assertEqual(saved.read_bytes(), original)
+        self.assertEqual(saved.stat().st_mode & 0o777, 0o600)
+        # The native writer's atomic rename works inside the directory store.
+        replacement = self.config / ".native-writer.tmp"
+        replacement.write_text('{"fixture": "updated"}')
+        os.replace(replacement, target)
+        state.reconcile(self.home, self.managed, self.seed, self.hook, source)
+        self.assertEqual(json.loads(target.read_text()), {"fixture": "updated"})
+        self.assertEqual(saved.read_bytes(), original)
+
+    def test_global_config_invalid_source_is_preserved(self):
+        source = self.home / ".claude.json"
+        for value in ("broken", "[]"):
+            source.write_text(value)
+            with self.assertRaises(ValueError):
+                self.run_migration()
+            self.assertEqual(source.read_text(), value)
+            self.assertFalse((self.config / ".claude.json").exists())
+
+    def test_global_config_failed_publication_preserves_source(self):
+        source = self.home / ".claude.json"
+        source.write_text('{"fixture": "keep"}')
+        with patch.object(state.os, "link", side_effect=OSError("synthetic failure")):
+            with self.assertRaises(OSError):
+                self.run_migration()
+        self.assertEqual(source.read_text(), '{"fixture": "keep"}')
+        self.assertFalse((self.config / ".claude.json").exists())
+        self.assertEqual(list(self.config.glob(".global-config-*")), [])
+        self.assertEqual(
+            next(self.config.glob(".sinnix-migration-*/.claude.json")).read_bytes(),
+            source.read_bytes(),
+        )
+
+    def test_global_config_concurrent_writer_is_not_replaced(self):
+        source = self.home / ".claude.json"
+        source.write_text('{"fixture": "source"}')
+        target = self.config / ".claude.json"
+
+        def native_writer(temporary, destination):
+            target.write_text('{"fixture": "native writer"}')
+            raise FileExistsError("native writer won")
+
+        with patch.object(state.os, "link", side_effect=native_writer):
+            with self.assertRaises(FileExistsError):
+                self.run_migration()
+        self.assertEqual(json.loads(target.read_text()), {"fixture": "native writer"})
+        self.assertEqual(json.loads(source.read_text()), {"fixture": "source"})
+
+    def test_global_config_changing_source_refuses_publication(self):
+        source = self.home / ".claude.json"
+        source.write_text('{"fixture": "before"}')
+        original_read = Path.read_bytes
+        reads = 0
+
+        def changed(path):
+            nonlocal reads
+            if path == source:
+                reads += 1
+                if reads == 2:
+                    source.write_text('{"fixture": "after"}')
+            return original_read(path)
+
+        with patch.object(Path, "read_bytes", changed):
+            with self.assertRaisesRegex(ValueError, "changed during migration"):
+                self.run_migration()
+        self.assertFalse((self.config / ".claude.json").exists())
+        self.assertEqual(json.loads(source.read_text()), {"fixture": "after"})
+        saved = next(self.config.glob(".sinnix-migration-*/.claude.json"))
+        self.assertEqual(json.loads(saved.read_text()), {"fixture": "before"})
+
+    def test_global_config_refuses_an_unexpected_link(self):
+        source = self.home / ".claude.json"
+        source.write_text('{"fixture": "source"}')
+        target = self.config / ".claude.json"
+        target.symlink_to(source)
+        with self.assertRaisesRegex(ValueError, "unexpected global Claude config link"):
+            self.run_migration()
+        self.assertTrue(target.is_symlink())
+
     def test_existing_private_settings_unchanged(self):
         self.settings.write_text('{"hooks": {"private": true}, "model": "mine"}')
         original = self.settings.read_bytes()

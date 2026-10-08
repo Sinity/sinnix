@@ -167,6 +167,11 @@ let
     else
       ''export ${varName}="${literal}"'';
 
+  claudeConfigPrelude = ''
+    # Keep the atomically replaced global JSON inside the persisted directory.
+    export CLAUDE_CONFIG_DIR="''${CLAUDE_CONFIG_DIR:-$HOME/.config/claude}"
+  '';
+
   # Claude Code's common launch contract. Both native Claude and the Clodex
   # proxy need the same scratch location and selected profile before their
   # distinct launch paths. Clodex inserts its child-routing exports after this
@@ -174,6 +179,7 @@ let
   mkClaudeScratchPrelude =
     { profile }:
     ''
+      ${claudeConfigPrelude}
       if [ -z "''${CLAUDE_CODE_TMPDIR:-}" ]; then
         export CLAUDE_CODE_TMPDIR="''${TMPDIR:-/tmp}"
       fi
@@ -310,6 +316,8 @@ let
     text = ''
       #!/usr/bin/env bash
       set -euo pipefail
+
+      ${claudeConfigPrelude}
 
       ${mkNpmBootstrap {
         stateDir = "clodex";

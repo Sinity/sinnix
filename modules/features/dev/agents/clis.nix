@@ -210,7 +210,7 @@ mkFeatureModule {
           "";
       # Registry-driven MCP config consumed via `claude --mcp-config`.
       # Claude Code 2.x does NOT read `mcpServers` from settings.json — only
-      # `.mcp.json` (project), `~/.claude.json` (user), or `--mcp-config <file>`
+      # `.mcp.json` (project), `$CLAUDE_CONFIG_DIR/.claude.json` (user), or `--mcp-config <file>`
       # recognise stdio servers.
       #
       claudeMcpConfigFile = jsonFormat.generate "claude-mcp.json" {
@@ -296,7 +296,6 @@ mkFeatureModule {
             }
             ".hermes"
           ];
-          files = [ ".claude.json" ];
         };
 
         home-manager.users.${user} =
@@ -310,6 +309,7 @@ mkFeatureModule {
             mkDotsFile = mkDotsFileFor config;
           in
           {
+            home.sessionVariables.CLAUDE_CONFIG_DIR = lib.mkDefault "${config.home.homeDirectory}/.config/claude";
             home.packages = [
               scriptPkgs.beads
               scriptPkgs.beads.passthru.dolt
@@ -339,7 +339,13 @@ mkFeatureModule {
                 "$HOME" \
                 ${lib.escapeShellArg "${sinnixCfg.paths.dotsRoot}/claude/managed-settings.json"} \
                 ${lib.escapeShellArg "${sinnixCfg.paths.dotsRoot}/claude/settings-seed.json"} \
-                ${lib.escapeShellArg "${sinnixCfg.paths.dotsRoot}/claude/hooks/sessionstart-beads-prime.sh"}
+                ${lib.escapeShellArg "${sinnixCfg.paths.dotsRoot}/claude/hooks/sessionstart-beads-prime.sh"} \
+                ${
+                  if sinnixCfg.persistence.enable then
+                    lib.escapeShellArg "/persist${config.home.homeDirectory}/.claude.json"
+                  else
+                    ''"$HOME/.claude.json"''
+                }
             '';
             home.activation.hermesConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
               mkdir -p "$HOME/.hermes"

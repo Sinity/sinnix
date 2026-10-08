@@ -45,6 +45,7 @@ in
           ''
             grep -Fq 'MCP_CONFIG="$HOME/.config/claude/${mcpFile}.json"' ${wrapper}
             grep -Fq 'export SINNIX_CLAUDE_PROFILE=${lane.mcpProfile}' ${wrapper}
+            grep -Fq 'export CLAUDE_CONFIG_DIR="''${CLAUDE_CONFIG_DIR:-$HOME/.config/claude}"' ${wrapper}
           ''
           + lib.optionalString (lane ? env) ''
             grep -Fq 'ANTHROPIC_BASE_URL="${lane.env.baseUrl}"' ${wrapper}
@@ -119,6 +120,15 @@ in
             codexWrapperText = hm.home.file.".local/bin/codex".text or "";
           in
           [
+            {
+              assertion = !(builtins.elem ".claude.json" config.sinnix.persistence.home.files);
+              message = "Claude's atomically replaced global JSON must not be a single-file bind mount.";
+            }
+            {
+              assertion =
+                (hm.home.sessionVariables.CLAUDE_CONFIG_DIR or null) == "${hm.home.homeDirectory}/.config/claude";
+              message = "Claude global config must live inside its persisted directory.";
+            }
             {
               assertion = !(hm.xdg.configFile ? "claude/settings.json");
               message = "Claude settings.json must not be managed through Home Manager xdg.configFile.";
