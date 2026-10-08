@@ -66,14 +66,14 @@ def run_duckdb_file(db: Path, sql: str, script_name: str) -> subprocess.Complete
         script = Path(handle.name)
         handle.write(sql)
     try:
-        return subprocess.run(["duckdb", str(db), "-f", str(script)], text=True,
+        return subprocess.run(["duckdb", "-no-init", str(db), "-f", str(script)], text=True,
                               capture_output=True, check=False)
     finally:
         script.unlink(missing_ok=True)
 
 
 def duckdb_query(db: Path, sql: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["duckdb", "-readonly", str(db), "-noheader", "-list", "-c", sql],
+    return subprocess.run(["duckdb", "-readonly", "-no-init", str(db), "-noheader", "-list", "-c", sql],
                           text=True, capture_output=True, check=False)
 
 
@@ -1266,8 +1266,9 @@ def cmd_status(args: argparse.Namespace) -> int:
 
 def cmd_query(args: argparse.Namespace) -> int:
     generation = resolve_generation(args.index_dir)
-    # DuckDB enforces read-only SQL, including multi-statement requests.
-    proc = subprocess.run(["duckdb", "-readonly", "-json", str(generation / args.database), "-c", args.sql], check=False)
+    # Read-only databases still permit external COPY writes. Safe mode locks
+    # external access off; skip user init commands for this query interface.
+    proc = subprocess.run(["duckdb", "-readonly", "-safe", "-no-init", "-json", str(generation / args.database), "-c", args.sql], check=False)
     return proc.returncode
 
 

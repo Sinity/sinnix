@@ -172,3 +172,29 @@ def test_sql_and_direct_resolution_share_time_ambiguity_unknown_and_invalid(tmp_
         direct = resolve_judgments(ledger, row['path'])['topic']
         assert row['observation'] == direct['status']
         assert row['value'] == direct.get('value')
+
+
+def test_public_query_cannot_write_outside_its_read_only_database(tmp_path):
+    import json
+    import hashlib
+    fs = load_script()
+    index = tmp_path / "index"
+    generation = index / "generations/synthetic"
+    generation.mkdir(parents=True)
+    (generation / "manifest.json").write_text(json.dumps({
+        "schema": "sinnix.fs-generation.v1", "generation": "synthetic",
+    }))
+    (index / "current").symlink_to("generations/synthetic", target_is_directory=True)
+    db = generation / "inventory.duckdb"
+    build = fs.run_duckdb_file(db, "CREATE TABLE protected AS SELECT 1 AS value", "fixture")
+    assert build.returncode == 0, build.stderr
+    before = hashlib.sha256(db.read_bytes()).hexdigest()
+    args = SimpleNamespace(index_dir=index, database="inventory.duckdb", sql="SELECT * FROM protected")
+    assert fs.cmd_query(args) == 0
+    external = tmp_path / "external.csv"
+    copy = f"COPY (SELECT * FROM protected) TO {fs.sql_string(external)}"
+    for sql in (copy, "SET enable_external_access=true; " + copy, "INSERT INTO protected VALUES (2)"):
+        args.sql = sql
+        assert fs.cmd_query(args) != 0
+        assert not external.exists()
+        assert hashlib.sha256(db.read_bytes()).hexdigest() == before
