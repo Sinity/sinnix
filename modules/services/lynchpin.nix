@@ -130,7 +130,7 @@ mkServiceModule {
         environment.variables = {
           LYNCHPIN_MCP_PROVIDED = "1";
           LYNCHPIN_CHISEL_CACHE_ROOT = "${config.sinnix.paths.stateRoot}/cache/chisel";
-          LYNCHPIN_CHISEL_SCRATCH_ROOT = "${config.sinnix.paths.tmpRoot}/work/lynchpin-chisel";
+          LYNCHPIN_CHISEL_SCRATCH_ROOT = "${config.sinnix.paths.realmRoot}/tmp/work/lynchpin-chisel";
         };
 
         systemd.services.lynchpin-local-attrs = {
