@@ -15,7 +15,7 @@ let
   stateDir = "${config.sinnix.paths.stateRoot}/url-ledger";
   derivedDir = "${config.sinnix.paths.capturePaths.url-ledger}";
   historyPath = "${config.sinnix.paths.capturePaths.webhistory}/gestalt/derived/full_history.ndjson";
-  cdxRawRoot = "${config.sinnix.paths.capturePaths.url-ledger}/sources/cdx";
+  cdxRawRoot = "${config.sinnix.paths.capturePaths.url-ledger}/source/cdx";
 in
 mkServiceModule {
   name = "url-ledger";

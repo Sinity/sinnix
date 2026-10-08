@@ -42,7 +42,7 @@ mkFeatureModule {
     }:
     let
       inherit (config) sinnix;
-      steamLibraryRoot = "${sinnix.paths.libraryRoot}/games/steam";
+      steamLibraryRoot = "${sinnix.paths.libraryRoot}/game/steam";
       factorioTokenPath = sinnix.secrets.paths."factorio-token";
       factorioVersion = pkgs.factorio.version;
       factorioSha256 = pkgs.factorio.src.outputHash;
@@ -135,7 +135,7 @@ mkFeatureModule {
         # Steam keeps its XDG data path, while the install and library live on
         # the library volume, including saves and client state.
         systemd.tmpfiles.rules = [
-          "d ${sinnix.paths.libraryRoot}/games 0755 ${user} users -"
+          "d ${sinnix.paths.libraryRoot}/game 0755 ${user} users -"
           "d ${steamLibraryRoot} 0750 ${user} users -"
           "L+ /home/${user}/.local/share/Steam - - - - ${steamLibraryRoot}"
         ];

@@ -144,7 +144,7 @@ mkFeatureModule {
         # sinity-owned parent, and tmpfiles then refuses every leaf below it
         # ("Detected unsafe path transition ...").
         systemd.tmpfiles.rules = [
-          "d ${config.sinnix.paths.libraryRoot}/images 0755 ${user} users -"
+          "d ${config.sinnix.paths.libraryRoot}/image 0755 ${user} users -"
           "d ${cfg.corpusRoot} 0755 ${user} users -"
           "d ${cfg.corpusRoot}/sets 0755 ${user} users -"
           "d ${cfg.corpusRoot}/pool 0755 ${user} users -"
