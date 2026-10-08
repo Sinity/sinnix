@@ -207,7 +207,7 @@ def render_human(report: dict[str, Any]) -> str:
         lines.append(
             f"  {normalize_timestamp(row.get('started_at'))} {row.get('attempt_id')} "
             f"{row.get('status')} {row.get('phase')} "
-            f"files={row.get('succeeded_file_count')}/{row.get('needed_file_count')} "
+            f"parsed_raw={row.get('parsed_raw_count')} materialized={row.get('materialized_count')} "
             f"payload_read={row.get('source_payload_read_bytes')}"
         )
 

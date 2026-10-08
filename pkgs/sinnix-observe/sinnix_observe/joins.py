@@ -159,10 +159,9 @@ def build_workload_rows(
                 "resource_class": "capture-runtime",
                 "metrics": {
                     "phase": row.get("phase"),
-                    "queued_file_count": row.get("queued_file_count"),
-                    "needed_file_count": row.get("needed_file_count"),
-                    "succeeded_file_count": row.get("succeeded_file_count"),
-                    "failed_file_count": row.get("failed_file_count"),
+                    "parsed_raw_count": row.get("parsed_raw_count"),
+                    "materialized_count": row.get("materialized_count"),
+                    "outcome_code": row.get("outcome_code"),
                     "input_bytes": row.get("input_bytes"),
                     "source_payload_read_bytes": row.get("source_payload_read_bytes"),
                     "cursor_fingerprint_read_bytes": row.get(

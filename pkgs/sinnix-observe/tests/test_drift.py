@@ -64,3 +64,12 @@ def test_fresh_positive_snapshot_can_be_healthy(tmp_path):
 
     assert report["status"] == "healthy"
     assert report["row_count"] == 1
+
+
+def test_non_object_row_is_unavailable(tmp_path):
+    path = tmp_path / "config-drift.jsonl"
+    path.write_text("[]\n")
+    report = collect_config_drift(path)
+    assert report["available"] is False
+    assert report["status"] == "unavailable"
+    assert "object" in report["reason"]

@@ -73,3 +73,9 @@ same paths at the next regular system activation.
 plugin callbacks and checks shell quoting, input dispatch and passive rendering.
 `checks.<system>.activity-substrate` runs both plus Luau compilation. A real panel load
 and notification submission are separate smoke tests; they are not implied by unit tests.
+
+## Host observations
+
+`sinnix-observe --section drift` reads the private host comparison report. The scheduled producer probes system state as root, then drops privileges to publish a `0600` report owned by the configured operator. Invalid report rows appear as an unavailable source.
+
+The ingestion section reads Polylogue's `ops.db` `ingest_attempts` relation from the exported runtime inventory. An empty current relation is available with zero rows. A missing, inaccessible or obsolete source remains unavailable. `SINNIX_OBSERVE_POLYLOGUE_DB` selects an explicit standalone source without fallback. Attempt timestamps are projected from milliseconds to UTC; parsed raw and materialized counts retain their meanings. Missing byte and resource measurements remain explicit gaps.

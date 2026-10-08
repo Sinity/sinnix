@@ -310,9 +310,11 @@ def compare_noctalia(args: argparse.Namespace) -> list[dict[str, Any]]:
         declared = tomllib.loads((config_home / "config.toml").read_text(encoding="utf-8"))
     except (OSError, tomllib.TOMLDecodeError) as error:
         return [unavailable("noctalia", None, f"declared config unreadable: {error}")]
-    env = dict(os.environ, NOCTALIA_CONFIG_HOME=str(config_home))
+    # Noctalia appends /noctalia to these XDG-style roots. CLI arguments
+    # name the application directories containing config.toml/settings.toml.
+    env = dict(os.environ, NOCTALIA_CONFIG_HOME=str(config_home.parent))
     if args.noctalia_state_home:
-        env["NOCTALIA_STATE_HOME"] = args.noctalia_state_home
+        env["NOCTALIA_STATE_HOME"] = str(Path(args.noctalia_state_home).parent)
     try:
         proc = subprocess.run(
             [args.noctalia, "config", "export", "merged"],
@@ -410,6 +412,13 @@ def main(argv: list[str] | None = None) -> int:
     manifest = read_json(Path(args.manifest)).get("sinnix", {}).get("drift", {})
     rows = collect(manifest, args)
     output = Path(args.output)
+    # Probe privileged state first, then publish as the operator. Keep the
+    # report private while allowing the operator-facing observer to read it.
+    if args.user_name and os.geteuid() == 0:
+        account = pwd.getpwnam(args.user_name)
+        os.initgroups(account.pw_name, account.pw_gid)
+        os.setgid(account.pw_gid)
+        os.setuid(account.pw_uid)
     output.parent.mkdir(parents=True, exist_ok=True)
     payload = "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows)
     atomic_publish(output, payload.encode("utf-8"), fsync=True, mode=0o600)

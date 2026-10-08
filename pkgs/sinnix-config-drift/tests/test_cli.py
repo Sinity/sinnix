@@ -135,7 +135,7 @@ def test_slice_and_generation_mismatch_require_reboot(tmp_path):
 def test_noctalia_state_override_of_a_declared_key_drifts(tmp_path):
     """A settings.toml value that overrides a declared critical key is a
     drift row; a fake noctalia reproduces the merge (state wins)."""
-    config_home = tmp_path / "noctalia-config"
+    config_home = tmp_path / "noctalia"
     config_home.mkdir()
     (config_home / "config.toml").write_text(
         '[accessibility]\nui_scale = 1.5\n[bar.default]\nposition = "bottom"\nend = ["a", "b"]\n'
@@ -143,6 +143,7 @@ def test_noctalia_state_override_of_a_declared_key_drifts(tmp_path):
     fake = tmp_path / "noctalia"
     fake.write_text(
         "#!/bin/sh\n"
+        'test -f "$NOCTALIA_CONFIG_HOME/noctalia/config.toml" || exit 1\n'
         "printf '%s\\n' '[accessibility]' 'ui_scale = 1.5' '[bar.default]' "
         '\'position = "top"\' \'end = ["a", "b"]\'\n'
     )
@@ -223,3 +224,25 @@ def test_unavailable_systemd_snapshot_stays_explicit(tmp_path):
     )
     by_check = {row["check"]: row for row in rows}
     assert by_check["slice:system:background.slice"]["status"] == "unavailable"
+
+
+def test_privileged_collection_publishes_as_operator(tmp_path, monkeypatch):
+    import os
+    import pwd
+    import runpy
+    from types import SimpleNamespace
+
+    main = runpy.run_path(str(SCRIPT))["main"]
+    calls = []
+    account = SimpleNamespace(pw_name="operator", pw_uid=1234, pw_gid=2345)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: account)
+    monkeypatch.setattr(os, "initgroups", lambda name, gid: calls.append(("groups", name, gid)))
+    monkeypatch.setattr(os, "setgid", lambda gid: calls.append(("gid", gid)))
+    monkeypatch.setattr(os, "setuid", lambda uid: calls.append(("uid", uid)))
+    main.__globals__["collect"] = lambda *args: calls.append(("collect",)) or []
+    main.__globals__["atomic_publish"] = lambda *args, **kwargs: calls.append(("publish", kwargs["mode"]))
+    manifest = tmp_path / "config.json"
+    manifest.write_text("{}")
+    main(["--manifest", str(manifest), "--output", str(tmp_path / "report.jsonl"), "--user-name", "operator"])
+    assert calls == [("collect",), ("groups", "operator", 2345), ("gid", 2345), ("uid", 1234), ("publish", 0o600)]

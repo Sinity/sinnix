@@ -28,7 +28,9 @@ def collect_config_drift(path: Path = REPORT) -> dict[str, Any]:
             for line in path.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-    except (OSError, json.JSONDecodeError) as error:
+        if any(not isinstance(row, dict) for row in rows):
+            raise ValueError("report rows must be JSON objects")
+    except (OSError, ValueError) as error:
         return {
             "available": False,
             "status": "unavailable",

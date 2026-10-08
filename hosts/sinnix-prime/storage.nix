@@ -24,6 +24,7 @@ let
   # silently orphan the prepare/drain unit wiring below.
   swapUnit = "${utils.escapeSystemdPath swapFile}.swap";
   swapSizeGiB = 8;
+  swapPriority = 10;
 
   # Overflow tier of the tiered swap posture: zram (priority 100,
   # modules/profiles/workstation.nix) absorbs bursts at RAM speed; this NVMe
@@ -118,7 +119,7 @@ let
       fi
 
       swapoff "$swap_file"
-      swapon "$swap_file"
+      swapon --priority ${toString swapPriority} "$swap_file"
     '';
   };
 
@@ -386,7 +387,7 @@ in
   swapDevices = [
     {
       device = swapFile;
-      priority = 10;
+      priority = swapPriority;
     }
   ];
 

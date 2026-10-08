@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from ..runtime_inventory import polylogue_archive
-from .sqlite_util import sqlite_columns, sqlite_rows, table_exists
+from .sqlite_util import sqlite_columns, sqlite_errors, sqlite_rows, table_exists
 
 POLYLOGUE_TIERS = (
     "index.db",
@@ -47,14 +48,11 @@ def polylogue_tiers() -> dict[str, Any]:
 
 
 def polylogue_db() -> Path | None:
-    candidates = [os.environ.get("SINNIX_OBSERVE_POLYLOGUE_DB")]
+    override = os.environ.get("SINNIX_OBSERVE_POLYLOGUE_DB")
+    if override:
+        return Path(override)
     root = _archive_root()
-    if root is not None:
-        candidates.append(str(root / "index.db"))
-    for candidate in candidates:
-        if candidate and table_exists(Path(candidate), "live_ingest_attempt"):
-            return Path(candidate)
-    return Path(candidates[0]) if candidates[0] else None
+    return root / "ops.db" if root is not None else None
 
 
 def collect_polylogue_live_attempts(limit: int) -> dict[str, Any]:
@@ -65,51 +63,57 @@ def collect_polylogue_live_attempts(limit: int) -> dict[str, Any]:
         "rows": [],
         "archive": polylogue_tiers(),
     }
-    if not db or not db.exists() or not table_exists(db, "live_ingest_attempt"):
+    if not db or not table_exists(db, "ingest_attempts"):
         source["gaps"] = ["polylogue.live_attempts.unavailable"]
         return source
-    cols = set(sqlite_columns(db, "live_ingest_attempt"))
-    wanted = [
+    required = {
         "attempt_id",
-        "started_at",
-        "updated_at",
-        "completed_at",
+        "source_path",
+        "origin",
         "status",
         "phase",
-        "queued_file_count",
-        "needed_file_count",
-        "succeeded_file_count",
-        "failed_file_count",
-        "input_bytes",
-        "source_payload_read_bytes",
-        "cursor_fingerprint_read_bytes",
-        "parse_time_s",
-        "convergence_time_s",
-        "current_source",
-        "current_path",
-        "error",
-        "rss_current_mb",
-        "rss_peak_self_mb",
-        "rss_peak_children_mb",
-        "cgroup_path",
-        "cgroup_memory_current_mb",
-        "cgroup_memory_peak_mb",
-        "cgroup_memory_swap_current_mb",
-    ]
-    selected = [col for col in wanted if col in cols]
-    if not selected:
-        source["gaps"] = ["polylogue.live_attempts.empty_schema"]
+        "started_at_ms",
+        "heartbeat_at_ms",
+        "finished_at_ms",
+        "parsed_raw_count",
+        "materialized_count",
+        "error_message",
+    }
+    if not required.issubset(sqlite_columns(db, "ingest_attempts")):
+        source["gaps"] = ["polylogue.live_attempts.invalid_schema"]
         return source
+    # The OPS tier owns this relation. Retain its fields and units; only the
+    # common report timestamps and path/error names need a projection.
+    prior_errors = len(sqlite_errors())
     rows = sqlite_rows(
         db,
-        f"""
-        select {", ".join(selected)}
-        from live_ingest_attempt
-        order by updated_at desc, started_at desc
+        """
+        select *, coalesce(heartbeat_at_ms, finished_at_ms, started_at_ms) as updated_at_ms
+        from ingest_attempts
+        order by coalesce(heartbeat_at_ms, finished_at_ms, started_at_ms) desc,
+                 started_at_ms desc, attempt_id
         limit ?
         """,
         (limit,),
     )
+    if len(sqlite_errors()) != prior_errors:
+        source["gaps"] = ["polylogue.live_attempts.query_failed"]
+        return source
+    for row in rows:
+        row.update(
+            started_at=_timestamp(row["started_at_ms"]),
+            updated_at=_timestamp(row["updated_at_ms"]),
+            completed_at=_timestamp(row["finished_at_ms"]),
+            current_source=row["origin"],
+            current_path=row["source_path"],
+            error=row["error_message"],
+        )
     source["available"] = True
     source["rows"] = rows
     return source
+
+
+def _timestamp(milliseconds: int | None) -> str | None:
+    if milliseconds is None:
+        return None
+    return datetime.fromtimestamp(milliseconds / 1000, UTC).isoformat()
