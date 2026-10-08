@@ -2412,6 +2412,9 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
                     ),
                     None,
                 )
+            checkout_absent = (registered is None or registered.path is None) and (
+                recorded_path is None or not recorded_path.exists()
+            )
             if registered is None or registered.path is None:
                 if recorded_path is None or not recorded_path.exists():
                     # A terminal manifest still owns the branch when its
@@ -2466,6 +2469,8 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
             )
             if reason:
                 kept.append({"branch": branch, "reason": reason})
+            elif checkout_absent:
+                absent.append(branch)
             else:
                 removed.append(branch)
             retained_artifacts.extend(copied)

@@ -3305,6 +3305,24 @@ def test_clean_reports_a_branch_without_a_checkout_as_absent(harness: Harness) -
     assert cleaned["absent"] == [branch]
 
 
+def test_clean_retiring_an_accepted_branch_does_not_count_an_absent_checkout(
+    harness: Harness,
+) -> None:
+    run = prepared_run(harness, "fx-solo")
+    harness.land(run["run_id"])
+    worker = run["workers"][0]
+    branch = worker["branch"]
+    harness.git.branches[branch] = OTHER
+    harness.wt.trees[branch] = Worktree(branch=branch, path=None)
+
+    cleaned = batch.clean(harness.config, harness.project)
+
+    assert cleaned["removed"] == []
+    assert branch in cleaned["absent"]
+    assert branch not in harness.git.branches
+    assert OTHER in harness.git.recovery_refs.values()
+
+
 def test_cleanup_keeps_an_unregistered_recorded_checkout(harness: Harness) -> None:
     """Anti-vacuity: a missing registry entry cannot hide its remaining directory."""
     run = prepared_run(harness, "fx-solo")
