@@ -212,7 +212,7 @@ def compare_swap(manifest: dict[str, Any], proc_root: Path) -> dict[str, Any]:
             live.append({"device": fields[0], "size": int(fields[2]), "priority": int(fields[4])})
     expected_identity = [{"device": row.get("device"), "priority": row.get("priority", 0)} for row in expected]
     live_identity = [{"device": row["device"], "priority": row["priority"]} for row in live]
-    return result("swap", expected, live, expected_identity == live_identity, evidence="/proc/swaps;live size is retained in evidence")
+    return result("swap", expected, live, sorted(expected_identity, key=lambda row: row["device"]) == sorted(live_identity, key=lambda row: row["device"]), evidence="/proc/swaps;live size is retained in evidence")
 
 
 def compare_single(manifest: dict[str, Any], key: str, live: Any, *, reboot_required: bool = False) -> dict[str, Any]:

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ..util import float_or_zero
-from .sqlite_util import sqlite_columns, sqlite_rows, table_exists
+from .sqlite_util import sqlite_columns, sqlite_errors, sqlite_rows, table_exists
 
 
 def sinex_history_db() -> Path | None:
@@ -15,14 +15,7 @@ def sinex_history_db() -> Path | None:
     if override:
         return Path(override)
     sinex_root = Path(os.environ.get("SINEX_ROOT", "/realm/project/sinex/repo"))
-    candidates = [
-        sinex_root / ".sinex/state/xtask-history.db",
-        Path("/realm/project/sinex/repo/.sinex/state/xtask-history.db"),
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return candidates[0]
+    return sinex_root / ".sinex/state/xtask-history.db"
 
 
 def collect_sinex_xtask(limit: int) -> dict[str, Any]:
@@ -36,6 +29,9 @@ def collect_sinex_xtask(limit: int) -> dict[str, Any]:
         source["gaps"] = ["sinex.xtask_history.unavailable"]
         return source
     cols = sqlite_columns(db, "invocations")
+    if not {"id", "command", "started_at", "status"}.issubset(cols):
+        source["gaps"] = ["sinex.xtask_history.invalid_schema"]
+        return source
     wanted = [
         "id",
         "command",
@@ -62,6 +58,7 @@ def collect_sinex_xtask(limit: int) -> dict[str, Any]:
         "shared_background_slice_memory_usage_max_mb",
     ]
     selected = [col for col in wanted if col in cols]
+    prior_errors = len(sqlite_errors())
     rows = sqlite_rows(
         db,
         f"""
@@ -72,6 +69,9 @@ def collect_sinex_xtask(limit: int) -> dict[str, Any]:
         """,
         (limit,),
     )
+    if len(sqlite_errors()) != prior_errors:
+        source["gaps"] = ["sinex.xtask_history.query_failed"]
+        return source
     source["available"] = True
     source["rows"] = rows
     return source

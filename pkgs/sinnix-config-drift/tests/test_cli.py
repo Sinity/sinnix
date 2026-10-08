@@ -140,7 +140,7 @@ def test_noctalia_state_override_of_a_declared_key_drifts(tmp_path):
     (config_home / "config.toml").write_text(
         '[accessibility]\nui_scale = 1.5\n[bar.default]\nposition = "bottom"\nend = ["a", "b"]\n'
     )
-    fake = tmp_path / "noctalia"
+    fake = tmp_path / "fake-noctalia"
     fake.write_text(
         "#!/bin/sh\n"
         'test -f "$NOCTALIA_CONFIG_HOME/noctalia/config.toml" || exit 1\n'
@@ -246,3 +246,30 @@ def test_privileged_collection_publishes_as_operator(tmp_path, monkeypatch):
     manifest.write_text("{}")
     main(["--manifest", str(manifest), "--output", str(tmp_path / "report.jsonl"), "--user-name", "operator"])
     assert calls == [("collect",), ("groups", "operator", 2345), ("gid", 2345), ("uid", 1234), ("publish", 0o600)]
+
+
+def test_swap_order_does_not_change_identity(tmp_path):
+    rows = run(
+        tmp_path,
+        {"sysctls": {}, "slices": {}, "swap": [
+            {"device": "/fixture/swap", "priority": 10},
+            {"device": "/dev/zram0", "priority": 100},
+        ], "generation": {"revision": "fixture"}},
+        proc_files={"proc/swaps": (
+            "Filename Type Size Used Priority\n"
+            "/dev/zram0 partition 100 0 100\n"
+            "/fixture/swap file 100 0 10\n"
+        )},
+    )
+    assert next(row for row in rows if row["check"] == "swap")["match"] is True
+
+
+def test_swap_priority_difference_is_still_drift(tmp_path):
+    rows = run(
+        tmp_path,
+        {"sysctls": {}, "slices": {}, "swap": [
+            {"device": "/fixture/swap", "priority": 10},
+        ], "generation": {"revision": "fixture"}},
+        proc_files={"proc/swaps": "Filename Type Size Used Priority\n/fixture/swap file 100 0 -2\n"},
+    )
+    assert next(row for row in rows if row["check"] == "swap")["match"] is False

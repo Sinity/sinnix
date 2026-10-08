@@ -728,3 +728,26 @@ def test_current_profile_never_fans_out_expensive_collectors(monkeypatch):
     assert report["sections"]["live_pressure"]["available"] is True
     assert report["sections"]["systemd_units"]["available"] is False
     assert report["runtime_inventory"] == {"surfaces": {}}
+
+
+def test_sqlite_read_helpers_close_their_connections(tmp_path, monkeypatch):
+    db = tmp_path / "read.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("create table sample(value integer)")
+        conn.execute("insert into sample values(7)")
+    conn.close()
+    opened = []
+    connect = sqlite3.connect
+
+    def tracked_connect(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr(sqlite_util.sqlite3, "connect", tracked_connect)
+    assert sqlite_util.sqlite_columns(db, "sample") == {"value"}
+    assert sqlite_util.sqlite_rows(db, "select value from sample") == [{"value": 7}]
+    assert sqlite_util.table_exists(db, "sample") is True
+    for connection in opened:
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            connection.execute("select 1")
