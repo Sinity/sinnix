@@ -90,7 +90,7 @@ def test_failed_generation_preserves_one_reader_generation(tmp_path, monkeypatch
     root = tmp_path / "input"
     root.mkdir()
     (root / "note.md").write_text("# Synthetic note")
-    index = tmp_path / "index"
+    index = tmp_path / "index'quoted"
     index.mkdir()
     (index / "judgments.jsonl").write_text(json.dumps({"target": "prefix:" + str(root), "field": "topic", "value": "fixture", "method": "operator", "evidence": "synthetic", "ts": "2026-01-01T00:00:00Z"}) + "\n")
     assert fs.publish_generation(index, roots=[str(root)]) == 0

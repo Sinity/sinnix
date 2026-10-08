@@ -803,6 +803,8 @@ class ProducerReceiptFixture(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "has not completed"):
                 COVERAGE.audit_status(receipt, policy, 691200)
             marker = root / "latest"
+            self.assertEqual(COVERAGE.audit_readiness(marker, policy),
+                             {"ready": False, "reason": "awaiting-acknowledged-archive"})
             uuid_value = str(uuid.uuid4())
             archive_id = "a" * 64
             proof = {
@@ -816,6 +818,12 @@ class ProducerReceiptFixture(unittest.TestCase):
                 "generation=17\nsubvolume_id=117\n"
                 f"coverage={json.dumps(proof)}\n"
             )
+            self.assertTrue(COVERAGE.audit_readiness(marker, policy)["ready"])
+            policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": ["new-boundary"]}))
+            self.assertEqual(COVERAGE.audit_readiness(marker, policy),
+                             {"ready": False, "reason": "awaiting-current-policy-archive"})
+            self.assertFalse(receipt.exists())
+            policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": []}))
             with (
                 patch.object(
                     COVERAGE, "snapshot_details", return_value=(uuid_value, 17, 117)

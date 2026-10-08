@@ -363,6 +363,17 @@ def verify_created(source, archive, uuid, policy_path, receipt_path):
     }
 
 
+def audit_readiness(marker, policy_path):
+    policy_hash = policy_identity(policy_path, require_borg_excludes=True)
+    fields = read_marker_fields(marker)
+    if fields is None:
+        return {"ready": False, "reason": "awaiting-acknowledged-archive"}
+    proof = json.loads(fields["coverage"])
+    if proof["policy_sha256"] != policy_hash:
+        return {"ready": False, "reason": "awaiting-current-policy-archive"}
+    return {"ready": True, "policy_sha256": policy_hash}
+
+
 def audit_latest(marker, snapshot_directory, policy_path):
     started = time.monotonic()
     marker_bytes = Path(marker).read_bytes()
@@ -847,6 +858,9 @@ def main():
     status.add_argument("receipt")
     status.add_argument("policy")
     status.add_argument("max_age", type=int)
+    ready = sub.add_parser("audit-ready")
+    ready.add_argument("latest_marker")
+    ready.add_argument("policy")
     select = sub.add_parser("select")
     select.add_argument("directory")
     select.add_argument("glob")
@@ -935,6 +949,8 @@ def main():
                 audit_latest(args.latest_marker, args.snapshot_directory, args.policy)
             )
         )
+    elif args.command == "audit-ready":
+        print(json.dumps(audit_readiness(args.latest_marker, args.policy)))
     elif args.command == "audit-status":
         print(
             f"independent_full_audit_age_seconds={audit_status(args.receipt, args.policy, args.max_age)}"

@@ -185,6 +185,13 @@
         exit 0
       fi
       install -d -m 0755 ${lib.escapeShellArg borgDrainStateRoot}
+      readiness="$(${snapshotCoverage} audit-ready ${lib.escapeShellArg "${borgDrainStateRoot}/realm.latest-archived"} ${realmCoveragePolicy})"
+      if [ "$(printf '%s' "$readiness" | ${pkgs.jq}/bin/jq -r '.ready')" != true ]; then
+        printf '%s' "$readiness" | ${pkgs.jq}/bin/jq --argjson epoch "$(date +%s)" '. + {status:"deferred",epoch:$epoch}' \
+          | publish_backup_marker ${lib.escapeShellArg "${borgDrainStateRoot}/realm.independent-full-audit-attempt.json"}
+        echo "backup_phase=independent_full_audit status=deferred reason=$(printf '%s' "$readiness" | ${pkgs.jq}/bin/jq -r '.reason') remains_due=true"
+        exit 0
+      fi
       if ! acquire_borg_global_lock_or_fail "realm independent full audit"; then
         printf '{"status":"deferred","reason":"borg-lock-contention","epoch":%s}\n' "$(date +%s)" \
           | publish_backup_marker ${lib.escapeShellArg "${borgDrainStateRoot}/realm.independent-full-audit-attempt.json"}

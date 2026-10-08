@@ -392,7 +392,7 @@ FROM nodes n LEFT JOIN rollup r USING (path);
 
 COPY (SELECT * FROM inventory) TO {sql_string(parquet)} (FORMAT PARQUET);
 """
-    rows = materialize_pair(db, parquet, lambda staged_parquet: sql.replace(str(parquet), str(staged_parquet)), "inventory")
+    rows = materialize_pair(db, parquet, lambda staged_parquet: sql.replace(sql_string(parquet), sql_string(staged_parquet)), "inventory")
     print(f"sinnix-fs inventory: materialized {rows} rows -> {db}, {parquet}")
 
 
