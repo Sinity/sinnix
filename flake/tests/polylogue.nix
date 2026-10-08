@@ -144,7 +144,6 @@ in
             {
               nativeBuildInputs = [
                 (polyloguePackage.pythonModule.withPackages (ps: [
-                  polyloguePackage
                   ps.pytest
                   ps.pytest-testmon
                 ]))
@@ -158,7 +157,7 @@ in
                 echo "FAIL: worker_memory.py restored the max(1) floor" >&2
                 exit 1
               fi
-              python3 ${./pytest_admission.py}
+              PYTHONPATH="$site''${PYTHONPATH:+:$PYTHONPATH}" python3 ${./pytest_admission.py}
               touch "$out"
             '';
         polylogue-runtime-inventory =
