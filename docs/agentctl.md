@@ -594,7 +594,10 @@ and failed unclaims are the residual. The members can then start again.
 behind. A worktree is a candidate only when its branch is `batch/<run>/…` and
 that run no longer holds its beads: landed, abandoned, or with no manifest
 left at all. It is removed on the same rule as an abandon. The branch remains
-as the recovery reference, and declared receipts are retained in private
+as the recovery reference. When cleanup retires a branch, its exact commit is
+first retained in a verified `refs/agentctl/recovery/` ref, including when the
+checkout was already absent. Branch deletion refuses a concurrent ref change.
+Declared receipts are retained in private
 runtime state before removal. One that is kept is printed with the reason.
 Already-absent checkouts are reported separately and are never counted as removals.
 Run state, never age: a live run's worktrees and an

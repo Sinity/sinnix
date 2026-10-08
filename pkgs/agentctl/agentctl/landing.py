@@ -2061,6 +2061,21 @@ def _drop_branch(
 
     Returns why it was kept, or None once it is gone.
     """
+
+    def retire_branch() -> None:
+        head = gitcmd.git(
+            project.root,
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            f"refs/heads/{branch}^{{commit}}",
+            ok_statuses=(0, 1),
+            error=BatchError,
+        )
+        if head:
+            _recovery_ref(project.root, run_id, recorded_path or project.root, head)
+            _git(project.root, "update-ref", "-d", f"refs/heads/{branch}", head)
+
     registry = worktrunk.worktrunk_list(project.root)
     tree = worktrunk.worktrunk_find(project.root, branch)
     path = tree.path if tree is not None else None
@@ -2082,14 +2097,11 @@ def _drop_branch(
     if path is None:
         if recorded_path is not None and recorded_path.exists():
             return f"worktree kept; checkout path is unregistered: {recorded_path}"
-        if delete_branch and tree is None:
-            gitcmd.git(
-                project.root,
-                "update-ref",
-                "-d",
-                f"refs/heads/{branch}",
-                error=BatchError,
-            )
+        if delete_branch:
+            try:
+                retire_branch()
+            except BatchError as error:
+                return f"branch kept; {error}"
         return None
     if not path.is_dir():
         if removal_target == branch:
@@ -2115,9 +2127,9 @@ def _drop_branch(
                 ok_statuses=(0, 1),
                 error=BatchError,
             )
-            if detached:
+            if detached or delete_branch:
                 _recovery_ref(project.root, run_id, path, head)
-            elif branch_head != head:
+            if not detached and branch_head != head:
                 return "worktree kept; branch no longer names checkout HEAD"
             copied = _preserve_artifacts(
                 config,
@@ -2178,7 +2190,7 @@ def _drop_branch(
             return f"worktree kept; {error}"
     try:
         worktrunk.worktrunk_remove(
-            project.root, removal_target, keep_branch=not delete_branch, reap=False
+            project.root, removal_target, keep_branch=True, reap=False
         )
     except WorktrunkError as error:
         return str(error)
@@ -2187,13 +2199,10 @@ def _drop_branch(
     if delete_branch:
         # The checkout is gone (or was already absent), so this ref can now be
         # removed without invalidating a registered worktree.
-        gitcmd.git(
-            project.root,
-            "update-ref",
-            "-d",
-            f"refs/heads/{branch}",
-            error=BatchError,
-        )
+        try:
+            retire_branch()
+        except BatchError as error:
+            return f"branch kept; {error}"
     return None
 
 

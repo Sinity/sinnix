@@ -183,6 +183,143 @@ def test_terminal_release_keeps_the_exact_branch_head(tmp_path: Path) -> None:
     assert retained == head
 
 
+@pytest.mark.parametrize("checkout_present", [False, True])
+def test_retiring_a_squashed_branch_retains_its_original_commit(
+    tmp_path: Path,
+    config: Config,
+    monkeypatch: pytest.MonkeyPatch,
+    checkout_present: bool,
+) -> None:
+    root = _repository(tmp_path / "repo")
+    write_project(root, worktrees=tmp_path / "worktrees")
+    project = load_project_adapter(root)
+    target = tmp_path / "worktrees" / "lane"
+    branch = "batch/run/worker"
+    worktrunk_create(root, branch, path=target, base="master")
+    (target / "worker.txt").write_text("candidate\n")
+    subprocess.run(["git", "-C", str(target), "add", "worker.txt"], check=True)
+    _commit(target, "worker candidate")
+    head = subprocess.check_output(
+        ["git", "-C", str(target), "rev-parse", "HEAD"], text=True
+    ).strip()
+    (root / "worker.txt").write_text("candidate\n")
+    subprocess.run(["git", "-C", str(root), "add", "worker.txt"], check=True)
+    _commit(root, "squash landing")
+    assert (
+        subprocess.run(
+            ["git", "-C", str(root), "merge-base", "--is-ancestor", head, "master"]
+        ).returncode
+        == 1
+    )
+    if not checkout_present:
+        worktrunk_remove(root, branch, keep_branch=True, reap=False)
+    monkeypatch.setattr(landing, "_task_users", lambda _path: [])
+    monkeypatch.setattr(landing, "_process_users", lambda _path: [])
+    for _attempt in range(2):
+        assert (
+            landing._drop_branch(
+                config,
+                project,
+                branch,
+                base="master",
+                recorded_path=target,
+                delete_branch=True,
+            )
+            is None
+        )
+    assert not target.exists()
+    assert (
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "show-ref",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{branch}",
+            ]
+        ).returncode
+        == 1
+    )
+    refs = subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(root),
+            "for-each-ref",
+            "--format=%(objectname)",
+            "refs/agentctl/recovery/",
+        ],
+        text=True,
+    ).splitlines()
+    assert head in refs
+    # Reflogs and unreachable-object grace must not be the preservation route.
+    subprocess.run(
+        ["git", "-C", str(root), "reflog", "expire", "--expire=now", "--all"],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(root), "gc", "--prune=now"], check=True)
+    assert (
+        subprocess.check_output(
+            ["git", "-C", str(root), "show", f"{head}:worker.txt"], text=True
+        )
+        == "candidate\n"
+    )
+
+
+def test_branch_retirement_refuses_a_concurrent_move(
+    tmp_path: Path,
+    config: Config,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = _repository(tmp_path / "repo")
+    write_project(root, worktrees=tmp_path / "worktrees")
+    project = load_project_adapter(root)
+    branch = "batch/run/worker"
+    subprocess.run(["git", "-C", str(root), "branch", branch], check=True)
+    first = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", branch], text=True
+    ).strip()
+    _commit(root, "new commit", allow_empty=True)
+    second = subprocess.check_output(
+        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
+    ).strip()
+    preserve = landing._recovery_ref
+
+    def move_after_preservation(*args: object) -> str:
+        ref = preserve(*args)
+        subprocess.run(
+            ["git", "-C", str(root), "update-ref", f"refs/heads/{branch}", second],
+            check=True,
+        )
+        return ref
+
+    monkeypatch.setattr(landing, "_recovery_ref", move_after_preservation)
+    reason = landing._drop_branch(
+        config, project, branch, base="master", delete_branch=True
+    )
+    assert reason and reason.startswith("branch kept;")
+    assert (
+        subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", branch], text=True
+        ).strip()
+        == second
+    )
+    refs = subprocess.check_output(
+        [
+            "git",
+            "-C",
+            str(root),
+            "for-each-ref",
+            "--format=%(objectname)",
+            "refs/agentctl/recovery/",
+        ],
+        text=True,
+    ).splitlines()
+    assert first in refs
+
+
 def test_terminal_release_archives_ignored_descriptor_artifacts_across_a_retry(
     tmp_path: Path, config: Config, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -155,6 +155,7 @@ class FakeGit:
         }
     )
     branches: dict[str, str] = field(default_factory=dict)
+    recovery_refs: dict[str, str] = field(default_factory=dict)
     merges: list[str] = field(default_factory=list)
     aborts: list[str] = field(default_factory=list)
     pushes: list[tuple[str, ...]] = field(default_factory=list)
@@ -248,6 +249,10 @@ class FakeGit:
         if verb == "fetch":
             return ""
         if verb == "rev-parse":
+            if arguments[-1].startswith("refs/agentctl/recovery/"):
+                return self.recovery_refs.get(
+                    arguments[-1].removesuffix("^{commit}"), ""
+                )
             if arguments[1] == "HEAD":
                 return self.heads.get(key, SHA)
             if arguments[-1].startswith("refs/remotes/origin/"):
@@ -312,6 +317,9 @@ class FakeGit:
             return ""
         if verb == "update-ref" and arguments[1] == "-d":
             self.branches.pop(arguments[2].removeprefix("refs/heads/"), None)
+            return ""
+        if verb == "update-ref" and arguments[1].startswith("refs/agentctl/recovery/"):
+            self.recovery_refs[arguments[1]] = arguments[2]
             return ""
         if verb == "symbolic-ref":
             # The project root is not a checkout of the base branch here, so a
