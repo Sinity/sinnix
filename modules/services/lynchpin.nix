@@ -63,6 +63,10 @@ mkServiceModule {
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       machineTelemetryLakeRoot = "${config.sinnix.paths.machineRoot}/analysis";
       localRoot = "${cfg.repoRoot}/.lynchpin";
+      chiselEnvironment = {
+        LYNCHPIN_CHISEL_CACHE_ROOT = "${config.sinnix.paths.stateRoot}/cache/chisel";
+        LYNCHPIN_CHISEL_SCRATCH_ROOT = "${config.sinnix.paths.realmRoot}/tmp/work/lynchpin-chisel";
+      };
       localHotDirs = [
         "cache"
         "enrich"
@@ -127,10 +131,8 @@ mkServiceModule {
           scriptPkgs.lynchpin-python
         ];
 
-        environment.variables = {
+        environment.variables = chiselEnvironment // {
           LYNCHPIN_MCP_PROVIDED = "1";
-          LYNCHPIN_CHISEL_CACHE_ROOT = "${config.sinnix.paths.stateRoot}/cache/chisel";
-          LYNCHPIN_CHISEL_SCRATCH_ROOT = "${config.sinnix.paths.realmRoot}/tmp/work/lynchpin-chisel";
         };
 
         systemd.services.lynchpin-local-attrs = {
@@ -185,6 +187,7 @@ mkServiceModule {
                 serviceConfig = {
                   Group = "users";
                   TimeoutStartSec = job.timeoutStartSec;
+                  Environment = lib.mapAttrsToList (name: value: "${name}=${value}") chiselEnvironment;
                 };
                 unit = {
                   requires = [ "lynchpin-local-attrs.service" ];

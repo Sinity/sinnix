@@ -44,6 +44,10 @@ let
     set -euo pipefail
     export LYNCHPIN_REPO_ROOT=/realm/project/sinity-lynchpin/repo
     export LYNCHPIN_LOCAL_ROOT=/realm/project/sinity-lynchpin/repo/.lynchpin
+    ${lib.optionalString (config.environment.variables ? LYNCHPIN_CHISEL_CACHE_ROOT) ''
+      export LYNCHPIN_CHISEL_CACHE_ROOT=${lib.escapeShellArg config.environment.variables.LYNCHPIN_CHISEL_CACHE_ROOT}
+      export LYNCHPIN_CHISEL_SCRATCH_ROOT=${lib.escapeShellArg config.environment.variables.LYNCHPIN_CHISEL_SCRATCH_ROOT}
+    ''}
     export PYTHONPATH="$LYNCHPIN_REPO_ROOT''${PYTHONPATH:+:$PYTHONPATH}"
     exec ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.mcp.cli "$@"
   '';
