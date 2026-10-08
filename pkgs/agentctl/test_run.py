@@ -469,10 +469,11 @@ def test_a_declared_scratch_is_created_exported_measured_and_removed(
         argv=[
             "sh",
             "-c",
-            'mkdir -p "$AGENTCTL_SCRATCH/inner" '
-            '&& dd if=/dev/zero of="$AGENTCTL_SCRATCH/inner/blob" bs=1024 count=4 '
+            'test "$TMPDIR" = "$AGENTCTL_SCRATCH" '
+            '&& temporary=$(mktemp) '
+            '&& dd if=/dev/zero of="$temporary" bs=1024 count=4 '
             "2>/dev/null "
-            '&& printf \'{"scratch": "%s"}\' "$AGENTCTL_SCRATCH"',
+            '&& printf \'{"scratch": "%s", "temporary": "%s"}\' "$AGENTCTL_SCRATCH" "$temporary"',
         ],
         result_kind="json",
         result_path=str(tmp_path / "job-a.result"),
@@ -489,7 +490,8 @@ def test_a_declared_scratch_is_created_exported_measured_and_removed(
     assert not scratch.exists() and (tmp_path / "tmpfs").is_dir()
     # The result artifact carries the command's stdout and nothing agentctl added.
     document = json.loads((tmp_path / "job-a.result").read_text())
-    assert document == {"scratch": str(scratch)}
+    assert document["scratch"] == str(scratch)
+    assert Path(document["temporary"]).parent == scratch
 
 
 def test_a_job_declaring_no_scratch_records_none(tmp_path: Path) -> None:

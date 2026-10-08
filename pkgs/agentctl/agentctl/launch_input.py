@@ -56,7 +56,7 @@ UNIT_PATH_PROPERTIES = frozenset(
 UNIT_PATH_VALUE = re.compile(r"-?/[^\x00-\x20:]+\Z")
 
 # A job-owned scratch directory: created before the command, exported as
-# `AGENTCTL_SCRATCH`, measured at unit exit and removed. `tmpfs` is RAM,
+# `AGENTCTL_SCRATCH` and `TMPDIR`, measured at unit exit and removed. `tmpfs` is RAM,
 # `nvme` the scratch filesystem; the environment overrides exist so a test
 # owns both roots.
 SCRATCH_KINDS = frozenset({"tmpfs", "nvme"})

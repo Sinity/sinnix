@@ -151,8 +151,8 @@ Native evidence records are private, immutable result artifacts under `$XDG_STAT
 An operation declaring `scratch = "tmpfs"` or `scratch = "nvme"` gets one
 job-owned directory, `/dev/shm/agentctl/<ref>` or
 `/realm/tmp/work/agentctl/<ref>`. `job start` resolves the path into the
-launch input; the wrapper creates it 0700, exports it as `AGENTCTL_SCRATCH`,
-and at unit exit measures it (bytes, file count, both bounded at 100,000
+launch input; the wrapper creates it 0700, exports it as `AGENTCTL_SCRATCH`
+and `TMPDIR`. At unit exit the wrapper measures it (bytes, file count, both bounded at 100,000
 entries; `truncated` says the count stopped there) and records the footprint
 under `scratch` in `jobs/<ref>.outcome` and on the `finished` event, then
 removes the directory. `job get` renders it. The typed result artifact stays

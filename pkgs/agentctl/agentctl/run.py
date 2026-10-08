@@ -821,6 +821,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         environment["AGENTCTL_POOL"] = pool
     if scratch_dir is not None:
         environment["AGENTCTL_SCRATCH"] = str(scratch_dir)
+        environment["TMPDIR"] = str(scratch_dir)
     argv = list(launch["argv"])
     executable = shutil.which(argv[0], path=environment.get("PATH", os.defpath))
     properties: dict[str, str] = {}

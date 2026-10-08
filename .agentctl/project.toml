@@ -208,6 +208,7 @@ arguments = "required"
 pool = "bulk"
 result = "exit"
 cache = "none"
+scratch = "nvme"
 timeout_seconds = 7200
 
 [operations.fs_index_scan]
@@ -216,6 +217,7 @@ exec = ["env", "PYTHONPATH=pkgs/sinnix-lib", "python3", "scripts/sinnix-fs", "ru
 pool = "bulk"
 result = "exit"
 cache = "none"
+scratch = "nvme"
 timeout_seconds = 21600
 
 [operations.git_store_repair]
@@ -225,6 +227,7 @@ arguments = "required"
 pool = "normal"
 result = "exit"
 cache = "none"
+scratch = "nvme"
 timeout_seconds = 1800
 
 [operations.verify_report_navigation]
