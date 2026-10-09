@@ -246,9 +246,11 @@
 
   # Long-term journal on the /realm NVMe rather than the wear-limited MX500
   # root, so retention can be generous (100G size cap, 365-day time cap). The
-  # nested subvol /realm/state/journal keeps journal churn out of the /realm
-  # btrbk→borg snapshots; sinex's syslog capture is the durable archive and
-  # this is the queryable window.
+  # source is provisioned before the bind mount by ensure-journal-source.
+  # New sources are nested subvolumes, excluding their churn from /realm
+  # snapshots. Existing ordinary directories are preserved until explicitly
+  # migrated. Sinex's syslog capture is the durable archive; this is the
+  # queryable window.
   fileSystems."/var/log/journal" = {
     device = "/realm/state/journal";
     fsType = "none";

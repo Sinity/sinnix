@@ -12,8 +12,26 @@
     let
       host = inputs.self.nixosConfigurations.sinnix-prime.config;
       failures = builtins.filter (entry: !entry.assertion) host.assertions;
+      journalSource = host.systemd.services.ensure-journal-source;
     in
     {
+      checks.journal-source =
+        assert builtins.elem "realm.mount" journalSource.requires;
+        assert builtins.elem "realm.mount" journalSource.after;
+        assert builtins.elem "var-log-journal.mount" journalSource.requiredBy;
+        assert builtins.elem "var-log-journal.mount" journalSource.before;
+        assert journalSource.unitConfig.DefaultDependencies == false;
+        assert host.fileSystems."/var/log/journal".device == "/realm/state/journal";
+        pkgs.runCommand "journal-source-check"
+          {
+            nativeBuildInputs = [ pkgs.python3 pkgs.bash ];
+            sourceScript = pkgs.writeText "journal-source-script" journalSource.script;
+          }
+          ''
+            python ${./journal_source.py} "$sourceScript"
+            touch "$out"
+          '';
+
       checks.sinnix-prime-assertions =
         if failures == [ ] then
           pkgs.runCommand "sinnix-prime-assertions" { } ''

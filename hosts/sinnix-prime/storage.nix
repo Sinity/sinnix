@@ -490,6 +490,46 @@ in
       '';
     };
 
+    services.ensure-journal-source = {
+      description = "Provision the persistent journal bind source when absent";
+      requires = [ "realm.mount" ];
+      after = [ "realm.mount" ];
+      requiredBy = [ "var-log-journal.mount" ];
+      before = [ "var-log-journal.mount" ];
+      unitConfig.DefaultDependencies = false;
+      path = [
+        pkgs.btrfs-progs
+        pkgs.coreutils
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        root=/realm/state/journal
+        parent=/realm/state
+        # Existing native stores retain their bytes and metadata. Converting
+        # an ordinary directory to a subvolume needs a separate migration.
+        if [ -L "$parent" ] || { [ -e "$parent" ] && [ ! -d "$parent" ]; }; then
+          echo "Journal source parent is not a directory" >&2
+          exit 1
+        fi
+        if [ -L "$root" ] || { [ -e "$root" ] && [ ! -d "$root" ]; }; then
+          echo "Journal source is not a directory" >&2
+          exit 1
+        fi
+        if [ -d "$root" ]; then
+          exit 0
+        fi
+        if [ ! -d "$parent" ]; then
+          install -d -o ${lib.escapeShellArg username} -g ${lib.escapeShellArg primaryGroupName} -m 0755 "$parent"
+        fi
+        btrfs subvolume create "$root"
+        chown root:systemd-journal "$root"
+        chmod 2755 "$root"
+      '';
+    };
+
     services.realm-scaffold = {
       description = "Create /realm-backed bind mount source directories and DB subvolumes";
       requires = [ "realm.mount" ];
