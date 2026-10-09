@@ -1,6 +1,40 @@
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import SimpleNamespace
+import os
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def restore_caller_umask():
+    prior = os.umask(0o022)
+    try:
+        yield
+    finally:
+        os.umask(prior)
+
+
+def test_downloader_children_create_private_outputs(monkeypatch, tmp_path):
+    downloader = load_script()
+    real_run = downloader.subprocess.run
+    output = tmp_path / "download"
+
+    def run(_command, **_kwargs):
+        return real_run(
+            [downloader.sys.executable, "-c",
+             "from pathlib import Path; import sys; p=Path(sys.argv[1]); p.mkdir(); (p/'receipt').write_text('neutral')",
+             str(output)],
+            check=False,
+        )
+
+    monkeypatch.setattr(downloader.subprocess, "run", run)
+    monkeypatch.setattr(downloader.sys, "argv", ["sinnix-ytdlp", "https://example.invalid/neutral"])
+    monkeypatch.setenv("SINNIX_CHROME_PROFILE", str(tmp_path / "no-profile"))
+    assert downloader.main() == 0
+    assert output.stat().st_mode & 0o777 == 0o700
+    assert (output / "receipt").stat().st_mode & 0o777 == 0o600
+    assert (output / "receipt").read_text() == "neutral"
 
 
 def load_script():

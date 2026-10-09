@@ -234,7 +234,11 @@
         ytdlp-suite = mkScriptSuite {
           name = "sinnix-ytdlp";
           suiteDir = ../../pkgs/sinnix-ytdlp/tests;
-          scripts = [ "sinnix-ytdlp" ];
+          scripts = [
+            "sinnix-ytdlp"
+            "sinnix-video-resolve"
+          ];
+          nativeBuildInputs = [ pkgs.bash ];
         };
         fs-materialization-suite = mkScriptSuite {
           name = "sinnix-fs";

@@ -17,9 +17,14 @@
             sinnix.services.capture-audio.enable = true;
             sinnix.services.capture-netflow.enable = true;
             sinnix.services.xiaomi-witness.enable = true;
+            sinnix.services.video-resolve.enable = true;
           }
         ];
         assertions = config: [
+          {
+            assertion = config.systemd.services.sinnix-video-resolve.serviceConfig.UMask == "0077";
+            message = "Video recovery writers must create owner-only output.";
+          }
           {
             assertion = config.systemd.user.services.sinnix-xiaomi-witness.serviceConfig.UMask == "0077";
             message = "Health witness writers must create owner-only output.";

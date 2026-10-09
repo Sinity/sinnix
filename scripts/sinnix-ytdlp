@@ -164,6 +164,7 @@ def same_page_resource(page_url, candidate_url):
 
 
 def main():
+    os.umask(0o077)
     arguments = sys.argv[1:]
     command = ["yt-dlp", *with_browser_cookies(arguments)]
     result = subprocess.run(command, check=False)

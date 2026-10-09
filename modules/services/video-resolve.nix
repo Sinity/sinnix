@@ -40,6 +40,7 @@ mkServiceModule {
   job = {
     description = "Resolve video-hosting URLs from the URL ledger into archived copies";
     user = config.sinnix.user.name;
+    serviceConfig.UMask = "0077";
     execStart = "${scriptPkgs.sinnix-video-resolve}/bin/sinnix-video-resolve";
     timer = {
       onCalendar = "weekly";

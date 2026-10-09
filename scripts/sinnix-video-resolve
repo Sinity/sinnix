@@ -14,6 +14,7 @@
 # are cheap; yt-dlp's own --download-archive gives the same guarantee at
 # the download layer, used here as the primary de-dup mechanism.
 set -euo pipefail
+umask 077
 
 LEDGER_PARQUET="${SINNIX_URL_LEDGER_PARQUET:-/realm/activity/browser/coverage/url_ledger.parquet}"
 ARCHIVE_ROOT="${SINNIX_VIDEO_ARCHIVE_ROOT:-/realm/activity/browser/recovery}"
@@ -36,17 +37,24 @@ if [[ ! -f "$LEDGER_PARQUET" ]]; then
   exit 1
 fi
 
-mkdir -p "$ARCHIVE_ROOT"
-touch "$TRIED"
-
-mapfile -t urls < <(
-  duckdb -csv -noheader -c "
+if ! url_lines=$(
+  duckdb -list -noheader -c "
     SELECT normalized_url
     FROM read_parquet('$LEDGER_PARQUET')
     WHERE regexp_matches(normalized_url, '$VIDEO_URL_PATTERN')
     ORDER BY visit_count DESC, normalized_url
     LIMIT $LIMIT;"
-)
+); then
+  echo "sinnix-video-resolve: ledger query failed" >&2
+  exit 1
+fi
+urls=()
+if [[ -n "$url_lines" ]]; then
+  mapfile -t urls <<< "$url_lines"
+fi
+
+mkdir -p "$ARCHIVE_ROOT"
+touch "$TRIED"
 
 echo "sinnix-video-resolve: ${#urls[@]} candidate video URLs from the ledger (limit $LIMIT, $(wc -l < "$TRIED") already tried)" >&2
 
