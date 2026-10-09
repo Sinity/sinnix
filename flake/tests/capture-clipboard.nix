@@ -45,7 +45,6 @@ in
           {
             nativeBuildInputs = [
               pkgs.coreutils
-              pkgs.findutils
               pkgs.gnugrep
               pkgs.jq
               pkgs.python3
@@ -120,7 +119,7 @@ in
 
             index_file="$TMPDIR/captures/desktop/clipboard/clipboard-index.jsonl"
             test "$(wc -l < "$index_file")" -eq 1
-            envelope_file="$(find "$TMPDIR/captures/desktop/clipboard" -maxdepth 1 -name 'clipboard-*.jsonl' | head -n1)"
+            envelope_file="$TMPDIR/captures/desktop/clipboard/$(jq -er '.file' "$index_file")"
             jq -e '.payload.size == 3145728' "$envelope_file" >/dev/null
 
             # Reset the isolated fixture after the large-payload case; the
@@ -136,7 +135,7 @@ in
 
             test "$(wc -l < "$index_file")" -eq 1
 
-            envelope_file="$(find "$TMPDIR/captures/desktop/clipboard" -maxdepth 1 -name 'clipboard-*.jsonl' | head -n1)"
+            envelope_file="$TMPDIR/captures/desktop/clipboard/$(jq -er '.file' "$index_file")"
             jq -e '
               .schema == "sinnix-capture-v1" and
               .lane == "clipboard" and
@@ -154,6 +153,7 @@ in
             "$watch"
 
             test "$(wc -l < "$index_file")" -eq 2
+            envelope_file="$TMPDIR/captures/desktop/clipboard/$(jq -ser '.[-1].file' "$index_file")"
 
             sha256="$(sha256sum "$FIXTURE_DIR/content" | cut -d' ' -f1)"
             jq -e --arg sha256 "$sha256" '
