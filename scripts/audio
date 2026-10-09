@@ -89,9 +89,22 @@ get_active_mic_status() {
 
 case "${1:-status}" in
     toggle)
+        if ! graph=$(pw-dump); then
+            echo "audio: cannot read PipeWire graph" >&2
+            exit 1
+        fi
+        if ! sink_ids=$(printf '%s\n' "$graph" | jq -r '.[] | select(.type == "PipeWire:Interface:Node") | select(.info.props["media.class"] == "Audio/Sink") | .id' | sort -n | uniq) ||
+           ! stream_ids=$(printf '%s\n' "$graph" | jq -r '.[] | select(.type == "PipeWire:Interface:Node") | select(.info.props["media.class"] == "Stream/Output/Audio") | .id'); then
+            echo "audio: cannot parse PipeWire graph" >&2
+            exit 1
+        fi
+        if [[ -z "$sink_ids" ]]; then
+            echo "audio: no audio sinks available" >&2
+            exit 1
+        fi
         inspect=$(wpctl inspect @DEFAULT_AUDIO_SINK@ 2>/dev/null || true)
         current_id=$(printf '%s\n' "$inspect" | head -n1 | awk '{print $2}' | tr -d ',')
-        mapfile -t sinks < <(pw-dump | jq -r '.[] | select(.type == "PipeWire:Interface:Node") | select(.info.props["media.class"] == "Audio/Sink") | .id' | sort -n | uniq)
+        mapfile -t sinks <<< "$sink_ids"
         
         sinks_count=${#sinks[@]}
         if (( sinks_count > 0 )); then
@@ -104,7 +117,10 @@ case "${1:-status}" in
             done
             wpctl set-default "$next"
             # Move active streams
-            mapfile -t streams < <(pw-dump | jq -r '.[] | select(.type == "PipeWire:Interface:Node") | select(.info.props["media.class"] == "Stream/Output/Audio") | .id')
+            streams=()
+            if [[ -n "$stream_ids" ]]; then
+                mapfile -t streams <<< "$stream_ids"
+            fi
             for stream in "${streams[@]}"; do
                 wpctl set-target "$stream" "$next" || true
             done

@@ -27,6 +27,7 @@ class AudioMicTest(unittest.TestCase):
             "wpctl",
             'printf "%s\\n" "$*" >> "$CALL_LOG"\n'
             'case "$*" in\n'
+            '  "inspect @DEFAULT_AUDIO_SINK@") echo "id 2, type PipeWire:Interface:Node" ;;\n'
             '  "inspect @DEFAULT_AUDIO_SOURCE@") '
             'if [ "${INSPECT_STATUS:-1}" -eq 0 ]; then echo "id 42, type PipeWire:Interface:Node"; else exit 1; fi ;;\n'
             '  "get-volume @DEFAULT_AUDIO_SOURCE@") '
@@ -36,6 +37,7 @@ class AudioMicTest(unittest.TestCase):
         )
         self.executable("notify-send", 'printf "notify %s\\n" "$*" >> "$CALL_LOG"\n')
         self.executable("pkill", 'printf "refresh %s\\n" "$*" >> "$CALL_LOG"\n')
+        self.executable("pw-dump", 'printf "dump\\n" >> "$CALL_LOG"\nprintf "%s" "${GRAPH:-[]}"\nexit "${DUMP_STATUS:-0}"\n')
 
     def executable(self, name, body):
         path = self.bin / name
@@ -59,6 +61,36 @@ class AudioMicTest(unittest.TestCase):
         calls = self.log.read_text()
         self.assertIn("inspect @DEFAULT_AUDIO_SOURCE@", calls)
         self.assertNotIn("set-mute", calls)
+
+    def test_output_switch_refuses_failed_invalid_or_empty_graphs(self):
+        for graph, status, error in [
+            ("[]", "42", "cannot read"),
+            ("not-json", "0", "cannot parse"),
+            ("[]", "0", "no audio sinks"),
+        ]:
+            with self.subTest(graph=graph, status=status):
+                self.log.write_text("")
+                self.env.update(GRAPH=graph, DUMP_STATUS=status)
+                result = self.run_audio("toggle", False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(error, result.stderr)
+                calls = self.log.read_text()
+                self.assertNotIn("set-default", calls)
+                self.assertNotIn("set-target", calls)
+                self.assertNotIn("refresh", calls)
+
+    def test_output_switch_uses_one_graph_and_moves_current_streams(self):
+        self.env["GRAPH"] = json.dumps([
+            {"type": "PipeWire:Interface:Node", "id": identity,
+             "info": {"props": {"media.class": kind}}}
+            for identity, kind in [(2, "Audio/Sink"), (3, "Audio/Sink"), (9, "Stream/Output/Audio")]
+        ])
+        self.run_audio("toggle", True)
+        calls = self.log.read_text().splitlines()
+        self.assertEqual(calls.count("dump"), 1)
+        self.assertIn("set-default 3", calls)
+        self.assertIn("set-target 9 3", calls)
+        self.assertLess(calls.index("set-default 3"), calls.index("set-target 9 3"))
 
     def test_missing_active_source_toggle_notifies_and_does_not_change_mute(self):
         result = self.run_audio("mic-toggle", False)
