@@ -103,3 +103,41 @@ def test_lane_qualified_history_and_repaired_size(lake):
     run_lake(module)
     assert calls == [mic, phone]
     assert module.LEDGER.read_text().startswith(prior)
+
+
+@pytest.mark.parametrize("framing, raw, success", [
+    ([("Content-Length", "2"), ("Content-Length", "3")], b"{}", False),
+    ([("Content-Length", "2"), ("Transfer-Encoding", "chunked")], b"{}", False),
+    ([("Content-Length", "-1")], b"{}", False),
+    ([("Content-Length", "3")], b"{}", False),
+    ([("Content-Length", "2")], b"{}", True),
+])
+def test_http_framing_precedes_transcription(lake, monkeypatch, framing, raw, success):
+    import io
+    import socketserver
+    from email.message import Message
+    module = lake[0]
+    calls, statuses = [], []
+    monkeypatch.setattr(module, "_multipart_file", lambda body, ctype: calls.append(body) or b"audio")
+    monkeypatch.setattr(module, "transcribe_file", lambda path: {"text": "neutral"})
+    class ShortReader(io.BytesIO):
+        def read(self, size=-1):
+            return super().read(min(size, 1))
+    class Server:
+        def __init__(self, address, handler):
+            self.handler = handler
+        def serve_forever(self):
+            handler = object.__new__(self.handler)
+            handler.headers = Message()
+            for key, value in framing:
+                handler.headers[key] = value
+            handler.rfile = ShortReader(raw)
+            handler.path = "/v1/audio/transcriptions"
+            handler._json = lambda status, body: statuses.append(int(status))
+            handler.do_POST()
+        def server_close(self):
+            pass
+    monkeypatch.setattr(socketserver, "ThreadingTCPServer", Server)
+    assert module.cmd_serve(argparse.Namespace(socket=None, listen="127.0.0.1:0")) == 0
+    assert statuses == [200 if success else 400]
+    assert calls == ([b"{}"] if success else [])

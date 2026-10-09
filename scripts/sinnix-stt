@@ -46,6 +46,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterable
 
+from sinnix_lib.http import RequestBodyError, read_body
 from sinnix_lib.layout import capture_lane_path
 from sinnix_lib.ledger import append_jsonl, utc_ts
 
@@ -639,9 +640,15 @@ def cmd_serve(args: argparse.Namespace) -> int:
             if not self.path.rstrip("/").endswith("/audio/transcriptions"):
                 self._json(HTTPStatus.NOT_FOUND, {"error": "no such route"})
                 return
-            length = int(self.headers.get("Content-Length") or 0)
             ctype = self.headers.get("Content-Type") or ""
-            body = self.rfile.read(length)
+            try:
+                body = read_body(
+                    self.headers, self.rfile, max_bytes=sys.maxsize,
+                    require_content_length=False,
+                )
+            except RequestBodyError as exc:
+                self._json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
+                return
             audio = _multipart_file(body, ctype)
             if audio is None:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": "expected a multipart file field"})

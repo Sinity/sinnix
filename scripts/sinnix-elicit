@@ -67,6 +67,7 @@ from pathlib import Path
 from rank_core import Comparison, build_selector, fit, top_k_stability
 from rank_core.store import append_log, read_log
 from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.http import read_body
 from sinnix_lib.ledger import utc_ts
 
 def publish_text(path: Path, text: str) -> None:
@@ -970,8 +971,14 @@ class ServeHandler(BaseHTTPRequestHandler):
         self._send(code, json.dumps(payload).encode(), "application/json")
 
     def _read_body(self):
-        length = int(self.headers.get("Content-Length") or 0)
-        return json.loads(self.rfile.read(length).decode()) if length else {}
+        raw = read_body(
+            self.headers, self.rfile, max_bytes=sys.maxsize,
+            require_content_length=False,
+        )
+        body = json.loads(raw or b"{}")
+        if not isinstance(body, dict):
+            raise ValueError("request body must be a JSON object")
+        return body
 
     # ── routes ───────────────────────────────────────────────────────────
     def do_GET(self):

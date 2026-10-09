@@ -347,3 +347,46 @@ def test_elicit_publication_is_readable_and_atomic(
         "fsync": True,
         "mode": 0o644,
     }
+
+
+@pytest.mark.parametrize("framing, raw", [
+    ([("Content-Length", "2"), ("Content-Length", "3")], b"{}"),
+    ([("Content-Length", "2"), ("Transfer-Encoding", "chunked")], b"{}"),
+    ([("Content-Length", "-1")], b"{}"),
+    ([("Content-Length", "3")], b"{}"),
+    ([("Content-Length", "1")], b"2"),
+])
+def test_bad_framing_or_nonobject_cannot_undo(elicit_module, framing, raw):
+    import io
+    from email.message import Message
+    handler = object.__new__(elicit_module.ServeHandler)
+    handler.headers = Message()
+    for key, value in framing:
+        handler.headers[key] = value
+    handler.rfile = io.BytesIO(raw)
+    handler.path = "/undo"
+    class State:
+        def undo(self):
+            raise AssertionError("invalid request reached a domain mutation")
+    handler.session_state = State()
+    responses = []
+    handler._json = lambda body, code=200: responses.append(code)
+    handler.do_POST()
+    assert responses == [400]
+
+
+def test_empty_request_preserves_undo_protocol(elicit_module):
+    import io
+    handler = object.__new__(elicit_module.ServeHandler)
+    handler.headers = {}
+    handler.rfile = io.BytesIO()
+    handler.path = "/undo"
+    calls = []
+    class State:
+        def undo(self):
+            calls.append("undo")
+            return {"ok": True}
+    handler.session_state = State()
+    handler._json = lambda body, code=200: None
+    handler.do_POST()
+    assert calls == ["undo"]

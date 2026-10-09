@@ -93,3 +93,41 @@ def test_reading_stack_push_passes_provenance_and_note(monkeypatch):
             {"check": True, "capture_output": True},
         )
     ]
+
+
+@pytest.mark.parametrize("framing", [
+    [("Content-Length", "2"), ("Content-Length", "3")],
+    [("Content-Length", "2"), ("Transfer-Encoding", "chunked")],
+    [("Transfer-Encoding", "chunked")],
+])
+def test_conflicting_framing_refuses_before_capture(framing, monkeypatch):
+    from email.message import Message
+    handler = object.__new__(daemon.Handler)
+    handler.headers = Message()
+    for key, value in framing:
+        handler.headers[key] = value
+    handler.rfile = io.BytesIO(b"{}")
+    handler.path = "/v1/link-event"
+    responses, calls = [], []
+    handler._respond = responses.append
+    monkeypatch.setattr(daemon, "sinnix_capture_write", lambda *args: calls.append(args))
+    handler.do_POST()
+    assert responses == [400]
+    assert calls == []
+    assert handler.rfile.tell() == 0
+
+
+def test_short_reads_are_completed_before_capture(monkeypatch):
+    class ShortReader(io.BytesIO):
+        def read(self, size=-1):
+            return super().read(min(size, 1))
+    handler = object.__new__(daemon.Handler)
+    handler.headers = {"Content-Length": "2"}
+    handler.rfile = ShortReader(b"{}")
+    handler.path = "/v1/link-event"
+    responses, calls = [], []
+    handler._respond = responses.append
+    monkeypatch.setattr(daemon, "sinnix_capture_write", lambda *args: calls.append(args))
+    handler.do_POST()
+    assert responses == [204]
+    assert calls == [("browser-nav-edges", {})]
