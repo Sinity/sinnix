@@ -209,8 +209,10 @@ def test_gateway_temporary_artifacts_are_excluded_from_project_apis(
     assert observer.search("fixture", "private temporary")["matches"] == []
 
 
+@pytest.mark.parametrize("dirty", [False, True])
 def test_project_patch_rename_removes_source_without_ingesting_ignored_files(
     tmp_path: Path,
+    dirty: bool,
 ) -> None:
     _observer, project, _linked = project_service(tmp_path)
     operator = ProjectService(_observer.config, Principal.for_name("operator"))
@@ -218,6 +220,8 @@ def test_project_patch_rename_removes_source_without_ingesting_ignored_files(
     source.write_text("tracked\n")
     git(project, "add", "old.txt")
     git(project, "commit", "--quiet", "-m", "tracked rename source")
+    expected = "uncommitted work\n" if dirty else "tracked\n"
+    source.write_text(expected)
     ignored = project / "private.payload"
     ignored.write_text("must never enter the object database")
     (project / ".gitignore").write_text("private.payload\n")
@@ -234,7 +238,7 @@ rename to new.txt
     )
 
     assert not source.exists()
-    assert (project / "new.txt").read_text() == "tracked\n"
+    assert (project / "new.txt").read_text() == expected
     assert ignored.read_text() == "must never enter the object database"
     assert (
         subprocess.run(
@@ -244,6 +248,38 @@ rename to new.txt
         ).returncode
         != 0
     )
+
+
+def test_failed_rename_destination_keeps_the_dirty_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observer, project, _linked = project_service(tmp_path)
+    operator = ProjectService(observer.config, Principal.for_name("operator"))
+    source = project / "a.txt"
+    source.write_text("committed\n")
+    git(project, "add", "a.txt")
+    git(project, "commit", "--quiet", "-m", "rename fixture")
+    source.write_text("uncommitted work\n")
+    publish = operator._publish_index_entry
+
+    def fail_destination(project_config, relative, entry, **kwargs):
+        if relative == "z.txt":
+            raise ProjectError("synthetic destination failure")
+        return publish(project_config, relative, entry, **kwargs)
+
+    monkeypatch.setattr(operator, "_publish_index_entry", fail_destination)
+    with pytest.raises(ProjectError, match="synthetic destination failure"):
+        operator.apply_patch(
+            "fixture",
+            """diff --git a/a.txt b/z.txt
+similarity index 100%
+rename from a.txt
+rename to z.txt
+""",
+            "default",
+        )
+    assert source.read_text() == "uncommitted work\n"
+    assert not (project / "z.txt").exists()
 
 
 def git_stdout(path: Path, *arguments: str) -> str:

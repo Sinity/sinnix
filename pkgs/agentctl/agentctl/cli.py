@@ -1148,13 +1148,16 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
 
 def main(argv: Sequence[str] | None = None) -> int:
     words = list(sys.argv[1:] if argv is None else argv)
-    # Everything after a bare `--` belongs to the operation, wherever the
-    # options before it ended up.
+    # Job start forwards arguments after a bare `--` to its operation,
+    # wherever the options before it ended up. Other verbs reject them.
     extra: list[str] = []
     if "--" in words:
         cut = words.index("--")
         extra, words = words[cut + 1 :], words[:cut]
-    arguments = parser().parse_args(words)
+    command_parser = parser()
+    arguments = command_parser.parse_args(words)
+    if extra and not (arguments.verb == "job" and arguments.job_verb == "start"):
+        command_parser.error("arguments after -- are only supported by job start")
     arguments.extra = extra
     out = Output(as_json=arguments.json, full=arguments.full)
     try:

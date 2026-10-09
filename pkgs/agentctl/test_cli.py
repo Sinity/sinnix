@@ -62,6 +62,19 @@ def test_job_start_get_logs_and_wait_round_trip(
     assert line.startswith("job 1 fixture:check succeeded finished ")
 
 
+@pytest.mark.parametrize("verb", ["cancel", "retry"])
+def test_job_controls_refuse_discarded_operation_arguments(
+    monkeypatch: pytest.MonkeyPatch, verb: str
+) -> None:
+    def dispatch(*_args: object) -> int:
+        pytest.fail("invalid command reached a mutation")
+
+    monkeypatch.setattr(cli, "_dispatch", dispatch)
+    with pytest.raises(SystemExit) as refused:
+        cli.main(["job", verb, "42", "--", "unexpected"])
+    assert refused.value.code == 2
+
+
 @pytest.mark.parametrize(
     ("overrides", "expected_error"),
     [
@@ -415,12 +428,18 @@ def test_project_verbs_read_the_catalog(
 
 
 def test_batch_cleanup_refuses_unknown_positional_owner(
-    cli_config: Config, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    cli_config: Config,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.chdir(cli_config.project_roots[0])
-    monkeypatch.setattr(cli.batch, "clean", lambda *_: pytest.fail("wrong owner cleanup"))
+    monkeypatch.setattr(
+        cli.batch, "clean", lambda *_: pytest.fail("wrong owner cleanup")
+    )
     assert cli.main(["batch", "clean", "nowhere"]) == cli.EXIT_REFUSED
-    assert "could not resolve an AgentCTL project for nowhere" in capsys.readouterr().err
+    assert (
+        "could not resolve an AgentCTL project for nowhere" in capsys.readouterr().err
+    )
 
 
 def test_events_tail_prints_the_last_lines_filtered_by_project(

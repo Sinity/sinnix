@@ -1516,19 +1516,23 @@ class ProjectService:
             root = _open_pinned_directory(project, (), create=False)
             root_path = Path(f"/proc/self/fd/{root}")
             pinned_parents: dict[tuple[str, ...], int] = {}
+
+            def pin_parent(relative: str) -> None:
+                parts = _mutation_parts(project, relative)
+                parent_parts = parts[:-1]
+                if parent_parts not in pinned_parents:
+                    try:
+                        pinned_parents[parent_parts] = _open_pinned_directory(
+                            project, parent_parts, create=False
+                        )
+                    except ProjectError as exc:
+                        if str(exc) != "path does not exist":
+                            raise
+
             try:
                 paths = self._patch_paths(root_path, patch_bytes)
                 for relative in paths:
-                    parts = _mutation_parts(project, relative)
-                    parent_parts = parts[:-1]
-                    if parent_parts not in pinned_parents:
-                        try:
-                            pinned_parents[parent_parts] = _open_pinned_directory(
-                                project, parent_parts, create=False
-                            )
-                        except ProjectError as exc:
-                            if str(exc) != "path does not exist":
-                                raise
+                    pin_parent(relative)
                 with tempfile.TemporaryDirectory(
                     prefix="sinnix-gateway-apply-"
                 ) as staging:
@@ -1569,6 +1573,38 @@ class ProjectService:
                         environment=environment,
                     )
                     after_tree = self._index_tree(root_path, index)
+                    changed_paths = self._changed_tree_paths(
+                        root_path, before_tree, after_tree
+                    )
+                    missing_seeds = tuple(
+                        path for path in changed_paths if path not in paths
+                    )
+                    if missing_seeds:
+                        # Git's numstat reports only a rename destination. The
+                        # private first application reveals its source too;
+                        # seed that source from the working tree before any
+                        # publication, then apply against those actual bytes.
+                        self._owner_result(
+                            ["git", "read-tree", before_tree],
+                            root_path,
+                            environment=environment,
+                        )
+                        for relative in missing_seeds:
+                            pin_parent(relative)
+                            parts = _mutation_parts(project, relative)
+                            parent = pinned_parents.get(parts[:-1])
+                            if parent is not None:
+                                self._seed_index_entry(
+                                    root_path, index, parent, parts[-1], relative
+                                )
+                        before_tree = self._index_tree(root_path, index)
+                        self._owner_result(
+                            ["git", "apply", "--cached", "--whitespace=nowarn", "-"],
+                            root_path,
+                            stdin_bytes=patch_bytes,
+                            environment=environment,
+                        )
+                        after_tree = self._index_tree(root_path, index)
                     paths = self._changed_tree_paths(root_path, before_tree, after_tree)
                     for relative in paths:
                         _mutation_parts(project, relative)
@@ -1590,7 +1626,11 @@ class ProjectService:
                                 ),
                             )
                         )
-                    for relative, entry in changes:
+                    # Create replacements before retiring their sources. A
+                    # failed destination write must not delete the only copy.
+                    for relative, entry in sorted(
+                        changes, key=lambda change: change[1] is None
+                    ):
                         parts = _mutation_parts(project, relative)
                         self._publish_index_entry(
                             project,

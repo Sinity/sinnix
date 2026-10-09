@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import math
+import os
 from pathlib import Path
 from typing import Any
 
@@ -16,11 +18,16 @@ def clodex_usage(path: Path | None) -> tuple[dict[str, Any], dict[str, Any]]:
         return {}, _health("disabled", source, "no accounting path configured")
     try:
         with path.open("rb") as handle:
-            data = handle.read(MAX_BYTES + 1)
+            handle.seek(0, os.SEEK_END)
+            start = max(0, handle.tell() - MAX_BYTES)
+            handle.seek(max(0, start - 1))
+            boundary = handle.read(1) if start else b"\n"
+            data = handle.read(MAX_BYTES)
+            if boundary != b"\n":
+                # The tail starts inside a record, not at its beginning.
+                data = data.partition(b"\n")[2]
     except OSError as error:
         return {}, _health("unavailable", source, str(error)[:240])
-    if len(data) > MAX_BYTES:
-        data = data[-MAX_BYTES:]
     total = {
         "requests": 0,
         "input_tokens": 0,
@@ -47,7 +54,12 @@ def clodex_usage(path: Path | None) -> tuple[dict[str, Any], dict[str, Any]]:
             ("cacheCreationInputTokens", "cache_write_tokens"),
         )
         values = [row.get(source_key) for source_key, _ in fields]
-        if not all(isinstance(value, (int, float)) and value >= 0 for value in values):
+        if not all(
+            type(value) in (int, float)
+            and value >= 0
+            and (not isinstance(value, float) or math.isfinite(value))
+            for value in values
+        ):
             continue
         total["requests"] += 1
         for value, (_, target) in zip(values, fields, strict=True):

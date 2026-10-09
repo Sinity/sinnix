@@ -1,8 +1,60 @@
+import importlib
 import json
 from pathlib import Path
 
+import pytest
 from sinnix_ops_reducer.clodex_usage import clodex_usage
 from sinnix_ops_reducer.reducer import Reducer
+
+usage_module = importlib.import_module("sinnix_ops_reducer.clodex_usage")
+
+
+def usage_row(tokens: object) -> bytes:
+    return (
+        json.dumps(
+            {
+                "event": "response_usage",
+                "route": "translated",
+                "inputTokens": tokens,
+                "outputTokens": 1,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0,
+            }
+        )
+        + "\n"
+    ).encode()
+
+
+def test_accounting_reads_the_end_of_a_growing_log(tmp_path: Path) -> None:
+    path = tmp_path / "usage.jsonl"
+    path.write_bytes(usage_row(7) + b"{}\n" * (usage_module.MAX_BYTES // 3 + 1))
+    with path.open("ab") as handle:
+        handle.write(usage_row(91))
+    value, _health = clodex_usage(path)
+    assert value["requests"] == 1 and value["input_tokens"] == 91
+
+
+@pytest.mark.parametrize("boundary", [b"\n", b"x"])
+def test_tail_preserves_only_complete_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: bytes
+) -> None:
+    first, second = usage_row(7), usage_row(91)
+    monkeypatch.setattr(usage_module, "MAX_BYTES", len(first + second))
+    path = tmp_path / "usage.jsonl"
+    path.write_bytes(b"prefix" + boundary + first + second)
+    value, _health = clodex_usage(path)
+    assert value["requests"] == (2 if boundary == b"\n" else 1)
+    assert value["input_tokens"] == (98 if boundary == b"\n" else 91)
+
+
+@pytest.mark.parametrize("invalid", [float("inf"), float("nan"), True, -1])
+def test_invalid_counts_do_not_crash_or_manufacture_usage(
+    tmp_path: Path, invalid: object
+) -> None:
+    path = tmp_path / "usage.jsonl"
+    path.write_bytes(usage_row(invalid) + usage_row(91))
+    value, _health = clodex_usage(path)
+    assert value["requests"] == 1 and value["input_tokens"] == 91
 
 
 def test_routed_usage_is_aggregated_without_request_data(tmp_path: Path) -> None:
