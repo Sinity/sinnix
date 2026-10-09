@@ -65,6 +65,26 @@ def test_project_summary_revision_tracks_head_and_worktree_state(
     assert projects.summary_revision("fixture") != first
 
 
+def test_read_only_project_views_do_not_run_repository_fsmonitor(
+    tmp_path: Path,
+) -> None:
+    projects, project, _linked = project_service(tmp_path)
+    marker = tmp_path / "fsmonitor-ran"
+    hook = tmp_path / "fsmonitor"
+    hook.write_text(f"#!/bin/sh\nprintf invoked >> '{marker}'\nprintf 'token\\0'\n")
+    hook.chmod(0o700)
+    git(project, "config", "core.fsmonitor", str(hook))
+    git(project, "status", "--porcelain")
+    assert marker.exists(), "fixture must demonstrate native fsmonitor invocation"
+    marker.unlink()
+
+    observer = ProjectService(projects.config, Principal.for_name("operator"))
+    assert observer.summary("fixture")["branch"]["head"] == "master"
+    assert observer.summary_revision("fixture")
+    assert observer.checkouts("fixture")["checkouts"]
+    assert not marker.exists()
+
+
 def test_worktree_porcelain_accepts_valueless_git_markers() -> None:
     records = ProjectService._worktree_records(
         """worktree /fixture

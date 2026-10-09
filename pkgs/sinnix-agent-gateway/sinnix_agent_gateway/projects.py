@@ -124,6 +124,8 @@ def _content_revision(root: Path) -> str:
     listing = subprocess.run(
         [
             "git",
+            "-c",
+            "core.fsmonitor=false",
             "-C",
             str(root),
             "ls-files",
@@ -902,6 +904,9 @@ class ProjectService:
         self, command: list[str], cwd: Path, timeout: int = 15
     ) -> Iterator[TextIO]:
         """Keep owner output on disk until consumers select the requested rows."""
+        if command and command[0] == "git":
+            # Read-only views must not execute a repository's monitor hook.
+            command = ["git", "-c", "core.fsmonitor=false", *command[1:]]
         safe_env = {
             "HOME": str(Path.home()),
             "LANG": os.environ.get("LANG", "C.UTF-8"),
