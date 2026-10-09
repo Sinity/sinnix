@@ -1127,7 +1127,7 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
         decision = backpressure.tick(spool=config.event_spool, checkpoint=checkpoint)
         holds = (
             launch.release_holds(config)
-            if decision.get("action") == "hold"
+            if decision.get("action") in {"hold", "clear"}
             else {"released": [], "waiting": []}
         )
         decision = {

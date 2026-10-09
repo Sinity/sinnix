@@ -614,8 +614,19 @@ def test_backpressure_tick_reports_the_decision(
         ),
     )
 
+    calls = []
+    monkeypatch.setattr(
+        launch, "release_holds",
+        lambda config: calls.append(config) or {"released": [7], "waiting": []},
+    )
     assert cli.main(["backpressure", "tick"]) == 0
-    assert json.loads(capsys.readouterr().out)["action"] == "hold"
+    output = capsys.readouterr()
+    decision = json.loads(output.out)
+    assert decision["action"] == "clear"
+    assert decision["holds_released"] == [7]
+    assert len(calls) == 1
+    assert calls[0].event_spool == cli_config.event_spool
+    assert "backpressure clear" in output.err
 
 
 def test_default_state_dir_moves_the_previous_directory_once(

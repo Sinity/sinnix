@@ -258,7 +258,9 @@ one eligible group per tick. IO closes `pytest-heavy`, then `pytest`, then
 An agentctl-owned pause can reopen when both resources are known and their
 `full avg10` values are below 10% (falling back to `avg60` if `avg10` is
 unavailable). One group reopens per tick. Unavailable or malformed PSI cannot
-reopen a pause.
+reopen a pause. A no-change tick reports `clear` when no managed groups are
+paused and neither closure threshold is exceeded; `hold` means admission
+remains paused or a closure signal remains active.
 
 The signal includes background services and stalls caused by their resource
 limits. A hold indicates the admission rule fired; it does not establish that

@@ -33,6 +33,21 @@ def _ours(group: str) -> dict:
     return {"action": "closed", "group": group, "owner": backpressure.OWNER}
 
 
+@pytest.mark.parametrize("io_avg10,io_avg60", [(0.0, 0.0), (30.0, 15.0)])
+def test_no_paused_groups_below_closure_threshold_reports_clear(
+    monkeypatch, io_avg10, io_avg60
+) -> None:
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg10": io_avg10, "io_full_avg60": io_avg60,
+         "memory_full_avg10": 0.0, "memory_full_avg60": 0.0},
+        {name: "Running" for name in backpressure.MANAGED_GROUPS},
+    )
+    assert calls == []
+    assert result["action"] == "clear"
+    assert result["frozen"] == [] and result["signal"] is None
+
+
 def test_unattributed_legacy_pause_is_not_reopened_until_all_signals_are_quiet(
     monkeypatch, tmp_path
 ) -> None:
@@ -375,7 +390,7 @@ def test_a_group_seen_running_after_our_pause_is_released_and_an_operator_repaus
         },
         spool=spool,
     )
-    assert calls == [] and result["action"] == "hold"
+    assert calls == [] and result["action"] == "clear"
     events = [json.loads(line) for line in spool.read_text().splitlines()]
     assert [(e["action"], e["group"]) for e in events] == [
         ("closed", "pytest"),
@@ -408,10 +423,10 @@ def test_io_pressure_keeps_focused_tests_admissible(monkeypatch) -> None:
     assert result["action"] == "hold"
 
 
-def test_old_io_pause_reopens_focused_tests_during_io_pressure(
+def test_old_io_pause_waits_for_its_closing_signal_to_recover(
     monkeypatch, tmp_path
 ) -> None:
-    """The policy upgrade releases its own existing I/O-only closure."""
+    """Changing eligibility does not prove the recorded closing signal recovered."""
     result, calls = _tick(
         monkeypatch,
         {"io_full_avg60": 60.0, "memory_full_avg60": 1.0},

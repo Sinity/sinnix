@@ -368,8 +368,11 @@ def tick(
             state.apply(event)
             _save_checkpoint(checkpoint_path, state)
             return event
+    action = "unknown-pressure"
+    if _pressure_complete(pressure):
+        action = "hold" if paused or signals else "clear"
     return {
-        "action": "hold" if _pressure_complete(pressure) else "unknown-pressure",
+        "action": action,
         "frozen": paused,
         "signal": signal,
         **pressure,
