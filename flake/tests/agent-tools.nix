@@ -1304,7 +1304,7 @@ in
             mkdir -p "$fixture_bin" "$flake_dir"
             printf '%s\n' '{"nodes":{"sinex":{"locked":{"rev":"fixture-rev","url":"https://example.test/sinex"}}}}' \
               > "$flake_dir/flake.lock"
-            printf '#!%s\nprintf "%%s\\n" /nix/store/fixture-sinex-1\n' \
+            printf '#!%s\nprintf "%%s\\n" /nix/store/fixture-sinex-1\nexit "''${BUILD_EXIT:-0}"\n' \
               ${pkgs.bash}/bin/bash > "$fixture_bin/nix"
             printf '#!%s\nprintf "%%s\\n" "$@" > "$PREBUILD_PUSH_ARGS"\nexit "''${PUSH_EXIT:-0}"\n' \
               ${pkgs.bash}/bin/bash > "$fixture_bin/sinnix-sinex-cache-push"
@@ -1322,6 +1322,16 @@ in
               test "$?" -eq 19
             fi
             test ! -e "$state_dir/last-built-rev"
+            printf '%s' previous-rev > "$state_dir/last-built-rev"
+            rm "$PREBUILD_PUSH_ARGS"
+            if BUILD_EXIT=42 ${pkgs.bash}/bin/bash ${../../scripts/sinnix-sinex-cache-prebuild} --flake-dir "$flake_dir" --state-dir "$state_dir"; then
+              echo "prebuild published partial output from a failed build" >&2
+              exit 1
+            else
+              test "$?" -eq 42
+            fi
+            test ! -e "$PREBUILD_PUSH_ARGS"
+            test "$(cat "$state_dir/last-built-rev")" = previous-rev
             touch "$out"
           '';
       preflightFixture =
