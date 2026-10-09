@@ -21,7 +21,7 @@ from sinnix_agent_gateway.cli import (
     verify_approval,
 )
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
-from sinnix_agent_gateway.owner_execution import ExecutionResult
+from sinnix_agent_gateway.owner_execution import ExecutionResult, OwnerExecution
 from sinnix_agent_gateway.projects import ProjectError
 from sinnix_agent_gateway.server import _bounded_resource_json
 
@@ -881,6 +881,49 @@ def test_machine_query_requests_owner_selected_section(
             "100",
         ]
     ]
+
+
+@pytest.mark.parametrize("with_bus", [False, True])
+def test_machine_query_preserves_optional_user_bus_in_real_collector(
+    tmp_path: Path, with_bus: bool
+) -> None:
+    collector = tmp_path / "collector"
+    collector.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os\n"
+        "row = {name: os.environ.get(name) for name in "
+        "('DBUS_SESSION_BUS_ADDRESS', 'XDG_RUNTIME_DIR', 'FIXTURE_SECRET')}\n"
+        "print(json.dumps({'schema': 'sinnix.observe.v1', 'systemd_units': "
+        "{'total': 1, 'cursor': 0, 'next_cursor': None, 'rows': [row]}}))\n"
+    )
+    collector.chmod(0o700)
+    runtime = Runtime.create(
+        dataclasses.replace(config(tmp_path), observe_command=str(collector)),
+        "operator",
+    )
+    environment = {
+        "HOME": str(tmp_path),
+        "PATH": os.environ["PATH"],
+        "FIXTURE_SECRET": "private",
+    }
+    expected = {
+        "DBUS_SESSION_BUS_ADDRESS": None,
+        "XDG_RUNTIME_DIR": None,
+        "FIXTURE_SECRET": None,
+    }
+    if with_bus:
+        bus = {
+            "DBUS_SESSION_BUS_ADDRESS": "unix:path=/fixture/bus",
+            "XDG_RUNTIME_DIR": "/fixture/runtime",
+        }
+        environment.update(bus)
+        expected.update(bus)
+    runtime.observe.execution = OwnerExecution(environment)
+
+    result = runtime.observe.machine_query("units")
+
+    assert result["available"] is True
+    assert result["rows"] == [expected]
 
 
 def test_machine_query_reduces_page_to_response_bound(

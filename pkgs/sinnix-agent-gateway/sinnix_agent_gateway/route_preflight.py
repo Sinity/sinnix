@@ -167,7 +167,7 @@ class GatewayRoutePreflight:
                     "--limit",
                     "1",
                 ],
-                OwnerRoute("machine-observe"),
+                OwnerRoute("machine-observe", EnvironmentProfile.USER_BUS_OPTIONAL),
                 "json_object_with_schema",
                 ExecutionResult.decode_json,
                 lambda value: self._is_json_object(value, "schema"),

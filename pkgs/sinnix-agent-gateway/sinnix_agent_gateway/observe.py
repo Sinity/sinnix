@@ -9,7 +9,12 @@ from typing import Any
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
+from .owner_execution import (
+    EnvironmentProfile,
+    ExecutionProfile,
+    OwnerExecution,
+    OwnerRoute,
+)
 
 
 class ObserveService:
@@ -134,7 +139,9 @@ class ObserveService:
                 str(page_limit),
             ],
             ExecutionProfile(
-                route=OwnerRoute("machine-observe"),
+                route=OwnerRoute(
+                    "machine-observe", EnvironmentProfile.USER_BUS_OPTIONAL
+                ),
                 timeout_seconds=20,
                 max_stdout_bytes=self._collector_bound(),
             ),
