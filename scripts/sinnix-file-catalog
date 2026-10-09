@@ -41,7 +41,8 @@ class CatalogError(ValueError):
 
 
 def fail(message: str) -> int:
-    print(f"sinnix-file-catalog: {message}", file=sys.stderr)
+    display = json.dumps(message, ensure_ascii=True) if sys.stderr.isatty() else message
+    print(f"sinnix-file-catalog: {display}", file=sys.stderr)
     return 2
 
 
@@ -410,7 +411,7 @@ def cmd_search(args: argparse.Namespace) -> int:
                 continue
             if args.limit is not None and emitted >= args.limit:
                 break
-            print(json.dumps(asset, ensure_ascii=False, sort_keys=True))
+            print(json.dumps(asset, ensure_ascii=sys.stdout.isatty(), sort_keys=True))
             emitted += 1
     return 0
 
@@ -429,7 +430,7 @@ def cmd_coverage(args: argparse.Namespace) -> int:
         "assets_with_conflicts": sum(bool(a.get("annotation_conflicts")) for a in selected),
         "scope": "Catalog records only. Inherited taxonomy is not inspection; overlapping collection counts are not summed. No filesystem census denominator is implied.",
     }
-    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    print(json.dumps(result, ensure_ascii=sys.stdout.isatty(), indent=2, sort_keys=True))
     return 0
 
 
@@ -437,7 +438,7 @@ def cmd_show(args: argparse.Namespace) -> int:
     catalog = load_catalog(Path(args.catalog), paths=False)
     for asset in catalog["assets"]:
         if asset["id"] == args.id:
-            print(json.dumps(asset, ensure_ascii=False, indent=2, sort_keys=True))
+            print(json.dumps(asset, ensure_ascii=sys.stdout.isatty(), indent=2, sort_keys=True))
             return 0
     return fail(f"asset id not found: {args.id}")
 
@@ -580,7 +581,8 @@ def cmd_relocate_batch(args: argparse.Namespace) -> int:
 
 def cmd_resolve(args: argparse.Namespace) -> int:
     catalog = load_catalog(Path(args.catalog), paths=False)
-    print(resolve_historical_path(catalog, args.path, asset_id=args.id))
+    path = str(resolve_historical_path(catalog, args.path, asset_id=args.id))
+    print(json.dumps(path, ensure_ascii=True) if sys.stdout.isatty() else path)
     return 0
 
 
@@ -697,7 +699,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
         "scope": "Filesystem metadata only; no payload hash verification or identity rebinding.",
         "findings": rows,
     }
-    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    print(json.dumps(result, ensure_ascii=sys.stdout.isatty(), indent=2, sort_keys=True))
     return 0 if counts.get("match", 0) == len(catalog["assets"]) else 1
 
 

@@ -379,7 +379,7 @@ def test_audit_reports_all_mismatches_without_rebinding(tmp_path: Path) -> None:
     assert catalog.read_bytes() == before
     assert invoke(catalog, "validate").returncode != 0
     # Audit must not silently let a later import accept changed identity.
-    assert import_rows(catalog, [observation(a)]).returncode != 0
+    assert import_rows(catalog, [observation(b)]).returncode != 0
     assert catalog.read_bytes() == before
 
 

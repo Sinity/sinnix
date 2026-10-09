@@ -81,7 +81,7 @@ def test_collision_and_partial_external_rename_are_refused(tmp_path):
 def test_existing_drift_is_explicit_retained_history_not_hash_certification(tmp_path):
     old, new, catalog, moves = fixture(tmp_path)
     value = json.loads(catalog.read_text())
-    value["assets"][1]["identity"]["device"] = -1
+    value["assets"][1]["identity"]["inode"] = -1
     value["assets"][1]["identity"]["sha256"] = "historical attribution"
     catalog.write_text(json.dumps(value))
     result, receipt = prepare(tmp_path, catalog, moves)
