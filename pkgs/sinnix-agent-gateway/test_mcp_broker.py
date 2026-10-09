@@ -814,3 +814,50 @@ def test_gateway_config_rejects_invalid_mcp_call_timeout(
 
     with pytest.raises(ValueError, match="callTimeoutSeconds"):
         GatewayConfig.load(config_path)
+
+
+@pytest.mark.parametrize(
+    ("call_budget", "probe_budget", "failure_class"),
+    [(3, 3, "timeout"), (300, 30, "discovery_timeout")],
+)
+def test_probe_distinguishes_capped_discovery_from_call_route_timeout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    call_budget,
+    probe_budget,
+    failure_class,
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    broker.config.mcp_broker_servers["fixture"]["callTimeoutSeconds"] = call_budget
+    budgets = []
+    wait_for = asyncio.wait_for
+
+    class SlowInitialization(FakeSession):
+        async def initialize(self) -> None:
+            await asyncio.sleep(60)
+
+    async def short_test_wait(awaitable, *, timeout):
+        budgets.append(timeout)
+        return await wait_for(awaitable, timeout=min(timeout, 0.02))
+
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.asyncio.wait_for", short_test_wait
+    )
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.ClientSession", SlowInitialization
+    )
+    result = anyio.run(broker.catalog)
+    row = next(row for row in result["servers"] if row["name"] == "fixture")
+    assert budgets[0] == probe_budget
+    assert 0 < budgets[1] <= probe_budget
+    assert row["availability"] == "unavailable"
+    assert row["failure_class"] == failure_class
+    if call_budget > probe_budget:
+        assert "configured call route is not proven unavailable" in row["reason"]
+        assert "callTimeoutSeconds 300" in row["reason"]
+    else:
+        assert "within 3 seconds" in row["reason"]
