@@ -112,6 +112,11 @@ import os,sys,subprocess,pathlib,shutil
 args=sys.argv[1:]
 if args[:1] == ['-s']: args=args[2:]
 if args == ['get-state']: print('device'); sys.exit(0)
+if args[:1] == ['logcat']:
+    if '-d' in args:
+        sys.stdout.buffer.write(pathlib.Path(os.environ['LOGCAT_CAPTURE']).read_bytes())
+        sys.exit(int(os.environ.get('LOGCAT_STATUS','0')))
+    sys.exit(0)
 mapping={'/sdcard/Oculus/Videoshots':str(pathlib.Path(os.environ['REMOTE'])/'Videoshots'),
          '/sdcard/sinnix-ambient':str(pathlib.Path(os.environ['REMOTE'])/'ambient'),
          '/sdcard/Android/data/com.chiller3.bcr/files':str(pathlib.Path(os.environ['REMOTE'])/'bcr'),
@@ -170,6 +175,7 @@ for value in sys.argv[1:]:
         "SINNIX_PHONE_USER": "fixture",
         "SINNIX_PHONE_SSH_CONTROL_DIR": str(tmp_path / "ssh-cache"),
         "SINNIX_PHONE_LAKE": str(tmp_path / "lake"),
+        "SINNIX_PHONE_STATE_DIR": str(tmp_path / "phone-state"),
         "SINNIX_QUEST_TRANSPORT": "usb",
         "SINNIX_QUEST_SERIAL": "fixture",
         "SINNIX_QUEST_STATE_DIR": str(tmp_path / "quest-state"),
@@ -343,3 +349,27 @@ def test_bcr_literal_filename_is_audited_only_once(device) -> None:
     assert len(rows) == 1 and rows[0]["file"] == name
     assert rows[0]["captured_nothing"] is False
     assert not (root / "sentinel").exists()
+
+
+@pytest.mark.parametrize("existing", [None, b"", b"--------- beginning of main\n"])
+@pytest.mark.parametrize("incoming", [b"", b"--------- beginning of system\n", b"2026-10-09 00:00:01.123 neutral record\n"])
+def test_logcat_zero_matches_are_one_numeric_count(device, existing, incoming):
+    root, env = device
+    capture = root / "logcat-input"
+    capture.write_bytes(incoming)
+    env["LOGCAT_CAPTURE"] = str(capture)
+    day = time.strftime("%Y%m%d", time.gmtime())
+    output = root / "lake" / "logcat" / f"logcat-{day}.txt"
+    output.parent.mkdir(parents=True)
+    if existing is not None:
+        output.write_bytes(existing)
+    result = run(device, "sinnix-phone", "logcat")
+    assert result.returncode == 0, result.stderr
+    expected = 1 if incoming.startswith(b"2026-") else 0
+    assert f"logcat: {expected} new lines ({expected} total)" in result.stdout
+    assert output.read_bytes() == (existing or b"") + incoming
+    cursor = root / "phone-state" / "logcat.cursor"
+    if expected:
+        assert cursor.read_text().strip() == "2026-10-09 00:00:01.123"
+    else:
+        assert not cursor.exists()

@@ -159,6 +159,7 @@
           # Declared AgentCTL operation body. It is intentionally available
           # by name in the project environment, never as a command shim.
           scriptPkgs.sinnix-sinex-cache-prebuild
+          scriptPkgs.sinnix-elicit
           scriptPkgs.sinnix-census
           scriptPkgs.sinnix-navigation-audit
 
