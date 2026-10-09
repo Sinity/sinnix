@@ -28,6 +28,12 @@ extension point is a declared operation in the project's
   (`~/.local/state/agentctl/runs/<run>.json`) with pueue state and the landing
   PR. A run ID's suffix is accepted everywhere.
 
+Capture JSON job details and results locally, then print the fields needed for
+the decision: job/reference, terminal status and exit, candidate binding, result
+summary, and artifact paths. Ordinary responses can inline complete file
+manifests and repeat result encodings. Keep that evidence intact and inspect its
+full artifact only when needed; do not dump the envelope into agent context.
+
 ## Jobs
 
 List the declared work with `agentctl project operations <project>` and start
@@ -45,6 +51,10 @@ Agents spawned inside a Claude or Codex session are not pueue jobs. Heavy
 gates, broad type checks, suites, and builds use `agentctl job start` with
 `--workspace <worktree>`. Bounded low-memory import/static probes and small
 diagnostics may run directly; avoid launching a managed job for every tiny check.
+Freeze the candidate while a bound verification or publication runs. A source
+edit or commit can invalidate its receipt. Reuse unchanged behavioral evidence;
+when normal publication runs the required static gates, do not queue a duplicate
+static run for the same candidate.
 
 In Codex, a `functions.exec` call that returns a `session_id` is still
 running and continues through `write_stdin`; the outer "Script completed"
