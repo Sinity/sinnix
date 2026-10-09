@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterator, Mapping, TextIO
+from typing import Any, BinaryIO, Iterator, Mapping, TextIO
 
 from sinnix_lib.atomic import atomic_publish_at
 from sinnix_lib.lock import flock
@@ -107,7 +107,7 @@ def _compute_file_sha256(
     path: Path, identity: tuple[int, int, int, int, int, int]
 ) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
+    with _open_source_file(path) as handle:
         if _stat_identity(os.fstat(handle.fileno())) != identity:
             raise ProjectPreconditionError("project file changed while being read")
         for chunk in iter(lambda: handle.read(1_048_576), b""):
@@ -115,6 +115,38 @@ def _compute_file_sha256(
         if _stat_identity(os.fstat(handle.fileno())) != identity:
             raise ProjectPreconditionError("project file changed while being read")
     return digest.hexdigest()
+
+
+@contextmanager
+def _source_path(root: Path, relative: Path) -> Iterator[Path]:
+    """Pin a Git-listed entry's parents without following directory symlinks."""
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        raise ProjectError("source path must remain inside the project")
+    parent = _open_pinned_directory(
+        ProjectConfig(project_id="source", path=root),
+        relative.parts[:-1],
+        create=False,
+        missing_ok=True,
+    )
+    try:
+        yield Path(f"/proc/self/fd/{parent}") / relative.name
+    finally:
+        os.close(parent)
+
+
+def _open_source_file(path: Path) -> BinaryIO:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise ProjectPreconditionError(
+            "project source changed or is unavailable"
+        ) from exc
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        raise ProjectError("project source is no longer a regular file")
+    return os.fdopen(descriptor, "rb")
 
 
 def _content_revision(root: Path) -> str:
@@ -140,35 +172,33 @@ def _content_revision(root: Path) -> str:
     ).stdout
     paths = sorted(set(filter(None, listing.split(b"\0"))))
     for relative in paths:
-        path = root / os.fsdecode(relative)
-        relative_path = Path(os.fsdecode(relative))
-        if _is_excluded(relative_path):
+        if _is_excluded(Path(os.fsdecode(relative))):
             continue
         try:
-            info = path.lstat()
+            with _source_path(root, Path(os.fsdecode(relative))) as path:
+                info = path.lstat()
+                if stat.S_ISLNK(info.st_mode):
+                    target = os.fsencode(os.readlink(path))
+                    digest.update(b"symlink\0")
+                    digest.update(len(relative).to_bytes(8, "big"))
+                    digest.update(relative)
+                    digest.update(stat.S_IMODE(info.st_mode).to_bytes(4, "big"))
+                    digest.update(len(target).to_bytes(8, "big"))
+                    digest.update(target)
+                    continue
+                if not stat.S_ISREG(info.st_mode):
+                    continue
+                file_digest = _cached_file_sha256(str(path), _stat_identity(info))
+                digest.update(b"file\0")
+                digest.update(len(relative).to_bytes(8, "big"))
+                digest.update(relative)
+                digest.update(stat.S_IMODE(info.st_mode).to_bytes(4, "big"))
+                digest.update(info.st_size.to_bytes(8, "big"))
+                digest.update(bytes.fromhex(file_digest))
         except FileNotFoundError:
             digest.update(b"missing\0")
             digest.update(len(relative).to_bytes(8, "big"))
             digest.update(relative)
-            continue
-        if stat.S_ISLNK(info.st_mode):
-            target = os.fsencode(os.readlink(path))
-            digest.update(b"symlink\0")
-            digest.update(len(relative).to_bytes(8, "big"))
-            digest.update(relative)
-            digest.update(stat.S_IMODE(info.st_mode).to_bytes(4, "big"))
-            digest.update(len(target).to_bytes(8, "big"))
-            digest.update(target)
-            continue
-        if not stat.S_ISREG(info.st_mode):
-            continue
-        file_digest = _cached_file_sha256(str(path), _stat_identity(info))
-        digest.update(b"file\0")
-        digest.update(len(relative).to_bytes(8, "big"))
-        digest.update(relative)
-        digest.update(stat.S_IMODE(info.st_mode).to_bytes(4, "big"))
-        digest.update(info.st_size.to_bytes(8, "big"))
-        digest.update(bytes.fromhex(file_digest))
     return digest.hexdigest()
 
 
@@ -187,7 +217,11 @@ def _mutation_parts(project: ProjectConfig, relative: str) -> tuple[str, ...]:
 
 
 def _open_pinned_directory(
-    project: ProjectConfig, parts: tuple[str, ...], *, create: bool
+    project: ProjectConfig,
+    parts: tuple[str, ...],
+    *,
+    create: bool,
+    missing_ok: bool = False,
 ) -> int:
     """Traverse one project directory with pinned, no-follow descriptors."""
     try:
@@ -200,6 +234,8 @@ def _open_pinned_directory(
                 child = os.open(part, _DIRECTORY_OPEN_FLAGS, dir_fd=current)
             except FileNotFoundError:
                 if not create:
+                    if missing_ok:
+                        raise
                     raise ProjectError("path does not exist") from None
                 try:
                     os.mkdir(part, 0o700, dir_fd=current)
@@ -213,7 +249,9 @@ def _open_pinned_directory(
         return current
     except (OSError, ProjectError) as exc:
         os.close(current)
-        if isinstance(exc, ProjectError):
+        if isinstance(exc, ProjectError) or (
+            missing_ok and isinstance(exc, FileNotFoundError)
+        ):
             raise
         raise ProjectError("project path contains a symlink or is unavailable") from exc
 
@@ -691,32 +729,39 @@ class ProjectService:
         content: list[str] = []
         used = 0
         truncated = False
-        with target.open("r", encoding="utf-8", errors="replace") as handle:
-            for line_number, line in enumerate(handle, 1):
-                if line_number < start_line:
-                    continue
-                if end_line is not None and line_number > end_line:
-                    break
-                encoded = line.encode("utf-8")
-                if used + len(encoded) > max_bytes:
-                    remaining = max_bytes - used
-                    if remaining:
-                        fragment = encoded[:remaining].decode("utf-8", errors="ignore")
-                        content.append(fragment)
-                        used += len(fragment.encode("utf-8"))
-                    truncated = True
-                    break
-                content.append(line)
-                used += len(encoded)
-        return {
-            "path": path,
-            "start_line": start_line,
-            "end_line": end_line,
-            "content": "".join(content),
-            "bytes": used,
-            "truncated": truncated,
-            "content_sha256": _file_sha256(target),
-        }
+        with _source_path(
+            project.path, target.relative_to(project.path.resolve())
+        ) as source_path:
+            with io.TextIOWrapper(
+                _open_source_file(source_path), encoding="utf-8", errors="replace"
+            ) as handle:
+                for line_number, line in enumerate(handle, 1):
+                    if line_number < start_line:
+                        continue
+                    if end_line is not None and line_number > end_line:
+                        break
+                    encoded = line.encode("utf-8")
+                    if used + len(encoded) > max_bytes:
+                        remaining = max_bytes - used
+                        if remaining:
+                            fragment = encoded[:remaining].decode(
+                                "utf-8", errors="ignore"
+                            )
+                            content.append(fragment)
+                            used += len(fragment.encode("utf-8"))
+                        truncated = True
+                        break
+                    content.append(line)
+                    used += len(encoded)
+            return {
+                "path": path,
+                "start_line": start_line,
+                "end_line": end_line,
+                "content": "".join(content),
+                "bytes": used,
+                "truncated": truncated,
+                "content_sha256": _file_sha256(source_path),
+            }
 
     def export(
         self,
@@ -753,22 +798,22 @@ class ProjectService:
         selected: list[Path] = []
         total = 0
         for relative in paths:
-            path = project.path / relative
-            size = (
-                len(os.fsencode(os.readlink(path)))
-                if path.is_symlink()
-                else path.stat().st_size
-            )
-            if max_files is not None and len(selected) >= max_files:
-                break
-            if max_bytes is not None and total + size > max_bytes:
-                if not selected:
-                    raise ProjectError(
-                        f"file {relative.as_posix()} is {size} bytes; increase max_bytes"
-                    )
-                break
-            selected.append(relative)
-            total += size
+            with _source_path(project.path, relative) as path:
+                size = (
+                    len(os.fsencode(os.readlink(path)))
+                    if path.is_symlink()
+                    else path.lstat().st_size
+                )
+                if max_files is not None and len(selected) >= max_files:
+                    break
+                if max_bytes is not None and total + size > max_bytes:
+                    if not selected:
+                        raise ProjectError(
+                            f"file {relative.as_posix()} is {size} bytes; increase max_bytes"
+                        )
+                    break
+                selected.append(relative)
+                total += size
         truncated = len(selected) < len(paths)
         capture = self.config.state_dir / "captures" / uuid.uuid4().hex
         capture.mkdir(mode=0o700, parents=True)
@@ -785,44 +830,44 @@ class ProjectService:
                 archive, "w", compression=zipfile.ZIP_DEFLATED
             ) as bundle:
                 for relative in selected:
-                    path = project.path / relative
-                    digest = hashlib.sha256()
-                    size = 0
-                    info = zipfile.ZipInfo(relative.as_posix())
-                    info.create_system = 3
-                    mode = stat.S_IMODE(path.lstat().st_mode)
-                    is_link = path.is_symlink()
-                    info.external_attr = (
-                        (stat.S_IFLNK if is_link else stat.S_IFREG) | mode
-                    ) << 16
-                    info.compress_type = (
-                        zipfile.ZIP_STORED if is_link else zipfile.ZIP_DEFLATED
-                    )
-                    source = (
-                        io.BytesIO(os.fsencode(os.readlink(path)))
-                        if is_link
-                        else path.open("rb")
-                    )
-                    with source, bundle.open(info, "w") as target:
-                        if is_link:
-                            link_bytes = os.fsencode(os.readlink(path))
-                            target.write(link_bytes)
-                            digest.update(link_bytes)
-                            size += len(link_bytes)
-                        else:
-                            while chunk := source.read(1_048_576):
-                                size += len(chunk)
-                                digest.update(chunk)
-                                target.write(chunk)
-                    rows.append(
-                        {
-                            "path": relative.as_posix(),
-                            "bytes": size,
-                            "sha256": digest.hexdigest(),
-                            "mode": mode,
-                            "kind": "symlink" if is_link else "file",
-                        }
-                    )
+                    with _source_path(project.path, relative) as path:
+                        digest = hashlib.sha256()
+                        size = 0
+                        info = zipfile.ZipInfo(relative.as_posix())
+                        info.create_system = 3
+                        mode = stat.S_IMODE(path.lstat().st_mode)
+                        is_link = path.is_symlink()
+                        info.external_attr = (
+                            (stat.S_IFLNK if is_link else stat.S_IFREG) | mode
+                        ) << 16
+                        info.compress_type = (
+                            zipfile.ZIP_STORED if is_link else zipfile.ZIP_DEFLATED
+                        )
+                        source = (
+                            io.BytesIO(os.fsencode(os.readlink(path)))
+                            if is_link
+                            else _open_source_file(path)
+                        )
+                        with source, bundle.open(info, "w") as target:
+                            if is_link:
+                                link_bytes = os.fsencode(os.readlink(path))
+                                target.write(link_bytes)
+                                digest.update(link_bytes)
+                                size += len(link_bytes)
+                            else:
+                                while chunk := source.read(1_048_576):
+                                    size += len(chunk)
+                                    digest.update(chunk)
+                                    target.write(chunk)
+                        rows.append(
+                            {
+                                "path": relative.as_posix(),
+                                "bytes": size,
+                                "sha256": digest.hexdigest(),
+                                "mode": mode,
+                                "kind": "symlink" if is_link else "file",
+                            }
+                        )
                 after_paths = self._export_paths(project)
                 after = self._export_revision(project.path, after_paths)
                 if before != after:
@@ -867,32 +912,35 @@ class ProjectService:
                 or _is_excluded(relative)
             ):
                 continue
-            path = project.path / relative
-            if path.is_symlink() or path.is_file():
-                paths.add(relative)
+            try:
+                with _source_path(project.path, relative) as path:
+                    if path.is_symlink() or path.is_file():
+                        paths.add(relative)
+            except FileNotFoundError:
+                continue
         return sorted(paths, key=lambda path: path.as_posix())
 
     @staticmethod
     def _export_revision(root: Path, paths: list[Path]) -> str:
         digest = hashlib.sha256()
         for relative in paths:
-            path = root / relative
-            name = relative.as_posix().encode()
-            digest.update(len(name).to_bytes(8, "big"))
-            digest.update(name)
-            info = path.lstat()
-            mode = stat.S_IMODE(info.st_mode)
-            digest.update(mode.to_bytes(4, "big"))
-            if stat.S_ISLNK(info.st_mode):
-                target = os.fsencode(os.readlink(path))
-                digest.update(b"symlink\0")
-                digest.update(len(target).to_bytes(8, "big"))
-                digest.update(target)
-                continue
-            digest.update(b"file\0")
-            with path.open("rb") as handle:
-                for chunk in iter(lambda: handle.read(1_048_576), b""):
-                    digest.update(chunk)
+            with _source_path(root, relative) as path:
+                name = relative.as_posix().encode()
+                digest.update(len(name).to_bytes(8, "big"))
+                digest.update(name)
+                info = path.lstat()
+                mode = stat.S_IMODE(info.st_mode)
+                digest.update(mode.to_bytes(4, "big"))
+                if stat.S_ISLNK(info.st_mode):
+                    target = os.fsencode(os.readlink(path))
+                    digest.update(b"symlink\0")
+                    digest.update(len(target).to_bytes(8, "big"))
+                    digest.update(target)
+                    continue
+                digest.update(b"file\0")
+                with _open_source_file(path) as handle:
+                    for chunk in iter(lambda: handle.read(1_048_576), b""):
+                        digest.update(chunk)
         return digest.hexdigest()
 
     def _run_spooled(self, command: list[str], cwd: Path, timeout: int = 15) -> str:

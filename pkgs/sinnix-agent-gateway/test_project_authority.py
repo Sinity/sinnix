@@ -306,3 +306,114 @@ def git_stdout(path: Path, *arguments: str) -> str:
     return subprocess.run(
         ["git", "-C", str(path), *arguments], check=True, capture_output=True, text=True
     ).stdout.strip()
+
+
+@pytest.mark.parametrize("operation", ["export", "content_revision"])
+def test_project_sources_refuse_symlinked_parent(
+    tmp_path: Path, operation: str
+) -> None:
+    projects, project, _linked = project_service(tmp_path)
+    nested = project / "nested"
+    nested.mkdir()
+    (nested / "data.txt").write_text("tracked fixture\n")
+    git(project, "add", "nested/data.txt")
+    git(project, "commit", "--quiet", "-m", "nested fixture")
+    nested.rename(tmp_path / "original")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "data.txt").write_text("outside fixture\n")
+    nested.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ProjectError, match="symlink"):
+        if operation == "content_revision":
+            projects_module._content_revision(project)
+        else:
+            projects.export("fixture")
+    assert not list((tmp_path / "state" / "captures").glob("*/project-export.zip"))
+
+
+def test_project_export_preserves_leaf_symlink_payload(tmp_path: Path) -> None:
+    import zipfile
+
+    projects, project, _linked = project_service(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside fixture\n")
+    (project / "link.txt").symlink_to(outside)
+    result = projects.export("fixture")
+    with zipfile.ZipFile(result["archive"]) as archive:
+        assert archive.read("link.txt") == str(outside).encode()
+        assert stat.S_ISLNK(archive.getinfo("link.txt").external_attr >> 16)
+
+
+def test_project_sources_allow_deleted_parent(tmp_path: Path) -> None:
+    projects, project, _linked = project_service(tmp_path)
+    nested = project / "nested"
+    nested.mkdir()
+    (nested / "data.txt").write_text("fixture\n")
+    git(project, "add", "nested/data.txt")
+    git(project, "commit", "--quiet", "-m", "nested fixture")
+    (nested / "data.txt").unlink()
+    nested.rmdir()
+    assert projects_module._content_revision(project)
+    assert "nested/data.txt" not in {
+        row["path"] for row in projects.export("fixture")["manifest"]["files"]
+    }
+
+
+def test_project_source_read_pins_parent_during_replacement(
+    tmp_path: Path, monkeypatch
+) -> None:
+    projects, project, _linked = project_service(tmp_path)
+    nested = project / "nested"
+    nested.mkdir()
+    (nested / "data.txt").write_text("fixture\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "data.txt").write_text("outside fixture\n")
+    original = projects_module._open_source_file
+
+    def replace_parent(path):
+        nested.rename(tmp_path / "original")
+        nested.symlink_to(outside, target_is_directory=True)
+        return original(path)
+
+    monkeypatch.setattr(projects_module, "_open_source_file", replace_parent)
+    with projects_module._source_path(project, Path("nested/data.txt")) as path:
+        with projects_module._open_source_file(path) as handle:
+            assert handle.read() == b"fixture\n"
+
+
+def test_project_source_read_refuses_leaf_replaced_with_symlink(tmp_path: Path) -> None:
+    projects, project, _linked = project_service(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside fixture\n")
+    with projects_module._source_path(project, Path("README.md")) as path:
+        (project / "README.md").unlink()
+        (project / "README.md").symlink_to(outside)
+        with pytest.raises(ProjectError, match="changed or is unavailable"):
+            projects_module._open_source_file(path)
+
+
+def test_project_read_refuses_parent_replaced_after_path_check(
+    tmp_path: Path, monkeypatch
+) -> None:
+    projects, project, _linked = project_service(tmp_path)
+    nested = project / "nested"
+    nested.mkdir()
+    (nested / "data.txt").write_text("fixture\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "data.txt").write_text("outside fixture\n")
+    original = projects._safe_path
+
+    def replace_parent(*args, **kwargs):
+        target = original(*args, **kwargs)
+        nested.rename(tmp_path / "original")
+        nested.symlink_to(outside, target_is_directory=True)
+        return target
+
+    monkeypatch.setattr(projects, "_safe_path", replace_parent)
+    with pytest.raises(ProjectError, match="symlink"):
+        projects._read_file(
+            projects.config.projects["fixture"], "nested/data.txt", 1, None, 1024
+        )

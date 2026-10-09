@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 995fc05bb71f1acb01cefd6d87a5faa8be87678dcd5608e5e421dff5b6c22f6c -->
+<!-- gateway-catalog-sha256: 5b3a3a5d7402a5fcb582361f54c90fca8b3fbbccd1aee2cff28ba49e8d16fd4a -->
 
 # Agent Gateway
 
@@ -50,7 +50,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 - `projects.tree` — Lists project files without following symlinks. When truncated, pass next_start_after as start_after to list the next page of the same directory.
 - `projects.read` — Read a bounded line range of one project file.
 - `projects.read_many` — Read several bounded project files from one checkout observation.
-- `projects.export` — Exports tracked and nonignored untracked files, excluding sensitive, local-only, and symlinked paths. Optional file and byte bounds return next_start_after; pass it with checkout_revision as expected_revision to continue. Fetch the ZIP through its artifact ref; its manifest_path holds the complete per-file manifest.
+- `projects.export` — Exports tracked and nonignored untracked files, excluding sensitive and local-only paths. Symlink entries retain their link targets; symlinked parent directories are refused. Optional file and byte bounds return next_start_after; pass it with checkout_revision as expected_revision to continue. Fetch the ZIP through its artifact ref; its manifest_path holds the complete per-file manifest.
 - `projects.diff` — Show uncommitted changes in a checkout, optionally against a git ref.
 - `projects.search` — Search project file contents with ripgrep.
 - `beads.closure` — Read native dependency closure, cycles, readiness and incomplete frontier at one revision.
@@ -185,4 +185,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `995fc05bb71f1acb01cefd6d87a5faa8be87678dcd5608e5e421dff5b6c22f6c`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `5b3a3a5d7402a5fcb582361f54c90fca8b3fbbccd1aee2cff28ba49e8d16fd4a`.

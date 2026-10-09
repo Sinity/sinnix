@@ -777,7 +777,7 @@ ACTIONS: tuple[Action, ...] = (
         resource_kinds=_KINDS,
         affordances=("projects.get", "projects.read"),
         aliases=("snapshot", "bundle", "download project", "portable export"),
-        documentation="Exports tracked and nonignored untracked files, excluding sensitive, local-only, and symlinked paths. Optional file and byte bounds return next_start_after; pass it with checkout_revision as expected_revision to continue. Fetch the ZIP through its artifact ref; its manifest_path holds the complete per-file manifest.",
+        documentation="Exports tracked and nonignored untracked files, excluding sensitive and local-only paths. Symlink entries retain their link targets; symlinked parent directories are refused. Optional file and byte bounds return next_start_after; pass it with checkout_revision as expected_revision to continue. Fetch the ZIP through its artifact ref; its manifest_path holds the complete per-file manifest.",
         examples=(
             Example(
                 title="Export a bounded checkout",
