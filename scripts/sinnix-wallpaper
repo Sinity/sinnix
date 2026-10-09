@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Wallpaper corpus + Noctalia palette CLI (current/next/prev/pin/import/status)
-# runtimeInputs: bash coreutils jq imagemagick @sinnix-wallpaper-generate
+# runtimeInputs: bash coreutils jq imagemagick systemd @sinnix-wallpaper-generate
 set -euo pipefail
 
 export LC_ALL=C
@@ -209,7 +209,12 @@ cmd_status() {
   done
   echo
   echo "== timers =="
-  systemctl --user list-timers --no-pager 2>/dev/null | grep -E "wallpaper|^NEXT" || echo "  (none active)"
+  local timers
+  if ! timers=$(systemctl --user list-timers --no-pager); then
+    echo "sinnix-wallpaper: cannot query user timers" >&2
+    return 1
+  fi
+  printf '%s\n' "$timers" | grep -E "wallpaper|^NEXT" || echo "  (none active)"
 }
 
 cmd_generate() {
