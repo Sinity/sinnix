@@ -8,6 +8,7 @@ that deadline under concurrent use, and the record left for each call.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import signal
 import socket
@@ -346,6 +347,171 @@ class _UnixHTTP(HTTPConnection):
     def connect(self) -> None:
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.connect(str(self.path))
+
+
+def test_disconnected_unix_request_cannot_steal_another_calls_response(tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"stateDir": str(tmp_path / "state"), "projects": {}}))
+    socket_path = tmp_path / "mcp.sock"
+    entered, release, completed = (
+        tmp_path / name for name in ("entered", "release", "completed")
+    )
+    # Only the file probe is injected. Serving, HTTP/MCP dispatch, request
+    # correlation, timeout handling and responses use the production stack.
+    injection = """
+import os, time
+from pathlib import Path
+from sinnix_agent_gateway.actions import waits
+original = waits._probe
+root = Path(os.environ['GATEWAY_PROBE_FIXTURE'])
+def probe(runtime, condition):
+    (root / 'entered').write_text(str(os.getpid()))
+    deadline = time.monotonic() + 15
+    while not (root / 'release').exists():
+        if time.monotonic() > deadline:
+            raise RuntimeError('fixture release missing')
+        time.sleep(0.01)
+    result = original(runtime, condition)
+    (root / 'completed').write_text(str(os.getpid()))
+    return result
+waits._probe = probe
+from sinnix_agent_gateway.cli import main
+main()
+"""
+
+    def request(rid, name, arguments):
+        connection = _UnixHTTP(socket_path)
+        connection.request(
+            "POST",
+            "/mcp",
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": rid,
+                    "method": "tools/call",
+                    "params": {
+                        "name": name,
+                        "arguments": arguments,
+                        "_meta": {
+                            PROTOCOL_VERSION_META_KEY: MODERN_PROTOCOL,
+                            CLIENT_CAPABILITIES_META_KEY: {},
+                        },
+                    },
+                }
+            ),
+            {
+                "Host": "localhost:8000",
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "MCP-Protocol-Version": MODERN_PROTOCOL,
+                "Mcp-Method": "tools/call",
+                "Mcp-Name": name,
+                "X-Request-Id": f"isolation-fixture/{rid}",
+            },
+        )
+        return connection
+
+    def await_fact(predicate, process):
+        deadline = time.monotonic() + 20
+        while not predicate():
+            assert process.poll() is None, stderr_path.read_text()
+            assert time.monotonic() < deadline, "fixture did not reach expected phase"
+            time.sleep(0.01)
+
+    def catalog(rid):
+        connection = request(rid, "gateway.catalog", {"limit": 1})
+        try:
+            response = connection.getresponse()
+            body = response.read()
+            assert response.status == 200, body
+            result = json.loads(body)
+            assert result["id"] == rid, result
+            assert result["result"]["structuredContent"]["result"]["outcome"] == "ok", (
+                result
+            )
+            data = result["result"]["structuredContent"]["data"]
+            assert len(data["actions"]) == 1
+            assert len(data["catalog_sha256"]) == 64
+        finally:
+            connection.close()
+
+    stderr_path = tmp_path / "stderr.log"
+    with (
+        stderr_path.open("wb") as stderr,
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                injection,
+                "--config",
+                str(config),
+                "serve-http",
+                "--socket",
+                str(socket_path),
+            ],
+            env={**os.environ, "GATEWAY_PROBE_FIXTURE": str(tmp_path)},
+            stdout=subprocess.DEVNULL,
+            stderr=stderr,
+        ) as process,
+    ):
+        try:
+            await_fact(socket_path.exists, process)
+            abandoned = request(
+                101,
+                "wait.for",
+                {
+                    "condition": {
+                        "kind": "file_exists",
+                        "target": {"path": str(tmp_path / "absent")},
+                    },
+                    "timeout_seconds": 1,
+                },
+            )
+            await_fact(entered.exists, process)  # Proves real work was in flight.
+            assert entered.read_text() == str(process.pid)
+            abandoned.close()
+            catalog(102)
+            assert not completed.exists(), "concurrent call did not precede late work"
+            # Let the original call's response budget expire before its owner
+            # completes. This thread cannot satisfy a later HTTP request.
+            await_fact(
+                lambda: '"action":"wait.for"' in stderr_path.read_text(), process
+            )
+            release.write_text("release")
+            await_fact(completed.exists, process)
+            assert completed.read_text() == str(process.pid)
+            catalog(103)
+            assert process.poll() is None
+        finally:
+            release.write_text("release")
+            if process.poll() is None:
+                process.send_signal(signal.SIGTERM)
+                try:
+                    process.wait(timeout=serving.EXIT_DEADLINE_SECONDS + 2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+                    raise
+
+    calls = [
+        json.loads(line)
+        for line in stderr_path.read_text().splitlines()
+        if line.startswith("{")
+    ]
+    calls = [row for row in calls if row.get("event") == "gateway.call"]
+    assert {row["request_id"] for row in calls} == {
+        "isolation-fixture/101",
+        "isolation-fixture/102",
+        "isolation-fixture/103",
+    }
+    abandoned_call = next(
+        row for row in calls if row["request_id"] == "isolation-fixture/101"
+    )
+    assert abandoned_call["duration_ms"] >= 1000
+    assert abandoned_call["action"] == "wait.for"
+    assert all(
+        row["action"] == "gateway.catalog" for row in calls if row is not abandoned_call
+    )
 
 
 def test_serve_http_logs_the_tunnel_request_id_and_drains_on_sigterm(
