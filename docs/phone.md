@@ -229,13 +229,9 @@ recording fails that timer run instead of masquerading as a success. The same
 scheduled probe still warns when finished ambient chunks pile up on-device,
 which means capture is working and delivery is not.
 
-**The media mirror has a stated blind spot.** It ships files newer than an
-mtime watermark seeded from what the lane already holds, because asking prime
-about each of 196,946 Downloads to discover the same thing is not a trade
-worth making. A file that arrives with an _old_ mtime — a download preserving
-a server date, a restore from backup — is behind the watermark and is not
-offered. That is acceptable for a mirror of a directory the operator can also
-copy by hand; it would not be acceptable for a capture lane.
+**Media sync resumes from acknowledged source timestamps and relative paths.** Each bounded batch selects the oldest files across the full source traversal, including files sharing a timestamp. It never seeds from workstation upload times. Upgrading from the old scalar cursor reoffers existing files; the workstation verifies duplicate bytes before acknowledging them. Missing listings, changed files and retryable upload refusals stop cursor advancement. Four relative path segments are supported.
+
+Files arriving with an old timestamp behind an established cursor still require an explicit rescan. This remains a directory mirror with that limitation.
 
 ## Capture
 

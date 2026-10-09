@@ -108,7 +108,7 @@ def safe_relative(lane_dir: Path, name: str) -> Path | None:
     if not name or name.endswith("/"):
         return None
     parts = name.split("/")
-    if len(parts) > MAX_NAME_DEPTH or not all(UPLOAD_NAME_RE.match(p) for p in parts):
+    if len(parts) > MAX_NAME_DEPTH or not all(UPLOAD_NAME_RE.fullmatch(p) for p in parts):
         return None
     target = lane_dir.joinpath(*parts)
     try:
@@ -116,32 +116,6 @@ def safe_relative(lane_dir: Path, name: str) -> Path | None:
     except (ValueError, OSError):
         return None
     return target
-
-
-def newest_in_lane(lane: str) -> tuple[HTTPStatus, dict]:
-    """The newest mtime the lane holds, which is how the phone's media mirror
-    learns where to resume without listing two hundred thousand files.
-
-    The mirror lanes were filled by an `rsync -a` that preserved the phone's
-    own mtimes, so this number means the same thing on both sides: everything
-    older than it is already here.
-    """
-    directory = UPLOAD_LANES.get(lane)
-    if directory is None:
-        return HTTPStatus.NOT_FOUND, {"ok": False, "detail": f"no upload lane {lane!r}"}
-    newest = 0.0
-    count = 0
-    if directory.is_dir():
-        for path in directory.rglob("*"):
-            if path.is_file():
-                count += 1
-                newest = max(newest, path.stat().st_mtime)
-    return HTTPStatus.OK, {
-        "ok": True,
-        "lane": lane,
-        "files": count,
-        "newest_mtime_ms": int(newest * 1000),
-    }
 
 
 def store_upload(

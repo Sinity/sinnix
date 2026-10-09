@@ -172,6 +172,8 @@ def test_a_lane_subdirectory_is_preserved(monkeypatch, tmp_path) -> None:
         "a/b/c/d/e/deep.jpg",
         "Camera/",
         "/abs.jpg",
+        "Camera/IMG_0001.jpg\n",
+        "Camera\n/IMG_0001.jpg",
     ],
 )
 def test_a_traversing_path_is_rejected(monkeypatch, tmp_path, name) -> None:
@@ -182,26 +184,6 @@ def test_a_traversing_path_is_rejected(monkeypatch, tmp_path, name) -> None:
     assert status == HTTPStatus.BAD_REQUEST
     assert payload["ok"] is False
     assert not (tmp_path / "escape.jpg").exists()
-
-
-def test_newest_in_lane_reports_the_watermark(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(uploads_mod, "UPLOAD_LANES", {"camera": tmp_path / "camera"})
-    nested = tmp_path / "camera" / "Camera"
-    nested.mkdir(parents=True)
-    (nested / "old.jpg").write_bytes(b"old")
-    os.utime(nested / "old.jpg", (1_000_000, 1_000_000))
-    (nested / "new.jpg").write_bytes(b"new")
-    os.utime(nested / "new.jpg", (2_000_000, 2_000_000))
-
-    status, payload = uploads_mod.newest_in_lane("camera")
-
-    assert status == HTTPStatus.OK
-    assert payload["files"] == 2
-    assert payload["newest_mtime_ms"] == 2_000_000_000
-
-
-def test_newest_in_an_unknown_lane_is_a_404() -> None:
-    assert uploads_mod.newest_in_lane("nope")[0] == HTTPStatus.NOT_FOUND
 
 
 def test_repair_closed_day_preserves_original(monkeypatch, tmp_path):
