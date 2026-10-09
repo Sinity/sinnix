@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from agentctl import backpressure
 
 
@@ -506,3 +507,49 @@ def test_tick_keeps_a_hold_whose_task_is_still_queued(monkeypatch, tmp_path) -> 
     assert set(backpressure.event_state(None, checkpoint=checkpoint).legacy_holds) == {
         847
     }
+
+
+@pytest.mark.parametrize(
+    "event_loss", ["rotation", "truncation", "missing", "append_failure"]
+)
+def test_owned_pause_reopens_after_event_loss(
+    monkeypatch, tmp_path, event_loss
+) -> None:
+    spool = _spool(tmp_path)
+    groups = {
+        "agent": "Running",
+        "pytest": "Running",
+        "normal": "Running",
+        "bulk": "Running",
+    }
+    if event_loss == "append_failure":
+
+        def unavailable(*_args, **_kwargs):
+            raise OSError("synthetic unavailable event store")
+
+        monkeypatch.setattr(backpressure, "append_jsonl", unavailable)
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg60": 30.0, "memory_full_avg60": 1.0},
+        groups,
+        spool=spool,
+    )
+    assert calls == [("pause", "pytest")]
+    assert result["action"] == "closed"
+    if event_loss == "rotation":
+        spool.rename(tmp_path / "previous.jsonl")
+        spool.write_text("")
+    elif event_loss == "truncation":
+        spool.write_text("")
+    elif event_loss == "missing":
+        spool.unlink()
+    groups["pytest"] = "Paused"
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg60": 1.0, "memory_full_avg60": 1.0},
+        groups,
+        spool=spool,
+    )
+    assert calls == [("resume", "pytest")]
+    assert result["action"] == "opened"
+    assert backpressure.paused_by_us(spool) == set()
