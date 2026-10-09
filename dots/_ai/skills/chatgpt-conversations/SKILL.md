@@ -86,8 +86,10 @@ scripts/sinnix-chatgpt-conversations download <page-id> <generated-filename>
 ```
 
 This opens and closes the file viewer in that tab but does not navigate or
-submit. It uses the configured Downloads directory and refuses an ambiguous
-or missing filename. For repeated names, select one with `--occurrence N`,
+submit. It uses the configured Downloads directory and accepts only a new file with
+the exact name or Chrome's numbered collision name. Multiple matching files
+are ambiguous and fail; filenames alone cannot distinguish a simultaneous
+download of the same name. For repeated names, select one with `--occurrence N`,
 using its zero-based position among matching controls from `artifacts`.
 Generated-file inventory describes rendered controls, not unseen branches.
 Sandbox-file links in old assistant turns are frequently

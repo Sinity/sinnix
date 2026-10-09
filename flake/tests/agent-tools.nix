@@ -1465,6 +1465,10 @@ in
             nativeBuildInputs = [
               pkgs.bash
               pkgs.coreutils
+              pkgs.findutils
+              pkgs.gnugrep
+              pkgs.gnused
+              pkgs.jq
               pkgs.nodejs
             ];
           }

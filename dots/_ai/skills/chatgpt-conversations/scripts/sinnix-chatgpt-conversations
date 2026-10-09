@@ -335,8 +335,28 @@ generated_artifacts() {
   jq --arg page_id "$page_id" '. + {page_id: $page_id}' <<<"$base"
 }
 
+download_name_matches() {
+  local requested="$1" observed="$2" stem extension="" suffix
+  [[ $observed == "$requested" ]] && return 0
+  stem="$requested"
+  if [[ $requested == *.* && -n ${requested%.*} ]]; then
+    stem="${requested%.*}"
+    extension=".${requested##*.}"
+  fi
+  [[ $observed == "$stem"*"$extension" ]] || return 1
+  suffix="${observed#"$stem"}"
+  suffix="${suffix%"$extension"}"
+  [[ $suffix =~ ^\ \([1-9][0-9]*\)$ ]]
+}
+
+close_generated_viewer() {
+  evaluate "$1" '(() => { document.querySelector("button[aria-label=\"Close viewer\"]")?.click(); return true; })()' >/dev/null
+}
+
 download_generated() {
-  local page_id="$1" name="$2" occurrence="$3" directory before after opened clicked candidate deadline
+  local page_id="$1" name="$2" occurrence="$3" directory workspace before after changes opened clicked candidate deadline record
+  local -a candidates
+
   [[ $name == "$(basename -- "$name")" && $name != . && $name != .. ]] || {
     printf 'generated filename must be a plain basename\n' >&2; exit 2;
   }
@@ -351,10 +371,12 @@ download_generated() {
   [[ $occurrence -lt $count ]] || { printf 'occurrence %s exceeds %s controls\n' "$occurrence" "$count" >&2; exit 2; }
   directory=$(xdg-user-dir DOWNLOAD)
   [[ -d $directory ]] || { printf 'Downloads directory unavailable: %s\n' "$directory" >&2; exit 1; }
-  before=$(mktemp /realm/tmp/work/sinnix-chatgpt-download-before.XXXXXX)
-  after=$(mktemp /realm/tmp/work/sinnix-chatgpt-download-after.XXXXXX)
-  trap 'rm -f -- "$before" "$after"' RETURN
-  find "$directory" -maxdepth 1 -type f -printf '%i %f\n' >"$before"
+  workspace=$(mktemp -d "${TMPDIR:-/realm/tmp/work}/sinnix-chatgpt-download.XXXXXX")
+  before="$workspace/before"
+  after="$workspace/after"
+  changes="$workspace/changes"
+  trap '[[ ${opened:-false} != true ]] || close_generated_viewer "$page_id" || true; rm -f -- "$before" "$after" "$changes"; rmdir -- "$workspace"; trap - RETURN EXIT' RETURN EXIT
+  find "$directory" -maxdepth 1 -type f -printf '%i %f\0' | sort -z >"$before"
   local quoted
   quoted=$(jq -Rn --arg value "$name" '$value')
   opened=$(evaluate "$page_id" "(() => {
@@ -378,14 +400,25 @@ download_generated() {
   [[ $clicked == true ]] || { printf 'generated preview had no Download control\n' >&2; exit 1; }
   deadline=$((SECONDS + 30))
   while (( SECONDS <= deadline )); do
-    find "$directory" -maxdepth 1 -type f -printf '%i %f\n' >"$after"
-    candidate=$(comm -13 <(sort "$before") <(sort "$after") | cut -d' ' -f2- | while IFS= read -r file; do
-      [[ $file == "$name" || $file == "${name%.*}"*".${name##*.}" ]] && printf '%s\n' "$file"
-    done | head -n 1 || true)
-    if [[ -n $candidate && -s $directory/$candidate ]]; then
+    find "$directory" -maxdepth 1 -type f -printf '%i %f\0' | sort -z >"$after"
+    comm -z -13 "$before" "$after" >"$changes"
+    candidates=()
+    while IFS= read -r -d '' record; do
+      candidate="${record#* }"
+      if download_name_matches "$name" "$candidate"; then
+        candidates+=("$candidate")
+      fi
+    done <"$changes"
+    if [[ ${#candidates[@]} -gt 1 ]]; then
+      printf 'multiple completed downloads match %s; cannot identify the requested artifact\n' "$name" >&2
+      exit 1
+    fi
+    candidate="${candidates[0]:-}"
+    if [[ -n $candidate && -f $directory/$candidate ]]; then
       # Chrome first creates a .crdownload file; only a completed filename passes.
-      evaluate "$page_id" '(() => { document.querySelector("button[aria-label=\"Close viewer\"]")?.click(); return true; })()' >/dev/null
-      jq -cn --arg path "$directory/$candidate" --arg sha256 "$(sha256sum "$directory/$candidate" | cut -d' ' -f1)" \
+      close_generated_viewer "$page_id"
+      opened=false
+      jq -cn --arg path "$directory/$candidate" --arg sha256 "$(sha256sum <"$directory/$candidate" | cut -d' ' -f1)" \
         --argjson bytes "$(stat -c %s "$directory/$candidate")" \
         '{schema:"sinnix-chatgpt-generated-download-v1",path:$path,bytes:$bytes,sha256:$sha256}'
       return 0
