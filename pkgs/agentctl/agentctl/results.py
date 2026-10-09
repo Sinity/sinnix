@@ -449,8 +449,11 @@ def complete_dispatch_identity(
         and isinstance(row.get("id"), str)
         and row.get("v2_available") is True
     }
-    for bead in value.get("beads") or ():
-        if not isinstance(bead, dict):
+    beads = value.get("beads")
+    if not isinstance(beads, list):
+        return value
+    for bead in beads:
+        if not isinstance(bead, dict) or not isinstance(bead.get("id"), str):
             continue
         binding = expected.get(bead.get("id"))
         if binding is None:
@@ -463,8 +466,13 @@ def complete_dispatch_identity(
                 ac_ids_by_text.setdefault(criterion.get("text"), set()).add(
                     criterion.get("ac_id")
                 )
-        for criterion in bead.get("criteria") or ():
-            if not isinstance(criterion, dict):
+        criteria = bead.get("criteria")
+        if not isinstance(criteria, list):
+            continue
+        for criterion in criteria:
+            if not isinstance(criterion, dict) or not isinstance(
+                criterion.get("text"), str
+            ):
                 continue
             candidates = ac_ids_by_text.get(criterion.get("text"), set())
             if len(candidates) == 1:
@@ -522,9 +530,10 @@ def _combine_repeated_criteria(value: Any) -> Any:
     if (
         not isinstance(value, dict)
         or value.get("schema_version") != RESULT_SCHEMA_VERSION
+        or not isinstance(value.get("beads"), list)
     ):
         return value
-    for bead in value.get("beads") or ():
+    for bead in value["beads"]:
         if not isinstance(bead, dict) or not isinstance(bead.get("criteria"), list):
             continue
         combined: list[Any] = []

@@ -545,3 +545,27 @@ def test_dispatch_identity_fills_only_what_the_dispatch_names_unambiguously() ->
         {"attempt": 1, "beads": []}, bindings, attempt=2
     )
     assert legacy == {"attempt": 2, "beads": []}
+
+
+@pytest.mark.parametrize("bind", [False, True])
+@pytest.mark.parametrize(
+    "beads",
+    [
+        1,
+        [{"id": [], "criteria": []}],
+        [{"id": "fx-1", "criteria": 1}],
+        [{"id": "fx-1", "criteria": [{"text": []}]}],
+    ],
+)
+def test_loading_malformed_v2_results_reports_errors_before_semantic_traversal(
+    tmp_path: Path, bind: bool, beads: Any
+) -> None:
+    document = worker_result(schema_version=2, beads=beads)
+    path = tmp_path / "malformed.json"
+    path.write_text(json.dumps(document))
+    bindings = [{"id": "fx-1", "v2_available": True, "criteria": []}]
+    _loaded, errors = results.load_result(
+        path, kind="worker", bindings=bindings if bind else None
+    )
+    assert errors
+    assert any(error.startswith("$.beads") for error in errors)
