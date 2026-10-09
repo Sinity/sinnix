@@ -32,7 +32,12 @@ grep -Fq 'BLOCK unpersisted-valuables: 1 large unpersisted files' <<<"$output"
 grep -Fq 'largest=105906176 bytes' <<<"$output"
 grep -Fq 'BLOCK nvidia-pairing: module=570.1, userspace=560.1' <<<"$output"
 grep -Fq 'BLOCK snapshot-headroom: free=100 KiB' <<<"$output"
-! grep -Fq 'private.bin' <<<"$output"
+if grep -Fq 'private.bin' <<<"$output"; then
+  printf 'forbidden content matched a negative assertion\n' >&2
+  exit 1
+else
+  test "$?" -eq 1
+fi
 
 # switch mode blocks on a REAL condition and FORCE overrides it. This used to
 # stub `pgrep` to exit 0 and assert that the resulting "concurrent switch"

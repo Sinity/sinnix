@@ -51,7 +51,12 @@ grep -Fq "$resume_header" "$plugin/service.luau" ||
 # system state would be a second, unbounded control plane in the shell.
 # (xdg-open of a hub page is deliberate: it hands a URL to the browser, it
 # does not read or mutate system state.)
-! grep -Eq 'systemctl|jq|curl|sqlite|\.jsonl' "$plugin"/*.luau
+if grep -Eq 'systemctl|jq|curl|sqlite|\.jsonl' "$plugin"/*.luau; then
+  printf 'forbidden content matched a negative assertion\n' >&2
+  exit 1
+else
+  test "$?" -eq 1
+fi
 
 # Schema agreement with both producers: every snapshot state key the plugin
 # binds must be published by sinnix-observe's report or the reducer's own

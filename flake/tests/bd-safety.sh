@@ -66,6 +66,7 @@ cp "$hook" "$mutated"
 # Quoting inside [[ -n ... ]] is formatter-owned; match either form, and
 # hard-fail if the mutation did not land -- a silently no-op mutation makes
 # this whole test vacuous.
+# shellcheck disable=SC2016 # Match the hook's literal variable, without expanding it here.
 sed -i -E 's/if \[\[ -n "?\$bd_guard_reason"? \]\]; then/if false; then/' "$mutated"
 grep -q 'if false; then' "$mutated"
 mutated_input="{\"tool_input\":{\"command\":$(printf '%s' 'bd update sinnix-test --notes note' | jq -Rs .)}}"

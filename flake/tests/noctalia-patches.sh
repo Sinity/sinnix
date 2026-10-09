@@ -23,7 +23,17 @@ git -C "$work_root" apply --check "$automation_patch"
 
 bash -n "$wallpaper_script" "$timeofday_script"
 bash "$timeofday_contract" "$timeofday_script"
-! rg -q '(^|[^[:alnum:]_])(awk|mv)[[:space:]].*config\.toml' "$wallpaper_script"
-! rg -q 'settings\.toml|repoint_state' "$timeofday_script"
+if rg -q '(^|[^[:alnum:]_])(awk|mv)[[:space:]].*config\.toml' "$wallpaper_script"; then
+  printf 'forbidden content matched a negative assertion\n' >&2
+  exit 1
+else
+  test "$?" -eq 1
+fi
+if rg -q 'settings\.toml|repoint_state' "$timeofday_script"; then
+  printf 'forbidden content matched a negative assertion\n' >&2
+  exit 1
+else
+  test "$?" -eq 1
+fi
 rg -q 'wallpaper-automation-set' "$wallpaper_script"
 rg -q 'wallpaper-automation-get' "$timeofday_script"

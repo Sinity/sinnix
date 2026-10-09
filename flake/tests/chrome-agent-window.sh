@@ -295,10 +295,10 @@ assert_fake_wire_rejects_out_of_range_id() {
 assert_positive_accepted_request_ids() {
   local requests="$1/request-ids" id method
   while IFS=$'\t' read -r id method; do
-    [[ $id =~ ^[1-9][0-9]*$ ]] && ((id <= 2147483647)) || {
+    if ! [[ $id =~ ^[1-9][0-9]{0,9}$ ]] || ((id > 2147483647)); then
       printf 'helper emitted an invalid CDP request ID: %s (%s)\n' "$id" "$method" >&2
       return 1
-    }
+    fi
   done <"$requests"
 }
 
@@ -334,6 +334,7 @@ assert_bulk_text() {
   mkdir -p "$state"
   touch "$state/agent-target"
   printf '%s\n' '<title>agent-target</title>' >"$state/marker-url"
+  # shellcheck disable=SC2016 # Prompt fixture must retain literal command-substitution syntax.
   printf 'Unicode: żółw 🤖; quotes: "hello"; literal: $() `cmd`\n' >"$state/prompt.txt"
   printf '%06000d\n\n' 0 >>"$state/prompt.txt"
   env PATH="$fixture_root/bin:$PATH" FAKE_STATE="$state" FAKE_CDP_SCENARIO=match \

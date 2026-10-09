@@ -67,12 +67,22 @@ assert_original_links() {
 make_fixture "$work_root/pinned"
 run_timeofday "$work_root/pinned" false "0:night,12:evening"
 assert_original_links "$work_root/pinned"
-! rg -q 'wallpaper-random' "$work_root/pinned/noctalia.log"
+if rg -q 'wallpaper-random' "$work_root/pinned/noctalia.log"; then
+  printf 'forbidden content matched a negative assertion\n' >&2
+  exit 1
+else
+  test "$?" -eq 1
+fi
 
 make_fixture "$work_root/unavailable"
 run_timeofday "$work_root/unavailable" unavailable "0:night,12:evening"
 assert_original_links "$work_root/unavailable"
-! rg -q 'wallpaper-random' "$work_root/unavailable/noctalia.log"
+if rg -q 'wallpaper-random' "$work_root/unavailable/noctalia.log"; then
+  printf 'forbidden content matched a negative assertion\n' >&2
+  exit 1
+else
+  test "$?" -eq 1
+fi
 
 # A declared schedule, rather than retired hardcoded boundaries, selects the
 # mood and asks Noctalia to choose the new image only while automation is live.

@@ -63,7 +63,7 @@ write_result "$head"
 # A dirty tree is refused; untracked files under `.agentctl/` are not counted.
 printf 'dirty\n' >"$repo/dirty.txt"
 set +e
-dirty_output=$(cd "$repo" && "$lane" done "$root/result.json" 2>&1)
+dirty_output=$(cd "$repo" && "$lane" "done" "$root/result.json" 2>&1)
 dirty_status=$?
 set -e
 test "$dirty_status" -eq 1
@@ -74,7 +74,7 @@ rm "$repo/dirty.txt"
 # A result that does not validate is refused.
 printf '{"candidate_sha": "%s", "beads": []}\n' "$head" >"$root/invalid.json"
 set +e
-invalid_output=$(cd "$repo" && "$lane" done "$root/invalid.json" 2>&1)
+invalid_output=$(cd "$repo" && "$lane" "done" "$root/invalid.json" 2>&1)
 invalid_status=$?
 set -e
 test "$invalid_status" -eq 1
@@ -84,7 +84,7 @@ grep -Fq 'unresolved' <<<"$invalid_output"
 # A result naming another commit is refused.
 write_result "$(printf '0%.0s' $(seq 1 40))"
 set +e
-mismatch_output=$(cd "$repo" && "$lane" done "$root/result.json" 2>&1)
+mismatch_output=$(cd "$repo" && "$lane" "done" "$root/result.json" 2>&1)
 mismatch_status=$?
 set -e
 test "$mismatch_status" -eq 1
@@ -93,7 +93,7 @@ grep -Fq 'is not HEAD' <<<"$mismatch_output"
 # A valid result at HEAD is printed verbatim and nothing is pushed.
 write_result "$head"
 captured=$root/captured.result
-(cd "$repo" && "$lane" done "$root/result.json") >"$captured"
+(cd "$repo" && "$lane" "done" "$root/result.json") >"$captured"
 test "$(cat "$captured")" = "$(cat "$root/result.json")"
 remote_head=$(git --git-dir="$origin" rev-parse refs/heads/batch/fixture/w1)
 test "$remote_head" != "$head"
