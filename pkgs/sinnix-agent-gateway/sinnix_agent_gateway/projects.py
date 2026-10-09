@@ -433,6 +433,12 @@ class ProjectService:
         configured_root = project.path.resolve(strict=True)
         repository_kind = self._repository_kind(project)
         default_path = self._default_checkout_path(project)
+        common_directory = Path(
+            self._run_spooled(
+                ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                project.path,
+            ).removesuffix("\n")
+        ).resolve()
         output = self._run_spooled(
             ["git", "worktree", "list", "--porcelain"], project.path
         )
@@ -449,6 +455,29 @@ class ProjectService:
                 raise ProjectError("git worktree record is missing worktree or HEAD")
             path = Path(raw_path).resolve()
             if not path.is_dir():
+                continue
+            # Git can keep advertising a worktree after its path is replaced.
+            # Verify the live checkout against the configured object store.
+            try:
+                actual_common = Path(
+                    self._run_spooled(
+                        [
+                            "git",
+                            "rev-parse",
+                            "--path-format=absolute",
+                            "--git-common-dir",
+                        ],
+                        path,
+                    ).removesuffix("\n")
+                ).resolve()
+                actual_root = Path(
+                    self._run_spooled(
+                        ["git", "rev-parse", "--show-toplevel"], path
+                    ).removesuffix("\n")
+                ).resolve()
+            except (ProjectError, OSError, subprocess.CalledProcessError):
+                continue
+            if actual_common != common_directory or actual_root != path:
                 continue
             candidates.append(
                 {

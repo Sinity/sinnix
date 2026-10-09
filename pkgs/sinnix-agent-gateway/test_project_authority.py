@@ -417,3 +417,38 @@ def test_project_read_refuses_parent_replaced_after_path_check(
         projects._read_file(
             projects.config.projects["fixture"], "nested/data.txt", 1, None, 1024
         )
+
+
+@pytest.mark.parametrize("replacement", ["other_repository", "repository_subdirectory"])
+def test_registered_checkout_replaced_by_symlink_is_not_authorized(
+    tmp_path: Path, replacement: str
+) -> None:
+    projects, project, linked = project_service(tmp_path)
+    checkout_id = next(
+        row["checkout_id"]
+        for row in projects.checkouts("fixture")["checkouts"]
+        if row["path"] == str(linked)
+    )
+    if replacement == "other_repository":
+        target = tmp_path / "other-repository"
+        target.mkdir()
+        git(target, "init", "--quiet")
+        git(target, "config", "user.name", "Fixture")
+        git(target, "config", "user.email", "fixture@example.invalid")
+        (target / "README.md").write_text("other repository fixture\n")
+        git(target, "add", ".")
+        git(target, "commit", "--quiet", "-m", "other fixture")
+    else:
+        target = project / "nested"
+        target.mkdir()
+        (target / "README.md").write_text("subdirectory fixture\n")
+    linked.rename(tmp_path / "preserved-linked")
+    linked.symlink_to(target, target_is_directory=True)
+    # Native Git still advertises the original registration in both cases.
+    assert str(linked) in git_stdout(project, "worktree", "list", "--porcelain")
+    candidates = projects.checkout_candidates("fixture")
+    assert [row["path"] for row in candidates] == [str(project)]
+    with pytest.raises(ProjectError, match="unknown configured checkout"):
+        projects.code_checkout(
+            "fixture", checkout_id, write=False, require_explicit=False
+        )
