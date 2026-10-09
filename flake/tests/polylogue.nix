@@ -66,7 +66,21 @@ in
             sinnix.services.polylogue.dataDir = sentinelDataDir;
           })
         ];
-        assertions = _config: [ ];
+        assertions =
+          config:
+          let
+            service = (hmFor config).systemd.user.services.polylogued.Service;
+          in
+          [
+            {
+              assertion = (service.SuccessExitStatus or [ ]) == [ 143 ];
+              message = "Polylogue must treat its handled SIGTERM exit 143 as successful termination.";
+            }
+            {
+              assertion = service.Restart == "on-failure";
+              message = "Polylogue must retain restarts for actual failures.";
+            }
+          ];
       };
       archiveRootEvaluated = evalTestSpec system archiveRootSpec;
       enrichmentSpec = mkServiceTest {

@@ -259,6 +259,8 @@ mkServiceModule {
             manager = "user";
           })
           // {
+            # The daemon encodes handled SIGTERM as exit 128 + 15.
+            SuccessExitStatus = [ 143 ];
             # The upstream unit does not pass its rendered TOML path to the
             # daemon process. Keep the service's startup-bound archive root
             # aligned with the generated user configuration.
