@@ -140,12 +140,13 @@
 +}
 --- /dev/null
 +++ b/cmd/bd/owner_contract_test.go
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,90 @@
 +//go:build cgo
 +
 +package main
 +
 +import (
++	"encoding/json"
 +	"path/filepath"
 +	"testing"
 +
@@ -187,6 +188,47 @@
 +	}
 +	if row.Status != types.StatusClosed {
 +		t.Fatalf("allowed close did not land: %s", row.Status)
++	}
++}
++
++func TestOwnerContractJSONEnvelopeKeepsAuthoredNumbers(t *testing.T) {
++	t.Setenv("BD_JSON_ENVELOPE", "")
++	payload := map[string]any{"revision": "9007199254740993", "metadata": json.RawMessage(`{"revision":9007199254740993,"content_revision":-9007199254740993}`)}
++	encoded, err := json.Marshal(wrapWithSchemaVersion(payload))
++	if err != nil {
++		t.Fatal(err)
++	}
++	var result struct {
++		Revision string `json:"revision"`
++		Metadata struct {
++			Revision        int64 `json:"revision"`
++			ContentRevision int64 `json:"content_revision"`
++		} `json:"metadata"`
++	}
++	if err := json.Unmarshal(encoded, &result); err != nil {
++		t.Fatal(err)
++	}
++	if result.Revision != "9007199254740993" || result.Metadata.Revision != 9007199254740993 || result.Metadata.ContentRevision != -9007199254740993 {
++		t.Fatalf("envelope changed metadata: %s", encoded)
++	}
++}
++
++func TestOwnerContractEmptyJSONObjectDoesNotPanic(t *testing.T) {
++	t.Setenv("BD_JSON_ENVELOPE", "")
++	for _, value := range []any{map[string]string(nil), (*struct{ ID string })(nil)} {
++		encoded, err := json.Marshal(wrapWithSchemaVersion(value))
++		if err != nil {
++			t.Fatal(err)
++		}
++		var result struct {
++			SchemaVersion int `json:"schema_version"`
++		}
++		if err := json.Unmarshal(encoded, &result); err != nil {
++			t.Fatal(err)
++		}
++		if result.SchemaVersion != JSONSchemaVersion {
++			t.Fatalf("invalid empty object: %s", encoded)
++		}
 +	}
 +}
 --- a/cmd/bd/batch.go
@@ -234,7 +276,7 @@
  			return result, err
 --- /dev/null
 +++ b/internal/httpapi/owner.go
-@@ -0,0 +1,271 @@
+@@ -0,0 +1,280 @@
 +package httpapi
 +
 +import (
@@ -265,15 +307,21 @@
 +		return nil, err
 +	}
 +	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
-+	for _, value := range schemas {
++	for schemaName, value := range schemas {
 +		schema, _ := value.(map[string]any)
 +		properties, _ := schema["properties"].(map[string]any)
-+		revision, _ := properties["revision"].(map[string]any)
-+		if ownerRowToken(revision) {
-+			revision["type"] = "string"
-+			delete(revision, "format")
-+			revision["pattern"] = "^-?(0|[1-9][0-9]*)$"
-+			revision["description"] = "Opaque signed-64-bit row equality token serialized as an exact decimal string. Never coerce through a floating-point number. Coverage is partial: claim, close, unclaim and generic update rewrite it; direct text updates may not. This is an administrative row token, not an acceptance-contract revision."
++		for name, value := range properties {
++			revision, _ := value.(map[string]any)
++			if (name == "revision" || schemaName == "Problem" && (name == "expected_version" || name == "actual_version")) && ownerRowToken(revision) {
++				revision["type"] = "string"
++				delete(revision, "format")
++				revision["pattern"] = "^-?(0|[1-9][0-9]*)$"
++				originalDescription, _ := revision["description"].(string)
++				revision["description"] = "Opaque signed-64-bit row equality token serialized as an exact decimal string. Never coerce through a floating-point number. Coverage is partial: claim, close, unclaim and generic update rewrite it; direct text updates may not. This is an administrative row token, not an acceptance-contract revision."
++				if schemaName == "Problem" {
++					revision["description"] = revision["description"].(string) + "\n\n" + originalDescription
++				}
++			}
 +		}
 +	}
 +	return document, nil
@@ -432,6 +480,9 @@
 +			response, _ := responses[strconv.Itoa(status)].(map[string]any)
 +			content, _ := response["content"].(map[string]any)
 +			media, _ := content["application/json"].(map[string]any)
++			if media == nil {
++				media, _ = content["application/problem+json"].(map[string]any)
++			}
 +			schema, _ := media["schema"].(map[string]any)
 +			return ownerProjectTokens(document, schema, body)
 +		}
@@ -490,7 +541,7 @@
 +			continue
 +		}
 +		child, _ := value.(map[string]any)
-+		if name == "revision" && ownerRowToken(child) {
++		if (name == "revision" || name == "expected_version" || name == "actual_version") && ownerRowToken(child) {
 +			var token int64
 +			if err := json.Unmarshal(raw, &token); err != nil {
 +				return nil, fmt.Errorf("invalid owner row token: %w", err)
@@ -508,7 +559,7 @@
 +}
 --- /dev/null
 +++ b/internal/httpapi/owner_test.go
-@@ -0,0 +1,126 @@
+@@ -0,0 +1,158 @@
 +package httpapi
 +
 +import (
@@ -517,6 +568,7 @@
 +	"fmt"
 +	"net/http"
 +	"strconv"
++	"strings"
 +	"testing"
 +
 +	"github.com/steveyegge/beads/internal/types"
@@ -635,9 +687,40 @@
 +		}
 +	}
 +}
++
++func TestOwnerContractConflictTokensRemainExact(t *testing.T) {
++	for _, token := range []int64{9007199254740993, -9007199254740993} {
++		lifecycle := &roleLifecycle{updateErr: issueops.ErrVersionMismatch}
++		cfg := rolesConfig(Config{Lifecycle: lifecycle})
++		body, status, err := InvokeOwner(context.Background(), cfg, "updateIssue", OwnerCall{Path: map[string]string{"id": "bd-one"}, Body: json.RawMessage(fmt.Sprintf(`{"actor":"operator","expected_version":%d,"patch":{"notes":"no write"}}`, token))})
++		if err != nil || status != http.StatusConflict {
++			t.Fatalf("status=%d err=%v body=%s", status, err, body)
++		}
++		var problem map[string]any
++		if err := json.Unmarshal(body, &problem); err != nil {
++			t.Fatal(err)
++		}
++		if problem["expected_version"] != strconv.FormatInt(token, 10) || problem["code"] != "precondition_failed" {
++			t.Fatalf("problem=%v", problem)
++		}
++	}
++	document, err := OwnerSchema()
++	if err != nil {
++		t.Fatal(err)
++	}
++	properties := document["components"].(map[string]any)["schemas"].(map[string]any)["Problem"].(map[string]any)["properties"].(map[string]any)
++	if !strings.Contains(properties["actual_version"].(map[string]any)["description"].(string), "NO v0 OPERATION EMITS IT TODAY") {
++		t.Fatal("lost actual-version unavailability disclosure")
++	}
++	for _, name := range []string{"expected_version", "actual_version"} {
++		if properties[name].(map[string]any)["type"] != "string" {
++			t.Fatalf("numeric conflict token %s", name)
++		}
++	}
++}
 --- /dev/null
 +++ b/internal/storage/issueops/owner_read.go
-@@ -0,0 +1,930 @@
+@@ -0,0 +1,934 @@
 +package issueops
 +
 +import (
@@ -1095,8 +1178,12 @@
 +			if column == "metadata" {
 +				if text, ok := value.(string); ok {
 +					var decoded any
-+					if json.Unmarshal([]byte(text), &decoded) == nil {
-+						value = decoded
++					if json.Valid([]byte(text)) {
++						decoder := json.NewDecoder(strings.NewReader(text))
++						decoder.UseNumber()
++						if decoder.Decode(&decoded) == nil {
++							value = decoded
++						}
 +					}
 +				}
 +			}
@@ -1570,11 +1657,12 @@
 +}
 --- /dev/null
 +++ b/internal/storage/issueops/owner_read_test.go
-@@ -0,0 +1,125 @@
+@@ -0,0 +1,161 @@
 +package issueops
 +
 +import (
 +	"context"
++	"encoding/json"
 +	"reflect"
 +	"strings"
 +	"testing"
@@ -1694,6 +1782,41 @@
 +			t.Fatal(err)
 +		}
 +		db.Close()
++	}
++}
++
++func TestOwnerContractMetadataNumbersRemainExact(t *testing.T) {
++	db, mock, err := sqlmock.New()
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer db.Close()
++	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"row_lock", "metadata"}).AddRow(int64(9007199254740993), []byte(`{"revision":9007199254740993,"nested":{"content_revision":-9007199254740993}}`)))
++	rows, err := ownerRows(context.Background(), db, "SELECT row_lock,metadata", nil...)
++	if err != nil {
++		t.Fatal(err)
++	}
++	encoded, err := json.Marshal(rows[0])
++	if err != nil {
++		t.Fatal(err)
++	}
++	var result struct {
++		Revision string `json:"revision"`
++		Metadata struct {
++			Revision int64 `json:"revision"`
++			Nested   struct {
++				Revision int64 `json:"content_revision"`
++			} `json:"nested"`
++		} `json:"metadata"`
++	}
++	if err := json.Unmarshal(encoded, &result); err != nil {
++		t.Fatal(err)
++	}
++	if result.Revision != "9007199254740993" || result.Metadata.Revision != 9007199254740993 || result.Metadata.Nested.Revision != -9007199254740993 {
++		t.Fatalf("metadata changed: %s", encoded)
++	}
++	if err := mock.ExpectationsWereMet(); err != nil {
++		t.Fatal(err)
 +	}
 +}
 --- /dev/null
@@ -2088,3 +2211,29 @@
 +coverage is `partial_update_coverage`: direct restore/compaction and some
 +label/reopen paths do not change that token. Use the database revision for a
 +complete committed snapshot identity.
+
+--- a/cmd/bd/output.go
++++ b/cmd/bd/output.go
+@@ -1,6 +1,7 @@
+ package main
+ 
+ import (
++	"bytes"
+ 	"encoding/json"
+ 	"fmt"
+ 	"os"
+@@ -91,8 +92,13 @@
+ 		return v
+ 	}
+ 	var m map[string]interface{}
+-	if err := json.Unmarshal(data, &m); err != nil {
++	decoder := json.NewDecoder(bytes.NewReader(data))
++	decoder.UseNumber()
++	if err := decoder.Decode(&m); err != nil {
+ 		return v
++	}
++	if m == nil {
++		m = make(map[string]interface{})
+ 	}
+ 	m["schema_version"] = JSONSchemaVersion
+ 	return m
