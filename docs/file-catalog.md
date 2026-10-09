@@ -4,6 +4,17 @@
 observations need to remain joined to the object that was inspected. It only
 changes the catalog; it never moves, renames, hashes, or deletes payloads.
 
+The tools are local to the Sinnix checkout. Run these examples from the checkout
+with its scripts and Python library available:
+
+```sh
+export PATH="$PWD/scripts:$PATH"
+export PYTHONPATH="$PWD/pkgs/sinnix-lib${PYTHONPATH:+:$PYTHONPATH}"
+```
+
+Terminal output quotes paths and escapes control characters. Pipe output retains
+raw resolved paths and JSON data; display formatting does not change catalog bytes.
+
 The catalog path is always explicit:
 
 ```sh
