@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, wait
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -698,7 +699,29 @@ def serve(
         server.elicit_model_dir = elicit_model_dir  # type: ignore[attr-defined]
         server.emitter_factory = emitter_factory  # type: ignore[attr-defined]
 
-    reducer.refresh()
+    watchdog = watchdog_period()
+    last_ping = 0.0
+    worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ops-refresh")
+
+    def await_work(work: Callable[[], Any]) -> None:
+        nonlocal last_ping
+        pending = worker.submit(work)
+        while True:
+            completed, _ = wait((pending,), timeout=watchdog or None)
+            # The main loop supervises completion and reports liveness.
+            # Filesystem stalls must not become watchdog-triggered crashes.
+            if watchdog and time.monotonic() - last_ping >= watchdog:
+                last_ping = time.monotonic()
+                sd_notify("WATCHDOG=1")
+            if completed:
+                pending.result()  # Worker errors still fail the service.
+                return
+
+    try:
+        await_work(reducer.refresh)
+    except BaseException:
+        worker.shutdown(wait=False, cancel_futures=True)
+        raise
     http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     reducer.actions = actions  # type: ignore[attr-defined]
     stamp(http, False)
@@ -729,26 +752,22 @@ def serve(
     for server in servers:
         threading.Thread(target=server.serve_forever, daemon=True).start()
     sd_notify("READY=1")
-    watchdog = watchdog_period()
     last_sweep = 0.0
-    last_ping = 0.0
+
+    def refresh_and_sweep() -> None:
+        nonlocal last_sweep
+        time.sleep(interval)
+        reducer.refresh()
+        # Preserve serial refreshes and the slower health-sweep cadence.
+        if time.monotonic() - last_sweep >= sweep_interval:
+            last_sweep = time.monotonic()
+            run_sweep(inventory_path, emitter_factory)
+
     try:
         while True:
-            time.sleep(interval)
-            reducer.refresh()
-            # The health sweep is deliberately slower than the snapshot: it
-            # shells out to df, systemctl and every lane's liveness probe, and
-            # its confirm-2 debounce is defined in sweeps, so its cadence is
-            # what "two agreeing samples" means in wall-clock terms.
-            if time.monotonic() - last_sweep >= sweep_interval:
-                last_sweep = time.monotonic()
-                run_sweep(inventory_path, emitter_factory)
-            # Pinged from the loop, not a timer thread: the point of the
-            # watchdog is that a wedged refresh is noticed, and a keepalive on
-            # its own thread would keep ticking through exactly that.
-            if watchdog and time.monotonic() - last_ping >= watchdog:
-                last_ping = time.monotonic()
-                sd_notify("WATCHDOG=1")
+            await_work(refresh_and_sweep)
     finally:
+        worker.shutdown(wait=False, cancel_futures=True)
         for server in servers:
             server.shutdown()
+            server.server_close()

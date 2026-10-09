@@ -101,10 +101,10 @@ mkServiceModule {
             ];
             Restart = "on-failure";
             RestartSec = "2s";
-            # sd_notify from the reducer's own loop, so a wedged refresh or a
-            # sweep that never returns is restarted rather than sitting there
-            # answering nothing. The loop pings once per interval, well inside
-            # this budget.
+            # The main loop supervises a serial refresh/sweep worker and
+            # sends sd_notify without filesystem I/O. The watchdog detects
+            # a stalled main loop; slow storage leaves the previous snapshot
+            # available instead of forcing a restart.
             NotifyAccess = "main";
             WatchdogSec = "120s";
             NoNewPrivileges = true;

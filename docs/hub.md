@@ -199,6 +199,12 @@ Running the hub in the same manager reaches that socket, the operator-owned
 reports tree, and the action API without loosening a single permission. Nothing
 here needs a privileged port.
 
+The reducer runs refreshes and health sweeps serially on one worker. Its main
+loop supervises that worker and sends watchdog pings without doing filesystem
+I/O. Storage stalls leave the previous snapshot and its observation timestamp
+available. Worker exceptions still fail the service; the watchdog detects a
+stalled main loop and does not diagnose stalled storage or worker deadlocks.
+
 ## The shader page has no buttons
 
 `/shaders/` lists the screen-shader library in `dots/hypr/shaders`, describes
