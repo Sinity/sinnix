@@ -257,16 +257,16 @@ def _close_revision(run: Run, beads: Beads, bead_id: str) -> int:
             f"task is assigned to {assignee or 'nobody'}, not the run actor {run.actor}",
         )
     revision = current.get("bead_revision")
-    if not isinstance(revision, str) or not revision.isdecimal():
+    if not isinstance(revision, str) or re.fullmatch(r"-?[0-9]+", revision) is None:
         raise ClosureRefusal(
             "revision_unusable",
             "current owner revision is not an exact decimal integer",
         )
     expected_version = int(revision, 10)
-    if not 0 <= expected_version < 2**64:
+    if not -(2**63) <= expected_version < 2**63:
         raise ClosureRefusal(
             "revision_unusable",
-            "current owner revision is outside the unsigned 64-bit range",
+            "current owner revision is outside the signed 64-bit range",
         )
     return expected_version
 

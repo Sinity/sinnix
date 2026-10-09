@@ -1124,8 +1124,11 @@ def test_owner_close_cas_refuses_a_revision_move_after_verdict(
     assert not harness.beads.closed
 
 
+@pytest.mark.parametrize(
+    "revision", [-(2**63), -8662698054174296873, 0, 7773497739344011640, 2**63 - 1]
+)
 def test_subprocess_close_sends_the_exact_owner_cas_revision(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, revision: int
 ) -> None:
     calls: list[dict[str, Any]] = []
 
@@ -1134,8 +1137,6 @@ def test_subprocess_close_sends_the_exact_owner_cas_revision(
         return subprocess.CompletedProcess(argv, 0, "{}", "")
 
     monkeypatch.setattr("agentctl.beads.subprocess.run", run)
-    revision = 7773497739344011640
-
     SubprocessBeads(tmp_path).close(
         "fx-solo", reason="verified", actor="codex", expected_version=revision
     )
@@ -1149,6 +1150,24 @@ def test_subprocess_close_sends_the_exact_owner_cas_revision(
             "reason": "verified",
         },
     }
+
+
+@pytest.mark.parametrize("revision", [-(2**63) - 1, 2**63, True, "42", 1.5])
+def test_subprocess_close_refuses_invalid_owner_revision(
+    tmp_path: Path, revision: Any
+) -> None:
+    with pytest.raises(BatchError, match="signed 64-bit"):
+        SubprocessBeads(tmp_path).close(
+            "fx-solo", reason="verified", actor="codex", expected_version=revision
+        )
+
+
+def test_landing_closes_with_negative_native_owner_revision(harness: Harness) -> None:
+    run = prepared_run(harness, "fx-solo")
+    harness.beads.beads["fx-solo"]["revision"] = -8662698054174296873
+    landed = harness.land(run["run_id"])
+    assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "closed"
+    assert harness.beads.closed[-1][3] == -8662698054174296873
 
 
 def test_versioned_worker_claim_never_becomes_observed_executor_fact(

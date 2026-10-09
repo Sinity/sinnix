@@ -56,8 +56,12 @@ class SubprocessBeads(SubprocessBdReader):
     def close(
         self, bead_id: str, *, reason: str, actor: str, expected_version: int
     ) -> None:
-        if isinstance(expected_version, bool) or not 0 <= expected_version < 2**64:
-            raise BatchError("owner close revision is not an unsigned 64-bit integer")
+        if (
+            not isinstance(expected_version, int)
+            or isinstance(expected_version, bool)
+            or not -(2**63) <= expected_version < 2**63
+        ):
+            raise BatchError("owner close revision is not a signed 64-bit integer")
         request = {
             "path": {"id": bead_id},
             "body": {
