@@ -22,6 +22,7 @@
 # completes.
 
 set -euo pipefail
+umask 077
 
 DEST=${YTDLP_CLIP_DIR:-/realm/inbox/download}
 LOG_DIR=${YTDLP_CLIP_LOG_DIR:-/realm/state/ytdlp-clip-watch}

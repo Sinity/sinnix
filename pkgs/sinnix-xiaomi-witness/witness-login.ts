@@ -17,6 +17,8 @@
 
 import { MiHealthClient, XiaomiAuth } from "./upstream/src/xiaomi/client.ts";
 
+process.umask(0o077);
+
 const STATE_DIR = process.env.XIAOMI_WITNESS_STATE ?? "/realm/state/xiaomi-witness";
 const BASE = process.env.MI_HEALTH_BASE ?? "https://de.hlth.io.mi.com";
 const TOKEN_PATH = `${STATE_DIR}/auth-token.json`;

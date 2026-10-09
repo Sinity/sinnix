@@ -16,9 +16,14 @@
             sinnix.services.capture-mpris.enable = true;
             sinnix.services.capture-audio.enable = true;
             sinnix.services.capture-netflow.enable = true;
+            sinnix.services.xiaomi-witness.enable = true;
           }
         ];
         assertions = config: [
+          {
+            assertion = config.systemd.user.services.sinnix-xiaomi-witness.serviceConfig.UMask == "0077";
+            message = "Health witness writers must create owner-only output.";
+          }
           {
             assertion = config.systemd.services.sinnix-capture-netflow.serviceConfig.UMask == "0077";
             message = "System capture writers must create owner-only output.";
@@ -49,6 +54,7 @@
                   config.sinnix.paths.capturePaths.audio-topology
                   config.sinnix.paths.capturePaths.audio-index
                   "${config.sinnix.paths.machineRoot}/netflow"
+                  "/realm/health/xiaomi-cloud"
                 ];
             message = "Private capture entrances must be owner-only.";
           }

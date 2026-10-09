@@ -53,6 +53,8 @@
 
 import { MiHealthClient, XiaomiAuth } from "./upstream/src/xiaomi/client.ts";
 
+process.umask(0o077);
+
 const STATE_DIR = process.env.XIAOMI_WITNESS_STATE ?? "/realm/state/xiaomi-witness";
 // The service passes both of these; the defaults are for running this file by
 // hand and deliberately name the same places the module does.

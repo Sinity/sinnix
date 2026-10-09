@@ -70,6 +70,7 @@ mkServiceModule {
     {
       description = "Xiaomi cloud health witness sync pass";
       manager = "user";
+      serviceConfig.UMask = "0077";
       execStart = lib.getExe scriptPkgs.sinnix-xiaomi-witness;
       # The module declares this lane to the runtime inventory and creates
       # its directory, so it must also be what the writer uses. It was
@@ -93,7 +94,7 @@ mkServiceModule {
     # Xiaomi account credential.
     systemd.tmpfiles.rules = [
       "d ${stateDir} 0700 sinity users -"
-      "d ${laneDir} 0755 sinity users -"
+      "d ${laneDir} 0700 sinity users -"
     ];
   };
 } args
