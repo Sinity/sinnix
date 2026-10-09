@@ -8,6 +8,8 @@ from typing import Any, Literal
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, RootModel
 from pydantic.experimental.missing_sentinel import MISSING
 
+from .revisions import VersionToken
+
 
 class Path(BaseModel):
     model_config = ConfigDict(
@@ -288,7 +290,7 @@ class CloseIssueRequest(BaseModel):
         min_length=1,
         pattern='^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$',
     )
-    expected_version: int | MISSING = Field(
+    expected_version: VersionToken | MISSING = Field(
         MISSING,
         description='Requires the row\'s revision to equal this value BEFORE the close. A miss refuses the whole request with `409 precondition_failed` and writes nothing — `UpdateIssueRequest.expected_version`\'s contract, on the operation that closes one row.\n\nIT IS CHECKED BEFORE THE IDEMPOTENT RE-CLOSE, which is the one place this guard differs from the update\'s. A re-close of a row somebody else has moved since the caller read it is a `409` and not the 200-with-`already_closed` the same body earns without a guard: a replay whose premise has expired is a refusal the caller wants to see, and it is the only way `already_closed` can be trusted as "nothing has happened here since".\n\nThe token is the `revision` this operation\'s own response carries. Compose the next expectation from the value a write ANSWERED with, never from a number the client incremented itself: the token is OPAQUE and compared for equality alone, so it has no predecessor a client can compute. A first guarded close seeds itself from `GET /v0/beads/issues/{id}`\'s `revision` — the read that sources a guard — or, for a chain already mid-flight, from an unguarded lifecycle write or `POST /v0/beads/issues:batchApply`\'s `ApplyItemResult.revision`.\n\nDECODE IT AS A 64-BIT INTEGER, for the reason `UpdateIssueRequest.expected_version` spells out: an IEEE-754-double parser corrupts it silently, and the corruption only surfaces as a `precondition_failed` on the NEXT request.',
     )
@@ -697,7 +699,7 @@ class ReopenIssueRequest(BaseModel):
         min_length=1,
         pattern='^[^\\u0000-\\u001F\\u007F-\\u009F\\u2028\\u2029]+$',
     )
-    expected_version: int | MISSING = Field(
+    expected_version: VersionToken | MISSING = Field(
         MISSING,
         description='Requires the row\'s revision to equal this value BEFORE the reopen. A miss refuses the whole request with `409 precondition_failed` and writes nothing — `CloseIssueRequest.expected_version`\'s contract, on the close\'s mirror.\n\nIT IS CHECKED BEFORE THE NON-DONE NO-OP, the mirror of the close\'s check-before-the-idempotent-re-close, and for the same reason: a reopen of a row somebody else has moved is a `409` rather than the 200-with-`already_open` the same body earns unguarded, which is what lets `already_open` be read as "nothing has happened here since".\n\nThe token is the `revision` this operation\'s own response carries; compose the next expectation from a value a write ANSWERED with and never from one the client computed. DECODE IT AS A 64-BIT INTEGER, for the reason `UpdateIssueRequest.expected_version` spells out.',
     )
@@ -743,7 +745,7 @@ class ApplyCloseItem(BaseModel):
     model_config = ConfigDict(
         extra='forbid',
     )
-    expected_version: int | MISSING = Field(
+    expected_version: VersionToken | MISSING = Field(
         MISSING,
         description="Requires the row's `revision` to equal this value, evaluated as-modified and checked before the idempotent close. A miss refuses the whole request with `409 precondition_failed`, and `ApplyUpdateItem.expected_version`'s already-written rule applies here identically.\n\nTHERE IS DELIBERATELY NO `expected_status` HERE. A close is idempotent — re-closing a closed issue is `changed: false` — so a guard spelled to refuse an already-closed row is asking for a REFUSAL where this verb answers with a no-op. That belongs on an `update` item whose `patch.status` crosses into the done category.\n\nDECODE IT AS A 64-BIT INTEGER, on `ApplyUpdateItem.expected_version`'s terms, including its note that a corrupted token here costs the whole plan.",
     )
@@ -983,7 +985,7 @@ class ApplyUpdateItem(BaseModel):
         description="Requires the issue's status to equal this value, evaluated AS-MODIFIED — against the row as this request has already changed it at this item's position. A miss refuses the whole request with `409 precondition_failed`.",
         max_length=255,
     )
-    expected_version: int | MISSING = Field(
+    expected_version: VersionToken | MISSING = Field(
         MISSING,
         description="Requires the row's `revision` to equal this value before the patch. A miss refuses the WHOLE request with `409 precondition_failed`.\n\nIT IS A `400`, NOT A `409`, ON A ROW THIS REQUEST HAS ALREADY WRITTEN — including one an earlier item created. The token is minted by the write, so mid-request there is no value a caller could send: the pre-request token is stale by construction and a row this request just created never had one the caller could read. Refusing statically says so; answering with a mismatch would send the caller looking for a concurrent writer that does not exist.\n\n`expected_status` and `expected_assignee` carry no such rule, because a caller CAN know what its own earlier item set them to.\n\nDECODE IT AS A 64-BIT INTEGER, for the reason `UpdateIssueRequest.expected_version` spells out. It bites harder here than anywhere else on the surface: a corrupted token refuses the WHOLE plan rather than one write, so a client with a lossy parser loses every item of every batch it guards.",
     )
@@ -1322,7 +1324,7 @@ class UpdateIssueRequest(BaseModel):
         description="Requires the issue's status to equal this value before the patch. A miss refuses the whole request with `409 precondition_failed`.\n\nUnlike `expected_version` this one is readable: `Issue.status` is on every read of this surface, so a caller can guard a status transition without any token at all.",
         max_length=255,
     )
-    expected_version: int | MISSING = Field(
+    expected_version: VersionToken | MISSING = Field(
         MISSING,
         description="Requires the row's revision to equal this value before the patch. A miss refuses the WHOLE request with `409 precondition_failed` and writes nothing — `ApplyUpdateItem.expected_version`'s contract, on the operation that patches one row.\n\nThe token is the `revision` this operation's own response carries, and the same one `GET /v0/beads/issues/{id}` publishes — which is where a first guarded write seeds itself, rather than from an unguarded one or from `POST /v0/beads/issues:batchApply`'s `ApplyItemResult.revision`. Compose the next expectation from the value the write ANSWERED with, never from a number the client incremented itself: the token is OPAQUE and compared for equality alone, so it has no predecessor a client can compute.\n\nDECODE IT AS A 64-BIT INTEGER. Live tokens run past 5e17, where an IEEE-754 double's ulp is already 64, so a parser that decodes JSON numbers as doubles — JavaScript's `JSON.parse`, Go's `any`, Python's `float` — hands back a value NEAR the token that is not it, and the guard is refused against a row nothing else touched.",
     )

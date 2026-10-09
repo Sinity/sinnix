@@ -154,7 +154,7 @@ def test_row_revisions_round_trip_exactly_as_strings(tmp_path):
     ]
     assert {"type": "string", "pattern": "^-?[0-9]{1,20}$"} in field["anyOf"]
 
-    for token in (negative, positive):
+    for token in (negative, positive, -(2**63), 2**63 - 1, 0):
         response = call(
             server,
             "beads.update",
@@ -249,7 +249,7 @@ def test_authored_revision_metadata_keeps_its_json_types(tmp_path):
 
 def test_changeset_string_guards_reach_owner_exactly(tmp_path):
     server, log = server_fixture(tmp_path)
-    for token in (9007199254740993, -9007199254740993):
+    for token in (9007199254740993, -9007199254740993, -(2**63), 2**63 - 1, 0):
         response = call(server, "beads.changeset", {
             "project": {"project": "fixture"},
             "idempotency_key": f"batch-guard-{token}",
@@ -270,20 +270,22 @@ def test_malformed_string_guards_refuse_before_owner_call(tmp_path):
     server, log = server_fixture(tmp_path)
     log.touch(exist_ok=True)
     before = len(commands(log))
-    requests = [
-        ("beads.update", {"actor": "fixture-operator", "expected_version": "not-a-token",
-                          "patch": {"notes": "must not write"}}),
-        ("beads.changeset", {"actor": "fixture-operator", "items": [{
-            "kind": "update", "update": {"target": {"id": "fixture-1"},
-                "expected_version": "not-a-token", "patch": {"notes": "must not write"}},
-        }]}),
-    ]
-    for action, body in requests:
-        request = {"project": {"project": "fixture"}, "idempotency_key": action,
-                   "body": body}
-        if action == "beads.update":
-            request["path"] = {"id": "fixture-1"}
-        response = call(server, action, request)
-        assert response["result"]["outcome"] != "ok", response
-        assert response["error"]["code"] == "invalid_request", response
+    for value in ("not-a-token", "1.0", "+7", "", "9223372036854775808",
+                  "-9223372036854775809", 9223372036854775808, True, 1.0):
+        requests = [
+            ("beads.update", {"actor": "fixture-operator", "expected_version": value,
+                              "patch": {"notes": "must not write"}}),
+            ("beads.changeset", {"actor": "fixture-operator", "items": [{
+                "kind": "update", "update": {"target": {"id": "fixture-1"},
+                    "expected_version": value, "patch": {"notes": "must not write"}},
+            }]}),
+        ]
+        for action, body in requests:
+            request = {"project": {"project": "fixture"}, "idempotency_key": action,
+                       "body": body}
+            if action == "beads.update":
+                request["path"] = {"id": "fixture-1"}
+            response = call(server, action, request)
+            assert response["result"]["outcome"] != "ok", response
+            assert response["error"]["code"] == "invalid_request", response
     assert len(commands(log)) == before

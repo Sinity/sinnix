@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 5b3a3a5d7402a5fcb582361f54c90fca8b3fbbccd1aee2cff28ba49e8d16fd4a -->
+<!-- gateway-catalog-sha256: b7e96f9af896e5475214f93971aeb7b952a9f01780a8f2f8facd196c42b23db8 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `5b3a3a5d7402a5fcb582361f54c90fca8b3fbbccd1aee2cff28ba49e8d16fd4a`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `b7e96f9af896e5475214f93971aeb7b952a9f01780a8f2f8facd196c42b23db8`.
 
 ## Invocation
 
@@ -6420,6 +6420,8 @@ Input schema:
               "type": "string"
             },
             {
+              "maximum": 9223372036854775807,
+              "minimum": -9223372036854775808,
               "type": "integer"
             }
           ],
@@ -6840,6 +6842,8 @@ Input schema:
               "type": "string"
             },
             {
+              "maximum": 9223372036854775807,
+              "minimum": -9223372036854775808,
               "type": "integer"
             }
           ],
@@ -8123,6 +8127,8 @@ Input schema:
               "type": "string"
             },
             {
+              "maximum": 9223372036854775807,
+              "minimum": -9223372036854775808,
               "type": "integer"
             }
           ],
@@ -11200,6 +11206,8 @@ Input schema:
               "type": "string"
             },
             {
+              "maximum": 9223372036854775807,
+              "minimum": -9223372036854775808,
               "type": "integer"
             }
           ],
@@ -11633,6 +11641,8 @@ Input schema:
               "type": "string"
             },
             {
+              "maximum": 9223372036854775807,
+              "minimum": -9223372036854775808,
               "type": "integer"
             }
           ],
