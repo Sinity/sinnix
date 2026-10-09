@@ -48,10 +48,11 @@
             # input feeds CUDA-narrowed AI packages (flake/overlay/package/local-ai.nix)
             # whose derivation hash breaks on any nixpkgs rev change, forcing an
             # hours-long recompile. Bump it deliberately: `update nixpkgs-ai`.
-            mapfile -t _routine_inputs < <(
+            _routine_input_lines=$(
               ${nix} flake metadata --json \
-                | ${pkgs.jq}/bin/jq -r '.locks.nodes.root.inputs | keys[] | select(. != "nixpkgs-ai")'
+                | ${pkgs.jq}/bin/jq -er '.locks.nodes.root.inputs | if type != "object" then error("invalid flake inputs") else keys | map(select(. != "nixpkgs-ai")) | if length == 0 then error("no routine inputs") else .[] end end'
             )
+            mapfile -t _routine_inputs <<< "$_routine_input_lines"
             exec ${nix} flake update "''${_routine_inputs[@]}"
           '';
           diff-closure = pkgs.writeShellScriptBin "diff-closure" ''

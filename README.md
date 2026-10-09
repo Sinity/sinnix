@@ -10,7 +10,7 @@ how one daily-use environment can remain reproducible while still accounting
 for hardware-specific behavior, private state, heavy development workloads,
 local data systems, and frequent operational changes.
 
-[Project overview](https://sinity.github.io/sinnix/) | [Roadmap and operating record](https://sinity.github.io/sinnix/beads/)
+[Subsystem documentation](docs/)
 
 ## What the repository manages
 
@@ -182,8 +182,6 @@ AgentCTL project operation; `switch` remains the supported activation command.
 - [Agent gateway](docs/agent-gateway.md)
 - [Agent environment reference](docs/agent-environment.md)
 - [Headless replica bootstrap](docs/ethereal-bootstrap.md)
-- [Project overview](https://sinity.github.io/sinnix/)
-- [Roadmap and operating record](https://sinity.github.io/sinnix/beads/)
 
 Editing and publication rules live in [AGENTS.md](AGENTS.md).
 
