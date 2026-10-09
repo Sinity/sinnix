@@ -23,6 +23,20 @@ let
   ) rawRegistry;
 
   rawRegistry = {
+    rea = {
+      description = "Local firmware extraction and native binary analysis with Ghidra";
+      transport = "stdio";
+      tier = "binary-analysis";
+      command = "rea";
+      args = [ "mcp" ];
+      clients = [
+        "claude"
+        "codex"
+        "gemini"
+        "hermes"
+      ];
+      codex.startup_timeout_sec = 30;
+    };
     context7 = {
       description = "Current third-party library and API documentation, resolved by library id";
       transport = "http";
@@ -210,6 +224,7 @@ let
       "deep-evidence"
     ];
     full = [
+      "binary-analysis"
       "remote-core"
       "recall"
       "deep-evidence"

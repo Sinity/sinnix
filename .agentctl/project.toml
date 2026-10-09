@@ -65,6 +65,29 @@ pool = "bulk"
 result = "exit"
 timeout_seconds = 1800
 
+[operations.reverse_engineering_verify]
+description = "Verify firmware extraction and Ghidra decompilation on synthetic inputs"
+exec = ["nix", "develop", ".#reverse-engineering", "--command", "python3", "flake/tests/reverse-engineering.py"]
+pool = "bulk"
+result = "exit"
+timeout_seconds = 900
+
+[operations.firmware_analysis]
+description = "Run an explicit REA firmware or native analysis command"
+exec = ["nix", "run", ".#rea", "--"]
+arguments = "required"
+pool = "bulk"
+result = "exit"
+timeout_seconds = 1800
+
+[operations.ghidra_analysis]
+description = "Run Ghidra headless with explicit project and loader arguments"
+exec = ["nix", "develop", ".#reverse-engineering", "--command", "ghidra-analyzeHeadless"]
+arguments = "required"
+pool = "bulk"
+result = "exit"
+timeout_seconds = 1800
+
 [operations.pytest_focused]
 description = "Run selected AgentCTL and gateway Python tests"
 exec = ["nix", "develop", ".#gateway-tests", "--command", "gateway-pytest", "-q"]

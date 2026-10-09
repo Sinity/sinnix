@@ -12,6 +12,7 @@
     { lib, sinnixScriptRegistry, ... }:
     let
       publicPackageNames = [
+        "rea"
         "beads"
         "ccusage"
         "lynchpin-cli"

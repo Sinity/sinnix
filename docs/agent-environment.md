@@ -16,18 +16,18 @@ Servers: context7, github, sinex.
 
 ### codex-local (codex)
 
-Tiers: remote-core, recall, deep-evidence.
-Servers: context7, github, lynchpin, sinex.
+Tiers: binary-analysis, remote-core, recall, deep-evidence.
+Servers: context7, github, lynchpin, rea, sinex.
 
 ### codex-deepseek (codex)
 
-Tiers: remote-core, recall, deep-evidence.
-Servers: context7, github, lynchpin, sinex.
+Tiers: binary-analysis, remote-core, recall, deep-evidence.
+Servers: context7, github, lynchpin, rea, sinex.
 
 ### gemini (gemini)
 
-Tiers: remote-core, recall, deep-evidence.
-Servers: context7, github, lynchpin, sinex.
+Tiers: binary-analysis, remote-core, recall, deep-evidence.
+Servers: context7, github, lynchpin, rea, sinex.
 
 ### antigravity (antigravity)
 
@@ -74,6 +74,7 @@ Servers: context7, github, lynchpin, sinex.
 | `github` | `remote-core` | `stdio` | `npx` | claude, codex, gemini, antigravity, hermes |
 | `lynchpin` | `deep-evidence` | `stdio` | `mcp-lynchpin` | codex, claude, gemini, antigravity, hermes |
 | `polylogue` | `recall` | `stdio` | `mcp-polylogue` |  |
+| `rea` | `binary-analysis` | `stdio` | `rea` | claude, codex, gemini, hermes |
 | `sinex` | `recall` | `stdio` | `mcp-sinex` | codex, claude, gemini, antigravity, hermes |
 
 ## Agent definitions
@@ -114,6 +115,7 @@ Servers: context7, github, lynchpin, sinex.
 | `prompting` | Write, rewrite, or diagnose prompts — dispatch packets for subagents, handoffs to external or browser models, prompt portfolios, reusable agent definitions and templates, or enhancing the user's rough request. |
 | `quest-hmd-control` | Control and verify a Meta Quest HMD through ADB, app intents, media forwarding, and immersive-session evidence. Use for Quest setup, pairing, streaming, capture, or headset UI beyond ordinary Android automation. |
 | `rank-options` | Order several generated options by real operator preference — brainstorm shortlists, design alternatives, candidate plans — with a few pairwise comparisons, a fitted order, and a resumable domain. |
+| `reverse-engineering` | Analyze firmware, updater packages, native binaries, encryption routines, and undocumented device protocols with REA, Ghidra, Binwalk, and Unblob on NixOS. |
 | `sinex` | Work on Sinex capture, provenance, schemas, sources, automata, xtask, AgentCTL operations, database-backed verification, replay, deployment, or wipe-campaign decisions. |
 | `sinnix` | Work on Sinnix NixOS configuration, modules, scripts, dotfiles, agentctl, the agent gateway, rebuilds, activation, or live workstation verification. |
 | `skill-authoring` | Create, restructure, validate, or retire a shared agent skill — routing description, SKILL.md layout, references, the validator, and routing probes. |

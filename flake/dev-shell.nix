@@ -194,5 +194,13 @@
       };
 
       devShells.gateway-tests = gatewayTestShell;
+      devShells.reverse-engineering = pkgs.mkShell {
+        name = "sinnix-reverse-engineering";
+        packages = [
+          scriptPkgs.rea
+          pkgs.ghidra
+          pkgs.python3
+        ];
+      };
     };
 }

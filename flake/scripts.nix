@@ -229,6 +229,57 @@ let
   polylogueSrc = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
   externalPackages = rec {
+    # recheck: when unblob's fs dependency supports Python 3.14 and setuptools 82.
+    firmware-unblob =
+      (pkgs.unblob.override {
+        # recheck: when partclone builds against the pinned nilfs-utils headers.
+        # Unblob uses partclone.info/restore, not its NILFS filesystem copier.
+        partclone = pkgs.partclone.overrideAttrs (old: {
+          configureFlags = lib.remove "--enable-nilfs2" old.configureFlags;
+        });
+        python3 = pkgs.python313.override {
+          packageOverrides = final: prev: {
+            fs = prev.fs.override { setuptools = final.setuptools_80; };
+          };
+        };
+      }).overrideAttrs
+        (old: {
+          # recheck: when sandboxed Btrfs-stream replay can rename across directories.
+          # The current kernel returns EXDEV under Landlock. Keep sandboxing enabled
+          # and declare this format unverified rather than weakening containment.
+          disabledTests = (old.disabledTests or [ ]) ++ [
+            "test_all_handlers[filesystem.btrfs_stream]"
+          ];
+        });
+    rea =
+      (mkNodeCliPackage {
+        pname = "rea";
+        version = "6.2.0";
+        src = ./npm/rea;
+        packagePath = "rea-agents";
+        entrypoint = "scripts/rea.mjs";
+        npmDepsHash = "sha256-kfA9cOa54MH9CbLYJITTbs+ajjusCYPEs9yT6F9U38k=";
+      }).overrideAttrs
+        (old: {
+          nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.autoPatchelfHook ];
+          buildInputs = (old.buildInputs or [ ]) ++ [ (lib.getLib pkgs.stdenv.cc.cc) ];
+          postFixup = ''
+            wrapProgram "$out/bin/rea" \
+              --set GHIDRA_INSTALL_DIR ${pkgs.ghidra}/lib/ghidra \
+              --set JAVA_HOME ${pkgs.openjdk21} \
+              --set REA_BINWALK_COMMAND ${pkgs.binwalk}/bin/binwalk \
+              --set REA_UNBLOB_COMMAND ${firmware-unblob}/bin/unblob \
+              --set REA_FIRMWARE_PRLIMIT_COMMAND ${pkgs.util-linux}/bin/prlimit \
+              --prefix PATH : ${
+                lib.makeBinPath [
+                  pkgs.python3
+                  pkgs.openjdk21
+                  pkgs.util-linux
+                ]
+              }
+          '';
+        });
+
     # bd needs the dolt binary on PATH for sql-server mode (per-project server,
     # auto-started on demand). Embedded mode serializes every invocation on a
     # process-exclusive lock — under multi-agent fanouts that convoys for
