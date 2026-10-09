@@ -351,7 +351,10 @@ let
     ${borgStaleLockRecovery}
   '';
 
-  snapshotCoverage = "${pkgs.python3}/bin/python3 ${./lib/backup/snapshot-coverage.py}";
+  # Full verification indexes millions of paths on disk. System services do
+  # not inherit the workstation session's TMPDIR; keep disposable inventory
+  # and SQLite sort files on the declared Realm scratch filesystem.
+  snapshotCoverage = "${pkgs.coreutils}/bin/env TMPDIR=\"\${TMPDIR:-${realmRoot}/tmp/work}\" ${pkgs.python3}/bin/python3 ${./lib/backup/snapshot-coverage.py}";
 
   mkCoveragePolicy =
     {

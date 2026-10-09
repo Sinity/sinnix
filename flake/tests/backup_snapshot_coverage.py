@@ -9,16 +9,19 @@ import os
 import re
 import resource
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
+import tracemalloc
 import unittest
 import uuid
 from contextlib import redirect_stdout
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
+from types import SimpleNamespace
 
 PARSER = argparse.ArgumentParser()
 PARSER.add_argument("--verifier", required=True)
@@ -27,6 +30,77 @@ ARGS = PARSER.parse_args()
 SPEC = importlib.util.spec_from_file_location("coverage", ARGS.verifier)
 COVERAGE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(COVERAGE)
+
+
+class CoverageMemoryFixture(unittest.TestCase):
+    def test_streamed_large_inventory_stays_below_memory_budget(self):
+        # Exercise verify's actual walk, metadata and content passes without
+        # creating tens of thousands of real files or hashing private data.
+        directory_count, files_per_directory = 100, 300
+        empty_hash = __import__("hashlib").sha256(b"").hexdigest()
+        real_path = Path
+
+        class VirtualPath:
+            def __init__(self, relative="."):
+                self.relative = relative
+
+            @property
+            def name(self):
+                return self.relative.rsplit("/", 1)[-1]
+
+            def __truediv__(self, path):
+                return VirtualPath(str(path))
+
+            def __lt__(self, other):
+                return self.relative < other.relative
+
+            def lstat(self):
+                directory = "/" not in self.relative
+                return SimpleNamespace(
+                    st_mode=(0o40700 if directory else 0o100600),
+                    st_uid=1000, st_gid=1000, st_mtime_ns=0, st_size=0,
+                    st_ino=2**63 + 123, st_dev=2**63 + 456, st_rdev=0,
+                )
+
+            def iterdir(self):
+                if self.relative == ".":
+                    return (VirtualPath(f"dir-{i:03d}") for i in range(directory_count))
+                return (VirtualPath(f"{self.relative}/file-{i:03d}-" + "x" * 100)
+                        for i in range(files_per_directory))
+
+            def open(self, mode):
+                return io.BytesIO(b"")
+
+        def paths():
+            yield VirtualPath()
+            for directory in VirtualPath().iterdir():
+                yield directory
+                yield from directory.iterdir()
+
+        def items(command, parser):
+            metadata = "dump-archive" in command
+            for path in paths():
+                st = path.lstat()
+                if metadata:
+                    yield dict(path=path.relative, mode=st.st_mode, uid=st.st_uid,
+                               gid=st.st_gid, mtime=st.st_mtime_ns, size=0)
+                elif "/" in path.relative:
+                    yield dict(path=path.relative, healthy=True, size=0, sha256=empty_hash)
+
+        with patch.object(COVERAGE, "Path", new=lambda path:
+                          VirtualPath() if path == "synthetic-source" else real_path(path)), \
+             patch.object(COVERAGE, "command_items", new=items), \
+             patch.object(COVERAGE.os, "listxattr", new=lambda path, **kw: []):
+            tracemalloc.start()
+            try:
+                result = COVERAGE.verify("synthetic-source", "synthetic-archive", [])
+                _, peak = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+        self.assertEqual(result["canonical_entries"], 30101)
+        self.assertEqual(result["source_hashed_bytes"], 0)
+        print(f"streamed coverage Python peak: {peak} bytes for 30101 entries")
+        self.assertLess(peak, 8 * 1024 * 1024)
 
 
 class CoverageFixture(unittest.TestCase):
@@ -164,6 +238,38 @@ class CoverageFixture(unittest.TestCase):
         self.assertTrue(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 6, 25)))
         self.assertFalse(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 6, 26)))
         self.assertFalse(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 7, 5)))
+
+    def test_inventory_failure_cleans_private_scratch(self):
+        real_temp = tempfile.TemporaryDirectory
+        created = []
+
+        def scratch(**kwargs):
+            temp = real_temp(dir=self.root, **kwargs)
+            created.append(Path(temp.name))
+            self.assertEqual(Path(temp.name).stat().st_mode & 0o777, 0o700)
+            return temp
+
+        with patch.object(COVERAGE.tempfile, "TemporaryDirectory", new=scratch), \
+             patch.object(COVERAGE.CoverageInventory, "add",
+                          side_effect=sqlite3.OperationalError("database or disk is full")):
+            with self.assertRaisesRegex(sqlite3.OperationalError, "disk is full"):
+                COVERAGE.verify(self.source, "unused", [])
+        self.assertEqual(len(created), 1)
+        self.assertFalse(created[0].exists())
+
+    def test_duplicate_metadata_cannot_satisfy_coverage(self):
+        self.archive()
+        original = COVERAGE.command_items
+
+        def duplicate(command, parser):
+            for item in original(command, parser):
+                yield item
+                if "dump-archive" in command:
+                    yield item
+
+        with patch.object(COVERAGE, "command_items", new=duplicate):
+            with self.assertRaisesRegex(ValueError, "duplicate archive path"):
+                COVERAGE.verify(self.source, "snapshot", [])
 
     def test_exact_versions_and_metadata(self):
         os.link(self.source / "same-name", self.source / "hardlink")

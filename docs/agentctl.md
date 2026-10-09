@@ -251,21 +251,27 @@ cancellations use their gateway principal label and pass the supplied
 reason to the same owner route. Managed cancellation refuses if it cannot retain
 the requester evidence.
 
-`agentctl-backpressure.timer` runs `agentctl backpressure tick`: it pauses one
-eligible group per minute while known host `full` IO or memory stall stays
-above threshold and resumes only an agentctl-owned pause once its closing
-signal is known to have cleared. Unavailable or malformed PSI never reads as
-zero and cannot reopen a pause. The spool projection uses an inode/offset
-checkpoint, rebuilding from current history after checkpoint loss and
-retaining ownership across spool rotation or truncation.
-The heavy pool closes before other test and bulk pools under IO or memory
-pressure. The bounded `pytest` and `pytest-quick` pools remain admissible
-under IO pressure; memory pressure can still close them. Pausing admission
-leaves running tasks active.
-Every pause event carries `"owner": "agentctl"` and
-the group, and a group is resumed only when its most recent pause event in
-the spool is agentctl's own: an operator's `pueue pause -g <group>` stays
-paused.
+`agentctl-backpressure.timer` runs `agentctl backpressure tick` once per
+minute. A host-wide `full avg60` IO or memory stall of at least 25% closes
+one eligible group per tick. IO closes `pytest-heavy`, then `pytest`, then
+`bulk`; memory also closes `normal` and `pytest-quick`. Running jobs continue.
+An agentctl-owned pause can reopen when both resources are known and their
+`full avg10` values are below 10% (falling back to `avg60` if `avg10` is
+unavailable). One group reopens per tick. Unavailable or malformed PSI cannot
+reopen a pause.
+
+The signal includes background services and stalls caused by their resource
+limits. A hold indicates the admission rule fired; it does not establish that
+the desktop is unresponsive or that the waiting job caused the load. The IO
+threshold remains provisional: its original load sample used `avg10`, while
+admission uses `avg60`.
+
+Every pause event carries `"owner": "agentctl"`. The spool projection uses an
+inode/offset checkpoint, rebuilding from current history after checkpoint
+loss and retaining ownership across rotation or truncation. An operator pause
+observed before automation is preserved. Reasserting an operator pause on an
+already automation-paused group has no distinguishable native state change;
+ownership tracking cannot infer that intent.
 
 ## Worktrees
 
@@ -925,9 +931,9 @@ evidence declares `checkout = "candidate"`.
 | `prompts.MAX_PROMPT_BYTES` (200,000)                         | arbitrary bound                                                           | cap on a compiled prompt                                                            |
 | `prompts.MAX_SUBJECT_LENGTH` (72)                            | repository commit convention                                              | cap on a PR subject                                                                 |
 | `prompts.RESULT_TEXT_CHARS` (200)                            | arbitrary bound                                                           | characters of a criterion's text a landing agent sees                               |
-| `backpressure.IO_FULL_FREEZE` (25%)                          | measurement (io full avg10 reached 76% under eight normal-pool jobs)      | the IO stall that freezes a group                                                   |
-| `backpressure.MEMORY_FULL_FREEZE` (25%)                      | half of systemd-oomd's kill threshold                                     | the memory stall that freezes a group                                               |
-| `backpressure.RESUME_BELOW` (10%)                            | arbitrary bound                                                           | both stalls must fall below this before a group thaws                               |
+| `backpressure.IO_FULL_FREEZE` (25%)                          | provisional bound (original load sample used avg10)      | global IO full avg60 that closes admission                                                   |
+| `backpressure.MEMORY_FULL_FREEZE` (25%)                      | half of systemd-oomd's kill threshold                                     | global memory full avg60 that closes admission                                               |
+| `backpressure.RESUME_BELOW` (10%)                            | arbitrary bound                                                           | full avg10 recovery bound (avg60 fallback)                               |
 | `operator_view.MAX_READY_SHOWN` (8) / `MAX_FAILED_SHOWN` (6) | arbitrary bound                                                           | rows the screen shows                                                               |
 
 ## Host wiring

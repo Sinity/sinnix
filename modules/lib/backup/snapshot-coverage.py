@@ -31,14 +31,16 @@ import json
 import os
 import re
 import stat
+import sqlite3
 import struct
 import subprocess
 import sys
+import tempfile
 import time
-from collections import Counter
 from datetime import datetime
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 
 SNAPSHOT_NAME = re.compile(r"^[^.]+\.(\d{8}T\d{6}[+-]\d{4})$")
 FULL_PROOF_INTERVAL = 7 * 24 * 3600
@@ -702,9 +704,136 @@ CHROME_EXTENSION_CACHE = re.compile(
 )
 
 
+class CoverageInventory:
+    """Disposable disk index. Neither an archive nor a reusable coverage proof."""
+
+    def __init__(self, filename):
+        self.db = sqlite3.connect(filename)
+        # Losing this scratch index fails verification; it cannot publish a
+        # receipt. Avoid a second copy in the journal and bound SQLite's cache.
+        self.db.executescript("""
+            PRAGMA journal_mode=OFF;
+            PRAGMA synchronous=OFF;
+            PRAGMA cache_size=-8192;
+            PRAGMA mmap_size=0;
+            PRAGMA temp_store=FILE;
+            CREATE TABLE entries (
+                path BLOB PRIMARY KEY, metadata TEXT NOT NULL,
+                root BLOB NOT NULL, regular INTEGER NOT NULL,
+                seen INTEGER NOT NULL DEFAULT 0,
+                hashed INTEGER NOT NULL DEFAULT 0,
+                lossy BLOB, hardlink BLOB, hardlink_order INTEGER
+            ) WITHOUT ROWID;
+            CREATE INDEX lossy_paths ON entries(lossy) WHERE lossy IS NOT NULL;
+        """)
+        self.writes = 0
+        self.hardlink_order = 0
+
+    def execute(self, sql, args=()):
+        cursor = self.db.execute(sql, args)
+        self.writes += 1
+        if self.writes % 4096 == 0:
+            self.db.commit()
+        return cursor
+
+    def add(self, path, st):
+        fields = ("mode", "uid", "gid", "mtime_ns", "size", "ino", "dev", "rdev")
+        # JSON preserves unsigned inode/device values and nanoseconds exactly.
+        metadata = json.dumps({"st_" + k: getattr(st, "st_" + k) for k in fields})
+        lossy = lossy_borg_path(path)
+        self.execute(
+            "INSERT INTO entries(path, metadata, root, regular, lossy) VALUES(?,?,?,?,?)",
+            (os.fsencode(path), metadata,
+             os.fsencode("/".join(path.split("/", 2)[:2])),
+             int(stat.S_ISREG(st.st_mode)),
+             os.fsencode(lossy) if lossy != path else None),
+        )
+
+    def get(self, path):
+        row = self.db.execute(
+            "SELECT metadata FROM entries WHERE path=?", (os.fsencode(path),)
+        ).fetchone()
+        return SimpleNamespace(**json.loads(row[0])) if row else None
+
+    def mark_seen(self, path):
+        changed = self.execute(
+            "UPDATE entries SET seen=1 WHERE path=? AND seen=0", (os.fsencode(path),)
+        ).rowcount
+        if not changed:
+            raise ValueError(f"duplicate archive path: {path!r}")
+
+    def require_metadata(self):
+        count = self.db.execute("SELECT count(*) FROM entries WHERE seen=0").fetchone()[0]
+        if not count:
+            return
+        first = min(os.fsdecode(row[0]) for row in self.db.execute(
+            "SELECT path FROM entries WHERE seen=0"
+        ))
+        largest = self.db.execute(
+            "SELECT root,count(*) AS n FROM entries WHERE seen=0 "
+            "GROUP BY root ORDER BY n DESC,root LIMIT 8"
+        )
+        summary = ", ".join(f"{os.fsdecode(root)}={n}" for root, n in largest)
+        raise ValueError(
+            f"canonical content missing from archive: {first!r} "
+            f"({count} entries; largest roots: {summary})"
+        )
+
+    def resolve_lossy(self, path):
+        cursor = self.db.execute(
+            "SELECT path FROM entries WHERE lossy=?", (os.fsencode(path),)
+        )
+        candidates = [os.fsdecode(row[0]) for row in cursor.fetchmany(2)]
+        if len(candidates) > 1:
+            # The complete diagnostic is only allocated on a failing proof.
+            candidates.extend(os.fsdecode(row[0]) for row in cursor)
+            raise ValueError(
+                f"ambiguous archive path: {path!r} matches "
+                + ", ".join(repr(c) for c in sorted(candidates))
+            )
+        return candidates[0] if candidates else None
+
+    def mark_hashed(self, path):
+        self.execute("UPDATE entries SET hashed=1 WHERE path=?", (os.fsencode(path),))
+
+    def defer_hardlink(self, path, target):
+        # Preserve first appearance order, including duplicate list records.
+        self.execute(
+            "UPDATE entries SET hardlink=?,hardlink_order=coalesce(hardlink_order,?) "
+            "WHERE path=?", (os.fsencode(target), self.hardlink_order, os.fsencode(path))
+        )
+        self.hardlink_order += 1
+
+    def require_data(self):
+        for path, target in self.db.execute(
+            "SELECT path,hardlink FROM entries WHERE hardlink IS NOT NULL "
+            "ORDER BY hardlink_order"
+        ):
+            row = self.db.execute("SELECT hashed FROM entries WHERE path=?", (target,)).fetchone()
+            if not row or not row[0]:
+                raise ValueError(f"unverified hardlink data: {os.fsdecode(path)!r}")
+            self.mark_hashed(os.fsdecode(path))
+        if self.db.execute(
+            "SELECT 1 FROM entries WHERE regular=1 AND hashed=0 LIMIT 1"
+        ).fetchone():
+            raise ValueError("incomplete archive data verification")
+
+    def count(self):
+        return self.db.execute("SELECT count(*) FROM entries").fetchone()[0]
+
+
 def verify(source, archive, noncanonical, chrome_extension_caches=False):
+    with tempfile.TemporaryDirectory(prefix="borg-coverage-") as scratch:
+        inventory = CoverageInventory(Path(scratch) / "inventory.sqlite")
+        try:
+            return verify_inventory(source, archive, noncanonical,
+                                    chrome_extension_caches, inventory)
+        finally:
+            inventory.db.close()
+
+
+def verify_inventory(source, archive, noncanonical, chrome_extension_caches, expected):
     source = Path(source)
-    expected = {}
     ignored = set(noncanonical)
     omitted_roots = []
     unarchivable = []
@@ -732,7 +861,7 @@ def verify(source, archive, noncanonical, chrome_extension_caches=False):
         if is_unarchivable_type(st.st_mode):
             unarchivable.append(relative)
             return
-        expected[relative] = st
+        expected.add(relative, st)
         if stat.S_ISDIR(st.st_mode):
             # Btrfs snapshotting replaces a nested subvolume with inode 2.
             # Its absent live bytes are outside this snapshot's proof.
@@ -743,7 +872,6 @@ def verify(source, archive, noncanonical, chrome_extension_caches=False):
 
     walk(source, ".")
     nested_stub_paths = frozenset(nested_stubs)
-    seen = set()
     for item in command_items(
         ["borg", "debug", "dump-archive", "::" + archive, "/dev/stdout"],
         lambda stream: JsonStream(stream).items(),
@@ -755,15 +883,13 @@ def verify(source, archive, noncanonical, chrome_extension_caches=False):
         if "part" in item:
             continue
         path = archive_path(item)
-        if path not in expected:
+        st = expected.get(path)
+        if st is None:
             # Noncanonical material may be over-preserved by Borg.
             if any(path == p or path.startswith(p + "/") for p in omitted_roots):
                 continue
             raise ValueError(f"unexpected archive path: {path!r}")
-        if path in seen:
-            raise ValueError(f"duplicate archive path: {path!r}")
-        seen.add(path)
-        st = expected[path]
+        expected.mark_seen(path)
         actual_metadata = {
             "mode": st.st_mode,
             "uid": st.st_uid,
@@ -793,9 +919,9 @@ def verify(source, archive, noncanonical, chrome_extension_caches=False):
         elif stat.S_ISREG(st.st_mode):
             if "source" in item:
                 target = item["source"]
-                if target not in expected or (st.st_ino, st.st_dev) != (
-                    expected[target].st_ino,
-                    expected[target].st_dev,
+                target_st = expected.get(target)
+                if target_st is None or (st.st_ino, st.st_dev) != (
+                    target_st.st_ino, target_st.st_dev,
                 ):
                     raise ValueError(f"archive hardlink mismatch: {path!r}")
             elif item.get("size") != st.st_size:
@@ -813,27 +939,10 @@ def verify(source, archive, noncanonical, chrome_extension_caches=False):
                 raise ValueError(f"archive device mismatch: {path!r}")
         elif not stat.S_ISDIR(st.st_mode):
             raise ValueError(f"unsupported canonical file type: {path!r}")
-    missing = expected.keys() - seen
-    if missing:
-        groups = Counter("/".join(path.split("/", 2)[:2]) for path in missing)
-        largest = sorted(groups.items(), key=lambda group: (-group[1], group[0]))[:8]
-        summary = ", ".join(f"{root}={count}" for root, count in largest)
-        raise ValueError(
-            f"canonical content missing from archive: {min(missing)!r} "
-            f"({len(missing)} entries; largest roots: {summary})"
-        )
+    expected.require_metadata()
 
-    hashed = set()
-    hardlinks = {}
     digest = hashlib.sha256()
     hashed_bytes = 0
-    # Only names that Borg cannot spell need the fallback, so the index stays
-    # empty on an ordinary tree and an exact match always wins.
-    lossy_index = {}
-    for candidate in expected:
-        rendered = lossy_borg_path(candidate)
-        if rendered != candidate:
-            lossy_index.setdefault(rendered, []).append(candidate)
     for item in command_items(
         [
             "borg",
@@ -846,38 +955,29 @@ def verify(source, archive, noncanonical, chrome_extension_caches=False):
         lambda stream: (json.loads(line) for line in stream),
     ):
         path = archive_path(item)
-        if path not in expected:
-            candidates = lossy_index.get(path, ())
-            if len(candidates) > 1:
-                raise ValueError(
-                    f"ambiguous archive path: {path!r} matches "
-                    + ", ".join(repr(c) for c in sorted(candidates))
-                )
-            if not candidates:
+        st = expected.get(path)
+        if st is None:
+            path = expected.resolve_lossy(path)
+            if path is None:
                 continue
-            path = candidates[0]
-        if not stat.S_ISREG(expected[path].st_mode):
+            st = expected.get(path)
+        if not stat.S_ISREG(st.st_mode):
             continue
         if not item["healthy"]:
             raise ValueError(f"damaged archive file: {path!r}")
         if item.get("source"):
-            hardlinks[path] = item["source"]
+            expected.defer_hardlink(path, item["source"])
             continue
         with (source / path).open("rb") as stream:
             checksum = hashlib.file_digest(stream, "sha256").hexdigest()
-        if checksum != item["sha256"] or item["size"] != expected[path].st_size:
+        if checksum != item["sha256"] or item["size"] != st.st_size:
             raise ValueError(f"archive content mismatch: {path!r}")
-        hashed.add(path)
-        hashed_bytes += expected[path].st_size
+        expected.mark_hashed(path)
+        hashed_bytes += st.st_size
         digest.update(json.dumps([path, checksum], ensure_ascii=True).encode())
-    for path, target in hardlinks.items():
-        if target not in hashed:
-            raise ValueError(f"unverified hardlink data: {path!r}")
-        hashed.add(path)
-    if hashed != {p for p, st in expected.items() if stat.S_ISREG(st.st_mode)}:
-        raise ValueError("incomplete archive data verification")
+    expected.require_data()
     return {
-        "canonical_entries": len(expected),
+        "canonical_entries": expected.count(),
         "content_sha256": digest.hexdigest(),
         "source_hashed_bytes": hashed_bytes,
         "archive_content_verified_bytes": hashed_bytes,
