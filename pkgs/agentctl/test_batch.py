@@ -4452,6 +4452,37 @@ def test_abandon_refuses_unresolved_admission_without_releasing_claims(
     assert manifest.load(harness.config, run.run_id).live
 
 
+def test_cleanup_reloads_runs_after_waiting_for_concurrent_start(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_lock = manifest.project_locked
+    started: list[dict[str, Any]] = []
+
+    @contextmanager
+    def interleaved_lock(config: Config, project_id: str) -> Any:
+        # Interrupted admission has no queued task to protect the checkout;
+        # the live manifest remains its owner and must settle cleanup.
+        harness.pueue.fail_add = True
+        with pytest.raises(launch.EnqueueUncertain):
+            harness.start("fx-solo")
+        started.append(manifest.list_runs(harness.config)[0].to_dict())
+        with original_lock(config, project_id):
+            yield True
+
+    monkeypatch.setattr(landing_module, "project_locked", interleaved_lock)
+
+    cleaned = batch.clean(harness.config, harness.project)
+
+    assert cleaned["removed"] == []
+    assert harness.wt.removed == []
+    run = manifest.load(harness.config, started[0]["run_id"])
+    assert run.live
+    assert all(
+        harness.wt.trees[worker["branch"]].path == Path(worker["worktree"])
+        for worker in run.workers
+    )
+
+
 @pytest.mark.parametrize("first", ["prepare", "abandon"])
 def test_abandon_and_prepare_serialize_and_reload(
     harness: Harness,

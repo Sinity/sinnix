@@ -2466,9 +2466,6 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
     manifest left at all. It is removed only when nothing would be lost with
     it, and one that is kept is named with the reason.
     """
-    runs = {
-        run.run_id: run for run in list_runs(config, project.project_id, strict=True)
-    }
     try:
         default_base = _git(
             project.root,
@@ -2485,6 +2482,12 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
     kept: list[dict[str, str]] = []
     retained_artifacts: list[dict[str, str]] = []
     with project_locked(config, project.project_id):
+        # Preparation holds this lock while creating checkouts. Read their
+        # owners after acquiring it, including starts that just finished.
+        runs = {
+            run.run_id: run
+            for run in list_runs(config, project.project_id, strict=True)
+        }
         targets: list[tuple[str, Run | None, Path | None]] = []
         for owner in runs.values():
             if owner.live:
