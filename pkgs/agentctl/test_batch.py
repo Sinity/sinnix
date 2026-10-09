@@ -2138,6 +2138,7 @@ def test_pr_policy_pushes_the_branch_waits_for_required_checks_and_merges_the_he
             "number": number,
             "state": "MERGED" if merged else "OPEN",
             "headRefOid": SHA,
+            "baseRefName": "master",
             "statusCheckRollup": [
                 {
                     "name": "verify",
@@ -3794,6 +3795,7 @@ def test_a_required_check_never_reported_is_check_missing_after_ten_minutes(
             "number": number,
             "state": "OPEN",
             "headRefOid": SHA,
+            "baseRefName": "master",
             "statusCheckRollup": [],
         },
     )
@@ -3835,6 +3837,7 @@ def test_a_merged_pr_remains_publication_not_unobserved_check_success(
             "number": number,
             "state": "MERGED",
             "headRefOid": SHA,
+            "baseRefName": "master",
             "statusCheckRollup": [],
             "mergeCommit": {"oid": MERGED},
         },
@@ -3948,6 +3951,7 @@ def test_a_merge_the_branch_policy_refuses_is_armed_as_auto_merge_and_awaited(
             "number": number,
             "state": "MERGED" if merged else "OPEN",
             "headRefOid": SHA,
+            "baseRefName": "master",
             "statusCheckRollup": [],
             "mergeCommit": {"oid": MERGED} if merged else None,
         }
@@ -4018,6 +4022,7 @@ def test_pr_policy_publishes_over_a_moved_base_and_refreshes_only_a_conflict(
             "number": number,
             "state": "MERGED" if merged else "OPEN",
             "headRefOid": SHA,
+            "baseRefName": "master",
             "mergeable": mergeable[0],
             "statusCheckRollup": [],
             "mergeCommit": {"oid": MERGED} if merged else None,
@@ -4064,8 +4069,9 @@ def test_the_checks_a_landing_waits_for_come_from_the_descriptor(
     assert landing_module._required_checks(harness.project, hosted_run) == ("verify",)
 
 
+@pytest.mark.parametrize("target", ["master", "unrelated", None])
 def test_an_already_merged_pr_on_the_candidate_is_accepted_without_reintegrating(
-    harness: Harness, monkeypatch: pytest.MonkeyPatch
+    harness: Harness, monkeypatch: pytest.MonkeyPatch, target: str | None
 ) -> None:
     """Breaks if a landing that merged and died before accepting re-merges or opens a second PR."""
     pr_project(harness)
@@ -4089,6 +4095,7 @@ def test_an_already_merged_pr_on_the_candidate_is_accepted_without_reintegrating
             "number": number,
             "state": "MERGED",
             "headRefOid": SHA,
+            "baseRefName": target,
             "mergeCommit": {"oid": MERGED},
         },
     )
@@ -4099,6 +4106,14 @@ def test_an_already_merged_pr_on_the_candidate_is_accepted_without_reintegrating
             pytest.fail(f"{name} must not run")
 
         monkeypatch.setattr(github, name, forbidden)
+
+    if target != "master":
+        with pytest.raises(BatchRefusal, match="publish_rejected"):
+            harness.land(run["run_id"])
+        assert harness.beads.closed == []
+        assert manifest.load(harness.config, run["run_id"]).acceptance is None
+        assert harness.git.merges == [] and harness.waited == []
+        return
 
     landed = harness.land(run["run_id"])
 

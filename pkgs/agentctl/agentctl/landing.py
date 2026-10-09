@@ -746,6 +746,17 @@ def _self_review_lines(run: Run, *, detail: str = "narrated") -> list[str]:
     return ["## Self-review", "", *note, *sections]
 
 
+def _require_pr_target(
+    project: ProjectAdapter, pull: Mapping[str, Any], number: int
+) -> None:
+    expected = workspace_of(project).base_branch
+    if pull.get("baseRefName") != expected:
+        raise BatchRefusal(
+            "publish_rejected",
+            f"PR #{number} targets {pull.get('baseRefName')!r}, expected {expected!r}",
+        )
+
+
 def _await_candidate_head(
     project: ProjectAdapter,
     number: int,
@@ -770,6 +781,7 @@ def _await_candidate_head(
             pull = github.pull_request(project.root, number) or {}
         head = pull.get("headRefOid")
         if head == candidate:
+            _require_pr_target(project, pull, number)
             return
         if head != prior_head:
             raise BatchRefusal(
@@ -796,6 +808,7 @@ def _merged(project: ProjectAdapter, run: Run, candidate: str) -> dict[str, Any]
     merged = github.merge_commit(pull)
     if merged is None or pull.get("headRefOid") != candidate:
         return None
+    _require_pr_target(project, pull, number)
     return {
         "policy": "pr",
         "pr": number,
@@ -1076,6 +1089,7 @@ def _verify(
                 raise BatchRefusal(
                     "head_moved", f"PR #{number} head is no longer {candidate[:12]}"
                 )
+            _require_pr_target(project, pull, number)
             merged = github.merge_commit(pull)
             if merged is not None:
                 # A merge is publication evidence, not a check-run receipt.
@@ -1397,6 +1411,7 @@ def _publish(
             raise BatchRefusal(
                 "head_moved", f"PR #{number} head is no longer {candidate[:12]}"
             )
+        _require_pr_target(project, pull, number)
         if github.merge_commit(pull):
             break
         if pull.get("mergeable") == "CONFLICTING":
@@ -1420,6 +1435,7 @@ def _publish(
         raise BatchRefusal(
             "head_moved", f"PR #{number} head is no longer {candidate[:12]}"
         )
+    _require_pr_target(project, pull, number)
     if not github.merge_commit(pull):
         try:
             github.merge_pr(project.root, number, candidate)
@@ -1439,6 +1455,7 @@ def _publish(
         raise BatchRefusal(
             "head_moved", f"PR #{number} did not merge on {candidate[:12]}"
         )
+    _require_pr_target(project, pull, number)
     published = {
         "policy": "pr",
         "pr": number,
@@ -1467,6 +1484,7 @@ def _await_auto_merge(
             raise BatchRefusal(
                 "head_moved", f"PR #{number} head is no longer {candidate[:12]}"
             )
+        _require_pr_target(project, pull, number)
         if github.merge_commit(pull):
             return pull
         if github.check_rollup(pull) == "failed":

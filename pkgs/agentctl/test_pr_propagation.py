@@ -16,9 +16,31 @@ def _pull(number: int, head: str, *, merged: bool = False) -> dict[str, Any]:
         "number": number,
         "state": "MERGED" if merged else "OPEN",
         "headRefOid": head,
+        "baseRefName": "master",
         "statusCheckRollup": [],
         "mergeCommit": {"oid": "9" * 40} if merged else None,
     }
+
+
+@pytest.mark.parametrize("wait", ["candidate", "auto-merge"])
+@pytest.mark.parametrize("target", ["unrelated", None])
+def test_pr_wait_refuses_a_correct_head_on_the_wrong_target(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch, wait: str, target: str | None
+) -> None:
+    pr_project(harness)
+    pull = {**_pull(7, SHA, merged=True), "baseRefName": target}
+    monkeypatch.setattr(github, "pull_request", lambda *_: pull)
+
+    def no_wait(_seconds: float) -> None:
+        pytest.fail("wrong target must be refused immediately")
+
+    with pytest.raises(BatchRefusal, match="publish_rejected"):
+        if wait == "candidate":
+            landing_module._await_candidate_head(
+                harness.project, 7, SHA, MOVED, no_wait
+            )
+        else:
+            landing_module._await_auto_merge(harness.project, 7, SHA, no_wait, 0)
 
 
 def test_publication_waits_for_exact_candidate_after_push(
