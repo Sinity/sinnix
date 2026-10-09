@@ -80,8 +80,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))
-        raw = self.rfile.read(length) if length else b"{}"
-        return json.loads(raw or b"{}")
+        if length < 0:
+            raise ValueError("negative Content-Length")
+        raw = self.rfile.read(length) if length else b""
+        if len(raw) != length:
+            raise ValueError("truncated request body")
+        payload = json.loads(raw or b"{}")
+        if not isinstance(payload, dict):
+            raise ValueError("request body must be a JSON object")
+        return payload
 
     def _respond(self, status: int) -> None:
         self.send_response(status)
@@ -95,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         try:
             payload = self._read_json()
-        except json.JSONDecodeError:
+        except ValueError:
             self._respond(400)
             return
 
