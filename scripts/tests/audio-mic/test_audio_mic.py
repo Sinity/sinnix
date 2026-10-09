@@ -35,6 +35,7 @@ class AudioMicTest(unittest.TestCase):
             "esac\n",
         )
         self.executable("notify-send", 'printf "notify %s\\n" "$*" >> "$CALL_LOG"\n')
+        self.executable("pkill", 'printf "refresh %s\\n" "$*" >> "$CALL_LOG"\n')
 
     def executable(self, name, body):
         path = self.bin / name
