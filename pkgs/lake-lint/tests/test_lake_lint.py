@@ -1,7 +1,7 @@
 """Contract tests for the /realm taxonomy ratchet.
 
 The manifest is never restated here: the fixture tree is built from the
-MISSING lines the script itself emits against an empty tree, so a taxonomy
+MISSING and INVALID directory lines the script emits against an empty tree, so a taxonomy
 change needs no edit in this file and cannot be ratified by one.
 """
 
@@ -11,10 +11,12 @@ import os
 import subprocess
 from pathlib import Path
 
+from sinnix_lib.layout import ROOTS as LAYOUT_ROOTS
+
 ROOT = Path(__file__).parents[3]
 SCRIPT = ROOT / "scripts" / "lake-lint"
 
-ROOTS = ("realm", "outer-realm")
+ROOTS = tuple(root.lstrip("/") for root in LAYOUT_ROOTS)
 
 
 def run(prefix: Path) -> subprocess.CompletedProcess[str]:
@@ -49,6 +51,14 @@ def build_lake(prefix: Path) -> list[str]:
             Path(node).touch()
         else:
             Path(node).mkdir(parents=True, exist_ok=True)
+    # Canonical capture/collection homes are nested below the root nodes.
+    # Ask the lint for them too instead of maintaining a second path registry.
+    result = run(prefix)
+    for line in result.stdout.splitlines():
+        if "INVALID managed directory: " in line:
+            Path(line.split("INVALID managed directory: ", 1)[1]).mkdir(
+                parents=True, exist_ok=True
+            )
     return nodes
 
 
@@ -74,7 +84,7 @@ def test_manifest_node_missing_from_disk_fails(tmp_path):
     prefix = tmp_path / "lake"
     nodes = build_lake(prefix)
     victim = next(node for node in nodes if node.endswith("/realm/activity"))
-    Path(victim).rmdir()
+    Path(victim).rename(tmp_path / "removed-activity")
     result = run(prefix)
     assert result.returncode == 1
     assert f"MISSING required node: {victim}" in result.stdout
@@ -193,3 +203,14 @@ def test_symlinked_cache_marker_is_not_a_declaration(tmp_path):
     cache.mkdir()
     (cache / "CACHEDIR.TAG").symlink_to(marker)
     assert run(prefix).returncode == 1
+
+
+def test_missing_nested_managed_home_fails(tmp_path):
+    from sinnix_lib.layout import COLLECTION_PATHS
+    prefix = tmp_path / "lake"
+    build_lake(prefix)
+    home = prefix / "realm" / next(iter(COLLECTION_PATHS.values()))
+    home.rename(tmp_path / "removed-managed-home")
+    result = run(prefix)
+    assert result.returncode == 1
+    assert f"INVALID managed directory: {home}" in result.stdout
