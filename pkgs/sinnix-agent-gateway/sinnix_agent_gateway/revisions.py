@@ -3,8 +3,9 @@
 Beads row revisions are signed 64-bit integers that run past 2**53. A client
 that decodes JSON numbers as doubles (ChatGPT's among them) receives a value
 near the token that is not it, and its next guarded write is refused against
-a row nothing else touched. Every revision the gateway returns is therefore a
-string, and every revision precondition accepts that string back unchanged.
+a row nothing else touched. The Beads owner serializes its declared row
+tokens as strings before any lossy decoding. Revision preconditions accept those strings back unchanged.
+Authored metadata and unrelated counters retain their native JSON types.
 """
 
 from __future__ import annotations
@@ -18,28 +19,6 @@ _TOKEN_NOTE = (
     "Send the revision exactly as a read or write returned it: the decimal "
     "string, not a number."
 )
-
-
-def is_revision_key(key: object) -> bool:
-    return isinstance(key, str) and (
-        key == "revision" or key.endswith("_revision") or key in REVISION_INPUTS
-    )
-
-
-def lossless_revisions(value: Any) -> Any:
-    """A copy of a response whose integer revisions are decimal strings."""
-    if isinstance(value, dict):
-        return {
-            key: str(item)
-            if is_revision_key(key)
-            and isinstance(item, int)
-            and not isinstance(item, bool)
-            else lossless_revisions(item)
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [lossless_revisions(item) for item in value]
-    return value
 
 
 def _is_integer_schema(schema: Any) -> bool:

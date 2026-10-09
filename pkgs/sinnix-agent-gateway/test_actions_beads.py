@@ -123,8 +123,8 @@ def test_row_revisions_round_trip_exactly_as_strings(tmp_path):
     negative, positive = -8662698054174296873, 2**62 + 3
     state = tmp_path / "owner-state.json"
     value = json.loads(state.read_text())
-    value["items"][0]["revision"] = negative
-    value["items"][1]["revision"] = positive
+    value["items"][0]["revision"] = str(negative)
+    value["items"][1]["revision"] = str(positive)
     state.write_text(json.dumps(value))
 
     listed = call(
@@ -172,7 +172,7 @@ def test_row_revisions_round_trip_exactly_as_strings(tmp_path):
         assert response["result"]["outcome"] == "ok", response
         assert commands(log)[-1]["payload"]["body"]["expected_version"] == token
         echoed = response["data"]["owner_result"]["request"]["body"]
-        assert echoed["expected_version"] == str(token)
+        assert echoed["expected_version"] == token
 
 
 def test_a_lost_changeset_response_is_recovered_by_its_key(tmp_path):
@@ -227,3 +227,63 @@ def test_an_abandoned_claim_reads_as_indeterminate_and_a_live_one_as_pending(
     # The process lock goes with the claimant; the row stays pending.
     audit.release_idempotency("beads.create", "dead")
     assert audit.operation("beads.create", "dead")["state"] == "indeterminate"
+
+
+def test_authored_revision_metadata_keeps_its_json_types(tmp_path):
+    server, log = server_fixture(tmp_path)
+    metadata = {"revision": 9007199254740993, "content_revision": 4,
+                "nested": [{"expected_version": 7}]}
+    response = call(server, "beads.update", {
+        "project": {"project": "fixture"},
+        "idempotency_key": "authored-revision-metadata",
+        "path": {"id": "fixture-1"},
+        "body": {"actor": "fixture-operator", "patch": {"metadata": {"set": metadata}}},
+    })
+    assert response["result"]["outcome"] == "ok", response
+    echoed = response["data"]["owner_result"]["request"]["body"]["patch"]["metadata"]["set"]
+    assert echoed == metadata
+    assert isinstance(echoed["revision"], int)
+    assert isinstance(echoed["content_revision"], int)
+    assert isinstance(echoed["nested"][0]["expected_version"], int)
+
+
+def test_changeset_string_guards_reach_owner_exactly(tmp_path):
+    server, log = server_fixture(tmp_path)
+    for token in (9007199254740993, -9007199254740993):
+        response = call(server, "beads.changeset", {
+            "project": {"project": "fixture"},
+            "idempotency_key": f"batch-guard-{token}",
+            "body": {"actor": "fixture-operator", "items": [{
+                "kind": "update", "update": {
+                    "target": {"id": "fixture-1"},
+                    "expected_version": str(token),
+                    "patch": {"notes": "guarded"},
+                },
+            }]},
+        })
+        assert response["result"]["outcome"] == "ok", response
+        item = commands(log)[-1]["payload"]["body"]["items"][0]
+        assert item["update"]["expected_version"] == token
+
+
+def test_malformed_string_guards_refuse_before_owner_call(tmp_path):
+    server, log = server_fixture(tmp_path)
+    log.touch(exist_ok=True)
+    before = len(commands(log))
+    requests = [
+        ("beads.update", {"actor": "fixture-operator", "expected_version": "not-a-token",
+                          "patch": {"notes": "must not write"}}),
+        ("beads.changeset", {"actor": "fixture-operator", "items": [{
+            "kind": "update", "update": {"target": {"id": "fixture-1"},
+                "expected_version": "not-a-token", "patch": {"notes": "must not write"}},
+        }]}),
+    ]
+    for action, body in requests:
+        request = {"project": {"project": "fixture"}, "idempotency_key": action,
+                   "body": body}
+        if action == "beads.update":
+            request["path"] = {"id": "fixture-1"}
+        response = call(server, action, request)
+        assert response["result"]["outcome"] != "ok", response
+        assert response["error"]["code"] == "invalid_request", response
+    assert len(commands(log)) == before

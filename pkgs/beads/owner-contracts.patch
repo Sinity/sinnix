@@ -234,7 +234,7 @@
  			return result, err
 --- /dev/null
 +++ b/internal/httpapi/owner.go
-@@ -0,0 +1,153 @@
+@@ -0,0 +1,271 @@
 +package httpapi
 +
 +import (
@@ -248,6 +248,7 @@
 +	"net/http"
 +	"net/url"
 +	"os"
++	"strconv"
 +	"strings"
 +
 +	"gopkg.in/yaml.v3"
@@ -260,7 +261,22 @@
 +func OwnerSchema() (map[string]any, error) {
 +	var document map[string]any
 +	err := yaml.Unmarshal(ownerSpec, &document)
-+	return document, err
++	if err != nil {
++		return nil, err
++	}
++	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
++	for _, value := range schemas {
++		schema, _ := value.(map[string]any)
++		properties, _ := schema["properties"].(map[string]any)
++		revision, _ := properties["revision"].(map[string]any)
++		if ownerRowToken(revision) {
++			revision["type"] = "string"
++			delete(revision, "format")
++			revision["pattern"] = "^-?(0|[1-9][0-9]*)$"
++			revision["description"] = "Opaque signed-64-bit row equality token serialized as an exact decimal string. Never coerce through a floating-point number. Coverage is partial: claim, close, unclaim and generic update rewrite it; direct text updates may not. This is an administrative row token, not an acceptance-contract revision."
++		}
++	}
++	return document, nil
 +}
 +
 +type OwnerCall struct {
@@ -373,7 +389,8 @@
 +		}
 +		out := &ownerResponse{header: make(http.Header), status: http.StatusOK}
 +		s.route(rt).ServeHTTP(out, request)
-+		return json.RawMessage(out.body.Bytes()), out.status, nil
++		body, err := ownerResponseTokens(operation, out.status, out.body.Bytes())
++		return body, out.status, err
 +	}
 +	return nil, 0, fmt.Errorf("unknown owner operation %q", operation)
 +}
@@ -388,15 +405,118 @@
 +	}
 +	return false, fmt.Errorf("unknown owner operation %q", operation)
 +}
++
++// ownerRowToken selects the native contract's row-version property. Authored
++// metadata and unrelated revision counters have no such schema declaration.
++func ownerRowToken(schema map[string]any) bool {
++	return schema["type"] == "integer" && schema["format"] == "int64"
++}
++
++// ownerResponseTokens projects native HTTP numbers before any lossy decoder.
++// The original HTTP schema supplies traversal; OwnerSchema publishes the same
++// positions as strings. Raw messages preserve all unselected JSON values.
++func ownerResponseTokens(operation string, status int, body json.RawMessage) (json.RawMessage, error) {
++	var document map[string]any
++	if err := yaml.Unmarshal(ownerSpec, &document); err != nil {
++		return nil, err
++	}
++	paths := document["paths"].(map[string]any)
++	for _, value := range paths {
++		path, _ := value.(map[string]any)
++		for _, value := range path {
++			method, _ := value.(map[string]any)
++			if method["operationId"] != operation {
++				continue
++			}
++			responses, _ := method["responses"].(map[string]any)
++			response, _ := responses[strconv.Itoa(status)].(map[string]any)
++			content, _ := response["content"].(map[string]any)
++			media, _ := content["application/json"].(map[string]any)
++			schema, _ := media["schema"].(map[string]any)
++			return ownerProjectTokens(document, schema, body)
++		}
++	}
++	return body, nil
++}
++
++func ownerProjectTokens(document, schema map[string]any, body json.RawMessage) (json.RawMessage, error) {
++	if ref, ok := schema["$ref"].(string); ok {
++		const prefix = "#/components/schemas/"
++		if !strings.HasPrefix(ref, prefix) {
++			return nil, fmt.Errorf("unsupported owner response schema %q", ref)
++		}
++		schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
++		resolved, ok := schemas[strings.TrimPrefix(ref, prefix)].(map[string]any)
++		if !ok {
++			return nil, fmt.Errorf("missing owner response schema %q", ref)
++		}
++		return ownerProjectTokens(document, resolved, body)
++	}
++	if members, ok := schema["allOf"].([]any); ok {
++		for _, member := range members {
++			var err error
++			body, err = ownerProjectTokens(document, member.(map[string]any), body)
++			if err != nil {
++				return nil, err
++			}
++		}
++	}
++	if schema["type"] == "array" {
++		var items []json.RawMessage
++		if err := json.Unmarshal(body, &items); err != nil {
++			return nil, err
++		}
++		itemSchema, _ := schema["items"].(map[string]any)
++		for i := range items {
++			var err error
++			items[i], err = ownerProjectTokens(document, itemSchema, items[i])
++			if err != nil {
++				return nil, err
++			}
++		}
++		return json.Marshal(items)
++	}
++	properties, ok := schema["properties"].(map[string]any)
++	if !ok || bytes.Equal(bytes.TrimSpace(body), []byte("null")) {
++		return body, nil
++	}
++	var object map[string]json.RawMessage
++	if err := json.Unmarshal(body, &object); err != nil {
++		return nil, err
++	}
++	for name, value := range properties {
++		raw, exists := object[name]
++		if !exists {
++			continue
++		}
++		child, _ := value.(map[string]any)
++		if name == "revision" && ownerRowToken(child) {
++			var token int64
++			if err := json.Unmarshal(raw, &token); err != nil {
++				return nil, fmt.Errorf("invalid owner row token: %w", err)
++			}
++			object[name], _ = json.Marshal(strconv.FormatInt(token, 10))
++		} else {
++			projected, err := ownerProjectTokens(document, child, raw)
++			if err != nil {
++				return nil, err
++			}
++			object[name] = projected
++		}
++	}
++	return json.Marshal(object)
++}
 --- /dev/null
 +++ b/internal/httpapi/owner_test.go
-@@ -0,0 +1,63 @@
+@@ -0,0 +1,126 @@
 +package httpapi
 +
 +import (
 +	"context"
 +	"encoding/json"
++	"fmt"
 +	"net/http"
++	"strconv"
 +	"testing"
 +
 +	"github.com/steveyegge/beads/internal/types"
@@ -454,9 +574,70 @@
 +		t.Fatal(err)
 +	}
 +}
++
++func TestOwnerContractResponseTokens(t *testing.T) {
++	for _, token := range []int64{0, 9007199254740993, -9007199254740993, 9223372036854775807, -9223372036854775808} {
++		t.Run(strconv.FormatInt(token, 10), func(t *testing.T) {
++			issue := &types.Issue{ID: "bd-one", RowVersion: token, Metadata: json.RawMessage(`{"revision":9007199254740993}`)}
++			lifecycle := &roleLifecycle{updateResult: issueops.UpdateResult{Issue: issue}}
++			applier := &roleBatchApplier{result: issueops.ApplyBatchResult{Items: []issueops.ItemResult{{Kind: issueops.ItemUpdate, IssueID: issue.ID, RowVersion: token}}, Keys: map[string]string{}}}
++			cfg := rolesConfig(Config{Reader: &roleReader{details: types.NewIssueDetails(*issue)}, Lifecycle: lifecycle, BatchApplier: applier})
++			for _, operation := range []string{"getIssue", "updateIssue", "applyBatch"} {
++				request := OwnerCall{Path: map[string]string{"id": issue.ID}}
++				if operation == "updateIssue" {
++					request.Body = json.RawMessage(fmt.Sprintf(`{"actor":"operator","expected_version":%d,"patch":{"notes":"new"}}`, token))
++				}
++				if operation == "applyBatch" {
++					request.Body = json.RawMessage(fmt.Sprintf(`{"actor":"operator","items":[{"kind":"update","update":{"target":{"id":"bd-one"},"expected_version":%d,"patch":{"notes":"new"}}}]}`, token))
++				}
++				body, status, err := InvokeOwner(context.Background(), cfg, operation, request)
++				if err != nil || status != http.StatusOK {
++					t.Fatalf("%s status=%d err=%v body=%s", operation, status, err, body)
++				}
++				var result map[string]json.RawMessage
++				if err := json.Unmarshal(body, &result); err != nil {
++					t.Fatal(err)
++				}
++				raw := result["revision"]
++				if operation == "applyBatch" {
++					var items []map[string]json.RawMessage
++					if err := json.Unmarshal(result["items"], &items); err != nil {
++						t.Fatal(err)
++					}
++					raw = items[0]["revision"]
++				}
++				var got string
++				if err := json.Unmarshal(raw, &got); err != nil || got != strconv.FormatInt(token, 10) {
++					t.Fatalf("%s token=%s err=%v", operation, raw, err)
++				}
++				if operation == "getIssue" && string(result["metadata"]) != `{"revision":9007199254740993}` {
++					t.Fatalf("authored metadata altered: %s", result["metadata"])
++				}
++			}
++			if got := *lifecycle.updateRequests()[0].ExpectedVersion; got != token {
++				t.Fatalf("update guard=%d want=%d", got, token)
++			}
++			if got := *applier.requests()[0].Items[0].Update.ExpectedVersion; got != token {
++				t.Fatalf("batch guard=%d want=%d", got, token)
++			}
++		})
++	}
++	document, err := OwnerSchema()
++	if err != nil {
++		t.Fatal(err)
++	}
++	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
++	for _, name := range []string{"IssueDetails", "ApplyItemResult", "CloseIssueResponse", "ReleaseIssueResponse", "ReopenIssueResponse", "UpdateIssueResponse"} {
++		schema := schemas[name].(map[string]any)
++		revision := schema["properties"].(map[string]any)["revision"].(map[string]any)
++		if revision["type"] != "string" || revision["format"] != nil {
++			t.Fatalf("%s token schema=%v", name, revision)
++		}
++	}
++}
 --- /dev/null
 +++ b/internal/storage/issueops/owner_read.go
-@@ -0,0 +1,928 @@
+@@ -0,0 +1,930 @@
 +package issueops
 +
 +import (
@@ -922,7 +1103,9 @@
 +			row[column] = value
 +		}
 +		if token, ok := row["row_lock"]; ok {
-+			row["revision"] = token
++			// Row versions are opaque signed-64-bit equality tokens, not JSON numbers.
++			// Keep both projections exact through CLI envelope re-encoding and JS clients.
++			row["revision"] = fmt.Sprint(token)
 +			row["bead_revision"] = fmt.Sprint(token)
 +			row["bead_revision_domain"] = "beads_row_revision"
 +			row["bead_revision_coverage"] = "partial_update_coverage"
@@ -1387,7 +1570,7 @@
 +}
 --- /dev/null
 +++ b/internal/storage/issueops/owner_read_test.go
-@@ -0,0 +1,94 @@
+@@ -0,0 +1,125 @@
 +package issueops
 +
 +import (
@@ -1480,6 +1663,37 @@
 +	}
 +	if err := mock.ExpectationsWereMet(); err != nil {
 +		t.Fatal(err)
++	}
++}
++
++func TestOwnerContractRowTokensAreExactStrings(t *testing.T) {
++	for _, test := range []struct {
++		token    int64
++		expected string
++	}{
++		{0, "0"},
++		{9007199254740993, "9007199254740993"},
++		{-9007199254740993, "-9007199254740993"},
++		{9223372036854775807, "9223372036854775807"},
++		{-9223372036854775808, "-9223372036854775808"},
++	} {
++		db, mock, err := sqlmock.New()
++		if err != nil {
++			t.Fatal(err)
++		}
++		mock.ExpectQuery("SELECT id, row_lock FROM issues").WillReturnRows(
++			sqlmock.NewRows([]string{"id", "row_lock"}).AddRow("bd-a", test.token))
++		rows, err := ownerRows(context.Background(), db, "SELECT id, row_lock FROM issues")
++		if err != nil {
++			t.Fatal(err)
++		}
++		if rows[0]["revision"] != test.expected || rows[0]["bead_revision"] != test.expected {
++			t.Fatalf("lossy row token %d: %v", test.token, rows[0])
++		}
++		if err := mock.ExpectationsWereMet(); err != nil {
++			t.Fatal(err)
++		}
++		db.Close()
 +	}
 +}
 --- /dev/null
