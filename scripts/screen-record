@@ -4,6 +4,7 @@
 # runtimeInputs: bash coreutils gpu-screen-recorder
 
 set -euo pipefail
+umask 077
 
 target="DP-3"
 resolution="3840x2160"
@@ -21,7 +22,7 @@ Options:
   --target OUTPUT       Monitor connector (default: DP-3)
   --resolution WxH      Output resolution limit (default: 3840x2160)
   --fps FPS             Capture framerate (default: 120)
-  --output-dir DIR      Destination directory (default: /realm/inbox)
+  --output-dir DIR      Destination directory (default: /realm/inbox/capture)
   -h, --help            Show this help
 
 Environment overrides: SINNIX_SCREEN_RECORD_TARGET, SINNIX_SCREEN_RECORD_RESOLUTION,

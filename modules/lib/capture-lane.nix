@@ -67,7 +67,7 @@
 
   # --- tmpfiles ---
   # Raw `d <path> <mode> <user> <group> -` rule strings. Defaults to one rule
-  # for laneDir at 0755.
+  # for laneDir at 0700: captures are private operator evidence.
   tmpfilesRules ? null,
 
   # --- hardening / exec ---
@@ -76,7 +76,7 @@
   environment ? [ ],
   runtimeDirectory ? null,
   runtimeDirectoryPreserve ? null,
-  umask ? null,
+  umask ? "0077",
   privateTmp ? false,
   # Merged last over the generated Service overrides -- escape hatch for a
   # lane-specific knob (capture-monitor's XDG_CACHE_HOME, capture-a11y's
@@ -123,7 +123,7 @@ let
 
   resolvedWritablePaths = if writablePaths != null then writablePaths else [ laneDir ];
   resolvedTmpfilesRules =
-    if tmpfilesRules != null then tmpfilesRules else [ "d ${laneDir} 0755 ${username} users -" ];
+    if tmpfilesRules != null then tmpfilesRules else [ "d ${laneDir} 0700 ${username} users -" ];
 
   defaultCaptures = lib.optional (laneDir != null) (
     {
