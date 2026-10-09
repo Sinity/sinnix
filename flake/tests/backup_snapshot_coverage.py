@@ -427,23 +427,75 @@ class CoverageFixture(unittest.TestCase):
             markers, {b"system.posix_acl_access", b"system.posix_acl_default"}
         )
         self.assertEqual(ordinary, ["user.fixture"])
-        # An archived access ACL, exactly as borg 1.4.5 dumps it.
-        self.assertEqual(
-            COVERAGE.archived_acl_markers(
-                {
-                    "acl_access": "user::rwx\nuser:sinity:rwx:1000\ngroup::r-x",
-                    "acl_default": "",
-                }
-            ),
-            {b"system.posix_acl_access"},
+        text = "user::rwx\nuser:neutral:r--:1000\ngroup::r-x\nmask::r-x\nother::---"
+        expected = {(1, None): 7, (2, 1000): 4, (4, None): 5, (16, None): 5, (32, None): 0}
+        raw = COVERAGE.struct.pack("<I", 2) + b"".join(
+            COVERAGE.struct.pack("<HHI", tag, perm, identity if identity is not None else 0xFFFFFFFF)
+            for (tag, identity), perm in expected.items()
         )
-        self.assertEqual(
-            COVERAGE.archived_acl_markers({"acl_default": "user::rwx"}),
-            {b"system.posix_acl_default"},
-        )
-        # An archive that carries no ACL must not satisfy a source that has
-        # one: this is the comparison that keeps the fix from being a skip.
-        self.assertEqual(COVERAGE.archived_acl_markers({}), set())
+        self.assertEqual(COVERAGE.source_acl_entries(raw), expected)
+        self.assertEqual(COVERAGE.archived_acl_entries(text), expected)
+        self.assertEqual(COVERAGE.archived_acl_entries(text.replace("neutral", "renamed")), expected)
+        encoded = "\x7f" + text.replace("neutral", "invalid-\udcff").encode("utf-8", "surrogateescape").hex()
+        self.assertEqual(COVERAGE.archived_acl_entries(encoded), expected)
+
+    def test_changed_acl_principal_or_permission_cannot_satisfy_coverage(self):
+        self.archive()
+        path = self.source / "same-name"
+        source_entries = [(1, 6, 0xFFFFFFFF), (2, 4, 1000), (4, 4, 0xFFFFFFFF), (16, 4, 0xFFFFFFFF), (32, 4, 0xFFFFFFFF)]
+        raw = COVERAGE.struct.pack("<I", 2) + b"".join(COVERAGE.struct.pack("<HHI", *entry) for entry in source_entries)
+        archived = {"uid": 1000, "permission": "r--"}
+        original_items = COVERAGE.command_items
+        original_list = os.listxattr
+        original_get = os.getxattr
+
+        def items(command, parser):
+            for item in original_items(command, parser):
+                if "debug" in command and COVERAGE.archive_path(item) == "same-name":
+                    item = {**item, "acl_access": f"user::rw-\nuser:neutral:{archived['permission']}:{archived['uid']}\ngroup::r--\nmask::r--\nother::r--"}
+                yield item
+
+        def names(candidate, **kw):
+            return ["system.posix_acl_access"] if Path(candidate) == path else original_list(candidate, **kw)
+
+        def value(candidate, name, **kw):
+            return raw if Path(candidate) == path and os.fsencode(name) == b"system.posix_acl_access" else original_get(candidate, name, **kw)
+
+        with patch.object(COVERAGE, "command_items", items), patch.object(os, "listxattr", names), patch.object(os, "getxattr", value):
+            COVERAGE.verify(self.source, "snapshot", [])
+            archived["uid"] = 1001
+            with self.assertRaisesRegex(ValueError, "ACL mismatch"):
+                COVERAGE.verify(self.source, "snapshot", [])
+            archived.update(uid=1000, permission="---")
+            with self.assertRaisesRegex(ValueError, "ACL mismatch"):
+                COVERAGE.verify(self.source, "snapshot", [])
+
+    def test_default_only_acl_uses_mode_for_borg_access_entries(self):
+        entries = [(1, 7, 0xFFFFFFFF), (2, 4, 1000), (4, 5, 0xFFFFFFFF), (16, 5, 0xFFFFFFFF), (32, 5, 0xFFFFFFFF)]
+        raw = COVERAGE.struct.pack("<I", 2) + b"".join(COVERAGE.struct.pack("<HHI", *entry) for entry in entries)
+        item = {"acl_access": "user::rwx\ngroup::r-x\nother::r-x", "acl_default": "user::rwx\nuser:neutral:r--:1000\ngroup::r-x\nmask::r-x\nother::r-x"}
+        with patch.object(os, "getxattr", return_value=raw):
+            COVERAGE.verify_acl_metadata(self.source, 0o755, {b"system.posix_acl_default"}, item)
+            with self.assertRaisesRegex(ValueError, "ACL mismatch"):
+                COVERAGE.verify_acl_metadata(self.source, 0o755, {b"system.posix_acl_default"}, {**item, "acl_default": ""})
+
+    def test_metadata_contract_changes_the_policy_proof_identity(self):
+        policy = self.root / "policy.json"
+        declaration = {"noncanonical": [], "borg_excludes": []}
+        policy.write_text(json.dumps(declaration))
+        legacy = COVERAGE.hashlib.sha256(json.dumps(declaration, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        self.assertNotEqual(COVERAGE.policy_identity(policy), legacy)
+        with patch.object(COVERAGE, "METADATA_CONTRACT", "older-weaker-contract"):
+            older = COVERAGE.policy_identity(policy)
+        self.assertNotEqual(COVERAGE.policy_identity(policy), older)
+
+    def test_malformed_acl_refuses_instead_of_waiving_metadata(self):
+        for raw in [b"", COVERAGE.struct.pack("<I", 3), COVERAGE.struct.pack("<IHHI", 2, 2, 4, 0xFFFFFFFF)]:
+            with self.subTest(raw=raw), self.assertRaises(ValueError):
+                COVERAGE.source_acl_entries(raw)
+        for text in ["user:unknown:rwx", "user::rwx\nuser::rwx", "user::rwx\ngroup::r-x\nother::r-X", "user::rwx\nuser:neutral:r--:1000\ngroup::r-x\nother::---"]:
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                COVERAGE.archived_acl_entries(text)
 
     def test_nested_subvolume_stub_mtime_is_not_coverage(self):
         # Snapshotting a subvolume replaces each nested subvolume with an

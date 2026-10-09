@@ -26,3 +26,9 @@ The weekly Btrfs metadata-image job captures persist, then realm, with a separat
 
 
 The live model home is covered by default. Explicit acquired weight stores retain exclusions; authored control-vector outputs are protected against an exclusion of their directory or an ancestor. Historical `library/models` snapshot addresses retain their historical policy.
+
+Coverage compares POSIX ACL numeric principals and permissions, including default
+ACLs. Display names and entry order do not define identity. The policy fingerprint
+includes this metadata contract, so a receipt from the former presence-only ACL
+check cannot qualify the stronger proof. Existing receipts remain historical
+evidence; a full comparison under the current contract must establish a new baseline.

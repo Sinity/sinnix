@@ -31,6 +31,7 @@ import json
 import os
 import re
 import stat
+import struct
 import subprocess
 import sys
 import time
@@ -42,6 +43,7 @@ from pathlib import Path, PurePosixPath
 SNAPSHOT_NAME = re.compile(r"^[^.]+\.(\d{8}T\d{6}[+-]\d{4})$")
 FULL_PROOF_INTERVAL = 7 * 24 * 3600
 REALM_PRODUCER_CONTRACT = "realm-borg-create-v2"
+METADATA_CONTRACT = "posix-acl-numeric-entries-v1"
 
 
 def snapshot_epoch(name):
@@ -200,7 +202,7 @@ def archive_identity(archive, snapshot_uuid):
 
 
 def policy_identity(policy, require_borg_excludes=False):
-    """Bind a producer-backed proof to the exact coverage declaration."""
+    """Bind a proof to the declaration and the metadata verification contract."""
     decoded = json.loads(Path(policy).read_text())
     decode_policy(decoded)
     if require_borg_excludes and (
@@ -208,7 +210,10 @@ def policy_identity(policy, require_borg_excludes=False):
     ):
         raise ValueError("created proof requires declared Borg exclusions")
     return hashlib.sha256(
-        json.dumps(decoded, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(
+            {"policy": decoded, "metadata_contract": METADATA_CONTRACT},
+            sort_keys=True, separators=(",", ":"),
+        ).encode()
     ).hexdigest()
 
 
@@ -520,11 +525,8 @@ def command_items(command, parser):
 # ACLs through the fields Borg actually writes, and leave every other xattr
 # an exact comparison.
 #
-# This proves an ACL is present on both sides, not that its entries are
-# identical: Borg stores ACLs as libacl's rendered text, and reproducing that
-# rendering from the raw xattr would couple this check to libacl's and Borg's
-# formatting. Permission drift that reaches the mode bits (an ACL's mask is
-# the group mode) is still caught by the mode comparison above.
+# Compare numeric principals and permissions, not display names or rendering
+# order. Borg appends the stored numeric UID/GID to each named entry.
 ACL_XATTR_FIELDS = {
     b"system.posix_acl_access": "acl_access",
     b"system.posix_acl_default": "acl_default",
@@ -574,9 +576,84 @@ def partition_acl_xattrs(names):
     return markers, ordinary
 
 
-def archived_acl_markers(item):
-    """The ACL markers an archived item implies, spelled as listxattr does."""
-    return {name for name, field in ACL_XATTR_FIELDS.items() if item.get(field)}
+def validate_acl_entries(entries):
+    if not all((tag, None) in entries for tag in (1, 4, 32)):
+        raise ValueError("ACL missing owner, group or other entry")
+    if any(tag in (2, 8) for tag, _ in entries) and (16, None) not in entries:
+        raise ValueError("ACL missing mask for named principals")
+    return entries
+
+
+def source_acl_entries(raw):
+    """Linux POSIX ACL xattr v2: little-endian header and tag/perm/id entries."""
+    if len(raw) < 4 or (len(raw) - 4) % 8 or struct.unpack_from("<I", raw)[0] != 2:
+        raise ValueError("invalid POSIX ACL xattr")
+    entries = {}
+    for tag, perm, identity in struct.iter_unpack("<HHI", raw[4:]):
+        if tag not in (1, 2, 4, 8, 16, 32) or perm > 7:
+            raise ValueError("invalid POSIX ACL entry")
+        named = tag in (2, 8)
+        if named == (identity == 0xFFFFFFFF):
+            raise ValueError("invalid POSIX ACL principal")
+        key = (tag, identity if named else None)
+        if key in entries:
+            raise ValueError("duplicate POSIX ACL principal")
+        entries[key] = perm
+    return validate_acl_entries(entries)
+
+
+def archived_acl_entries(text):
+    if text is None or text == "" or text == b"":
+        return {}
+    if isinstance(text, str):
+        text = decode_borg_bytes(text)
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", "surrogateescape")
+    if not isinstance(text, str):
+        raise ValueError("invalid archived ACL text")
+    tags = {"user": (1, 2), "group": (4, 8), "mask": (16, 16), "other": (32, 32)}
+    entries = {}
+    for line in text.split("\n"):
+        if not line:
+            continue
+        fields = line.split(":")
+        if len(fields) not in (3, 4) or fields[0] not in tags:
+            raise ValueError("invalid archived ACL entry")
+        kind, qualifier, permissions = fields[:3]
+        if not re.fullmatch(r"[r-][w-][x-]", permissions):
+            raise ValueError("invalid archived ACL permissions")
+        named = bool(qualifier)
+        if named:
+            numeric = fields[3] if len(fields) == 4 else qualifier
+            if kind not in ("user", "group") or not re.fullmatch(r"[0-9]+", numeric):
+                raise ValueError("archived ACL has no numeric principal")
+            identity = int(numeric)
+            if identity >= 0xFFFFFFFF:
+                raise ValueError("invalid archived ACL principal")
+        else:
+            if len(fields) != 3:
+                raise ValueError("invalid archived ACL object entry")
+            identity = None
+        key = (tags[kind][int(named)], identity)
+        if key in entries:
+            raise ValueError("duplicate archived ACL principal")
+        entries[key] = sum(bit for char, bit in zip(permissions, (4, 2, 1)) if char != "-")
+    return validate_acl_entries(entries)
+
+
+def verify_acl_metadata(path, mode, names, item):
+    for name, field in ACL_XATTR_FIELDS.items():
+        archived = archived_acl_entries(item.get(field))
+        if name in names:
+            actual = source_acl_entries(os.getxattr(path, name, follow_symlinks=False))
+        elif field == "acl_access" and archived:
+            # A default-only directory causes Borg to emit its ordinary
+            # access ACL too, although Linux stores that ACL in mode bits.
+            actual = {(1, None): (mode >> 6) & 7, (4, None): (mode >> 3) & 7, (32, None): mode & 7}
+        else:
+            actual = {}
+        if actual != archived:
+            raise ValueError(f"archive ACL mismatch: {path!r} ({field})")
 
 
 def archive_path(item):
@@ -706,8 +783,7 @@ def verify(source, archive, noncanonical, chrome_extension_caches=False):
         }
         if actual_xattrs != archived_xattrs:
             raise ValueError(f"archive extended metadata mismatch: {path!r}")
-        if actual_acls != archived_acl_markers(item):
-            raise ValueError(f"archive ACL mismatch: {path!r}")
+        verify_acl_metadata(source / path, st.st_mode, actual_acls, item)
         if stat.S_ISLNK(st.st_mode):
             if item.get("source") != os.readlink(source / path):
                 raise ValueError(f"archive symlink mismatch: {path!r}")
