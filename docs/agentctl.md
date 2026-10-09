@@ -560,9 +560,12 @@ still running, and creates the landing groups the daemon lacks.
    names none), then `gh pr merge --squash --match-head-commit <sha>`, read
    the merge commit back and delete the remote integration branch. That
    declared check unreported ten minutes after the wait began is
-   `check_missing`; a branch protection context the descriptor does not name
-   is GitHub's to enforce at the merge and never stops the landing. A stored PR already merged on `candidate_sha` is the
-   publication: nothing is merged again. If the target moved, one refresh
+   `check_missing`. GitHub enforces branch protection at the merge; a blocked
+   direct merge enables auto-merge and waits for its result. Every PR
+   observation used for verification or publication must target the configured
+   base branch. A stored PR already merged on `candidate_sha` into that branch
+   is the publication: nothing is merged again. A failed publication lease or
+   conflicting PR allows one refresh, which
    rebases the run on the new base and repeats from step 2; a second
    movement stops with `target_moved_twice`.
 6. Accept: write the acceptance record, `bd close` each bead whose immutable
@@ -589,6 +592,13 @@ A refusal or substrate error after step 1 is written to `landing.failure`
 with its code; `batch status` shows `failed: <code>` and `view` names what
 follows.
 
+An auto-merge request enabled by landing is observed and recorded in
+`landing.auto_merge_request`. A failed landing withdraws that recorded request
+after rechecking it against GitHub. A pre-existing unrecorded request or a
+replaced request is retained. Withdrawal failures remain visible in the
+failure record and command error. GitHub's disable operation has no conditional
+request argument, so this recheck is not an atomic comparison and withdrawal.
+
 ### Abandon
 
 `batch abandon <run> [--reason R]` releases a run that will not land. It is
@@ -598,6 +608,8 @@ every member as the run's actor, removes each worker and integration
 worktree whose tree is clean and has no active task or process user, retains
 its branch, and records `abandoned: {reason, at, residual}`; kept worktrees
 and failed unclaims are the residual. The members can then start again.
+Before cancellation or unclaiming, abandon also withdraws a recorded
+auto-merge request. If withdrawal cannot be verified, the run stays live.
 
 ### Clean
 

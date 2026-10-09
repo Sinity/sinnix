@@ -259,6 +259,30 @@ def arm_auto_merge(root: Path, number: int, sha: str) -> None:
     )
 
 
+def disable_owned_auto_merge(
+    root: Path, number: int, request: Mapping[str, Any]
+) -> None:
+    """Withdraw the observed request, preserving a replaced or absent request."""
+    if not request.get("enabledAt"):
+        raise GithubError(f"PR #{number} auto-merge request has no observed identity")
+    pull = pull_request(root, number)
+    if pull is None:
+        raise GithubError(f"PR #{number} auto-merge state is unavailable")
+    if merge_commit(pull) or pull.get("autoMergeRequest") is None:
+        return
+    if pull.get("autoMergeRequest") != request:
+        raise GithubError(f"PR #{number} auto-merge request changed; not disabling it")
+    # GitHub's disable mutation has no conditional request/head argument.
+    # Match the request immediately before it; --match-head-commit does not
+    # guard gh's --disable-auto route.
+    _run(["gh", "pr", "merge", str(number), "--disable-auto"], cwd=root)
+    observed = pull_request(root, number)
+    if observed is None:
+        raise GithubError(f"PR #{number} auto-merge withdrawal was not observed")
+    if not merge_commit(observed) and observed.get("autoMergeRequest") is not None:
+        raise GithubError(f"PR #{number} auto-merge withdrawal was not observed")
+
+
 def push_branch(
     root: Path, branch: str, *, sha: str, lease: str | None, timeout: float = 2_400
 ) -> None:

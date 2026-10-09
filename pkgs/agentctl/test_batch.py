@@ -3954,6 +3954,11 @@ def test_a_merge_the_branch_policy_refuses_is_armed_as_auto_merge_and_awaited(
             "baseRefName": "master",
             "statusCheckRollup": [],
             "mergeCommit": {"oid": MERGED} if merged else None,
+            "autoMergeRequest": (
+                {"enabledAt": "2026-01-01T00:00:00Z"}
+                if ("arm", number, SHA) in calls
+                else None
+            ),
         }
 
     def refused(root: Path, number: int, sha: str) -> None:
@@ -3994,6 +3999,165 @@ def test_a_merge_the_branch_policy_refuses_is_armed_as_auto_merge_and_awaited(
     ]
     assert landed["acceptance"]["published"]["merge_commit"] == MERGED
     assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "closed"
+
+
+@pytest.mark.parametrize(
+    "ownership",
+    [
+        "new",
+        "preexisting",
+        "recorded",
+        "replaced",
+        "withdrawal_failed",
+        "earlier_failure",
+        "early_refusal_withdrawal_failed",
+    ],
+)
+def test_failed_auto_merge_wait_withdraws_only_its_recorded_request(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch, ownership: str
+) -> None:
+    pr_project(harness)
+    document = prepared_run(harness, "fx-solo")
+    request = {"enabledAt": "2026-01-01T00:00:00Z"}
+    if ownership in {"recorded", "earlier_failure", "early_refusal_withdrawal_failed"}:
+        manifest.land_update(
+            harness.config,
+            document["run_id"],
+            auto_merge_request={"pr": 7, "request": request},
+        )
+    run = manifest.load(harness.config, document["run_id"])
+    pull = {
+        "state": "OPEN",
+        "headRefOid": SHA,
+        "baseRefName": "master",
+        "autoMergeRequest": request
+        if ownership
+        in {
+            "recorded",
+            "preexisting",
+            "earlier_failure",
+            "early_refusal_withdrawal_failed",
+        }
+        else None,
+    }
+    calls = []
+    monkeypatch.setattr(landing_module, "_ensure_pr", lambda *_: 7)
+    monkeypatch.setattr(github, "pull_request", lambda *_: pull)
+    monkeypatch.setattr(github, "check_rollup", lambda *_: "ready")
+
+    def merge(*_):
+        raise github.MergeBlocked("synthetic policy gate")
+
+    def arm(*_):
+        calls.append("arm")
+        pull["autoMergeRequest"] = request
+
+    def wait(*_):
+        if ownership == "replaced":
+            pull["autoMergeRequest"] = {"enabledAt": "2026-01-02T00:00:00Z"}
+        raise BatchRefusal("checks_failed", "synthetic failed wait")
+
+    def withdraw(argv, **_):
+        calls.append("withdraw")
+        if ownership in {"withdrawal_failed", "early_refusal_withdrawal_failed"}:
+            raise github.GithubError("synthetic withdrawal failure")
+        pull["autoMergeRequest"] = None
+        return ""
+
+    monkeypatch.setattr(github, "merge_pr", merge)
+    monkeypatch.setattr(github, "arm_auto_merge", arm)
+    monkeypatch.setattr(github, "_run", withdraw)
+    monkeypatch.setattr(landing_module, "_await_auto_merge", wait)
+
+    def verify(_config, _project, current, *_args, **_kwargs):
+        if ownership == "earlier_failure":
+            raise BatchRefusal("verify_failed", "synthetic failed wait")
+        return current, {"candidate_sha": SHA, "phase": "succeeded"}
+
+    monkeypatch.setattr(landing_module, "_verify", verify)
+    if ownership == "early_refusal_withdrawal_failed":
+
+        def incomplete(_run):
+            raise BatchRefusal("worker_not_done", "synthetic failed wait")
+
+        monkeypatch.setattr(landing_module, "_refuse_unless_workers_done", incomplete)
+    monkeypatch.setattr(
+        landing_module,
+        "_review",
+        lambda *_args: {"candidate_sha": SHA, "verdict": "pass"},
+    )
+    with pytest.raises(
+        (BatchError, BatchRefusal), match="synthetic failed wait"
+    ) as refused:
+        harness.land(run.run_id)
+
+    assert ("arm" in calls) == (
+        ownership
+        not in {
+            "recorded",
+            "preexisting",
+            "earlier_failure",
+            "early_refusal_withdrawal_failed",
+        }
+    )
+    assert ("withdraw" in calls) == (
+        ownership
+        in {
+            "new",
+            "recorded",
+            "withdrawal_failed",
+            "earlier_failure",
+            "early_refusal_withdrawal_failed",
+        }
+    )
+    if ownership == "preexisting":
+        assert pull["autoMergeRequest"] == request
+    else:
+        assert manifest.load(harness.config, run.run_id).landing[
+            "auto_merge_request"
+        ] == {"pr": 7, "request": request}
+    if ownership in {
+        "replaced",
+        "withdrawal_failed",
+        "early_refusal_withdrawal_failed",
+    }:
+        assert "withdrawal failed" in str(refused.value)
+        assert manifest.load(harness.config, run.run_id).landing["failure"][
+            "auto_merge_withdrawal_error"
+        ]
+
+
+@pytest.mark.parametrize("withdrawal_fails", [False, True])
+def test_abandon_withdraws_its_request_before_releasing_the_run(
+    harness: Harness,
+    monkeypatch: pytest.MonkeyPatch,
+    withdrawal_fails: bool,
+    recording_systemctl: Callable[[], list[list[str]]],
+) -> None:
+    run = prepared_run(harness, "fx-solo")
+    request = {"enabledAt": "2026-01-01T00:00:00Z"}
+    manifest.land_update(
+        harness.config, run["run_id"], auto_merge_request={"pr": 7, "request": request}
+    )
+    calls = []
+
+    def withdraw(root, number, observed):
+        assert number == 7 and observed == request
+        assert not harness.beads.released and not harness.wt.removed
+        calls.append(number)
+        if withdrawal_fails:
+            raise github.GithubError("synthetic withdrawal failure")
+
+    monkeypatch.setattr(github, "disable_owned_auto_merge", withdraw)
+    if withdrawal_fails:
+        with pytest.raises(BatchRefusal, match="withdrawal failed"):
+            harness.abandon(run["run_id"])
+        assert manifest.load(harness.config, run["run_id"]).live
+        assert not harness.beads.released and not harness.wt.removed
+        assert not recording_systemctl()
+    else:
+        assert harness.abandon(run["run_id"])["abandoned"]
+    assert calls == [7]
 
 
 def test_pr_policy_publishes_over_a_moved_base_and_refreshes_only_a_conflict(

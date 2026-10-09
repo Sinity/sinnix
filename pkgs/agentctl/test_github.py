@@ -206,6 +206,41 @@ def test_create_pull_request_returns_the_number_from_the_url(
         )
 
 
+@pytest.mark.parametrize(
+    "state", ["owned", "absent", "merged", "replaced", "unidentified"]
+)
+def test_auto_merge_withdrawal_matches_the_observed_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, state: str
+) -> None:
+    request = {"enabledAt": "2026-01-01T00:00:00Z", "mergeMethod": "SQUASH"}
+    current = {"state": "OPEN", "autoMergeRequest": request}
+    if state == "absent":
+        current["autoMergeRequest"] = None
+    elif state == "merged":
+        current.update(state="MERGED", mergeCommit={"oid": "a" * 40})
+    elif state == "replaced":
+        current["autoMergeRequest"] = {**request, "enabledAt": "2026-01-02T00:00:00Z"}
+    elif state == "unidentified":
+        request = {}
+    calls = []
+    monkeypatch.setattr(github, "pull_request", lambda *_: current)
+
+    def run(argv, **_kwargs):
+        calls.append(argv)
+        current["autoMergeRequest"] = None
+        return ""
+
+    monkeypatch.setattr(github, "_run", run)
+    if state in {"replaced", "unidentified"}:
+        with pytest.raises(GithubError):
+            github.disable_owned_auto_merge(tmp_path, 7, request)
+    else:
+        github.disable_owned_auto_merge(tmp_path, 7, request)
+    assert calls == (
+        [["gh", "pr", "merge", "7", "--disable-auto"]] if state == "owned" else []
+    )
+
+
 def test_advisory_lists_reviews_and_comments_with_author_state_head_and_url(
     recorded_gh: dict[str, Any], tmp_path: Path
 ) -> None:

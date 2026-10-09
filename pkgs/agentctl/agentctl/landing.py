@@ -1442,7 +1442,21 @@ def _publish(
         except github.MergeBlocked:
             # Branch protection gates on a check this landing does not wait
             # for; GitHub merges the head once that check reports.
-            github.arm_auto_merge(project.root, number, candidate)
+            request = pull.get("autoMergeRequest")
+            if request is None:
+                github.arm_auto_merge(project.root, number, candidate)
+                acknowledgement = github.pull_request(project.root, number) or {}
+                request = acknowledgement.get("autoMergeRequest")
+                if not github.merge_commit(acknowledgement):
+                    if not isinstance(request, Mapping) or not request.get("enabledAt"):
+                        raise GithubError(
+                            f"PR #{number} auto-merge enabling outcome was not observed"
+                        ) from None
+                    run = land_update(
+                        config,
+                        run.run_id,
+                        auto_merge_request={"pr": number, "request": dict(request)},
+                    )
             pull = _await_auto_merge(project, number, candidate, sleep, deadline)
         except GithubError as error:
             if "no longer" in str(error):
@@ -1660,6 +1674,22 @@ def land(
         )
 
 
+def _withdraw_recorded_auto_merge(
+    config: Config, project: ProjectAdapter, run_id: str
+) -> str | None:
+    recorded = load(config, run_id).landing.get("auto_merge_request")
+    if not isinstance(recorded, Mapping):
+        return None
+    number, request = recorded.get("pr"), recorded.get("request")
+    if not isinstance(number, int) or not isinstance(request, Mapping):
+        return None
+    try:
+        github.disable_owned_auto_merge(project.root, number, request)
+    except GithubError as error:
+        return str(error)
+    return None
+
+
 def _land_locked(
     config: Config,
     project: ProjectAdapter,
@@ -1812,13 +1842,21 @@ def _land_locked(
             published=published,
         )
     except BatchRefusal as refusal:
-        if refusal.code not in {
+        withdrawal_error = _withdraw_recorded_auto_merge(config, project, run_id)
+        failure = refusal.to_dict()
+        if withdrawal_error:
+            failure["auto_merge_withdrawal_error"] = withdrawal_error
+        if withdrawal_error or refusal.code not in {
             "abandoned",
             "already_accepted",
             "worker_not_done",
             "worker_result_missing",
         }:
-            land_update(config, run_id, failure=refusal.to_dict())
+            land_update(config, run_id, failure=failure)
+        if withdrawal_error:
+            raise BatchError(
+                f"{refusal}; auto-merge withdrawal failed: {withdrawal_error}"
+            ) from refusal
         raise
     except (
         BatchError,
@@ -1837,7 +1875,14 @@ def _land_locked(
                 "lock": str(stranded.lock),
                 "removed": stranded.removed,
             }
+        withdrawal_error = _withdraw_recorded_auto_merge(config, project, run_id)
+        if withdrawal_error:
+            failure["auto_merge_withdrawal_error"] = withdrawal_error
         land_update(config, run_id, failure=failure)
+        if withdrawal_error:
+            raise BatchError(
+                f"{error}; auto-merge withdrawal failed: {withdrawal_error}"
+            ) from error
         raise
     return run.to_dict()
 
@@ -2402,6 +2447,14 @@ def abandon(
             raise BatchRefusal(
                 "landing_in_progress", f"landing task {landing_id} is running"
             )
+        withdrawal_error = _withdraw_recorded_auto_merge(config, project, run.run_id)
+        if withdrawal_error:
+            refusal = BatchRefusal(
+                "publish_rejected",
+                f"auto-merge withdrawal failed: {withdrawal_error}",
+            )
+            land_update(config, run.run_id, failure=refusal.to_dict())
+            raise refusal
         residual: list[str] = []
         for worker in run.workers:
             task_id = worker.get("task_id")
