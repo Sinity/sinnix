@@ -113,7 +113,13 @@ pinned candidate; required hosted review stays with the forge.
   Preserve both intents where possible, never invent behavior mid-merge, and
   commit after each resolution. Grep for leftover conflict markers after any
   autostash.
-- Verify actual required gates and publication before claiming the change
+- Read the repository's required checks and conversation rules. Use one hosted
+  review for the coherent delivery; address findings together, review the changed
+  delta, and resolve threads with a fix or concrete refutation. Request another
+  review when protection requires it or a named new risk remains. An advisory
+  review summary's commit or running state alone does not add a merge gate.
+  Use the repository's protected merge route and matching candidate SHA.
+- Verify required gates and publication before claiming the change
   landed. A stacked merge counts as landed on the default branch. Report the
   commit or PR, useful check results, and residuals without a ceremonial list.
   Preserve WIP and clean only worktrees and watches you own.

@@ -32,9 +32,12 @@ names, and exits with one result document.
    No separate ticket, plan, or review cycle for a small correction. Separate
    only substantial investigation, new architectural dependencies, conflicting
    ownership, or material delivery delay. Report remaining failures honestly.
-3. **Verify the change.** Run the snapshot's `verification_commands` when the
-   task names them, through the route in step 7, after the owned source patch
-   is coherent. Run a shared selector once for all assigned Beads that name
+3. **Verify the change.** Reconcile the snapshot's `verification_commands` with
+   the current project descriptor, instructions, and changed behavior. Task
+   examples do not create an automatic full-suite gate; preserve required checks
+   and evidence needed for the assigned criteria. Run the selected commands
+   through the route in step 7 after the owned source patch is coherent.
+   Run a shared selector once for all assigned Beads that name
    it; reuse evidence until a change invalidates it. For ordinary fixes, a
    cheap import/static check or small discriminating test is enough when useful.
    Full affected-module or full-suite runs belong at integration milestones,
