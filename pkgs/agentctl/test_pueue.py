@@ -17,11 +17,17 @@ import time
 from pathlib import Path
 
 import pytest
+import sinnix_lib
 from agentctl import launch, pueue
 from agentctl.config import Config
 from agentctl.launch import JobError
 from agentctl.projects import load_project_adapter
 from agentctl.run import unit_for
+
+# Child runners need the shared library after replacing the parent PYTHONPATH.
+CHILD_PYTHONPATH = os.pathsep.join(
+    [str(Path(__file__).parent), str(Path(sinnix_lib.__file__).parent.parent)]
+)
 
 # Recorded from `pueue status --json` on pueue 4.0.4 after one failing task.
 LIVE_STATUS = {
@@ -392,7 +398,7 @@ def test_a_private_pueue_task_places_its_child_in_the_declared_pool_scope(
                     "HOME": os.environ["HOME"],
                     "PATH": os.environ["PATH"],
                     "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}",
-                    "PYTHONPATH": str(Path(__file__).parent),
+                    "PYTHONPATH": CHILD_PYTHONPATH,
                 },
                 "working_directory": str(tmp_path),
                 "timeout_seconds": 30,
@@ -407,7 +413,7 @@ def test_a_private_pueue_task_places_its_child_in_the_declared_pool_scope(
         label="fixture:verify:private",
         command=(
             "env",
-            f"PYTHONPATH={Path(__file__).parent}",
+            f"PYTHONPATH={CHILD_PYTHONPATH}",
             sys.executable,
             "-m",
             "agentctl.run",
@@ -684,7 +690,7 @@ def test_cancelling_a_task_reaps_every_descendant_it_started(
     # workload; anything else is another program that happens to be queued.
     wrapper = tmp_path / "agentctl-run"
     wrapper.write_text(
-        f"#!/bin/sh\nexport PYTHONPATH={Path(__file__).parent}\n"
+        f"#!/bin/sh\nexport PYTHONPATH={CHILD_PYTHONPATH}\n"
         f'exec {sys.executable} -m agentctl.run "$@"\n'
     )
     wrapper.chmod(0o755)
@@ -700,7 +706,7 @@ def test_cancelling_a_task_reaps_every_descendant_it_started(
                     "HOME": os.environ["HOME"],
                     "PATH": os.environ["PATH"],
                     "XDG_RUNTIME_DIR": f"/run/user/{os.getuid()}",
-                    "PYTHONPATH": str(Path(__file__).parent),
+                    "PYTHONPATH": CHILD_PYTHONPATH,
                     "PIDS": str(pids),
                     "CHILD": str(scripts["child"]),
                     "GRANDCHILD": str(scripts["grandchild"]),

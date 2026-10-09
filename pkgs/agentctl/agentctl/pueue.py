@@ -409,7 +409,8 @@ def log(task_id: int) -> str:
 
 def wait(task_id: int, *, timeout_seconds: float) -> Task:
     """Block until the task is terminal, then return its final state."""
-    _run(["wait", str(task_id)], timeout=timeout_seconds)
+    # Status is read below; discarded progress output can panic on a closed pipe.
+    _run(["wait", "--quiet", str(task_id)], timeout=timeout_seconds)
     final = task(task_id)
     if final is None:
         raise PueueError(f"pueue forgot task {task_id} while waiting for it")
