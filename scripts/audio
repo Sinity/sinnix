@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Audio device and volume control with gum UI
-# runtimeInputs: coreutils gum pulseaudio pamixer
+# description: Audio device and volume control
+# runtimeInputs: coreutils gawk gnugrep jq libnotify pipewire procps wireplumber
 # audio - Unified audio management for PipeWire
 # Usage: audio [toggle|status|mic-toggle|mic-status|volume-up|volume-down|mute]
 
@@ -67,7 +67,7 @@ get_current_sink_json() {
 
 get_mic_json() {
     if ! status=$(get_active_mic_status); then
-        jq -n '{text:"󰍭", tooltip:"No active microphone (input unplugged)", class:"unavailable", state:"unavailable"}'
+        jq -n '{text:"󰍭", tooltip:"No active microphone", class:"unavailable", state:"unavailable"}'
         return
     fi
 
@@ -116,7 +116,7 @@ case "${1:-status}" in
         ;;
     mic-toggle)
         if ! get_active_mic_status >/dev/null; then
-            message="No active microphone (input unplugged)"
+            message="No active microphone"
             if command -v notify-send >/dev/null 2>&1; then
                 notify-send "Microphone unavailable" "$message" || true
             fi
