@@ -5,6 +5,7 @@
 
 """Publish a `codex-review` commit status that branch protection can require.
 
+Only the exact chatgpt-codex-connector Bot identity is accepted as the reviewer.
 The hosted Codex reviewer posts a summary comment whose Code Review row names
 the reviewed commit and its state; it publishes no status of its own. One pass
 reads every open PR of each repository, with all of its comments, and sets the
@@ -64,6 +65,7 @@ from datetime import datetime, timezone
 
 CONTEXT = "codex-review"
 WAIVER_LABEL = "codex-review-waived"
+REVIEWER_LOGIN = "chatgpt-codex-connector"
 SUMMARY_MARKER = "<!-- codex-pull-request-review-summary -->"
 GH_TIMEOUT_S = 60
 # Codex normally starts within minutes of a push; a head it never picks up
@@ -97,7 +99,7 @@ query($owner: String!, $name: String!, $cursor: String) {
         labels(first: 100) { nodes { name } }
         comments(first: 100) {
           pageInfo { hasNextPage endCursor }
-          nodes { url body createdAt author { login } }
+          nodes { url body createdAt author { login __typename } }
         }
         commits(last: 1) {
           nodes {
@@ -118,7 +120,7 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
     pullRequest(number: $number) {
       comments(first: 100, after: $cursor) {
         pageInfo { hasNextPage endCursor }
-        nodes { url body createdAt author { login } }
+        nodes { url body createdAt author { login __typename } }
       }
     }
   }
@@ -148,7 +150,7 @@ def summary_row(comments: list[dict]) -> tuple[str, bool, str | None]:
         c
         for c in comments
         if SUMMARY_MARKER in (c.get("body") or "")
-        and "codex" in ((c.get("author") or {}).get("login") or "")
+        and _by_codex(c)
     ]
     if not summaries:
         return "", False, None
@@ -220,7 +222,8 @@ def _stamp(moment: datetime) -> str:
 
 
 def _by_codex(comment: dict) -> bool:
-    return "codex" in ((comment.get("author") or {}).get("login") or "")
+    author = comment.get("author") or {}
+    return author.get("login") == REVIEWER_LOGIN and author.get("__typename") == "Bot"
 
 
 @dataclass(frozen=True)

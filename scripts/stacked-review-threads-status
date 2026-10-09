@@ -414,10 +414,17 @@ def sync_repository(repository: str, *, run: Run = gh_graphql, post: Post | None
     github = GitHub(run, repository)
     default, roots = github.open_roots()
     wanted = desired_statuses(github, default, roots)
+    # Commit statuses belong to a SHA, not a PR. A fork or another branch
+    # sharing that SHA must never overwrite a failing or unreadable stack.
+    heads: dict[str, list[Root]] = {}
     for root in roots:
+        heads.setdefault(root.head_oid, []).append(root)
+    rank = {"failure": 0, "pending": 1, "success": 2}
+    for shared in heads.values():
+        root = min(shared, key=lambda item: (rank[wanted[item.number][0]], item.number))
         state, description, target = wanted[root.number]
         description = description[:140]
-        if root.current == (state, description, target):
+        if all(item.current == (state, description, target) for item in shared):
             continue
         print(f"{repository}#{root.number} {root.head_oid[:9]}: {state} ({description})")
         if dry_run:

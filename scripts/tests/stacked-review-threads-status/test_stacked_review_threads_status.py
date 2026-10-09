@@ -356,3 +356,38 @@ def test_an_unchanged_status_is_not_rewritten() -> None:
     )
     settled.sync()
     assert settled.posted == []
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("fork", [False, True])
+def test_shared_commit_failure_wins_once_regardless_of_pr_order(reverse, fork):
+    owner = _root(10, "owner")
+    other = _root(20, "other", fork=fork)
+    other["headRefOid"] = owner["headRefOid"]
+    other["commits"] = owner["commits"]
+    roots = [owner, other]
+    if reverse:
+        roots.reverse()
+    fake = FakeGitHub(
+        roots,
+        {
+            "owner": [_merged(11, "child", "2026-01-05T00:00:00Z", False)],
+            "child": [],
+            "other": [],
+        },
+    )
+    fake.sync()
+    assert len(fake.posted) == 1
+    assert fake.posted[0][1] == owner["headRefOid"]
+    assert fake.posted[0][2] == "failure"
+
+
+def test_shared_commit_unreadable_stack_cannot_be_passed_by_fork():
+    owner = _root(10, "owner")
+    fork = _root(20, "foreign", fork=True)
+    fork["headRefOid"] = owner["headRefOid"]
+    fork["commits"] = owner["commits"]
+    fake = FakeGitHub([owner, fork], {}, fail={"branches"})
+    fake.sync()
+    assert len(fake.posted) == 1
+    assert fake.posted[0][2] == "pending"

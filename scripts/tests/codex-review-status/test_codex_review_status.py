@@ -59,7 +59,7 @@ def _quota(at: datetime, body: str = QUOTA_BODY) -> dict:
         "url": "https://example.test/quota",
         "body": body,
         "createdAt": _iso(at),
-        "author": {"login": "chatgpt-codex-connector"},
+        "author": {"login": "chatgpt-codex-connector", "__typename": "Bot"},
     }
 
 
@@ -77,7 +77,7 @@ def _summary(sha: str, state: str) -> dict:
         "url": "https://example.test/summary",
         "body": body,
         "createdAt": _iso(NOW - timedelta(days=1)),
-        "author": {"login": "chatgpt-codex-connector"},
+        "author": {"login": "chatgpt-codex-connector", "__typename": "Bot"},
     }
 
 
@@ -470,3 +470,21 @@ def test_unreadable_protection_writes_nothing(fake: FakeGitHub) -> None:
     with pytest.raises(status.GhError):
         fake.sync()
     assert fake.requests == [] and fake.statuses == []
+
+
+@pytest.mark.parametrize("author", [
+    {"login": "friendly-codex-reviewer", "__typename": "User"},
+    {"login": "chatgpt-codex-connector", "__typename": "User"},
+    {"login": "chatgpt-codex-connector"},
+    None,
+])
+def test_untrusted_summary_and_quota_notice_do_not_control_gate(fake, author):
+    summary = _summary(HEAD_A, "Completed")
+    summary["author"] = author
+    notice = _quota(NOW)
+    notice["author"] = author
+    fake.pr(1, comments=[summary, notice])
+    fake.sync()
+    assert not any("completed" in description for _, description in fake.statuses)
+    assert status.summary_row([summary]) == ("", False, None)
+    assert status.Quota.read([[notice]]).notice is None
