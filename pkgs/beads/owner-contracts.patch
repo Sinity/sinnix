@@ -276,7 +276,7 @@
  			return result, err
 --- /dev/null
 +++ b/internal/httpapi/owner.go
-@@ -0,0 +1,280 @@
+@@ -0,0 +1,288 @@
 +package httpapi
 +
 +import (
@@ -313,11 +313,15 @@
 +		for name, value := range properties {
 +			revision, _ := value.(map[string]any)
 +			if (name == "revision" || schemaName == "Problem" && (name == "expected_version" || name == "actual_version")) && ownerRowToken(revision) {
++				if name == "revision" {
++					properties["bead_revision_domain"] = map[string]any{"type": "string", "enum": []any{"beads_row_revision"}, "description": "Administrative row equality token domain; not an acceptance-contract revision."}
++					properties["bead_revision_coverage"] = map[string]any{"type": "string", "enum": []any{"partial_update_coverage"}, "description": "Claim, close, unclaim and generic update rewrite the token; label-only changes, reopen, restore and compaction may not. Complete change detection also needs updated_at, status and labels."}
++				}
 +				revision["type"] = "string"
 +				delete(revision, "format")
 +				revision["pattern"] = "^-?(0|[1-9][0-9]*)$"
 +				originalDescription, _ := revision["description"].(string)
-+				revision["description"] = "Opaque signed-64-bit row equality token serialized as an exact decimal string. Never coerce through a floating-point number. Coverage is partial: claim, close, unclaim and generic update rewrite it; direct text updates may not. This is an administrative row token, not an acceptance-contract revision."
++				revision["description"] = "Opaque signed-64-bit row equality token serialized as an exact decimal string. Never coerce through a floating-point number. Coverage is partial: claim, close, unclaim and generic update rewrite it; label-only changes, reopen, restore and compaction may not. Complete change detection also needs updated_at, status and labels. This is an administrative row token, not an acceptance-contract revision."
 +				if schemaName == "Problem" {
 +					revision["description"] = revision["description"].(string) + "\n\n" + originalDescription
 +				}
@@ -547,6 +551,10 @@
 +				return nil, fmt.Errorf("invalid owner row token: %w", err)
 +			}
 +			object[name], _ = json.Marshal(strconv.FormatInt(token, 10))
++			if name == "revision" {
++				object["bead_revision_domain"] = json.RawMessage(`"beads_row_revision"`)
++				object["bead_revision_coverage"] = json.RawMessage(`"partial_update_coverage"`)
++			}
 +		} else {
 +			projected, err := ownerProjectTokens(document, child, raw)
 +			if err != nil {
@@ -559,7 +567,7 @@
 +}
 --- /dev/null
 +++ b/internal/httpapi/owner_test.go
-@@ -0,0 +1,158 @@
+@@ -0,0 +1,178 @@
 +package httpapi
 +
 +import (
@@ -651,12 +659,16 @@
 +					t.Fatal(err)
 +				}
 +				raw := result["revision"]
++				if operation != "applyBatch" {
++					assertOwnerCoverage(t, result)
++				}
 +				if operation == "applyBatch" {
 +					var items []map[string]json.RawMessage
 +					if err := json.Unmarshal(result["items"], &items); err != nil {
 +						t.Fatal(err)
 +					}
 +					raw = items[0]["revision"]
++					assertOwnerCoverage(t, items[0])
 +				}
 +				var got string
 +				if err := json.Unmarshal(raw, &got); err != nil || got != strconv.FormatInt(token, 10) {
@@ -681,7 +693,13 @@
 +	schemas := document["components"].(map[string]any)["schemas"].(map[string]any)
 +	for _, name := range []string{"IssueDetails", "ApplyItemResult", "CloseIssueResponse", "ReleaseIssueResponse", "ReopenIssueResponse", "UpdateIssueResponse"} {
 +		schema := schemas[name].(map[string]any)
-+		revision := schema["properties"].(map[string]any)["revision"].(map[string]any)
++		properties := schema["properties"].(map[string]any)
++		revision := properties["revision"].(map[string]any)
++		for _, key := range []string{"bead_revision_domain", "bead_revision_coverage"} {
++			if properties[key] == nil {
++				t.Fatalf("%s missing %s schema", name, key)
++			}
++		}
 +		if revision["type"] != "string" || revision["format"] != nil {
 +			t.Fatalf("%s token schema=%v", name, revision)
 +		}
@@ -715,6 +733,16 @@
 +	for _, name := range []string{"expected_version", "actual_version"} {
 +		if properties[name].(map[string]any)["type"] != "string" {
 +			t.Fatalf("numeric conflict token %s", name)
++		}
++	}
++}
++
++func assertOwnerCoverage(t *testing.T, object map[string]json.RawMessage) {
++	t.Helper()
++	for key, want := range map[string]string{"bead_revision_domain": "beads_row_revision", "bead_revision_coverage": "partial_update_coverage"} {
++		var got string
++		if err := json.Unmarshal(object[key], &got); err != nil || got != want {
++			t.Fatalf("%s=%s want=%s err=%v", key, object[key], want, err)
 +		}
 +	}
 +}
