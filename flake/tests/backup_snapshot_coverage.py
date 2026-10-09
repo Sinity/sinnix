@@ -470,6 +470,17 @@ class CoverageFixture(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "ACL mismatch"):
                 COVERAGE.verify(self.source, "snapshot", [])
 
+    def test_masked_named_acl_accepts_borg_permission_padding(self):
+        # Captured from a neutral native Borg archive with a named rwx entry
+        # restricted by an r-- mask. Preserve the stored permission, not its
+        # effective masked value; formatting whitespace carries no semantics.
+        text = "user::rw-\nuser:1001:rwx\t:1001\ngroup::r--\nmask::r--\nother::r--"
+        expected = {(1, None): 6, (2, 1001): 7, (4, None): 4, (16, None): 4, (32, None): 4}
+        self.assertEqual(COVERAGE.archived_acl_entries(text), expected)
+        self.assertNotEqual(
+            COVERAGE.archived_acl_entries(text.replace("rwx\t", "r--\t")), expected
+        )
+
     def test_default_only_acl_uses_mode_for_borg_access_entries(self):
         entries = [(1, 7, 0xFFFFFFFF), (2, 4, 1000), (4, 5, 0xFFFFFFFF), (16, 5, 0xFFFFFFFF), (32, 5, 0xFFFFFFFF)]
         raw = COVERAGE.struct.pack("<I", 2) + b"".join(COVERAGE.struct.pack("<HHI", *entry) for entry in entries)

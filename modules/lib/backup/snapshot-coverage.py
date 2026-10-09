@@ -620,6 +620,9 @@ def archived_acl_entries(text):
         if len(fields) not in (3, 4) or fields[0] not in tags:
             raise ValueError("invalid archived ACL entry")
         kind, qualifier, permissions = fields[:3]
+        # Borg removes getfacl's effective-permission comment but retains
+        # its tab before the appended numeric principal ("rwx\t:1001").
+        permissions = permissions.strip()
         if not re.fullmatch(r"[r-][w-][x-]", permissions):
             raise ValueError("invalid archived ACL permissions")
         named = bool(qualifier)
