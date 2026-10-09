@@ -85,6 +85,25 @@ printf '%s' "$bash_deny" | jq -e '.hookSpecificOutput.permissionDecision == "den
 test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" '{"tool_input":{"command":"printf \"safe\""}}')"
 test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" 'not-json' 2>/dev/null)"
 
+# Inspect every update in a compound command, including after a safe update.
+for denied in 'bd update x --append-notes safe; bd update y --notes replace' 'bd update x --append-notes safe && bd update y --description replace'; do
+  payload=$(jq -cn --arg command "$denied" '{tool_input: {command: $command}}')
+  run_hook "$hooks_dir/pretooluse-bash.sh" "$payload" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+done
+payload=$(jq -cn --arg command 'bd update x --append-notes safe; bd update y --append-notes safe' '{tool_input: {command: $command}}')
+test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$payload")"
+
+# Leading shell whitespace must not bypass the lock guard. These commands
+# are input to the hook only; the harness never invokes fastboot.
+for denied in '  fastboot flashing lock' $'\tfastboot oem lock' '  sudo fastboot flashing lock_critical' 'true;  fastboot flashing lock'; do
+  payload=$(jq -cn --arg command "$denied" '{tool_input: {command: $command}}')
+  run_hook "$hooks_dir/pretooluse-bash.sh" "$payload" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+done
+for allowed in '  fastboot flashing unlock' 'echo fastboot flashing lock'; do
+  payload=$(jq -cn --arg command "$allowed" '{tool_input: {command: $command}}')
+  test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$payload")"
+done
+
 # Hook bypass and checkout-wide stashes are denied; named-path stashes, stash
 # inspection, and a heredoc message naming the flag stay allowed.
 for denied in 'git commit --no-verify -m x' 'git commit -n -m x' 'git commit -anm x' 'git -c core.hooksPath=/dev/null commit -m x' 'git -C /tmp/r push --no-verify origin b' 'cd /tmp && git stash' 'git stash -u' 'git stash push -m wip' 'git stash save wip'; do

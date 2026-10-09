@@ -65,7 +65,6 @@ for index, token in enumerate(tokens):
         for option in tokens[index + 2 : end]:
             if option in replace_flags or any(option.startswith(flag + "=") for flag in replace_flags):
                 deny("bd update replace-writes blocked: use --append-notes for note history, --design-file or --body-file for file-backed updates, or read-modify-write when replacing a field is intentional.")
-        sys.exit(0)
     if cwd == "/realm/worktree" or cwd.startswith("/realm/worktree/"):
         end = index + 1
         while end < len(tokens) and tokens[end] not in separators:
@@ -250,7 +249,7 @@ fi
 # Anchored at a command position, with only known wrapper prefixes allowed
 # (sudo/doas/time/command/env) and an optional absolute path, so that prose
 # mentioning the command -- echo, a comment, a bd note -- is not caught.
-if echo "$CMD_NO_HEREDOC" | grep -qE '(^|[;&|]\s*)(sudo\s+|doas\s+|time\s+|command\s+|env\s+[^[:space:];&|]+\s+)*[^[:space:];&|]*\bfastboot\b[^;&|]*\b(flashing\s+lock(_critical)?|oem\s+lock)\b'; then
+if echo "$CMD_NO_HEREDOC" | grep -qE '(^|[;&|])[[:space:]]*(sudo\s+|doas\s+|time\s+|command\s+|env\s+[^[:space:];&|]+\s+)*[^[:space:];&|]*\bfastboot\b[^;&|]*\b(flashing\s+lock(_critical)?|oem\s+lock)\b'; then
   emit_deny "Bootloader relock blocked: this device runs a custom ROM on an unlocked bootloader, so locking makes it demand Xiaomi-signed boot images it does not have -- it will neither boot nor accept flashes, which is a hard brick needing EDL 9008 + an authorized Mi account. Relock is only safe after restoring the full stock HyperOS fastboot ROM and confirming it boots green. If that is genuinely what you are doing, run the lock command outside an agent session."
   exit 0
 fi
