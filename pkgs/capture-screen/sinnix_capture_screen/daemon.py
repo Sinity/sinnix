@@ -48,9 +48,8 @@ import sys
 import time
 from pathlib import Path
 
-from sinnix_lib.layout import capture_lane_path
-
 from sinnix_lib.atomic_json import write_json_atomic
+from sinnix_lib.layout import capture_lane_path
 
 from . import capture, hypr
 from .hashing import (
@@ -124,7 +123,9 @@ def run(args: argparse.Namespace) -> int:
         )
         return 1
 
-    throttle_state_path = capture_lane_path(args.capture_root, args.lane) / "throttle-state.json"
+    throttle_state_path = (
+        capture_lane_path(args.capture_root, args.lane) / "throttle-state.json"
+    )
     throttle_state_path.parent.mkdir(parents=True, exist_ok=True)
     throttle = DailyThrottleGuard(
         ceiling_bytes=args.daily_ceiling_bytes,
@@ -200,8 +201,6 @@ def run(args: argparse.Namespace) -> int:
             last_hash_by_window[window_key] = new_hash
             attempt_gate.record_success()
             return
-        last_hash_by_window[window_key] = new_hash
-
         webp_bytes = capture.encode_webp(
             im, max_width=args.max_width, quality=args.quality
         )
@@ -245,6 +244,8 @@ def run(args: argparse.Namespace) -> int:
         if written_path is None:
             attempt_gate.record_failure(attempt_now)
         else:
+            # A failed publication must remain eligible for an identical retry.
+            last_hash_by_window[window_key] = new_hash
             attempt_gate.record_success()
 
     try:
