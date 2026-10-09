@@ -13,6 +13,7 @@ lane is a placement, not a permission.
 
 from __future__ import annotations
 
+import io
 import shlex
 from pathlib import PurePosixPath
 from typing import Literal
@@ -47,6 +48,29 @@ WRAPPERS = frozenset(
 )
 # Wrappers whose first positional argument is a value, not the command.
 _WRAPPER_VALUE = {"timeout": 1, "chrt": 1, "taskset": 1}
+# Required option operands belong to each wrapper's own grammar. For example,
+# env -i is a flag, while stdbuf -i consumes a buffering mode.
+_VALUE_OPTIONS = {
+    "env": {"-a", "--argv0", "-u", "--unset", "-C", "--chdir", "-S", "--split-string"},
+    "nice": {"-n", "--adjustment"},
+    "ionice": {
+        "-c",
+        "--class",
+        "-n",
+        "--classdata",
+        "-p",
+        "--pid",
+        "-P",
+        "--pgid",
+        "-u",
+        "--uid",
+    },
+    "stdbuf": {"-i", "--input", "-o", "--output", "-e", "--error"},
+    "timeout": {"-s", "--signal", "-k", "--kill-after"},
+    "chrt": {"-T", "--sched-runtime", "-P", "--sched-period", "-D", "--sched-deadline"},
+    "time": {"-f", "--format", "-o", "--output"},
+    "exec": {"-a"},
+}
 _SEPARATORS = frozenset({";", "&", "&&", "|", "||", "|&", "(", ")", "\n"})
 _KEYWORDS = frozenset(
     {"then", "do", "else", "elif", "if", "while", "until", "{", "}", "!"}
@@ -61,6 +85,21 @@ def _name(word: str) -> str:
 def _is_assignment(word: str) -> bool:
     name, equals, _ = word.partition("=")
     return bool(equals) and name.replace("_", "a").isalnum() and not name[0].isdigit()
+
+
+def _option_operand(wrapper: str, word: str) -> tuple[str, str | None] | None:
+    options = _VALUE_OPTIONS.get(wrapper, set())
+    if word.startswith("--"):
+        option, equals, value = word.partition("=")
+        if option in options:
+            return option, value if equals else None
+        return None
+    if word.startswith("-"):
+        for index, letter in enumerate(word[1:], start=1):
+            if f"-{letter}" in options:
+                # Short options can be grouped or carry an attached operand.
+                return f"-{letter}", word[index + 1 :] or None
+    return None
 
 
 def _command_word(words: list[str]) -> tuple[str | None, list[str]]:
@@ -79,17 +118,26 @@ def _command_word(words: list[str]) -> tuple[str | None, list[str]]:
         while index < len(words):
             current = words[index]
             if current == "--":
-                index += 1
+                index = min(len(words), index + 1 + values)
                 break
             if current.startswith("-") or _is_assignment(current):
                 index += 1
-                # `nice -n 5`, `ionice -c 3`, `env -u NAME`: an option's value.
-                if (
-                    current in {"-n", "-c", "-u", "-p", "-s", "-k", "-o", "-e", "-i"}
-                    and index < len(words)
-                    and not words[index].startswith("-")
-                ):
-                    index += 1
+                operand = _option_operand(name, current)
+                if operand is not None:
+                    option, value = operand
+                    if value is None and index < len(words):
+                        value = words[index]
+                        index += 1
+                    if (
+                        name == "env"
+                        and option in {"-S", "--split-string"}
+                        and value is not None
+                    ):
+                        try:
+                            expanded = shlex.split(value)
+                        except ValueError:
+                            expanded = []
+                        words = words[:index] + expanded + words[index:]
                 continue
             if values:
                 values -= 1
@@ -124,9 +172,21 @@ def _script(arguments: list[str]) -> str | None:
     return None
 
 
+class _ScriptStream(io.StringIO):
+    def readline(self, size: int = -1) -> str:
+        line = super().readline(size)
+        # shlex discards comments via readline(). Preserve their terminating
+        # newline so the next command cannot become the preceding one's args.
+        if line.endswith("\n"):
+            self.seek(self.tell() - 1)
+        return line
+
+
 def _script_commands(script: str) -> list[list[str]]:
     """The simple commands of a shell script, split at its operators."""
-    lexer = shlex.shlex(script, posix=True, punctuation_chars=";&|()")
+    operators = ";&|()\n"
+    lexer = shlex.shlex(_ScriptStream(script), posix=True, punctuation_chars=operators)
+    lexer.whitespace = " \t\r"
     lexer.whitespace_split = True
     lexer.commenters = "#"
     try:
@@ -136,7 +196,7 @@ def _script_commands(script: str) -> list[list[str]]:
         tokens = script.replace(";", " ; ").replace("&", " & ").split()
     commands: list[list[str]] = [[]]
     for token in tokens:
-        if token in _SEPARATORS or set(token) <= set(";&|()"):
+        if token in _SEPARATORS or set(token) <= set(operators):
             commands.append([])
         else:
             commands[-1].append(token)
