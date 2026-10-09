@@ -103,6 +103,7 @@ in
             cat > bin/uwsm <<'EOF_UWSM'
             #!/bin/sh
             printf '%s\n' "$@" > "$HOME/uwsm-args"
+            printf '%s\n' "$HYPRLAND_CONFIG" > "$HOME/hyprland-config-path"
             EOF_UWSM
             chmod +x bin/id bin/tty bin/uwsm
             cat > login.zsh <<'EOF_LOGIN'
@@ -116,18 +117,16 @@ in
             Hyprland
             --
             ${hyprland}/bin/start-hyprland
-            --
-            --config
-            $PWD/home/.config/hypr/hyprland.lua
             EOF_ARGS
+            test "$(cat "$PWD/home/hyprland-config-path")" = "$PWD/home/.config/hypr/hyprland.lua"
             uwsm_parse=$(
-              HOME="$PWD/home" XDG_RUNTIME_DIR="$PWD/runtime" \
+              HOME="$PWD/home" XDG_RUNTIME_DIR="$PWD/runtime" HYPRLAND_CONFIG="$PWD/home/.config/hypr/hyprland.lua" \
                 ${pkgs.uwsm}/bin/uwsm start -n -e -D Hyprland -- \
-                  ${hyprland}/bin/Hyprland --config "$PWD/home/.config/hypr/hyprland.lua" \
+                  ${hyprland}/bin/Hyprland \
                   2>&1 || true
             )
             printf '%s\n' "$uwsm_parse" | grep -F \
-              "Command Line: ${hyprland}/bin/Hyprland --config $PWD/home/.config/hypr/hyprland.lua"
+              "Command Line: ${hyprland}/bin/Hyprland"
             touch "$out"
           '';
 

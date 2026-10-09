@@ -155,12 +155,15 @@ in
               current_tty=$(tty 2>/dev/null || true)
               if [ "$current_tty" = "/dev/tty1" ] && command -v uwsm >/dev/null 2>&1; then
                 # UWSM's packaged desktop entry launches Hyprland without a
-                # config argument. Lua is not its default discovery path, so
-                # pass the Home Manager-generated config explicitly. Hyprland
-                # 0.56+ expects to run under its start-hyprland watchdog (it
+                # config argument. Select Lua through the environment: --config
+                # canonicalizes Home Manager's symlink to an immutable store
+                # file, leaving subsequent reloads stuck on that generation.
+                # HYPRLAND_CONFIG retains the path through symlink replacements.
+                # Hyprland 0.56+ expects its start-hyprland watchdog (it
                 # warns otherwise); uwsm's hyprland plugin recognises that
                 # launcher, and the earlyoom avoid pattern protects it.
-                exec uwsm start -e -D Hyprland -- ${hyprlandPkg}/bin/start-hyprland -- --config "$HOME/.config/hypr/hyprland.lua"
+                export HYPRLAND_CONFIG="$HOME/.config/hypr/hyprland.lua"
+                exec uwsm start -e -D Hyprland -- ${hyprlandPkg}/bin/start-hyprland
               fi
             fi
           '';
