@@ -12,10 +12,54 @@ from __future__ import annotations
 
 import hashlib
 import os
+import multiprocessing
 from http import HTTPStatus
 
 import pytest
 import sinnix_phone_dispatcher.uploads as uploads_mod
+
+
+def test_repair_serializes_with_late_upload_process(monkeypatch, tmp_path):
+    monkeypatch.setattr(uploads_mod, "EVENTS_DIR", tmp_path)
+    original = b'{"n":0}\n'
+    replacement = b'{"n":1}\n'
+    target = tmp_path / "events-20200101.jsonl"
+    target.write_bytes(original)
+    source = tmp_path / "source"
+    source.write_bytes(replacement)
+    ctx = multiprocessing.get_context("fork")
+    started, finished = ctx.Event(), ctx.Event()
+    parent, child = ctx.Pipe(duplex=False)
+    def upload():
+        started.set()
+        status, payload = uploads_mod.append_events("20200101", 0, original + b'{"n":2}\n', None)
+        child.send(int(status))
+        finished.set()
+    process = ctx.Process(target=upload)
+    real_replace = uploads_mod.os.replace
+    finished_before_replace = []
+    def replace(pending, destination):
+        process.start()
+        assert started.wait(5)
+        finished_before_replace.append(finished.wait(0.2))
+        real_replace(pending, destination)
+    monkeypatch.setattr(uploads_mod.os, "replace", replace)
+    try:
+        result = uploads_mod.repair_event_day("20200101", source, hashlib.sha256(original).hexdigest())
+        process.join(5)
+        assert not process.is_alive()
+        assert parent.poll(1)
+        assert parent.recv() == int(HTTPStatus.CONFLICT)
+        assert finished_before_replace == [False]
+        assert result["changed"]
+        assert target.read_bytes() == replacement
+        assert next((tmp_path / ".repairs").iterdir()).read_bytes() == original
+    finally:
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+        parent.close()
+        child.close()
 
 
 def _lanes(tmp_path):

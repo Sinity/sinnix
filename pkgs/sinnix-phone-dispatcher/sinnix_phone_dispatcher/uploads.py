@@ -10,10 +10,10 @@ repeat of something already landed answers ok rather than a conflict, because
 the phone deletes its copy on an ok and retries on anything else.
 
 An ok therefore describes bytes read back from where they were retained, never
-the request that carried them. This service is the only writer of the upload
-lanes and the event day files, so a lock per shape, held across the
-check-write-verify of one request, is what keeps two concurrent deliveries
-from both deciding the destination is theirs.
+the request that carried them. Upload deliveries serialize their
+check-write-verify operation. Event writes and the separate closed-day repair
+CLI share a filesystem lock, so a late delivery cannot be acknowledged into
+an inode that repair is replacing.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from threading import Lock
 
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.ledger import utc_ts
+from sinnix_lib.lock import flock
 
 from .notifications import mirror_new_events
 from .state import (
@@ -45,7 +46,6 @@ AMBIENT_PROGRESS_MARKER = Path(
 )
 _AMBIENT_PROGRESS_LOCK = Lock()
 _UPLOAD_LOCK = Lock()
-_EVENTS_LOCK = Lock()
 
 
 def _retained_digest(target: Path) -> tuple[int, str] | None:
@@ -348,7 +348,7 @@ def append_events(
     target = _day_file(day)
     try:
         EVENTS_DIR.mkdir(parents=True, exist_ok=True)
-        with _EVENTS_LOCK:
+        with flock(EVENTS_DIR / ".write.lock"):
             size = target.stat().st_size if target.is_file() else 0
             if offset > size:
                 return HTTPStatus.CONFLICT, {
@@ -447,43 +447,44 @@ def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
         if not isinstance(json.loads(line), dict):
             raise ValueError("source contains a non-object record")
     target = _day_file(day)
-    previous = target.read_bytes()
-    old_sha = hashlib.sha256(previous).hexdigest()
-    if old_sha != expected_sha256:
-        raise ValueError("destination changed; expected SHA-256 does not match")
-    new_sha = hashlib.sha256(body).hexdigest()
-    if body == previous:
-        return {"ok": True, "changed": False, "sha256": new_sha}
-    backups = EVENTS_DIR / ".repairs"
-    backups.mkdir(exist_ok=True)
-    backup = backups / f"{day}-{old_sha}.jsonl"
-    if not backup.exists():
-        os.link(target, backup)
-    if hashlib.sha256(backup.read_bytes()).hexdigest() != old_sha:
-        raise ValueError("backup verification failed")
-    pending: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=EVENTS_DIR, prefix=".repair-", delete=False
-        ) as out:
-            pending = Path(out.name)
-            out.write(body)
-            out.flush()
-            os.fsync(out.fileno())
-        if target.read_bytes() != previous:
-            raise ValueError("destination changed during repair")
-        os.chmod(pending, 0o660)
-        os.replace(pending, target)
-        pending = None
-    finally:
-        if pending is not None:
-            pending.unlink(missing_ok=True)
-    return {
-        "ok": True,
-        "changed": True,
-        "day": day,
-        "sha256": new_sha,
-        "previous_sha256": old_sha,
-        "backup": str(backup),
-        "bytes": len(body),
-    }
+    with flock(EVENTS_DIR / ".write.lock"):
+        previous = target.read_bytes()
+        old_sha = hashlib.sha256(previous).hexdigest()
+        if old_sha != expected_sha256:
+            raise ValueError("destination changed; expected SHA-256 does not match")
+        new_sha = hashlib.sha256(body).hexdigest()
+        if body == previous:
+            return {"ok": True, "changed": False, "sha256": new_sha}
+        backups = EVENTS_DIR / ".repairs"
+        backups.mkdir(exist_ok=True)
+        backup = backups / f"{day}-{old_sha}.jsonl"
+        if not backup.exists():
+            os.link(target, backup)
+        if hashlib.sha256(backup.read_bytes()).hexdigest() != old_sha:
+            raise ValueError("backup verification failed")
+        pending: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                dir=EVENTS_DIR, prefix=".repair-", delete=False
+            ) as out:
+                pending = Path(out.name)
+                out.write(body)
+                out.flush()
+                os.fsync(out.fileno())
+            if target.read_bytes() != previous:
+                raise ValueError("destination changed during repair")
+            os.chmod(pending, 0o660)
+            os.replace(pending, target)
+            pending = None
+        finally:
+            if pending is not None:
+                pending.unlink(missing_ok=True)
+        return {
+            "ok": True,
+            "changed": True,
+            "day": day,
+            "sha256": new_sha,
+            "previous_sha256": old_sha,
+            "backup": str(backup),
+            "bytes": len(body),
+        }
