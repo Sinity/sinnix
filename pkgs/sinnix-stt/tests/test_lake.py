@@ -4,6 +4,8 @@ import argparse
 import importlib.machinery
 import importlib.util
 import json
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -39,6 +41,21 @@ def lake(tmp_path, monkeypatch):
 
 def run_lake(module):
     assert module.cmd_lake(argparse.Namespace(lane=None, limit=0)) == 0
+
+
+def test_cli_creates_private_transcripts_under_a_permissive_parent_umask(lake):
+    module, calls, phone, mic = lake
+    previous = os.umask(0o022)
+    try:
+        assert module.main(["lake"]) == 0
+    finally:
+        os.umask(previous)
+    assert calls == [phone, mic]
+    assert stat.S_IMODE(module.TRANSCRIPT_DIR.stat().st_mode) == 0o700
+    outputs = list(module.TRANSCRIPT_DIR.iterdir())
+    assert module.LEDGER in outputs
+    assert module.TRANSCRIPT_DIR / ".lake.lock" in outputs
+    assert all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in outputs)
 
 
 def test_same_name_and_size_in_different_lanes_transcribe_once_each(lake):
