@@ -94,6 +94,12 @@
             pkgs.jq
           ];
         };
+        url-ledger-suite = mkScriptSuite {
+          name = "url-ledger";
+          suiteDir = ../../scripts/tests/url-ledger;
+          scripts = [ "sinnix-url-ledger" ];
+          extraPythonPackages = [ sinnix-lib ];
+        };
         audio-mic-suite = mkScriptSuite {
           name = "audio-mic";
           suiteDir = ../../scripts/tests/audio-mic;
