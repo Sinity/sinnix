@@ -144,7 +144,7 @@ mkServiceModule {
     { config, ... }:
     {
       systemd.tmpfiles.rules = [
-        "d ${laneDir} 0755 ${username} users -"
+        "d ${laneDir} 0700 ${username} users -"
       ];
 
       # Both default to off. Without nf_conntrack_acct every flow records
@@ -183,6 +183,7 @@ mkServiceModule {
             Type = "simple";
             User = username;
             Group = "users";
+            UMask = "0077";
             # `+` runs this one step as root: the unit itself stays unprivileged.
             ExecStartPre = "+${requireAccounting}/bin/capture-netflow-require-accounting";
             ExecStart = lib.concatStringsSep " " [

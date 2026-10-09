@@ -158,10 +158,10 @@ mkServiceModule {
       )
       {
         systemd.tmpfiles.rules = [
-          "d ${audioDir} 0755 ${username} users -"
-          "d ${devicesDir} 0755 ${username} users -"
-          "d ${topologyDir} 0755 ${username} users -"
-          "d ${indexDir} 0755 ${username} users -"
+          "d ${audioDir} 0700 ${username} users -"
+          "d ${devicesDir} 0700 ${username} users -"
+          "d ${topologyDir} 0700 ${username} users -"
+          "d ${indexDir} 0700 ${username} users -"
         ];
 
         sinnix.runtime.surfaces = {

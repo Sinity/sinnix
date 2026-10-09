@@ -105,7 +105,7 @@ mkServiceModule (mkCaptureLane {
   execStart = "${syncer}/bin/capture-calendar-sync ${vdirsyncerConfig} ${laneDir}";
   privateTmp = true;
   tmpfilesRules = [
-    "d ${laneDir} 0755 ${username} users -"
+    "d ${laneDir} 0700 ${username} users -"
     "d ${stateDir} 0700 ${username} users -"
     "d ${stateDir}/status 0700 ${username} users -"
   ];

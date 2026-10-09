@@ -3,6 +3,7 @@
 # description: Capture full-ANSI-fidelity kitty terminal scrollback across all instances
 # runtimeInputs: bash coreutils hostname kitty jq
 set -euo pipefail
+umask 077
 
 # Capture all kitty terminal scrollbacks with full ANSI fidelity.
 # Iterates over ALL kitty instances (each has its own socket).

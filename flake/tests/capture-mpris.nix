@@ -14,9 +14,15 @@
           {
             sinnix.services.capture-kitty-scrollback.enable = true;
             sinnix.services.capture-mpris.enable = true;
+            sinnix.services.capture-audio.enable = true;
+            sinnix.services.capture-netflow.enable = true;
           }
         ];
         assertions = config: [
+          {
+            assertion = config.systemd.services.sinnix-capture-netflow.serviceConfig.UMask == "0077";
+            message = "System capture writers must create owner-only output.";
+          }
           {
             assertion =
               config.systemd.user.services.sinnix-capture-kitty-scrollback.serviceConfig.UMask == "0077";
@@ -38,6 +44,11 @@
                 [
                   config.sinnix.paths.capturePaths.kitty-scrollback
                   config.sinnix.paths.capturePaths.mpris
+                  config.sinnix.paths.capturePaths.audio
+                  config.sinnix.paths.capturePaths.audio-devices
+                  config.sinnix.paths.capturePaths.audio-topology
+                  config.sinnix.paths.capturePaths.audio-index
+                  "${config.sinnix.paths.machineRoot}/netflow"
                 ];
             message = "Private capture entrances must be owner-only.";
           }
