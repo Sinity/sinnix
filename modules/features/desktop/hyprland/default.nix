@@ -315,10 +315,8 @@ in
 
           xdg.configFile."hypr/hyprland.lua" = {
             force = true;
-            # Home Manager's default onChange runs `hyprctl reload config-only`.
-            # During a NixOS switch, unit churn is already risky enough; apply
-            # new compositor config on the next session or by explicit reload.
-            onChange = lib.mkForce "";
+            # Keep Home Manager's config-only reload so changed bindings and
+            # script paths reach the running session after activation.
           };
 
           # Scratchpad config files + script links

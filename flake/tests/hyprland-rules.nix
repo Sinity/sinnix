@@ -58,13 +58,16 @@ in
       settings = hm.wayland.windowManager.hyprland.settings;
     in
     {
-      checks.hyprland-rules = pkgs.runCommand "sinnix-hyprland-rules" { } ''
-        cat > "$out" <<'EOF_CONTRACT'
-        ${builtins.toJSON {
-          globalBlur = settings.config.decoration.blur.enabled;
-        }}
-        EOF_CONTRACT
-      '';
+      checks.hyprland-rules =
+        assert lib.hasInfix "hyprctl" hm.xdg.configFile."hypr/hyprland.lua".onChange;
+        assert lib.hasInfix "reload" hm.xdg.configFile."hypr/hyprland.lua".onChange;
+        pkgs.runCommand "sinnix-hyprland-rules" { } ''
+          cat > "$out" <<'EOF_CONTRACT'
+          ${builtins.toJSON {
+            globalBlur = settings.config.decoration.blur.enabled;
+          }}
+          EOF_CONTRACT
+        '';
 
       checks.hyprland-lua-config = mkHmRuntimeCheck system {
         name = "hyprland-lua-config";
