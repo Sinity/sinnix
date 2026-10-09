@@ -133,11 +133,12 @@ mkFeatureModule {
         };
 
         # Steam keeps its XDG data path, while the install and library live on
-        # the library volume, including saves and client state.
+        # the library volume, including saves and client state. Existing XDG
+        # data must be migrated by its owner, never replaced by tmpfiles.
         systemd.tmpfiles.rules = [
           "d ${sinnix.paths.libraryRoot}/game 0755 ${user} users -"
           "d ${steamLibraryRoot} 0750 ${user} users -"
-          "L+ /home/${user}/.local/share/Steam - - - - ${steamLibraryRoot}"
+          "L /home/${user}/.local/share/Steam - - - - ${steamLibraryRoot}"
         ];
 
         home-manager.users.${user} = {
