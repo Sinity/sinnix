@@ -1,4 +1,5 @@
 import json
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -130,6 +131,90 @@ def test_zero_avg10_is_current_recovery_not_a_stale_avg60_fallback(
 
     assert calls == [("resume", "pytest")]
     assert result["action"] == "opened"
+
+
+def test_backpressure_replay_memory_does_not_scale_with_retained_history(tmp_path):
+    spool = tmp_path / "events.jsonl"
+    checkpoint = tmp_path / "checkpoint.json"
+    event = {"kind": "backpressure", "action": "closed", "group": "bulk",
+             "owner": "agentctl", "signal": "io", "detail": "x" * 200}
+    line = json.dumps(event) + "\n"
+    with spool.open("w") as stream:
+        for _ in range(20000):
+            stream.write(line)
+    tracemalloc.start()
+    try:
+        state = backpressure.event_state(spool, checkpoint=checkpoint)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert state.ours() == {"bulk"}
+    assert state.cursor["offset"] == spool.stat().st_size
+    assert peak < 2 * 1024 * 1024
+
+
+def test_backpressure_replay_leaves_partial_record_for_next_read(tmp_path):
+    spool = tmp_path / "events.jsonl"
+    checkpoint = tmp_path / "checkpoint.json"
+    closed = json.dumps({"kind": "backpressure", **_ours("bulk")}).encode() + b"\n"
+    opened = json.dumps({"kind": "backpressure", "action": "opened", "group": "bulk"}).encode()
+    prefix = closed + b"not-json\n\xff\n"
+    spool.write_bytes(prefix + opened[:-4])
+    first = backpressure.event_state(spool, checkpoint=checkpoint)
+    assert first.ours() == {"bulk"}
+    assert first.cursor["offset"] == len(prefix)
+    with spool.open("ab") as stream:
+        stream.write(opened[-4:] + b"\n")
+    second = backpressure.event_state(spool, checkpoint=checkpoint)
+    assert second.ours() == set()
+    assert second.cursor["offset"] == spool.stat().st_size
+
+
+def test_backpressure_replay_read_failure_retains_previous_projection(monkeypatch, tmp_path):
+    spool = _spool(tmp_path, _ours("pytest"))
+    checkpoint = tmp_path / "checkpoint.json"
+    previous = backpressure.event_state(spool, checkpoint=checkpoint)
+    with spool.open("ab") as stream:
+        stream.write((json.dumps({"kind": "backpressure", **_ours("bulk")}) + "\n").encode())
+        stream.write((json.dumps({"kind": "backpressure", "action": "opened", "group": "pytest"}) + "\n").encode())
+    saved_checkpoint = checkpoint.read_bytes()
+    original_open = Path.open
+
+    class FailingRead:
+        def __init__(self, handle):
+            self.handle = handle
+            self.reads = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.handle.close()
+
+        def fileno(self):
+            return self.handle.fileno()
+
+        def seek(self, offset):
+            return self.handle.seek(offset)
+
+        def readline(self, limit):
+            self.reads += 1
+            if self.reads == 2:
+                raise OSError("synthetic read failure")
+            return self.handle.readline(limit)
+
+    def open_with_failure(path, *args, **kwargs):
+        handle = original_open(path, *args, **kwargs)
+        return FailingRead(handle) if path == spool and args == ("rb",) else handle
+
+    with monkeypatch.context() as patching:
+        patching.setattr(Path, "open", open_with_failure)
+        failed = backpressure.event_state(spool, checkpoint=checkpoint)
+    assert failed == previous
+    assert checkpoint.read_bytes() == saved_checkpoint
+    recovered = backpressure.event_state(spool, checkpoint=checkpoint)
+    assert recovered.ours() == {"bulk"}
+    assert recovered.cursor["offset"] == spool.stat().st_size
 
 
 def test_checkpoint_round_trips_nonempty_legacy_holds(tmp_path) -> None:

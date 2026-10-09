@@ -130,6 +130,12 @@ def event_state(spool: Path | None, *, checkpoint: Path | None = None) -> SpoolS
     state = _load_checkpoint(checkpoint_path)
     if spool is None:
         return state
+    previous = state
+    state = SpoolState(
+        pauses=dict(previous.pauses),
+        legacy_holds=dict(previous.legacy_holds),
+        cursor=previous.cursor,
+    )
     try:
         with spool.open("rb") as handle:
             # Attribute bytes to the inode actually opened, not a path that
@@ -146,20 +152,24 @@ def event_state(spool: Path | None, *, checkpoint: Path | None = None) -> SpoolS
             ):
                 offset = state.cursor["offset"]
             handle.seek(offset)
-            appended = handle.read()
+            # Replay one complete record at a time, through the observed
+            # size. A growing writer cannot keep this pass open forever.
+            # Leave a partial final record for the next pass.
+            while offset < metadata.st_size:
+                line = handle.readline(metadata.st_size - offset)
+                if not line.endswith(b"\n"):
+                    break
+                offset += len(line)
+                try:
+                    event = json.loads(line.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    continue
+                if isinstance(event, dict):
+                    state.apply(event)
     except OSError:
-        return state
-    complete, separator, _partial = appended.rpartition(b"\n")
-    if separator:
-        consumed = len(complete) + 1
-        for line in complete.splitlines():
-            try:
-                event = json.loads(line.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError):
-                continue
-            if isinstance(event, dict):
-                state.apply(event)
-        offset += consumed
+        # A failed replay cannot replace previously verified ownership or
+        # publish a cursor past unread events.
+        return previous
     state.cursor = {**identity, "offset": offset}
     _save_checkpoint(checkpoint_path, state)
     return state
