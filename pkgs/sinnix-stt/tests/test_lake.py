@@ -141,3 +141,58 @@ def test_http_framing_precedes_transcription(lake, monkeypatch, framing, raw, su
     assert module.cmd_serve(argparse.Namespace(socket=None, listen="127.0.0.1:0")) == 0
     assert statuses == [200 if success else 400]
     assert calls == ([b"{}"] if success else [])
+
+
+@pytest.mark.parametrize("failure", [None, "write", "transcribe"])
+def test_upload_scratch_is_removed_even_after_partial_write(lake, monkeypatch, tmp_path, failure):
+    import socketserver
+    from email.message import Message
+
+    module = lake[0]
+    scratch = tmp_path / "requests"
+    scratch.mkdir()
+    monkeypatch.setattr(module.tempfile, "tempdir", str(scratch))
+    monkeypatch.setattr(module, "_multipart_file", lambda body, ctype: b"neutral audio")
+    original_write = Path.write_bytes
+
+    def write(path, data):
+        if failure == "write":
+            original_write(path, data[:3])
+            raise OSError("synthetic storage failure")
+        return original_write(path, data)
+
+    monkeypatch.setattr(Path, "write_bytes", write)
+
+    def transcribe(path):
+        assert path.read_bytes() == b"neutral audio"
+        if failure == "transcribe":
+            raise OSError("synthetic transcription failure")
+        return {"text": "neutral"}
+
+    monkeypatch.setattr(module, "transcribe_file", transcribe)
+
+    class Server:
+        def __init__(self, address, handler):
+            self.handler = handler
+
+        def serve_forever(self):
+            import io
+            handler = object.__new__(self.handler)
+            handler.headers = Message()
+            handler.headers["Content-Length"] = "2"
+            handler.rfile = io.BytesIO(b"{}")
+            handler.path = "/v1/audio/transcriptions"
+            handler._json = lambda status, body: None
+            handler.do_POST()
+
+        def server_close(self):
+            pass
+
+    monkeypatch.setattr(socketserver, "ThreadingTCPServer", Server)
+    args = argparse.Namespace(socket=None, listen="127.0.0.1:0")
+    if failure:
+        with pytest.raises(OSError, match="synthetic"):
+            module.cmd_serve(args)
+    else:
+        assert module.cmd_serve(args) == 0
+    assert list(scratch.iterdir()) == []

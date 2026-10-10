@@ -653,13 +653,10 @@ def cmd_serve(args: argparse.Namespace) -> int:
             if audio is None:
                 self._json(HTTPStatus.BAD_REQUEST, {"error": "expected a multipart file field"})
                 return
-            with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as tmp:
-                tmp.write(audio)
-                tmp_path = Path(tmp.name)
-            try:
+            with tempfile.TemporaryDirectory(prefix="sinnix-stt-request-") as scratch:
+                tmp_path = Path(scratch) / "audio.bin"
+                tmp_path.write_bytes(audio)
                 record = transcribe_file(tmp_path)
-            finally:
-                tmp_path.unlink(missing_ok=True)
             # The OpenAI response shape is {"text": ...}; the extra fields are
             # additive and ignored by clients that do not know them.
             self._json(
