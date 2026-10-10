@@ -3,11 +3,13 @@ import fs from "node:fs";
 import vm from "node:vm";
 
 let contextMenuHandler;
+let relayHandler;
+let responseOK = true;
 const requests = [];
 
 globalThis.fetch = async (url, options) => {
   requests.push({ url, payload: JSON.parse(options.body) });
-  return { ok: true };
+  return { ok: responseOK };
 };
 
 globalThis.chrome = {
@@ -19,7 +21,7 @@ globalThis.chrome = {
   },
   runtime: {
     onInstalled: { addListener() {} },
-    onMessage: { addListener() {} },
+    onMessage: { addListener(handler) { relayHandler = handler; } },
   },
   scripting: { executeScript: async () => [{ result: null }] },
   tabs: {
@@ -87,3 +89,17 @@ handlers.contextmenu(event(true));
 handlers.contextmenu({ ...event(false), target: { ...anchor, href: "https://forged.example/" } });
 contextHandler({ type: "link-context" }, {}, (value) => { context = value; });
 assert.equal(context.target_url, anchor.href);
+
+// An HTTP refusal is a failed relay, even when fetch itself resolves.
+for (const ok of [true, false]) {
+  responseOK = ok;
+  const reply = await new Promise((resolve) => {
+    assert.equal(relayHandler({ path: "/v1/link-event", body: {} }, {}, resolve), true);
+  });
+  assert.equal(reply.ok, ok);
+}
+globalThis.fetch = async () => { throw new Error("neutral transport failure"); };
+const failedReply = await new Promise((resolve) => {
+  relayHandler({ path: "/v1/link-event", body: {} }, {}, resolve);
+});
+assert.equal(failedReply.ok, false);

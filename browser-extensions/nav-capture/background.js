@@ -38,7 +38,7 @@ async function promptInPage(tabId, message) {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message?.path || !message.body) return false;
   post(message.path, message.body)
-    .then(() => sendResponse({ ok: true }))
+    .then((ok) => sendResponse({ ok }))
     .catch(() => sendResponse({ ok: false }));
   return true;
 });
