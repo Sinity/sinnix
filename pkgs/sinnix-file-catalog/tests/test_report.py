@@ -344,3 +344,23 @@ console.log('cached-search, type-filter, reset and hash navigation passed');
         [node, str(driver), str(script)], capture_output=True, text=True, timeout=15
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_known_unavailable_current_addresses_are_text_not_active_links(tmp_path):
+    path = str(tmp_path / "retained historical address")
+    for status in ("unavailable", "missing", "offline_mount", "denied", "inaccessible", "wrong_type"):
+        asset = dict(id="fixture", kind="file", current_path=path, title="Fixture",
+            description="Retained historical evidence", inspections=[], relations=[], location_status=status)
+        page = MODULE["render_asset"](asset, {"fixture": asset})
+        assert "Location unavailable." in page
+        assert MODULE["esc"](path) in page
+        assert MODULE["path_link"](path) not in page
+
+
+def test_available_and_unobserved_current_addresses_keep_their_links(tmp_path):
+    path = str(tmp_path / "fixture")
+    for status in (None, "available"):
+        asset = dict(id="fixture", kind="file", current_path=path, title="Fixture",
+            description="Evidence", inspections=[], relations=[], location_status=status)
+        page = MODULE["render_asset"](asset, {"fixture": asset})
+        assert MODULE["path_link"](path) in page

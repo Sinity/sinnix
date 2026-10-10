@@ -182,15 +182,17 @@ def render_asset(asset: dict, by_id: dict, judgments: dict | None = None) -> str
     inspections = asset["inspections"]
     methods = sorted({item["method"] for item in inspections})
     tags = "".join(f'<span class="chip">{esc(tag)}</span>' for tag in asset.get("tags", []))
+    unavailable = asset.get("location_status") in {"unavailable", "missing", "offline_mount", "denied", "inaccessible", "wrong_type"}
+    current_path = f'<span class="path">{esc(asset["current_path"])}</span>' if unavailable else path_link(asset["current_path"])
     parts = [
         f'<article class="asset" id="asset-{esc(asset_id)}" data-kind="{esc(asset["kind"])}" '
         f'data-coverage="{esc(asset.get("coverage", {}).get("status", "unrecorded"))}" '
         f'data-document-type="{esc(document_type(asset))}" data-methods="{esc(json.dumps(methods))}">',
         f'<h3>{esc(asset["title"])}</h3>',
         f'<p>{esc(asset["description"])}</p>',
-        f'<p>{path_link(asset["current_path"])}</p><div class="tags">{tags}</div>',
+        f'<p>{current_path}</p><div class="tags">{tags}</div>',
     ]
-    if asset.get("location_status") in {"unavailable", "missing", "offline_mount", "denied", "inaccessible", "wrong_type"}:
+    if unavailable:
         parts.append('<p><strong>Location unavailable.</strong> The retained address is historical; no new physical identity is asserted.</p>')
     location = asset.get("current_location")
     if location:

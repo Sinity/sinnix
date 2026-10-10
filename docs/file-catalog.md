@@ -161,3 +161,8 @@ Publication URLs are relative route paths. Percent-encoded UTF-8 filenames map
 to the decoded filename the web server serves, and collision checks use that
 same decoded path. Queries, fragments, schemes, invalid escapes, hidden paths
 and encoded traversal are refused before a publication directory is created.
+
+The viewer displays a known unavailable current location as text alongside its
+availability explanation. It preserves the address and historical evidence,
+but does not offer that location as an active file link. Available and
+unobserved locations retain their existing link behavior.
