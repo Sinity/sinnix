@@ -1,7 +1,7 @@
 # Hyprland idle / DPMS management.
 #
-# The lock screen UI is provided by Noctalia (see noctalia.nix). This keeps
-# hypridle owns the ordered OLED power and lock stages. Media and game
+# The lock screen UI is provided by Noctalia (see noctalia.nix).
+# Hypridle owns the ordered OLED power and lock stages. Media and game
 # inhibitors remain in the Hyprland rules module.
 #
 { pkgs, ... }:
@@ -40,6 +40,11 @@ in
       general = {
         after_sleep_cmd = "hyprctl eval 'hl.dispatch(hl.dsp.dpms(\"on\"))'";
         ignore_dbus_inhibit = false;
+        # Machine-job idle inhibitors must not imply operator presence for
+        # display power, locking or AFK anchors. Logind still owns sleep
+        # inhibition; retain media's D-Bus and Wayland display inhibitors.
+        ignore_systemd_inhibit = true;
+        ignore_wayland_inhibit = false;
         lock_cmd = "noctalia msg session lock";
       };
 
