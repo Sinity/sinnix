@@ -1126,8 +1126,20 @@ def generation_coverage(path: Path) -> dict:
     if result.returncode:
         raise ValueError(f"coverage check failed: {result.stderr}")
     errors, pruned = map(int, result.stdout.strip().split(','))
-    return {"incomplete": bool(errors or pruned), "directory_errors": errors,
-            "pruned_directories": pruned,
+    columns = duckdb_query(path / "content.duckdb", "SELECT column_name FROM information_schema.columns WHERE table_name='files'")
+    if columns.returncode:
+        raise ValueError(f"content coverage schema check failed: {columns.stderr}")
+    has_boundaries = "kind" in columns.stdout.splitlines()
+    boundary_count = "count(*) FILTER (WHERE kind = 'collection_boundary')" if has_boundaries else "NULL"
+    content = duckdb_query(path / "content.duckdb", f"SELECT count(*) FILTER (WHERE error IS NOT NULL), {boundary_count} FROM files")
+    if content.returncode:
+        raise ValueError(f"content coverage check failed: {content.stderr}")
+    observed_errors, observed_boundaries = content.stdout.strip().split('|')
+    content_errors = int(observed_errors)
+    content_boundaries = int(observed_boundaries) if has_boundaries else None
+    return {"incomplete": bool(errors or pruned or content_errors or content_boundaries is None or content_boundaries),
+            "directory_errors": errors, "pruned_directories": pruned,
+            "content_errors": content_errors, "content_boundaries": content_boundaries,
             "scope": "generic metadata and bounded content scan; native payload coverage remains owner-specific"}
 
 
@@ -1165,6 +1177,7 @@ def publish_generation(index_dir: Path, *, roots=None, retained_inputs: Path | N
                 content_materialize(stage / "files.jsonl", stage / "content.duckdb", stage / "files.parquet")
                 scan = {"kind": "fresh", "started_at": started, "finished_at": dt.datetime.now(dt.timezone.utc).isoformat(),
                         "roots": roots, "content_exclusions": list(CONTENT_EXCLUDE_PREFIXES),
+                        "content_collection_boundaries": dict(CONTENT_COLLECTION_BOUNDARIES),
                         "excluded_components": sorted(CONTENT_EXCLUDE_DIR_PARTS)}
             if content_views_refresh(stage / "content.duckdb"):
                 raise ValueError("content comparison view refresh failed")

@@ -198,3 +198,51 @@ def test_public_query_cannot_write_outside_its_read_only_database(tmp_path):
         assert fs.cmd_query(args) != 0
         assert not external.exists()
         assert hashlib.sha256(db.read_bytes()).hexdigest() == before
+
+
+@pytest.mark.parametrize("omission", ["none", "denied", "boundary"])
+def test_generation_and_status_include_content_failures(tmp_path, monkeypatch, capsys, omission):
+    import json
+    fs = load_script()
+    root = tmp_path / "input"
+    root.mkdir()
+    source = root / "note.md"
+    source.write_text("Synthetic content")
+    index = tmp_path / "index"
+    index.mkdir()
+    (index / "judgments.jsonl").write_text("")
+    if omission == "denied":
+        source.chmod(0)
+    if omission == "boundary":
+        monkeypatch.setattr(fs, "CONTENT_COLLECTION_BOUNDARIES", {str(root): "synthetic native owner"})
+    try:
+        assert fs.publish_generation(index, roots=[str(root)]) == 0
+        generation = fs.resolve_generation(index)
+        observed = fs.duckdb_query(generation / "content.duckdb", "SELECT count(*) FROM files WHERE error IS NOT NULL")
+        assert observed.returncode == 0 and int(observed.stdout.strip()) == int(omission == "denied")
+        manifest = json.loads((generation / "manifest.json").read_text())
+        coverage = manifest["coverage"]
+        assert coverage["directory_errors"] == coverage["pruned_directories"] == 0
+        assert coverage["incomplete"] is (omission != "none")
+        assert coverage["content_errors"] == int(omission == "denied")
+        assert coverage["content_boundaries"] == int(omission == "boundary")
+        if omission == "boundary":
+            assert manifest["scan"]["content_collection_boundaries"] == {str(root): "synthetic native owner"}
+        capsys.readouterr()
+        assert fs.cmd_status(SimpleNamespace(index_dir=index)) == 0
+        status = json.loads(capsys.readouterr().out)
+        assert status["valid"] is True and status["coverage"] == coverage
+    finally:
+        source.chmod(0o600)
+
+
+def test_legacy_content_without_boundary_records_reports_unknown_coverage(tmp_path):
+    fs = load_script()
+    assert fs.run_duckdb_file(tmp_path / "inventory.duckdb",
+        "CREATE TABLE nodes(error VARCHAR, prune_reason VARCHAR)", "fixture").returncode == 0
+    assert fs.run_duckdb_file(tmp_path / "content.duckdb",
+        "CREATE TABLE files(error VARCHAR)", "fixture").returncode == 0
+    coverage = fs.generation_coverage(tmp_path)
+    assert coverage["incomplete"] is True
+    assert coverage["content_errors"] == 0
+    assert coverage["content_boundaries"] is None
