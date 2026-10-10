@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import time
 from types import SimpleNamespace
 
@@ -9,9 +10,12 @@ from PIL import Image
 from sinnix_capture_screen import daemon
 
 
-@pytest.mark.parametrize("unavailable", [{}, {"dpmsStatus": False}, {"disabled": True}])
+@pytest.mark.parametrize(
+    "unavailable",
+    [{}, {"dpmsStatus": False}, {"disabled": True}, {"budget_blocked": True}],
+)
 def test_failed_frame_publication_does_not_suppress_identical_retry(
-    tmp_path, monkeypatch, unavailable
+    tmp_path, monkeypatch, unavailable, capsys
 ):
     image = Image.new("RGB", (32, 32))
     for x in range(32):
@@ -98,6 +102,20 @@ def test_failed_frame_publication_does_not_suppress_identical_retry(
 
     monkeypatch.setattr(daemon.capture, "run_grim", grab)
     monkeypatch.setattr(daemon.capture, "write_frame", write)
+    if unavailable.get("budget_blocked"):
+        from sinnix_lib.layout import capture_lane_path
+
+        lane = capture_lane_path(tmp_path, "fixture")
+        lane.mkdir(parents=True, exist_ok=True)
+        (lane / "throttle-state.json").write_text(
+            json.dumps(
+                {
+                    "day": time.strftime("%Y-%m-%d", time.gmtime(now)),
+                    "bytes_written": 10_000_000_000,
+                    "tripped": True,
+                }
+            )
+        )
     args = daemon.build_arg_parser().parse_args(
         [
             "--capture-root",
@@ -114,6 +132,11 @@ def test_failed_frame_publication_does_not_suppress_identical_retry(
     )
     assert daemon.run(args) == 1  # Controlled socket close ends the loop.
     assert sock.closed
+    if unavailable.get("budget_blocked"):
+        assert not grabs
+        assert not writes
+        assert "DAILY VOLUME CEILING STILL TRIPPED" in capsys.readouterr().err
+        return
     assert len(grabs) == 3
     assert len(writes) == 2  # Failed first write retried; successful frame deduped.
     assert writes[0]["webp_bytes"] == writes[1]["webp_bytes"]

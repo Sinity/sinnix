@@ -304,3 +304,13 @@ def test_throttle_state_is_private_and_published_atomically(tmp_path) -> None:
     _save_throttle_state(path, DailyThrottleGuard(100).state)
     assert path.stat().st_mode & 0o777 == 0o600
     assert not list(tmp_path.glob(".throttle.json.atomic-tmp-*"))
+
+
+def test_blocked_guard_rolls_day_without_acquiring_a_frame() -> None:
+    clock = {"t": 0.0}
+    guard = DailyThrottleGuard(ceiling_bytes=100, clock=lambda: clock["t"])
+    guard.allow(101)
+    assert guard.blocked()
+    clock["t"] = 86400.0
+    assert not guard.blocked()
+    assert guard.state.bytes_written == 0

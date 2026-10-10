@@ -15,13 +15,12 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-
-from sinnix_lib.layout import capture_lane_path
 from typing import Any
 
 import numpy as np
 from PIL import Image
 from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.layout import capture_lane_path
 
 PHASH_IMAGE_SIZE = 32  # hash_size(8) * high_freq_factor(4), see hashing.phash64
 

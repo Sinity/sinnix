@@ -150,6 +150,11 @@ class DailyThrottleGuard:
         if today != self.state.day:
             self.state = ThrottleState(day=today)
 
+    def blocked(self) -> bool:
+        """Avoid frame acquisition work while today's write budget is exhausted."""
+        self._roll_if_new_day()
+        return self.state.tripped
+
     def allow(self, nbytes: int) -> tuple[bool, bool]:
         """Attempt to account for `nbytes` more written today.
 

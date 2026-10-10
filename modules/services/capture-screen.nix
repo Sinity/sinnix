@@ -12,7 +12,7 @@
 # modules/features/desktop/hyprland/default.nix, not by swapping grim out;
 # the setting applies to any wlr-screencopy client.
 #
-# `--daily-ceiling-bytes` (default 1GB) is a runaway-bug backstop, NOT a
+# `--daily-ceiling-bytes` (default 10GB) is a runaway-bug backstop, NOT a
 # policy cap: it exists only to stop a stuck dedup/trigger loop from writing
 # unbounded data, and it trips loudly (stderr, once per UTC day) rather than
 # silently dropping writes.
@@ -91,8 +91,8 @@ mkServiceModule (mkCaptureLane {
     };
     dailyCeilingBytes = lib.mkOption {
       type = lib.types.int;
-      default = 1000000000;
-      description = "Runaway-bug backstop on daily write volume (default 1GB), NOT a policy cap -- see module docstring.";
+      default = 10000000000;
+      description = "Runaway-bug backstop on daily write volume (default 10GB), NOT a policy cap -- see module docstring.";
     };
   };
   tmpfilesRules = [ "d ${laneDir} 0700 ${username} users -" ];

@@ -132,6 +132,14 @@ def run(args: argparse.Namespace) -> int:
         state=_load_throttle_state(throttle_state_path, time.time),
     )
 
+    if throttle.blocked():
+        print(
+            f"sinnix-capture-screen: DAILY VOLUME CEILING STILL TRIPPED "
+            f"({throttle.state.bytes_written}/{throttle.ceiling_bytes} bytes); "
+            "frame acquisition is paused until the UTC day rolls over",
+            file=sys.stderr,
+        )
+
     pause_detector = PauseDetector(idle_seconds=args.idle_pause_seconds)
     attempt_gate = CaptureAttemptGate()
     last_hash_by_window: dict[str, int] = {}
@@ -147,6 +155,8 @@ def run(args: argparse.Namespace) -> int:
             return
         now = time.time()
         last_capture_ts = now
+        if throttle.blocked():
+            return
         window = hypr.get_active_window(read_json)
         monitors = hypr.get_monitors(read_json)
         monitor_name = (
@@ -322,8 +332,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--daily-ceiling-bytes",
         type=int,
-        default=1_000_000_000,
-        help="Runaway-bug backstop, not a policy cap (default: 1GB/day)",
+        default=10_000_000_000,
+        help="Runaway-bug backstop, not a policy cap (default: 10GB/day)",
     )
     return parser
 
