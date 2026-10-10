@@ -76,6 +76,8 @@ and notification submission are separate smoke tests; they are not implied by un
 
 ## Host observations
 
+`sinnix-observe --section storage` includes the monitored mount paths declared in the runtime inventory, alongside native system and service mounts. Repeated paths are probed once; an absent archive-root setting does not produce an empty-path probe. This includes backup and secondary-disk entrances without a second hardcoded workstation mapping.
+
 `sinnix-observe --section drift` reads the private host comparison report. The scheduled producer probes system state as root, then drops privileges to publish a `0600` report owned by the configured operator. Invalid report rows appear as an unavailable source.
 
 The ingestion section reads Polylogue's `ops.db` `ingest_attempts` relation from the exported runtime inventory. An empty current relation is available with zero rows. A missing, inaccessible or obsolete source remains unavailable. `SINNIX_OBSERVE_POLYLOGUE_DB` selects an explicit standalone source without fallback. Attempt timestamps are projected from milliseconds to UTC; parsed raw and materialized counts retain their meanings. Missing byte and resource measurements remain explicit gaps.

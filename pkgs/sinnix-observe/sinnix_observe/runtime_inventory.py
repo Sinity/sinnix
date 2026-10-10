@@ -53,6 +53,17 @@ def surfaces() -> dict[str, dict[str, Any]]:
     )
 
 
+def monitored_mount_paths() -> list[str]:
+    """Configured storage entrances, without guessed workstation paths."""
+    rows = load_inventory().get("mounts", [])
+    if not isinstance(rows, list):
+        return []
+    paths = [row.get("path") for row in rows if isinstance(row, dict)]
+    return list(dict.fromkeys(
+        path for path in paths if isinstance(path, str) and path.startswith("/")
+    ))
+
+
 def polylogue_archive() -> dict[str, Any]:
     value = load_inventory().get("polylogue", {})
     return value if isinstance(value, dict) else {}

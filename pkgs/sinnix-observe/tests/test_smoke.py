@@ -751,3 +751,32 @@ def test_sqlite_read_helpers_close_their_connections(tmp_path, monkeypatch):
     for connection in opened:
         with pytest.raises(sqlite3.ProgrammingError, match="closed"):
             connection.execute("select 1")
+
+
+def test_storage_includes_declared_mounts_without_duplicate_or_empty_paths(tmp_path, monkeypatch):
+    inventory = tmp_path / "runtime.json"
+    inventory.write_text(json.dumps({"mounts": [
+        {"path": "/fixture-backup"}, {"path": "/fixture-media"},
+        {"path": "/realm"}, {"path": ""}, {"path": None}, "invalid",
+    ]}))
+    monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", str(inventory))
+    monkeypatch.setenv("SINNIX_OBSERVE_IOSTAT", "0")
+    monkeypatch.setattr(storage, "polylogue_archive", lambda: {})
+    monkeypatch.setattr(storage.glob, "glob", lambda pattern: [])
+    monkeypatch.setattr(storage, "systemctl_show", lambda unit: {})
+    probed = []
+
+    def findmnt(argv, **kwargs):
+        assert argv[0] == "findmnt"
+        path = argv[2]
+        probed.append(path)
+        return Result(tuple(argv), 0, f"{path} /dev/fixture btrfs rw\n", "")
+
+    monkeypatch.setattr(storage, "run", findmnt)
+    result = storage.collect_storage(offline=False)
+    paths = [row["path"] for row in result["mounts"]]
+    assert "/fixture-backup" in paths
+    assert "/fixture-media" in paths
+    assert paths.count("/realm") == 1
+    assert "" not in probed
+    assert paths == probed

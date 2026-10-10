@@ -10,7 +10,7 @@ from typing import Any
 from sinnix_lib.process import run
 from sinnix_lib.values import read_text
 
-from ..runtime_inventory import polylogue_archive
+from ..runtime_inventory import monitored_mount_paths, polylogue_archive
 from .systemd import systemctl_show
 
 
@@ -28,7 +28,8 @@ def collect_storage(offline: bool) -> dict[str, Any]:
         "/var/lib/sinex",
         str(polylogue_archive().get("archiveRoot", "")),
     ]
-    for path in paths:
+    paths.extend(monitored_mount_paths())
+    for path in dict.fromkeys(path for path in paths if path):
         result = run(
             ["findmnt", "-T", path, "-n", "-o", "TARGET,SOURCE,FSTYPE,OPTIONS"],
             timeout=5,
