@@ -37,6 +37,11 @@ command -v hyprctl >/dev/null 2>&1 || {
   exit 1
 }
 
+# Native Nix binaries carry their own runtime libraries. Agent/devshell
+# library overrides can select an incompatible C++ ABI for hyprctl.
+HYPRCTL_BIN=$(type -P hyprctl)
+hyprctl() { env -u LD_LIBRARY_PATH "$HYPRCTL_BIN" "$@"; }
+
 case "$WORKSPACE" in
   *[!A-Za-z0-9_.-]*)
     echo "toggle-scratch: invalid workspace name: $WORKSPACE" >&2

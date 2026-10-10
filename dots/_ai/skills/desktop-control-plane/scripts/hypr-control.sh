@@ -42,6 +42,12 @@ need_cmd() {
 
 need_cmd hyprctl
 
+# Native Nix binaries carry their own runtime libraries. Agent/devshell
+# library overrides can select an incompatible C++ ABI for hyprctl.
+HYPRCTL_BIN=$(type -P hyprctl)
+hyprctl() { env -u LD_LIBRARY_PATH "$HYPRCTL_BIN" "$@"; }
+
+
 lua_quote() {
   need_cmd jq
   jq -nr --arg value "$1" '$value | tojson'
