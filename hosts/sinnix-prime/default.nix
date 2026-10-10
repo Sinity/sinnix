@@ -191,9 +191,6 @@
     activity.enable = true;
     # Kernel audit capture plus the check that no unit is sandboxed out of
     # writing its own declared output.
-    # Backstop reaper for orphaned per-checkout sinex dev-postgres instances;
-    # primary cleanup is sinnix-direnvrc's owner-watcher.
-    sinex-dev-db-reaper.enable = true;
     # Pre-build + cachix-push sinex whenever its pinned input moves, off the
     # interactive switch critical path.
     sinex-cache-prebuild.enable = true;

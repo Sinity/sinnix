@@ -1035,49 +1035,31 @@ in
             test "$(direct-command)" = direct
             touch "$out"
           '';
-      # A declared AgentCTL operation evaluates the direnv rc inside a unit with
-      # no controlling terminal. If it registers a dev-database owner there, the
-      # detached watcher lands in the job's cgroup and its sleep child keeps the
-      # unit active with MainPID=0 after the command exits, holding a queue slot
-      # (sinnix-wp04). A Nix builder has no controlling terminal either, so the
-      # build itself is the no-tty case; the tty case is exercised by forcing the
-      # gate, which also proves the assertion is not vacuous.
-      sinexDevOwnerGateFixture =
-        pkgs.runCommand "sinex-dev-owner-gate-fixture"
+      # Direnv selects development paths; the foreground Sinex lease owns
+      # service lifetime. Exercise custom state and connection preservation.
+      sinexDevPathsFixture =
+        pkgs.runCommand "sinex-dev-paths-fixture"
           {
-            nativeBuildInputs = [
-              pkgs.bash
-              pkgs.coreutils
-              pkgs.gawk
-            ];
+            nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
           }
           ''
             source ${../../scripts/sinnix-direnvrc}
-
-            if _sinnix_pid_has_tty 1; then
-              echo "pid 1 must never report a controlling terminal" >&2
+            _sinnix_register_sinex_dev_owner() {
+              echo "direnv tried to acquire service ownership" >&2
               exit 1
-            fi
-
-            state_dir="$TMPDIR/state"
-            mkdir -p "$state_dir"
-            _sinnix_register_sinex_dev_owner "$state_dir" "$TMPDIR/project"
-            if [ -n "$(ls -A "$state_dir/owners" 2>/dev/null || true)" ]; then
-              echo "a shell with no controlling terminal registered a dev-db owner" >&2
-              exit 1
-            fi
-
-            # Anti-vacuity: with a terminal the registration must happen, so the
-            # check above is discriminating rather than always-true. The watcher
-            # spawn is stubbed because the builder must not start a daemon.
-            _sinnix_pid_has_tty() { return 0; }
-            _sinnix_ensure_sinex_dev_watcher() { return 0; }
-            _sinnix_register_sinex_dev_owner "$state_dir" "$TMPDIR/project"
-            if [ -z "$(ls -A "$state_dir/owners" 2>/dev/null || true)" ]; then
-              echo "a shell with a controlling terminal failed to register an owner" >&2
-              exit 1
-            fi
-
+            }
+            project_root="$TMPDIR/project"
+            export SINEX_DEV_CACHE_ROOT="$TMPDIR/cache"
+            export SINEX_DEV_STATE_DIR="$TMPDIR/leased-state"
+            export SINEX_STATE_DIR="$TMPDIR/runtime-state"
+            export DATABASE_URL="postgresql:///fixture?host=$SINEX_DEV_STATE_DIR/run&port=15432"
+            export PGHOST="$SINEX_DEV_STATE_DIR/run"
+            expected_url="$DATABASE_URL"
+            _sinnix_setup_sinex_dev_cache "$project_root"
+            test "$SINEX_DEV_ROOT" = "$project_root"
+            test "$SINEX_DEV_STATE_DIR" = "$TMPDIR/leased-state"
+            test "$DATABASE_URL" = "$expected_url"
+            test "$PGHOST" = "$TMPDIR/leased-state/run"
             touch "$out"
           '';
       # The agent wrappers' scope decision, exercised against cgroup paths
@@ -1655,7 +1637,7 @@ in
         agent-npm-bootstrap-recovery = agentNpmBootstrapRecovery;
         agent-scope-guard = agentScopeGuardFixture;
         direnv-direct-commands = direnvDirectCommandsFixture;
-        sinex-dev-owner-gate = sinexDevOwnerGateFixture;
+        sinex-dev-paths = sinexDevPathsFixture;
         agentctl-operation-contract = agentctlOperationFixture;
         agentctl-operation-launch = agentctlOperationLaunchFixture;
         agentctl-runtime-tools = agentctlRuntimeFixture;
