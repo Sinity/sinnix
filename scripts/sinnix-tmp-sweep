@@ -13,7 +13,8 @@ A directory is held when a process has it, or anything beneath it, as cwd,
 root, executable, an open descriptor, or the value of TMPDIR / TMP / TEMP /
 NIX_BUILD_TOP in its environment. Environment ownership is the case an
 open-file probe cannot see: an idle devshell whose shell sits in another cwd
-still owns its scratch tree.
+still owns its scratch tree. Environment paths are resolved through symlinks,
+and relative values are interpreted against the owning process's cwd.
 
 /proc is walked exactly once, after the candidate list is taken. Once, because
 a probe repeated per candidate rescans every process on the host and turns a
@@ -114,8 +115,7 @@ def held_directories(candidates: set[str], root_list: list[str]) -> set[str]:
                 claim(os.readlink(proc + "/fd/" + fd))
             except OSError:
                 pass
-        # An unreadable environ (another user's process) contributes nothing;
-        # such a process cannot hold a directory this sweep may remove.
+        # A vanished or unreadable environment cannot contribute a path claim.
         try:
             with open(proc + "/environ", "rb") as handle:
                 blob = handle.read()
@@ -125,7 +125,14 @@ def held_directories(candidates: set[str], root_list: list[str]) -> set[str]:
             if item.startswith(HOLDER_VARS):
                 value = item.partition(b"=")[2]
                 try:
-                    claim(os.fsdecode(value))
+                    path = os.fsdecode(value)
+                    if not path or path in root_list:
+                        continue
+                    # The process, not the sweeper, owns a relative spelling.
+                    # realpath must resolve symlinks before consuming '..'.
+                    if not os.path.isabs(path):
+                        path = os.path.join(proc, "cwd", path)
+                    claim(os.path.realpath(path))
                 except (UnicodeDecodeError, ValueError):
                     pass
         if held == candidates:

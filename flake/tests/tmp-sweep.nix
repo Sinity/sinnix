@@ -35,8 +35,8 @@ in
               message = "the user manager must hand every unit the same scratch root";
             }
             {
-              assertion = lib.any (r: r == "d ${root} 0700 ${user} users 30d") config.systemd.tmpfiles.rules;
-              message = "the scratch root must have one owner and a bounded age";
+              assertion = lib.any (r: r == "d ${root} 0700 ${user} users -") config.systemd.tmpfiles.rules;
+              message = "the scratch root must have one owner and no age-only cleanup";
             }
             {
               assertion = config.systemd.user.timers ? sinnix-tmp-sweep;
@@ -75,34 +75,50 @@ in
           '';
 
       # Anti-vacuity: a sweeper that removed nothing, or one that ignored a
-      # live holder, both fail here. The two holders exercise the two ways a
-      # directory is claimed -- a process sitting in it, and a process that
-      # merely names it in TMPDIR while working elsewhere.
+      # live holder, both fail here. Holders cover cwd and environment paths
+      # spelled directly, through symlinks, through symlink/.. and relative
+      # to a process whose cwd differs from the sweeper's.
       checks.tmp-sweep-runtime = mkRuntimeCheck system {
         name = "tmp-sweep-runtime";
         nativeBuildInputs = [ sinnixScriptRegistry.packageSet.sinnix-tmp-sweep ];
         script = ''
           root="$HOME/scratch"
-          mkdir -p "$root/nix-shell.leaked/deep" "$root/nix-shell.cwd" "$root/nix-shell.named" "$root/nix-develop-123-456" "$root/nix-develop-789-012"
+          mkdir -p "$root/nix-shell.leaked/deep" "$root/nix-shell.cwd" "$root/nix-shell.named" "$root/nix-shell.symlink" "$root/nix-shell.dotdot" "$root/nix-shell.relative" "$root/deeper" "$root/nix-develop-123-456" "$root/nix-develop-789-012"
           touch "$root/nix-shell.leaked/deep/file"
           touch -d '20 minutes ago' "$root/nix-develop-123-456"
 
+          holders=()
+          cleanup() {
+            kill "''${holders[@]}" 2>/dev/null || true
+            wait "''${holders[@]}" 2>/dev/null || true
+          }
+          trap cleanup EXIT
           ( cd "$root/nix-shell.cwd" && sleep 120 ) &
-          cwd_holder=$!
+          holders+=("$!")
           TMPDIR="$root/nix-shell.named" sleep 120 &
-          named_holder=$!
+          holders+=("$!")
+          ln -s "$root" "$HOME/scratch-alias"
+          ln -s "$root/deeper" "$HOME/deep-alias"
+          TMPDIR="$HOME/scratch-alias/nix-shell.symlink" sleep 120 &
+          holders+=("$!")
+          TEMP="$HOME/deep-alias/../nix-shell.dotdot" sleep 120 &
+          holders+=("$!")
+          ( cd "$HOME" && NIX_BUILD_TOP="scratch/nix-shell.relative" sleep 120 ) &
+          holders+=("$!")
           sleep 1
 
-          TMPDIR="$root" sinnix-tmp-sweep | tee sweep.log
-
-          kill "$cwd_holder" "$named_holder" 2>/dev/null || true
+          TMPDIR="$root" sinnix-tmp-sweep > sweep.log
+          cat sweep.log
 
           test ! -e "$root/nix-shell.leaked"
           test ! -e "$root/nix-develop-123-456"
           test -d "$root/nix-develop-789-012"
           test -d "$root/nix-shell.cwd"
           test -d "$root/nix-shell.named"
-          grep -q "root=$root removed=2 held=2 skipped=0" sweep.log
+          test -d "$root/nix-shell.symlink"
+          test -d "$root/nix-shell.dotdot"
+          test -d "$root/nix-shell.relative"
+          grep -q "root=$root removed=2 held=5 skipped=0" sweep.log
         '';
       };
 
@@ -123,17 +139,25 @@ in
             : > "$root/nix-shell.$i/sub/file"
           done
 
+          holders=()
+          cleanup() {
+            kill "''${holders[@]}" 2>/dev/null || true
+            wait "''${holders[@]}" 2>/dev/null || true
+          }
+          trap cleanup EXIT
           for _ in $(seq 1 200); do
             sleep 600 &
+            holders+=("$!")
           done
 
-          procs=$(ls -d /proc/[0-9]* | wc -l)
+          pids=(/proc/[0-9]*)
+          procs="''${#pids[@]}"
 
           start=$SECONDS
-          TMPDIR="$root" sinnix-tmp-sweep | tee scale.log
+          TMPDIR="$root" sinnix-tmp-sweep > scale.log
+          cat scale.log
           elapsed=$((SECONDS - start))
 
-          kill $(jobs -p) 2>/dev/null || true
 
           echo "swept 4000 candidates against $procs processes in ''${elapsed}s"
           # Without a real process table the budget below proves nothing.

@@ -101,8 +101,9 @@ scratch tree, and a devshell killed rather than exited leaks one. A user timer
 runs `sinnix-tmp-sweep` every fifteen minutes over both that root and `/tmp`,
 removing each `nix-shell.*` or `nix-develop-*` directory that no live process holds — held meaning
 some process has it as cwd, root, executable, an open descriptor, or its
-`TMPDIR`. Live holders prevent removal. `nix-develop-*` also has a ten-minute
-minimum age to protect startup; age alone never authorizes removal.
+`TMPDIR`. Environment paths resolve symlinks and relative spellings against
+the owning process's current directory. A recognized holder prevents removal.
+`nix-develop-*` also has a ten-minute minimum age to protect startup; age alone never authorizes removal.
 
 ### Each data system keeps its own authority
 
