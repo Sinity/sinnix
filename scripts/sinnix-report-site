@@ -12,7 +12,26 @@ staged directory. Nothing in the canonical source trees is changed.
 
 import argparse
 import json
+import re
 from pathlib import Path, PurePosixPath
+from urllib.parse import unquote, urlsplit
+
+
+def publication_path(url: str) -> PurePosixPath:
+    """Map one relative URL to the filename served after URL decoding."""
+    if (not isinstance(url, str) or not url or any(ord(c) < 32 for c in url)
+            or re.search(r"%(?![0-9a-fA-F]{2})", url)):
+        raise ValueError(f"unsafe publication URL: {url!r}")
+    parsed = urlsplit(url)
+    if parsed.scheme or parsed.netloc or parsed.path != url:
+        raise ValueError(f"unsafe publication URL: {url!r}")
+    decoded = unquote(parsed.path, errors="strict")
+    parts = PurePosixPath(decoded)
+    if (parts.is_absolute() or str(parts) != decoded
+            or any(part.startswith(".") for part in parts.parts)
+            or "\\" in decoded or any(ord(c) < 32 for c in decoded)):
+        raise ValueError(f"unsafe publication URL: {url!r}")
+    return parts
 
 
 def build(manifest: dict, output: Path) -> None:
@@ -25,14 +44,11 @@ def build(manifest: dict, output: Path) -> None:
     urls = set()
     for row in manifest["files"]:
         url, source = row["url"], Path(row["source"])
-        parts = PurePosixPath(url)
-        if (not url or parts.is_absolute() or str(parts) != url
-                or any(part in {".", ".."} or part.startswith(".") for part in parts.parts)
-                or "\\" in url or any(ord(c) < 32 for c in url)):
-            raise ValueError(f"unsafe publication URL: {url!r}")
-        if url in urls:
+        parts = publication_path(url)
+        serving_path = str(parts)
+        if serving_path in urls:
             raise ValueError(f"duplicate publication URL: {url}")
-        urls.add(url)
+        urls.add(serving_path)
         if not source.is_absolute() or not source.is_file():
             raise ValueError(f"publication source must be an existing absolute file: {source}")
         resolved = source.resolve()

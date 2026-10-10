@@ -57,3 +57,44 @@ def test_companions_and_translations_keep_their_urls_but_conflicts_are_refused(t
         with pytest.raises(ValueError):
             BUILD({"schema_version": 1, "files": [{"url": url, "source": str(source)} for url in urls]}, tmp_path / "conflict")
     assert not (tmp_path / "conflict").exists()
+
+
+@pytest.mark.parametrize("url,filename", [("report%20one.html", "report one.html"),
+    ("caf%C3%A9.html", "café.html"), ("report%25.html", "report%.html")])
+def test_encoded_urls_map_to_the_served_filename(tmp_path, url, filename):
+    source = tmp_path / "source"
+    source.write_text("neutral report")
+    output = tmp_path / "site"
+    BUILD({"schema_version": 1, "files": [{"url": "reports/" + url, "source": str(source)}]}, output)
+    assert (output / "reports" / filename).read_text() == "neutral report"
+    assert not (output / "reports" / url).exists()
+
+
+@pytest.mark.parametrize("url", ["a?query=1", "a#fragment", "https:external", "a%zz", "%2e%2e/escape", "%2fabsolute", "a%5cb", "a%00b"])
+def test_invalid_serving_urls_refuse_before_publication(tmp_path, url):
+    source = tmp_path / "source"
+    source.touch()
+    output = tmp_path / "site"
+    with pytest.raises(ValueError):
+        BUILD({"schema_version": 1, "files": [{"url": url, "source": str(source)}]}, output)
+    assert not output.exists()
+
+
+def test_encoded_and_literal_urls_cannot_publish_the_same_file(tmp_path):
+    source = tmp_path / "source"
+    source.touch()
+    output = tmp_path / "site"
+    with pytest.raises(ValueError, match="duplicate"):
+        BUILD({"schema_version": 1, "files": [{"url": url, "source": str(source)}
+            for url in ["report one.html", "report%20one.html"]]}, output)
+    assert not output.exists()
+
+
+def test_encoded_file_directory_collision_is_refused(tmp_path):
+    source = tmp_path / "source"
+    source.touch()
+    output = tmp_path / "site"
+    with pytest.raises(ValueError, match="collision"):
+        BUILD({"schema_version": 1, "files": [{"url": url, "source": str(source)}
+            for url in ["assets", "%61ssets/report.html"]]}, output)
+    assert not output.exists()

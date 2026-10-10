@@ -154,3 +154,8 @@ produce a verified match. A complete matching Btrfs identity allows device-numbe
 drift during relocation verification; the audit still reports that drift as a
 separate device-only observation. Newly observed stable fields do not become retrospective requirements on legacy
 records. None of these checks verifies payload hashes.
+
+Publication URLs are relative route paths. Percent-encoded UTF-8 filenames map
+to the decoded filename the web server serves, and collision checks use that
+same decoded path. Queries, fragments, schemes, invalid escapes, hidden paths
+and encoded traversal are refused before a publication directory is created.
