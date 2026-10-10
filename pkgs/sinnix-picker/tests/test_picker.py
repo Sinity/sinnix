@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import subprocess
 
+import pytest
+
 from conftest import load_script
 
 picker = load_script("sinnix-picker")
@@ -91,3 +93,54 @@ def test_clipboard_uses_the_capture_layout_and_preserves_selected_text(
     assert configured.load_clipboard() == [
         configured.Entry("clip", "Synthetic clipboard with its original newline", text)
     ]
+
+
+@pytest.mark.parametrize("title", ["Named resource", ""])
+def test_loaded_history_and_bookmarks_show_one_url(monkeypatch, tmp_path, title):
+    history = tmp_path / "history.ndjson"
+    history.write_text(
+        json.dumps(
+            {
+                "title": title,
+                "url": "https://history.example",
+                "iso_time": "2026-10-10",
+            }
+        )
+        + "\n"
+    )
+    raindrop = tmp_path / "bookmarks.csv"
+    raindrop.write_text(
+        f"title,url,folder\n{title},https://bookmark.example,Research\n"
+    )
+    chrome = tmp_path / "Bookmarks"
+    chrome.write_text(
+        json.dumps(
+            {
+                "roots": {
+                    "bookmark_bar": {
+                        "type": "folder",
+                        "name": "Research",
+                        "children": [
+                            {
+                                "type": "url",
+                                "name": title,
+                                "url": "https://chrome.example",
+                            }
+                        ],
+                    }
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(picker, "HISTORY_PATH", history)
+    monkeypatch.setattr(picker, "RAINDROP_CSV", raindrop)
+    monkeypatch.setattr(picker, "CHROME_BOOKMARKS", chrome)
+
+    entries = (
+        picker.load_history() + picker.load_raindrop() + picker.load_chrome_bookmarks()
+    )
+    assert len(entries) == 3
+    for entry in entries:
+        assert entry.display().count(entry.payload) == 1
+    assert "Research" in entries[1].display()
+    assert "Research" in entries[2].display()

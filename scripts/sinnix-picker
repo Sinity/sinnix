@@ -98,7 +98,11 @@ class Entry:
     def display(self) -> str:
         one_line_label = self.label.replace("\t", " ").replace("\n", " ")
         if self.category in ("hist", "mark", "stack"):
-            one_line_label = f"{one_line_label} -- {self.payload}"
+            one_line_label = (
+                f"{one_line_label} -- {self.payload}"
+                if one_line_label and one_line_label != self.payload
+                else self.payload
+            )
         return f"[{self.category}] {one_line_label}"
 
 
@@ -127,7 +131,7 @@ def load_history() -> list[Entry]:
     except OSError:
         return []
     ranked = sorted(seen.values(), key=lambda t: t[0], reverse=True)[:HISTORY_LIMIT]
-    return [Entry("hist", f"{title} -- {url}", url) for _, title, url in ranked]
+    return [Entry("hist", title, url) for _, title, url in ranked]
 
 
 def load_raindrop() -> list[Entry]:
@@ -157,9 +161,9 @@ def load_raindrop() -> list[Entry]:
     rows.sort(key=lambda t: t[0], reverse=True)
     out = []
     for _created, title, folder, url in rows[:RAINDROP_LIMIT]:
-        label = f"{title} -- {url}"
+        label = title if title != url else ""
         if folder:
-            label = f"{label} ({folder})"
+            label = f"{label} ({folder})".strip()
         out.append(Entry("mark", label, url))
     return out
 
@@ -171,9 +175,9 @@ def _walk_chrome_bookmarks(node: dict, path: list[str], out: list[Entry]) -> Non
         name = node.get("name", url)
         if url:
             folder = "/".join(path) if path else ""
-            label = f"{name} -- {url}"
+            label = name if name != url else ""
             if folder:
-                label = f"{label} ({folder})"
+                label = f"{label} ({folder})".strip()
             out.append(Entry("mark", label, url))
     elif node_type == "folder":
         children = node.get("children", [])
