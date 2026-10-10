@@ -105,7 +105,7 @@ mkFeatureModule {
         systemd.user.services.sinnix-quest-media = {
           description = "Private Quest video archive HTTP server";
           serviceConfig = {
-            ExecStart = "${pkgs.python3}/bin/python3 -m http.server 9790 --bind 0.0.0.0 --directory /realm/archive/quest-3/videoshots";
+            ExecStart = "${pkgs.python3}/bin/python3 -m http.server 9790 --bind 0.0.0.0 --directory /realm/device/quest-3/history/videoshots";
             Restart = "on-failure";
             RestartSec = "5s";
           };
