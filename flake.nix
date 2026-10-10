@@ -163,6 +163,9 @@
 
     # Declarative userland inside the Nix-on-Droid app. Termux remains the
     # Android integration and SSH host; this input owns CLI package state.
+    # Retain its upstream bootstrap pin: login defaults reference exact
+    # proot store paths from that package set. Its documentation output also
+    # explicitly imports nixpkgs-docs with nmd; preserve that declared set.
     nix-on-droid = {
       url = "github:nix-community/nix-on-droid";
       inputs.nixpkgs.follows = "nixpkgs";
