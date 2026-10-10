@@ -72,6 +72,11 @@ class ContextComponent(GatewayModel):
     # Set when this component's data did not fit `total_budget_bytes` and was
     # left in the snapshot instead; `snapshot_ref` reads the complete value.
     inline_omitted: bool = False
+    presentation: Literal["full", "compact", "unavailable"] = "full"
+    full_product_pointer: str | None = Field(
+        default=None,
+        description="JSON pointer in snapshot_ref to the complete owner product; compact owner pointers are relative to it.",
+    )
 
 
 class ComposedContext(GatewayModel):
@@ -85,6 +90,7 @@ class ComposedContext(GatewayModel):
     components: list[ContextComponent]
     component_plan: list[dict[str, Any]] = Field(default_factory=list)
     total_budget_bytes: int
+    availability: Availability = "available"
     affordances: list[str] = Field(default_factory=list)
 
 
@@ -228,6 +234,7 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
                 "intent": inp.intent,
                 "roots": inp.roots,
                 "at": inp.at.owner_value() if inp.at else None,
+                "budget_bytes": min(56000, max(8192, runtime.config.max_result_bytes - 8192)),
                 **({"refresh_id": inp.refresh_id} if inp.refresh_id else {}),
             },
             deadline_at=inp.deadline_at,
@@ -258,6 +265,11 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
             ],
         },
     )
+    # Leave room for the standard result envelope and include model defaults
+    # before measuring the presentation, rather than adding them afterwards.
+    context["context_schema"] = context["schema"]
+    context["affordances"] = _AFFORDANCES[inp.intent]
+    context["availability"] = product.availability
     bounded = _within_budget(context)
     return ComposedContext(
         **{
@@ -265,39 +277,63 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
             for key, value in bounded.items()
             if key in ComposedContext.model_fields
         },
-        context_schema=bounded["schema"],
-        affordances=_AFFORDANCES[inp.intent],
     )
 
 
-def _within_budget(context: Mapping[str, Any]) -> dict[str, Any]:
-    """The returned copy of a composed context, inside `total_budget_bytes`.
+def _within_budget(context: Mapping[str, Any], *, reserve_bytes: int = 0) -> dict[str, Any]:
+    """Use the owner's compact view when full data exceeds the payload bound.
 
-    The field was declared and then never enforced, so a composition whose
-    owner product was megabytes returned megabytes to a caller that had been
-    told the budget was 262 KB. Every other bounded action in this package
-    holds itself to `max_result_bytes`; this one now does too.
-
-    A component whose data does not fit is not truncated into something that
-    reads like a complete value: its inline data is dropped, it is marked
-    `inline_omitted`, and `snapshot_ref` still reads the complete observation
-    that was persisted before this ran.
+    The immutable snapshot always retains the original. Unsupported or unusable
+    presentations are explicitly unavailable, independently of transport success.
     """
     budget = int(context["total_budget_bytes"])
-    if len(canonical_bytes(context)) <= budget:
+    budget -= min(4096, max(1, budget // 2)) + reserve_bytes
+
+    def size(value: Mapping[str, Any]) -> int:
+        fields = {key: item for key, item in value.items() if key in ComposedContext.model_fields}
+        return len(canonical_bytes(ComposedContext.model_validate(fields).model_dump()))
+
+    if size(context) <= budget:
         return dict(context)
     bounded = dict(context)
+    components = []
+    for index, component in enumerate(context["components"]):
+        entry = dict(component)
+        product = entry.get("data")
+        data = product.get("data") if isinstance(product, dict) else None
+        projection = data.get("presentation") if isinstance(data, dict) else None
+        if (
+            entry["name"] == "lynchpin"
+            and isinstance(projection, dict)
+            and projection.get("product") == "project_context_compact"
+            and projection.get("outcome") in {"ok", "partial"}
+            and projection.get("components")
+        ):
+            entry["data"] = {**product, "data": projection, "owner_metadata": None}
+            entry["presentation"] = "compact"
+            entry["full_product_pointer"] = f"/components/{index}/data/data"
+            entry["reason"] = "Owner-selected compact view; full observation is in snapshot_ref"
+        components.append(entry)
+    bounded["components"] = components
+    if size(bounded) <= budget:
+        return bounded
     components = []
     for component in context["components"]:
         entry = dict(component)
         entry["data"] = None
         entry["inline_omitted"] = True
+        entry["presentation"] = "unavailable"
+        entry["status"] = "unavailable"
+        entry["component_failures"] = {}
         entry["reason"] = (
             entry.get("reason")
             or f"inline data omitted: over the {budget}-byte context budget"
         )
         components.append(entry)
     bounded["components"] = components
+    bounded["availability"] = "unavailable"
+    if size(bounded) > budget:
+        raise ProtocolError("response_bound", "Context metadata exceeds the result budget")
     return bounded
 
 
@@ -328,7 +364,7 @@ ACTIONS: tuple[Action, ...] = (
             "review job",
             "incident",
         ),
-        documentation="The selected owner supplies domain composition, source coverage and partial results. The gateway preserves its product and availability in an immutable observation under snapshot_ref.",
+        documentation="The owner supplies domain composition and a compact presentation when full data exceeds the inline budget. snapshot_ref retains the exact observation. availability and component presentation report usability independently of transport success; omitted data is unavailable.",
         examples=(
             Example(
                 title="Orient in sinnix",

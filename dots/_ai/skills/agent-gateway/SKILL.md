@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 4c587c3cd26251ce230212ad549bc59fe0d42d5bb181553c396c8a8ba8fd0efd -->
+<!-- gateway-catalog-sha256: 72dd43a9dd6e5111202e75150876e8c0594889cc16de03665ef479c1937017e3 -->
 
 # Agent Gateway
 
@@ -120,7 +120,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 ### context
 
 - `projects.context` — Components are budgeted independently; an unavailable component names its reason and source ref so the caller can follow the direct route.
-- `context.compose` — The selected owner supplies domain composition, source coverage and partial results. The gateway preserves its product and availability in an immutable observation under snapshot_ref.
+- `context.compose` — The owner supplies domain composition and a compact presentation when full data exceeds the inline budget. snapshot_ref retains the exact observation. availability and component presentation report usability independently of transport success; omitted data is unavailable.
 
 ### events
 
@@ -185,4 +185,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `4c587c3cd26251ce230212ad549bc59fe0d42d5bb181553c396c8a8ba8fd0efd`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `72dd43a9dd6e5111202e75150876e8c0594889cc16de03665ef479c1937017e3`.

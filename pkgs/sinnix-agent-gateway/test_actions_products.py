@@ -276,6 +276,7 @@ def test_historical_context_owner_contract_preserves_partial_and_unknown(
         "roots": [],
         "at": None,
         "refresh_id": "fixture-generation",
+        "budget_bytes": 56000,
     }
     component = result.components[0]
     # `partial` is a named gap, not an available answer: flattening it to

@@ -22,6 +22,7 @@ from ..locators import CheckoutLocator, ProjectLocator, ResolvedCheckout, projec
 from ..projects import ProjectError, ProjectPreconditionError
 from ..results import ProtocolError, ResultError
 from ..schemas import GatewayModel
+from .contexts import ComposedContext
 
 if TYPE_CHECKING:
     from ..runtime import Runtime
@@ -589,57 +590,15 @@ class ContextInput(RequestControls):
     intent: Literal["project.orientation", "project.triage"] = "project.orientation"
 
 
-class ContextComponent(GatewayModel):
-    name: str
-    # The owner's terminal state, widened from the composer's own
-    # `products.Availability`; carried through rather than narrowed, because
-    # this projection re-validates a composed component and dropping a state
-    # here would relabel a gap-shaped answer on the `projects.context` route.
-    status: str
-    data: dict[str, Any] | None = None
-    reason: str | None = None
-    source_ref: str | None = None
-    source_revision: str | None = None
-    snapshot_ref: str | None = None
-    budget_bytes: int | None = None
-    component_failures: dict[str, str] = Field(default_factory=dict)
-    inline_omitted: bool = False
-    extra: dict[str, Any] = Field(default_factory=dict)
-
-
-class ProjectContext(GatewayModel):
-    ref: str
+class ProjectContext(ComposedContext):
     project_ref: str
     project_id: str
     intent: Literal["project.orientation", "project.triage"]
-    context_schema: str = Field(description="Context envelope schema id.")
-    target_ref: str
-    snapshot_ref: str
-    components: list[ContextComponent]
-    component_plan: list[dict[str, Any]]
-    total_budget_bytes: int
-    extra: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Compatibility projections of available components.",
-    )
-    affordances: list[str] = Field(default_factory=list)
-
-
-_COMPONENT_KEYS = set(ContextComponent.model_fields) - {"extra"}
-_CONTEXT_KEYS = {
-    "schema",
-    "intent",
-    "target_ref",
-    "snapshot_ref",
-    "components",
-    "component_plan",
-    "total_budget_bytes",
-    "ref",
-}
 
 
 async def _context(runtime: Runtime, inp: ContextInput) -> ProjectContext:
-    from .contexts import ComposeInput, _compose
+    from ..contexts import canonical_bytes
+    from .contexts import ComposeInput, _compose, _within_budget
 
     project_id = await anyio.to_thread.run_sync(inp.target.resolve, runtime)
     ref = project_ref(project_id)
@@ -651,19 +610,15 @@ async def _context(runtime: Runtime, inp: ContextInput) -> ProjectContext:
             deadline_at=inp.deadline_at,
         ),
     )
-    return ProjectContext(
-        ref=ref,
-        project_ref=ref,
-        project_id=project_id,
-        intent=inp.intent,
-        context_schema=context.context_schema,
-        target_ref=context.target_ref,
-        snapshot_ref=context.snapshot_ref,
-        components=[ContextComponent(**row.model_dump()) for row in context.components],
-        component_plan=context.component_plan,
-        total_budget_bytes=context.total_budget_bytes,
-        affordances=["projects.get", "beads.query", "projects.diff", "projects.tree"],
-    )
+    fields = context.model_dump()
+    fields["affordances"] = ["projects.get", "beads.query", "projects.diff", "projects.tree"]
+    project_fields = {"project_ref": ref, "project_id": project_id}
+    # Inserting these keys replaces no composer fields. Account for their
+    # encoded bytes and the joining comma before selecting the inline view.
+    reserve = len(canonical_bytes(project_fields)) - 1
+    bounded = _within_budget(fields, reserve_bytes=reserve)
+    return ProjectContext(**bounded, **project_fields)
+
 
 
 _KINDS = ("project", "checkout")
