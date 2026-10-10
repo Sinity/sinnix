@@ -1,10 +1,12 @@
 """Native backend stdout is a result protocol, including on a cold bootstrap."""
 
 import json
+import io
 import os
 import shutil
 import subprocess
 import tempfile
+import tarfile
 import unittest
 from pathlib import Path
 
@@ -39,7 +41,15 @@ class NativeOutputTest(unittest.TestCase):
             ),
         }
         self.result = self.root / "result.json"
-        (self.root / "locked-package.tgz").write_bytes(b"fixture locked tarball")
+        package = {"name": "fixture-package", "version": "1.0.0", "bin": {"fixture": "fixture"}}
+        lock = {"name": package["name"], "version": package["version"], "lockfileVersion": 3, "packages": {"": package}}
+        with tarfile.open(self.root / "locked-package.tgz", "w:gz") as archive:
+            for name, payload in {"package.json": json.dumps(package), "npm-shrinkwrap.json": json.dumps(lock)}.items():
+                data = payload.encode()
+                member = tarfile.TarInfo("package/" + name)
+                member.size = len(data)
+                member.mode = 0o644
+                archive.addfile(member, io.BytesIO(data))
 
     def executable(self, name, body):
         # An absolute interpreter: a build sandbox has no /usr/bin/env.
@@ -481,10 +491,8 @@ class NativeOutputTest(unittest.TestCase):
         self.executable(
             "npm",
             'printf "%s\\n" "$@" > "$HOME/npm-args"\n'
-            'mkdir -p "$npm_config_prefix/bin"\n'
             f'printf "#!{shutil.which("bash")}\\nexit 0\\n"'
-            ' > "$npm_config_prefix/bin/fixture"\n'
-            'chmod +x "$npm_config_prefix/bin/fixture"\n',
+            ' > "$3/fixture"\n',
         )
         source = self.root / "locked-package.tgz"
         outcome = subprocess.run(
@@ -497,10 +505,12 @@ class NativeOutputTest(unittest.TestCase):
             timeout=10,
         )
         self.assertEqual(outcome.returncode, 0, outcome.stderr)
-        self.assertEqual(
-            (self.root / "npm-args").read_text().splitlines(),
-            ["install", "-g", str(source)],
-        )
+        args = (self.root / "npm-args").read_text().splitlines()
+        self.assertEqual(args[:2], ["ci", "--prefix"])
+        self.assertEqual(args[3:], ["--global=false", "--omit=dev"])
+        installed = self.root / ".local/state/fixture-agent/npm/lib/node_modules/fixture-package"
+        with tarfile.open(source) as archive:
+            self.assertEqual((installed / "npm-shrinkwrap.json").read_bytes(), archive.extractfile("package/npm-shrinkwrap.json").read())
 
     def test_missing_tarball_does_not_retire_recoverable_package(self):
         state = self.root / ".local/state/fixture-agent"
@@ -565,9 +575,9 @@ class NativeOutputTest(unittest.TestCase):
     def test_bootstrap_diagnostics_never_enter_stdout(self):
         self.executable(
             "npm",
-            'printf "changed 9 packages in 7s\\n"\nmkdir -p "$npm_config_prefix/bin"\n'
+            'printf "changed 9 packages in 7s\\n"\n'
             f'printf "#!{shutil.which("bash")}\\nprintf agent-result\\n"'
-            ' > "$npm_config_prefix/bin/fixture"\nchmod +x "$npm_config_prefix/bin/fixture"\n',
+            ' > "$3/fixture"\n',
         )
         outcome = subprocess.run(
             [

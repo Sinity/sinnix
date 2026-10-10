@@ -513,6 +513,9 @@ in
               pkgs.bash
               pkgs.coreutils
               pkgs.util-linux
+              pkgs.nodejs_22
+              pkgs.gnutar
+              pkgs.gzip
             ];
           }
           ''
@@ -529,10 +532,12 @@ in
             cat > "$TMPDIR/bin/npm" <<'EOF'
             #!${pkgs.bash}/bin/bash
             set -euo pipefail
-            test "$#" = 3
-            test "$1" = install
-            test "$2" = -g
-            test "$3" = "$TMPDIR/locked-package.tgz"
+            test "$#" = 5
+            test "$1" = ci
+            test "$2" = --prefix
+            test "$4" = --global=false
+            test "$5" = --omit=dev
+            test -f "$3/npm-shrinkwrap.json"
             package_parent="$npm_config_prefix/lib/node_modules/@example"
             test ! -e "$package_parent/.fake-cli-AbCd1234"
             test ! -e "$package_parent/..fake-cli-ZyXw9876"
@@ -547,12 +552,12 @@ in
             printf '%s\n' "$((count + 1))" > "$HOME/npm-invocations"
             sleep 0.2
 
-            mkdir -p "$npm_config_prefix/bin"
-            cat > "$npm_config_prefix/bin/fakeagent" <<'AGENT'
+            mkdir -p "$3/bin"
+            cat > "$3/bin/fakeagent" <<'AGENT'
             #!${pkgs.bash}/bin/bash
             printf 'fakeagent 1.0\n'
             AGENT
-            chmod +x "$npm_config_prefix/bin/fakeagent"
+            chmod +x "$3/bin/fakeagent"
             EOF
             chmod +x "$TMPDIR/bin/npm"
 
@@ -561,9 +566,19 @@ in
                 pkgs.bash
                 pkgs.coreutils
                 pkgs.util-linux
+                pkgs.nodejs_22
+                pkgs.gnutar
+                pkgs.gzip
               ]
             }"
-            printf fixture > "$TMPDIR/locked-package.tgz"
+            mkdir "$TMPDIR/package"
+            cat > "$TMPDIR/package/package.json" <<'JSON'
+            {"name":"@example/fake-cli","version":"1.0.0","bin":{"fakeagent":"bin/fakeagent"}}
+            JSON
+            cat > "$TMPDIR/package/npm-shrinkwrap.json" <<'JSON'
+            {"name":"@example/fake-cli","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"@example/fake-cli","version":"1.0.0"}}}
+            JSON
+            tar -czf "$TMPDIR/locked-package.tgz" -C "$TMPDIR" package
             bootstrap=${../../scripts/sinnix-agent-npm-bootstrap}
             ${pkgs.bash}/bin/bash "$bootstrap" fake-agent @example/fake-cli fakeagent "$runtime_path" "$TMPDIR/locked-package.tgz" &
             first=$!
@@ -970,7 +985,7 @@ in
             grep -Fq -- '--append-system-prompt "$HOME/.config/claude/CLAUDE.md"' "$HOME/.local/bin/pi"
             grep -Fq -- '--skill "$HOME/.config/claude/skills"' "$HOME/.local/bin/pi"
             grep -Fq 'unset OPENAI_API_KEY' "$HOME/.local/bin/pi"
-            grep -Fq 'npm install -g "$package_source"' '${../../scripts/sinnix-agent-npm-bootstrap}'
+            grep -Fq 'npm ci --prefix "$staged" --global=false --omit=dev' '${../../scripts/sinnix-agent-npm-bootstrap}'
             grep -Fq 'export npm_config_prefix="$STATE/npm"' '${../../scripts/sinnix-agent-npm-bootstrap}'
 
             # Only alternate-backend wrappers select a native profile. Codex
@@ -1045,7 +1060,10 @@ in
       sinexDevPathsFixture =
         pkgs.runCommand "sinex-dev-paths-fixture"
           {
-            nativeBuildInputs = [ pkgs.bash pkgs.coreutils ];
+            nativeBuildInputs = [
+              pkgs.bash
+              pkgs.coreutils
+            ];
           }
           ''
             source ${../../scripts/sinnix-direnvrc}

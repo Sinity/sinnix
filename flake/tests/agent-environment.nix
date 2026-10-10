@@ -82,6 +82,9 @@
               pkgs.gawk
               pkgs.python3
               pkgs.util-linux
+              pkgs.nodejs_22
+              pkgs.gnutar
+              pkgs.gzip
             ];
           }
           ''

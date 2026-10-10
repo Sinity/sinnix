@@ -13,20 +13,39 @@
               pkgs.bash
               pkgs.coreutils
               pkgs.util-linux
+              pkgs.nodejs_22
+              pkgs.gnutar
+              pkgs.gzip
             ];
           }
           ''
             export HOME="$TMPDIR/home"
             mkdir -p "$TMPDIR/bin"
-            printf '#!${pkgs.bash}/bin/bash\nexit 0\n' > "$TMPDIR/bin/npm"
+            cat > "$TMPDIR/bin/npm" <<'SH'
+            #!${pkgs.bash}/bin/bash
+            case "$HOME" in
+              */missing) : ;;
+              */directory) mkdir "$3/fixture" ;;
+              */dangling) ln -s /missing "$3/fixture" ;;
+              */escape) ln -s "$TMPDIR/outside" "$3/fixture" ;;
+            esac
+            SH
             chmod +x "$TMPDIR/bin/npm"
-            printf fixture > "$TMPDIR/package.tgz"
+            printf fixture > "$TMPDIR/outside"
+            mkdir "$TMPDIR/package"
+            cat > "$TMPDIR/package/package.json" <<'JSON'
+            {"name":"@fixture/neutral","version":"1.0.0","bin":{"fixture":"fixture"}}
+            JSON
+            cat > "$TMPDIR/package/npm-shrinkwrap.json" <<'JSON'
+            {"name":"@fixture/neutral","version":"1.0.0","lockfileVersion":3,"packages":{"":{"name":"@fixture/neutral","version":"1.0.0"}}}
+            JSON
+            tar -czf "$TMPDIR/package.tgz" -C "$TMPDIR" package
             runtime="$TMPDIR/bin:$PATH"
-            for kind in missing nonexec directory dangling; do
+            for kind in missing directory dangling escape; do
+              export HOME="$TMPDIR/home/$kind"
               state="$HOME/.local/state/$kind/npm/bin"
               mkdir -p "$state"
               case "$kind" in
-                nonexec) printf fixture > "$state/fixture" ;;
                 directory) mkdir "$state/fixture" ;;
                 dangling) ln -s /missing "$state/fixture" ;;
               esac
@@ -34,7 +53,7 @@
                 echo "accepted unusable binary: $kind" >&2
                 exit 1
               fi
-              grep -Fq 'did not produce an executable regular file' "$TMPDIR/$kind.err"
+              test ! -e "$HOME/.local/state/$kind/npm/lib/node_modules/@fixture/neutral"
             done
             echo 'Unusable recovery outputs rejected in all four cases'
             touch "$out"

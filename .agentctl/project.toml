@@ -95,6 +95,15 @@ pool = "normal"
 result = "exit"
 timeout_seconds = 1800
 
+[operations.verify_agent_recovery]
+description = "Verify pinned CLI recovery and native versions in an isolated HOME"
+exec = ["python3", "scripts/tests/verify_agent_recovery.py"]
+arguments = "required"
+pool = "bulk"
+result = "exit"
+timeout_seconds = 1800
+admission = { memory_mib = 2048 }
+
 [operations.gateway_codegen]
 description = "Render the generated gateway catalog and skill from their source"
 exec = ["nix", "develop", ".#gateway-tests", "--command", "sinnix-agent-gateway-generate", "--root", ".", "--write"]
