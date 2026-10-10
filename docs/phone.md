@@ -156,7 +156,14 @@ order, when it next has a network.
 
 Reachability is **measured, not assumed**: the app pings, renders the
 round-trip and its age ("live · 34 ms"), and every action reports the path it
-actually took — `sent · live` or `queued · retrying`.
+actually took. Intent requests show `sent · live` only for a typed completed
+outcome matching the requested action kind. Definitive failures show
+`queued · retrying` and retain the original content and token. Partial outcomes
+show `partially completed · retained`; uncertain, conflicting or malformed
+outcomes show `needs review · request retained`. These requests are saved as
+`.json.rejected` and stay outside automatic replay. Failed retention is shown
+explicitly, and unsaved answer text remains in the editor. Job answers use the
+same intent route and outcome rules.
 
 Intent execution binds each `send_token` to canonical request content and serializes file and HTTP delivery through the same lock. An identical completed retry returns its prior receipt without acting again. A verified definitive failure remains retryable; partial or indeterminate effects are preserved and refused replay. Conflicting token reuse is refused. Terminal records whose result does not agree with the recorded outcome and action kind are treated as indeterminate, retained unchanged, and never acknowledged as completed or retried as definitive failures. Byte uploads use full SHA-256 identity.
 
