@@ -53,6 +53,7 @@ function edgePayload(anchor) {
 document.addEventListener(
   "contextmenu",
   (ev) => {
+    if (!ev.isTrusted) return; // Page-generated events are not operator input.
     const a = nearestAnchor(ev.target);
     contextLink = a && a.href ? edgePayload(a) : null;
   },
@@ -67,6 +68,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 document.addEventListener(
   "click",
   (ev) => {
+    if (!ev.isTrusted) return; // Page-generated events are not operator input.
     const a = nearestAnchor(ev.target);
     if (!a || !a.href) return;
     postEvent("/v1/link-event", { ...edgePayload(a), trigger: "click" });
@@ -77,6 +79,7 @@ document.addEventListener(
 document.addEventListener(
   "auxclick",
   (ev) => {
+    if (!ev.isTrusted) return; // Page-generated events are not operator input.
     if (ev.button !== 1) return; // middle button only
     const a = nearestAnchor(ev.target);
     if (!a || !a.href) return;

@@ -281,6 +281,7 @@ mkFeatureModule {
                 ExecStart = "${scriptPkgs.sinnix-nav-capture-daemon}/bin/sinnix-nav-capture-daemon";
                 Environment = [
                   "SINNIX_NAV_CAPTURE_PORT=${toString navigationPort}"
+                  "SINNIX_NAV_CAPTURE_EXTENSION_ID_FILE=${navCaptureExtension}/extension-id"
                   "SINNIX_CAPTURE_ROOT=${activityRoot}"
                 ];
                 Restart = "on-failure";

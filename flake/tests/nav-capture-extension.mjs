@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import vm from "node:vm";
 
 let contextMenuHandler;
 const requests = [];
@@ -31,7 +33,7 @@ globalThis.chrome = {
   },
 };
 
-const [, , backgroundScript, expectedPort] = process.argv;
+const [, , backgroundScript, expectedPort, contentScript] = process.argv;
 
 await import(backgroundScript);
 
@@ -48,3 +50,40 @@ assert.equal(requests.length, 1);
 assert.equal(requests[0].url, `http://127.0.0.1:${expectedPort}/v1/reading-stack/push`);
 assert.equal(requests[0].payload.target_url, "https://context-link.example/");
 assert.equal(requests[0].payload.source_url, "https://page.example/");
+
+// Exercise the content producer separately from the background relay.
+const handlers = {};
+const messages = [];
+let contextHandler;
+vm.runInNewContext(fs.readFileSync(contentScript, "utf8"), {
+  document: { title: "Neutral page", addEventListener: (name, fn) => { handlers[name] = fn; } },
+  location: { href: "https://source.example/" },
+  chrome: { runtime: {
+    sendMessage: (message) => { messages.push(message); return Promise.resolve(); },
+    onMessage: { addListener: (fn) => { contextHandler = fn; } },
+  } },
+  Date,
+});
+const anchor = { tagName: "A", href: "https://target.example/", textContent: "Target" };
+let prevented = 0;
+function event(isTrusted) {
+  return { isTrusted, target: anchor, button: 1,
+    preventDefault: () => { prevented++; }, stopPropagation() {} };
+}
+for (const kind of ["click", "auxclick", "contextmenu"]) handlers[kind](event(false));
+assert.equal(messages.length, 0);
+assert.equal(prevented, 0);
+let context;
+contextHandler({ type: "link-context" }, {}, (value) => { context = value; });
+assert.equal(Object.keys(context).length, 0);
+handlers.click(event(true));
+handlers.auxclick(event(true));
+assert.equal(messages.length, 3);
+assert.equal(messages[0].body.trigger, "click");
+assert.equal(messages[1].body.trigger, "middle-click");
+assert.equal(messages[2].path, "/v1/reading-stack/push");
+assert.equal(prevented, 1);
+handlers.contextmenu(event(true));
+handlers.contextmenu({ ...event(false), target: { ...anchor, href: "https://forged.example/" } });
+contextHandler({ type: "link-context" }, {}, (value) => { context = value; });
+assert.equal(context.target_url, anchor.href);

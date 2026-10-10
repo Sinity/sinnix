@@ -25,6 +25,11 @@ extension<->daemon channel, not a network service. Port chosen to sit next
 to polylogue's browser-extension receiver (127.0.0.1:8765) without
 colliding.
 
+Host must identify the loopback listener. Browser Origin must match the
+installed extension identity from SINNIX_NAV_CAPTURE_EXTENSION_ID_FILE; native
+JSON clients without browser metadata remain supported. CORS grants only that
+extension. These checks protect against remote pages, not other local users.
+
 Uses http.server and the shared Sinnix request framing parser. Capture and
 reading-state mutations run through their owning commands; this daemon does
 no analysis, it is a thin relay.
@@ -34,6 +39,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+from pathlib import Path
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -43,6 +50,16 @@ from sinnix_lib.http import read_body
 CAPTURE_ROOT = os.environ.get("SINNIX_CAPTURE_ROOT", "/realm/activity")
 BIND_HOST = "127.0.0.1"
 BIND_PORT = int(os.environ.get("SINNIX_NAV_CAPTURE_PORT", "8767"))
+
+
+def extension_origin() -> str | None:
+    source = os.environ.get("SINNIX_NAV_CAPTURE_EXTENSION_ID_FILE")
+    if not source:
+        return None
+    identity = Path(source).read_text().strip()
+    if not re.fullmatch(r"[a-p]{32}", identity):
+        raise ValueError("invalid nav-capture extension identity")
+    return f"chrome-extension://{identity}"
 
 
 def sinnix_capture_write(lane: str, payload: dict) -> None:
@@ -93,16 +110,60 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("request body must be a JSON object")
         return payload
 
+    def _allowed(self) -> bool:
+        hosts = self.headers.get_all("Host", [])
+        port = self.server.server_port
+        allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        if port == 80:
+            allowed_hosts.update({"127.0.0.1", "localhost"})
+        if len(hosts) != 1 or hosts[0] not in allowed_hosts:
+            return False
+        origins = self.headers.get_all("Origin", [])
+        sites = self.headers.get_all("Sec-Fetch-Site", [])
+        if len(origins) > 1 or len(sites) > 1:
+            return False
+        if origins:
+            return origins[0] == self.server.extension_origin
+        return not sites or sites[0] in {"none", "same-origin"}
+
+    def _refuse(self, status: int) -> None:
+        self.close_connection = True
+        self._respond(status)
+
     def _respond(self, status: int) -> None:
         self.send_response(status)
         self.send_header("Content-Length", "0")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Vary", "Origin")
+        origin = self.headers.get("Origin")
+        if origin and origin == self.server.extension_origin:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            if self.command == "OPTIONS" and status == 204:
+                self.send_header("Access-Control-Allow-Methods", "POST")
+                self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
     def do_OPTIONS(self) -> None:  # CORS preflight from the extension
+        if not self._allowed():
+            self._refuse(403)
+            return
+        methods = self.headers.get_all("Access-Control-Request-Method", [])
+        headers = self.headers.get_all("Access-Control-Request-Headers", [])
+        if methods != ["POST"] or len(headers) > 1 or any(
+            field.strip().lower() != "content-type"
+            for value in headers for field in value.split(",")
+        ):
+            self._refuse(403)
+            return
         self._respond(204)
 
     def do_POST(self) -> None:
+        if not self._allowed():
+            self._refuse(403)
+            return
+        types = self.headers.get_all("Content-Type", [])
+        if len(types) != 1 or types[0].split(";", 1)[0].strip().lower() != "application/json":
+            self._refuse(415)
+            return
         try:
             payload = self._read_json()
         except ValueError:
@@ -124,7 +185,9 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
+    origin = extension_origin()
     server = ThreadingHTTPServer((BIND_HOST, BIND_PORT), Handler)
+    server.extension_origin = origin
     print(f"sinnix-nav-capture-daemon: listening on {BIND_HOST}:{BIND_PORT}", file=sys.stderr)
     server.serve_forever()
     return 0

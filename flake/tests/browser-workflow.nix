@@ -43,6 +43,12 @@ in
               message = "The navigation extension policy must come from the generated extension derivation.";
             }
             {
+              assertion = lib.elem (
+                "SINNIX_NAV_CAPTURE_EXTENSION_ID_FILE=${builtins.dirOf policySource}/extension-id"
+              ) hm.systemd.user.services.sinnix-nav-capture.Service.Environment;
+              message = "The receiver must trust the identity generated with Chrome's policy.";
+            }
+            {
               assertion = builtins.hasAttr "sinnix-nav-capture" hm.systemd.user.services;
               message = "The browser provenance receiver must be supervised by the user manager.";
             }
@@ -109,7 +115,8 @@ in
           }
           ''
             ${pkgs.nodejs}/bin/node ${./nav-capture-extension.mjs} \
-              ${../../browser-extensions/nav-capture/background.js} ${toString navigationPort}
+              ${../../browser-extensions/nav-capture/background.js} ${toString navigationPort} \
+              ${../../browser-extensions/nav-capture/content.js}
             test -n "$workflow"
 
             # A policy that pins an id the signed archive does not have is the
