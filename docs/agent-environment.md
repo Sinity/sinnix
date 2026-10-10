@@ -71,7 +71,7 @@ Servers: context7, github, lynchpin, sinex.
 | `chrome-devtools` | `browser-mcp` | `stdio` | `mcp-chrome-devtools` | claude, codex, gemini |
 | `context7` | `remote-core` | `http` | `https://mcp.context7.com/mcp` | claude, codex, gemini, antigravity, hermes |
 | `firecrawl` | `browser-mcp` | `stdio` | `mcp-firecrawl` | claude, hermes |
-| `github` | `remote-core` | `stdio` | `npx` | claude, codex, gemini, antigravity, hermes |
+| `github` | `remote-core` | `stdio` | `mcp-github` | claude, codex, gemini, antigravity, hermes |
 | `lynchpin` | `deep-evidence` | `stdio` | `mcp-lynchpin` | codex, claude, gemini, antigravity, hermes |
 | `polylogue` | `recall` | `stdio` | `mcp-polylogue` |  |
 | `rea` | `binary-analysis` | `stdio` | `rea` | claude, codex, gemini, hermes |
