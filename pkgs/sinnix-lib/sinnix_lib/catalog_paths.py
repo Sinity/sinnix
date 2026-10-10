@@ -13,6 +13,11 @@ def normalized(path: str) -> str:
     return path
 
 
+def _replace_prefix(path: str, source: str, destination: str) -> str:
+    # Relative components preserve the separator when either address is root.
+    return str(PurePosixPath(destination) / PurePosixPath(path).relative_to(source))
+
+
 def relocate_path(path: str, moves: list[dict]) -> str:
     """Longest component-prefix wins; similarly named subjects never match."""
     path = normalized(path)
@@ -20,7 +25,7 @@ def relocate_path(path: str, moves: list[dict]) -> str:
     for move in moves:
         source, destination = normalized(move["source"]), normalized(move["destination"])
         if path == source or path.startswith(source.rstrip("/") + "/"):
-            matches.append((len(source), destination + path[len(source):]))
+            matches.append((len(source), _replace_prefix(path, source, destination)))
     if not matches:
         return path
     longest = max(length for length, _ in matches)
@@ -48,7 +53,7 @@ def resolve_historical_path(catalog: dict, path: str, *, asset_id: str | None = 
                 matches.append((len(address), None if asset.get("location_status") in {
                     "unavailable", "missing", "denied", "offline_mount", "wrong_type", "inaccessible"
                 }
-                                else current + path[len(address):]))
+                                else _replace_prefix(path, address, current)))
     if not matches:
         raise ValueError(f"path has no catalog identity history: {path}")
     longest = max(length for length, _ in matches)

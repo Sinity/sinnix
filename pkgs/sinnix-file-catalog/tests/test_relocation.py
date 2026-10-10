@@ -245,3 +245,17 @@ def test_single_relocation_refuses_a_dangling_link_at_the_old_address(tmp_path):
     result = invoke(catalog, "relocate", original["id"], str(destination))
     assert result.returncode != 0 and "old path still exists" in result.stderr
     assert catalog.read_bytes() == before
+
+
+def test_root_prefix_preparation_and_historical_cli_lookup(tmp_path):
+    old, new, catalog, _ = fixture(tmp_path)
+    result, receipt = prepare(tmp_path, catalog, [{"source": "/", "destination": str(new)}])
+    assert result.returncode == 0, result.stderr
+    value = json.loads(receipt.read_text())
+    for row in value["assets"]:
+        assert row["destination"] == str(new / row["source"].lstrip("/"))
+    value = json.loads(catalog.read_text())
+    value["assets"][0]["previous_paths"] = ["/"]
+    catalog.write_text(json.dumps(value))
+    result = invoke(catalog, "resolve", "/child", "--id", value["assets"][0]["id"])
+    assert result.returncode == 0 and result.stdout.strip() == str(old / "child")
