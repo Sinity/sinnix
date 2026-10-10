@@ -13,6 +13,7 @@
   user,
 }:
 let
+  npmRecoverySources = import ../../../../flake/data/agent-cli-sources.nix { inherit pkgs; };
   # Mirrors environment.sessionVariables.TMPDIR in profiles/workstation.nix;
   # the wrappers re-assert it because inheritance is not guaranteed.
   shellTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/work";
@@ -56,7 +57,8 @@ let
         ${lib.escapeShellArg stateDir} \
         ${lib.escapeShellArg npmPackage} \
         ${lib.escapeShellArg binaryName} \
-        ${lib.escapeShellArg agentRuntimePath}
+        ${lib.escapeShellArg agentRuntimePath} \
+        ${lib.escapeShellArg (toString npmRecoverySources.${npmPackage})}
     '';
 
   # Resolves an agenix secret name to its runtime path, honoring a live

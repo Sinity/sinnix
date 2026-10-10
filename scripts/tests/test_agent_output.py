@@ -39,6 +39,7 @@ class NativeOutputTest(unittest.TestCase):
             ),
         }
         self.result = self.root / "result.json"
+        (self.root / "locked-package.tgz").write_bytes(b"fixture locked tarball")
 
     def executable(self, name, body):
         # An absolute interpreter: a build sandbox has no /usr/bin/env.
@@ -476,6 +477,46 @@ class NativeOutputTest(unittest.TestCase):
         self.assertFalse(self.result.exists())
         self.assertFalse((self.root / "pi-args").exists())
 
+    def test_bootstrap_installs_the_declared_tarball_not_a_registry_name(self):
+        self.executable(
+            "npm",
+            'printf "%s\\n" "$@" > "$HOME/npm-args"\n',
+        )
+        source = self.root / "locked-package.tgz"
+        outcome = subprocess.run(
+            [
+                "bash", str(BOOTSTRAP), "fixture-agent", "fixture-package",
+                "fixture", str(self.bin), str(source),
+            ],
+            env={**self.env, "HOME": str(self.root)},
+            capture_output=True,
+            timeout=10,
+        )
+        self.assertEqual(outcome.returncode, 0, outcome.stderr)
+        self.assertEqual(
+            (self.root / "npm-args").read_text().splitlines(),
+            ["install", "-g", str(source)],
+        )
+
+    def test_missing_tarball_does_not_retire_recoverable_package(self):
+        state = self.root / ".local/state/fixture-agent"
+        retired = state / "npm/lib/node_modules/.fixture-package-AbCd1234"
+        retired.mkdir(parents=True)
+        (retired / "recoverable.txt").write_bytes(b"retained fixture bytes")
+        self.executable("npm", 'touch "$HOME/npm-called"\n')
+        outcome = subprocess.run(
+            ["bash", str(BOOTSTRAP), "fixture-agent", "fixture-package",
+             "fixture", str(self.bin), str(self.root / "absent.tgz")],
+            env={**self.env, "HOME": str(self.root)},
+            capture_output=True, timeout=10,
+        )
+        self.assertNotEqual(outcome.returncode, 0)
+        self.assertIn(b"locked recovery tarball is unavailable", outcome.stderr)
+        self.assertEqual((retired / "recoverable.txt").read_bytes(),
+                         b"retained fixture bytes")
+        self.assertFalse((self.root / "npm-called").exists())
+        self.assertFalse((state / "npm-recovery").exists())
+
     def test_failed_bootstrap_preserves_retired_package_and_launcher(self):
         state = self.root / ".local/state/fixture-agent"
         retired = state / "npm/lib/node_modules/.fixture-package-AbCd1234"
@@ -493,6 +534,7 @@ class NativeOutputTest(unittest.TestCase):
                 "fixture-package",
                 "fixture",
                 str(self.bin),
+                str(self.root / "locked-package.tgz"),
             ],
             env={**self.env, "HOME": str(self.root)},
             capture_output=True,
@@ -531,6 +573,7 @@ class NativeOutputTest(unittest.TestCase):
                 "fixture-package",
                 "fixture",
                 str(self.bin),
+                str(self.root / "locked-package.tgz"),
             ],
             env={**self.env, "HOME": str(self.root)},
             text=True,

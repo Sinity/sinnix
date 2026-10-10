@@ -529,6 +529,10 @@ in
             cat > "$TMPDIR/bin/npm" <<'EOF'
             #!${pkgs.bash}/bin/bash
             set -euo pipefail
+            test "$#" = 3
+            test "$1" = install
+            test "$2" = -g
+            test "$3" = "$TMPDIR/locked-package.tgz"
             package_parent="$npm_config_prefix/lib/node_modules/@example"
             test ! -e "$package_parent/.fake-cli-AbCd1234"
             test ! -e "$package_parent/..fake-cli-ZyXw9876"
@@ -559,10 +563,11 @@ in
                 pkgs.util-linux
               ]
             }"
+            printf fixture > "$TMPDIR/locked-package.tgz"
             bootstrap=${../../scripts/sinnix-agent-npm-bootstrap}
-            ${pkgs.bash}/bin/bash "$bootstrap" fake-agent @example/fake-cli fakeagent "$runtime_path" &
+            ${pkgs.bash}/bin/bash "$bootstrap" fake-agent @example/fake-cli fakeagent "$runtime_path" "$TMPDIR/locked-package.tgz" &
             first=$!
-            ${pkgs.bash}/bin/bash "$bootstrap" fake-agent @example/fake-cli fakeagent "$runtime_path" &
+            ${pkgs.bash}/bin/bash "$bootstrap" fake-agent @example/fake-cli fakeagent "$runtime_path" "$TMPDIR/locked-package.tgz" &
             second=$!
             wait "$first"
             wait "$second"
@@ -575,7 +580,7 @@ in
 
             # A healthy canonical binary must bypass cleanup and npm entirely.
             mkdir "$package_parent/.fake-cli-Keep1234"
-            ${pkgs.bash}/bin/bash "$bootstrap" fake-agent @example/fake-cli fakeagent "$runtime_path"
+            ${pkgs.bash}/bin/bash "$bootstrap" fake-agent @example/fake-cli fakeagent "$runtime_path" "$TMPDIR/absent-package.tgz"
             test "$(cat "$HOME/npm-invocations")" = 1
             test -d "$package_parent/.fake-cli-Keep1234"
             test ! -e "$HOME/.local/state/fake-agent/launch.sh"
@@ -965,7 +970,7 @@ in
             grep -Fq -- '--append-system-prompt "$HOME/.config/claude/CLAUDE.md"' "$HOME/.local/bin/pi"
             grep -Fq -- '--skill "$HOME/.config/claude/skills"' "$HOME/.local/bin/pi"
             grep -Fq 'unset OPENAI_API_KEY' "$HOME/.local/bin/pi"
-            grep -Fq 'npm install -g "$npm_package"' '${../../scripts/sinnix-agent-npm-bootstrap}'
+            grep -Fq 'npm install -g "$package_source"' '${../../scripts/sinnix-agent-npm-bootstrap}'
             grep -Fq 'export npm_config_prefix="$STATE/npm"' '${../../scripts/sinnix-agent-npm-bootstrap}'
 
             # Only alternate-backend wrappers select a native profile. Codex

@@ -139,6 +139,11 @@ Snapshots and Borg jobs cover durable data. Rebuildable or nested subvolumes use
 explicit alternative handling. Restore drills exercise the recovery path rather
 than assuming that an archive is usable.
 
+Agent CLI recovery installs the versioned, hash-checked top-level tarballs in
+`flake/data/agent-cli-sources.nix`. Existing working installations and native
+updates remain owned by each CLI. npm dependency trees are not yet locked by
+this registry; the top-level tarball hash does not attest their contents.
+
 ## Working with the repository
 
 Enter the development environment:
