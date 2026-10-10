@@ -361,6 +361,9 @@ def test_bad_framing_or_nonobject_cannot_undo(elicit_module, framing, raw):
     from email.message import Message
     handler = object.__new__(elicit_module.ServeHandler)
     handler.headers = Message()
+    handler.headers["Host"] = "127.0.0.1:8080"
+    handler.headers["Content-Type"] = "application/json"
+    handler.server = type("Server", (), {"server_address": ("127.0.0.1", 8080), "configured_host": "127.0.0.1"})()
     for key, value in framing:
         handler.headers[key] = value
     handler.rfile = io.BytesIO(raw)
@@ -377,8 +380,11 @@ def test_bad_framing_or_nonobject_cannot_undo(elicit_module, framing, raw):
 
 def test_empty_request_preserves_undo_protocol(elicit_module):
     import io
+    from email.message import Message
     handler = object.__new__(elicit_module.ServeHandler)
-    handler.headers = {}
+    handler.headers = Message()
+    handler.headers["Host"] = "127.0.0.1:8080"
+    handler.server = type("Server", (), {"server_address": ("127.0.0.1", 8080), "configured_host": "127.0.0.1"})()
     handler.rfile = io.BytesIO()
     handler.path = "/undo"
     calls = []
@@ -390,3 +396,89 @@ def test_empty_request_preserves_undo_protocol(elicit_module):
     handler._json = lambda body, code=200: None
     handler.do_POST()
     assert calls == ["undo"]
+
+
+@pytest.mark.parametrize("headers, code", [
+    ({"Origin": "https://example.invalid"}, 403),
+    ({"Origin": "null"}, 403),
+    ({"Sec-Fetch-Site": "cross-site"}, 403),
+    ({"Sec-Fetch-Site": "same-site"}, 403),
+    ({"Host": "rebound.example.invalid:8080"}, 403),
+    ({"Host": "@{authority}"}, 403),
+    ({"Origin": "http://@{authority}"}, 403),
+    ({"Origin": "http://127.0.0.1:0"}, 403),
+    ({"Content-Type": "text/plain"}, 415),
+])
+def test_forged_browser_post_cannot_append(serving, image_domain, headers, code):
+    client, _state = serving
+    authority = urllib.parse.urlsplit(client.base).netloc
+    headers = {key: value.format(authority=authority) for key, value in headers.items()}
+    request = urllib.request.Request(
+        client.base + "/answer",
+        data=json.dumps({"id": "forged", "a": "alpha", "b": "beta", "outcome": 1}).encode(),
+        headers={"Content-Type": "application/json", **headers},
+        method="POST",
+    )
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(request, timeout=10)
+    assert error.value.code == code
+    assert raw_records(image_domain) == []
+
+
+def test_same_origin_page_can_append(serving, image_domain):
+    client, _state = serving
+    request = urllib.request.Request(
+        client.base + "/answer",
+        data=json.dumps({"id": "same-origin", "a": "alpha", "b": "beta", "outcome": 1}).encode(),
+        headers={"Content-Type": "application/json", "Origin": client.base, "Sec-Fetch-Site": "same-origin"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=10) as response:
+        assert response.status == 200
+    assert len(judgments(image_domain)) == 1
+
+
+def test_rebinding_host_cannot_read_images(serving):
+    client, _state = serving
+    request = urllib.request.Request(client.base + "/image/alpha", headers={"Host": "rebound.example.invalid"})
+    with pytest.raises(urllib.error.HTTPError) as error:
+        urllib.request.urlopen(request, timeout=10)
+    assert error.value.code == 403
+
+
+def test_duplicate_host_is_refused(serving):
+    import http.client
+    client, _state = serving
+    endpoint = urllib.parse.urlsplit(client.base)
+    connection = http.client.HTTPConnection(endpoint.hostname, endpoint.port, timeout=10)
+    try:
+        connection.putrequest("GET", "/status", skip_host=True)
+        connection.putheader("Host", endpoint.netloc)
+        connection.putheader("Host", "rebound.example.invalid")
+        connection.endheaders()
+        response = connection.getresponse()
+        assert response.status == 403
+        response.read()
+    finally:
+        connection.close()
+
+
+def test_explicit_listen_hostname_remains_an_allowed_authority(elicit_module, image_domain):
+    server, _state = elicit_module.build_serve_server(image_domain, port=0)
+    # Model the declared hostname resolving to this listener, without using
+    # external DNS or changing the machine's hosts file.
+    server.configured_host = "ranking.example.invalid"
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        authority = f"ranking.example.invalid:{server.server_port}"
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_port}/status",
+            headers={"Host": authority, "Origin": "http://" + authority, "Sec-Fetch-Site": "same-origin"},
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            assert response.status == 200
+    finally:
+        server.shutdown()
+        thread.join(timeout=10)
+        server.server_close()

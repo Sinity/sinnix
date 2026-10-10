@@ -981,7 +981,46 @@ class ServeHandler(BaseHTTPRequestHandler):
         return body
 
     # ── routes ───────────────────────────────────────────────────────────
+    def _browser_request_allowed(self):
+        # Reachability is not authorization for web content. Validate Host
+        # before serving private views as well as mutations (DNS rebinding),
+        # and reject cross-origin browser requests before reading their body.
+        hosts = self.headers.get_all("Host", [])
+        origins = self.headers.get_all("Origin", [])
+        sites = self.headers.get_all("Sec-Fetch-Site", [])
+        bind_host, port = self.server.server_address[:2]
+        allowed = {str(bind_host).lower(), self.server.configured_host.lower()}
+        if allowed & {"127.0.0.1", "localhost", "::1"}:
+            allowed.update({"127.0.0.1", "localhost", "::1"})
+        try:
+            host = urllib.parse.urlsplit("http://" + hosts[0]) if len(hosts) == 1 else None
+            valid = (
+                host is not None and host.hostname in allowed
+                and (host.port if host.port is not None else 80) == port
+                and host.username is None and host.password is None
+                and not host.path and not host.query
+                and not host.fragment and len(origins) <= 1 and len(sites) <= 1
+                and (not sites or sites[0] in {"none", "same-origin"})
+            )
+            if valid and origins:
+                origin = urllib.parse.urlsplit(origins[0])
+                valid = (
+                    origin.scheme == "http" and origin.hostname == host.hostname
+                    and (origin.port if origin.port is not None else 80) == port
+                    and origin.username is None and origin.password is None
+                    and not origin.path
+                    and not origin.query and not origin.fragment
+                )
+        except ValueError:
+            valid = False
+        if not valid:
+            self.close_connection = True
+            self._json({"error": "browser request origin or host refused"}, 403)
+        return valid
+
     def do_GET(self):
+        if not self._browser_request_allowed():
+            return
         state = self.session_state
         path = urllib.parse.urlparse(self.path).path
         if path == "/":
@@ -1010,6 +1049,13 @@ class ServeHandler(BaseHTTPRequestHandler):
         self._send(200, source.read_bytes(), content_type, {"Cache-Control": "max-age=3600"})
 
     def do_POST(self):
+        if not self._browser_request_allowed():
+            return
+        content_types = self.headers.get_all("Content-Type", [])
+        if len(content_types) > 1 or (content_types and content_types[0].split(";", 1)[0].strip().lower() != "application/json"):
+            self.close_connection = True
+            self._json({"error": "expected application/json"}, 415)
+            return
         state = self.session_state
         path = urllib.parse.urlparse(self.path).path
         try:
@@ -1032,10 +1078,12 @@ class ServeHandler(BaseHTTPRequestHandler):
 
 
 def build_serve_server(domain, host="127.0.0.1", port=0, top_k=10, seed=None):
-    """(bound server, session). Loopback by default; nothing here authenticates."""
+    """(bound server, session). Browser origin/host checks are not user authentication."""
     state = ServeSession(domain, top_k=top_k, seed=seed)
     handler = type("BoundServeHandler", (ServeHandler,), {"session_state": state})
-    return ThreadingHTTPServer((host, port), handler), state
+    server = ThreadingHTTPServer((host, port), handler)
+    server.configured_host = host
+    return server, state
 
 
 def cmd_serve(domain, args):
