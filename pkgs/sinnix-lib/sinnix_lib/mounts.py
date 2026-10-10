@@ -9,12 +9,17 @@ _OCTAL_ESCAPE = re.compile(r"\\([0-7]{3})")
 
 
 def read_mountpoints() -> frozenset[Path]:
-    """Decode Linux mountinfo path escapes, including tabs and backslashes."""
+    """Decode payload mount paths; automount placeholders do not prove availability."""
     points = set()
     for line in Path("/proc/self/mountinfo").read_text().splitlines():
         fields = line.split()
         if len(fields) < 10 or "-" not in fields[6:]:
             raise ValueError("malformed mountinfo record")
+        separator = fields.index("-", 6)
+        if len(fields) < separator + 4:
+            raise ValueError("malformed mountinfo record")
+        if fields[separator + 1] == "autofs":
+            continue
         point = Path(_OCTAL_ESCAPE.sub(lambda match: chr(int(match[1], 8)), fields[4]))
         if not point.is_absolute():
             raise ValueError("mountinfo mountpoint must be absolute")

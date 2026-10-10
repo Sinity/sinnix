@@ -26,3 +26,17 @@ def test_mounts_do_not_cover_siblings_or_similar_names():
     assert not has_mounted_ancestor(Path("/mnt/offline/a"), Path("/mnt"), mounted)
     assert not has_mounted_ancestor(Path("/mnt/device-other/a"), Path("/mnt"), mounted)
     assert not has_mounted_ancestor(Path("/mnt-other/device/a"), Path("/mnt"), mounted)
+
+
+def test_automount_placeholder_does_not_prove_payload_presence(monkeypatch):
+    raw = (
+        "1 0 8:1 / / rw - ext4 /dev/root rw\n"
+        "2 1 0:2 / /mnt/offline rw - autofs systemd-1 rw\n"
+        "3 1 0:3 / /mnt/online rw - autofs systemd-1 rw\n"
+        "4 3 8:2 / /mnt/online rw - ext4 /dev/fixture rw\n"
+    )
+    monkeypatch.setattr(Path, "read_text", lambda _: raw)
+    mounted = read_mountpoints()
+    assert mounted == {Path("/"), Path("/mnt/online")}
+    assert not has_mounted_ancestor(Path("/mnt/offline/item"), Path("/mnt"), mounted)
+    assert has_mounted_ancestor(Path("/mnt/online/item"), Path("/mnt"), mounted)

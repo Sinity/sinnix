@@ -209,3 +209,32 @@ def test_percent_encoded_backslash_is_filename_content(tmp_path):
     report = audit({"schema_version": 1, "documents": [str(document)]})
     assert [row["status"] for row in report["links"]] == ["ok", "ok"]
     assert report["links"][0]["destination"] == str(tmp_path / "literal\\(name).md")
+
+
+def test_automount_placeholder_is_not_probed(tmp_path, monkeypatch):
+    import runpy
+
+    external = tmp_path / "external"
+    offline = external / "offline"
+    document = tmp_path / "README.md"
+    document.write_text("[offline](external/offline/item.md)\n")
+    original_read = Path.read_text
+    original_stat = Path.stat
+
+    def read(path, *args, **kwargs):
+        if path == Path("/proc/self/mountinfo"):
+            return (
+                "1 0 8:1 / / rw - ext4 /dev/root rw\n"
+                f"2 1 0:2 / {offline} rw - autofs systemd-1 rw\n"
+            )
+        return original_read(path, *args, **kwargs)
+
+    def guarded_stat(path, *args, **kwargs):
+        assert not path.is_relative_to(offline), "offline payload must not be probed"
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(Path, "stat", guarded_stat)
+    audit = runpy.run_path(str(SCRIPT))["audit"]
+    report = audit({"schema_version": 1, "documents": [str(document)], "external_roots": [str(external)]})
+    assert report["links"][0]["status"] == "external-unprobed"
