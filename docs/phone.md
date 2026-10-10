@@ -165,6 +165,10 @@ outcomes show `needs review · request retained`. These requests are saved as
 explicitly, and unsaved answer text remains in the editor. Job answers use the
 same intent route and outcome rules.
 
+Notification, receipt and quick-settings tile requests use the same screen routes on a fresh launch and while the app is running. Repeating a route request after manual navigation opens that screen again. Unknown routes preserve the current screen, or fall back to Home on a fresh launch. Activity recreation preserves the initial navigation graph.
+
+Home, Capture, Grants and the instrument screens reduce historical events on an I/O worker. The event reader snapshots at most the final 4 MiB of each requested day file, decodes UTF-8, skips only an actual partial leading line and rejects lines over 1 MiB. Kind-specific reads retain only the requested records in memory. Original event files remain append-only.
+
 Intent execution binds each `send_token` to canonical request content and serializes file and HTTP delivery through the same lock. An identical completed retry returns its prior receipt without acting again. A verified definitive failure remains retryable; partial or indeterminate effects are preserved and refused replay. Conflicting token reuse is refused. Terminal records whose result does not agree with the recorded outcome and action kind are treated as indeterminate, retained unchanged, and never acknowledged as completed or retried as definitive failures. Byte uploads use full SHA-256 identity.
 
 A chunk prime already holds answers ok rather than 409, because a phone that retried after losing an acknowledgement must be able to let go of the file. An event batch declares the offset it starts at and is written there, so re-sending one changes nothing. The sender accepts a chunk or event upload only when the returned byte count and full SHA-256 match the submitted payload. Missing or mismatched receipt identities are refusals, so local input and event progress remain available for retry. Inbox confirmation uses its separate control-response contract.

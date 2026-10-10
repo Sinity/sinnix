@@ -1272,17 +1272,17 @@
     "phone-app": {
       "flake": false,
       "locked": {
-        "lastModified": 1791656721,
-        "narHash": "sha256-3Ot5RC3QFfu1YY9yQIiVrBWc3/B6+z3uCck65KiLq/0=",
+        "lastModified": 1791660781,
+        "narHash": "sha256-QSGblmkI5wuDVsRm5sY7t9qIuQpi2zpGC40HJkht9ww=",
         "owner": "Sinity",
         "repo": "sinnix-phone-app",
-        "rev": "92b5b40f4c66f9b2304cc461ae5372b1a2d2ae4d",
+        "rev": "8d4c0ab74d8f3e7eb7f7cc41d177deb4a43b9e7f",
         "type": "github"
       },
       "original": {
         "owner": "Sinity",
         "repo": "sinnix-phone-app",
-        "rev": "92b5b40f4c66f9b2304cc461ae5372b1a2d2ae4d",
+        "rev": "8d4c0ab74d8f3e7eb7f7cc41d177deb4a43b9e7f",
         "type": "github"
       }
     },
