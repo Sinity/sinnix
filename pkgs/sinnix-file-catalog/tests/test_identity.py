@@ -50,3 +50,23 @@ def test_stable_identity_allows_device_observation_drift():
     legacy = {key: value for key, value in BASE.items() if key not in ("filesystem_uuid", "btrfs_subvolume_id")}
     assert not compare(legacy, dict(legacy, device=99))
     assert compare(legacy, BASE)  # New stable fields do not rewrite old evidence.
+
+
+def test_source_vanishing_during_identity_is_missing(tmp_path, monkeypatch):
+    source = tmp_path / "neutral"
+    source.write_text("neutral")
+    original = Path.stat
+    calls = 0
+    def raced(path, *args, **kwargs):
+        nonlocal calls
+        if path == source:
+            calls += 1
+            if calls == 2:
+                raise FileNotFoundError("synthetic source vanished")
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "stat", raced)
+    diagnose = runpy.run_path(str(SCRIPT))["location_diagnosis"]
+    assert diagnose(source, "file")["status"] == "missing"
+    other = tmp_path / "other"
+    other.write_text("neutral")
+    assert diagnose(other, "file")["status"] == "available"

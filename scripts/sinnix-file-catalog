@@ -66,7 +66,7 @@ def identity(path: Path) -> dict[str, Any]:
     try:
         s = path.stat()
     except OSError as e:
-        raise CatalogError(f"current_path does not exist or is inaccessible: {path}: {e}")
+        raise CatalogError(f"current_path does not exist or is inaccessible: {path}: {e}") from e
     observed = {
         "device": s.st_dev,
         "inode": s.st_ino,
@@ -658,6 +658,12 @@ def location_diagnosis(path: Path, kind: str) -> dict:
         if not (stat.S_ISDIR(info.st_mode) if kind == "collection" else stat.S_ISREG(info.st_mode)):
             return {"status": "wrong_type", "reason": "configured object type differs"}
         return {"status": "available", "identity": identity(path)}
+    except CatalogError as exc:
+        cause = exc.__cause__
+        if not isinstance(cause, OSError):
+            raise
+        status = "denied" if isinstance(cause, PermissionError) else "missing" if isinstance(cause, FileNotFoundError) else "inaccessible"
+        return {"status": status, "reason": str(cause)}
     except PermissionError as exc:
         return {"status": "denied", "reason": str(exc)}
     except FileNotFoundError as exc:
