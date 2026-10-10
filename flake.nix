@@ -57,6 +57,8 @@
     intercept-bounce = {
       url = "github:Sinity/intercept-bounce/master";
       inputs.nixpkgs.follows = "nixpkgs";
+      inputs.devshell.inputs.nixpkgs.follows = "nixpkgs";
+      inputs.rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
     };
 
     scribe-tap = {
@@ -79,6 +81,7 @@
       url = "git+https://github.com/Sinity/sinity-lynchpin.git?ref=master";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.polylogueSrc.follows = "polylogue";
+      inputs.nixpkgsRepomix.follows = "nixpkgs";
     };
 
     # The phone app, extracted to its own repo (operator decision,
@@ -119,7 +122,10 @@
     };
 
     # BTRFS rollback impermanence (see modules/persistence.nix)
-    impermanence.url = "github:nix-community/impermanence";
+    impermanence = {
+      url = "github:nix-community/impermanence";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     # System-wide theming (fonts + cursor only; color authority is Noctalia)
     stylix.url = "github:danth/stylix";
@@ -150,6 +156,9 @@
     nix-android = {
       url = "github:devindudeman/nix-android";
       inputs.nixpkgs.follows = "nixpkgs";
+      # Its flake module is required by android-rebuild; share the package
+      # source without removing that module or its development dependencies.
+      inputs.devenv.inputs.nixpkgs.follows = "nixpkgs";
     };
 
     # Declarative userland inside the Nix-on-Droid app. Termux remains the
@@ -172,6 +181,7 @@
       url = "github:nix-community/nixos-anywhere";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.disko.follows = "disko";
+      inputs.nixos-stable.follows = "nixpkgs";
     };
 
     # colmena: declarative multi-host deploy with per-host gating.
@@ -179,6 +189,7 @@
       url = "github:zhaofengli/colmena";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.flake-utils.follows = "flake-utils-for-colmena";
+      inputs.stable.follows = "nixpkgs";
     };
 
     # colmena pulls in flake-utils; pin it once here so the dep graph stays
