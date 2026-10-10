@@ -28,6 +28,8 @@ The former independent `inventory`, `content` and `content-views` output command
 
 The content scanner stops at configured native or temporary collection boundaries, including temporary work, Polylogue's live and retired native archive, and Stashbox's store. It emits a `kind: collection_boundary` row with `exclusion_reason`, no digest and no invented descendant count. A boundary does not mean empty, deleted, unimportant, unbacked, or disposable. Native owner queries and the directory inventory remain distinct access paths.
 
+Relative and dot-segment directory roots resolve to their physical absolute location before exclusion checks and enumeration. Fresh manifests record absolute root addresses so their scope remains interpretable outside the caller’s working directory. Parent-directory aliases therefore cannot bypass a native collection boundary. Repeated spellings of the same resolved directory root are inspected once. Direct symlink roots remain explicit error observations; skipped directory aliases within a scope leave boundary observations.
+
 Pruning happens before entering the excluded child directory. Exclusions match path components, so a rule for one directory cannot swallow a similarly prefixed sibling. Build/dependency-directory exclusions also leave explicit boundary records. Missing roots, non-directory roots, and unreadable directories produce error observations, rather than an indistinguishable empty result. Directory inventory traversal uses a deque while preserving breadth-first ordering.
 
 This remains bounded generic content inspection, not a claim that every native record or filesystem byte was indexed. Do not enable deeper traversal merely to make a missing native adapter appear to work.
@@ -36,7 +38,7 @@ This remains bounded generic content inspection, not a claim that every native r
 
 Authored judgment and reference ledgers are not regenerable simply because they share a directory with derived indexes. Ledger materialization uses the JSON readers already supplied by the declared DuckDB runtime; it does not install extensions or require a per-user extension cache at runtime. Prefix inheritance matches the named path or descendants separated by `/`, not lexical lookalikes. Content-addressed judgment joins use only full-file digests, never legacy large-file samples.
 
-Materialization uses explicit nullable schema columns. Malformed JSON fails staged publication rather than being silently skipped. A generation publishes as one pointer after staging and validation. Existing generations remain in place on failure.
+Materialization uses explicit nullable schema columns. A readable scope with no selected content files publishes validated zero-row content artifacts; unavailable roots still produce explicit error observations. Malformed JSON fails staged publication rather than being silently skipped. A generation publishes as one pointer after staging and validation. Existing generations remain in place on failure.
 
 The focused tests under `pkgs/sinnix-fs/tests` use synthetic small files and isolated real DuckDB databases. Counterexamples include equal head/tail/size with a different middle, legacy sample demotion, in-flight changes, missing roots, FIFOs, aliases, malformed JSON, quoted filesystem paths, non-traversed collections, and prefix siblings. Test dependencies belong to the existing Nix script-suite declaration, not an undeclared host installation.
 

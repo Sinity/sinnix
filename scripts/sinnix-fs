@@ -108,8 +108,8 @@ def materialize_pair(
 
         check = duckdb_query(staged_db, f"SELECT count(*) FROM {table}")
         rows = check.stdout.strip()
-        if check.returncode != 0 or not rows.isdigit() or int(rows) == 0:
-            raise SystemExit(f"materialize produced no rows (duckdb said: {rows!r} "
+        if check.returncode != 0 or not rows.isdigit():
+            raise SystemExit(f"materialize row-count validation failed (duckdb said: {rows!r} "
                              f"{check.stderr.strip()})")
         parquet_check = duckdb_query(
             staged_db, f"SELECT count(*) FROM read_parquet({sql_string(staged_parquet)})",
@@ -212,6 +212,15 @@ def owner_of(st: os.stat_result) -> tuple[str, str]:
     return user, group
 
 
+def inspect_scan_root(root: str) -> tuple[str, os.stat_result]:
+    """Use physical absolute directory paths while preserving root-link refusal."""
+    path = Path(root).absolute()
+    observed = path.lstat()
+    if stat.S_ISDIR(observed.st_mode):
+        path = path.resolve(strict=True)
+    return str(path), observed
+
+
 def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_every: int) -> int:
     """Breadth-first walk, one JSONL record per directory.
 
@@ -224,7 +233,8 @@ def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_ev
     started = time.monotonic()
 
     with atomic_text_writer(out_path, fsync=True, mode=0o600) as out:
-        queue = deque((r, 0) for r in roots)
+        root_paths: set[str] = set()
+        queue = deque((str(Path(r).absolute()), 0) for r in roots)
         while queue:
             path, depth = queue.popleft()
             # error rows MUST carry "parent" like ordinary rows do -- without
@@ -236,7 +246,10 @@ def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_ev
             # back true until this was added.
             parent = os.path.dirname(path) if depth else None
             try:
-                st = os.lstat(path)
+                if depth == 0:
+                    path, st = inspect_scan_root(path)
+                else:
+                    st = os.lstat(path)
             except OSError as exc:
                 out.write(json.dumps({"schema": INVENTORY_SCHEMA, "path": path, "parent": parent,
                                       "depth": depth, "error": str(exc)}) + "\n")
@@ -249,6 +262,10 @@ def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_ev
                     "error": "not a directory (root symlinks are not followed)"})) + "\n")
                 written += 1
                 continue
+            if depth == 0:
+                if path in root_paths:
+                    continue
+                root_paths.add(path)
             try:
                 with os.scandir(path) as it:
                     entries = list(it)
@@ -579,7 +596,7 @@ def content_magic_type(path: Path) -> str | None:
     it had existed on the file layer rather than only the config layer.
     """
     try:
-        out = subprocess.run(["file", "-b", "--mime-type", str(path)],
+        out = subprocess.run(["file", "-b", "--mime-type", "--", str(path)],
                               capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -721,15 +738,20 @@ def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
                 "head": None, "title": None}), ensure_ascii=False) + "\n")
             written += 1
             skipped += 1
+        root_paths: set[str] = set()
         for root in roots:
+            root = str(Path(root).absolute())
             try:
-                root_stat = Path(root).lstat()
+                root, root_stat = inspect_scan_root(root)
                 if not stat.S_ISDIR(root_stat.st_mode):
                     boundary_error(root, "not a directory (root aliases are not followed)")
                     continue
             except OSError as exc:
                 boundary_error(root, f"root unavailable: {exc.__class__.__name__}")
                 continue
+            if root in root_paths:
+                continue
+            root_paths.add(root)
             excluded = content_excluded(root)
             if excluded:
                 boundary_record(root, excluded)
@@ -748,6 +770,8 @@ def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
                     excluded = content_excluded(child_path)
                     if excluded:
                         boundary_record(child_path, excluded)
+                    elif Path(child_path).is_symlink():
+                        boundary_record(child_path, "directory alias not traversed")
                     else:
                         descend.append(child)
                 dirnames[:] = descend
@@ -1170,6 +1194,7 @@ def publish_generation(index_dir: Path, *, roots=None, retained_inputs: Path | N
                     "exclusions": "historical exclusions were not recorded; no fresh coverage claim",
                 }
             else:
+                roots = [str(Path(root).absolute()) for root in roots]
                 started = dt.datetime.now(dt.timezone.utc).isoformat()
                 inventory_scan(roots, -1, stage / "nodes.jsonl", 2000)
                 inventory_materialize(stage / "nodes.jsonl", stage / "inventory.duckdb", stage / "nodes.parquet")

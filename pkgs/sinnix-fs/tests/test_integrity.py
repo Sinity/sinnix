@@ -452,3 +452,135 @@ def test_generated_directory_exclusion_keeps_a_boundary_record(tmp_path):
     rows = list(map(json.loads, out.read_text().splitlines()))
     assert len(rows) == 1 and rows[0]["kind"] == "collection_boundary"
     assert rows[0]["exclusion_reason"] == "inside node_modules"
+
+
+@pytest.mark.parametrize("address", [".", "../native", "../native/../ordinary"])
+def test_root_spellings_obey_physical_collection_boundary(tmp_path, monkeypatch, address):
+    fs = load()
+    native = tmp_path / "native"
+    native.mkdir()
+    (native / "note.md").write_text("Synthetic native payload")
+    ordinary = tmp_path / "ordinary"
+    ordinary.mkdir()
+    (ordinary / "note.md").write_text("Ordinary fixture")
+    monkeypatch.chdir(native)
+    monkeypatch.setattr(fs, "CONTENT_COLLECTION_BOUNDARIES", {str(native): "synthetic native owner"})
+    original_walk = fs.os.walk
+    def guarded_walk(path, *args, **kwargs):
+        assert Path(path).resolve() != native, "entered native root through an alternate spelling"
+        return original_walk(path, *args, **kwargs)
+    monkeypatch.setattr(fs.os, "walk", guarded_walk)
+    output = tmp_path / "files.jsonl"
+    fs.content_walk([address], output, 0)
+    rows = list(map(json.loads, output.read_text().splitlines()))
+    if address == "../native/../ordinary":
+        assert rows[0]["path"] == str(ordinary / "note.md")
+        assert rows[0]["sha256"]
+    else:
+        assert len(rows) == 1 and rows[0]["path"] == str(native)
+        assert rows[0]["kind"] == "collection_boundary"
+        assert rows[0]["exclusion_reason"] == "synthetic native owner"
+
+
+def test_relative_inventory_paths_are_absolute_and_joinable(tmp_path, monkeypatch):
+    fs = load()
+    root = tmp_path / "root"
+    (root / "child").mkdir(parents=True)
+    monkeypatch.chdir(root)
+    output = tmp_path / "nodes.jsonl"
+    fs.inventory_scan(["."], -1, output, 0)
+    rows = {row["path"]: row for row in map(json.loads, output.read_text().splitlines())}
+    assert set(rows) == {str(root), str(root / "child")}
+    assert rows[str(root / "child")]["parent"] == str(root)
+    index = tmp_path / "index"
+    index.mkdir()
+    (index / "judgments.jsonl").write_text(json.dumps(dict(
+        target="prefix:" + str(root), field="topic", value="fixture",
+        method="operator", evidence="synthetic", ts="2026-01-01T00:00:00Z")) + "\n")
+    assert fs.publish_generation(index, roots=["."]) == 0
+    generation = fs.resolve_generation(index)
+    manifest = json.loads((generation / "manifest.json").read_text())
+    assert manifest["scan"]["roots"] == [str(root)]
+    assert sql(generation / "inventory.duckdb",
+        "SELECT path, value FROM inherited_judgments WHERE field='topic' ORDER BY path") == [
+            {"path": str(root), "value": "fixture"},
+            {"path": str(root / "child"), "value": "fixture"},
+        ]
+
+
+def test_native_boundary_through_parent_alias_is_still_not_walked(tmp_path, monkeypatch):
+    fs = load()
+    native = tmp_path / "physical" / "native"
+    native.mkdir(parents=True)
+    (native / "note.md").write_text("Synthetic native payload")
+    alias = tmp_path / "alias"
+    alias.symlink_to(native.parent, target_is_directory=True)
+    monkeypatch.setattr(fs, "CONTENT_COLLECTION_BOUNDARIES", {str(native): "synthetic native owner"})
+    def forbidden(*a, **k):
+        raise AssertionError("walked native root through an ancestor alias")
+    monkeypatch.setattr(fs.os, "walk", forbidden)
+    output = tmp_path / "files.jsonl"
+    fs.content_walk([str(alias / "native")], output, 0)
+    assert json.loads(output.read_text())["path"] == str(native)
+
+
+def test_directory_alias_keeps_an_explicit_boundary_observation(tmp_path):
+    fs = load()
+    root = tmp_path / "root"
+    root.mkdir()
+    destination = tmp_path / "outside"
+    destination.mkdir()
+    (destination / "note.md").write_text("Outside the selected scope")
+    alias = root / "alias"
+    alias.symlink_to(destination, target_is_directory=True)
+    output = tmp_path / "files.jsonl"
+    fs.content_walk([str(root)], output, 0)
+    rows = list(map(json.loads, output.read_text().splitlines()))
+    assert len(rows) == 1 and rows[0]["path"] == str(alias)
+    assert rows[0]["kind"] == "collection_boundary"
+    assert rows[0]["exclusion_reason"] == "directory alias not traversed"
+    assert rows[0]["sha256"] is None
+
+
+def test_content_type_accepts_a_relative_option_shaped_filename(tmp_path, monkeypatch):
+    fs = load()
+    monkeypatch.chdir(tmp_path)
+    source = Path("-report.md")
+    source.write_text("Ordinary text\n")
+    assert fs.content_magic_type(source) == "text/plain"
+
+
+def test_direct_root_alias_remains_an_error_without_enumeration(tmp_path, monkeypatch):
+    fs = load()
+    target = tmp_path / "target"
+    target.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(target, target_is_directory=True)
+    def forbidden(*a, **k):
+        raise AssertionError("enumerated a direct root alias")
+    monkeypatch.setattr(fs.os, "walk", forbidden)
+    monkeypatch.setattr(fs.os, "scandir", forbidden)
+    for scan, name in ((fs.content_walk, "files.jsonl"), (fs.inventory_scan, "nodes.jsonl")):
+        output = tmp_path / name
+        if scan is fs.inventory_scan:
+            scan([str(alias)], -1, output, 0)
+        else:
+            scan([str(alias)], output, 0)
+        observed = json.loads(output.read_text())
+        assert observed["path"] == str(alias) and observed["error"]
+
+
+def test_repeated_physical_root_spellings_are_not_counted_twice(tmp_path, monkeypatch):
+    fs = load()
+    root = tmp_path / "root"
+    (root / "child").mkdir(parents=True)
+    (root / "note.md").write_text("One observed file")
+    monkeypatch.chdir(root)
+    roots = [".", "../root"]
+    inventory = tmp_path / "nodes.jsonl"
+    assert fs.inventory_scan(roots, -1, inventory, 0) == 2
+    rows = list(map(json.loads, inventory.read_text().splitlines()))
+    assert len({row["path"] for row in rows}) == 2
+    content = tmp_path / "files.jsonl"
+    assert fs.content_walk(roots, content, 0) == 1
+    assert json.loads(content.read_text())["path"] == str(root / "note.md")
