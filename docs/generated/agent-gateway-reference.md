@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 15ef9eda5eff8ade6e929057604ff42e7a3974572dc25b42b40e0d42a8cf2754 -->
+<!-- gateway-catalog-sha256: 4c587c3cd26251ce230212ad549bc59fe0d42d5bb181553c396c8a8ba8fd0efd -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `15ef9eda5eff8ade6e929057604ff42e7a3974572dc25b42b40e0d42a8cf2754`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `4c587c3cd26251ce230212ad549bc59fe0d42d5bb181553c396c8a8ba8fd0efd`.
 
 ## Invocation
 
@@ -62,7 +62,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `projects.read_many`         | `query`   | `projects`         | `operator` | Read several bounded project files from one checkout observation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `projects.export`            | `query`   | `projects`         | `operator` | Exports tracked and nonignored untracked files, excluding sensitive and local-only paths. Symlink entries retain their link targets; symlinked parent directories are refused. Optional file and byte bounds return next_start_after; pass it with checkout_revision as expected_revision to continue. Fetch the ZIP through its artifact ref; its manifest_path holds the complete per-file manifest.                                                                                                                                                                                                                                                                      |
 | `projects.diff`              | `query`   | `projects`         | `operator` | Show uncommitted changes in a checkout, optionally against a git ref.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `projects.search`            | `query`   | `projects`         | `operator` | Search project file contents with ripgrep.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `projects.search`            | `query`   | `projects`         | `operator` | max_matches selects retained matches; page_size sizes responses. next_cursor pages the immutable observation after checkout edits. checkout_revision identifies its captured source; truncated reports additional matches beyond max_matches. Cursors bind the principal, checkout and query.                                                                                                                                                                                                                                                                                                                                                                               |
 | `projects.change`            | `change`  | `projects`         | `operator` | Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `projects.context`           | `context` | `projects`         | `operator` | Components are budgeted independently; an unavailable component names its reason and source ref so the caller can follow the direct route.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `beads.closure`              | `query`   | `beads`            | `operator` | Read native dependency closure, cycles, readiness and incomplete frontier at one revision.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -3915,7 +3915,7 @@ Working tree vs HEAD:
 
 ### `projects.search`
 
-Search project file contents with ripgrep.
+max_matches selects retained matches; page_size sizes responses. next_cursor pages the immutable observation after checkout edits. checkout_revision identifies its captured source; truncated reports additional matches beyond max_matches. Cursors bind the principal, checkout and query.
 
 Family: `query`. Owner: `projects`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
@@ -4005,6 +4005,19 @@ Input schema:
       ],
       "default": null
     },
+    "cursor": {
+      "anyOf": [
+        {
+          "maxLength": 4096,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "deadline_at": {
       "anyOf": [
         {
@@ -4018,6 +4031,11 @@ Input schema:
       "description": "Unix timestamp after which the call is refused."
     },
     "max_matches": {
+      "default": 200,
+      "minimum": 1,
+      "type": "integer"
+    },
+    "page_size": {
       "default": 200,
       "minimum": 1,
       "type": "integer"

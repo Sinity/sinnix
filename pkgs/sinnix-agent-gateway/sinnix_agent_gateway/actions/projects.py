@@ -20,7 +20,7 @@ from ..content import Artifact, attach
 from ..contracts import VerbFamily
 from ..locators import CheckoutLocator, ProjectLocator, ResolvedCheckout, project_ref
 from ..projects import ProjectError, ProjectPreconditionError
-from ..results import ProtocolError
+from ..results import ProtocolError, ResultError
 from ..schemas import GatewayModel
 
 if TYPE_CHECKING:
@@ -415,6 +415,8 @@ class SearchInput(RequestControls):
     target: CheckoutLocator
     query: str = Field(min_length=1, max_length=1_000, description="ripgrep regex.")
     max_matches: int = Field(default=200, ge=1)
+    page_size: int = Field(default=200, ge=1)
+    cursor: str | None = Field(default=None, min_length=1, max_length=4096)
 
 
 class SearchMatch(GatewayModel):
@@ -424,28 +426,42 @@ class SearchMatch(GatewayModel):
 
 
 class SearchResult(Identity):
+    checkout_revision: str
     query: str
     matches: list[SearchMatch]
     truncated: bool
+    row_count: int
+    offset: int
+    next_cursor: str | None
+    snapshot_ref: str
+    expires_at: float
 
 
 def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
     resolved = inp.target.resolve(runtime)
-    result = owner(
-        runtime.projects.search,
-        resolved.project_id,
-        inp.query,
-        inp.max_matches,
-        resolved.checkout_id,
-    )
-    matches = [
-        {**row, "path": row["path"].removeprefix("./")} for row in result["matches"]
-    ]
+    try:
+        page = owner(
+            runtime.projects.search_page,
+            resolved.project_id,
+            inp.query,
+            inp.max_matches,
+            resolved.checkout_id,
+            page_size=inp.page_size,
+            cursor=inp.cursor,
+        )
+    except ResultError as exc:
+        raise ProtocolError(exc.failure_class, str(exc)) from exc
     return SearchResult(
         **_identity(resolved),
         query=inp.query,
-        matches=matches,
-        truncated=result["truncated"],
+        checkout_revision=page["metadata"]["checkout_revision"],
+        matches=page["rows"],
+        truncated=page["metadata"]["truncated"],
+        row_count=page["row_count"],
+        offset=page["offset"],
+        next_cursor=page["next_cursor"],
+        snapshot_ref=page["snapshot_ref"],
+        expires_at=page["expires_at"],
     )
 
 
@@ -808,6 +824,7 @@ ACTIONS: tuple[Action, ...] = (
         family=VerbFamily.QUERY,
         owner="projects",
         summary="Search project file contents with ripgrep.",
+        documentation="max_matches selects retained matches; page_size sizes responses. next_cursor pages the immutable observation after checkout edits. checkout_revision identifies its captured source; truncated reports additional matches beyond max_matches. Cursors bind the principal, checkout and query.",
         Input=SearchInput,
         Output=SearchResult,
         handler=_search,

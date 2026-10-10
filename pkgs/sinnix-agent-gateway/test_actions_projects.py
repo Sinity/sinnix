@@ -943,3 +943,109 @@ def test_context_composes_orientation_and_triage(tmp_path: Path) -> None:
         )
         == "invalid_request"
     )
+
+
+def test_search_pages_retain_observation_after_checkout_edit(tmp_path: Path) -> None:
+    config, project, _ = fixture(tmp_path)
+    rt = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    source = project / "search.txt"
+    source.write_text("needle original\n" * 7)
+    request = projects.SearchInput(
+        target={"project": "fixture"}, query="needle", max_matches=6, page_size=2
+    )
+    first = projects._search(rt, request)
+    assert first.row_count == 6 and first.truncated
+    assert len(first.matches) == 2 and first.next_cursor
+    source.write_text("replacement without matches\n")
+    rows = list(first.matches)
+    cursor = first.next_cursor
+    while cursor:
+        page = projects._search(rt, request.model_copy(update={"cursor": cursor}))
+        assert page.snapshot_ref == first.snapshot_ref
+        assert page.checkout_revision == first.checkout_revision
+        rows.extend(page.matches)
+        cursor = page.next_cursor
+    assert len(rows) == 6
+    assert all(row.text == "needle original" for row in rows)
+    with pytest.raises(projects.ProtocolError) as refused:
+        projects._search(
+            rt,
+            request.model_copy(
+                update={"query": "different", "cursor": first.next_cursor}
+            ),
+        )
+    assert refused.value.code == "stale_cursor"
+
+
+def test_requested_search_count_does_not_buffer_all_matches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tracemalloc
+    from types import SimpleNamespace
+
+    config, _, _ = fixture(tmp_path)
+    rt = create_server(config, "operator")._sinnix_revision_publisher.runtime
+
+    def stream(self, argv, profile, collect, **kwargs):
+        for index in range(12_001):
+            row = {
+                "type": "match",
+                "data": {
+                    "path": {"text": "./fixture.txt"},
+                    "line_number": index + 1,
+                    "lines": {"text": str(index) + "x" * 3000 + "\n"},
+                },
+            }
+            if collect(row) is False:
+                break
+        return SimpleNamespace(
+            timed_out=False,
+            output_exceeded=False,
+            failure_class=None,
+            exit_status=0,
+            stopped_early=True,
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(projects_module.OwnerExecution, "run_jsonl", stream)
+    tracemalloc.start()
+    try:
+        page = projects._search(
+            rt,
+            projects.SearchInput(
+                target={"project": "fixture"},
+                query="fixture",
+                max_matches=12_000,
+                page_size=3,
+            ),
+        )
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert page.row_count == 12_000 and len(page.matches) == 3 and page.next_cursor
+    assert peak < 5_000_000, peak
+
+
+def test_search_checkout_race_does_not_publish_partial_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, project, _ = fixture(tmp_path)
+    rt = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    source = project / "search.txt"
+    source.write_text("needle original\n")
+    search = rt.projects.search
+
+    def edit_after_read(*args, **kwargs):
+        result = search(*args, **kwargs)
+        source.write_text("changed after read\n")
+        return result
+
+    monkeypatch.setattr(rt.projects, "search", edit_after_read)
+    snapshots = config.state_dir / "results/snapshots"
+    before = set(snapshots.iterdir())
+    with pytest.raises(projects.ProtocolError) as refused:
+        projects._search(
+            rt, projects.SearchInput(target={"project": "fixture"}, query="needle")
+        )
+    assert refused.value.code == "precondition_failed"
+    assert set(snapshots.iterdir()) == before

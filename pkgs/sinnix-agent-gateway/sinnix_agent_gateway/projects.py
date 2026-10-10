@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, BinaryIO, Iterator, Mapping, TextIO
+from typing import Any, BinaryIO, Callable, Iterator, Mapping, TextIO
 
 from sinnix_lib.atomic import atomic_publish_at
 from sinnix_lib.lock import flock
@@ -1071,6 +1071,8 @@ class ProjectService:
         query: str,
         max_matches: int = 200,
         checkout_id: str | None = None,
+        *,
+        sink: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         project = self.code_checkout(
             project_id, checkout_id, write=False, require_explicit=False
@@ -1080,15 +1082,21 @@ class ProjectService:
         if max_matches < 1:
             raise ProjectError("max_matches must be positive")
         matches: list[dict[str, Any]] = []
+        count = 0
 
         def collect(row: Any) -> bool | None:
+            nonlocal count
             match = self._search_match(row)
             if match is None:
                 return None
-            matches.append(match)
-            # Keep one surplus row solely to report a truthful truncation flag;
-            # terminate rg before it scans the rest of a large checkout.
-            return len(matches) <= max_matches
+            count += 1
+            if count > max_matches:
+                return False
+            if sink is None:
+                matches.append(match)
+            else:
+                sink(match)
+            return True
 
         safe_env = {
             "HOME": str(Path.home()),
@@ -1115,28 +1123,64 @@ class ProjectService:
             raise ProjectError("project operation timed out")
         if result.output_exceeded:
             raise ProjectError("project operation exceeded its output bound")
-        if result.failure_class is not None or result.exit_status not in (0, 1):
+        if result.failure_class is not None or (
+            not result.stopped_early and result.exit_status not in (0, 1)
+        ):
             diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
             raise ProjectError(diagnostic or "project operation failed")
         return {
-            "matches": matches[:max_matches],
-            "truncated": len(matches) > max_matches,
+            "matches": matches,
+            "truncated": count > max_matches,
         }
 
-    @staticmethod
-    def _search_matches(output: TextIO, max_matches: int) -> list[dict[str, Any]]:
-        matches: list[dict[str, Any]] = []
-        for line in output:
-            try:
-                row = json.loads(line)
-            except ValueError:
-                continue
-            match = ProjectService._search_match(row)
-            if match is not None:
-                matches.append(match)
-            if len(matches) > max_matches:
-                break
-        return matches
+    def search_page(
+        self,
+        project_id: str,
+        query: str,
+        max_matches: int = 200,
+        checkout_id: str | None = None,
+        *,
+        page_size: int = 200,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        from .results import ResultService
+
+        project = self.code_checkout(
+            project_id, checkout_id, write=False, require_explicit=False
+        )
+        key = hashlib.sha256(
+            json.dumps(
+                ["projects.search", project_id, str(project.path), query, max_matches],
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        results = ResultService(self.config, self.principal)
+        if cursor is not None:
+            return results.continue_snapshot(
+                cursor, query_sha256=key, page_size=page_size
+            )
+        revision = _content_revision(project.path)
+        writer = results.start_snapshot(
+            query_sha256=key,
+            source_revision=revision,
+            page_size=page_size,
+            metadata={"checkout_revision": revision},
+        )
+
+        def append(match: dict[str, Any]) -> None:
+            writer.append({**match, "path": match["path"].removeprefix("./")})
+
+        try:
+            observed = self.search(
+                project_id, query, max_matches, checkout_id, sink=append
+            )
+            if revision != _content_revision(project.path):
+                raise ProjectPreconditionError("project changed while search was read")
+            writer.metadata["truncated"] = observed["truncated"]
+            return results.finish_snapshot(writer)
+        except BaseException:
+            writer.abort()
+            raise
 
     @staticmethod
     def _search_match(row: Any) -> dict[str, Any] | None:

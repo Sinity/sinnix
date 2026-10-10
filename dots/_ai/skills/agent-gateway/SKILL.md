@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 15ef9eda5eff8ade6e929057604ff42e7a3974572dc25b42b40e0d42a8cf2754 -->
+<!-- gateway-catalog-sha256: 4c587c3cd26251ce230212ad549bc59fe0d42d5bb181553c396c8a8ba8fd0efd -->
 
 # Agent Gateway
 
@@ -52,7 +52,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 - `projects.read_many` — Read several bounded project files from one checkout observation.
 - `projects.export` — Exports tracked and nonignored untracked files, excluding sensitive and local-only paths. Symlink entries retain their link targets; symlinked parent directories are refused. Optional file and byte bounds return next_start_after; pass it with checkout_revision as expected_revision to continue. Fetch the ZIP through its artifact ref; its manifest_path holds the complete per-file manifest.
 - `projects.diff` — Show uncommitted changes in a checkout, optionally against a git ref.
-- `projects.search` — Search project file contents with ripgrep.
+- `projects.search` — max_matches selects retained matches; page_size sizes responses. next_cursor pages the immutable observation after checkout edits. checkout_revision identifies its captured source; truncated reports additional matches beyond max_matches. Cursors bind the principal, checkout and query.
 - `beads.closure` — Read native dependency closure, cycles, readiness and incomplete frontier at one revision.
 - `beads.query` — The owner filters, projects and counts before serialization. limit sizes immutable observation pages; cursors never reread live rows. Owner coverage reports any bounded prefix; beads.read exposes native offset paging. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.
 - `beads.read` — Read native Beads queries, counts or dependency closure with owner revisions and paging.
@@ -185,4 +185,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `15ef9eda5eff8ade6e929057604ff42e7a3974572dc25b42b40e0d42a8cf2754`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `4c587c3cd26251ce230212ad549bc59fe0d42d5bb181553c396c8a8ba8fd0efd`.

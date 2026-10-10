@@ -336,6 +336,6 @@ class OwnerExecution:
         result = self.run(command, profile, stdout_chunk_callback=consume)
         if result.failure_class is not None:
             return result
-        if pending:
+        if pending and not result.stopped_early:
             return replace(result, failure_class="command_stream_decode")
         return result

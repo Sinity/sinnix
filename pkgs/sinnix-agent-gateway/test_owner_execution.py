@@ -381,3 +381,23 @@ def test_jsonl_row_bounds_are_explicit_for_trusted_producers() -> None:
     assert unbounded.exit_status == 0
     assert rows == [{"value": "x" * 4096}]
     assert unbounded.stdout == b""
+
+
+def test_jsonl_early_stop_ignores_unrequested_buffered_rows() -> None:
+    rows = []
+
+    def first(row):
+        rows.append(row)
+        return False
+
+    result = OwnerExecution().run_jsonl(
+        [
+            sys.executable,
+            "-c",
+            "import sys,time; sys.stdout.write(chr(10).join(['{\"value\":1}', 'not-json', ''])); sys.stdout.flush(); time.sleep(3)",
+        ],
+        ExecutionProfile(route=OwnerRoute("fixture")),
+        first,
+    )
+    assert rows == [{"value": 1}]
+    assert result.stopped_early and result.failure_class is None
