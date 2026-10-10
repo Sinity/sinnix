@@ -37,10 +37,12 @@ if [[ ! -f "$LEDGER_PARQUET" ]]; then
   exit 1
 fi
 
+# SQL string literals escape apostrophes by doubling them.
+ledger_sql=${LEDGER_PARQUET//\'/\'\'}
 if ! url_lines=$(
   duckdb -list -noheader -c "
     SELECT normalized_url
-    FROM read_parquet('$LEDGER_PARQUET')
+    FROM read_parquet('$ledger_sql')
     WHERE regexp_matches(normalized_url, '$VIDEO_URL_PATTERN')
     ORDER BY visit_count DESC, normalized_url
     LIMIT $LIMIT;"

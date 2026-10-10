@@ -238,7 +238,10 @@
             "sinnix-ytdlp"
             "sinnix-video-resolve"
           ];
-          nativeBuildInputs = [ pkgs.bash ];
+          nativeBuildInputs = [
+            pkgs.bash
+            pkgs.duckdb
+          ];
         };
         fs-materialization-suite = mkScriptSuite {
           name = "sinnix-fs";
