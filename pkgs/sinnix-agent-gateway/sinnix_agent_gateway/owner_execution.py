@@ -308,23 +308,29 @@ class OwnerExecution:
         *,
         max_row_bytes: int | None = None,
     ) -> ExecutionResult:
-        """Stream JSONL rows through the one process kernel without result buffering."""
+        """Stream JSONL rows; zero disables the row bound for trusted producers."""
+        if max_row_bytes is not None and max_row_bytes < 0:
+            raise ValueError("JSONL row bound cannot be negative")
         pending = bytearray()
-        row_bound = max_row_bytes or profile.max_stdout_bytes
+        scan_from = 0
+        row_bound = profile.max_stdout_bytes if max_row_bytes is None else max_row_bytes
 
         def consume(chunk: bytes) -> bool | None:
+            nonlocal scan_from
             pending.extend(chunk)
-            if len(pending) > row_bound and b"\n" not in pending:
+            if row_bound and len(pending) > row_bound and b"\n" not in pending:
                 raise ValueError("JSONL row exceeded stream bound")
-            while (newline := pending.find(b"\n")) >= 0:
+            while (newline := pending.find(b"\n", scan_from)) >= 0:
                 line = bytes(pending[:newline])
                 del pending[: newline + 1]
-                if len(line) > row_bound:
+                scan_from = 0
+                if row_bound and len(line) > row_bound:
                     raise ValueError("JSONL row exceeded stream bound")
                 if not line:
                     continue
                 if on_row(json.loads(line)) is False:
                     return False
+            scan_from = len(pending)
             return None
 
         result = self.run(command, profile, stdout_chunk_callback=consume)

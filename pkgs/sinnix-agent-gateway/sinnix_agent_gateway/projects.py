@@ -58,10 +58,6 @@ LOCAL_ONLY_FILES = frozenset({(".mcp.json",)})
 _DIRECTORY_OPEN_FLAGS = (
     os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
 )
-# A search row may legitimately contain a source line larger than the normal
-# response budget.  It is still bounded independently so malformed producer
-# output cannot grow the streaming decoder without limit.
-_SEARCH_ROW_MAX_BYTES = 1_048_576
 
 
 def _is_excluded(path: Path) -> bool:
@@ -1111,7 +1107,9 @@ class ProjectService:
                 environment={"GIT_OPTIONAL_LOCKS": "0"},
             ),
             collect,
-            max_row_bytes=max(self.config.max_result_bytes, _SEARCH_ROW_MAX_BYTES),
+            # Trusted rg emits a complete source line per match. The response
+            # budget must not turn a valid long source line into a decode error.
+            max_row_bytes=0,
         )
         if result.timed_out:
             raise ProjectError("project operation timed out")

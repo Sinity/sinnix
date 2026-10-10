@@ -361,3 +361,23 @@ def test_terminal_profile_carries_the_compositor_instance() -> None:
     assert missing is None
     assert environment["HYPRLAND_INSTANCE_SIGNATURE"] == "fixture-instance"
     assert environment["WAYLAND_DISPLAY"] == "wayland-1"
+
+
+def test_jsonl_row_bounds_are_explicit_for_trusted_producers() -> None:
+    command = [
+        sys.executable,
+        "-c",
+        "import json; print(json.dumps({'value': 'x' * 4096}))",
+    ]
+    profile = ExecutionProfile(route=OwnerRoute("fixture"), max_stdout_bytes=64)
+    execution = OwnerExecution()
+    bounded_rows = []
+    bounded = execution.run_jsonl(command, profile, bounded_rows.append)
+    assert bounded.failure_class == "command_stream_decode"
+    assert bounded_rows == []
+    rows = []
+    unbounded = execution.run_jsonl(command, profile, rows.append, max_row_bytes=0)
+    assert unbounded.failure_class is None
+    assert unbounded.exit_status == 0
+    assert rows == [{"value": "x" * 4096}]
+    assert unbounded.stdout == b""

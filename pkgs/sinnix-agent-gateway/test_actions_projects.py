@@ -55,7 +55,7 @@ def test_search_large_lines_and_requested_count(tmp_path: Path) -> None:
     config, project, _ = fixture(tmp_path)
     server = create_server(config, "operator")
     rt = server._sinnix_revision_publisher.runtime
-    long_line = "needle " + "x" * 300_000
+    long_line = "needle " + "x" * 1_100_000
     (project / "large.txt").write_text(long_line + "\n" + "needle\n" * 1100)
     result = rt.projects.search("fixture", "needle", 1200)
     assert not result["truncated"]
