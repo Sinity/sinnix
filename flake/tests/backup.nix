@@ -984,6 +984,9 @@ assert lib.assertMsg (
           }
           ''
             mkdir -p "$TMPDIR/mock-bin" "$TMPDIR/images"
+            printf 'retained interrupted capture evidence\n' > "$TMPDIR/images/persist-20000101T000000Z.btrfs-image.tmp"
+            touch -d '2000-01-01 UTC' "$TMPDIR/images/persist-20000101T000000Z.btrfs-image.tmp"
+            cp -p "$TMPDIR/images/persist-20000101T000000Z.btrfs-image.tmp" "$TMPDIR/partial-preimage"
             cat > "$TMPDIR/mock-bin/btrfs-image" <<'EOF_IMAGE'
             #!${pkgs.bash}/bin/bash
             set -eu
@@ -1002,6 +1005,7 @@ assert lib.assertMsg (
             export IMAGE_CALLS="$TMPDIR/calls" FAIL_PERSIST="$TMPDIR/fail-persist" HANG_PERSIST="$TMPDIR/hang-persist"
             bash ${pkgs.writeText "metadata-image-script" script} > "$TMPDIR/success.log" 2>&1
             test "$(find "$TMPDIR/images" -name '*.btrfs-image' | wc -l)" -eq 2
+            cmp "$TMPDIR/partial-preimage" "$TMPDIR/images/persist-20000101T000000Z.btrfs-image.tmp"
             grep -q 'persist captured' "$TMPDIR/success.log"
             grep -q 'realm captured' "$TMPDIR/success.log"
             test "$(wc -l < "$IMAGE_CALLS")" -eq 2
@@ -1031,6 +1035,7 @@ assert lib.assertMsg (
             grep -q 'realm captured' "$TMPDIR/timeout.log"
             test "$(stat -c %s "$persist_image")" -eq "$previous_size"
             test "$(head -c 64 "$persist_image")" = "$previous_header"
+            cmp "$TMPDIR/partial-preimage" "$TMPDIR/images/persist-20000101T000000Z.btrfs-image.tmp"
             touch "$out"
           '';
     in

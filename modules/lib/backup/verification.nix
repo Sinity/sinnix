@@ -254,11 +254,8 @@
       stamp="$(date -u +%Y%m%dT%H%M%SZ)"
       install -d -m 0700 -o root -g root "${btrfsImageRoot}"
 
-      # btrfs-image writes to "$out.tmp" and renames only on success, so a
-      # run killed mid-capture leaves a multi-GB partial file that is not an
-      # image of anything. Only that in-flight debris is swept; finished
-      # images (no .tmp suffix) are kept indefinitely.
-      find "${btrfsImageRoot}" -type f -name '*.btrfs-image.tmp' -mtime +1 -delete
+      # Earlier interrupted captures remain owner evidence. Each invocation
+      # cleans only its own exact temporary output inside capture_image.
 
       # btrfs-image walks a MOUNTED, actively-written filesystem: there is
       # no consistent-view mode for one, and a tree block whose generation
