@@ -966,7 +966,7 @@ assert lib.assertMsg (
         in
         assert lib.assertMsg (
           unit.serviceConfig.TimeoutStartSec == "85min"
-          && unit.serviceConfig.MemoryHigh == "3G"
+          && unit.serviceConfig.MemoryHigh == "4G"
           && unit.serviceConfig.MemoryMax == "5G"
           && unit.serviceConfig.MemorySwapMax == 0
           && unit.serviceConfig.Slice == "borgdrain.slice"

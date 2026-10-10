@@ -234,7 +234,7 @@
       # Its working set exceeds background.slice's 2G soft limit. Reuse the
       # bounded backup slice instead of raising every maintenance job's budget.
       Slice = "borgdrain.slice";
-      MemoryHigh = "3G";
+      MemoryHigh = "4G";
       MemoryMax = "5G";
       MemorySwapMax = 0;
     };
