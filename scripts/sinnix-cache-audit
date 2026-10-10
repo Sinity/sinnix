@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Report which large directories backup actually keeps, and which regenerable ones are still untagged
+# description: Report large directory backup markers and marker-based Borg projections
 # runtimeInputs: bash coreutils findutils gnugrep gawk borgbackup
 set -euo pipefail
 
-# Backup membership is decided by a property the directory carries, not by a
-# path in a list: CACHEDIR.TAG (the bford.info standard, written unprompted by
+# This audit reports properties carried by a directory:
+# CACHEDIR.TAG (the bford.info standard, written unprompted by
 # cargo/uv/ruff/pytest/mypy) or .nobackup (regenerable scratch that is not a
-# cache). Untagged means kept, so the failure direction is over-preservation.
+# cache). The scheduled backup policy also applies path exclusions.
 #
 # The cost of that safe default is silent waste, and this reports it: big
-# directories that are being archived, with the cache-shaped ones called out.
+# directories without markers, with the cache-shaped ones called out.
 # It deliberately does NOT reimplement borg's exclude patterns -- duplicating
 # that logic would create a second source of truth that drifts from the first.
-# For an authoritative answer use --dry-run, which asks borg itself.
+# --dry-run asks Borg for this command's marker-based projection; it does
+# not apply the scheduled backup owner's full policy or prove preservation.
 
 ROOT="${SINNIX_CACHE_AUDIT_ROOT:-/realm}"
 THRESHOLD_GB="${SINNIX_CACHE_AUDIT_THRESHOLD:-5}"
@@ -30,11 +31,12 @@ while [[ $# -gt 0 ]]; do
       cat <<'EOF'
 sinnix-cache-audit [--root DIR] [--threshold GB] [--depth N] [--dry-run]
 
-  --dry-run  ask borg exactly what it would archive (authoritative, slow)
+  --dry-run  stream Borg's marker-based projection (slow)
 
 Without --dry-run this reports directories above the size threshold and
 whether each carries a CACHEDIR.TAG or .nobackup marker. Marker-less entries
-are being backed up; judge whether that is right for each one.
+may be kept under marker rules. The scheduled backup policy can exclude
+additional paths; this command does not prove backup coverage.
 EOF
       exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -47,7 +49,7 @@ if [[ "$DRY_RUN" == 1 ]]; then
   export BORG_REPO="${BORG_REPO:-/outer-realm/backup/borg-realm-v2}"
   borg create --dry-run --list --filter=+ \
     --exclude-caches --exclude-if-present .nobackup \
-    "::audit-dry-run" "$ROOT" 2>&1 | head -100
+    "::audit-dry-run" "$ROOT" 2>&1
   exit 0
 fi
 
@@ -58,9 +60,10 @@ threshold_kb=$((THRESHOLD_GB * 1024 * 1024))
 # find -- the model store (now /realm/library/model) measured 35G as the user and 120G as root. The
 # errors are surfaced rather than discarded, and a short count of them is a
 # warning that the totals below are floors, not measurements.
-du_errors="$(mktemp)"
-du_output="$(mktemp)"
-trap 'rm -f "$du_errors" "$du_output"' EXIT
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/sinnix-cache-audit.XXXXXXXX")"
+trap 'rm -rf -- "$scratch"' EXIT
+du_errors="$scratch/errors"
+du_output="$scratch/output"
 
 # du exits 1 when it could not read something, which is a partial result to be
 # reported, not a failure to abort on -- but under `set -e` with pipefail that
