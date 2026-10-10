@@ -14,7 +14,7 @@
 }:
 let
   npmRecoverySources = import ../../../../flake/data/agent-cli-sources.nix { inherit pkgs; };
-  # Mirrors environment.sessionVariables.TMPDIR in profiles/workstation.nix;
+  # Mirrors environment.sessionVariables.TMPDIR in modules/profiles/workstation.nix;
   # the wrappers re-assert it because inheritance is not guaranteed.
   shellTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/work";
   clodexCredentialHelper = "${scriptPkgs.sinnix-clodex-credential-helper}/bin/sinnix-clodex-credential-helper";
@@ -45,7 +45,7 @@ let
       export NPM_CONFIG_PREFIX="$STATE/npm"
       export PATH="$HOME/.local/bin:${agentRuntimePath}:$STATE/npm/bin:$PATH"
       # Guarantee the NVMe scratch TMPDIR rather than trusting inheritance:
-      # environment.sessionVariables.TMPDIR (profiles/workstation.nix) only
+      # environment.sessionVariables.TMPDIR (modules/profiles/workstation.nix) only
       # reaches processes whose session imported it, so an agent CLI started
       # outside that path runs with TMPDIR unset and everything beneath it
       # fills the bounded /tmp tmpfs, truncating shell heredocs mid-write.

@@ -94,11 +94,24 @@ in
             ) config.systemd.user.services;
             expectedBookmarks = map (place: "file://${place.path} ${place.name}") nav.places;
             expectedCorpusEntrances = {
-              Documents = "${config.sinnix.paths.realmRoot}/documents";
-              Pictures = "${config.sinnix.paths.realmRoot}/photos";
-              Projects = "${config.sinnix.paths.realmRoot}/project";
-              Videos = "${config.sinnix.paths.realmRoot}/library/videos";
+              Documents = "${config.sinnix.paths.realmRoot}/document";
+              Pictures = config.sinnix.paths.photosRoot;
+              Projects = config.sinnix.projects.root;
+              Videos = "${config.sinnix.paths.realmRoot}/library/video";
             };
+            livePathVariables = {
+              XDG_DOCUMENTS_DIR = hm.xdg.userDirs.documents;
+              XDG_PICTURES_DIR = hm.xdg.userDirs.pictures;
+              XDG_PROJECTS_DIR = hm.xdg.userDirs.projects;
+              XDG_VIDEOS_DIR = hm.xdg.userDirs.videos;
+            }
+            // lib.filterAttrs (
+              name: _:
+              builtins.elem name [
+                "MPV_SCREENSHOT_DIR"
+                "SINNIX_WALLPAPER_CORPUS"
+              ]
+            ) hm.home.sessionVariables;
             declaredRoots = [
               config.sinnix.paths.realmRoot
               config.sinnix.paths.neoOuterRealm
@@ -125,6 +138,13 @@ in
                 && !(hm.home.file.${name}.force or false)
               ) (builtins.attrNames expectedCorpusEntrances);
               message = "Home aliases must share XDG's declared targets without overwriting populated paths.";
+            }
+            {
+              assertion = lib.all (
+                assignment:
+                lib.hasInfix (lib.escapeShellArg assignment) hm.home.activation.sinnix-path-environment.data
+              ) (lib.mapAttrsToList (name: value: "${name}=${toString value}") livePathVariables);
+              message = "Activation must refresh each managed path from its effective owner.";
             }
             {
               assertion =
@@ -222,6 +242,53 @@ in
         }}
         EOF_CONTRACT
       '';
+
+      checks.desktop-path-environment-overrides =
+        let
+          overrideConfig = evalTestSpec system {
+            name = "desktop-path-environment-overrides";
+            modules = spec.modules ++ [
+              ({ config, ... }: {
+                home-manager.users.${config.sinnix.user.name} = {
+                  xdg.userDirs.documents = lib.mkForce "/realm/custom documents";
+                  home.sessionVariables = {
+                    MPV_SCREENSHOT_DIR = lib.mkForce "/realm/custom screenshots";
+                    SINNIX_WALLPAPER_CORPUS = lib.mkForce "/realm/custom wallpaper";
+                    UNRELATED_TEST_VARIABLE = "neutral-not-exported";
+                  };
+                };
+              })
+            ];
+            assertions =
+              config:
+              let
+                activation = (hmFor config).home.activation.sinnix-path-environment.data;
+              in
+              [
+                {
+                  assertion = lib.all (assignment: lib.hasInfix (lib.escapeShellArg assignment) activation) [
+                    "XDG_DOCUMENTS_DIR=/realm/custom documents"
+                    "MPV_SCREENSHOT_DIR=/realm/custom screenshots"
+                    "SINNIX_WALLPAPER_CORPUS=/realm/custom wallpaper"
+                  ];
+                  message = "Path activation must honor effective overrides with shell quoting.";
+                }
+                {
+                  assertion =
+                    !(lib.hasInfix "UNRELATED_TEST_VARIABLE" activation)
+                    && !(lib.hasInfix "neutral-not-exported" activation);
+                  message = "Path activation must not serialize unrelated session variables.";
+                }
+              ];
+          };
+        in
+        pkgs.runCommand "desktop-path-environment-overrides" { nativeBuildInputs = [ pkgs.bash ]; } ''
+          cat > activation-fragment <<'EOF_ACTIVATION'
+          ${(hmFor overrideConfig.config).home.activation.sinnix-path-environment.data}
+          EOF_ACTIVATION
+          bash -n activation-fragment
+          touch "$out"
+        '';
 
       # Every content type the manager cannot decode itself must be claimed by
       # a declared helper, and that helper's registered command must actually

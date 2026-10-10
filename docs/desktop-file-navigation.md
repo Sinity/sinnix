@@ -12,6 +12,12 @@ preview helpers and the sidebar places under
 `modules/features/desktop/mime.nix` declares the content-type handlers,
 including `inode/directory`.
 
+Home Manager updates the managed XDG corpus paths, screenshot root and
+wallpaper corpus in the live user manager and D-Bus activation environment
+when a user bus is present. New launches receive current paths after a switch;
+running processes retain their inherited environment. Values come from the
+effective XDG and feature declarations, including explicit overrides.
+
 ## Measurement
 
 Every candidate was opened on the live Hyprland 0.56.1 session against one

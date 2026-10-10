@@ -94,16 +94,15 @@ cannot start competing system builds by accident.
 ### Temporary files live on NVMe, and something reclaims them
 
 `/tmp` is a small RAM-backed tmpfs, so the operator's temporary files go to
-`/realm/tmp/<user>` on NVMe instead: login sessions, the systemd user manager,
+`/realm/tmp/work` on NVMe instead: login sessions, the systemd user manager,
 and the self-hosted CI runner all export that `TMPDIR`, while system services
 keep the default. That is where every `nix develop` puts its `nix-shell.*`
 scratch tree, and a devshell killed rather than exited leaks one. A user timer
 runs `sinnix-tmp-sweep` every fifteen minutes over both that root and `/tmp`,
-removing each `nix-shell.*` directory that no live process holds — held meaning
+removing each `nix-shell.*` or `nix-develop-*` directory that no live process holds — held meaning
 some process has it as cwd, root, executable, an open descriptor, or its
-`TMPDIR`. The criterion is ownership, never age: the timer is a cadence, so a
-leaked tree is reclaimed on the next pass and a live devshell is never touched
-however long it sits idle.
+`TMPDIR`. Live holders prevent removal. `nix-develop-*` also has a ten-minute
+minimum age to protect startup; age alone never authorizes removal.
 
 ### Each data system keeps its own authority
 
