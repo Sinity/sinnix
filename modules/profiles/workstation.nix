@@ -118,11 +118,29 @@ in
           description = "Remove unheld Nix devshell scratch directories";
         }
         {
-          manager = "user";
+          # Root can observe non-dumpable holders. The program drops to the
+          # declared owner before removal; no privileged deletion is allowed.
+          manager = "system";
+          user = "root";
           resourceClass = "background";
-          execStart = "${scriptPkgs.sinnix-tmp-sweep}/bin/sinnix-tmp-sweep";
+          execStart = "${scriptPkgs.sinnix-tmp-sweep}/bin/sinnix-tmp-sweep --owner ${lib.escapeShellArg config.sinnix.user.name}";
+          environment.TMPDIR = userTmpRoot;
+          unit.unitConfig.RequiresMountsFor = [ userTmpRoot ];
           serviceConfig = {
             TimeoutStartSec = "5min";
+            NoNewPrivileges = true;
+            CapabilityBoundingSet = [
+              "CAP_DAC_READ_SEARCH"
+              "CAP_SYS_PTRACE"
+              "CAP_SETUID"
+              "CAP_SETGID"
+            ];
+            ProtectSystem = "strict";
+            ProtectHome = "read-only";
+            ReadWritePaths = [
+              userTmpRoot
+              "/tmp"
+            ];
           };
           timer = {
             # Cadence, not retention: the sweeper's only criterion is whether a

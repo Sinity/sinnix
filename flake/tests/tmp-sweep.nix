@@ -22,8 +22,8 @@ in
           let
             user = config.sinnix.user.name;
             root = "/realm/tmp/work";
-            sweeper = config.systemd.user.services.sinnix-tmp-sweep;
-            timer = config.systemd.user.timers.sinnix-tmp-sweep.timerConfig;
+            sweeper = config.systemd.services.sinnix-tmp-sweep;
+            timer = config.systemd.timers.sinnix-tmp-sweep.timerConfig;
           in
           [
             {
@@ -39,8 +39,11 @@ in
               message = "the scratch root must have one owner and no age-only cleanup";
             }
             {
-              assertion = config.systemd.user.timers ? sinnix-tmp-sweep;
-              message = "the scratch sweeper must run on a timer, not on demand only";
+              assertion =
+                config.systemd.timers ? sinnix-tmp-sweep
+                && !(config.systemd.user.timers ? sinnix-tmp-sweep)
+                && !(config.systemd.user.services ? sinnix-tmp-sweep);
+              message = "one system-manager timer must replace the unreadable user-manager route";
             }
             {
               assertion = timer.OnCalendar == "*:0/15" && timer.Persistent == true;
@@ -52,6 +55,17 @@ in
               # next elapse to infinity and the timer fires exactly once.
               assertion = !(timer ? OnUnitActiveSec) && !(timer ? OnUnitInactiveSec);
               message = "the sweeper cadence must not be anchored on the unit's own activity";
+            }
+            {
+              assertion =
+                lib.hasInfix "--owner ${user}" sweeper.serviceConfig.ExecStart
+                && sweeper.environment.TMPDIR == root
+                && sweeper.serviceConfig.NoNewPrivileges
+                && builtins.elem "CAP_SYS_PTRACE" sweeper.serviceConfig.CapabilityBoundingSet
+                && builtins.elem "CAP_SETUID" sweeper.serviceConfig.CapabilityBoundingSet
+                && sweeper.unitConfig.RequiresMountsFor == [ root ]
+                && sweeper.serviceConfig.User == "root";
+              message = "privileged holder observation must name its unprivileged owner and mounted scratch root";
             }
             {
               assertion = lib.hasInfix "sinnix-tmp-sweep" sweeper.serviceConfig.ExecStart;
@@ -68,11 +82,20 @@ in
       checks.tmp-sweep-placement =
         inputs.nixpkgs.legacyPackages.${system}.runCommand "sinnix-tmp-sweep-placement"
           {
-            sweeper = evaluated.config.systemd.user.services.sinnix-tmp-sweep.serviceConfig.ExecStart;
+            sweeper = evaluated.config.systemd.services.sinnix-tmp-sweep.serviceConfig.ExecStart;
           }
           ''
             touch "$out"
           '';
+
+      checks.tmp-sweep-visibility = mkRuntimeCheck system {
+        name = "tmp-sweep-visibility";
+        nativeBuildInputs = [ inputs.nixpkgs.legacyPackages.${system}.python3 ];
+        script = ''
+          TMP_SWEEP_SOURCE=${../../scripts/sinnix-tmp-sweep} \
+            python3 ${../../scripts/tests/test_tmp_sweep.py}
+        '';
+      };
 
       # Anti-vacuity: a sweeper that removed nothing, or one that ignored a
       # live holder, both fail here. Holders cover cwd and environment paths

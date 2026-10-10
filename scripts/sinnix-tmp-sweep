@@ -25,7 +25,10 @@ starting mid-sweep safe.
 
 from __future__ import annotations
 
+import errno
 import os
+import pwd
+import stat
 import shutil
 import sys
 import time
@@ -34,12 +37,39 @@ HOLDER_VARS = (b"TMPDIR=", b"TMP=", b"TEMP=", b"NIX_BUILD_TOP=")
 PREFIXES = ("nix-shell.", "nix-develop-")
 DEVELOP_MIN_AGE_SECONDS = 10 * 60
 
-USAGE = """usage: sinnix-tmp-sweep [--dry-run]
+USAGE = """usage: sinnix-tmp-sweep [--dry-run] [--owner USER]
 
 Remove Nix devshell scratch directories that no live process holds, from
-$TMPDIR and from /tmp. Only directories owned by the invoking user are
-considered; anything else is counted as skipped.
+$TMPDIR and from /tmp. Only directories owned by the selected owner (by
+default, the invoking user) are considered; anything else is counted as skipped.
+A privileged scheduled scan
+uses --owner, then irreversibly drops to that user before deletion. Incomplete
+process visibility refuses deletion.
 """
+
+
+class VisibilityError(RuntimeError):
+    """A holder observation is unavailable, rather than absent."""
+
+
+def vanished_entry(error: OSError, path: str) -> None:
+    if error.errno not in (errno.ENOENT, errno.ESRCH):
+        raise VisibilityError(f"cannot inspect {path}: {error.strerror}") from error
+
+
+def drop_privileges(uid: int, owner: pwd.struct_passwd | None) -> None:
+    if os.geteuid() == 0:
+        if owner is None or uid == 0:
+            raise PermissionError("deletion requires an explicit non-root owner")
+        os.initgroups(owner.pw_name, owner.pw_gid)
+        os.setresgid(owner.pw_gid, owner.pw_gid, owner.pw_gid)
+        os.setresuid(uid, uid, uid)
+    if uid == 0 or os.getresuid() != (uid, uid, uid):
+        raise PermissionError("could not irreversibly drop to the directory owner")
+
+
+def directory_identity(value: os.stat_result) -> tuple[int, int, int]:
+    return value.st_dev, value.st_ino, value.st_uid
 
 
 def roots() -> list[str]:
@@ -56,13 +86,14 @@ def roots() -> list[str]:
     return found
 
 
-def collect_candidates(root: str, uid: int) -> tuple[list[str], int]:
+def collect_candidates(root: str, uid: int) -> tuple[dict[str, tuple[int, int, int]], int]:
     """Owned Nix devshell directories directly under root, plus a skip count."""
-    candidates: list[str] = []
+    candidates: dict[str, tuple[int, int, int]] = {}
     skipped = 0
     try:
         entries = list(os.scandir(root))
-    except OSError:
+    except OSError as error:
+        vanished_entry(error, root)
         return candidates, skipped
     now = time.time()
     for entry in entries:
@@ -71,15 +102,16 @@ def collect_candidates(root: str, uid: int) -> tuple[list[str], int]:
         try:
             if not entry.is_dir(follow_symlinks=False):
                 continue
-            stat = entry.stat(follow_symlinks=False)
-            if stat.st_uid != uid:
+            observed = entry.stat(follow_symlinks=False)
+            if observed.st_uid != uid:
                 skipped += 1
                 continue
-            if entry.name.startswith("nix-develop-") and now - stat.st_mtime < DEVELOP_MIN_AGE_SECONDS:
+            if entry.name.startswith("nix-develop-") and now - observed.st_mtime < DEVELOP_MIN_AGE_SECONDS:
                 continue
-        except OSError:
+        except OSError as error:
+            vanished_entry(error, entry.path)
             continue
-        candidates.append(entry.path)
+        candidates[entry.path] = directory_identity(observed)
     return candidates, skipped
 
 
@@ -104,22 +136,24 @@ def held_directories(candidates: set[str], root_list: list[str]) -> set[str]:
         for link in ("cwd", "root", "exe"):
             try:
                 claim(os.readlink(proc + "/" + link))
-            except OSError:
-                pass
+            except OSError as error:
+                vanished_entry(error, proc + "/" + link)
         try:
             fds = os.listdir(proc + "/fd")
-        except OSError:
+        except OSError as error:
+            vanished_entry(error, proc + "/fd")
             fds = []
         for fd in fds:
             try:
                 claim(os.readlink(proc + "/fd/" + fd))
-            except OSError:
-                pass
-        # A vanished or unreadable environment cannot contribute a path claim.
+            except OSError as error:
+                vanished_entry(error, proc + "/fd/" + fd)
+        # Missing process records are normal churn. Denied reads are unknown.
         try:
             with open(proc + "/environ", "rb") as handle:
                 blob = handle.read()
-        except OSError:
+        except OSError as error:
+            vanished_entry(error, proc + "/environ")
             continue
         for item in blob.split(b"\0"):
             if item.startswith(HOLDER_VARS):
@@ -132,7 +166,7 @@ def held_directories(candidates: set[str], root_list: list[str]) -> set[str]:
                     # realpath must resolve symlinks before consuming '..'.
                     if not os.path.isabs(path):
                         path = os.path.join(proc, "cwd", path)
-                    claim(os.path.realpath(path))
+                    claim(os.path.realpath(path, strict=os.path.ALLOW_MISSING))
                 except (UnicodeDecodeError, ValueError):
                     pass
         if held == candidates:
@@ -143,27 +177,51 @@ def held_directories(candidates: set[str], root_list: list[str]) -> set[str]:
 
 def main(argv: list[str]) -> int:
     dry_run = False
-    if len(argv) > 1:
-        if argv[1] in ("-h", "--help"):
+    owner = None
+    uid = os.getuid()
+    args = iter(argv[1:])
+    for arg in args:
+        if arg in ("-h", "--help"):
             sys.stdout.write(USAGE)
             return 0
-        if argv[1] == "--dry-run":
+        if arg == "--dry-run":
             dry_run = True
+        elif arg == "--owner" and owner is None:
+            name = next(args, None)
+            try:
+                owner = pwd.getpwnam(name) if name else None
+            except KeyError:
+                owner = None
+            if owner is None:
+                sys.stderr.write("sinnix-tmp-sweep: unknown or missing owner\n")
+                return 64
+            uid = owner.pw_uid
         else:
             sys.stderr.write(USAGE)
             return 64
-
-    uid = os.getuid()
+    if uid == 0:
+        sys.stderr.write("sinnix-tmp-sweep: select a non-root directory owner with --owner\n")
+        return 64
+    if os.geteuid() != 0 and uid != os.getuid():
+        sys.stderr.write("sinnix-tmp-sweep: cannot select another user's directories\n")
+        return 1
     root_list = roots()
 
-    candidates: dict[str, list[str]] = {}
+    candidates: dict[str, dict[str, tuple[int, int, int]]] = {}
     skipped: dict[str, int] = {}
-    for root in root_list:
-        candidates[root], skipped[root] = collect_candidates(root, uid)
+    try:
+        for root in root_list:
+            candidates[root], skipped[root] = collect_candidates(root, uid)
+        every = {path for paths in candidates.values() for path in paths}
+        held = held_directories(every, root_list) if every else set()
+        # Scanning may require root; removal never does. This must precede
+        # every mutation, including a run with no recognized holders.
+        drop_privileges(uid, owner)
+    except (OSError, VisibilityError) as error:
+        print(f"sinnix-tmp-sweep: retaining candidates: {error}", file=sys.stderr)
+        return 1
 
-    every = {path for paths in candidates.values() for path in paths}
-    held = held_directories(every, root_list) if every else set()
-
+    failed = False
     for root in root_list:
         removed = 0
         kept = 0
@@ -171,12 +229,29 @@ def main(argv: list[str]) -> int:
             if path in held:
                 kept += 1
                 continue
+            try:
+                observed = os.stat(path, follow_symlinks=False)
+                if (not stat.S_ISDIR(observed.st_mode) or observed.st_uid != uid
+                        or directory_identity(observed) != candidates[root][path]):
+                    skipped[root] += 1
+                    continue
+            except FileNotFoundError:
+                skipped[root] += 1
+                continue
+            except OSError as error:
+                print(f"sinnix-tmp-sweep: could not recheck {path}: {error}", file=sys.stderr)
+                failed = True
+                continue
             if dry_run:
                 print(f"sinnix-tmp-sweep: would remove {path}")
             else:
                 errors: list[BaseException] = []
-                shutil.rmtree(path, onerror=lambda _f, _p, info: errors.append(info[1]))
+                try:
+                    shutil.rmtree(path, onerror=lambda _f, _p, info: errors.append(info[1]))
+                except OSError as error:
+                    errors.append(error)
                 if errors:
+                    failed = True
                     print(
                         f"sinnix-tmp-sweep: could not remove {path}: {errors[0]}",
                         file=sys.stderr,
@@ -187,7 +262,7 @@ def main(argv: list[str]) -> int:
             f"sinnix-tmp-sweep: root={root} removed={removed} "
             f"held={kept} skipped={skipped[root]}"
         )
-    return 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
