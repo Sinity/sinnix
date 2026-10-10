@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: Unified fuzzy picker over the reading stack, history, bookmarks, clipboard, and recent project dirs
 # runtimeInputs: bash python3 noctalia kitty zoxide wl-clipboard @sinnix-browser-app @sinnix-reading-stack
+# pythonPackages: @sinnix-lib
 """sinnix-picker: one fuzzy-search surface over heterogeneous "things I might
 want to jump to" sources, presented by the Noctalia launcher through
 `noctalia dmenu` (candidates on stdin, the chosen line on stdout, exit 1 on
@@ -34,7 +35,7 @@ hard failure):
     bookmarks (~/.config/chrome-ws/Default/Bookmarks, Chrome's own JSON
     format, walked recursively for the folder tree).
   - Clipboard: capture-clipboard's own JSONL lane
-    (/realm/activity/desktop/clipboard/clipboard/clipboard-*.jsonl) -- text entries only
+    (/realm/activity/desktop/clipboard/clipboard-*.jsonl) -- text entries only
     (image/binary clipboard entries are skipped here; they have no useful
     single-line picker representation), most recent N.
   - Recent project directories: zoxide's own database (`zoxide query -l`,
@@ -70,12 +71,16 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from sinnix_lib.layout import capture_lane_path
+
 HISTORY_PATH = Path(
     "/realm/activity/browser/history/gestalt/derived/full_history.ndjson"
 )
 RAINDROP_CSV = Path("/realm/account/raindrop/processed/bookmarks.csv")
 CHROME_BOOKMARKS = Path.home() / ".config/chrome-ws/Default/Bookmarks"
-CLIPBOARD_DIR = Path("/realm/activity/desktop/clipboard/clipboard")
+CLIPBOARD_DIR = capture_lane_path(
+    Path(os.environ.get("SINNIX_ACTIVITY_ROOT", "/realm/activity")), "clipboard"
+)
 READING_STACK_PATH = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "sinnix/reading-stack.json"
 
 HISTORY_LIMIT = 4000

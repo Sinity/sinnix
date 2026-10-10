@@ -223,6 +223,7 @@
           name = "sinnix-picker";
           suiteDir = ../../pkgs/sinnix-picker/tests;
           scripts = [ "sinnix-picker" ];
+          extraPythonPackages = [ sinnix-lib ];
         };
         ytdlp-suite = mkScriptSuite {
           name = "sinnix-ytdlp";

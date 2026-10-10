@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 
 from conftest import load_script
@@ -64,4 +65,29 @@ def test_gather_deduplicates_urls_across_sources(monkeypatch):
     assert picker.gather() == [
         picker.Entry("stack", "Queued", "https://same.example"),
         picker.Entry("hist", "History", "https://other.example"),
+    ]
+
+
+def test_clipboard_uses_the_capture_layout_and_preserves_selected_text(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("SINNIX_ACTIVITY_ROOT", str(tmp_path))
+    configured = load_script("sinnix-picker")
+    lane = tmp_path / "desktop" / "clipboard"
+    lane.mkdir(parents=True)
+    text = "Synthetic clipboard\nwith its original newline"
+    rows = [
+        {"payload": {"category": "text", "text": text}},
+        {"payload": {"category": "image", "text": "ignore binary"}},
+    ]
+    (lane / "clipboard-20261010.jsonl").write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8"
+    )
+    (lane / "clipboard-index.jsonl").write_text(
+        json.dumps({"file": "clipboard-20261010.jsonl", "seq": 2}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert configured.load_clipboard() == [
+        configured.Entry("clip", "Synthetic clipboard with its original newline", text)
     ]
