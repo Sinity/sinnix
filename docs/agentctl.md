@@ -255,9 +255,12 @@ the requester evidence.
 minute. A host-wide `full avg60` IO or memory stall of at least 25% closes
 one eligible group per tick. IO closes `pytest-heavy`, then `pytest`, then
 `bulk`; memory also closes `normal` and `pytest-quick`. Running jobs continue.
-An agentctl-owned pause can reopen when both resources are known and their
-`full avg10` values are below 10% (falling back to `avg60` if `avg10` is
-unavailable). One group reopens per tick. Unavailable or malformed PSI cannot
+An agentctl-owned pause can reopen when both resources are known and the
+resources relevant to that group and its recorded pause signal have
+`full avg10` values below 10% (falling back to `avg60` if `avg10` is
+unavailable). For a memory-only pause of `normal` or `pytest-quick`, IO must
+be observable but need not be below the recovery threshold. One group reopens
+per tick. Unavailable or malformed PSI cannot
 reopen a pause. A no-change tick reports `clear` when no managed groups are
 paused and neither closure threshold is exceeded; `hold` means admission
 remains paused or a closure signal remains active.
