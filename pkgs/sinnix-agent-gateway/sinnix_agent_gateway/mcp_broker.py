@@ -528,7 +528,7 @@ class McpBrokerService:
     def _environment(self, server: dict[str, Any]) -> dict[str, str]:
         route = OwnerRoute("mcp-broker", EnvironmentProfile.PLAIN)
         execution = self.execution or OwnerExecution()
-        environment, missing = execution.environment_for(route, server["env"])
+        environment, missing = execution.environment_for(route, server.get("env", {}))
         if missing is not None:
             raise McpEnvironmentError(f"MCP environment is missing {missing}")
         return environment
