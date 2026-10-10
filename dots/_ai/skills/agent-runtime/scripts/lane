@@ -74,7 +74,7 @@ lane_verify() {
 import json, sys
 value = json.load(sys.stdin)
 job_id, reference = value.get("job_id"), value.get("reference")
-if type(job_id) is not int or job_id <= 0 or not isinstance(reference, str) or not reference:
+if type(job_id) is not int or job_id < 0 or not isinstance(reference, str) or not reference:
     raise SystemExit("missing job id or launch reference")
 print(job_id)
 print(reference)
