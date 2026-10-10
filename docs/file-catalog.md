@@ -57,6 +57,8 @@ changes. Each row names an asset ID, actor, basis, reason and explicit action:
 `metadata`, `content_revision`, `collection_replacement` or `unavailable`.
 Available locations also require the exact reviewed `expected_identity`.
 The digest guards the whole catalog and refuses stale review before mutation.
+The returned digest identifies this operation’s committed catalog, even if a
+later writer updates it before the response is printed.
 Metadata observations retain earlier identities and inspections without claiming
 byte continuity. Revisions retain the asset UUID, move earlier content evidence
 into revision history, and give the current revision metadata-only coverage.

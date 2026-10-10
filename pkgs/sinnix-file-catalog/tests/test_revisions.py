@@ -94,3 +94,42 @@ def test_unavailable_observation_becomes_current_and_can_be_restored(tmp_path):
     assert restored["identity"] == original["identity"]
     assert restored["inspections"] == original["inspections"]
     assert restored["location_observations"][:-1] == unavailable["location_observations"]
+
+
+def test_observation_receipt_digest_is_bound_before_unlock(tmp_path, monkeypatch, capsys):
+    from argparse import Namespace
+    from contextlib import contextmanager
+
+    source = tmp_path / "note"
+    source.write_text("content")
+    catalog = tmp_path / "catalog.json"
+    assert import_rows(catalog, [observation(source)]).returncode == 0
+    asset = assets(catalog)[0]
+    module = runpy.run_path(str(SCRIPT))["cmd_observe"].__globals__
+    observations = tmp_path / "observations.json"
+    observations.write_text(json.dumps([dict(
+        id=asset["id"], action="metadata", actor="synthetic-test",
+        basis="reviewed current metadata", reason="refresh",
+        expected_identity=module["identity"](source),
+    )]))
+    original_lock = module["locked"]
+    committed = []
+
+    @contextmanager
+    def next_writer_after_unlock(path):
+        with original_lock(path):
+            yield
+            committed.append(path.read_bytes())
+        # A second writer wins the lock before the first prints its receipt.
+        with original_lock(path):
+            later = json.loads(path.read_bytes())
+            later["assets"][0]["tags"].append("second-writer")
+            module["write_catalog"](path, later)
+
+    monkeypatch.setitem(module, "locked", next_writer_after_unlock)
+    args = Namespace(catalog=str(catalog), observations=str(observations),
+                     expected_sha256=hashlib.sha256(catalog.read_bytes()).hexdigest())
+    assert module["cmd_observe"](args) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["catalog_sha256"] == hashlib.sha256(committed[0]).hexdigest()
+    assert receipt["catalog_sha256"] != hashlib.sha256(catalog.read_bytes()).hexdigest()

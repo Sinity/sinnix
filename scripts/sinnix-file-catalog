@@ -715,7 +715,8 @@ def cmd_observe(args: argparse.Namespace) -> int:
             record_location(asset, observation)
         validate_catalog(catalog, check_paths=False)
         write_catalog(path, catalog)
-    print(json.dumps({"observations": len(rows), "catalog_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}))
+        committed_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
+    print(json.dumps({"observations": len(rows), "catalog_sha256": committed_sha256}))
     return 0
 
 
