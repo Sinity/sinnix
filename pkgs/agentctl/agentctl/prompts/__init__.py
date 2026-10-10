@@ -693,13 +693,20 @@ def _stable_criteria(bead: Mapping[str, Any]) -> tuple[dict[str, str], ...]:
     return tuple(rows)
 
 
-def evidence_binding(bead: Mapping[str, Any]) -> dict[str, Any]:
+def evidence_binding(
+    bead: Mapping[str, Any], *, semantic_digest_version: int = 2
+) -> dict[str, Any]:
     """Immutable acceptance facts retained with one dispatch worker.
 
     The identity is created from the owner-authored acceptance snapshot at
     dispatch, rather than requiring a second metadata ledger just to make a
     batch safe to close.
     """
+    if type(semantic_digest_version) is not int or semantic_digest_version not in (
+        1,
+        2,
+    ):
+        raise PromptError("unsupported semantic digest version")
     revision = _owner_revision(bead.get("revision"))
     criteria = _stable_criteria(bead)
     available = revision is not None and bool(criteria)
@@ -732,10 +739,16 @@ def evidence_binding(bead: Mapping[str, Any]) -> dict[str, Any]:
             for row in dependencies
             if isinstance(row, Mapping)
         ]
+    if semantic_digest_version == 2 and "dependencies" in semantic:
+        # Graph edge order is presentation, not an authored task amendment.
+        semantic["dependencies"].sort(
+            key=lambda row: json.dumps(row, separators=(",", ":"), sort_keys=True)
+        )
     semantic_digest = hashlib.sha256(
         json.dumps(semantic, separators=(",", ":"), sort_keys=True).encode("utf-8")
     ).hexdigest()
     return {
+        **({"semantic_digest_version": 2} if semantic_digest_version == 2 else {}),
         "v2_available": available,
         "bead_revision": revision,
         "criteria": list(criteria),

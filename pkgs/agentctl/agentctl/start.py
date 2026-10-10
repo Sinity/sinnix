@@ -213,6 +213,11 @@ def _evidence_binding(beads: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]
                 "criteria": list(binding.get("criteria") or ()),
                 "acceptance_digest": binding.get("acceptance_digest"),
                 "semantic_digest": binding.get("semantic_digest"),
+                **(
+                    {"semantic_digest_version": binding["semantic_digest_version"]}
+                    if "semantic_digest_version" in binding
+                    else {}
+                ),
             }
         )
     return records

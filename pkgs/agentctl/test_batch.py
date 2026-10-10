@@ -883,6 +883,7 @@ def test_launch_binds_beads_authored_v2_criteria_into_the_worker_result(
         .split("\n```", 1)[0]
     )
     binding = {
+        "semantic_digest_version": 2,
         "v2_available": True,
         "bead_revision": str(revision),
         "criteria": [{"ac_id": "AC-solo-1", "text": "the focused check passes"}],
@@ -1054,6 +1055,42 @@ def test_landing_closes_after_administrative_revision_drift(
     state = landed["acceptance"]["beads"]["fx-solo"]
     assert state["state"] == "closed"
     assert harness.beads.closed[-1][3] == 7773497739344011640
+
+
+@pytest.mark.parametrize("changed", [False, True])
+def test_landing_dependency_order_is_not_contract_drift(
+    harness: Harness, changed: bool
+) -> None:
+    record = harness.beads.beads["fx-solo"]
+    record["dependencies"] = [
+        {"id": "fx-a", "dependency_type": "relates-to"},
+        {"id": "fx-b", "dependency_type": "relates-to"},
+    ]
+    run = prepared_run(harness, "fx-solo")
+    record["dependencies"].reverse()
+    if changed:
+        record["dependencies"][0]["dependency_type"] = "blocks"
+    landed = harness.land(run["run_id"])
+    state = landed["acceptance"]["beads"]["fx-solo"]
+    assert state["state"] == ("open" if changed else "closed")
+    if changed:
+        assert state["reason"] == "contract_changed"
+
+
+def test_landing_preserves_unversioned_dispatch_binding(
+    harness: Harness, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original = prompts.evidence_binding
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            prompts,
+            "evidence_binding",
+            lambda bead: original(bead, semantic_digest_version=1),
+        )
+        run = prepared_run(harness, "fx-solo")
+    assert "semantic_digest_version" not in run["workers"][0]["evidence_binding"][0]
+    landed = harness.land(run["run_id"])
+    assert landed["acceptance"]["beads"]["fx-solo"]["state"] == "closed"
 
 
 def test_landing_refuses_scope_drift_as_a_task_contract_change(

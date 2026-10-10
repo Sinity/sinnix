@@ -626,3 +626,29 @@ def test_structured_acceptance_criteria_survive_json_string_storage() -> None:
         {"ac_id": "ac-1", "text": "first"},
         {"ac_id": "ac-2", "text": "second"},
     ]
+
+
+def test_semantic_digest_versions_preserve_original_dispatch_interpretation() -> None:
+    record = bead(
+        "fx-order",
+        "Fixture",
+        metadata={"acceptance_criteria": [{"id": "ac", "text": "done"}]},
+    )
+    record["revision"] = 1
+    record["dependencies"] = [
+        {"id": "fx-b", "dependency_type": "blocks"},
+        {"id": "fx-a", "dependency_type": "blocks"},
+    ]
+    old = evidence_binding(record, semantic_digest_version=1)
+    current = evidence_binding(record)
+    assert "semantic_digest_version" not in old
+    assert current["semantic_digest_version"] == 2
+    assert evidence_binding(record, semantic_digest_version=1) == old
+    record["dependencies"].reverse()
+    assert evidence_binding(record)["semantic_digest"] == current["semantic_digest"]
+    assert (
+        evidence_binding(record, semantic_digest_version=1)["semantic_digest"]
+        != old["semantic_digest"]
+    )
+    with pytest.raises(PromptError, match="unsupported semantic digest version"):
+        evidence_binding(record, semantic_digest_version=3)

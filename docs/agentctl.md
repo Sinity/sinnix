@@ -318,6 +318,8 @@ directory), written once by `batch start` and appended with worker
 results, landing state and the acceptance record. pueue holds the live task state, Beads the claims,
 worktrunk the worktrees, GitHub the PR; the manifest is not a database.
 
+Closure compares authored task fields and acceptance against the dispatch binding, then rereads the current row revision for the atomic close guard. New semantic digest bindings ignore dependency edge order while retaining each edge's identity and relation. Historical unversioned bindings retain their original ordered interpretation; upgrading AgentCTL does not rehash retained dispatch evidence. Unknown digest versions refuse automatic closure.
+
 ### The manifest
 
 ```

@@ -209,7 +209,10 @@ def _closure_verdicts(
                 )
                 continue
             try:
-                current = prompts.evidence_binding(beads.show(bead_id))
+                current = prompts.evidence_binding(
+                    beads.show(bead_id),
+                    semantic_digest_version=binding.get("semantic_digest_version", 1),
+                )
             except (BatchError, PromptError) as error:
                 residuals[bead_id] = ClosureRefusal(
                     "unobservable", f"current acceptance could not be observed: {error}"
@@ -242,7 +245,9 @@ def _close_revision(run: Run, beads: Beads, bead_id: str) -> int:
         )
     try:
         bead = beads.show(bead_id)
-        current = prompts.evidence_binding(bead)
+        current = prompts.evidence_binding(
+            bead, semantic_digest_version=binding.get("semantic_digest_version", 1)
+        )
     except (BatchError, PromptError) as error:
         raise ClosureRefusal(
             "unobservable", f"current task could not be observed: {error}"
