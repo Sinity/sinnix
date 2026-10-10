@@ -99,6 +99,17 @@ pool slot. Each invocation allocates `jobs/<ref>.attempts/<n>/`: `output.log` ca
 
 The native owner interfaces are `launch.get_job`, `launch.result`, and `launch.read_job_artifact(config, task_id, reference, *, attempt, artifact, offset, limit)`. `launch.start_operation(..., owner_request_key=...)` and CLI `job start --owner-request-key` optionally bind a durable owner request to one launch. Replays validate the request, reconcile its stable reference against pueue and retained evidence, and reuse an accepted launch. `launch.lookup_operation_request` performs reconciliation without submitting. A submission whose acceptance cannot be proved raises `EnqueueUncertain`; it is never automatically repeated. The launch input is published atomically before submission and before any declared dependencies, so a caller crash cannot silently duplicate accepted work.
 
+Native runners receive the launch reference as both AGENTCTL_JOB_ID and
+AGENTCTL_CORRELATION_ID, alongside project and operation. The retained configured
+project root and observed Git checkout root determine AGENTCTL_CHECKOUT_ID:
+default for that root, or the same path-derived worktree identity used by project
+queries. A command run in a subdirectory keeps its checkout identity. AGENTCTL_CHECKOUT_HEAD
+comes from the execution-start Git observation, including for dirty checkouts;
+it identifies the observed commit, not all working-tree bytes. Parent-job
+provenance is cleared. Unknown Git head or an older launch without a recorded
+project root leaves the corresponding field absent; execution receipts retain
+the unavailable observation rather than inventing an identity.
+
 `job cancel --reference <ref> --expected-attempt <n>` compares the selected execution while holding the attempt allocation lock. A changed attempt refuses cancellation. This lets an operator act on the reference and attempt shown by `job snapshot` without cancelling a newer retry.
 
 A vanished working directory or an unresolvable command is refused before anything starts

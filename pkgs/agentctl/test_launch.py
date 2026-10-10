@@ -63,6 +63,7 @@ def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
     assert added["label"] == "fixture:verify"
     assert added["command"][0] == "agentctl-run"
     assert added["working_directory"] == project_root
+    assert read_launch(config, fake_pueue.task(started["job_id"]))["project_root"] == str(project_root)
     input_path = Path(added["command"][1])
     assert input_path.stat().st_mode & 0o777 == 0o600
     written = json.loads(input_path.read_text())

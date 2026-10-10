@@ -348,6 +348,7 @@ def enqueue(
     launch: dict[str, Any] = {
         "job_id": reference,
         "project_id": project.project_id,
+        "project_root": str(project.root),
         "operation": operation,
         "pool": group,
         "kind": kind,

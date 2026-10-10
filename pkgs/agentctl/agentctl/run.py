@@ -813,14 +813,34 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     # every identity computed from it keep their names alone.
     secrets, lost_secrets = secret_environment(Path(launch_input), launch)
     environment.update(secrets)
+    # Native invocation provenance is owned here, not inherited from a parent
+    # job or caller. The launch reference joins this attempt to retained input.
+    for field in ("JOB_ID", "CORRELATION_ID", "PROJECT_ID", "OPERATION",
+                  "CHECKOUT_ID", "CHECKOUT_HEAD"):
+        environment.pop(f"AGENTCTL_{field}", None)
     environment.update(
         {
+            "AGENTCTL_CORRELATION_ID": str(launch["job_id"]),
             "AGENTCTL_JOB_ID": str(launch["job_id"]),
             "AGENTCTL_PROJECT_ID": str(launch["project_id"]),
             "AGENTCTL_OPERATION": str(launch["operation"]),
             "AGENTCTL_QUEUE_WORKER": "1",
         }
     )
+    root = launch.get("project_root")
+    checkout_path, checkout_error = _git_probe(
+        Path(launch["working_directory"]), "rev-parse", "--show-toplevel"
+    )
+    start_git["checkout_root"] = checkout_path
+    start_git["checkout_root_error"] = checkout_error
+    if isinstance(root, str) and root and checkout_path:
+        path = Path(checkout_path).resolve()
+        environment["AGENTCTL_CHECKOUT_ID"] = (
+            "default" if path == Path(root).resolve()
+            else "worktree-" + hashlib.sha256(str(path).encode()).hexdigest()[:16]
+        )
+    if isinstance(start_git.get("head"), str) and start_git["head"]:
+        environment["AGENTCTL_CHECKOUT_HEAD"] = start_git["head"]
     if pool:
         environment["AGENTCTL_POOL"] = pool
     if scratch_dir is not None:

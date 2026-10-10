@@ -1352,3 +1352,63 @@ def test_event_append_takes_the_spool_lock_and_repairs_a_torn_tail(
     assert not writer.is_alive()
     kinds = [json.loads(line)["kind"] for line in spool.read_text().splitlines()]
     assert kinds == ["backpressure", "queue-task"]
+
+
+@pytest.mark.parametrize("dirty", [False, True])
+@pytest.mark.parametrize("linked", [False, True])
+@pytest.mark.parametrize("subdirectory", [False, True])
+def test_worker_exports_observed_native_provenance(
+    tmp_path, fake_systemd, fake_pueue, dirty, linked, subdirectory
+):
+    import hashlib
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=Fixture",
+                    "-c", "user.email=fixture@example.invalid", "commit",
+                    "--allow-empty", "-qm", "neutral"], check=True)
+    (tmp_path / ".git/info/exclude").write_text("*\n!neutral.txt\n")
+    (tmp_path / "neutral.txt").write_text("committed fixture")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "neutral.txt"], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=Fixture",
+                    "-c", "user.email=fixture@example.invalid", "commit",
+                    "-qm", "track neutral fixture"], check=True)
+    head = subprocess.check_output(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], text=True
+    ).strip()
+    if dirty:
+        (tmp_path / "neutral.txt").write_text("uncommitted fixture")
+    assert run_module.git_observation(tmp_path)["dirty"] is dirty
+    root = tmp_path / "other-root" if linked else tmp_path
+    fields = ["JOB_ID", "CORRELATION_ID", "PROJECT_ID", "OPERATION",
+              "CHECKOUT_ID", "CHECKOUT_HEAD"]
+    command = "import os,json;print(json.dumps({k:os.environ.get('AGENTCTL_'+k) for k in " + repr(fields) + "}))"
+    cwd = tmp_path / "sub" if subdirectory else tmp_path
+    cwd.mkdir(exist_ok=True)
+    launch = write_launch(
+        tmp_path, pool="pytest", project_root=str(root), working_directory=str(cwd),
+        argv=[sys.executable, "-c", command],
+        tree_receipt={"head": "stale-cache-head"},
+        environment={"PATH": os.environ["PATH"], "AGENTCTL_CHECKOUT_HEAD": "parent-head",
+                     "AGENTCTL_CORRELATION_ID": "parent-request"},
+    )
+    assert main([str(launch)]) == 0
+    row = json.loads(log_of(tmp_path))
+    assert row == {
+        "JOB_ID": "job-a", "CORRELATION_ID": "job-a",
+        "PROJECT_ID": "fixture", "OPERATION": "check",
+        "CHECKOUT_HEAD": head,
+        "CHECKOUT_ID": "worktree-" + hashlib.sha256(str(tmp_path).encode()).hexdigest()[:16]
+            if linked else "default",
+    }
+
+
+def test_worker_does_not_invent_missing_checkout_evidence(
+    tmp_path, fake_systemd, fake_pueue
+):
+    command = "import os,json;print(json.dumps({k:os.environ.get('AGENTCTL_'+k) for k in ['CHECKOUT_ID','CHECKOUT_HEAD']}))"
+    launch = write_launch(
+        tmp_path, pool="pytest", argv=[sys.executable, "-c", command],
+        environment={"PATH": os.environ["PATH"], "AGENTCTL_CHECKOUT_ID": "parent",
+                     "AGENTCTL_CHECKOUT_HEAD": "parent"},
+    )
+    assert main([str(launch)]) == 0
+    assert json.loads(log_of(tmp_path)) == {"CHECKOUT_ID": None, "CHECKOUT_HEAD": None}
