@@ -121,10 +121,19 @@ set -euo pipefail
 printf '%s\n' "$*" >> "${AGENTCTL_CALLS:?}"
 case "$1 $2" in
   job\ start)
-    printf '{"job_id": 7, "phase": "queued", "terminal": false}\n'
+    if [[ ${AGENTCTL_FIXTURE_MISSING_REFERENCE:-0} == 1 ]]; then
+      printf '{"job_id": 7, "phase": "queued", "terminal": false}\n'
+    else
+      printf '{"job_id": 7, "reference": "fixture-verify-launch", "phase": "queued", "terminal": false}\n'
+    fi
     ;;
   job\ wait)
-    printf 'job 7 fixture:verify_quick succeeded\n'
+    # Queue reordering moved this launch to 9; position 7 is another job.
+    [[ "$*" == "job wait 7 --reference fixture-verify-launch --timeout-seconds 60" ]] || {
+      printf 'refusing to observe the unrelated task now at 7\n' >&2
+      exit 3
+    }
+    printf 'job 9 fixture:verify_quick succeeded\n'
     ;;
   *)
     exit 2
@@ -136,7 +145,20 @@ export AGENTCTL_CALLS=$root/agentctl.calls
 verify_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_TIMEOUT_SECONDS=60 "$lane" verify)
 grep -Fq 'succeeded' <<<"$verify_output"
 grep -Fxq "job start fixture verify_quick --workspace $repo" "$AGENTCTL_CALLS"
-grep -Fxq "job wait 7 --timeout-seconds 60" "$AGENTCTL_CALLS"
+grep -Fxq "job wait 7 --reference fixture-verify-launch --timeout-seconds 60" "$AGENTCTL_CALLS"
+
+# Missing owner identity must fail before observing a queue position.
+: >"$AGENTCTL_CALLS"
+set +e
+missing_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_FIXTURE_MISSING_REFERENCE=1 AGENTCTL_TIMEOUT_SECONDS=60 "$lane" verify 2>&1)
+missing_status=$?
+set -e
+test "$missing_status" -eq 1
+grep -Fq 'launch identity' <<<"$missing_output"
+if grep -q '^job wait ' "$AGENTCTL_CALLS"; then
+  printf 'wait was invoked without an owner launch reference\n' >&2
+  exit 1
+fi
 
 printf 'launch snapshot\n' >"$repo/.agentctl/prompt.md"
 task_output=$(cd "$repo" && "$lane" task)
