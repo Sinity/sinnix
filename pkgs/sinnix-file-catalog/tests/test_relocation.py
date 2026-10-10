@@ -127,6 +127,8 @@ def test_original_address_can_become_a_new_parent_container(tmp_path):
 def test_unavailable_history_remains_unavailable_without_inventing_continuity(tmp_path):
     old, new, catalog, moves = fixture(tmp_path)
     original = assets(catalog)[1]
+    observe_location(tmp_path, catalog, original["id"], "metadata", old / "entry")
+    reviewed = assets(catalog)[1]
     (old / "entry").unlink()
     result, receipt = prepare(tmp_path, catalog, moves, "--retain-unavailable")
     assert result.returncode == 0
@@ -136,4 +138,110 @@ def test_unavailable_history_remains_unavailable_without_inventing_continuity(tm
     assert missing["current_path"] == original["current_path"]
     assert missing["identity"] == original["identity"]
     assert missing["location_status"] == "unavailable"
+    assert missing["current_location"] == missing["location_observations"][-1]
+    assert missing["current_location"]["status"] == "unavailable"
+    assert missing["location_observations"][:-1] == reviewed["location_observations"]
     assert invoke(catalog, "resolve", str(old / "entry")).returncode != 0
+
+
+def observe_location(tmp_path, catalog, asset_id, action, source=None):
+    import hashlib
+    import runpy
+    from pathlib import Path
+
+    row = dict(id=asset_id, action=action, actor="synthetic-test", basis="reviewed fixture location", reason="location transition")
+    if source is not None:
+        script = Path(__file__).parents[3] / "scripts" / "sinnix-file-catalog"
+        row["expected_identity"] = runpy.run_path(str(script))["identity"](source)
+    path = tmp_path / "location-observations.json"
+    path.write_text(json.dumps([row]))
+    digest = hashlib.sha256(catalog.read_bytes()).hexdigest()
+    result = invoke(catalog, "observe", str(path), "--expected-sha256", digest)
+    assert result.returncode == 0, result.stderr
+
+
+def test_single_relocation_replaces_unavailable_location_with_verified_destination(tmp_path):
+    old, new, catalog, _ = fixture(tmp_path)
+    original = assets(catalog)[1]
+    destination = tmp_path / "moved-entry"
+    (old / "entry").rename(destination)
+    observe_location(tmp_path, catalog, original["id"], "unavailable")
+    missing = assets(catalog)[1]
+    result = invoke(catalog, "relocate", original["id"], str(destination))
+    assert result.returncode == 0, result.stderr
+    current = assets(catalog)[1]
+    assert current["location_status"] == "available"
+    assert current["current_location"]["path"] == str(destination)
+    assert current["current_location"] == current["location_observations"][-1]
+    assert current["current_location"]["content_continuity"] == "unverified"
+    assert current["location_observations"][:-1] == missing["location_observations"]
+    assert current["inspections"] == original["inspections"]
+    result = invoke(catalog, "resolve", str(old / "entry"))
+    assert result.returncode == 0 and result.stdout.strip() == str(destination)
+
+
+def test_batch_relocation_advances_stale_location_metadata_after_reviewed_drift(tmp_path):
+    old, new, catalog, moves = fixture(tmp_path)
+    original = assets(catalog)[1]
+    observe_location(tmp_path, catalog, original["id"], "metadata", old / "entry")
+    before = assets(catalog)[1]
+    (old / "entry").chmod(0o600)
+    result, receipt = prepare(tmp_path, catalog, moves, "--record-existing-drift")
+    assert result.returncode == 0, result.stderr
+    old.rename(new)
+    result = invoke(catalog, "relocate-batch", str(receipt))
+    assert result.returncode == 0, result.stderr
+    current = assets(catalog)[1]
+    assert current["current_location"]["path"] == str(new / "entry")
+    assert current["current_location"]["identity"]["mode"] == 0o600
+    assert current["location_observations"][:-1] == before["location_observations"]
+    assert current["relocations"][-1]["prior_catalog_identity"] == original["identity"]
+    assert invoke(catalog, "validate").returncode == 0
+    assert invoke(catalog, "audit").returncode == 0
+
+
+def test_relocation_uses_last_reviewed_identity_when_latest_observation_is_missing(tmp_path):
+    old, _, catalog, _ = fixture(tmp_path)
+    import hashlib
+
+    value = json.loads(catalog.read_text())
+    value["assets"][1]["identity"]["sha256"] = hashlib.sha256((old / "entry").read_bytes()).hexdigest()
+    catalog.write_text(json.dumps(value))
+    original = assets(catalog)[1]
+    (old / "entry").chmod(0o600)
+    observe_location(tmp_path, catalog, original["id"], "metadata", old / "entry")
+    destination = tmp_path / "moved-entry"
+    (old / "entry").rename(destination)
+    observe_location(tmp_path, catalog, original["id"], "unavailable")
+    result = invoke(catalog, "relocate", original["id"], str(destination))
+    assert result.returncode == 0, result.stderr
+    current = assets(catalog)[1]
+    assert current["relocations"][-1]["prior_catalog_identity"] == original["identity"]
+    assert current["current_location"]["identity"]["mode"] == 0o600
+    assert "sha256" not in current["identity"]
+    assert current["current_location"]["content_continuity"] == "unverified"
+    assert invoke(catalog, "validate").returncode == 0
+
+
+def test_batch_preparation_uses_metadata_already_reviewed_in_catalog(tmp_path):
+    old, new, catalog, moves = fixture(tmp_path)
+    original = assets(catalog)[1]
+    (old / "entry").chmod(0o600)
+    observe_location(tmp_path, catalog, original["id"], "metadata", old / "entry")
+    result, receipt = prepare(tmp_path, catalog, moves)
+    assert result.returncode == 0, result.stderr
+    old.rename(new)
+    assert invoke(catalog, "relocate-batch", str(receipt)).returncode == 0
+    assert assets(catalog)[1]["relocations"][-1]["prior_catalog_identity"] == original["identity"]
+
+
+def test_single_relocation_refuses_a_dangling_link_at_the_old_address(tmp_path):
+    old, _, catalog, _ = fixture(tmp_path)
+    original = assets(catalog)[1]
+    destination = tmp_path / "moved-entry"
+    (old / "entry").rename(destination)
+    (old / "entry").symlink_to(tmp_path / "absent-target")
+    before = catalog.read_bytes()
+    result = invoke(catalog, "relocate", original["id"], str(destination))
+    assert result.returncode != 0 and "old path still exists" in result.stderr
+    assert catalog.read_bytes() == before

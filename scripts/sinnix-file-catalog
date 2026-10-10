@@ -19,6 +19,7 @@ import copy
 import datetime as _dt
 import fcntl
 import hashlib
+from itertools import chain
 import json
 import stat
 import subprocess
@@ -95,6 +96,30 @@ def same_identity(a: Any, b: Any, kind: str = "file") -> bool:
         return all(a.get(k) == b.get(k) for k in keys)
     keys = ("device", "inode") if kind == "collection" else ("device", "inode", "size", "mtime_ns", "mode")
     return all(a.get(k) == b.get(k) for k in keys)
+
+
+def location_identity(asset: dict[str, Any]) -> dict[str, Any]:
+    """Latest reviewed identity at this address, separate from older inspections."""
+    for observation in chain((asset.get("current_location"),), reversed(asset.get("location_observations", []))):
+        if (isinstance(observation, dict) and observation.get("path") == asset["current_path"]
+                and isinstance(observation.get("identity"), dict)):
+            return observation["identity"]
+    return asset["identity"]
+
+
+def record_location(asset: dict[str, Any], observation: dict[str, Any]) -> None:
+    asset.setdefault("location_observations", []).append(observation)
+    asset["current_location"] = observation
+    asset["location_status"] = observation["status"]
+
+
+def record_relocated_location(asset: dict[str, Any], source: str, actual: dict[str, Any]) -> None:
+    record_location(asset, {
+        "observed_at": now(), "actor": "sinnix-file-catalog", "action": "relocation",
+        "path": asset["current_path"], "source": source, "status": "available", "identity": actual,
+        "basis": "Destination matches the reviewed filesystem identity after external rename.",
+        "reason": "Verified relocation", "content_continuity": "unverified",
+    })
 
 
 def check_path_kind(path: Path, kind: str) -> None:
@@ -216,7 +241,7 @@ def check_asset(asset: Any, *, require_path: bool = True, require_identity: bool
         path = Path(asset["current_path"])
         check_path_kind(path, asset["kind"])
         actual = identity(path)
-        if not same_identity(asset.get("current_location", {}).get("identity", asset["identity"]), actual, asset["kind"]):
+        if not same_identity(location_identity(asset), actual, asset["kind"]):
             raise CatalogError(f"identity mismatch for {asset['current_path']}")
 
 
@@ -453,16 +478,26 @@ def cmd_relocate(args: argparse.Namespace) -> int:
         target = next((a for a in catalog["assets"] if a["id"] == args.id), None)
         if target is None: raise CatalogError(f"asset id not found: {args.id}")
         old_path = Path(target["current_path"])
-        if old_path.exists(): raise CatalogError(f"old path still exists; perform the external rename first: {old_path}")
+        if old_path.exists() or old_path.is_symlink(): raise CatalogError(f"old path still exists; perform the external rename first: {old_path}")
         if any(a is not target and a["current_path"] == str(new_path) for a in catalog["assets"]):
             raise CatalogError(f"new path already belongs to another asset: {new_path}")
         actual = identity(new_path)
         check_path_kind(new_path, target["kind"])
-        if not same_identity(target.get("identity"), actual, target["kind"]): raise CatalogError("new path identity does not match catalog")
+        known = location_identity(target)
+        if not same_identity(known, actual, target["kind"]): raise CatalogError("new path identity does not match catalog")
+        prior = copy.deepcopy(target["identity"])
+        continuity = same_identity(prior, actual, target["kind"])
+        target.setdefault("relocations", []).append({
+            "at": now(), "source": str(old_path), "destination": str(new_path),
+            "recorded_location_identity": copy.deepcopy(known), "after": actual,
+            "prior_catalog_identity": prior, "prior_identity_matches": continuity,
+            "basis": "Destination matches last reviewed location metadata; payload hashes are not reverified.",
+        })
         target.setdefault("previous_paths", []).append(target["current_path"])
         target["current_path"] = str(new_path)
-        extras = {k: v for k, v in target.get("identity", {}).items() if k not in actual}
-        target["identity"] = {**actual, **extras}
+        extras = {k: v for k, v in prior.items() if k not in actual}
+        target["identity"] = {**actual, **(extras if continuity else {})}
+        record_relocated_location(target, str(old_path), actual)
         validate_catalog(catalog, check_paths=False)
         write_catalog(path, catalog)
     return 0
@@ -500,7 +535,7 @@ def cmd_prepare_relocation(args: argparse.Namespace) -> int:
             check_path_kind(source, asset["kind"])
             observed = identity(source)
             continuity = same_identity(asset["identity"], observed, asset["kind"])
-            if not continuity and not args.record_existing_drift:
+            if not same_identity(location_identity(asset), observed, asset["kind"]) and not args.record_existing_drift:
                 raise CatalogError(f"existing identity drift: {old}; audit and explicitly record it first")
             rows.append({"id": asset["id"], "source": old, "destination": destination,
                          "before": observed, "catalog_identity": asset["identity"],
@@ -541,8 +576,12 @@ def cmd_relocate_batch(args: argparse.Namespace) -> int:
                 raise CatalogError("stale unavailable-asset exception")
             if Path(row["source"]).exists() or Path(row["destination"]).exists():
                 raise CatalogError("unavailable-asset exception now has a live candidate; inspect its identity")
-            asset["location_status"] = "unavailable"
-            asset.setdefault("location_observations", []).append({"at": now(), **row})
+            record_location(asset, {
+                "observed_at": now(), **row, "path": row["source"], "status": "unavailable",
+                "actor": "sinnix-file-catalog", "action": "unavailable",
+                "basis": "Prepared relocation exception; source and destination remain unavailable.",
+                "content_continuity": "unverified",
+            })
         for row in rows:
             asset = by_id[row["id"]]
             old, destination = normalized(row["source"]), normalized(row["destination"])
@@ -575,6 +614,7 @@ def cmd_relocate_batch(args: argparse.Namespace) -> int:
             # changed object. Keep them in prior_catalog_identity in that case.
             extras = {key: value for key, value in asset["identity"].items() if key not in actual}
             asset["identity"] = {**actual, **(extras if row["prior_identity_matches"] else {})}
+            record_relocated_location(asset, old, actual)
         validate_catalog(catalog, check_paths=False)
         write_catalog(path, catalog)
     return 0
@@ -636,9 +676,7 @@ def cmd_observe(args: argparse.Namespace) -> int:
             if action == 'unavailable':
                 if diagnosis['status'] == 'available':
                     raise CatalogError("unavailable observation has a live source")
-                asset.setdefault('location_observations', []).append(observation)
-                asset['current_location'] = observation
-                asset['location_status'] = diagnosis['status']
+                record_location(asset, observation)
                 continue
             if diagnosis['status'] != 'available':
                 raise CatalogError("cannot observe an unavailable source as available")
@@ -660,9 +698,7 @@ def cmd_observe(args: argparse.Namespace) -> int:
                 asset['identity'] = diagnosis['identity']
                 asset['inspections'] = [{"method": "metadata", "scope": "current location metadata only", "basis": row['basis']}]
                 asset['coverage'] = {"status": "metadata_only", "scope": "current revision; payload not inspected", "unit": "object", "discovered_count": None, "inspected_count": 0}
-            asset.setdefault('location_observations', []).append(observation)
-            asset['current_location'] = observation
-            asset['location_status'] = 'available'
+            record_location(asset, observation)
         validate_catalog(catalog, check_paths=False)
         write_catalog(path, catalog)
     print(json.dumps({"observations": len(rows), "catalog_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}))
@@ -686,7 +722,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
             row.update(diagnosis)
         else:
             actual = diagnosis['identity']
-            recorded = asset.get('current_location', {}).get('identity', asset['identity'])
+            recorded = location_identity(asset)
             keys = ("device", "inode") if asset['kind'] == 'collection' else ("device", "inode", "size", "mtime_ns", "mode")
             differences = [key for key in keys if recorded[key] != actual[key]]
             row['status'] = 'match' if not differences else 'device_only_mismatch' if differences == ['device'] else 'identity_mismatch'

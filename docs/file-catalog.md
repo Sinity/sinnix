@@ -43,7 +43,10 @@ the command does not calculate hashes as part of import.
 
 After an external same-filesystem rename, use `relocate`. The old path must be
 absent, the new path must exist, and its recorded identity must match. The
-command appends the old path to `previous_paths` and updates only catalog JSON.
+command appends the old path to `previous_paths`, records the verified current
+location and updates only catalog JSON. Identity checks use the latest reviewed
+metadata at that address, retaining earlier inspections and identity evidence in
+history. A dangling link at the old address is still an occupied address.
 Writes use an adjacent lock and an atomic replacement, so invalid input cannot
 leave a partially written catalog.
 
