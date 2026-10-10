@@ -2582,3 +2582,80 @@
          expected_status:
            type: string
            description: >-
+--- a/cmd/bd/store_factory.go
++++ b/cmd/bd/store_factory.go
+@@ -278,12 +278,9 @@
+ 		// })
+ 	}
+ 	if cfg != nil && cfg.IsDoltServerMode() {
+-		return dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{ReadOnly: true})
+-	}
+-	database := configfile.DefaultDoltDatabase
+-	if cfg != nil {
+-		database = cfg.GetDoltDatabase()
+-	}
++		return dolt.NewFromConfigWithOptions(ctx, beadsDir, foreignReadOnlyOptions(cfg))
++	}
++	database := foreignReadOnlyOptions(cfg).Database
+ 	if sanitized := sanitizeDBName(database); sanitized != database {
+ 		database = sanitized
+ 	}
+--- a/cmd/bd/store_factory_nocgo.go
++++ b/cmd/bd/store_factory_nocgo.go
+@@ -124,7 +124,7 @@
+ 		// })
+ 	}
+ 	if cfg != nil && cfg.IsDoltServerMode() {
+-		return dolt.NewFromConfigWithOptions(ctx, beadsDir, &dolt.Config{ReadOnly: true})
++		return dolt.NewFromConfigWithOptions(ctx, beadsDir, foreignReadOnlyOptions(cfg))
+ 	}
+ 	return nil, fmt.Errorf("%s", nocgoEmbeddedErrMsg)
+ }
+--- /dev/null
++++ b/cmd/bd/owner_foreign_database.go
+@@ -0,0 +1,17 @@
++package main
++
++import (
++	"github.com/steveyegge/beads/internal/configfile"
++	"github.com/steveyegge/beads/internal/storage/dolt"
++)
++
++// foreignReadOnlyOptions binds the foreign owner's database explicitly. The
++// caller may have preserved its own redirect identity in the process environment;
++// that override must not retarget reads of another project's capabilities.
++func foreignReadOnlyOptions(cfg *configfile.Config) *dolt.Config {
++	database := cfg.DoltDatabase
++	if database == "" {
++		database = configfile.DefaultDoltDatabase
++	}
++	return &dolt.Config{ReadOnly: true, Database: database}
++}
+--- /dev/null
++++ b/cmd/bd/owner_foreign_database_test.go
+@@ -0,0 +1,25 @@
++package main
++
++import (
++	"github.com/steveyegge/beads/internal/configfile"
++	"os"
++	"testing"
++)
++
++func TestOwnerContractForeignDatabaseIgnoresCallerRedirect(t *testing.T) {
++	t.Setenv("BEADS_DOLT_SERVER_DATABASE", "caller_project")
++	for _, database := range []string{"foreign_project", ""} {
++		metadata := &configfile.Config{DoltDatabase: database}
++		options := foreignReadOnlyOptions(metadata)
++		want := database
++		if want == "" {
++			want = configfile.DefaultDoltDatabase
++		}
++		if !options.ReadOnly || options.Database != want {
++			t.Fatalf("foreign open options = %+v, want read-only database %q", options, want)
++		}
++		if metadata.GetDoltDatabase() != "caller_project" || os.Getenv("BEADS_DOLT_SERVER_DATABASE") != "caller_project" {
++			t.Fatal("foreign read changed the caller's database selection")
++		}
++	}
++}
