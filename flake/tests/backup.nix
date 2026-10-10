@@ -217,6 +217,8 @@ assert lib.assertMsg (
           "Polylogue state Borg job must omit only the live hook input by its physical source path";
         assert lib.assertMsg (lib.hasInfix "seal-polylogue-hooks.py" script)
           "Polylogue state Borg job must seal hook carriers before archiving them";
+        assert lib.assertMsg (lib.hasInfix "cut-polylogue-hooks.py" script)
+          "Polylogue state hooks must be sealed from a verified read-only native cut";
         assert lib.assertMsg (lib.hasInfix "state/cache/polylogue-backup-hooks" script)
           "Polylogue state Borg job must use its stable private hooks cache";
         assert lib.assertMsg (lib.hasInfix "install -d -m 0700 -o root -g root" script)
@@ -716,6 +718,9 @@ assert lib.assertMsg (
             nativeBuildInputs = [ pkgs.python3 ];
           }
           ''
+            ${pkgs.python3}/bin/python3 ${./polylogue-hook-cut.py} \
+              ${../../modules/lib/backup/cut-polylogue-hooks.py} \
+              ${../../modules/lib/backup/seal-polylogue-hooks.py}
             missing_state="$TMPDIR/state-root"
             missing_source="$missing_state/hooks"
             missing_stage="$TMPDIR/missing-sealed/realm/state/polylogue/hooks"

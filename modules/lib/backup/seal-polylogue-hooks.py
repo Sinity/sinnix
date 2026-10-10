@@ -243,9 +243,9 @@ def _cached_file_matches(
             ):
                 return False
             # A completed manifest remains valid for pre-checkpoint cache files.
-            return completed_record or json.loads(
-                os.getxattr(fd, SOURCE_RECORD_XATTR)
-            ) == expected
+            return completed_record or _same_source_record(
+                json.loads(os.getxattr(fd, SOURCE_RECORD_XATTR)), expected
+            )
         finally:
             os.close(fd)
     except (OSError, ValueError):
@@ -330,10 +330,37 @@ def _clone_file(
         temporary.unlink(missing_ok=True)
 
 
-def _sync_once(
-    source: Path, destination: Path, old_manifest: dict[str, dict[str, object]]
+def _same_source_record(old: dict[str, object] | None, new: dict[str, object]) -> bool:
+    if not isinstance(old, dict):
+        return False
+    if (
+        new.get("source_subvolume_uuid")
+        and old.get("source_subvolume_uuid") == new["source_subvolume_uuid"]
+    ):
+        # Read-only cuts retain inode and change metadata but have their own device.
+        return {k: v for k, v in old.items() if k != "dev"} == {
+            k: v for k, v in new.items() if k != "dev"
+        }
+    return old == new
+
+
+def _source_manifest(
+    source: Path, source_identity: str | None
 ) -> dict[str, dict[str, object]]:
-    source_manifest = _manifest(source)
+    records = _manifest(source)
+    if source_identity is not None:
+        for record in records.values():
+            record["source_subvolume_uuid"] = source_identity
+    return records
+
+
+def _sync_once(
+    source: Path,
+    destination: Path,
+    old_manifest: dict[str, dict[str, object]],
+    source_identity: str | None = None,
+) -> dict[str, dict[str, object]]:
+    source_manifest = _source_manifest(source, source_identity)
     for relative, record in sorted(source_manifest.items()):
         dst = destination / relative
         _ensure_parent_directories(destination, dst.parent)
@@ -344,7 +371,7 @@ def _sync_once(
         elif record["kind"] == "file":
             with _phase("cache_validation"):
                 unchanged = _cached_file_matches(
-                    dst, record, old_manifest.get(relative) == record
+                    dst, record, _same_source_record(old_manifest.get(relative), record)
                 )
             if unchanged:
                 _count("reused_files")
@@ -358,7 +385,7 @@ def _sync_once(
                 old_manifest[relative] = record
         else:
             unchanged = (
-                old_manifest.get(relative) == record
+                _same_source_record(old_manifest.get(relative), record)
                 and dst.is_symlink()
                 and os.readlink(dst) == record["target"]
             )
@@ -381,7 +408,7 @@ def _sync_once(
                 )
                 os.replace(temporary, dst)
 
-    if _manifest(source) != source_manifest:
+    if _source_manifest(source, source_identity) != source_manifest:
         raise OSError("hook tree changed during seal pass")
     staged_paths = _manifest(destination)
     for relative in sorted(
@@ -424,7 +451,7 @@ def _write_manifest(path: Path, manifest: dict[str, dict[str, object]]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _seal() -> int:
+def _seal(source_identity: str | None = None) -> int:
     if len(sys.argv) != 3:
         print(f"usage: {sys.argv[0]} SOURCE_HOOKS DESTINATION_HOOKS", file=sys.stderr)
         return 64
@@ -477,16 +504,22 @@ def _seal() -> int:
                             else:
                                 stale.unlink(missing_ok=True)
                     else:
-                        manifest = _sync_once(source, destination, old_manifest)
+                        manifest = (
+                            _sync_once(source, destination, old_manifest)
+                            if source_identity is None
+                            else _sync_once(
+                                source, destination, old_manifest, source_identity
+                            )
+                        )
                     if source_absent:
                         try:
                             source.lstat()
                         except FileNotFoundError:
                             current = {}
                         else:
-                            current = _manifest(source)
+                            current = _source_manifest(source, source_identity)
                     else:
-                        current = _manifest(source)
+                        current = _source_manifest(source, source_identity)
                     if current == manifest:
                         _fsync_directory(destination)
                         _write_manifest(manifest_path, manifest)
@@ -503,7 +536,7 @@ def _seal() -> int:
         return 1
 
 
-def main() -> int:
+def main(source_identity: str | None = None) -> int:
     global _metrics
     now = time.monotonic()
     _metrics = {
@@ -519,7 +552,7 @@ def main() -> int:
         signal.signal(signal.SIGTERM, _termination_report)
     _report("start", force=True)
     try:
-        result = _seal()
+        result = _seal(source_identity)
         _report("complete" if result == 0 else "failed", force=True)
         return result
     finally:

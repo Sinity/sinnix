@@ -32,3 +32,5 @@ ACLs. Display names and entry order do not define identity. The policy fingerpri
 includes this metadata contract, so a receipt from the former presence-only ACL
 check cannot qualify the stronger proof. Existing receipts remain historical
 evidence; a full comparison under the current contract must establish a new baseline.
+
+The Polylogue state archive seals hooks from a read-only cut of its dedicated Btrfs state subvolume. The producer verifies the source and cut UUIDs, the cut's parent UUID and read-only flag, and refuses nested subvolumes that a snapshot would omit. Writers continue against live state while the sealer reads the cut. Its durable cache keeps the existing logical archive paths and strict per-file and whole-tree checks. Verified origin UUIDs allow reuse across cuts despite device-number changes; inode and change metadata must still match. Failed provisional cuts remain in the private hook cache for owner recovery. Successful sealing removes only that invocation's verified cut before Borg creation. This cache cleanup does not prune historical restore points or change archive acceptance.

@@ -158,7 +158,8 @@
 
   # Direct-path borg covers the state root, except live SQLite files and the
   # append-only hook tree. SQLite is covered by the dump job above; hooks are
-  # reflink-sealed first so Borg reads a stable copy while producers append.
+  # reflink-sealed from a read-only state cut so writers can keep appending.
+  # Failed provisional cuts remain in the private cache for owner recovery.
   (mkBackupJob "borgbackup-job-polylogue-state" {
     description = "Back up Polylogue state (blob CAS and non-live files) into Borg";
     unit = {
@@ -181,6 +182,7 @@
       coreutils
       gnugrep
       util-linux
+      btrfs-progs
     ];
     timer = {
       # Leave 105 minutes before the drain coordinator; a 90-minute service
@@ -208,8 +210,10 @@
       stage_hooks="$stage_root/$stage_relative_root/hooks"
       staged_hook_source="$stage_root/./$stage_relative_root/hooks"
       echo "polylogue state backup phase: sealing hooks"
-      ${pkgs.python3}/bin/python3 ${./seal-polylogue-hooks.py} \
-        ${lib.escapeShellArg "${polylogueStateRoot}/hooks"} "$stage_hooks"
+      install -d -m 0700 -o root -g root "$stage_root/cuts" "$(dirname "$stage_hooks")"
+      ${pkgs.python3}/bin/python3 ${./cut-polylogue-hooks.py} \
+        ${lib.escapeShellArg polylogueStateRoot} "$stage_hooks" "$stage_root/cuts" \
+        ${./seal-polylogue-hooks.py}
       echo "polylogue state backup phase: creating archive"
       with_borg_lock borg create \
         --compression auto,zstd,1 \

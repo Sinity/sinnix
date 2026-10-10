@@ -1084,7 +1084,7 @@ class DrainFixture(unittest.TestCase):
             (root / "identities.json").write_text("{}")
             (root / "generations.json").write_text("{}")
             mock = """#!PYTHON
-import json, os, pathlib, shutil, subprocess, sys
+import json, os, pathlib, shutil, subprocess, sys, uuid
 root=pathlib.Path(os.environ['TMPDIR']); command=pathlib.Path(sys.argv[0]).name; args=sys.argv[1:]
 with (root/'logs/commands').open('a') as log: log.write(json.dumps([command,*args])+'\\n')
 if command=='borg':
@@ -1121,7 +1121,20 @@ elif command=='umount':
 elif command=='btrfs':
     identities=json.loads((root/'identities.json').read_text())
     generations=json.loads((root/'generations.json').read_text())
-    if args[:2]==['subvolume','show']:
+    parents_path=root/'cut-parents.json'
+    parents=json.loads(parents_path.read_text()) if parents_path.exists() else {}
+    if args[:2]==['subvolume','list']: pass
+    elif args[:3]==['subvolume','snapshot','-r']:
+        source,target=args[3:]
+        shutil.copytree(source,target,symlinks=True)
+        identities[target]=str(uuid.uuid4()); generations[target]=generations[source]
+        parents[target]=identities[source]
+        (root/'identities.json').write_text(json.dumps(identities))
+        (root/'generations.json').write_text(json.dumps(generations))
+        parents_path.write_text(json.dumps(parents))
+    elif args[:2]==['subvolume','show']:
+        print('Parent UUID: '+parents.get(args[2],'-'))
+        print('Flags: '+('readonly' if args[2] in parents else '-'))
         print('UUID: '+identities[args[2]])
         print('Gen at creation: '+str(generations[args[2]]))
         print('Subvolume ID: '+str(100+generations[args[2]]))
@@ -1417,6 +1430,12 @@ else: sys.exit(1)
                 file = root / relative
                 file.parent.mkdir(parents=True, exist_ok=True)
                 file.write_text(data)
+            identities = json.loads((root / "identities.json").read_text())
+            identities[str(root / "live-polylogue")] = str(uuid.uuid4())
+            (root / "identities.json").write_text(json.dumps(identities))
+            generations = json.loads((root / "generations.json").read_text())
+            generations[str(root / "live-polylogue")] = 1
+            (root / "generations.json").write_text(json.dumps(generations))
             run("sinex")
             (root / "logs/append-hooks").touch()
             run("polylogue")
@@ -1504,7 +1523,8 @@ else: sys.exit(1)
                     original + '{"event":"written-during-borg-create"}\n',
                 )
             # The first create deliberately races a live append. Seal that
-            # append, then compare two archives with an unchanged stage.
+            # append, then compare unchanged hook payloads. The snapshot mock
+            # copies files into fresh inodes; native cut reuse is checked separately.
             hook = next(
                 (root / "realm-data/state/cache/polylogue-backup-hooks").rglob(
                     "codex-session-live.jsonl"
@@ -1512,7 +1532,7 @@ else: sys.exit(1)
             )
             time.sleep(1.1)
             run("polylogue")
-            stable_inode = hook.stat().st_ino
+            stable_payload = hook.read_bytes()
             time.sleep(1.1)
             before_io = resource.getrusage(resource.RUSAGE_CHILDREN).ru_inblock
             started = time.monotonic()
@@ -1522,7 +1542,7 @@ else: sys.exit(1)
                 f"elapsed_seconds={time.monotonic() - started:.3f} "
                 f"child_input_blocks={resource.getrusage(resource.RUSAGE_CHILDREN).ru_inblock - before_io}"
             )
-            self.assertEqual(hook.stat().st_ino, stable_inode)
+            self.assertEqual(hook.read_bytes(), stable_payload)
             shutil.rmtree(root / "live-polylogue/hooks")
             time.sleep(1.1)
             run("polylogue")
