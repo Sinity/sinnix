@@ -59,7 +59,10 @@ Every observation, including an unavailable source, advances the current
 location while retaining the earlier observation history. Missing paths, offline
 mounts, access denial and wrong object types are recorded separately. Device
 numbers are observations; filesystem UUID and Btrfs subvolume identity are
-recorded when available. These checks do not hash payloads.
+recorded when available. External locations require a mounted ancestor within
+their declared external root before payload metadata is probed. A mounted child
+of `/mnt` is checked even when `/mnt` itself is a container directory. These
+checks do not hash payloads.
 
 Record an observation after inspecting a file, while its content and scope are
 still available. Use specific descriptions, date roles and evidence for

@@ -30,6 +30,7 @@ from typing import Any
 
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.catalog_paths import normalized, relocate_path, resolve_historical_path
+from sinnix_lib.mounts import has_mounted_ancestor, read_mountpoints
 
 SCHEMA_VERSION = 1
 REQUIRED_INSPECTION = ("method", "scope", "basis")
@@ -587,6 +588,14 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
 
 def location_diagnosis(path: Path, kind: str) -> dict:
+    external = next((root for root in (Path('/outer-realm'), Path('/neo-outer-realm'), Path('/mnt')) if path.is_relative_to(root)), None)
+    if external is not None:
+        try:
+            mounted = read_mountpoints()
+        except (OSError, ValueError) as exc:
+            return {"status": "inaccessible", "reason": f"cannot observe external mounts: {exc}"}
+        if not has_mounted_ancestor(path, external, mounted):
+            return {"status": "offline_mount", "reason": str(external)}
     try:
         info = path.stat()
         if not (stat.S_ISDIR(info.st_mode) if kind == "collection" else stat.S_ISREG(info.st_mode)):
@@ -595,10 +604,6 @@ def location_diagnosis(path: Path, kind: str) -> dict:
     except PermissionError as exc:
         return {"status": "denied", "reason": str(exc)}
     except FileNotFoundError as exc:
-        # External packages require their mount. Do not call an offline mount missing data.
-        external = next((root for root in (Path('/outer-realm'), Path('/neo-outer-realm'), Path('/mnt')) if path.is_relative_to(root)), None)
-        if external is not None and not os.path.ismount(external):
-            return {"status": "offline_mount", "reason": str(external)}
         return {"status": "missing", "reason": str(exc)}
     except OSError as exc:
         return {"status": "inaccessible", "reason": str(exc)}

@@ -17,6 +17,7 @@ python3Packages.buildPythonPackage {
     "sinnix_lib.ledger"
     "sinnix_lib.secrets"
     "sinnix_lib.lock"
+    "sinnix_lib.mounts"
     "sinnix_lib.note_links"
     "sinnix_lib.notify"
     "sinnix_lib.paths"

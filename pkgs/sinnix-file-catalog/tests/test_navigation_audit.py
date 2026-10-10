@@ -52,11 +52,58 @@ def test_external_collection_is_not_statted(tmp_path, monkeypatch):
     offline = tmp_path / 'offline'
     document = tmp_path / 'README.md'
     document.write_text('[external](offline/x.md)')
-    original = os.lstat
-    def guarded(path, *args, **kwargs):
-        assert not Path(path).is_relative_to(offline)
-        return original(path, *args, **kwargs)
-    monkeypatch.setattr(os, 'lstat', guarded)
+    def guard(original):
+        def guarded(path, *args, **kwargs):
+            if isinstance(path, (str, os.PathLike)):
+                assert not Path(path).is_relative_to(offline)
+            return original(path, *args, **kwargs)
+        return guarded
+    monkeypatch.setattr(os, 'lstat', guard(os.lstat))
+    monkeypatch.setattr(os, 'stat', guard(os.stat))
     report = audit({'schema_version': 1, 'documents': [str(document)], 'external_roots': [str(offline)]})
     assert report['failures'] == 0
     assert report['links'][0]['status'] == 'external-unprobed'
+
+
+def test_mounted_child_links_are_probed_and_missing_links_fail(tmp_path, monkeypatch):
+    import runpy
+
+    external = tmp_path / "external"
+    mounted = external / "fixture-disk"
+    mounted.mkdir(parents=True)
+    (mounted / "present.md").write_text("present")
+    document = tmp_path / "README.md"
+    document.write_text("[present](external/fixture-disk/present.md)\n[absent](external/fixture-disk/absent.md)\n")
+    read_text = Path.read_text
+
+    def read(self, *args, **kwargs):
+        if self == Path("/proc/self/mountinfo"):
+            return f"1 0 8:1 / {mounted} rw - ext4 /dev/fixture rw\n"
+        return read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    audit = runpy.run_path(str(SCRIPT))["audit"]
+    report = audit({"schema_version": 1, "documents": [str(document)], "external_roots": [str(external)]})
+    assert report["failures"] == 1
+    assert [row["status"] for row in report["links"]] == ["ok", "missing"]
+
+
+def test_mountinfo_tab_escape_matches_a_real_link(tmp_path, monkeypatch):
+    import runpy
+
+    external = tmp_path / "external\troot"
+    external.mkdir()
+    (external / "present.md").write_text("present")
+    document = tmp_path / "README.md"
+    document.write_text("[present](external%09root/present.md)\n")
+    escaped = str(external).replace("\t", r"\011")
+    read_text = Path.read_text
+
+    def read(self, *args, **kwargs):
+        if self == Path("/proc/self/mountinfo"):
+            return f"1 0 8:1 / {escaped} rw - ext4 /dev/fixture rw\n"
+        return read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    report = runpy.run_path(str(SCRIPT))["audit"]({"schema_version": 1, "documents": [str(document)], "external_roots": [str(external)]})
+    assert report["links"][0]["status"] == "ok"

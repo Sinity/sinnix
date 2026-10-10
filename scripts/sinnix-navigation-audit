@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from sinnix_lib.note_links import prose_mask
+from sinnix_lib.mounts import has_mounted_ancestor, read_mountpoints
 
 INLINE = re.compile(r"!?\[[^\]\n]*\]\(\s*(<[^>\n]+>|(?:\\.|[^\s()])+(?:\([^()]*\)(?:\\.|[^\s()])*)*)[^\n)]*\)")
 REFERENCE = re.compile(r"^\s{0,3}\[[^\]\n]+\]:\s*(<[^>\n]+>|\S+)", re.M)
@@ -26,9 +27,9 @@ def audit(manifest: dict) -> dict:
     if any(not root.is_absolute() for root in external):
         raise ValueError("external roots must be absolute")
     try:
-        mounted = {line.split()[4].replace("\\040", " ") for line in Path("/proc/self/mountinfo").read_text().splitlines()}
-    except OSError:
-        mounted = set()
+        mounted = read_mountpoints()
+    except (OSError, ValueError):
+        mounted = frozenset()
     rows = []
     for name in manifest["documents"]:
         document = Path(name)
@@ -50,7 +51,7 @@ def audit(manifest: dict) -> dict:
             if not destination.is_absolute():
                 destination = document.parent / destination
             destination = Path(os.path.abspath(destination))
-            offline = any(destination.is_relative_to(root) and str(root) not in mounted for root in external)
+            offline = any(destination.is_relative_to(root) and not has_mounted_ancestor(destination, root, mounted) for root in external)
             rows.append({"document": str(document), "target": target,
                          "destination": str(destination),
                          "status": "external-unprobed" if offline else "ok" if destination.exists() else "missing"})
