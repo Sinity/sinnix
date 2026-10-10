@@ -246,3 +246,34 @@ def test_legacy_content_without_boundary_records_reports_unknown_coverage(tmp_pa
     assert coverage["incomplete"] is True
     assert coverage["content_errors"] == 0
     assert coverage["content_boundaries"] is None
+
+
+@pytest.mark.parametrize("manifest", [
+    [],
+    {"schema": "sinnix.fs-generation.v1", "generation": "synthetic"},
+    {"schema": "sinnix.fs-generation.v1", "generation": "synthetic",
+     "scan": [], "invalid_definitions": [], "ledger_sha256": "a" * 64},
+    {"schema": "sinnix.fs-generation.v1", "generation": "synthetic",
+     "scan": {}, "invalid_definitions": {}, "ledger_sha256": "a" * 64},
+    {"schema": "sinnix.fs-generation.v1", "generation": "synthetic",
+     "scan": {}, "invalid_definitions": [], "ledger_sha256": "sampled"},
+])
+def test_status_reports_invalid_manifest_without_probing_databases(tmp_path, monkeypatch, capsys, manifest):
+    import json
+
+    fs = load_script()
+    index = tmp_path / "index"
+    generation = index / "generations/synthetic"
+    generation.mkdir(parents=True)
+    source = generation / "manifest.json"
+    source.write_text(json.dumps(manifest))
+    before = source.read_bytes()
+    (index / "current").symlink_to("generations/synthetic", target_is_directory=True)
+    def unexpected_validation(*args):
+        raise AssertionError("invalid metadata must be rejected before database validation")
+    monkeypatch.setattr(fs, "validate_generation", unexpected_validation)
+    assert fs.cmd_status(SimpleNamespace(index_dir=index)) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["valid"] is False
+    assert "invalid generation" in report["reason"]
+    assert source.read_bytes() == before

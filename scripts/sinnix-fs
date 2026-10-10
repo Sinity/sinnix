@@ -1118,7 +1118,7 @@ def resolve_generation(index_dir: Path) -> Path:
     if generation.parent != (index_dir / "generations").resolve():
         raise ValueError("generation pointer escapes its owning store")
     manifest = json.loads((generation / "manifest.json").read_text())
-    if manifest.get("schema") != "sinnix.fs-generation.v1" or manifest.get("generation") != generation.name:
+    if not isinstance(manifest, dict) or manifest.get("schema") != "sinnix.fs-generation.v1" or manifest.get("generation") != generation.name:
         raise ValueError("invalid generation manifest")
     return generation
 
@@ -1287,6 +1287,11 @@ def cmd_status(args: argparse.Namespace) -> int:
     try:
         generation = resolve_generation(args.index_dir)
         manifest = json.loads((generation / "manifest.json").read_text())
+        if (not isinstance(manifest.get("scan"), dict)
+                or not isinstance(manifest.get("invalid_definitions"), list)
+                or not isinstance(manifest.get("ledger_sha256"), str)
+                or not re.fullmatch(r"[0-9a-fA-F]{64}", manifest["ledger_sha256"])):
+            raise ValueError("invalid generation status metadata")
         validate_generation(generation)
         result.update(valid=True, generation=str(generation), scan=manifest["scan"],
                       invalid_definitions=manifest["invalid_definitions"],
