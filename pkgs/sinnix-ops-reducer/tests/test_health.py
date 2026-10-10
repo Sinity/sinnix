@@ -972,3 +972,42 @@ def test_newest_mtime_is_bounded_and_finds_newest_partition_first(tmp_path):
     assert not result.complete and result.reason == "budget"
     assert len(stats) <= 199  # The root directory stat uses the remaining slot.
     assert len(stats) < 2000  # 50 dirs * 40 files: an exhaustive walk stats them all
+
+
+@pytest.mark.parametrize(
+    "unit_type,code,exit_status,accepted,expected",
+    [
+        ("oneshot", "1", "1", "", "failed"),
+        ("exec", "1", "1", "", "failed"),
+        ("oneshot", "1", "75", "75", "healthy"),
+        ("oneshot", "1", "0", "", "healthy"),
+        ("exec", "2", "15", "", "healthy"),
+        ("oneshot", "2", "15", "", "failed"),
+        ("oneshot", "2", "15", "SIGTERM", "healthy"),
+        ("exec", "2", "11", "", "failed"),
+        ("exec", "3", "11", "", "failed"),
+    ],
+)
+def test_reset_failure_does_not_erase_retained_process_outcome(
+    unit_type, code, exit_status, accepted, expected
+):
+    entry = {"unit": "retained-exit.service", "manager": "system"}
+    properties = {
+        ("system", entry["unit"]): {
+            "ActiveState": "inactive",
+            "Type": unit_type,
+            "Result": "success",
+            "WantedBy": "",
+            "ExecMainCode": code,
+            "ExecMainStatus": exit_status,
+            "SuccessExitStatus": accepted,
+        }
+    }
+    recorder = CaptureRecorder()
+
+    health.sweep_services([entry], properties, recorder)
+
+    assert len(recorder.events) == 1
+    assert recorder.events[0][1] == expected
+    if expected == "failed":
+        assert f"exec_main_status={exit_status}" in recorder.events[0][2]

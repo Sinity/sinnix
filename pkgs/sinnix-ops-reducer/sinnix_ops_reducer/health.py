@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import stat
 import subprocess
 import time
@@ -85,7 +86,16 @@ CALM_STATUSES = frozenset({"unproduced"})
 
 PAYLOAD_SAMPLE_SIZE = 50
 PAYLOAD_MIN_SAMPLES = 5
-SERVICE_PROPERTIES = ("Id", "ActiveState", "Type", "Result", "WantedBy")
+SERVICE_PROPERTIES = (
+    "Id",
+    "ActiveState",
+    "Type",
+    "Result",
+    "WantedBy",
+    "ExecMainCode",
+    "ExecMainStatus",
+    "SuccessExitStatus",
+)
 SWEEP_INTERVAL_SECONDS = 60.0
 
 
@@ -895,6 +905,28 @@ def unit_properties(
     return found
 
 
+def _retained_exit_failed(info: dict[str, str]) -> bool:
+    # reset-failed clears Result without clearing the last main-process exit.
+    # Respect systemd's accepted exit codes and clean daemon stop signals.
+    try:
+        code = int(info.get("ExecMainCode", "0"))
+        status = int(info.get("ExecMainStatus", "0"))
+    except ValueError:
+        return False
+    accepted = set(info.get("SuccessExitStatus", "").split())
+    if code == 1:  # CLD_EXITED
+        return status != 0 and str(status) not in accepted
+    if code in {2, 3}:  # CLD_KILLED / CLD_DUMPED
+        if info.get("Type") != "oneshot":
+            accepted.update({"SIGHUP", "SIGINT", "SIGPIPE", "SIGTERM"})
+        try:
+            name = signal.Signals(status).name
+        except ValueError:
+            return True
+        return name not in accepted
+    return False
+
+
 def sweep_services(
     services: Sequence[dict[str, Any]],
     properties: dict[tuple[str, str], dict[str, str]],
@@ -904,12 +936,13 @@ def sweep_services(
     never from a hardcoded unit list, which would rot the moment a new oneshot
     or on-demand backend is added:
 
-      - a oneshot judges itself by Result -- it is SUPPOSED to go inactive once
-        it finishes; ran-and-succeeded is healthy, anything else failed;
+      - a oneshot is SUPPOSED to go inactive once it finishes. Result and the
+        retained process exit must both be clean; reset-failed alone is not
+        evidence that the process succeeded;
       - a unit nothing pulls in at boot/login (WantedBy empty) is on-demand by
         design, as is a declared socket-proxy backend; inactive is its correct
         resting state. "On-demand" excuses being inactive, not having crashed,
-        so Result must still say the last run ended cleanly;
+        so the result and retained exit must both be clean;
       - anything else that isn't active is a daemon that IS supposed to be
         running and isn't.
     """
@@ -929,6 +962,12 @@ def sweep_services(
         unit_type = info.get("Type", "")
         result = info.get("Result", "")
         wanted_by = info.get("WantedBy", "")
+        clean_exit = result == "success" and not _retained_exit_failed(info)
+        exit_evidence = (
+            f"exec_main_code={info.get('ExecMainCode', '')};"
+            f"exec_main_status={info.get('ExecMainStatus', '')};"
+            f"success_exit_status={info.get('SuccessExitStatus', '')}"
+        )
         key = f"service:{manager}:{unit}"
 
         if not active_state:
@@ -939,15 +978,18 @@ def sweep_services(
                 f"manager={manager};active_state={active_state}",
             )
         elif active_state == "inactive" and unit_type == "oneshot":
-            status = "healthy" if result == "success" else "failed"
-            evidence = f"manager={manager};active_state={active_state};type=oneshot;result={result}"
+            status = "healthy" if clean_exit else "failed"
+            evidence = (
+                f"manager={manager};active_state={active_state};type=oneshot;"
+                f"result={result};{exit_evidence}"
+            )
         elif active_state == "inactive" and (
             activation_mode == "socket-proxy" or not wanted_by
         ):
-            status = "healthy" if result == "success" else "failed"
+            status = "healthy" if clean_exit else "failed"
             evidence = (
                 f"manager={manager};active_state={active_state};"
-                f"activation_mode={activation_mode};wanted_by=;on-demand;result={result}"
+                f"activation_mode={activation_mode};wanted_by=;on-demand;result={result};{exit_evidence}"
             )
         elif active_state in {"inactive", "failed"}:
             status = "failed"
