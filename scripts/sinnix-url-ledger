@@ -840,6 +840,11 @@ def _iso_to_epoch(value: str) -> float | None:
     return None
 
 
+def sql_path(path: Path) -> str:
+    """Quote one filesystem path as a DuckDB string literal."""
+    return "'" + path.as_posix().replace("'", "''") + "'"
+
+
 def cmd_build(args: argparse.Namespace) -> int:
     state_dir = Path(args.state_root)
     urls_path = state_dir / "urls.jsonl"
@@ -927,9 +932,9 @@ def cmd_build(args: argparse.Namespace) -> int:
 
     sql = f"""
 CREATE TABLE url_ledger AS
-  SELECT * FROM read_json_auto('{coverage_path.as_posix()}', format='newline_delimited');
+  SELECT * FROM read_json_auto({sql_path(coverage_path)}, format='newline_delimited');
 
-COPY url_ledger TO '{parquet_path.as_posix()}' (FORMAT PARQUET);
+COPY url_ledger TO {sql_path(parquet_path)} (FORMAT PARQUET);
 
 COPY (
   SELECT
@@ -942,7 +947,7 @@ COPY (
       THEN sum(visits_with_snapshot_within_window)::DOUBLE / sum(visit_count)
       ELSE NULL END AS visit_coverage_fraction
   FROM url_ledger
-) TO '{stats_path.as_posix()}' (FORMAT JSON, ARRAY true);
+) TO {sql_path(stats_path)} (FORMAT JSON, ARRAY true);
 """
     # duckdb's CLI only durably commits writes against the on-disk file when
     # driven via `-f <script>` -- piping the same SQL over stdin (even with

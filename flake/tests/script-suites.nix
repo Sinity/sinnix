@@ -99,6 +99,7 @@
           suiteDir = ../../scripts/tests/url-ledger;
           scripts = [ "sinnix-url-ledger" ];
           extraPythonPackages = [ sinnix-lib ];
+          nativeBuildInputs = [ pkgs.duckdb ];
         };
         audio-mic-suite = mkScriptSuite {
           name = "audio-mic";
