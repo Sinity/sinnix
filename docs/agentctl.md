@@ -227,10 +227,10 @@ filter, so a job read costs one small response however long the queue's
 history grows.
 
 When the admission pass reports `hold` or `clear`, the recurring backpressure
-command checks the current reference-bound cross-pool hold release. It does not run the legacy hold-retirement helper or
-re-enqueue a task solely because an old launch marker names a hold. Historical
-spool records for tasks absent from pueue are retired as observations, without
-starting work.
+command releases cross-pool holds only when the launch reference and both
+recorded pools match the stashed task. Old markers without that identity remain
+untouched. Historical spool records for tasks absent from pueue are retired as
+observations, without starting work.
 
 `job cancel` drops a queued task out of the queue (`removed`); for a running
 task it writes the cancel marker, runs `systemctl --user stop <unit>`, then

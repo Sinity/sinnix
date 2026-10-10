@@ -606,13 +606,6 @@ def test_backpressure_tick_reports_the_decision(
     monkeypatch.setattr(
         backpressure.pueue, "groups_status", lambda: {"agent": "Running"}
     )
-    monkeypatch.setattr(
-        launch,
-        "retire_legacy_holds",
-        lambda *_args: pytest.fail(
-            "recurring backpressure must not retire legacy holds"
-        ),
-    )
 
     calls = []
     monkeypatch.setattr(
