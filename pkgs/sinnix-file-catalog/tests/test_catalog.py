@@ -417,3 +417,23 @@ def test_audit_is_not_a_content_inspection_or_collection_membership_check(
     assert audit["findings"] == []
     assert "no payload hash" in audit["scope"]
     assert catalog.read_bytes() == before
+
+
+def test_supplied_sha256_requires_full_hex_digest_without_mutating_catalog(tmp_path):
+    import runpy
+
+    payload = tmp_path / "note"
+    payload.write_text("neutral sample")
+    catalog = tmp_path / "catalog.json"
+    assert import_rows(catalog, [observation(payload)]).returncode == 0
+    before = catalog.read_bytes()
+    identity = runpy.run_path(str(SCRIPT))["identity"](payload)
+    for digest in ("", "a" * 12, "a" * 63, "a" * 65, "g" * 64, "a" * 63 + "\n"):
+        result = import_rows(catalog, [observation(payload, identity={**identity, "sha256": digest})])
+        assert result.returncode == 2, (digest, result.stderr)
+        assert "64 hexadecimal" in result.stderr
+        assert catalog.read_bytes() == before
+    digest = "aB" * 32
+    result = import_rows(catalog, [observation(payload, identity={**identity, "sha256": digest})])
+    assert result.returncode == 0, result.stderr
+    assert assets(catalog)[0]["identity"]["sha256"] == digest

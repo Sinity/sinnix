@@ -82,7 +82,7 @@ def test_existing_drift_is_explicit_retained_history_not_hash_certification(tmp_
     old, new, catalog, moves = fixture(tmp_path)
     value = json.loads(catalog.read_text())
     value["assets"][1]["identity"]["inode"] = -1
-    value["assets"][1]["identity"]["sha256"] = "historical attribution"
+    value["assets"][1]["identity"]["sha256"] = "ab" * 32
     catalog.write_text(json.dumps(value))
     result, receipt = prepare(tmp_path, catalog, moves)
     assert result.returncode != 0 and "existing identity drift" in result.stderr
@@ -92,7 +92,7 @@ def test_existing_drift_is_explicit_retained_history_not_hash_certification(tmp_
     assert invoke(catalog, "relocate-batch", str(receipt)).returncode == 0
     moved = assets(catalog)[1]
     assert "sha256" not in moved["identity"]
-    assert moved["relocations"][0]["prior_catalog_identity"]["sha256"] == "historical attribution"
+    assert moved["relocations"][0]["prior_catalog_identity"]["sha256"] == "ab" * 32
     assert moved["relocations"][0]["prior_identity_matches"] is False
 
 

@@ -40,8 +40,9 @@ the history resolver. Current and former addresses reject dot segments,
 repeated separators and control characters before metadata probing. The catalog records device, inode, size,
 modification time, and mode. If an existing path has a different identity,
 the import fails instead of replacing the identity associated with prior
-inspections. A supplied `identity.sha256` is retained as an attributed value;
-the command does not calculate hashes as part of import.
+inspections. A supplied `identity.sha256` requires exactly 64 hexadecimal characters and is
+retained as an attributed value, preserving its spelling. The command does not
+calculate hashes as part of import.
 
 After an external same-filesystem rename, use `relocate`. The old path must be
 absent, the new path must exist, and its recorded identity must match. The

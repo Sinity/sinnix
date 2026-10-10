@@ -189,8 +189,11 @@ def check_asset(asset: Any, *, require_path: bool = True, require_identity: bool
         for key in ("device", "inode", "size", "mtime_ns", "mode"):
             if not isinstance(asset["identity"].get(key), int):
                 raise CatalogError(f"identity requires integer {key}")
-        if "sha256" in asset["identity"] and not isinstance(asset["identity"]["sha256"], str):
-            raise CatalogError("identity sha256 must be a string")
+        if "sha256" in asset["identity"]:
+            digest = asset["identity"]["sha256"]
+            if (not isinstance(digest, str) or len(digest) != 64
+                    or any(c not in "0123456789abcdefABCDEF" for c in digest)):
+                raise CatalogError("identity sha256 must contain exactly 64 hexadecimal characters")
     try:
         parsed_id = uuid.UUID(asset["id"])
     except (ValueError, AttributeError):
