@@ -848,7 +848,7 @@ ACTIONS: tuple[Action, ...] = (
         resource_kinds=("project",),
         affordances=("projects.get", "beads.query", "projects.diff", "projects.tree"),
         aliases=("orient", "overview", "where are we", "triage", "what is ready"),
-        documentation="Components are budgeted independently; an unavailable component names its reason and source ref so the caller can follow the direct route.",
+        documentation="Project-scoped view of context.compose with the same owner coverage, compact presentation and snapshot retrieval, plus project navigation affordances.",
         examples=(
             Example(title="Orientation", input=_EXAMPLE),
             Example(title="Triage", input={**_EXAMPLE, "intent": "project.triage"}),
