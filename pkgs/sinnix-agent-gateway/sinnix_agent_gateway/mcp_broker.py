@@ -879,7 +879,7 @@ class McpBrokerService:
         environment: dict[str, str],
     ) -> StdioServerParameters:
         return StdioServerParameters(
-            command=server["command"], args=server["args"], env=environment
+            command=server["command"], args=server.get("args", []), env=environment
         )
 
     @staticmethod

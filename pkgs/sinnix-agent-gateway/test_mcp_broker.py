@@ -172,6 +172,22 @@ def test_optional_broker_environment_defaults_to_empty(
     assert row["tools"][0]["name"] == "lookup"
 
 
+def test_optional_broker_arguments_default_to_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    del broker.config.mcp_broker_servers["fixture"]["args"]
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
+    result = anyio.run(broker.catalog)
+    row = next(s for s in result["servers"] if s["name"] == "fixture")
+    assert row["availability"] == "available"
+    assert row["tools"][0]["name"] == "lookup"
+
+
 def test_concurrent_broker_instances_share_discovery_in_the_same_state_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
