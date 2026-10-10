@@ -1,0 +1,8 @@
+{
+  "name": "mcp-github-wrapper",
+  "private": true,
+  "version": "0.0.0",
+  "dependencies": {
+    "@modelcontextprotocol/server-github": "2025.4.8"
+  }
+}

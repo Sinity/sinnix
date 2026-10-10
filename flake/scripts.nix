@@ -406,6 +406,15 @@ let
       ln -s "${polylogueSrc}/bin/polylogued" "$out/bin/polylogued"
     '';
 
+    mcp-github = mkNodeCliPackage {
+      pname = "mcp-github";
+      version = "2025.4.8";
+      src = ./npm/github-mcp;
+      packagePath = "@modelcontextprotocol/server-github";
+      entrypoint = "dist/index.js";
+      npmDepsHash = "sha256-Nc4KCBSqE+kDUBDkXjYVXybzysgpyaCjSNjrtZ04aJc=";
+    };
+
     mcp-firecrawl = mkNodeCliPackage {
       pname = "mcp-firecrawl";
       version = "3.10.3";

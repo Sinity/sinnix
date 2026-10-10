@@ -598,6 +598,10 @@ mkFeatureModule {
                 force = true;
               };
               ".gemini/config/AGENTS.md".source = mkDotsFile "/_ai/AGENTS.md";
+              ".local/bin/mcp-github" = {
+                source = "${scriptPkgs.mcp-github}/bin/mcp-github";
+                force = true;
+              };
               ".local/bin/mcp-firecrawl" = {
                 source = "${mcpFirecrawlBin}/bin/mcp-firecrawl";
                 force = true;

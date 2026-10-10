@@ -19,6 +19,7 @@
         "lynchpin-python"
         "mcp-chrome-devtools"
         "mcp-firecrawl"
+        "mcp-github"
         "polylogue-cli"
         "polylogue-python"
         "polylogued"

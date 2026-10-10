@@ -57,11 +57,7 @@ let
       description = "GitHub issues, pull requests, and repository operations";
       transport = "stdio";
       tier = "remote-core";
-      command = "npx";
-      args = [
-        "-y"
-        "@modelcontextprotocol/server-github"
-      ];
+      command = "mcp-github";
       env = {
         GITHUB_PERSONAL_ACCESS_TOKEN = "\${GITHUB_TOKEN}";
       };
