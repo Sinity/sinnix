@@ -40,7 +40,7 @@ command, the run manifest of a batch, and one operator screen.
 | `events tail [--lines N] [--follow] [--project p]`                                                              | the event spool (`/realm/state/agentctl/events.jsonl`)                                                                                                                                                                                                                                                                                                                                                                                           |
 | `schedule apply`                                                                                                | make the transient timer set equal the declared schedules                                                                                                                                                                                                                                                                                                                                                                                        |
 | `pools apply`                                                                                                   | write the declared parallelism of every pueue group into the running daemon                                                                                                                                                                                                                                                                                                                                                                      |
-| `backpressure tick`                                                                                             | one admission pass: pause or resume one pool against host stall, then report any safely retired legacy holds                                                                                                                                                                                                                                                                                                                                     |
+| `backpressure tick`                                                                                             | one admission pass: pause or resume one pool against memory pressure, observe I/O pressure, and release verified cross-pool holds whose blockers have drained                                                                                                                                                                                                                                                                                                                                     |
 
 The project is `--project`, a leading positional naming a configured project
 or a checkout path, or the checkout enclosing the working directory. A run
@@ -226,12 +226,11 @@ slots it needs. A single-task read (`pueue.task`) uses `pueue log --json
 filter, so a job read costs one small response however long the queue's
 history grows.
 
-At the first backpressure pass after this upgrade, agentctl may retire an old
-cross-pool stash only when the task is non-terminal and still stashed _and_
-its latest matching spool event is an unresolved `held`. A stale launch
-marker, missing/conflicting history, or a terminal task is reported and left
-alone; this never revives a cancelled job or releases an operator/external
-stash.
+When the admission pass reports `hold` or `clear`, the recurring backpressure
+command checks the current reference-bound cross-pool hold release. It does not run the legacy hold-retirement helper or
+re-enqueue a task solely because an old launch marker names a hold. Historical
+spool records for tasks absent from pueue are retired as observations, without
+starting work.
 
 `job cancel` drops a queued task out of the queue (`removed`); for a running
 task it writes the cancel marker, runs `systemctl --user stop <unit>`, then
