@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import re
+import stat
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -18,6 +19,18 @@ from sinnix_lib.mounts import has_mounted_ancestor, read_mountpoints
 
 INLINE = re.compile(r"!?\[[^\]\n]*\]\(\s*(<[^>\n]+>|(?:\\.|[^\s()])+(?:\([^()]*\)(?:\\.|[^\s()])*)*)[^\n)]*\)")
 REFERENCE = re.compile(r"^\s{0,3}\[[^\]\n]+\]:\s*(<[^>\n]+>|\S+)", re.M)
+
+
+FAILURES = {"invalid-link", "missing", "denied", "inaccessible", "invalid-document", "wrong-type-document",
+            "missing-document", "denied-document", "inaccessible-document"}
+
+
+def access_error(exc: Exception) -> str:
+    if isinstance(exc, PermissionError):
+        return "denied"
+    if isinstance(exc, FileNotFoundError):
+        return "missing"
+    return "inaccessible"
 
 
 def audit(manifest: dict) -> dict:
@@ -33,13 +46,29 @@ def audit(manifest: dict) -> dict:
     rows = []
     for name in manifest["documents"]:
         document = Path(name)
-        if not document.is_absolute() or not document.is_file():
-            rows.append({"document": str(document), "status": "missing-document"})
+        if not document.is_absolute():
+            rows.append({"document": str(document), "status": "invalid-document"})
             continue
-        text = prose_mask(document.read_text(encoding="utf-8"))
+        document = Path(os.path.abspath(document))
+        if any(document.is_relative_to(root) and not has_mounted_ancestor(document, root, mounted) for root in external):
+            rows.append({"document": str(document), "status": "external-unprobed"})
+            continue
+        try:
+            if not stat.S_ISREG(document.stat().st_mode):
+                rows.append({"document": str(document), "status": "wrong-type-document"})
+                continue
+            text = prose_mask(document.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError) as exc:
+            rows.append({"document": str(document), "status": access_error(exc) + "-document", "reason": str(exc)})
+            continue
         for match in (*INLINE.finditer(text), *REFERENCE.finditer(text)):
             target = match.group(1).strip("<>")
-            parsed = urlsplit(target)
+            try:
+                parsed = urlsplit(target)
+            except ValueError as exc:
+                rows.append({"document": str(document), "target": target,
+                             "status": "invalid-link", "reason": str(exc)})
+                continue
             if parsed.scheme and parsed.scheme != "file":
                 continue
             if parsed.netloc and parsed.netloc != "localhost":
@@ -47,15 +76,25 @@ def audit(manifest: dict) -> dict:
             if not parsed.path:
                 continue
             decoded = re.sub(r"\\([() ])", r"\1", unquote(parsed.path))
+            if "\0" in decoded:
+                rows.append({"document": str(document), "target": target,
+                             "status": "invalid-link", "reason": "local path contains a null character"})
+                continue
             destination = Path(decoded)
             if not destination.is_absolute():
                 destination = document.parent / destination
             destination = Path(os.path.abspath(destination))
             offline = any(destination.is_relative_to(root) and not has_mounted_ancestor(destination, root, mounted) for root in external)
-            rows.append({"document": str(document), "target": target,
-                         "destination": str(destination),
-                         "status": "external-unprobed" if offline else "ok" if destination.exists() else "missing"})
-    failed = sum(row["status"] in {"missing", "missing-document"} for row in rows)
+            row = {"document": str(document), "target": target,
+                   "destination": str(destination), "status": "external-unprobed"}
+            if not offline:
+                try:
+                    destination.stat()
+                    row["status"] = "ok"
+                except OSError as exc:
+                    row.update(status=access_error(exc), reason=str(exc))
+            rows.append(row)
+    failed = sum(row["status"] in FAILURES for row in rows)
     return {"schema_version": 1, "documents": len(manifest["documents"]), "links": rows, "failures": failed}
 
 
@@ -69,7 +108,7 @@ def main() -> int:
         print(json.dumps(result, indent=2))
     else:
         for row in result["links"]:
-            if row["status"] in {"missing", "missing-document"}:
+            if row["status"] in FAILURES:
                 print(f"{row['document']}: {row['status']}: {row.get('target', '')}")
         print(f"navigation-audit: {result['documents']} documents, {result['failures']} failures")
     return 1 if result["failures"] else 0

@@ -131,12 +131,19 @@ The report renderer accepts `--judgments` for authoritative current classificati
 `sinnix-navigation-audit --manifest /path/navigation-audit.json` checks local
 Markdown links in explicitly selected current entrance documents. The JSON
 manifest has `schema_version: 1`, an absolute-path `documents` list, and an
-optional absolute-path `external_roots` list. External roots are reported as
+optional absolute-path `external_roots` list. Targets below mounted external
+roots are checked; offline or unobservable external roots are reported as
 unprobed without accessing them. Remote links and code examples are excluded;
-missing local destinations return a nonzero exit status. The tool is read-only
+local failures return a nonzero exit status. The tool is read-only
 and does not scan imported packages or historical reports.
 
 The workstation's private manifest is owned by the report catalog. Run its
 declared `navigation_audit` operation after moving managed collections or
 editing current entrances. `lake-lint` separately verifies declared managed
 containers and rejects recreation of retired paths.
+
+Navigation audits report denied and inaccessible targets separately from missing
+paths. Unreadable, wrongly typed or invalidly encoded entrance documents and
+malformed links are explicit failures; the audit continues through the remaining
+entrances. Documents and targets below offline external roots remain explicitly
+unprobed, without inspecting their placeholder paths.

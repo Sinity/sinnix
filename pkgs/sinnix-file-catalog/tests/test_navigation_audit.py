@@ -107,3 +107,68 @@ def test_mountinfo_tab_escape_matches_a_real_link(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "read_text", read)
     report = runpy.run_path(str(SCRIPT))["audit"]({"schema_version": 1, "documents": [str(document)], "external_roots": [str(external)]})
     assert report["links"][0]["status"] == "ok"
+
+
+def test_unreadable_document_does_not_abort_other_entrances(tmp_path, monkeypatch):
+    import runpy
+    denied = tmp_path / "denied.md"
+    denied.write_text("fixture")
+    readable = tmp_path / "README.md"
+    readable.write_text("[present](denied.md)")
+    original = Path.read_text
+    def read(path, *args, **kwargs):
+        if path == denied:
+            raise PermissionError("synthetic read denial")
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "read_text", read)
+    result = runpy.run_path(str(SCRIPT))["audit"]({"schema_version": 1, "documents": [str(denied), str(readable)]})
+    assert result["failures"] == 1
+    assert [row["status"] for row in result["links"]] == ["denied-document", "ok"]
+
+
+def test_lookup_errors_do_not_claim_absent_targets(tmp_path, monkeypatch):
+    import errno
+    import runpy
+    document = tmp_path / "README.md"
+    document.write_text("[denied](denied)\n[error](error)\n[missing](missing)")
+    original = Path.stat
+    def observed(path, *args, **kwargs):
+        if path == tmp_path / "denied":
+            raise PermissionError(errno.EACCES, "synthetic denial")
+        if path == tmp_path / "error":
+            raise OSError(errno.EIO, "synthetic lookup failure")
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "stat", observed)
+    result = runpy.run_path(str(SCRIPT))["audit"]({"schema_version": 1, "documents": [str(document)]})
+    assert result["failures"] == 3
+    assert [row["status"] for row in result["links"]] == ["denied", "inaccessible", "missing"]
+
+
+def test_offline_entrance_is_not_probed(tmp_path, monkeypatch):
+    import runpy
+    external = tmp_path / "external"
+    document = external / "README.md"
+    def no_probe(*args, **kwargs):
+        raise AssertionError("offline entrance must not be statted")
+    monkeypatch.setattr(Path, "stat", no_probe)
+    result = runpy.run_path(str(SCRIPT))["audit"]({"schema_version": 1, "documents": [str(document)], "external_roots": [str(external)]})
+    assert result["failures"] == 0
+    assert result["links"] == [{"document": str(document), "status": "external-unprobed"}]
+
+
+def test_wrong_type_and_invalid_encoding_entrances_are_explicit(tmp_path):
+    import runpy
+    document = tmp_path / "broken.md"
+    document.write_bytes(b"\xff")
+    result = runpy.run_path(str(SCRIPT))["audit"]({"schema_version": 1, "documents": [str(tmp_path), str(document)]})
+    assert result["failures"] == 2
+    assert [row["status"] for row in result["links"]] == ["wrong-type-document", "inaccessible-document"]
+
+
+def test_malformed_links_do_not_abort_remaining_targets(tmp_path):
+    import runpy
+    document = tmp_path / "README.md"
+    document.write_text("[bad URL](http://[invalid)\n[null path](no%00file.md)\n[present](README.md)")
+    result = runpy.run_path(str(SCRIPT))["audit"]({"schema_version": 1, "documents": [str(document)]})
+    assert result["failures"] == 2
+    assert [row["status"] for row in result["links"]] == ["invalid-link", "invalid-link", "ok"]
