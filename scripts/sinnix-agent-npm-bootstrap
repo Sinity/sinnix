@@ -59,10 +59,14 @@ preserve_reify_entries() {
   done
 }
 
+has_binary() {
+  [ -f "$STATE/npm/bin/$binary_name" ] && [ -x "$STATE/npm/bin/$binary_name" ]
+}
+
 # A missing binary means an earlier install may have been interrupted after npm
 # retired the old package. Only recovery takes the lock: ordinary launches must
 # not contend with one another or rewrite a file another process is executing.
-if [ -x "$STATE/npm/bin/$binary_name" ]; then
+if has_binary; then
   exit 0
 fi
 
@@ -73,7 +77,7 @@ if ! flock -w 120 9; then
 fi
 
 # Another wrapper may have completed recovery while this process waited.
-if [ ! -x "$STATE/npm/bin/$binary_name" ]; then
+if ! has_binary; then
   if [ ! -f "$package_source" ]; then
     echo "$binary_name: locked recovery tarball is unavailable: $package_source" >&2
     exit 1
@@ -81,4 +85,8 @@ if [ ! -x "$STATE/npm/bin/$binary_name" ]; then
   preserve_reify_entries
   echo "$binary_name: bootstrapping (npm install -g $package_source)..." >&2
   npm install -g "$package_source" >&2
+  if ! has_binary; then
+    echo "$binary_name: npm recovery returned success but did not produce an executable regular file at $STATE/npm/bin/$binary_name" >&2
+    exit 1
+  fi
 fi
