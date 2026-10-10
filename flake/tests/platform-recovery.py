@@ -74,6 +74,8 @@ def alias_and_failure_boundary():
     integrity = "sha512-" + base64.b64encode(hashlib.sha512(child.read_bytes()).digest()).decode()
     package = {"name": "@fixture/alias-root", "version": "1.0.0", "bin": {"fixture": "bin.cjs"}, "dependencies": {"@fixture/root-native": "npm:@fixture/alias-root@1.0.0-native"}, "scripts": {"postinstall": "node -e \"require('fs').writeFileSync('root-hook', require('@fixture/root-native'))\"", "prepare": "node -e \"process.exit(93)\"", "prepublish": "node -e \"process.exit(94)\""}}
     lock = {"name": package["name"], "version": "1.0.0", "lockfileVersion": 3, "requires": True, "packages": {"": package, "node_modules/@fixture/root-native": {"name": child_package["name"], "version": child_package["version"], "resolved": child.as_uri(), "integrity": integrity, "hasInstallScript": True}}}
+    package["devDependencies"] = {"@fixture/dev-only": "1.0.0"}
+    lock["packages"]["node_modules/@fixture/dev-only"] = {"version": "1.0.0", "resolved": (root / "unavailable-dev-only.tgz").as_uri(), "integrity": integrity, "dev": True}
     source = root / "alias-root.tgz"
     archive(source, {"package.json": json.dumps(package), "npm-shrinkwrap.json": json.dumps(lock), "bin.cjs": "#!/usr/bin/env node\nconsole.log(require('@fixture/root-native'));"})
     env = {**os.environ, "HOME": str(root / "alias-home"), "npm_config_offline": "true", "npm_config_audit": "false", "npm_config_fund": "false", "npm_config_update_notifier": "false"}
@@ -93,6 +95,8 @@ def alias_and_failure_boundary():
             assert result.returncode == 0, result.stderr
             assert (target / "root-hook").read_text() == "ALIAS"
             assert (target / "node_modules/@fixture/root-native/child-hook").read_text() == "done"
+            assert (target / "package.json").read_text() == json.dumps(package)
+            assert not (target / "node_modules/@fixture/dev-only").exists()
             binary = state / "npm/bin/fixture"
             result = subprocess.run(["node", str(binary)], env=case_env, capture_output=True, text=True)
             assert result.returncode == 0 and result.stdout.strip() == "ALIAS", result.stderr
@@ -108,11 +112,34 @@ def alias_and_failure_boundary():
             assert not (state / "npm/bin/fixture").exists()
             attempts = list(target.parent.glob(".alias-root.recovery.*"))
             assert len(attempts) == 1 and (attempts[0] / "npm-shrinkwrap.json").is_file()
+            assert (attempts[0] / "package.json").read_text() == json.dumps(package)
     print("Locked aliases and install hooks work; failed recovery preserves the old package and attempt; healthy launch bypasses recovery")
+
+
+def optional_hook_boundary():
+    root = Path.cwd()
+    child = root / "optional-hook.tgz"
+    child_package = {"name": "@fixture/optional-hook", "version": "1.0.0", "scripts": {"install": "node -e \"process.exit(85)\""}}
+    archive(child, {"package.json": json.dumps(child_package)})
+    integrity = "sha512-" + base64.b64encode(hashlib.sha512(child.read_bytes()).digest()).decode()
+    package = {"name": "@fixture/optional-root", "version": "1.0.0", "bin": {"fixture": "bin.cjs"}, "optionalDependencies": {child_package["name"]: "1.0.0"}}
+    lock = {"name": package["name"], "version": package["version"], "lockfileVersion": 3, "requires": True, "packages": {"": package, "node_modules/@fixture/optional-hook": {"version": "1.0.0", "resolved": child.as_uri(), "integrity": integrity, "optional": True, "hasInstallScript": True}}}
+    source = root / "optional-root.tgz"
+    archive(source, {"package.json": json.dumps(package), "npm-shrinkwrap.json": json.dumps(lock), "bin.cjs": "#!/usr/bin/env node\nconsole.log('RECOVERED');"})
+    env = {**os.environ, "HOME": str(root / "optional-home"), "npm_config_offline": "true", "npm_config_audit": "false", "npm_config_fund": "false", "npm_config_update_notifier": "false", "npm_config_cache": str(root / "optional-cache")}
+    result = subprocess.run(["bash", sys.argv[5], "optional", package["name"], "fixture", os.environ["PATH"], str(source)], env=env, capture_output=True, text=True)
+    assert result.returncode == 0 and not result.stdout, result.stderr
+    target = Path(env["HOME"]) / ".local/state/optional/npm/lib/node_modules/@fixture/optional-root"
+    assert not (target / "node_modules/@fixture/optional-hook").exists()
+    assert (target / "package.json").read_text() == json.dumps(package)
+    result = subprocess.run(["node", str(target / "bin.cjs")], env=env, capture_output=True, text=True)
+    assert result.returncode == 0 and result.stdout.strip() == "RECOVERED"
+    print("Optional hook failure omits that dependency; production recovery and original manifest remain intact")
 
 
 compare(sys.argv[1], sys.argv[2], 8)
 compare(sys.argv[3], sys.argv[4], 6)
 npm_boundary()
 alias_and_failure_boundary()
+optional_hook_boundary()
 print("All publisher payloads/metadata preserved; 14 platform acquisitions locked")

@@ -77,7 +77,7 @@ preserve_existing() {
 }
 
 recover_locked_package() {
-  local package_target package_parent staged relative_bin temporary_bin
+  local package_target package_parent staged relative_bin temporary_bin manifest_backup result
   package_target="$STATE/npm/lib/node_modules/$npm_package"
   package_parent=$(dirname "$package_target")
   mkdir -p "$package_parent"
@@ -107,11 +107,28 @@ JS
   )
   # Installing a local tarball globally ignores its shrinkwrap in npm 10.
   # ci reads the extracted root's lock before acquiring any dependencies.
-  # A published package's prepare/prepublish scripts are not install hooks.
-  # ci would run them at a project root; rebuild instead runs the ordinary
-  # preinstall/install/postinstall hooks on the acquired tree and root.
-  npm ci --prefix "$staged" --global=false --ignore-scripts >&2
-  npm rebuild --prefix "$staged" --global=false >&2
+  # ci handles optional install failures like a global package install, but
+  # also runs project publishing hooks. Suppress only the root's non-install
+  # hooks during acquisition, then restore its exact publisher manifest.
+  manifest_backup=$(mktemp "$package_parent/.${npm_package##*/}.manifest.XXXXXXXX")
+  cp -p -- "$staged/package.json" "$manifest_backup"
+  node - "$staged/package.json" <<'JS'
+const fs = require('node:fs');
+const file = process.argv[2];
+const pkg = JSON.parse(fs.readFileSync(file));
+if (pkg.scripts) {
+  pkg.scripts = Object.fromEntries(Object.entries(pkg.scripts).filter(([event]) =>
+    ['preinstall', 'install', 'postinstall'].includes(event)));
+  fs.writeFileSync(file, JSON.stringify(pkg) + '\n');
+}
+JS
+  if npm ci --prefix "$staged" --global=false --omit=dev >&2; then
+    mv -- "$manifest_backup" "$staged/package.json"
+  else
+    result=$?
+    mv -- "$manifest_backup" "$staged/package.json"
+    return "$result"
+  fi
   node - "$staged" "$relative_bin" <<'JS'
 const fs = require('node:fs');
 const path = require('node:path');
