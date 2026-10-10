@@ -136,11 +136,12 @@ def run(args: argparse.Namespace) -> int:
     attempt_gate = CaptureAttemptGate()
     last_hash_by_window: dict[str, int] = {}
     last_capture_ts: float | None = None
+    unavailable_monitor: str | None = None
     seq = 0
     buf = b""
 
     def do_capture(trigger: str) -> None:
-        nonlocal last_capture_ts, seq
+        nonlocal last_capture_ts, seq, unavailable_monitor
         attempt_now = time.monotonic()
         if not attempt_gate.allow(attempt_now):
             return
@@ -158,6 +159,19 @@ def run(args: argparse.Namespace) -> int:
         if monitor_name is None:
             attempt_gate.record_failure(attempt_now)
             return
+
+        monitor = next(item for item in monitors if item.get("name") == monitor_name)
+        if monitor.get("dpmsStatus") is False or monitor.get("disabled") is True:
+            # An output without scanout cannot deliver a screencopy frame. This
+            # is expected unavailability, not a failed capture or an empty frame.
+            if unavailable_monitor != monitor_name:
+                print(
+                    f"sinnix-capture-screen: output unavailable, skipping screencopy (monitor={monitor_name})",
+                    file=sys.stderr,
+                )
+            unavailable_monitor = monitor_name
+            return
+        unavailable_monitor = None
 
         geometry = window.get("geometry") if window else {}
         grim_geometry = None

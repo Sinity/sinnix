@@ -4,12 +4,14 @@ import io
 import time
 from types import SimpleNamespace
 
+import pytest
 from PIL import Image
 from sinnix_capture_screen import daemon
 
 
+@pytest.mark.parametrize("unavailable", [{}, {"dpmsStatus": False}, {"disabled": True}])
 def test_failed_frame_publication_does_not_suppress_identical_retry(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, unavailable
 ):
     image = Image.new("RGB", (32, 32))
     for x in range(32):
@@ -37,7 +39,7 @@ def test_failed_frame_publication_does_not_suppress_identical_retry(
     def select(*args):
         nonlocal iteration
         iteration += 1
-        return ([sock] if iteration == 4 else []), [], []
+        return ([sock] if iteration == (5 if unavailable else 4) else []), [], []
 
     monkeypatch.setattr(daemon.select, "select", select)
     monkeypatch.setattr(
@@ -54,7 +56,19 @@ def test_failed_frame_publication_does_not_suppress_identical_retry(
     monkeypatch.setattr(daemon.hypr, "make_hyprctl_json_reader", lambda *args: None)
     monkeypatch.setattr(daemon.hypr, "get_cursor_pos", lambda *args: None)
     monkeypatch.setattr(
-        daemon.hypr, "get_monitors", lambda *args: [{"id": 0, "name": "fixture"}]
+        daemon.hypr,
+        "get_monitors",
+        lambda *args: [
+            {
+                "id": 0,
+                "name": "fixture",
+                **(
+                    unavailable
+                    if iteration == 1
+                    else {"dpmsStatus": True, "disabled": False}
+                ),
+            }
+        ],
     )
     monkeypatch.setattr(
         daemon.hypr,
@@ -70,6 +84,9 @@ def test_failed_frame_publication_does_not_suppress_identical_retry(
     grabs = []
 
     def grab(*args):
+        assert not (unavailable and iteration == 1), (
+            "screencopy attempted on unavailable output"
+        )
         grabs.append(args)
         return png.getvalue(), None
 
