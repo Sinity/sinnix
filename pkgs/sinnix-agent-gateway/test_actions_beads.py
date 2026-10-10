@@ -231,16 +231,28 @@ def test_an_abandoned_claim_reads_as_indeterminate_and_a_live_one_as_pending(
 
 def test_authored_revision_metadata_keeps_its_json_types(tmp_path):
     server, log = server_fixture(tmp_path)
-    metadata = {"revision": 9007199254740993, "content_revision": 4,
-                "nested": [{"expected_version": 7}]}
-    response = call(server, "beads.update", {
-        "project": {"project": "fixture"},
-        "idempotency_key": "authored-revision-metadata",
-        "path": {"id": "fixture-1"},
-        "body": {"actor": "fixture-operator", "patch": {"metadata": {"set": metadata}}},
-    })
+    metadata = {
+        "revision": 9007199254740993,
+        "content_revision": 4,
+        "nested": [{"expected_version": 7}],
+    }
+    response = call(
+        server,
+        "beads.update",
+        {
+            "project": {"project": "fixture"},
+            "idempotency_key": "authored-revision-metadata",
+            "path": {"id": "fixture-1"},
+            "body": {
+                "actor": "fixture-operator",
+                "patch": {"metadata": {"set": metadata}},
+            },
+        },
+    )
     assert response["result"]["outcome"] == "ok", response
-    echoed = response["data"]["owner_result"]["request"]["body"]["patch"]["metadata"]["set"]
+    echoed = response["data"]["owner_result"]["request"]["body"]["patch"]["metadata"][
+        "set"
+    ]
     assert echoed == metadata
     assert isinstance(echoed["revision"], int)
     assert isinstance(echoed["content_revision"], int)
@@ -250,17 +262,27 @@ def test_authored_revision_metadata_keeps_its_json_types(tmp_path):
 def test_changeset_string_guards_reach_owner_exactly(tmp_path):
     server, log = server_fixture(tmp_path)
     for token in (9007199254740993, -9007199254740993, -(2**63), 2**63 - 1, 0):
-        response = call(server, "beads.changeset", {
-            "project": {"project": "fixture"},
-            "idempotency_key": f"batch-guard-{token}",
-            "body": {"actor": "fixture-operator", "items": [{
-                "kind": "update", "update": {
-                    "target": {"id": "fixture-1"},
-                    "expected_version": str(token),
-                    "patch": {"notes": "guarded"},
+        response = call(
+            server,
+            "beads.changeset",
+            {
+                "project": {"project": "fixture"},
+                "idempotency_key": f"batch-guard-{token}",
+                "body": {
+                    "actor": "fixture-operator",
+                    "items": [
+                        {
+                            "kind": "update",
+                            "update": {
+                                "target": {"id": "fixture-1"},
+                                "expected_version": str(token),
+                                "patch": {"notes": "guarded"},
+                            },
+                        }
+                    ],
                 },
-            }]},
-        })
+            },
+        )
         assert response["result"]["outcome"] == "ok", response
         item = commands(log)[-1]["payload"]["body"]["items"][0]
         assert item["update"]["expected_version"] == token
@@ -270,22 +292,99 @@ def test_malformed_string_guards_refuse_before_owner_call(tmp_path):
     server, log = server_fixture(tmp_path)
     log.touch(exist_ok=True)
     before = len(commands(log))
-    for value in ("not-a-token", "1.0", "+7", "", "9223372036854775808",
-                  "-9223372036854775809", 9223372036854775808, True, 1.0):
+    for value in (
+        "not-a-token",
+        "1.0",
+        "+7",
+        "",
+        "9223372036854775808",
+        "-9223372036854775809",
+        9223372036854775808,
+        True,
+        1.0,
+    ):
         requests = [
-            ("beads.update", {"actor": "fixture-operator", "expected_version": value,
-                              "patch": {"notes": "must not write"}}),
-            ("beads.changeset", {"actor": "fixture-operator", "items": [{
-                "kind": "update", "update": {"target": {"id": "fixture-1"},
-                    "expected_version": value, "patch": {"notes": "must not write"}},
-            }]}),
+            (
+                "beads.update",
+                {
+                    "actor": "fixture-operator",
+                    "expected_version": value,
+                    "patch": {"notes": "must not write"},
+                },
+            ),
+            (
+                "beads.changeset",
+                {
+                    "actor": "fixture-operator",
+                    "items": [
+                        {
+                            "kind": "update",
+                            "update": {
+                                "target": {"id": "fixture-1"},
+                                "expected_version": value,
+                                "patch": {"notes": "must not write"},
+                            },
+                        }
+                    ],
+                },
+            ),
         ]
         for action, body in requests:
-            request = {"project": {"project": "fixture"}, "idempotency_key": action,
-                       "body": body}
+            request = {
+                "project": {"project": "fixture"},
+                "idempotency_key": action,
+                "body": body,
+            }
             if action == "beads.update":
                 request["path"] = {"id": "fixture-1"}
             response = call(server, action, request)
             assert response["result"]["outcome"] != "ok", response
             assert response["error"]["code"] == "invalid_request", response
     assert len(commands(log)) == before
+
+
+def test_lost_refusal_response_is_confirmed_without_reexecution(tmp_path):
+    """A confirmed operation may be a refusal; recovery must retain that failure."""
+    server, log = server_fixture(tmp_path)
+    request = {
+        "project": {"project": "fixture"},
+        "idempotency_key": "refused-update",
+        "path": {"id": "fixture-1"},
+        "body": {"actor": "conflict", "patch": {"notes": "refused"}},
+    }
+    refused = call(server, "beads.update", request)
+    assert refused["error"]["code"] == "precondition_failed", refused
+    before = len(commands(log))
+    recovered = call(
+        server, "audit.operation", {"action": "beads.update", "key": "refused-update"}
+    )["data"]
+    assert recovered["state"] == "confirmed"
+    assert recovered["response"]["error"] == refused["error"]
+    assert recovered["receipt_ref"] == refused["receipt"]["ref"]
+    assert len(commands(log)) == before
+
+
+def test_rejected_before_admission_can_be_unknown(tmp_path):
+    """An unknown claim does not imply the request never reached the gateway."""
+    server, log = server_fixture(tmp_path)
+    rejected = call(
+        server,
+        "beads.update",
+        {
+            "project": {"project": "fixture"},
+            "idempotency_key": "invalid-guard",
+            "path": {"id": "fixture-1"},
+            "body": {
+                "actor": "operator",
+                "expected_version": "not-a-token",
+                "patch": {"notes": "refused"},
+            },
+        },
+    )
+    assert rejected["error"]["code"] == "invalid_request", rejected
+    assert rejected["receipt"]["ref"]
+    recovered = call(
+        server, "audit.operation", {"action": "beads.update", "key": "invalid-guard"}
+    )["data"]
+    assert recovered["state"] == "unknown" and recovered["response"] is None
+    assert not log.exists()

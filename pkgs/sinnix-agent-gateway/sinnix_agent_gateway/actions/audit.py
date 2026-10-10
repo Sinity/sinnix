@@ -94,16 +94,16 @@ class Operation(GatewayModel):
     idempotency_key: str
     state: Literal["unknown", "pending", "confirmed", "indeterminate"] = Field(
         description=(
-            "unknown: the call never reached the gateway, so it did nothing. "
-            "pending: it is still running; read again. confirmed: it "
-            "committed, and response is its complete answer. indeterminate: "
+            "unknown: no mutation claim is recorded for this principal, action and key. "
+            "pending: it is still running; read again. confirmed: execution finished "
+            "and response contains its success or refusal. indeterminate: "
             "it ended without a confirmed outcome; check the owner before any "
             "new effect."
         )
     )
     response: dict[str, Any] | None = Field(
         default=None,
-        description="The committed response envelope, created ids included.",
+        description="The confirmed response envelope, including failures and created ids on success.",
     )
     receipt_ref: str | None = None
     request_sha256: str | None = None
@@ -271,7 +271,8 @@ ACTIONS: tuple[Action, ...] = (
             "idempotency_key its caller chose before sending it. When the "
             "response was lost (a tunnel 502 or deadline), read the outcome "
             "here instead of sending the mutation again: a confirmed "
-            "operation returns its committed response with the created ids, "
+            "operation returns its success or failure response, including created "
+            "ids on success, "
             "and nothing runs twice."
         ),
         Input=OperationInput,

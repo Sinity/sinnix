@@ -269,10 +269,12 @@ class AuditService:
 
         The caller chose the key before it sent the call, so a response lost
         in transit (a tunnel 502) is still addressable: ``confirmed`` returns
-        the committed response, created ids included, without the request
-        body and without running anything. ``pending`` is still running,
+        the complete success or failure response, created ids on success, without
+        the request body and without running anything. ``pending`` is still running,
         ``indeterminate`` ended without a confirmed outcome, and ``unknown``
-        never reached the gateway. Reading never changes the row.
+        has no recorded mutation claim for this principal/action/key. A call
+        rejected before admission can also be unknown. Reading never changes
+        the row.
         """
         self.principal.require(Capability.AUDIT_READ)
         with self._connect() as connection:
