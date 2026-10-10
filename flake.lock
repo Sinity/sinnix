@@ -1293,11 +1293,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791634574,
-        "narHash": "sha256-XJB7wpRra0xx1k7FSw6HqhzZSqi9861nX2SbyF+7aH8=",
+        "lastModified": 1791643609,
+        "narHash": "sha256-McMwuvqmmCr+EN7lr12qa4Q79WwYKESeQIieTaChXL0=",
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "fe9ca8e8a7f461675e92b8e8601d8f677ed08914",
+        "rev": "0824aa2f113d7530e49c81dca0fe963c5de541d2",
         "type": "github"
       },
       "original": {
