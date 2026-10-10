@@ -16,7 +16,6 @@ let
       ${spec.script}
     '';
   scriptPkgs = sinnixScriptRegistry.packageSet;
-  sourceRevision = inputs.self.rev or (inputs.self.dirtyRev or "unknown");
   rebuildServicePath = lib.makeBinPath [
     pkgs.coreutils
     pkgs.findutils
@@ -25,11 +24,7 @@ let
     pkgs.systemd
     pkgs.util-linux
   ];
-  # Prefer the live git checkout over a bare `${inputs.self}` fallback: a
-  # Nix-store copy of the flake has no `.git` dir, so a rebuild using it as
-  # `--flake` stamps configurationRevision "unknown", silently defeating the
-  # live-drift tripwire. Fall back to the store copy only as a last resort,
-  # and warn loudly when that happens.
+  # Resolve a live checkout at invocation; packaged commands carry no flake source.
   resolveFlakeDir = ''
     # Precedence: explicit override; then the checkout you are STANDING IN
     # when it is the SAME repository as the ambient default (a linked
@@ -45,7 +40,7 @@ let
     if [ -z "$_flake_dir" ]; then
       _toplevel="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || true)"
       if [ -n "$_toplevel" ]; then
-        if [ -z "$_ambient" ]; then
+        if [ -z "$_ambient" ] || [ ! -f "$_ambient/flake.nix" ]; then
           _flake_dir="$_toplevel"
         else
           _top_common="$(${pkgs.git}/bin/git -C "$_toplevel" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
@@ -60,8 +55,8 @@ let
       _flake_dir="$_ambient"
     fi
     if [ -z "$_flake_dir" ]; then
-      _flake_dir=${inputs.self}
-      echo "sinnix: WARNING no SINNIX_FLAKE_DIR/NH_FLAKE/FLAKE env var set and \$PWD ($PWD) is not inside a git checkout; falling back to a Nix-store copy of the flake ($_flake_dir). That copy has no git metadata, so system.configurationRevision will stamp \"unknown\" for anything built from this invocation (sinnix-6ru) -- the live-drift tripwire will be non-probative for the resulting generation. Run this from inside the sinnix checkout, or set SINNIX_FLAKE_DIR, to get a real revision stamp." >&2
+      echo "sinnix: no checkout found; run inside the repository or set SINNIX_FLAKE_DIR" >&2
+      exit 64
     fi
   '';
   # The evaluator never returns memory, so one process evaluating a whole tier
@@ -585,7 +580,6 @@ in
   inherit
     mkAppCommand
     scriptPkgs
-    sourceRevision
     resolveFlakeDir
     loadCheckTargets
     rebuildLock

@@ -160,6 +160,11 @@
         ${pkgs.git}/bin/git -C "$TMPDIR/source" remote add origin "$TMPDIR/remote.git"
         ${pkgs.git}/bin/git -C "$TMPDIR/source" push -q -u origin master
         export SINNIX_FLAKE_DIR="$TMPDIR/source"
+        # A long-lived parent can retain a retired ambient address. A valid
+        # current checkout must still be selected, without recreating aliases.
+        SINNIX_FLAKE_DIR= NH_FLAKE="$TMPDIR/retired-subject-home" FLAKE= \
+          DISCOVERY_JOBS="$good" ${pkgs.coreutils}/bin/env -C "$TMPDIR/source" \
+          ${builtins.head commands} --no-build
         printf '{ }\n' > "$TMPDIR/secret-declarations.nix"
         export SINNIX_SECRET_DECLARATIONS="$TMPDIR/secret-declarations.nix"
         export PATH="${fakeSudo}/bin:$PATH"

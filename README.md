@@ -172,6 +172,11 @@ Common commands:
 Direct commands stay direct. Submit scheduled or heavy work as a named
 AgentCTL project operation; `switch` remains the supported activation command.
 
+AgentCTL caches the devshell from its declared package and wrapper inputs. Each
+entry captures the current checkout as an immutable source with its Git revision;
+`switch` keeps using that source if the caller later changes directory. A missing
+checkout is refused. Dirty-source and remote-currency checks still apply.
+
 ## Repository guide
 
 | Path        | Purpose                                                                                     |

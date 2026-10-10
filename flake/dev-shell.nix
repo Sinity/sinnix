@@ -4,7 +4,7 @@
 # - Development tools and Nix helpers
 # - Helper scripts for common operations
 
-{ inputs, ... }:
+{ ... }:
 {
   perSystem =
     {
@@ -28,7 +28,6 @@
         activationPackages
         scriptPkgs
         resolveFlakeDir
-        sourceRevision
         ;
       registryDevCommands = lib.mapAttrs commandRegistry.mkAppCommand (
         lib.filterAttrs (name: _: !builtins.hasAttr name activationPackages) commandRegistry.appCommands
@@ -171,20 +170,21 @@
         ++ builtins.attrValues devCommands;
 
         shellHook = ''
-          # Keep the evaluated source and revision when the caller changes
-          # directory. A matching checkout is only a Git reference for the
-          # switch guard; the rebuild uses SINNIX_DEV_SHELL_SOURCE.
-          unset SINNIX_DEV_SHELL_FLAKE
-          export SINNIX_DEV_SHELL_REV="${sourceRevision}"
-          # The evaluated source is immutable and identifies the flake even
-          # when the caller entered this shell from a different checkout at
-          # the same revision.
-          export SINNIX_DEV_SHELL_SOURCE="${inputs.self.outPath}"
-          _sinnix_shell_root="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || true)"
-          if [ -n "$_sinnix_shell_root" ] && [ -f "$_sinnix_shell_root/flake.nix" ] \
-            && [ "$(${pkgs.git}/bin/git -C "$_sinnix_shell_root" rev-parse HEAD 2>/dev/null || true)" = "''${SINNIX_DEV_SHELL_REV%-dirty}" ]; then
-            export SINNIX_DEV_SHELL_FLAKE="$_sinnix_shell_root"
+          # Cached shells resolve their source afresh on entry. Metadata copies
+          # the tracked tree to an immutable store path without evaluating the
+          # host, and binds its revision before the caller can change directory.
+          unset SINNIX_DEV_SHELL_FLAKE SINNIX_DEV_SHELL_REV SINNIX_DEV_SHELL_SOURCE
+          ${resolveFlakeDir}
+          _sinnix_shell_root="$_flake_dir"
+          if ! _sinnix_source_metadata=$(${nix} flake metadata --json --no-write-lock-file "$_sinnix_shell_root"); then
+            echo "sinnix: cannot capture devshell source" >&2
+            exit 69
           fi
+          SINNIX_DEV_SHELL_SOURCE="$(printf '%s' "$_sinnix_source_metadata" | ${pkgs.jq}/bin/jq -er '.path')" || exit 69
+          SINNIX_DEV_SHELL_REV="$(printf '%s' "$_sinnix_source_metadata" | ${pkgs.jq}/bin/jq -er '.revision // .dirtyRevision // "unknown"')" || exit 69
+          export SINNIX_DEV_SHELL_SOURCE SINNIX_DEV_SHELL_REV
+          export SINNIX_DEV_SHELL_FLAKE="$_sinnix_shell_root"
+          unset _sinnix_source_metadata
           echo ""
           echo "NixOS Configuration Development Environment"
           echo ""
