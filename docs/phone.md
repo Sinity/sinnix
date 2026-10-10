@@ -158,17 +158,9 @@ Reachability is **measured, not assumed**: the app pings, renders the
 round-trip and its age ("live · 34 ms"), and every action reports the path it
 actually took — `sent · live` or `queued · retrying`.
 
-Idempotency is the `send_token` for intents and the sha256 for bytes. An
-intent that went out live and was queued anyway executes once, because prime
-records every executed token and answers a repeat with the same receipt. A
-chunk prime already holds answers ok rather than 409, because a phone that
-retried after losing an acknowledgement must be able to let go of the file.
-An event batch declares the offset it starts at and is written there, so
-re-sending one changes nothing.
-The sender accepts a chunk or event upload only when the returned byte count
-and full SHA-256 match the submitted payload. Missing or mismatched receipt
-identities are refusals, so local input and event progress remain available
-for retry. Inbox confirmation uses its separate control-response contract.
+Intent execution binds each `send_token` to canonical request content and serializes file and HTTP delivery through the same lock. An identical completed retry returns its prior receipt without acting again. A verified definitive failure remains retryable; partial or indeterminate effects are preserved and refused replay. Conflicting token reuse is refused. Terminal records whose result does not agree with the recorded outcome and action kind are treated as indeterminate, retained unchanged, and never acknowledged as completed or retried as definitive failures. Byte uploads use full SHA-256 identity.
+
+A chunk prime already holds answers ok rather than 409, because a phone that retried after losing an acknowledgement must be able to let go of the file. An event batch declares the offset it starts at and is written there, so re-sending one changes nothing. The sender accepts a chunk or event upload only when the returned byte count and full SHA-256 match the submitted payload. Missing or mismatched receipt identities are refusals, so local input and event progress remain available for retry. Inbox confirmation uses its separate control-response contract.
 
 Speech regions are metadata derived on prime from uploaded ambient chunks.
 The phone records one canonical audio stream; it does not run another recorder

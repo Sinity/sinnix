@@ -305,3 +305,36 @@ def test_an_all_failed_ritual_is_a_retryable_failure(monkeypatch, isolated_state
         for p in isolated_state_dirs["receipts_dir"].iterdir()
     }
     assert titles == {"Intentions not recorded"}
+
+
+@pytest.mark.parametrize("outcome", ["completed", "partial", "failed"])
+@pytest.mark.parametrize(
+    "result",
+    [
+        None,
+        [],
+        {},
+        {"ok": True, "outcome": "wrong"},
+        {"ok": False, "outcome": "completed", "kind": "steering_resolve"},
+        {"ok": True, "outcome": "completed", "kind": "another_action"},
+    ],
+)
+def test_malformed_terminal_token_is_indeterminate_and_never_replayed(
+    monkeypatch, isolated_state_dirs, outcome, result
+):
+    intent = _resolve("malformed-terminal")
+    monkeypatch.setattr(
+        execute_mod,
+        "steer",
+        lambda *args: pytest.fail("replayed malformed terminal evidence"),
+    )
+    isolated_state_dirs["tokens_dir"].mkdir(parents=True)
+    execute_mod._record(
+        intent["send_token"], execute_mod._content_digest(intent), outcome, result
+    )
+    before = (isolated_state_dirs["tokens_dir"] / intent["send_token"]).read_bytes()
+    answer = execute_mod.execute(intent)
+    assert answer["ok"] is False and answer["outcome"] == "indeterminate"
+    assert (
+        isolated_state_dirs["tokens_dir"] / intent["send_token"]
+    ).read_bytes() == before

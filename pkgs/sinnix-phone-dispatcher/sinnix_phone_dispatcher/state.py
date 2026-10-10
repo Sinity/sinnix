@@ -34,9 +34,9 @@ RECEIPTS_DIR = INBOX_DIR / "receipts"
 NOTIFY_DIR = INBOX_DIR / "notify"
 DECKS_DIR = INBOX_DIR / "decks"
 
-# Executed tokens, one file each. A directory rather than a database because
-# the only query is "have I seen this", the only write is "now I have", and a
-# filesystem answers both atomically.
+# Request-bound outcome receipts, one file per token. execute.py serializes
+# both ingress routes with separate lock files and atomically publishes each
+# transition; an attempted effect is not evidence of successful completion.
 TOKENS_DIR = STATE_DIR / "tokens"
 
 MAX_BODY = 8 << 20  # a shared image can be large; an intent never is

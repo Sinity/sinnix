@@ -129,6 +129,18 @@ def execute(intent: dict) -> dict:
                 return _answer(kind, INDETERMINATE, "token record is unreadable")
             if prior_digest != digest:
                 return _answer(kind, CONFLICT, "send_token belongs to other content")
+            if prior_outcome in (COMPLETED, PARTIAL, FAILED):
+                result = prior.get("result")
+                if (
+                    not isinstance(result, dict)
+                    or result.get("ok") is not (prior_outcome == COMPLETED)
+                    or result.get("outcome") != prior_outcome
+                    or result.get("kind") != kind
+                ):
+                    # A terminal label alone cannot establish that an effect
+                    # completed or definitively failed. Preserve malformed
+                    # evidence and refuse replay rather than acknowledge it.
+                    return _answer(kind, INDETERMINATE, "token result is unreadable")
             if prior_outcome == COMPLETED:
                 return {**prior["result"], "duplicate": True}
             if prior_outcome == PARTIAL:
