@@ -200,11 +200,15 @@ def check_asset(asset: Any, *, require_path: bool = True, require_identity: bool
     for key in ("previous_paths", "tags", "inspections", "uncertainties", "relations"):
         if not isinstance(asset.get(key, []), list):
             raise CatalogError(f"asset {key} must be a list")
-    if not Path(asset["current_path"]).is_absolute():
-        raise CatalogError(f"current_path must be absolute: {asset['current_path']}")
+    try:
+        normalized(asset["current_path"])
+    except ValueError as exc:
+        raise CatalogError(f"current_path must be a normalized absolute path: {exc}") from exc
     for previous in asset.get("previous_paths", []):
-        if not isinstance(previous, str) or not Path(previous).is_absolute():
-            raise CatalogError("previous_paths must contain absolute paths")
+        try:
+            normalized(previous)
+        except ValueError as exc:
+            raise CatalogError(f"previous_paths must contain normalized absolute paths: {exc}") from exc
     if not asset.get("inspections"):
         raise CatalogError("asset requires at least one inspection")
     if not all(isinstance(tag, str) for tag in asset.get("tags", [])):
@@ -480,7 +484,7 @@ def cmd_show(args: argparse.Namespace) -> int:
 
 
 def cmd_relocate(args: argparse.Namespace) -> int:
-    path, new_path = Path(args.catalog), Path(args.new_path)
+    path, new_path = Path(args.catalog), Path(normalized(args.new_path))
     with locked(path):
         # Relocation is the one operation that intentionally starts with the
         # old current_path absent; validate every other catalog invariant first.

@@ -259,3 +259,40 @@ def test_root_prefix_preparation_and_historical_cli_lookup(tmp_path):
     catalog.write_text(json.dumps(value))
     result = invoke(catalog, "resolve", "/child", "--id", value["assets"][0]["id"])
     assert result.returncode == 0 and result.stdout.strip() == str(old / "child")
+
+
+def test_import_refuses_addresses_the_history_resolver_cannot_use(tmp_path):
+    source = tmp_path / "fixture"
+    source.write_text("neutral fixture")
+    (tmp_path / "child").mkdir()
+    addresses = [str(tmp_path) + "/child/../fixture", str(tmp_path) + "/./fixture", str(tmp_path) + "//fixture"]
+    for address in addresses:
+        catalog = tmp_path / "catalog.json"
+        result = import_rows(catalog, [observation(source, current_path=address)])
+        assert result.returncode != 0 and "normalized" in result.stderr
+        assert not catalog.exists()
+        assert source.read_text() == "neutral fixture"
+
+
+def test_invalid_former_address_refuses_the_whole_import(tmp_path):
+    first = tmp_path / "first"
+    first.write_text("neutral first")
+    second = tmp_path / "second"
+    second.write_text("neutral second")
+    catalog = tmp_path / "catalog.json"
+    assert import_rows(catalog, [observation(first)]).returncode == 0
+    before = catalog.read_bytes()
+    invalid = str(tmp_path) + "/old/../second"
+    result = import_rows(catalog, [observation(second, previous_paths=[invalid])])
+    assert result.returncode != 0 and "normalized" in result.stderr
+    assert catalog.read_bytes() == before
+
+
+def test_import_rejects_an_unsupported_control_character_address(tmp_path):
+    source = tmp_path / "fixture\n"
+    source.write_text("neutral fixture")
+    catalog = tmp_path / "catalog.json"
+    result = import_rows(catalog, [observation(source)])
+    assert result.returncode != 0 and "control characters" in result.stderr
+    assert not catalog.exists()
+    assert source.read_text() == "neutral fixture"

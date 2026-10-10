@@ -35,7 +35,9 @@ unknown annotation fields.
 Each imported inspection also receives the asset title and description as a
 snapshot, preserving the authored context if the asset is edited later.
 
-Each imported path must exist. The catalog records device, inode, size,
+Each imported path must exist and use a normalized absolute address, matching
+the history resolver. Current and former addresses reject dot segments,
+repeated separators and control characters before metadata probing. The catalog records device, inode, size,
 modification time, and mode. If an existing path has a different identity,
 the import fails instead of replacing the identity associated with prior
 inspections. A supplied `identity.sha256` is retained as an attributed value;
