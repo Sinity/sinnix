@@ -804,3 +804,13 @@ def test_storage_selects_visible_mount_above_automount(monkeypatch):
     assert mount["source"] == "/dev/fixture"
     assert mount["fstype"] == "btrfs"
     assert mount["options"] == "rw,noatime"
+
+
+def test_runtime_inventory_invalid_utf8_is_explicitly_unavailable(tmp_path, monkeypatch):
+    inventory = tmp_path / "runtime.json"
+    inventory.write_bytes(b'{"mounts": []}\xff')
+    monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", str(inventory))
+    assert runtime_inventory.load_inventory() == {
+        "available": False, "reason": "runtime inventory malformed",
+    }
+    assert runtime_inventory.monitored_mount_paths() == []

@@ -31,7 +31,7 @@ def load_inventory() -> dict[str, Any]:
             "available": False,
             "reason": "runtime inventory unreadable",
         }
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeError):
         return {
             "available": False,
             "reason": "runtime inventory malformed",
