@@ -437,3 +437,28 @@ def test_supplied_sha256_requires_full_hex_digest_without_mutating_catalog(tmp_p
     result = import_rows(catalog, [observation(payload, identity={**identity, "sha256": digest})])
     assert result.returncode == 0, result.stderr
     assert assets(catalog)[0]["identity"]["sha256"] == digest
+
+
+def test_invalid_utf8_observation_is_rejected_without_catalog_mutation(tmp_path):
+    payload = tmp_path / "fixture.txt"
+    payload.write_text("neutral fixture")
+    catalog = tmp_path / "catalog.json"
+    assert import_rows(catalog, [observation(payload)]).returncode == 0
+    before = catalog.read_bytes()
+    source = tmp_path / "invalid.json"
+    source.write_bytes(b"\xff")
+    result = invoke(catalog, "import", str(source))
+    assert result.returncode == 2
+    assert "cannot read JSON" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert catalog.read_bytes() == before
+
+
+def test_invalid_utf8_catalog_is_rejected_without_rewriting_input(tmp_path):
+    catalog = tmp_path / "catalog.json"
+    catalog.write_bytes(b"\xff")
+    result = invoke(catalog, "audit")
+    assert result.returncode == 2
+    assert "cannot read JSON" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert catalog.read_bytes() == b"\xff"

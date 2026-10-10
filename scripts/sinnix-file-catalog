@@ -58,7 +58,7 @@ def read_json(path: Path) -> Any:
             return json.load(f)
     except FileNotFoundError:
         raise CatalogError(f"catalog does not exist: {path}")
-    except (OSError, json.JSONDecodeError) as e:
+    except (OSError, UnicodeError, json.JSONDecodeError) as e:
         raise CatalogError(f"cannot read JSON {path}: {e}")
 
 
