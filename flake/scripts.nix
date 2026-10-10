@@ -353,7 +353,8 @@ let
             doCheck = true;
             checkPhase = ''
               runHook preCheck
-              BEADS_TEST_EMBEDDED_DOLT=1 go test -tags=gms_pure_go ./cmd/bd ./internal/httpapi ./internal/storage/issueops ./internal/storage/embeddeddolt -run 'OwnerContract|WrapWithSchemaVersion|OutputJSONWithPagination' -count=1 -timeout=2m
+              BEADS_TEST_EMBEDDED_DOLT=1 go test -tags=gms_pure_go ./cmd/bd ./internal/storage/issueops ./internal/storage/embeddeddolt -run 'OwnerContract|WrapWithSchemaVersion|OutputJSONWithPagination' -count=1 -timeout=2m
+              go test -tags=gms_pure_go ./internal/httpapi ./issueops -count=1 -timeout=2m
               runHook postCheck
             '';
           };

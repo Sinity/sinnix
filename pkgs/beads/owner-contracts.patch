@@ -313,7 +313,7 @@
 +		for name, value := range properties {
 +			revision, _ := value.(map[string]any)
 +			if (name == "revision" || schemaName == "Problem" && (name == "expected_version" || name == "actual_version")) && ownerRowToken(revision) {
-+				if name == "revision" {
++				if name == "revision" || name == "actual_version" {
 +					properties["bead_revision_domain"] = map[string]any{"type": "string", "enum": []any{"beads_row_revision"}, "description": "Administrative row equality token domain; not an acceptance-contract revision."}
 +					properties["bead_revision_coverage"] = map[string]any{"type": "string", "enum": []any{"partial_update_coverage"}, "description": "Claim, close, unclaim and generic update rewrite the token; label-only changes, reopen, restore and compaction may not. Complete change detection also needs updated_at, status and labels."}
 +				}
@@ -551,7 +551,7 @@
 +				return nil, fmt.Errorf("invalid owner row token: %w", err)
 +			}
 +			object[name], _ = json.Marshal(strconv.FormatInt(token, 10))
-+			if name == "revision" {
++			if name == "revision" || name == "actual_version" {
 +				object["bead_revision_domain"] = json.RawMessage(`"beads_row_revision"`)
 +				object["bead_revision_coverage"] = json.RawMessage(`"partial_update_coverage"`)
 +			}
@@ -567,7 +567,7 @@
 +}
 --- /dev/null
 +++ b/internal/httpapi/owner_test.go
-@@ -0,0 +1,178 @@
+@@ -0,0 +1,210 @@
 +package httpapi
 +
 +import (
@@ -727,8 +727,8 @@
 +		t.Fatal(err)
 +	}
 +	properties := document["components"].(map[string]any)["schemas"].(map[string]any)["Problem"].(map[string]any)["properties"].(map[string]any)
-+	if !strings.Contains(properties["actual_version"].(map[string]any)["description"].(string), "NO v0 OPERATION EMITS IT TODAY") {
-+		t.Fatal("lost actual-version unavailability disclosure")
++	if !strings.Contains(properties["actual_version"].(map[string]any)["description"].(string), "Version guards report this member") {
++		t.Fatal("lost transaction-observation disclosure")
 +	}
 +	for _, name := range []string{"expected_version", "actual_version"} {
 +		if properties[name].(map[string]any)["type"] != "string" {
@@ -744,6 +744,38 @@
 +		if err := json.Unmarshal(object[key], &got); err != nil || got != want {
 +			t.Fatalf("%s=%s want=%s err=%v", key, object[key], want, err)
 +		}
++	}
++}
++
++func TestOwnerContractRefusedTransactionObservation(t *testing.T) {
++	for _, actual := range []int64{0, 9007199254740993, -9007199254740993, 9223372036854775807, -9223372036854775808} {
++		mismatch := fmt.Errorf("wrapped: %w", &issueops.VersionMismatchError{Expected: 41, Actual: actual})
++		for _, operation := range []string{"updateIssue", "applyBatch"} {
++			lifecycle := &roleLifecycle{updateErr: mismatch}
++			applier := &roleBatchApplier{err: mismatch}
++			cfg := rolesConfig(Config{Lifecycle: lifecycle, BatchApplier: applier})
++			request := OwnerCall{Path: map[string]string{"id": "bd-one"}, Body: json.RawMessage(`{"actor":"operator","expected_version":41,"patch":{"notes":"no write"}}`)}
++			if operation == "applyBatch" {
++				request.Body = json.RawMessage(`{"actor":"operator","items":[{"kind":"update","update":{"target":{"id":"bd-one"},"expected_version":41,"patch":{"notes":"no write"}}}]}`)
++			}
++			body, status, err := InvokeOwner(context.Background(), cfg, operation, request)
++			if err != nil || status != http.StatusConflict {
++				t.Fatalf("%s status=%d err=%v body=%s", operation, status, err, body)
++			}
++			var result map[string]json.RawMessage
++			if err := json.Unmarshal(body, &result); err != nil {
++				t.Fatal(err)
++			}
++			var got string
++			if err := json.Unmarshal(result["actual_version"], &got); err != nil || got != strconv.FormatInt(actual, 10) {
++				t.Fatalf("%s actual=%s err=%v", operation, result["actual_version"], err)
++			}
++			assertOwnerCoverage(t, result)
++		}
++	}
++	bare := PreconditionFailed().WithObservedVersion(issueops.ErrVersionMismatch)
++	if bare.Problem.ActualVersion != nil {
++		t.Fatal("invented observation for bare sentinel")
 +	}
 +}
 --- /dev/null
@@ -2104,17 +2136,20 @@
 +}
 --- /dev/null
 +++ b/internal/storage/embeddeddolt/owner_contract_test.go
-@@ -0,0 +1,88 @@
+@@ -0,0 +1,122 @@
 +//go:build cgo
 +
 +package embeddeddolt_test
 +
 +import (
 +	"context"
++	"errors"
 +	"github.com/steveyegge/beads/backend/conformance"
++	"github.com/steveyegge/beads/internal/storage"
 +	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
 +	storageops "github.com/steveyegge/beads/internal/storage/issueops"
 +	"github.com/steveyegge/beads/internal/types"
++	publicops "github.com/steveyegge/beads/issueops"
 +	"testing"
 +	"time"
 +)
@@ -2193,6 +2228,37 @@
 +		t.Fatalf("working update hidden: %v", working)
 +	}
 +}
++
++func TestOwnerContractRefusedUpdateRetainsObservedVersion(t *testing.T) {
++	skipUnlessEmbeddedDolt(t)
++	t.Setenv("DOLT_ROOT_PATH", t.TempDir())
++	env := newTestEnv(t, "observed")
++	ctx := t.Context()
++	issue := &types.Issue{ID: "observed-one", Title: "Original", Status: types.StatusOpen, IssueType: types.TypeTask, Priority: 2}
++	if err := env.store.CreateIssue(ctx, issue, "operator"); err != nil {
++		t.Fatal(err)
++	}
++	current, err := env.store.GetIssue(ctx, issue.ID)
++	if err != nil {
++		t.Fatal(err)
++	}
++	stale := current.RowVersion ^ 1
++	err = env.store.UpdateIssueChecked(ctx, issue.ID, map[string]interface{}{"title": "Refused"}, "operator", storage.UpdateIssueOptions{ExpectedVersion: &stale})
++	var mismatch *publicops.VersionMismatchError
++	if !errors.Is(err, publicops.ErrVersionMismatch) || !errors.As(err, &mismatch) {
++		t.Fatalf("missing typed refusal: %v", err)
++	}
++	if mismatch.Expected != stale || mismatch.Actual != current.RowVersion {
++		t.Fatalf("observation=%+v", mismatch)
++	}
++	after, err := env.store.GetIssue(ctx, issue.ID)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if after.Title != "Original" || after.RowVersion != current.RowVersion {
++		t.Fatal("refused update changed row")
++	}
++}
 --- /dev/null
 +++ b/docs/cli-reference/owner.md
 @@ -0,0 +1,43 @@
@@ -2265,3 +2331,254 @@
  	}
  	m["schema_version"] = JSONSchemaVersion
  	return m
+--- /dev/null
++++ b/issueops/version_mismatch.go
+@@ -0,0 +1,12 @@
++package issueops
++
++import "fmt"
++
++// VersionMismatchError retains the equality tokens observed by the refusing
++// transaction. Actual is that transaction's observation, not a later read.
++type VersionMismatchError struct{ Expected, Actual int64 }
++
++func (e *VersionMismatchError) Error() string {
++	return fmt.Sprintf("%s: expected %d, got %d", ErrVersionMismatch, e.Expected, e.Actual)
++}
++func (e *VersionMismatchError) Unwrap() error { return ErrVersionMismatch }
+--- a/internal/storage/issueops/version.go
++++ b/internal/storage/issueops/version.go
+@@ -7,6 +7,7 @@
+ 	"fmt"
+ 
+ 	"github.com/steveyegge/beads/internal/storage"
++	publicops "github.com/steveyegge/beads/issueops"
+ )
+ 
+ // CheckVersionInTx reads the current row_lock (the RowVersion token) for id and
+@@ -42,7 +43,7 @@
+ 		return fmt.Errorf("failed to read row version for %s: %w", id, err)
+ 	}
+ 	if current.Int64 != expected {
+-		return fmt.Errorf("%w: expected %d, got %d", storage.ErrVersionMismatch, expected, current.Int64)
++		return &publicops.VersionMismatchError{Expected: expected, Actual: current.Int64}
+ 	}
+ 	return nil
+ }
+--- a/internal/storage/domain/issue.go
++++ b/internal/storage/domain/issue.go
+@@ -693,7 +693,7 @@
+ 			return nil, fmt.Errorf("%w: issue %s", storage.ErrNotFound, id)
+ 		}
+ 		if spec.ExpectedVersion != nil && current.RowVersion != *spec.ExpectedVersion {
+-			return nil, fmt.Errorf("%w: expected %d, got %d", storage.ErrVersionMismatch, *spec.ExpectedVersion, current.RowVersion)
++			return nil, &publicops.VersionMismatchError{Expected: *spec.ExpectedVersion, Actual: current.RowVersion}
+ 		}
+ 		if spec.ExpectedAssignee != nil && !validation.ActorMatches(current.Assignee, *spec.ExpectedAssignee) {
+ 			return nil, fmt.Errorf("%w: %s is held by %q, expected %q",
+--- a/internal/storage/uow/deleter.go
++++ b/internal/storage/uow/deleter.go
+@@ -129,8 +129,7 @@
+ 	// duplicates before either ran.
+ 	if req.ExpectedVersion != nil {
+ 		if current := present[req.IDs[0]].RowVersion; current != *req.ExpectedVersion {
+-			return publicops.DeleteResult{}, fmt.Errorf("%w: expected %d, got %d",
+-				publicops.ErrVersionMismatch, *req.ExpectedVersion, current)
++			return publicops.DeleteResult{}, &publicops.VersionMismatchError{Expected: *req.ExpectedVersion, Actual: current}
+ 		}
+ 	}
+ 
+--- a/internal/httpapi/close.go
++++ b/internal/httpapi/close.go
+@@ -240,7 +240,7 @@
+ // makes member presence the discriminator the document promises.
+ func (s *Server) failClose(w http.ResponseWriter, r *http.Request, request issueops.CloseRequest, err error) {
+ 	if errors.Is(err, issueops.ErrVersionMismatch) {
+-		s.fail(w, r, versionPreconditionResult(request.ExpectedVersion))
++		s.fail(w, r, versionPreconditionResult(request.ExpectedVersion).WithObservedVersion(err))
+ 		return
+ 	}
+ 	var openChildren *issueops.CloseOpenChildrenError
+@@ -262,8 +262,8 @@
+ // publish ONE guard, where updatePreconditionResult has to choose between
+ // three. The rule is updatePreconditionResult's unchanged: the expected value
+ // comes from the REQUEST rather than from a read, and the observed value is
+-// absent, because the refusal rolled its transaction back and a read afterwards
+-// would describe a row the refusal never saw. See PreconditionFailed.
++// supplied separately by WithObservedVersion when the typed refusal retains
++// it. A read after rollback would describe a row the refusal never saw. See PreconditionFailed.
+ //
+ // A nil expectation cannot reach here from any of the three handlers — the
+ // role raises this sentinel only when a guard was sent — but it is handled
+--- a/internal/httpapi/reopen.go
++++ b/internal/httpapi/reopen.go
+@@ -94,7 +94,7 @@
+ // 4xx — failClose's finding, on the mirror operation.
+ func (s *Server) failReopen(w http.ResponseWriter, r *http.Request, request issueops.ReopenRequest, err error) {
+ 	if errors.Is(err, issueops.ErrVersionMismatch) {
+-		s.fail(w, r, versionPreconditionResult(request.ExpectedVersion))
++		s.fail(w, r, versionPreconditionResult(request.ExpectedVersion).WithObservedVersion(err))
+ 		return
+ 	}
+ 	s.failErr(w, r, err)
+--- a/internal/httpapi/delete.go
++++ b/internal/httpapi/delete.go
+@@ -263,7 +263,7 @@
+ // has to arrange it.
+ func (s *Server) failDeleteErr(w http.ResponseWriter, r *http.Request, request issueops.DeleteRequest, err error) {
+ 	if errors.Is(err, issueops.ErrVersionMismatch) {
+-		s.fail(w, r, versionPreconditionResult(request.ExpectedVersion))
++		s.fail(w, r, versionPreconditionResult(request.ExpectedVersion).WithObservedVersion(err))
+ 		return
+ 	}
+ 	if errors.Is(err, issueops.ErrValidation) || errors.Is(err, issueops.ErrDependentsOutsideRequest) {
+--- a/internal/httpapi/update.go
++++ b/internal/httpapi/update.go
+@@ -603,11 +603,11 @@
+ // guard member and echoing what the request asked for.
+ //
+ // applyPreconditionResult's rule unchanged: the expected value comes from the
+-// REQUEST rather than from a read, and the observed value is absent, because
+-// the refusal rolled its transaction back and a read afterwards would describe
++// REQUEST rather than from a read. The observed version comes only from
++// the typed transaction refusal, because a read after rollback would describe
+ // a row the refusal never saw. See PreconditionFailed.
+ func updatePreconditionResult(request issueops.UpdateRequest, err error) Result {
+-	res := PreconditionFailed()
++	res := PreconditionFailed().WithObservedVersion(err)
+ 	switch {
+ 	case errors.Is(err, issueops.ErrVersionMismatch):
+ 		res.Problem.Param = updateGuardParam("expected_version")
+--- a/internal/httpapi/batch_apply.go
++++ b/internal/httpapi/batch_apply.go
+@@ -1006,11 +1006,10 @@
+ // guard member and echoing what the request asked for.
+ //
+ // The expected value comes from the REQUEST rather than from a read, and the
+-// observed value is absent, because this operation's refusal rolled its
+-// transaction back: a read afterwards would describe a row the refusal never
+-// saw. See PreconditionFailed.
++// observed version comes only from the typed transaction refusal. A read
++// after rollback would describe a row the refusal never saw. See PreconditionFailed.
+ func applyPreconditionResult(request issueops.ApplyBatchRequest, itemErr *issueops.ItemError, err error, at func(Result, string) Result) Result {
+-	res := PreconditionFailed()
++	res := PreconditionFailed().WithObservedVersion(err)
+ 	switch {
+ 	case errors.Is(err, issueops.ErrVersionMismatch):
+ 		res = at(res, "expected_version")
+--- a/internal/httpapi/problem.go
++++ b/internal/httpapi/problem.go
+@@ -1130,8 +1130,8 @@
+ // WithExpectedVersion attaches the `expected_version` member of a
+ // `precondition_failed`: the row version the request guarded on.
+ //
+-// It is the REQUEST's value rather than a read, which is why there is no
+-// `actual_version` beside it here — see PreconditionFailed.
++// It is the REQUEST's value rather than a read. WithObservedVersion attaches
++// an actual value only when the refusal retained its transaction observation.
+ func (r Result) WithExpectedVersion(expected int64) Result {
+ 	r.Problem.ExpectedVersion = &expected
+ 	return r
+@@ -1157,9 +1157,9 @@
+ // The detail says what a client does next rather than what the row held,
+ // because on this contract those are different facts: the transaction that saw
+ // the mismatch rolled back, so a value read afterwards describes a row the
+-// refusal never saw. The role's refusals carry the expectation and not the
+-// observation, so `actual_version`, `actual_status` and `actual_assignee` stay
+-// absent here — the envelope declares them for an operation whose role can
++// refusal never saw. A typed version refusal retains its transaction
++// observation; other refusals leave observed members absent. The envelope
++// declares them for an operation whose role can
+ // report what it found, and inventing one from a later read would be worse than
+ // omitting it.
+ func PreconditionFailed() Result {
+@@ -1450,3 +1450,14 @@
+ 	w.WriteHeader(res.Problem.Status)
+ 	_ = json.NewEncoder(w).Encode(res.Problem)
+ }
++
++// WithObservedVersion uses only the value captured by the refusing transaction.
++// A bare sentinel provides no observation and must retain an absent member.
++func (r Result) WithObservedVersion(err error) Result {
++	var mismatch *issueops.VersionMismatchError
++	if errors.As(err, &mismatch) {
++		actual := mismatch.Actual
++		r.Problem.ActualVersion = &actual
++	}
++	return r
++}
+--- a/internal/httpapi/spec/openapi.v0.yaml
++++ b/internal/httpapi/spec/openapi.v0.yaml
+@@ -3054,9 +3054,9 @@
+ 
+             `precondition_failed`: `expected_version` did not match the row's
+             current revision. `param` is `expected_version` and the refusal
+-            echoes the value the REQUEST guarded on; there is no `actual_version`
+-            beside it, because the transaction that saw the mismatch rolled back
+-            and a read afterwards would describe a row the refusal never saw.
++            echoes the value the REQUEST guarded on. `actual_version`, when present,
++            is retained from the refusing transaction, never reconstructed
++            from a read after rollback.
+             Re-read and recompose rather than retrying the same body.
+ 
+ 
+@@ -3187,9 +3187,9 @@
+           description: >-
+             `expected_version` did not match the row's current revision
+             (`precondition_failed`). `param` is `expected_version` and the
+-            refusal echoes the value the REQUEST guarded on, with no
+-            `actual_version` beside it for the reason
+-            `POST /v0/beads/issues/{id}:close` gives. Nothing was written.
++            refusal echoes the value the REQUEST guarded on. `actual_version` follows
++            the transaction-observation rule of
++            `POST /v0/beads/issues/{id}:close`. Nothing was written.
+ 
+ 
+             This operation's ONLY conflict, and it is a precondition rather than
+@@ -3560,8 +3560,8 @@
+             `expected_version` did not match the named bead's current revision
+             (`precondition_failed`), and NOTHING was deleted. `param` is
+             `expected_version` and the refusal echoes the value the REQUEST
+-            guarded on, with no `actual_version` beside it for the reason
+-            `POST /v0/beads/issues/{id}:close` gives.
++            guarded on. `actual_version` follows the transaction-observation rule of
++            `POST /v0/beads/issues/{id}:close`.
+ 
+ 
+             It outranks the dependents refusal and is outranked by the `404`:
+@@ -3902,10 +3902,10 @@
+             and `item_index`, `item_kind`, `item_key` and `item_issue_id` name
+             the item, all read from the refusing transaction rather than parsed
+             out of prose. The `expected_*` members echo what the request asked
+-            for; the `actual_*` members are absent on this operation, because
+-            the all-or-nothing rollback means a read after the fact would report
+-            a row the refusal never saw and this role's refusals do not carry
+-            the observed value. A client recovers by re-reading and recomposing,
++            for; `actual_version` is present when the typed refusal retains the
++            observation from its transaction. `actual_status` and
++            `actual_assignee` remain absent. A read after rollback is never
++            used to reconstruct those observations. A client recovers by re-reading and recomposing,
+             never by retrying the same body.
+ 
+ 
+@@ -10984,14 +10984,12 @@
+             zero".
+ 
+ 
+-            NO v0 OPERATION EMITS IT TODAY, nor `actual_status` or
+-            `actual_assignee`. Every operation that publishes a guard refuses
+-            all-or-nothing, and none of the roles behind them carries the
+-            observed value out of the rolled-back transaction. The three
+-            members are declared so that an operation whose role CAN report
+-            what it found is an addition rather than a wire change — a client
+-            must not wait for them, and must never read their absence as a
+-            value.
++            Version guards report this member when storage retains a typed
++            observation from the refusing transaction. A bare mismatch sentinel
++            cannot report it and leaves it absent. It is an observation at refusal,
++            not a guarantee that the row has not changed again; re-read and
++            recompose before a new mutation. `actual_status` and `actual_assignee`
++            remain unavailable from current roles.
+         expected_status:
+           type: string
+           description: >-
