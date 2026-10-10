@@ -34,22 +34,75 @@ def _ours(group: str) -> dict:
     return {"action": "closed", "group": group, "owner": backpressure.OWNER}
 
 
+@pytest.mark.parametrize("io", [26.0, 80.0])
+def test_io_pressure_is_observation_without_blanket_admission_veto(monkeypatch, io):
+    result, calls = _tick(
+        monkeypatch,
+        {
+            "io_full_avg10": io,
+            "io_full_avg60": io,
+            "memory_full_avg10": 0.0,
+            "memory_full_avg60": 0.0,
+        },
+        dict.fromkeys(backpressure.MANAGED_GROUPS, "Running"),
+    )
+    assert calls == []
+    assert result["action"] == "clear"
+    assert result["io_full_avg60"] == io
+
+
+def test_retired_owned_io_pause_releases_without_waiting_for_disk_idle(
+    monkeypatch, tmp_path
+):
+    result, calls = _tick(
+        monkeypatch,
+        {
+            "io_full_avg10": 30.0,
+            "io_full_avg60": 30.0,
+            "memory_full_avg10": 0.0,
+            "memory_full_avg60": 0.0,
+        },
+        {
+            name: "Paused" if name == "bulk" else "Running"
+            for name in backpressure.MANAGED_GROUPS
+        },
+        spool=_spool(tmp_path, {**_ours("bulk"), "signal": "io"}),
+    )
+    assert calls == [("resume", "bulk")]
+    assert result["action"] == "opened"
+
+
+def test_retired_io_pause_stays_closed_when_memory_is_unknown(monkeypatch, tmp_path):
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg10": 30.0, "io_full_avg60": 30.0},
+        {"bulk": "Paused"},
+        spool=_spool(tmp_path, {**_ours("bulk"), "signal": "io"}),
+    )
+    assert calls == []
+    assert result["action"] == "unknown-pressure"
+
+
 @pytest.mark.parametrize("io_avg10,io_avg60", [(0.0, 0.0), (30.0, 15.0)])
 def test_no_paused_groups_below_closure_threshold_reports_clear(
     monkeypatch, io_avg10, io_avg60
 ) -> None:
     result, calls = _tick(
         monkeypatch,
-        {"io_full_avg10": io_avg10, "io_full_avg60": io_avg60,
-         "memory_full_avg10": 0.0, "memory_full_avg60": 0.0},
-        {name: "Running" for name in backpressure.MANAGED_GROUPS},
+        {
+            "io_full_avg10": io_avg10,
+            "io_full_avg60": io_avg60,
+            "memory_full_avg10": 0.0,
+            "memory_full_avg60": 0.0,
+        },
+        dict.fromkeys(backpressure.MANAGED_GROUPS, "Running"),
     )
     assert calls == []
     assert result["action"] == "clear"
     assert result["frozen"] == [] and result["signal"] is None
 
 
-def test_unattributed_legacy_pause_is_not_reopened_until_all_signals_are_quiet(
+def test_owned_legacy_pause_recovers_on_memory_even_with_busy_io(
     monkeypatch, tmp_path
 ) -> None:
     result, calls = _tick(
@@ -64,11 +117,11 @@ def test_unattributed_legacy_pause_is_not_reopened_until_all_signals_are_quiet(
         spool=_spool(tmp_path, _ours("agent")),
     )
 
-    assert calls == []
-    assert result["action"] == "hold"
+    assert calls == [("resume", "agent")]
+    assert result["action"] == "opened"
 
 
-def test_io_closure_stays_until_io_below_hysteresis(monkeypatch) -> None:
+def test_unowned_pause_is_preserved_with_busy_io(monkeypatch) -> None:
     result, calls = _tick(
         monkeypatch,
         {"io_full_avg60": 15.0, "memory_full_avg60": 1.0},
@@ -84,9 +137,7 @@ def test_io_closure_stays_until_io_below_hysteresis(monkeypatch) -> None:
     assert result["action"] == "hold"
 
 
-def test_io_closure_reopens_when_current_pressure_recovers(
-    monkeypatch, tmp_path
-) -> None:
+def test_owned_pause_reopens_on_memory_recovery(monkeypatch, tmp_path) -> None:
     result, calls = _tick(
         monkeypatch,
         {
@@ -117,8 +168,8 @@ def test_zero_avg10_is_current_recovery_not_a_stale_avg60_fallback(
         {
             "io_full_avg10": 0.0,
             "io_full_avg60": 30.0,
-            "memory_full_avg10": 1.0,
-            "memory_full_avg60": 1.0,
+            "memory_full_avg10": 0.0,
+            "memory_full_avg60": 30.0,
         },
         {
             "agent": "Running",
@@ -136,8 +187,14 @@ def test_zero_avg10_is_current_recovery_not_a_stale_avg60_fallback(
 def test_backpressure_replay_memory_does_not_scale_with_retained_history(tmp_path):
     spool = tmp_path / "events.jsonl"
     checkpoint = tmp_path / "checkpoint.json"
-    event = {"kind": "backpressure", "action": "closed", "group": "bulk",
-             "owner": "agentctl", "signal": "io", "detail": "x" * 200}
+    event = {
+        "kind": "backpressure",
+        "action": "closed",
+        "group": "bulk",
+        "owner": "agentctl",
+        "signal": "io",
+        "detail": "x" * 200,
+    }
     line = json.dumps(event) + "\n"
     with spool.open("w") as stream:
         for _ in range(20000):
@@ -157,7 +214,9 @@ def test_backpressure_replay_leaves_partial_record_for_next_read(tmp_path):
     spool = tmp_path / "events.jsonl"
     checkpoint = tmp_path / "checkpoint.json"
     closed = json.dumps({"kind": "backpressure", **_ours("bulk")}).encode() + b"\n"
-    opened = json.dumps({"kind": "backpressure", "action": "opened", "group": "bulk"}).encode()
+    opened = json.dumps(
+        {"kind": "backpressure", "action": "opened", "group": "bulk"}
+    ).encode()
     prefix = closed + b"not-json\n\xff\n"
     spool.write_bytes(prefix + opened[:-4])
     first = backpressure.event_state(spool, checkpoint=checkpoint)
@@ -170,13 +229,24 @@ def test_backpressure_replay_leaves_partial_record_for_next_read(tmp_path):
     assert second.cursor["offset"] == spool.stat().st_size
 
 
-def test_backpressure_replay_read_failure_retains_previous_projection(monkeypatch, tmp_path):
+def test_backpressure_replay_read_failure_retains_previous_projection(
+    monkeypatch, tmp_path
+):
     spool = _spool(tmp_path, _ours("pytest"))
     checkpoint = tmp_path / "checkpoint.json"
     previous = backpressure.event_state(spool, checkpoint=checkpoint)
     with spool.open("ab") as stream:
-        stream.write((json.dumps({"kind": "backpressure", **_ours("bulk")}) + "\n").encode())
-        stream.write((json.dumps({"kind": "backpressure", "action": "opened", "group": "pytest"}) + "\n").encode())
+        stream.write(
+            (json.dumps({"kind": "backpressure", **_ours("bulk")}) + "\n").encode()
+        )
+        stream.write(
+            (
+                json.dumps(
+                    {"kind": "backpressure", "action": "opened", "group": "pytest"}
+                )
+                + "\n"
+            ).encode()
+        )
     saved_checkpoint = checkpoint.read_bytes()
     original_open = Path.open
 
@@ -286,8 +356,8 @@ def test_signal_transition_reopens_excluded_group_before_closing_another(
         spool=_spool(tmp_path, _ours("agent")),
     )
 
-    assert calls == [("pause", "pytest")]
-    assert result["group"] == "pytest"
+    assert calls == [("resume", "agent")]
+    assert result["group"] == "agent"
 
 
 def test_signal_transition_keeps_group_closed_while_new_signal_still_requires_it(
@@ -320,7 +390,7 @@ def test_signal_transition_keeps_group_closed_while_new_signal_still_requires_it
 def test_pressure_closes_admission_without_stopping_tasks(monkeypatch) -> None:
     result, calls = _tick(
         monkeypatch,
-        {"io_full_avg60": 30.0, "memory_full_avg60": 1.0},
+        {"io_full_avg60": 30.0, "memory_full_avg60": 30.0},
         {
             "agent": "Running",
             "pytest": "Running",
@@ -347,8 +417,8 @@ def test_io_pressure_keeps_normal_admissible_after_pytest_is_paused(
         },
     )
 
-    assert calls == [("pause", "bulk")]
-    assert result["action"] == "closed"
+    assert calls == []
+    assert result["action"] == "hold"
 
 
 def test_memory_pressure_keeps_agent_admissible(monkeypatch) -> None:
@@ -380,14 +450,14 @@ def test_memory_closure_continues_after_io_targets_are_closed(monkeypatch) -> No
     )
 
     assert calls == [("pause", "normal")]
-    assert result["signal"] == "io+memory"
+    assert result["signal"] == "memory"
 
 
 def test_a_pause_event_names_its_owner_and_group(monkeypatch, tmp_path) -> None:
     spool = tmp_path / "events.jsonl"
     _tick(
         monkeypatch,
-        {"io_full_avg60": 30.0, "memory_full_avg60": 1.0},
+        {"io_full_avg60": 30.0, "memory_full_avg60": 30.0},
         {
             "agent": "Running",
             "pytest": "Running",
@@ -508,18 +578,16 @@ def test_io_pressure_keeps_focused_tests_admissible(monkeypatch) -> None:
     assert result["action"] == "hold"
 
 
-def test_old_io_pause_waits_for_its_closing_signal_to_recover(
-    monkeypatch, tmp_path
-) -> None:
-    """Changing eligibility does not prove the recorded closing signal recovered."""
+def test_old_owned_pause_recovers_on_memory(monkeypatch, tmp_path) -> None:
+    """Retired I/O rules do not keep an owned pause closed."""
     result, calls = _tick(
         monkeypatch,
         {"io_full_avg60": 60.0, "memory_full_avg60": 1.0},
         {"pytest": "Paused", "bulk": "Paused", "pytest-quick": "Paused"},
         spool=_spool(tmp_path, _ours("pytest-quick")),
     )
-    assert calls == []
-    assert result["action"] == "hold"
+    assert calls == [("resume", "pytest-quick")]
+    assert result["action"] == "opened"
 
 
 def test_memory_pressure_still_closes_focused_tests(monkeypatch) -> None:
@@ -630,7 +698,7 @@ def test_owned_pause_reopens_after_event_loss(
         monkeypatch.setattr(backpressure, "append_jsonl", unavailable)
     result, calls = _tick(
         monkeypatch,
-        {"io_full_avg60": 30.0, "memory_full_avg60": 1.0},
+        {"io_full_avg60": 30.0, "memory_full_avg60": 30.0},
         groups,
         spool=spool,
     )

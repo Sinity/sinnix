@@ -173,7 +173,7 @@ mkServiceModule {
         {
           inherit config;
           unitName = "agentctl-backpressure";
-          description = "Reconcile queue admission against host stall";
+          description = "Reconcile queue admission against memory stall";
         }
         {
           manager = "user";
@@ -191,7 +191,7 @@ mkServiceModule {
             # with the signal-specific order defined by `agentctl backpressure tick`.
             intervalSec = 60;
             onBootSec = 60;
-            description = "Reconcile queue admission against host stall";
+            description = "Reconcile queue admission against memory stall";
           };
         }
       )

@@ -252,24 +252,22 @@ reason to the same owner route. Managed cancellation refuses if it cannot retain
 the requester evidence.
 
 `agentctl-backpressure.timer` runs `agentctl backpressure tick` once per
-minute. A host-wide `full avg60` IO or memory stall of at least 25% closes
-one eligible group per tick. IO closes `pytest-heavy`, then `pytest`, then
-`bulk`; memory also closes `normal` and `pytest-quick`. Running jobs continue.
-An agentctl-owned pause can reopen when both resources are known and the
-resources relevant to that group and its recorded pause signal have
-`full avg10` values below 10% (falling back to `avg60` if `avg10` is
-unavailable). For a memory-only pause of `normal` or `pytest-quick`, IO must
-be observable but need not be below the recovery threshold. One group reopens
-per tick. Unavailable or malformed PSI cannot
-reopen a pause. A no-change tick reports `clear` when no managed groups are
-paused and neither closure threshold is exceeded; `hold` means admission
-remains paused or a closure signal remains active.
+minute. A host-wide memory `full avg60` stall of at least 25% closes one
+eligible group per tick: `pytest-heavy`, `pytest`, `normal`, `bulk`, then
+`pytest-quick`. Running jobs continue. An agentctl-owned pause can reopen
+when memory is known and its `full avg10` value is below 10% (falling back
+to `avg60` when `avg10` is unavailable). One group reopens per tick.
+Unavailable or malformed memory PSI cannot reopen a pause. Operator pauses
+remain paused unless the recorded event ownership belongs to agentctl.
 
-The signal includes background services and stalls caused by their resource
-limits. A hold indicates the admission rule fired; it does not establish that
-the desktop is unresponsive or that the waiting job caused the load. The IO
-threshold remains provisional: its original load sample used `avg10`, while
-admission uses `avg60`.
+I/O PSI remains visible in the result but does not close admission or delay
+recovery. Global I/O stalls include background and tool workloads outside
+these queues; the former blanket I/O veto could block useful work without
+relieving those workloads. Existing concurrency, resource limits and I/O
+priorities still apply. Retained agentctl-owned I/O pauses recover under the
+memory rule. A no-change tick reports `clear` when no managed groups are
+paused and memory is below the closure threshold; `hold` means a pause or
+memory closure signal remains active.
 
 Every pause event carries `"owner": "agentctl"`. The spool projection uses an
 inode/offset checkpoint, rebuilding from current history after checkpoint
@@ -938,7 +936,6 @@ evidence declares `checkout = "candidate"`.
 | `prompts.MAX_PROMPT_BYTES` (200,000)                         | arbitrary bound                                                           | cap on a compiled prompt                                                            |
 | `prompts.MAX_SUBJECT_LENGTH` (72)                            | repository commit convention                                              | cap on a PR subject                                                                 |
 | `prompts.RESULT_TEXT_CHARS` (200)                            | arbitrary bound                                                           | characters of a criterion's text a landing agent sees                               |
-| `backpressure.IO_FULL_FREEZE` (25%)                          | provisional bound (original load sample used avg10)      | global IO full avg60 that closes admission                                                   |
 | `backpressure.MEMORY_FULL_FREEZE` (25%)                      | half of systemd-oomd's kill threshold                                     | global memory full avg60 that closes admission                                               |
 | `backpressure.RESUME_BELOW` (10%)                            | arbitrary bound                                                           | full avg10 recovery bound (avg60 fallback)                               |
 | `operator_view.MAX_READY_SHOWN` (8) / `MAX_FAILED_SHOWN` (6) | arbitrary bound                                                           | rows the screen shows                                                               |

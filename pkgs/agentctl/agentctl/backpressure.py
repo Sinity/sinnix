@@ -20,11 +20,9 @@ from sinnix_lib.ledger import append_jsonl
 from . import pueue
 from .pueue import PueueError
 
-IO_FULL_FREEZE = 25.0
 MEMORY_FULL_FREEZE = 25.0
 RESUME_BELOW = 10.0
 CLOSE_ORDER = {
-    "io": ("pytest-heavy", "pytest", "bulk"),
     "memory": ("pytest-heavy", "pytest", "normal", "bulk", "pytest-quick"),
 }
 MANAGED_GROUPS = ("agent", "pytest-heavy", "pytest", "pytest-quick", "normal", "bulk")
@@ -213,10 +211,6 @@ def _value(pressure: Mapping[str, float | None], key: str) -> float | None:
 def over_threshold(pressure: Mapping[str, float | None]) -> tuple[str, ...]:
     active = []
     if (
-        value := _value(pressure, "io_full_avg60")
-    ) is not None and value >= IO_FULL_FREEZE:
-        active.append("io")
-    if (
         value := _value(pressure, "memory_full_avg60")
     ) is not None and value >= MEMORY_FULL_FREEZE:
         active.append("memory")
@@ -245,8 +239,9 @@ def _can_reopen(
         if isinstance(signals, list)
         else ()
     )
-    # Old events had no signal. Require all readings known and quiet rather
-    # than accidentally releasing after an invalid PSI read.
+    # Retired I/O admission events no longer veto recovery. Memory remains
+    # the admission signal, including when releasing an old I/O-only pause.
+    # Unknown memory never silently becomes a quiet observation.
     sources = sources or tuple(CLOSE_ORDER)
     sources = tuple(
         dict.fromkeys(
