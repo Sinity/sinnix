@@ -1,0 +1,33 @@
+--- a/watchers/src/watchers/wl_connection.rs
++++ b/watchers/src/watchers/wl_connection.rs
+@@ -107,7 +107,7 @@
+             .map_err(std::convert::Into::into)
+     }
+ 
+-    pub fn get_ext_idle_notification(&self, timeout: u32) -> anyhow::Result<ExtIdleNotificationV1>
++    pub fn get_ext_input_idle_notification(&self, timeout: u32) -> anyhow::Result<ExtIdleNotificationV1>
+     where
+         T: Dispatch<ExtIdleNotifierV1, ()>
+             + Dispatch<WlSeat, ()>
+@@ -118,7 +118,8 @@
+                 .bind(&self.queue_handle, 1..=WlSeat::interface().version, ())?;
+ 
+         let idle = self.get_ext_idle()?;
+-        Ok(idle.get_idle_notification(timeout, &seat, &self.queue_handle, ()))
++        anyhow::ensure!(idle.version() >= 2, "Input-idle tracking requires ext-idle-notify protocol version 2");
++        Ok(idle.get_input_idle_notification(timeout, &seat, &self.queue_handle, ()))
+     }
+ 
+     pub fn get_kwin_idle_timeout(&self, timeout: u32) -> anyhow::Result<OrgKdeKwinIdleTimeout>
+--- a/watchers/src/watchers/wl_ext_idle_notify.rs
++++ b/watchers/src/watchers/wl_ext_idle_notify.rs
+@@ -80,8 +80,7 @@
+         let timeout = u32::try_from(client.config.idle_timeout.num_milliseconds());
+         let mut watcher_state = WatcherState::new(
+             connection
+-                .get_ext_idle_notification(timeout.unwrap())
+-                .unwrap(),
++                .get_ext_input_idle_notification(timeout.unwrap())?,
+             client.config.idle_timeout,
+         );
+         connection.roundtrip(&mut watcher_state).unwrap();

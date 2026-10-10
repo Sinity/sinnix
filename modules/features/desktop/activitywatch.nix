@@ -82,8 +82,11 @@ mkFeatureModule {
         }:
         {
           # awatcher (Rust) handles both AFK and window tracking natively on
-          # Wayland; aw-watcher-afk is X11-only. Its first supported Wayland
-          # idle backend is ext-idle-notify-v1, which remains the idle source.
+          # Wayland; aw-watcher-afk is X11-only. The ext-idle-notify-v1 backend
+          # uses protocol-v2 input notifications, ignoring media inhibitors.
+          # AFK measures input idleness, not human attention. Older protocol
+          # versions are rejected by that backend instead of reporting
+          # compositor idleness under the same meaning.
           services.activitywatch = {
             enable = true;
             package = pkgs.aw-server-rust;

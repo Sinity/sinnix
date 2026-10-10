@@ -31,6 +31,11 @@
 #
 # recheck: when nixpkgs awatcher contains bounded retries for all reqwest
 # transport failures and tests the accepted-then-lost-response case.
+#
+# The AFK bucket must measure input idleness. Compositor idle notification
+# honors media inhibitors and can report activity without operator input.
+# Use the protocol-v2 input notification without changing bucket or payload.
+# recheck: remove this patch when awatcher uses input-only idle notification.
 _: _final: prev: {
   aw-server-rust = prev.aw-server-rust.overrideAttrs (old: {
     patches = (old.patches or [ ]) ++ [
@@ -44,7 +49,10 @@ _: _final: prev: {
   });
 
   awatcher = prev.awatcher.overrideAttrs (old: {
-    patches = (old.patches or [ ]) ++ [ ./activitywatch-awatcher-retry.patch ];
+    patches = (old.patches or [ ]) ++ [
+      ./activitywatch-awatcher-retry.patch
+      ./activitywatch-awatcher-input-idle.patch
+    ];
     doCheck = true;
     # The retry helper lives in the workspace's `watchers` library, which the
     # default single-package `cargo test` never builds.
