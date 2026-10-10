@@ -31,7 +31,10 @@ def collect_storage(offline: bool) -> dict[str, Any]:
     paths.extend(monitored_mount_paths())
     for path in dict.fromkeys(path for path in paths if path):
         result = run(
-            ["findmnt", "-T", path, "-n", "-o", "TARGET,SOURCE,FSTYPE,OPTIONS"],
+            # A mounted filesystem can cover an autofs entrance. The reverse
+            # search selects the visible top mount and emits exactly one row.
+            ["findmnt", "-T", path, "-d", "backward", "-f", "-n", "-o",
+             "TARGET,SOURCE,FSTYPE,OPTIONS"],
             timeout=5,
         )
         if result.stdout.strip():

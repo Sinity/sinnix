@@ -780,3 +780,27 @@ def test_storage_includes_declared_mounts_without_duplicate_or_empty_paths(tmp_p
     assert paths.count("/realm") == 1
     assert "" not in probed
     assert paths == probed
+
+
+def test_storage_selects_visible_mount_above_automount(monkeypatch):
+    monkeypatch.setenv("SINNIX_OBSERVE_IOSTAT", "0")
+    monkeypatch.setattr(storage, "polylogue_archive", lambda: {})
+    monkeypatch.setattr(storage, "monitored_mount_paths", lambda: ["/fixture-disk"])
+    monkeypatch.setattr(storage.glob, "glob", lambda pattern: [])
+    monkeypatch.setattr(storage, "systemctl_show", lambda unit: {})
+
+    def findmnt(argv, **kwargs):
+        path = argv[2]
+        visible = f"{path} /dev/fixture btrfs rw,noatime\n"
+        if "-d" in argv and argv[argv.index("-d") + 1] == "backward" and "-f" in argv:
+            output = visible
+        else:
+            output = f"{path} systemd-1 autofs rw,relatime\n" + visible
+        return Result(tuple(argv), 0, output, "")
+
+    monkeypatch.setattr(storage, "run", findmnt)
+    result = storage.collect_storage(offline=False)
+    mount = next(row for row in result["mounts"] if row["path"] == "/fixture-disk")
+    assert mount["source"] == "/dev/fixture"
+    assert mount["fstype"] == "btrfs"
+    assert mount["options"] == "rw,noatime"
