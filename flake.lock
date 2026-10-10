@@ -1272,11 +1272,11 @@
     "phone-app": {
       "flake": false,
       "locked": {
-        "lastModified": 1791509430,
-        "narHash": "sha256-uRvVxqUpRsOlb85uKqHsRe6D/eqrrBqGT7RnZMpzUfU=",
+        "lastModified": 1791629539,
+        "narHash": "sha256-2aTm5/860CkDgEi5q9TuttgSUn5wjjexVzzikVyBNuA=",
         "owner": "Sinity",
         "repo": "sinnix-phone-app",
-        "rev": "c5028fa460bebaddb077373fe6b2ea4806e764c3",
+        "rev": "81e7886ecb5663c9d22e143990a3a796d5df6513",
         "type": "github"
       },
       "original": {

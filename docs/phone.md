@@ -165,6 +165,10 @@ chunk prime already holds answers ok rather than 409, because a phone that
 retried after losing an acknowledgement must be able to let go of the file.
 An event batch declares the offset it starts at and is written there, so
 re-sending one changes nothing.
+The sender accepts a chunk or event upload only when the returned byte count
+and full SHA-256 match the submitted payload. Missing or mismatched receipt
+identities are refusals, so local input and event progress remain available
+for retry. Inbox confirmation uses its separate control-response contract.
 
 Speech regions are metadata derived on prime from uploaded ambient chunks.
 The phone records one canonical audio stream; it does not run another recorder
