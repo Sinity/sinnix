@@ -1,7 +1,8 @@
-# Local model roster — single source shared by three consumers:
+# Local model roster — single source shared by four consumers:
 # modules/services/ollama.nix (loadModels), modules/services/litellm.nix
 # (settings.model_list), and modules/services/open-webui.nix
-# (RAG_EMBEDDING_MODEL). Edit the roster here; the consumer modules only
+# (RAG_EMBEDDING_MODEL), and modules/features/cli/aichat.nix (default chat).
+# Edit the roster here; the consumer modules only
 # render it.
 { lib }:
 let

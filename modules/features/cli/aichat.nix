@@ -2,8 +2,17 @@
 {
   mkFeatureModule,
   pkgs,
+  lib,
+  helpers,
   ...
 }@args:
+let
+  chatModel =
+    lib.findSingle (model: model.litellmName == "local-chat")
+      (throw "aichat requires a local-chat model")
+      (throw "aichat local-chat model is ambiguous")
+      helpers.data.localModels.models;
+in
 mkFeatureModule {
   path = [
     "cli"
@@ -20,11 +29,11 @@ mkFeatureModule {
       environment.systemPackages = [ pkgs.aichat ];
 
       home-manager.users.${user}.xdg.configFile."aichat/config.yaml".text = ''
-        model: ollama:huihui_ai/llama3.2-abliterate
+        model: ollama:${chatModel.ollamaTag}
         clients:
           - type: openai-compatible
             name: ollama
-            api_base: http://127.0.0.1:11434/v1
+            api_base: ${helpers.data.localModels.ollamaApiBase}/v1
       '';
     };
 } args
