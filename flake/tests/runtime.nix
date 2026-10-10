@@ -218,8 +218,16 @@ in
             sinnix.services.tts.enable = true;
             sinnix.services.llama-cpp.enable = true;
             sinnix.services.comfyui.enable = true;
-            sinnix.services.musicgen.enable = true;
-            sinnix.services.ocr.enable = true;
+            sinnix.services.musicgen = {
+              enable = true;
+              port = 18800;
+              backendPort = 18805;
+            };
+            sinnix.services.ocr = {
+              enable = true;
+              port = 18501;
+              backendPort = 18502;
+            };
             # The container backends pull in hardware.nvidia-container-toolkit,
             # whose upstream assertion demands a configured NVIDIA driver. This
             # spec evaluates unit wiring on a minimal test host with no GPU
@@ -241,6 +249,9 @@ in
             # declared.
             proxyBackends = lib.filterAttrs (
               _: surface: surface.ai != null && (surface.activation.mode or "direct") == "socket-proxy"
+            ) config.sinnix.runtime.inventory.surfaces;
+            containerBackends = lib.filterAttrs (
+              _: surface: surface.ai != null && surface.ai.backendKind == "container"
             ) config.sinnix.runtime.inventory.surfaces;
             proxies = lib.mapAttrsToList (name: surface: {
               name = "${name}-proxy";
@@ -294,6 +305,18 @@ in
             {
               assertion = config.virtualisation.podman.enable && config.hardware.nvidia-container-toolkit.enable;
               message = "CUDA container backends require both Podman and NVIDIA CDI";
+            }
+            {
+              assertion = lib.all (
+                surface:
+                let
+                  container = lib.removePrefix "podman-" (lib.removeSuffix ".service" surface.unit);
+                in
+                lib.any (
+                  port: lib.hasPrefix "${surface.activation.backendEndpoint}:" port
+                ) config.virtualisation.oci-containers.containers.${container}.ports
+              ) (lib.attrValues containerBackends);
+              message = "Each OCI backend must publish the endpoint its runtime inventory advertises";
             }
             {
               # ai-control must discover the owning service declarations,
