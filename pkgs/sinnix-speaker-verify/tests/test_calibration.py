@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
+from types import SimpleNamespace
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
@@ -114,3 +116,53 @@ def test_calibrate_publishes_a_private_report(monkeypatch, tmp_path: Path) -> No
     assert json.loads(output.read_text())["version"] == MODULE.CALIBRATION_VERSION
     assert output.stat().st_mode & 0o777 == 0o600
     assert not list(output.parent.glob(".*.atomic-tmp-*"))
+
+
+def test_model_fetch_pins_the_cached_revision_even_with_existing_files(monkeypatch):
+    calls = []
+    sentinel = object()
+
+    def from_hparams(**kwargs):
+        calls.append(kwargs)
+        return sentinel
+
+    monkeypatch.setitem(
+        sys.modules,
+        "speechbrain.inference.speaker",
+        SimpleNamespace(EncoderClassifier=SimpleNamespace(from_hparams=from_hparams)),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "speechbrain.utils.fetching",
+        SimpleNamespace(FetchConfig=SimpleNamespace),
+    )
+
+    assert MODULE._load_model() is sentinel
+    assert len(calls) == 1
+    fetch = calls[0]["fetch_config"]
+    assert calls[0]["source"] == "speechbrain/spkrec-ecapa-voxceleb"
+    assert fetch.revision == "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286"
+    assert fetch.allow_updates is True
+
+
+@pytest.mark.parametrize(
+    "embedding", [[0.0, 0.0], [float("nan"), 1.0], [float("inf"), 1.0]]
+)
+def test_invalid_enrollment_preserves_the_previous_centroid(
+    monkeypatch, tmp_path, embedding
+):
+    monkeypatch.setattr(MODULE, "STORE_DIR", tmp_path / "store")
+    monkeypatch.setattr(MODULE, "_load_model", lambda: object())
+    monkeypatch.setattr(MODULE, "_embed", lambda _model, _audio: np.array(embedding))
+    target = MODULE._enrollment_path("operator")
+    target.parent.mkdir()
+    previous = b'{"name":"operator","centroid":[1.0,0.0],"n_samples":1}'
+    target.write_bytes(previous)
+    target.chmod(0o600)
+    args = SimpleNamespace(audio=["synthetic.wav"], name="operator")
+
+    with pytest.raises(ValueError, match="finite non-zero norm"):
+        MODULE.cmd_enroll(args)
+
+    assert target.read_bytes() == previous
+    assert target.stat().st_mode & 0o777 == 0o600

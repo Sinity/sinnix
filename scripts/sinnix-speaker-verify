@@ -35,6 +35,8 @@ from sinnix_lib.atomic import atomic_publish
 STORE_DIR = Path("/realm/state/speaker-verify")
 AUDIO_SUFFIXES = {".wav", ".flac", ".ogg", ".mp3", ".m4a"}
 CALIBRATION_VERSION = 1
+MODEL_SOURCE = "speechbrain/spkrec-ecapa-voxceleb"
+MODEL_REVISION = "0f99f2d0ebe89ac095bcc5903c4dd8f72b367286"
 
 
 def _enrollment_path(name: str) -> Path:
@@ -47,10 +49,14 @@ def _load_model():
     # Deferred import: keep --help fast, and let callers without the model
     # deps installed still see usage.
     from speechbrain.inference.speaker import EncoderClassifier
+    from speechbrain.utils.fetching import FetchConfig
 
     return EncoderClassifier.from_hparams(
-        source="speechbrain/spkrec-ecapa-voxceleb",
+        source=MODEL_SOURCE,
         savedir="/realm/state/speaker-verify/.model-cache",
+        # Check existing savedir links against the immutable revision too;
+        # otherwise SpeechBrain can reuse files from a different revision.
+        fetch_config=FetchConfig(revision=MODEL_REVISION, allow_updates=True),
     )
 
 
@@ -152,8 +158,7 @@ def cmd_enroll(args: argparse.Namespace) -> int:
     model = _load_model()
     audio_files = list(args.audio)  # snapshot before any mutation
     embeddings = [_embed(model, path) for path in audio_files]
-    centroid = np.mean(embeddings, axis=0)
-    centroid = centroid / np.linalg.norm(centroid)
+    centroid = _unit(np.mean(embeddings, axis=0))
 
     STORE_DIR.mkdir(parents=True, exist_ok=True)
     out = _enrollment_path(args.name)

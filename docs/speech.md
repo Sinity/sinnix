@@ -177,7 +177,11 @@ voice locally, so treating a voiceprint as authorisation would be theatre. The
 question it answers is only _whether an utterance is a command at all_.
 
 `scripts/sinnix-speaker-verify` supports enrollment, raw scoring, and a
-held-out `calibrate` command. Calibration requires disjoint enrollment,
+held-out `calibrate` command. Its SpeechBrain ECAPA model is pinned to revision
+`0f99f2d0ebe89ac095bcc5903c4dd8f72b367286`, including configuration and
+checkpoints; existing cache links are resolved against that revision.
+Enrollment rejects zero or non-finite centroids before replacing stored state.
+Calibration requires disjoint enrollment,
 same-speaker, different-speaker, and unrelated cohort directories; it reports
 symmetric AS-norm scores, EER, and Brier calibration error. The report's
 `supports_attribution` field is true only when EER is at most 5% (override with
