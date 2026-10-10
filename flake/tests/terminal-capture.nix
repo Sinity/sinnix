@@ -53,6 +53,7 @@ in
             cat > "$TMPDIR/fake-shell.zsh" <<'EOF'
             #!${pkgs.zsh}/bin/zsh
             set -eu
+            jq -e --arg capture_user "$USER" '.user == $capture_user' "$SINNIX_CAPTURE_SESSION_FILE" >/dev/null
             source ${../../scripts/sinnix-terminal-capture-hooks.zsh}
             print -r -- "terminal-capture-ready"
             print -r -- "inherited-capture-marker: ''${SINNIX_CAPTURE_POISON:-stripped}"
@@ -62,6 +63,7 @@ in
             chmod +x "$TMPDIR/fake-shell.zsh"
 
             transcript="$TMPDIR/terminal-capture-runtime.typescript"
+            capture_user=$'tester\001\002\003\004\005\006\007\010\011\012\013\014\015\016\017\020\021\022\023\024\025\026\027\030\031\032\033\034\035\036\037'
 
             script -qfec "stty rows 24 cols 80; exec env \
               EPOCHREALTIME='1773285652,647035000' \
@@ -75,7 +77,7 @@ in
               SINNIX_CAPTURE_POISON='leaked' \
               SINNIX_CAPTURE_SESSION_ID='poison-session' \
               TERM='xterm-kitty' \
-              USER='tester' \
+              USER='$capture_user' \
               ${pkgs.bash}/bin/bash ${../../scripts/sinnix-captured-shell}" "$transcript"
 
             if test -e "$TMPDIR/retired-captures"; then
@@ -120,6 +122,7 @@ in
               .cast_path == $cast_path and
               .events_path == $events_path and
               .host == "terminal-capture-test" and
+              .user == $capture_user and
               .terminal == "kitty" and
               .exit_reason == "shell_exit" and
               .cleanup_escalated == false and
@@ -129,6 +132,7 @@ in
               .cast_path != $poison_cast and
               .events_path != $poison_events
             ' \
+              --arg capture_user "$capture_user" \
               --arg session_id "$session_id" \
               --arg cast_path "$cast_file" \
               --arg events_path "$events_json" \

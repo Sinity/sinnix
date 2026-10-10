@@ -60,9 +60,14 @@ _sinnix_capture_json_escape() {
   local value="$1"
   value=${value//\\/\\\\}
   value=${value//\"/\\\"}
-  value=${value//$'\n'/\\n}
-  value=${value//$'\r'/\\r}
-  value=${value//$'\t'/\\t}
+  # JSON requires every non-NUL ASCII control byte to be escaped. Shell
+  # arguments cannot contain NUL; decoding preserves these control values.
+  local code hex control
+  for code in {1..31}; do
+    printf -v hex '%02x' "$code"
+    printf -v control '%b' "\\x$hex"
+    value=${value//"$control"/"\\u00$hex"}
+  done
   print -nr -- "$value"
 }
 
