@@ -23,10 +23,16 @@ Pipeline (three subcommands, chained by `run`):
            <provider>/ (dated-snapshot convention, precedent: sinnix-0h2 /
            lynchpin raindrop_archive.py) and append to
            state/resolution.jsonl (the resumability checkpoint).
-  build    urls.jsonl + resolution.jsonl -> a duckdb table/parquet file
-           under <derived>/url-ledger/ with one row per normalized URL:
+  build    urls.jsonl + resolution.jsonl -> one validated private generation
+           under <derived>/generations/<id>/ with one row per normalized URL:
            visit timestamps, per-provider snapshot timestamps, and the
            nearest archived snapshot to each visit.
+
+Build publishes current.json atomically after reopening and comparing the
+database, Parquet, coverage rows and statistics. Readers use `published` once
+per operation to select its immutable generation. Authored state stays outside
+generation cleanup. Previous generations remain retained; predecessor flat
+products move into history only after successful publication.
 
 Resumability: `resolve` is bounded per invocation (--max-seconds, with
 --max-requests as a backstop) and skips any (url, provider) pair already
@@ -53,13 +59,17 @@ import argparse
 import calendar
 import gzip
 import hashlib
+import fcntl
 import json
 import os
 import re
 import socket
+import shutil
 import subprocess
 import sys
 import time
+import tempfile
+import uuid
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -845,7 +855,7 @@ def sql_path(path: Path) -> str:
     return "'" + path.as_posix().replace("'", "''") + "'"
 
 
-def cmd_build(args: argparse.Namespace) -> int:
+def _build_products(args: argparse.Namespace) -> int:
     state_dir = Path(args.state_root)
     urls_path = state_dir / "urls.jsonl"
     if not urls_path.exists():
@@ -927,9 +937,6 @@ def cmd_build(args: argparse.Namespace) -> int:
     duckdb_path = derived_dir / "url_ledger.duckdb"
     parquet_path = derived_dir / "url_ledger.parquet"
     stats_path = derived_dir / "coverage_stats.json"
-    if duckdb_path.exists():
-        duckdb_path.unlink()
-
     sql = f"""
 CREATE TABLE url_ledger AS
   SELECT * FROM read_json_auto({sql_path(coverage_path)}, format='newline_delimited');
@@ -974,6 +981,167 @@ COPY (
         f"sinnix-url-ledger build: {total_urls} URLs -> {duckdb_path}, {parquet_path}, {stats_path}"
     )
     return 0
+
+
+PRODUCTS = ("coverage.jsonl", "url_ledger.duckdb", "url_ledger.parquet", "coverage_stats.json")
+PUBLICATION_SCHEMA = "sinnix.url-ledger-generation.v1"
+
+
+def published_generation(root: Path) -> Path:
+    """Resolve one complete publication once, without borrowing writer state."""
+    pointer = json.loads((root / "current.json").read_text())
+    if not isinstance(pointer, dict):
+        raise ValueError("invalid URL-ledger publication pointer")
+    name = pointer["generation"]
+    if not isinstance(name, str) or re.fullmatch(r"[0-9a-f]{32}", name) is None:
+        raise ValueError("invalid URL-ledger generation identity")
+    path = (root / "generations" / name).resolve(strict=True)
+    if path.parent != (root / "generations").resolve():
+        raise ValueError("URL-ledger generation escapes its owner")
+    payload = (path / "manifest.json").read_bytes()
+    manifest = json.loads(payload)
+    if (not isinstance(manifest, dict) or manifest.get("schema") != PUBLICATION_SCHEMA or manifest.get("generation") != name
+            or hashlib.sha256(payload).hexdigest() != pointer.get("manifest_sha256")
+            or set(manifest.get("artifacts", {})) != set(PRODUCTS)
+            or any(not (path / filename).is_file() for filename in PRODUCTS)):
+        raise ValueError("invalid URL-ledger publication manifest")
+    return path
+
+
+def cmd_published(args: argparse.Namespace) -> int:
+    try:
+        print(published_generation(Path(args.derived_root)))
+        return 0
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        print(f"sinnix-url-ledger: publication unavailable: {error}", file=sys.stderr)
+        return 1
+
+
+def _query_json(binary: str, database: Path, sql: str) -> list[dict]:
+    result = subprocess.run([binary, "-readonly", "-json", "-bail", str(database), "-c", sql],
+                            capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError(f"publication validation failed: {result.stderr}")
+    return json.loads(result.stdout)
+
+
+def _validate_products(path: Path, binary: str) -> int:
+    database = path / "url_ledger.duckdb"
+    # Reopen the database and Parquet, comparing every row in both directions.
+    row = _query_json(binary, database, f"""
+        WITH parquet AS (SELECT * FROM read_parquet({sql_path(path / 'url_ledger.parquet')})),
+             coverage AS (SELECT * FROM read_json_auto({sql_path(path / 'coverage.jsonl')}, format='newline_delimited')),
+             differences AS (
+                 (SELECT * FROM url_ledger EXCEPT ALL SELECT * FROM parquet)
+                 UNION ALL (SELECT * FROM parquet EXCEPT ALL SELECT * FROM url_ledger)
+                 UNION ALL (SELECT * FROM url_ledger EXCEPT ALL SELECT * FROM coverage)
+                 UNION ALL (SELECT * FROM coverage EXCEPT ALL SELECT * FROM url_ledger))
+        SELECT count(*) AS urls, sum(visit_count) AS visits,
+            sum(any_snapshot_count > 0) AS urls_with_any_snapshot,
+            sum(visits_with_snapshot_within_window) AS visits_with_snapshot_within_window,
+            sum(visit_count) - sum(visits_with_snapshot_within_window) AS visits_with_coverage_gap,
+            CASE WHEN sum(visit_count) > 0 THEN sum(visits_with_snapshot_within_window)::DOUBLE / sum(visit_count)
+                 ELSE NULL END AS visit_coverage_fraction,
+            (SELECT count(*) FROM differences) AS different_rows
+        FROM url_ledger
+    """)[0]
+    # The CLI emits HUGEINT sums as decimal strings; COPY JSON emits numbers.
+    # Normalize only these known integer aggregate fields, without float casts.
+    for key in ("visits", "urls_with_any_snapshot", "visits_with_snapshot_within_window", "visits_with_coverage_gap"):
+        if isinstance(row[key], str):
+            if re.fullmatch(r"-?[0-9]+", row[key]) is None:
+                raise ValueError("invalid integer publication statistic")
+            row[key] = int(row[key])
+    if row.pop("different_rows") != 0 or json.loads((path / "coverage_stats.json").read_text()) != [row]:
+        raise ValueError("URL-ledger products disagree")
+    return row["urls"]
+
+
+def _sync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def cmd_build(args: argparse.Namespace) -> int:
+    root = Path(args.derived_root)
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    generations = root / "generations"
+    generations.mkdir(mode=0o700, exist_ok=True)
+    with (root / ".build.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        old_umask = os.umask(0o077)
+        stage = None
+        committed = False
+        name = uuid.uuid4().hex
+        try:
+            stage = Path(tempfile.mkdtemp(prefix=".building-", dir=generations))
+            inputs = stage / ".inputs"
+            inputs.mkdir(mode=0o700)
+            identities = {}
+            for filename in ("urls.jsonl", "resolution.jsonl"):
+                source = Path(args.state_root) / filename
+                if filename == "resolution.jsonl" and not source.exists():
+                    continue
+                if not source.is_file():
+                    raise ValueError(f"URL-ledger input is not a regular file: {filename}")
+                shutil.copyfile(source, inputs / filename)
+                with (inputs / filename).open("rb") as handle:
+                    identities[filename] = hashlib.file_digest(handle, "sha256").hexdigest()
+            build_args = argparse.Namespace(**vars(args))
+            build_args.state_root, build_args.derived_root = str(inputs), str(stage)
+            if _build_products(build_args):
+                return 1
+            rows = _validate_products(stage, args.duckdb_bin)
+            shutil.rmtree(inputs)
+            artifacts = {}
+            for filename in PRODUCTS:
+                with (stage / filename).open("rb") as handle:
+                    artifacts[filename] = {"sha256": hashlib.file_digest(handle, "sha256").hexdigest(),
+                                           "bytes": os.fstat(handle.fileno()).st_size}
+                    os.fsync(handle.fileno())
+            manifest = {"schema": PUBLICATION_SCHEMA, "generation": name, "rows": rows,
+                        "window_days": args.window_days,
+                        "published_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        "input_sha256": identities, "artifacts": artifacts}
+            payload = json.dumps(manifest, sort_keys=True).encode() + b"\n"
+            atomic_publish(stage / "manifest.json", payload, fsync=True, mode=0o600)
+            _sync_directory(stage)
+            final = generations / name
+            os.replace(stage, final)
+            _sync_directory(generations)
+            pointer = json.dumps({"generation": name, "manifest_sha256": hashlib.sha256(payload).hexdigest()}).encode() + b"\n"
+            try:
+                atomic_publish(root / "current.json", pointer, fsync=True, mode=0o600)
+            except OSError:
+                # A directory fsync can fail after the rename committed. Do not
+                # call that a pre-publication refusal or remove its complete data.
+                if published_generation(root) != final.resolve():
+                    raise
+                print("sinnix-url-ledger: publication committed; durability confirmation failed", file=sys.stderr)
+            committed = True
+            predecessors = [root / filename for filename in PRODUCTS if (root / filename).exists()]
+            if predecessors:
+                history = root / "history" / f"flat-{name}"
+                history.mkdir(parents=True, mode=0o700)
+                for source in predecessors:
+                    os.replace(source, history / source.name)
+                _sync_directory(history)
+                _sync_directory(root)
+            print(f"sinnix-url-ledger published: {name}, {rows} URLs")
+            return 0
+        except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
+            outcome = "publication committed; predecessor preservation failed" if committed else "build refused"
+            print(f"sinnix-url-ledger {outcome}: {error}", file=sys.stderr)
+            return 1
+        finally:
+            try:
+                if stage is not None and stage.exists():
+                    shutil.rmtree(stage)
+            finally:
+                os.umask(old_umask)
 
 
 # ---------------------------------------------------------------------------
@@ -1029,6 +1197,10 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--window-days", type=int, default=30, help="Coverage window in days (default: %(default)s)")
     build.add_argument("--duckdb-bin", default="duckdb")
     build.set_defaults(func=cmd_build)
+
+    published = sub.add_parser("published", help="Resolve one verified generation for a reader")
+    published.add_argument("--derived-root", default=str(DEFAULT_DERIVED_ROOT))
+    published.set_defaults(func=cmd_published)
 
     run = sub.add_parser("run", help="ingest + resolve + build in one invocation (what the timer runs)")
     run.add_argument("--history-path", default=str(DEFAULT_HISTORY_PATH))

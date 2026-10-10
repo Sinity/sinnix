@@ -163,6 +163,7 @@
           scriptPkgs.sinnix-elicit
           scriptPkgs.sinnix-census
           scriptPkgs.sinnix-navigation-audit
+          scriptPkgs.sinnix-url-ledger
 
           # Help
           help

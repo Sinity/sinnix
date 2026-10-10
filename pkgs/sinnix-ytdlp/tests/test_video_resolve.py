@@ -1,9 +1,88 @@
+import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+
+def test_default_reader_pins_generation_during_replacement(tmp_path):
+    scripts = Path(__file__).parents[3] / "scripts"
+    state = tmp_path / "state"
+    state.mkdir()
+    root = tmp_path / "derived"
+    pointers = []
+    for name in ("first", "second"):
+        (state / "urls.jsonl").write_text(
+            json.dumps(
+                {
+                    "url": f"https://youtu.be/{name}",
+                    "visits": ["2026-01-01T00:00:00Z"],
+                    "visit_count": 1,
+                }
+            )
+            + "\n"
+        )
+        build = subprocess.run(
+            [
+                sys.executable,
+                str(scripts / "sinnix-url-ledger"),
+                "build",
+                "--state-root",
+                str(state),
+                "--derived-root",
+                str(root),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert build.returncode == 0, build.stderr
+        pointers.append((root / "current.json").read_bytes())
+    (root / "current.json").write_bytes(pointers[0])
+    replacement = tmp_path / "replacement.json"
+    replacement.write_bytes(pointers[1])
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    receipt = tmp_path / "downloads"
+    calls = tmp_path / "selections"
+    shell = shutil.which("bash")
+    helper = bindir / "sinnix-url-ledger"
+    helper.write_text(
+        f"#!{sys.executable}\n"
+        "import os, subprocess, sys\n"
+        f"selected = subprocess.run([sys.executable, {str(scripts / 'sinnix-url-ledger')!r}, *sys.argv[1:]], capture_output=True, text=True, check=True)\n"
+        "with open(os.environ['SELECTION_RECEIPT'], 'a') as f: f.write('selected\\n')\n"
+        "os.replace(os.environ['REPLACEMENT_POINTER'], os.environ['SINNIX_URL_LEDGER_ROOT'] + '/current.json')\n"
+        "print(selected.stdout, end='')\n"
+    )
+    helper.chmod(0o700)
+    downloader = bindir / "sinnix-ytdlp"
+    downloader.write_text(
+        f'#!{shell}\nprintf "%s\\n" "${{@: -1}}" >> "$DOWNLOAD_RECEIPT"\n'
+    )
+    downloader.chmod(0o700)
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "SINNIX_URL_LEDGER_ROOT": str(root),
+        "SINNIX_VIDEO_ARCHIVE_ROOT": str(tmp_path / "archive"),
+        "DOWNLOAD_RECEIPT": str(receipt),
+        "SELECTION_RECEIPT": str(calls),
+        "REPLACEMENT_POINTER": str(replacement),
+    }
+    env.pop("SINNIX_URL_LEDGER_PARQUET", None)
+    result = subprocess.run(
+        [shell, str(scripts / "sinnix-video-resolve")],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert receipt.read_text().splitlines() == ["https://youtu.be/first"]
+    assert calls.read_text().splitlines() == ["selected"]
+    assert (root / "current.json").read_bytes() == pointers[1]
 
 
 @pytest.fixture

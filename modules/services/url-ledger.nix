@@ -41,12 +41,9 @@ mkServiceModule {
       }
       {
         name = "url-ledger-coverage";
-        # coverage.jsonl, not derivedDir: stateDir lives INSIDE derivedDir, so
-        # a lane pointed at the parent reports the newest of the two and can
-        # never see its own product go stale. Observed 2026-08-18 -- the
-        # coverage products were 24h older than the state files and the lane
-        # read as fresh.
-        path = "${derivedDir}/coverage.jsonl";
+        # Only a validated generation advances this publication pointer.
+        # Input/cache activity must not refresh derived-product liveness.
+        path = "${derivedDir}/current.json";
         cadenceSeconds = 86400;
         staleAfterSeconds = 172800;
       }

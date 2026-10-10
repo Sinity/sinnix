@@ -224,6 +224,16 @@ pool = "normal"
 result = "exit"
 cache = "none"
 
+[operations.url_ledger_build]
+description = "Publish a coherent URL-ledger generation from explicit local state without provider requests"
+exec = ["sinnix-url-ledger", "build"]
+arguments = "required"
+pool = "bulk"
+result = "exit"
+cache = "none"
+scratch = "nvme"
+timeout_seconds = 1800
+
 [operations.fs_index_restore]
 description = "Restore a coherent filesystem-index generation from explicit dated scan artifacts"
 exec = ["env", "PYTHONPATH=pkgs/sinnix-lib", "python3", "scripts/sinnix-fs", "ledger", "--index-dir", "/realm/state/fs-index", "--retained-inputs"]

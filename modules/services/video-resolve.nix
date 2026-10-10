@@ -3,7 +3,7 @@
 # existed, not that the video survives -- so URLs on known video-hosting
 # domains get resolved into a real yt-dlp'd copy instead of relying on the
 # archive-availability join sinnix-url-ledger does for everything else. Runs
-# after the ledger's weekly build so it has a fresh parquet to query.
+# after a ledger publication, resolving one immutable generation per run.
 {
   mkServiceModule,
   config,
@@ -15,7 +15,7 @@
 let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   archiveRoot = "${config.sinnix.paths.capturePaths.video-resolve}";
-  ledgerParquet = "${config.sinnix.paths.capturePaths.url-ledger}/url_ledger.parquet";
+  ledgerRoot = config.sinnix.paths.capturePaths.url-ledger;
 in
 mkServiceModule {
   name = "video-resolve";
@@ -40,7 +40,10 @@ mkServiceModule {
   job = {
     description = "Resolve video-hosting URLs from the URL ledger into archived copies";
     user = config.sinnix.user.name;
-    serviceConfig.UMask = "0077";
+    serviceConfig = {
+      UMask = "0077";
+      Environment = "SINNIX_URL_LEDGER_ROOT=${ledgerRoot}";
+    };
     execStart = "${scriptPkgs.sinnix-video-resolve}/bin/sinnix-video-resolve";
     timer = {
       onCalendar = "weekly";
@@ -57,7 +60,7 @@ mkServiceModule {
       # condition turns "my input does not exist yet" into a skip instead
       # of a reported failure.
       after = [ "sinnix-url-ledger.service" ];
-      unitConfig.ConditionPathExists = [ ledgerParquet ];
+      unitConfig.ConditionPathExists = [ "${ledgerRoot}/current.json" ];
     };
   };
 } args

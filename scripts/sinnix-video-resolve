@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Resolve video-hosting URLs found in the URL ledger into archived copies
-# runtimeInputs: duckdb coreutils jq @sinnix-ytdlp
+# runtimeInputs: duckdb coreutils jq @sinnix-ytdlp @sinnix-url-ledger
 
 # The URL ledger discovers and normalizes every URL this operator's browsing
 # history has touched, joined against archive-availability. This script is
@@ -16,7 +16,16 @@
 set -euo pipefail
 umask 077
 
-LEDGER_PARQUET="${SINNIX_URL_LEDGER_PARQUET:-/realm/activity/browser/coverage/url_ledger.parquet}"
+LEDGER_PARQUET="${SINNIX_URL_LEDGER_PARQUET:-}"
+if [[ -z "$LEDGER_PARQUET" ]]; then
+  ledger_args=()
+  if [[ -n "${SINNIX_URL_LEDGER_ROOT:-}" ]]; then
+    ledger_args=(--derived-root "$SINNIX_URL_LEDGER_ROOT")
+  fi
+  # Bind the immutable generation once before querying it.
+  ledger_generation=$(sinnix-url-ledger published "${ledger_args[@]}") || exit 1
+  LEDGER_PARQUET="$ledger_generation/url_ledger.parquet"
+fi
 ARCHIVE_ROOT="${SINNIX_VIDEO_ARCHIVE_ROOT:-/realm/activity/browser/recovery}"
 DL_ARCHIVE="$ARCHIVE_ROOT/.yt-dlp-archive"
 # Compatibility record from the first resolver implementation. It remains

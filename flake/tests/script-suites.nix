@@ -238,7 +238,9 @@
           scripts = [
             "sinnix-ytdlp"
             "sinnix-video-resolve"
+            "sinnix-url-ledger"
           ];
+          extraPythonPackages = [ sinnix-lib ];
           nativeBuildInputs = [
             pkgs.bash
             pkgs.duckdb
