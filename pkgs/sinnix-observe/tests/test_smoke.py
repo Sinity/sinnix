@@ -770,7 +770,7 @@ def test_storage_includes_declared_mounts_without_duplicate_or_empty_paths(tmp_p
         assert argv[0] == "findmnt"
         path = argv[2]
         probed.append(path)
-        return Result(tuple(argv), 0, f"{path} /dev/fixture btrfs rw\n", "")
+        return Result(tuple(argv), 0, json.dumps({"filesystems": [dict(target=path, source="/dev/fixture", fstype="btrfs", options="rw")]}), "")
 
     monkeypatch.setattr(storage, "run", findmnt)
     result = storage.collect_storage(offline=False)
@@ -791,11 +791,12 @@ def test_storage_selects_visible_mount_above_automount(monkeypatch):
 
     def findmnt(argv, **kwargs):
         path = argv[2]
-        visible = f"{path} /dev/fixture btrfs rw,noatime\n"
+        visible = dict(target=path, source="/dev/fixture", fstype="btrfs", options="rw,noatime")
         if "-d" in argv and argv[argv.index("-d") + 1] == "backward" and "-f" in argv:
-            output = visible
+            entries = [visible]
         else:
-            output = f"{path} systemd-1 autofs rw,relatime\n" + visible
+            entries = [dict(target=path, source="systemd-1", fstype="autofs", options="rw"), visible]
+        output = json.dumps({"filesystems": entries})
         return Result(tuple(argv), 0, output, "")
 
     monkeypatch.setattr(storage, "run", findmnt)
@@ -814,3 +815,26 @@ def test_runtime_inventory_invalid_utf8_is_explicitly_unavailable(tmp_path, monk
         "available": False, "reason": "runtime inventory malformed",
     }
     assert runtime_inventory.monitored_mount_paths() == []
+
+
+def test_storage_mount_json_preserves_spaces_and_provider_failures(monkeypatch):
+    monkeypatch.setenv("SINNIX_OBSERVE_IOSTAT", "0")
+    monkeypatch.setattr(storage, "polylogue_archive", lambda: {})
+    monkeypatch.setattr(storage, "monitored_mount_paths", lambda: ["/fixture with space"])
+    monkeypatch.setattr(storage.glob, "glob", lambda pattern: [])
+    monkeypatch.setattr(storage, "systemctl_show", lambda unit: {})
+    expected = {"target": "/fixture with space", "source": "/dev/fixture[/source with space]",
+                "fstype": "btrfs", "options": "rw,noatime"}
+    output = json.dumps({"filesystems": [expected]})
+
+    def findmnt(argv, **kwargs):
+        return Result(tuple(argv), 0, output, "")
+
+    monkeypatch.setattr(storage, "run", findmnt)
+    result = storage.collect_storage(offline=False)
+    mount = next(row for row in result["mounts"] if row["path"] == "/fixture with space")
+    assert mount == {"path": "/fixture with space", **expected}
+    for output in ("{", "[]", '{"filesystems": []}', '{"filesystems": [null]}'):
+        result = storage.collect_storage(offline=False)
+        mount = next(row for row in result["mounts"] if row["path"] == "/fixture with space")
+        assert mount == {"path": "/fixture with space", "unresolved": True}

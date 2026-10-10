@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import glob
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -33,21 +34,28 @@ def collect_storage(offline: bool) -> dict[str, Any]:
         result = run(
             # A mounted filesystem can cover an autofs entrance. The reverse
             # search selects the visible top mount and emits exactly one row.
-            ["findmnt", "-T", path, "-d", "backward", "-f", "-n", "-o",
+            ["findmnt", "-T", path, "-d", "backward", "-f", "-J", "-o",
              "TARGET,SOURCE,FSTYPE,OPTIONS"],
             timeout=5,
         )
-        if result.stdout.strip():
-            parts = result.stdout.strip().split(None, 3)
-            mounts.append(
-                {
-                    "path": path,
-                    "target": parts[0] if len(parts) > 0 else None,
-                    "source": parts[1] if len(parts) > 1 else None,
-                    "fstype": parts[2] if len(parts) > 2 else None,
-                    "options": parts[3] if len(parts) > 3 else None,
-                }
-            )
+        row = None
+        if result.ok:
+            try:
+                document = json.loads(result.stdout)
+            except json.JSONDecodeError:
+                document = None
+            entries = document.get("filesystems") if isinstance(document, dict) else None
+            if isinstance(entries, list) and len(entries) == 1 and isinstance(entries[0], dict):
+                candidate = entries[0]
+                if (isinstance(candidate.get("target"), str)
+                        and isinstance(candidate.get("fstype"), str)
+                        and all(candidate.get(key) is None or isinstance(candidate[key], str)
+                                for key in ("source", "options"))):
+                    row = candidate
+        if row is not None:
+            mounts.append({"path": path, **{
+                key: row.get(key) for key in ("target", "source", "fstype", "options")
+            }})
         else:
             mounts.append({"path": path, "unresolved": True})
 

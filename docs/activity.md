@@ -78,7 +78,7 @@ and notification submission are separate smoke tests; they are not implied by un
 
 A runtime inventory with malformed JSON or invalid UTF-8 is reported as unavailable with a malformed-input reason. It does not crash the observation report.
 
-`sinnix-observe --section storage` includes the monitored mount paths declared in the runtime inventory, alongside native system and service mounts. Repeated paths are probed once; an absent archive-root setting does not produce an empty-path probe. A stacked automount reports the visible mounted filesystem rather than combining its rows with the underlying autofs entrance. This includes backup and secondary-disk entrances without a second hardcoded workstation mapping.
+`sinnix-observe --section storage` includes the monitored mount paths declared in the runtime inventory, alongside native system and service mounts. Repeated paths are probed once; an absent archive-root setting does not produce an empty-path probe. A stacked automount reports the visible mounted filesystem rather than combining its rows with the underlying autofs entrance. Mount metadata uses the provider’s JSON fields so spaces in target and source paths remain intact; failed or malformed probes remain unresolved. This includes backup and secondary-disk entrances without a second hardcoded workstation mapping.
 
 `sinnix-observe --section drift` reads the private host comparison report. The scheduled producer probes system state as root, then drops privileges to publish a `0600` report owned by the configured operator. Invalid report rows appear as an unavailable source.
 
