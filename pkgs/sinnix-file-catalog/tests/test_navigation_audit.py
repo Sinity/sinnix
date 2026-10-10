@@ -193,3 +193,19 @@ def test_invalid_utf8_link_cannot_match_replacement_filename(tmp_path):
     result = runpy.run_path(str(SCRIPT))["audit"]({"schema_version": 1, "documents": [str(document)]})
     assert result["failures"] == 1
     assert [row["status"] for row in result["links"]] == ["invalid-link", "ok", "ok"]
+
+
+def test_percent_encoded_backslash_is_filename_content(tmp_path):
+    import runpy
+
+    (tmp_path / "literal\\(name).md").write_text("present")
+    (tmp_path / "escaped(name).md").write_text("present")
+    document = tmp_path / "README.md"
+    document.write_text(
+        "[literal](literal%5C%28name%29.md)\n"
+        "[escaped](escaped\\(name\\).md)\n"
+    )
+    audit = runpy.run_path(str(SCRIPT))["audit"]
+    report = audit({"schema_version": 1, "documents": [str(document)]})
+    assert [row["status"] for row in report["links"]] == ["ok", "ok"]
+    assert report["links"][0]["destination"] == str(tmp_path / "literal\\(name).md")

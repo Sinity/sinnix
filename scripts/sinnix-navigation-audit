@@ -79,7 +79,7 @@ def audit(manifest: dict) -> dict:
             if not parsed.path:
                 continue
             try:
-                decoded = re.sub(r"\\([() ])", r"\1", unquote(parsed.path, errors="strict"))
+                decoded = unquote(re.sub(r"\\([() ])", r"\1", parsed.path), errors="strict")
             except UnicodeError as exc:
                 rows.append({"document": str(document), "target": target,
                              "status": "invalid-link", "reason": str(exc)})
