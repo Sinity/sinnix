@@ -172,3 +172,13 @@ def test_malformed_links_do_not_abort_remaining_targets(tmp_path):
     result = runpy.run_path(str(SCRIPT))["audit"]({"schema_version": 1, "documents": [str(document)]})
     assert result["failures"] == 2
     assert [row["status"] for row in result["links"]] == ["invalid-link", "invalid-link", "ok"]
+
+
+def test_null_document_does_not_abort_other_entrances(tmp_path):
+    import runpy
+    document = tmp_path / "README.md"
+    document.write_text("[present](README.md)")
+    invalid = str(document) + "\0bad"
+    result = runpy.run_path(str(SCRIPT))["audit"]({"schema_version": 1, "documents": [invalid, str(document)]})
+    assert result["failures"] == 1
+    assert [row["status"] for row in result["links"]] == ["invalid-document", "ok"]

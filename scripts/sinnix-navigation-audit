@@ -45,6 +45,9 @@ def audit(manifest: dict) -> dict:
         mounted = frozenset()
     rows = []
     for name in manifest["documents"]:
+        if not isinstance(name, str) or "\0" in name:
+            rows.append({"document": name, "status": "invalid-document"})
+            continue
         document = Path(name)
         if not document.is_absolute():
             rows.append({"document": str(document), "status": "invalid-document"})
