@@ -147,3 +147,10 @@ paths. Unreadable, wrongly typed or invalidly encoded entrance documents and
 malformed links are explicit failures; the audit continues through the remaining
 entrances. Documents and targets below offline external roots remain explicitly
 unprobed, without inspecting their placeholder paths.
+
+Identity checks and metadata audits include recorded filesystem UUID and Btrfs
+subvolume observations. Changed or no longer observable stable fields cannot
+produce a verified match. A complete matching Btrfs identity allows device-number
+drift during relocation verification; the audit still reports that drift as a
+separate device-only observation. Newly observed stable fields do not become retrospective requirements on legacy
+records. None of these checks verifies payload hashes.
