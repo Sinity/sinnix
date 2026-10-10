@@ -10,4 +10,5 @@ trap 'rm -rf "$tmp_dir"' EXIT
 geometry=$(slurp)
 [ -n "$geometry" ] || exit 0
 grim -g "$geometry" "$tmp_dir/region.png"
-timeout 30s tesseract "$tmp_dir/region.png" stdout 2>/dev/null | wl-copy
+timeout 30s tesseract "$tmp_dir/region.png" stdout 2>/dev/null >"$tmp_dir/text"
+wl-copy <"$tmp_dir/text"
