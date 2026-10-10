@@ -476,6 +476,46 @@ class NativeOutputTest(unittest.TestCase):
         self.assertFalse(self.result.exists())
         self.assertFalse((self.root / "pi-args").exists())
 
+    def test_failed_bootstrap_preserves_retired_package_and_launcher(self):
+        state = self.root / ".local/state/fixture-agent"
+        retired = state / "npm/lib/node_modules/.fixture-package-AbCd1234"
+        retired.mkdir(parents=True)
+        (retired / "recoverable.txt").write_bytes(b"retained fixture bytes")
+        launcher = state / "npm/bin/.fixture-Qwer1234"
+        launcher.parent.mkdir(parents=True)
+        launcher.symlink_to("/missing-fixture")
+        self.executable("npm", "exit 57\n")
+        outcome = subprocess.run(
+            [
+                "bash",
+                str(BOOTSTRAP),
+                "fixture-agent",
+                "fixture-package",
+                "fixture",
+                str(self.bin),
+            ],
+            env={**self.env, "HOME": str(self.root)},
+            capture_output=True,
+            timeout=10,
+        )
+        self.assertEqual(outcome.returncode, 57, outcome.stderr)
+        self.assertEqual(outcome.stdout, b"")
+        attempts = list((state / "npm-recovery").glob("attempt.*"))
+        self.assertEqual(len(attempts), 1)
+        saved = attempts[0]
+        self.assertEqual(
+            (
+                saved / "lib/node_modules/.fixture-package-AbCd1234/recoverable.txt"
+            ).read_bytes(),
+            b"retained fixture bytes",
+        )
+        self.assertEqual(
+            os.readlink(saved / "bin/.fixture-Qwer1234"), "/missing-fixture"
+        )
+        self.assertFalse(retired.exists())
+        self.assertFalse(launcher.is_symlink())
+        self.assertEqual(saved.stat().st_mode & 0o777, 0o700)
+
     def test_bootstrap_diagnostics_never_enter_stdout(self):
         self.executable(
             "npm",

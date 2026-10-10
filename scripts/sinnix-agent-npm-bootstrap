@@ -22,8 +22,8 @@ export npm_config_prefix="$STATE/npm"
 export PATH="$runtime_path:$STATE/npm/bin:$PATH"
 mkdir -p "$STATE/npm"
 
-cleanup_stale_reify_entries() {
-  local package_name package_parent candidate suffix
+preserve_reify_entries() {
+  local package_name package_parent candidate suffix relative recovery_dir=""
 
   package_name=${npm_package##*/}
   case "$npm_package" in
@@ -45,8 +45,16 @@ cleanup_stale_reify_entries() {
       continue
     fi
 
-    echo "$binary_name: removing interrupted npm retirement entry $candidate" >&2
-    rm -rf -- "$candidate"
+    # An interrupted retirement can hold the only recoverable package copy.
+    # Clear npm's collision path without discarding it, even if reinstall fails.
+    if [ -z "$recovery_dir" ]; then
+      install -d -m 0700 "$STATE/npm-recovery"
+      recovery_dir=$(mktemp -d "$STATE/npm-recovery/attempt.XXXXXXXX")
+    fi
+    relative=${candidate#"$STATE/npm/"}
+    install -d -m 0700 "$recovery_dir/$(dirname "$relative")"
+    mv -- "$candidate" "$recovery_dir/$relative"
+    echo "$binary_name: preserved interrupted npm retirement at $recovery_dir/$relative" >&2
   done
 }
 
@@ -65,7 +73,7 @@ fi
 
 # Another wrapper may have completed recovery while this process waited.
 if [ ! -x "$STATE/npm/bin/$binary_name" ]; then
-  cleanup_stale_reify_entries
+  preserve_reify_entries
   echo "$binary_name: bootstrapping (npm install -g $npm_package)..." >&2
   npm install -g "$npm_package" >&2
 fi
