@@ -11,9 +11,9 @@ import shutil
 import tempfile
 import time
 import uuid
-from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -55,6 +55,7 @@ class McpBrokerDeadlineError(McpBrokerError):
 
 MAX_MCP_TOOL_LIST_PAGES = 128
 MAX_MCP_TOOL_COUNT = 10_000
+MAX_SESSION_CALLS = 4
 
 
 @dataclass
@@ -69,6 +70,8 @@ class _PersistentSession:
         self.service = service
         self.name = name
         self.sender = sender
+        self.pending: dict[int, _SessionRequest] = {}
+        self.failure: McpBrokerError | None = None
 
     async def initialize(self) -> None:
         return None
@@ -80,14 +83,30 @@ class _PersistentSession:
         return await self._request("call_tool", (name, arguments))
 
     async def _request(self, operation: str, payload: Any) -> Any:
+        if self.failure is not None:
+            raise self.failure
         send, receive = anyio.create_memory_object_stream[Any](1)
-        async with send, receive:
-            await self.sender.send(_SessionRequest(operation, payload, send))
-            ok, value = await receive.receive()
-        if not ok:
-            await self.service._discard_session(self.name)
-            raise value
-        return value
+        request = _SessionRequest(operation, payload, send)
+        self.pending[id(request)] = request
+        try:
+            async with send, receive:
+                await self.sender.send(request)
+                ok, value = await receive.receive()
+            if not ok:
+                await self.service._discard_session(self.name, expected=self)
+                raise value
+            return value
+        except (
+            anyio.BrokenResourceError,
+            anyio.ClosedResourceError,
+            anyio.EndOfStream,
+        ) as exc:
+            await self.service._discard_session(self.name, expected=self)
+            raise self.failure or McpBrokerError(
+                f"MCP upstream {self.name} session closed"
+            ) from exc
+        finally:
+            self.pending.pop(id(request), None)
 
 
 class McpBrokerService:
@@ -166,7 +185,7 @@ class McpBrokerService:
     ) -> None:
         current_tool = "initialize"
         started = False
-        failed_request: _SessionRequest | None = None
+        proxy: _PersistentSession | None = None
         try:
             with stderr_path.open("w", encoding="utf-8") as stderr:
                 async with stdio_client(parameters, errlog=stderr) as (
@@ -178,9 +197,16 @@ class McpBrokerService:
                         proxy = _PersistentSession(self, name, None)
                         task_status.started(proxy)
                         started = True
-                        async with receiver:
-                            async for request in receiver:
-                                current_tool = (
+                        limiter = anyio.Semaphore(MAX_SESSION_CALLS)
+
+                        async def dispatch(request: _SessionRequest) -> None:
+                            nonlocal current_tool
+                            try:
+                                # Admission must recheck the reply endpoint after
+                                # waiting: a queued caller may have disconnected.
+                                if request.reply.statistics().open_receive_streams == 0:
+                                    return
+                                tool = (
                                     request.payload[0]
                                     if request.operation == "call_tool"
                                     else "tools/list"
@@ -196,19 +222,25 @@ class McpBrokerService:
                                             tool_name, arguments
                                         )
                                 except Exception:
-                                    failed_request = request
+                                    current_tool = tool
                                     raise
-                                else:
-                                    try:
-                                        await request.reply.send((True, result))
-                                    except (
-                                        anyio.BrokenResourceError,
-                                        anyio.ClosedResourceError,
-                                    ):
-                                        # The caller timed out or disconnected. The
-                                        # upstream result may already exist; keep it
-                                        # only in this session and never resend it.
-                                        continue
+                                try:
+                                    await request.reply.send((True, result))
+                                except (
+                                    anyio.BrokenResourceError,
+                                    anyio.ClosedResourceError,
+                                ):
+                                    # A completed upstream effect is never replayed.
+                                    pass
+                            finally:
+                                limiter.release()
+
+                        async with receiver, anyio.create_task_group() as calls:
+                            async for request in receiver:
+                                # Keep the pending task set bounded as well as
+                                # upstream concurrency; the stream buffers 32.
+                                await limiter.acquire()
+                                calls.start_soon(dispatch, request)
         except Exception as exc:
             artifact_id = self._store_upstream_stderr(
                 stderr_path.parent, name, current_tool
@@ -217,22 +249,33 @@ class McpBrokerService:
             message = McpBrokerError(
                 f"MCP upstream {name} session failed: {type(exc).__name__}{diagnostic}"
             )
-            if failed_request is not None:
-                with anyio.CancelScope(shield=True):
+            if proxy is not None:
+                # Includes buffered requests not yet consumed by the receiver.
+                # Publish failure without blocking behind a completed reply.
+                proxy.failure = message
+                for request in list(proxy.pending.values()):
                     try:
-                        await failed_request.reply.send((False, message))
-                    except (anyio.BrokenResourceError, anyio.ClosedResourceError):
+                        request.reply.send_nowait((False, message))
+                    except (
+                        anyio.BrokenResourceError,
+                        anyio.ClosedResourceError,
+                        anyio.WouldBlock,
+                    ):
                         pass
             if not started:
-                task_status.started(exception=message)
+                raise message from exc
+            await self._discard_session(name, expected=proxy)
             return
         finally:
             if stderr_path.exists() and stderr_path.stat().st_size == 0:
                 shutil.rmtree(stderr_path.parent, ignore_errors=True)
 
-    async def _discard_session(self, name: str) -> None:
+    async def _discard_session(
+        self, name: str, *, expected: _PersistentSession | None = None
+    ) -> None:
         async with self._session_lock:
-            self._sessions.pop(name, None)
+            if expected is None or self._sessions.get(name) is expected:
+                self._sessions.pop(name, None)
 
     @staticmethod
     def _string(value: Any, name: str, maximum: int = 8_192) -> str:

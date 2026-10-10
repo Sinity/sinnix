@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import json
 import fcntl
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -1147,3 +1147,227 @@ def test_probe_distinguishes_capped_discovery_from_call_route_timeout(
         assert "callTimeoutSeconds 300" in row["reason"]
     else:
         assert "within 3 seconds" in row["reason"]
+
+
+def test_persistent_calls_overlap(tmp_path, monkeypatch):
+    broker = broker_service(tmp_path, "operator")
+    started = []
+    both = asyncio.Event()
+
+    class ConcurrentSession(FakeSession):
+        async def call_tool(self, name, arguments):
+            started.append(arguments["query"])
+            if len(started) == 2:
+                both.set()
+            await both.wait()
+            return await super().call_tool(name, arguments)
+
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client", lambda *a, **k: FakeTransport()
+    )
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.ClientSession", ConcurrentSession
+    )
+
+    async def invoke():
+        async with broker.lifespan():
+            proxy = await broker._persistent_session(
+                "fixture", broker._server("fixture"), {}, tmp_path / "stderr"
+            )
+            with anyio.fail_after(1):
+                await asyncio.gather(
+                    *(
+                        proxy.call_tool("lookup", {"query": value})
+                        for value in ["first", "second"]
+                    )
+                )
+
+    anyio.run(invoke)
+    assert sorted(started) == ["first", "second"]
+
+
+def test_persistent_cancelled_queued_call_is_skipped(tmp_path, monkeypatch):
+    broker = broker_service(tmp_path, "operator")
+    started = []
+    full = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingSession(FakeSession):
+        async def call_tool(self, name, arguments):
+            query = arguments["query"]
+            started.append(query)
+            if len(started) == 4:
+                full.set()
+            if query.startswith("block"):
+                await release.wait()
+            return await super().call_tool(name, arguments)
+
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client", lambda *a, **k: FakeTransport()
+    )
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.ClientSession", BlockingSession
+    )
+
+    async def invoke():
+        async with broker.lifespan():
+            proxy = await broker._persistent_session(
+                "fixture", broker._server("fixture"), {}, tmp_path / "stderr"
+            )
+            with anyio.fail_after(2):
+                blockers = [
+                    asyncio.create_task(
+                        proxy.call_tool("lookup", {"query": f"block{i}"})
+                    )
+                    for i in range(4)
+                ]
+                await full.wait()
+                cancelled = asyncio.create_task(
+                    proxy.call_tool("lookup", {"query": "cancelled"})
+                )
+                await anyio.sleep(0.01)
+                assert len(started) == 4
+                cancelled.cancel()
+                await asyncio.gather(cancelled, return_exceptions=True)
+                release.set()
+                await asyncio.gather(*blockers)
+                await proxy.call_tool("lookup", {"query": "after"})
+
+    anyio.run(invoke)
+    assert "cancelled" not in started
+
+
+def test_persistent_failure_answers_all_pending_callers(tmp_path, monkeypatch):
+    broker = broker_service(tmp_path, "operator")
+    two = asyncio.Event()
+    count = 0
+
+    class FailedSession(FakeSession):
+        async def call_tool(self, name, arguments):
+            nonlocal count
+            count += 1
+            if count >= 2:
+                two.set()
+            if arguments["query"] == "boom":
+                await two.wait()
+                raise OSError("fixture connection lost")
+            await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client", lambda *a, **k: FakeTransport()
+    )
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FailedSession)
+
+    async def invoke():
+        async with broker.lifespan():
+            proxy = await broker._persistent_session(
+                "fixture", broker._server("fixture"), {}, tmp_path / "stderr"
+            )
+            with anyio.fail_after(2):
+                results = await asyncio.gather(
+                    *(
+                        proxy.call_tool("lookup", {"query": value})
+                        for value in [
+                            "boom",
+                            "slow",
+                            "queued1",
+                            "queued2",
+                            "queued3",
+                            "queued4",
+                        ]
+                    ),
+                    return_exceptions=True,
+                )
+            assert all(isinstance(result, McpBrokerError) for result in results), (
+                results
+            )
+            assert "fixture" not in broker._sessions
+            with pytest.raises(McpBrokerError):
+                await proxy.call_tool("lookup", {"query": "late"})
+
+    anyio.run(invoke)
+
+
+def test_persistent_initialization_failure_is_typed(tmp_path, monkeypatch):
+    broker = broker_service(tmp_path, "operator")
+
+    class FailedInitialization(FakeSession):
+        async def initialize(self):
+            raise OSError("fixture initialization failure")
+
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client", lambda *a, **k: FakeTransport()
+    )
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.ClientSession", FailedInitialization
+    )
+
+    async def invoke():
+        async with broker.lifespan():
+            with pytest.raises(McpBrokerError, match="session failed"):
+                await broker._persistent_session(
+                    "fixture", broker._server("fixture"), {}, tmp_path / "stderr"
+                )
+            assert "fixture" not in broker._sessions
+
+    anyio.run(invoke)
+
+
+def test_discard_failed_proxy_preserves_replacement(tmp_path):
+    broker = broker_service(tmp_path, "operator")
+    old, replacement = object(), object()
+    broker._sessions["fixture"] = replacement
+    anyio.run(lambda: broker._discard_session("fixture", expected=old))
+    assert broker._sessions["fixture"] is replacement
+
+
+def test_persistent_calls_overlap_through_real_stdio(tmp_path):
+    script = tmp_path / "fixture_mcp.py"
+    script.write_text("""import asyncio, json, sys
+calls = []
+both = asyncio.Event()
+async def handle(request):
+    method = request['method']
+    if method == 'initialize':
+        result = {'protocolVersion': request['params']['protocolVersion'], 'capabilities': {'tools': {}}, 'serverInfo': {'name': 'fixture', 'version': '1'}}
+    elif method == 'tools/list':
+        result = {'tools': [{'name': 'lookup', 'description': 'Neutral fixture', 'inputSchema': {'type': 'object', 'properties': {'query': {'type': 'string'}}}, 'annotations': {'readOnlyHint': True}}]}
+    else:
+        value = request['params']['arguments']['query']
+        calls.append(value)
+        if len(calls) == 2:
+            both.set()
+        await both.wait()
+        result = {'content': [{'type': 'text', 'text': value}], 'isError': False}
+    print(json.dumps({'jsonrpc': '2.0', 'id': request['id'], 'result': result}), flush=True)
+async def main():
+    tasks = set()
+    while line := await asyncio.to_thread(sys.stdin.readline):
+        request = json.loads(line)
+        if 'id' in request:
+            task = asyncio.create_task(handle(request))
+            tasks.add(task)
+            task.add_done_callback(tasks.discard)
+    await asyncio.gather(*tasks)
+asyncio.run(main())
+""")
+    broker = broker_service(tmp_path, "operator")
+    broker.config.mcp_broker_servers["fixture"].update(
+        command=sys.executable, args=[str(script)], env={}
+    )
+
+    async def invoke():
+        async with broker.lifespan():
+            with anyio.fail_after(10):
+                return await asyncio.gather(
+                    *(
+                        broker.call("fixture", "lookup", {"query": value}, write=False)
+                        for value in ["first", "second"]
+                    )
+                )
+
+    results = anyio.run(invoke)
+    assert [result["response"]["content"][0]["text"] for result in results] == [
+        "first",
+        "second",
+    ]
