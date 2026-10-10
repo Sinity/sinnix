@@ -188,6 +188,24 @@ in
         models = localModels.models;
         inherit (localModels) ollamaLoadModels litellmModelList;
       };
+      cpuContainerSpec = mkFeatureTest {
+        name = "cpu-ai-container-runtime";
+        feature = "sinnix.features.cli.polylogue.enable";
+        extraModules = [
+          ({ ... }: { sinnix.services.kokoro.enable = true; })
+        ];
+        assertions = config: [
+          {
+            assertion = config.virtualisation.podman.enable;
+            message = "CPU-only AI containers need the shared Podman runtime";
+          }
+          {
+            assertion = !config.hardware.nvidia-container-toolkit.enable;
+            message = "CPU-only AI containers must not require NVIDIA CDI";
+          }
+        ];
+      };
+      cpuContainerEvaluated = evalTestSpec system cpuContainerSpec;
       aiActivationSpec = mkFeatureTest {
         name = "ai-activation";
         feature = "sinnix.features.cli.polylogue.enable";
@@ -273,6 +291,10 @@ in
             conflictsOf = unit: config.systemd.services.${lib.removeSuffix ".service" unit}.conflicts or [ ];
           in
           [
+            {
+              assertion = config.virtualisation.podman.enable && config.hardware.nvidia-container-toolkit.enable;
+              message = "CUDA container backends require both Podman and NVIDIA CDI";
+            }
             {
               # ai-control must discover the owning service declarations,
               # rather than carry another backend-name list. Every marked
@@ -544,10 +566,13 @@ in
           ${inventoryJson}
           EOF_INVENTORY
         '';
-      # Provably fails when: any socket-proxy surface's unit wiring drifts
-      # from the endpoints/timeouts its inventory entry advertises, or the
-      # gpu-inference conflicts mesh loses symmetry. Claims live in the
-      # spec's assertions; this derivation forces the evaluation.
+      # A CPU-only container must evaluate on a host without an NVIDIA driver.
+      checks.ai-cpu-container-runtime = pkgs.runCommand "ai-cpu-container-runtime-check" { } ''
+        cat > "$out" <<'EOF_INVENTORY'
+        ${builtins.toJSON cpuContainerEvaluated.config.sinnix.runtime.inventory}
+        EOF_INVENTORY
+      '';
+      # Forces endpoint/timeouts, GPU exclusivity and CUDA runtime assertions.
       checks.ai-activation = pkgs.runCommand "ai-activation-check" { } ''
         cat > "$out" <<'EOF_INVENTORY'
         ${builtins.toJSON aiActivationEvaluated.config.sinnix.runtime.inventory}

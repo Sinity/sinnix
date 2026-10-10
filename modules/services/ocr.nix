@@ -71,8 +71,6 @@ mkServiceModule {
       dir = "${config.sinnix.paths.modelsRoot}/ocr";
     in
     {
-      sinnix.ml.containerRuntime.enable = true;
-
       systemd.tmpfiles.rules = [ "d ${dir} 0755 ${user} users -" ];
 
       virtualisation.oci-containers.containers.ocr = {

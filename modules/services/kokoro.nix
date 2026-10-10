@@ -56,8 +56,6 @@ mkAiService {
   configFn =
     { cfg, helpers, ... }:
     {
-      sinnix.ml.containerRuntime.enable = true;
-
       virtualisation.oci-containers.containers.kokoro = {
         inherit (cfg) image autoStart;
         pull = "never";

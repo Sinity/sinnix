@@ -181,8 +181,9 @@ let
     };
 
   # AI service specialization. It owns only the repeated surface metadata and
-  # persistence declaration. Launch commands, users, dependencies, and
-  # protocol-specific settings remain in each service module.
+  # persistence declaration and shared container-runtime requirement. Launch
+  # commands, users, dependencies, and protocol-specific settings remain in
+  # each service module.
   mkAiService =
     {
       name,
@@ -219,6 +220,9 @@ let
       configFn =
         args:
         lib.mkMerge [
+          (lib.optionalAttrs (backendKind == "container") {
+            sinnix.ml.containerRuntime.enable = true;
+          })
           (lib.optionalAttrs (stateDirectories != [ ]) {
             sinnix.persistence.system.directories = stateDirectories;
           })

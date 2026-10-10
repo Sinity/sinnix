@@ -53,8 +53,6 @@ mkAiService {
       ttsDir = "${config.sinnix.paths.modelsRoot}/tts";
     in
     {
-      sinnix.ml.containerRuntime.enable = true;
-
       systemd.tmpfiles.rules = [
         "d ${ttsDir} 0755 ${user} users -"
         "d ${ttsDir}/voices 0755 ${user} users -"

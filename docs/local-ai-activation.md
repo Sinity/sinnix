@@ -187,4 +187,6 @@ The reranker is the llama.cpp endpoint at `127.0.0.1:8081` and answers `/v1/rera
 - If VRAM is tight, inspect `sinnix ai status` and stop the current GPU occupant before starting another. The services are designed to be mutually exclusive.
 - After configuration changes, run `nix develop --command switch` from the intended Sinnix checkout, then verify `nixos-version --configuration-revision`. The wrapper builds the devshell's evaluated source and checks that source's revision against a fresh `origin/master` before activation. It refuses a dirty or stale source. `SINNIX_ALLOW_DIRTY=1` explicitly permits uncommitted files; it does not permit a stale revision. A successful switch is confirmed when the live revision matches the repository commit.
 
+Container-backed AI services enable the shared Podman runtime through the AI service factory. NVIDIA CDI is enabled only when an enabled container backend declares `requiresCuda`; CPU-only Kokoro does not require an NVIDIA driver. OCI layers stay under the managed service-state root.
+
 The runtime inventory at `/etc/sinnix/runtime-inventory.json` records the declared endpoints, activation modes, resource class, idle windows, and GPU admission relationships for these services.

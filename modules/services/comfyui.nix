@@ -85,8 +85,6 @@ mkServiceModule {
       mnt = "${config.sinnix.paths.stateRoot}/comfyui";
     in
     {
-      sinnix.ml.containerRuntime.enable = true;
-
       systemd.tmpfiles.rules = [
         "d ${mnt} 0755 ${user} users -"
       ];
