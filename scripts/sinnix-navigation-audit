@@ -78,7 +78,12 @@ def audit(manifest: dict) -> dict:
                 continue
             if not parsed.path:
                 continue
-            decoded = re.sub(r"\\([() ])", r"\1", unquote(parsed.path))
+            try:
+                decoded = re.sub(r"\\([() ])", r"\1", unquote(parsed.path, errors="strict"))
+            except UnicodeError as exc:
+                rows.append({"document": str(document), "target": target,
+                             "status": "invalid-link", "reason": str(exc)})
+                continue
             if "\0" in decoded:
                 rows.append({"document": str(document), "target": target,
                              "status": "invalid-link", "reason": "local path contains a null character"})

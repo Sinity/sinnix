@@ -182,3 +182,14 @@ def test_null_document_does_not_abort_other_entrances(tmp_path):
     result = runpy.run_path(str(SCRIPT))["audit"]({"schema_version": 1, "documents": [invalid, str(document)]})
     assert result["failures"] == 1
     assert [row["status"] for row in result["links"]] == ["invalid-document", "ok"]
+
+
+def test_invalid_utf8_link_cannot_match_replacement_filename(tmp_path):
+    import runpy
+    (tmp_path / "\ufffd.md").write_text("neutral fixture")
+    (tmp_path / "caf\u00e9.md").write_text("neutral fixture")
+    document = tmp_path / "README.md"
+    document.write_text("[invalid](%FF.md)\n[unicode](caf%C3%A9.md)\n[present](README.md)")
+    result = runpy.run_path(str(SCRIPT))["audit"]({"schema_version": 1, "documents": [str(document)]})
+    assert result["failures"] == 1
+    assert [row["status"] for row in result["links"]] == ["invalid-link", "ok", "ok"]
