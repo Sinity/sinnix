@@ -18,6 +18,35 @@ from test_mcp_broker import FakeSession, FakeTransport
 BY_NAME = {action.name: action for action in mcp_tools.ACTIONS}
 
 
+def test_offline_owner_keeps_stale_contract_in_typed_catalogs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rt = runtime(tmp_path, "operator", monkeypatch)
+    call(rt, "mcp.tools", {}, BY_NAME)
+
+    async def failed(*_args: object) -> dict:
+        return {"availability": "unavailable", "reason": "fixture offline"}
+
+    monkeypatch.setattr(rt.mcp_broker, "_probe", failed)
+    tools = call(rt, "mcp.tools", {"text": "lookup"}, BY_NAME)["data"]
+    assert tools["servers_unavailable"]["fixture"] == "fixture offline"
+    assert tools["tools"][0]["schema_stale"] is True
+    assert tools["tools"][0]["availability"] == "unavailable"
+    servers = call(rt, "mcp.servers", {"servers": ["fixture"]}, BY_NAME)["data"]
+    assert servers["servers"][0]["last_successful_probe"]
+    assert servers["servers"][0]["schema_complete"] is True
+    from sinnix_agent_gateway.actions.gateway import ACTIONS
+
+    catalog = call(
+        rt,
+        "gateway.catalog",
+        {"query": "lookup"},
+        {action.name: action for action in ACTIONS},
+    )["data"]
+    assert catalog["mcp_tools"][0]["schema_stale"] is True
+    assert "mcp.fixture" in catalog["mcp_unavailable"]
+
+
 class WriteSession(FakeSession):
     async def list_tools(self, *, params: object | None = None) -> object:
         tools = (await super().list_tools(params=params)).tools

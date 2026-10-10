@@ -1,11 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import fcntl
+import hashlib
 import json
 import math
+import os
 import shutil
+import tempfile
 import time
 import uuid
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,6 +105,7 @@ class McpBrokerService:
         self._task_group: Any | None = None
         self._sessions: dict[str, _PersistentSession] = {}
         self._session_lock = anyio.Lock()
+        self._discoveries: dict[tuple[str, str], asyncio.Task[dict[str, Any]]] = {}
 
     @asynccontextmanager
     async def lifespan(self):
@@ -110,6 +117,11 @@ class McpBrokerService:
             try:
                 yield
             finally:
+                discoveries = list(self._discoveries.values())
+                for discovery in discoveries:
+                    discovery.cancel()
+                await asyncio.gather(*discoveries, return_exceptions=True)
+                self._discoveries.clear()
                 self._task_group = None
                 self._sessions.clear()
                 task_group.cancel_scope.cancel()
@@ -306,6 +318,144 @@ class McpBrokerService:
             largest["tools_truncated"] = True
 
     async def _catalog_server(self, name: str, row: dict[str, Any]) -> dict[str, Any]:
+        # Share only concurrent discovery, never invocation results. A cancelled
+        # reader must not cancel the bounded probe another reader is awaiting.
+        identity = hashlib.sha256(
+            json.dumps(row, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        key = (name, identity)
+        task = self._discoveries.get(key)
+        if task is None:
+            task = asyncio.create_task(self._shared_discovery(name, row, identity))
+            self._discoveries[key] = task
+
+            def finished(done: asyncio.Task[dict[str, Any]]) -> None:
+                if self._discoveries.get(key) is done:
+                    self._discoveries.pop(key, None)
+                if not done.cancelled():
+                    done.exception()
+
+            task.add_done_callback(finished)
+        # Catalog presentation can trim tools; never let that mutate a shared
+        # complete result or the last-good snapshot.
+        return copy.deepcopy(await asyncio.shield(task))
+
+    async def _shared_discovery(
+        self, name: str, row: dict[str, Any], identity: str
+    ) -> dict[str, Any]:
+        if row.get("brokered") is not True:
+            return await self._discover_server(name, row, identity)
+        path = self._discovery_path(name, identity)
+        latest_path = path.with_suffix(".probe.json")
+        initial = self._read_json(latest_path)
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd = os.open(path.with_suffix(".lock"), os.O_CREAT | os.O_RDWR, 0o600)
+        waited = False
+        deadline = asyncio.get_running_loop().time() + DEFAULT_MCP_CALL_TIMEOUT_SECONDS
+        try:
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    waited = True
+                    if asyncio.get_running_loop().time() >= deadline:
+                        previous = self._read_discovery(path)
+                        return {
+                            "name": name,
+                            "brokered": True,
+                            "availability": "unavailable",
+                            "failure_class": "discovery_wait_timeout",
+                            "reason": "another discovery did not finish within the discovery budget",
+                            "schema_complete": previous is not None,
+                            "schema_stale": previous is not None,
+                            "schema_observed_at": (
+                                previous["observed_at"] if previous else None
+                            ),
+                            "tools": previous["tools"] if previous else [],
+                            "owner_contract_digest": identity,
+                        }
+                    await asyncio.sleep(0.02)
+            latest = self._read_json(latest_path)
+            if (
+                waited
+                and isinstance(latest, dict)
+                and latest.get("refresh_id") != (initial or {}).get("refresh_id")
+                and isinstance(latest.get("result"), dict)
+            ):
+                return latest["result"]
+            result = await self._discover_server(name, row, identity, deadline)
+            try:
+                self._write_discovery(
+                    latest_path,
+                    {
+                        "refresh_id": uuid.uuid4().hex,
+                        "result": result,
+                    },
+                )
+            except OSError as exc:
+                result["schema_storage_error"] = type(exc).__name__
+            return result
+        finally:
+            os.close(fd)
+
+    def _discovery_path(self, name: str, identity: str) -> Path:
+        digest = hashlib.sha256(name.encode()).hexdigest()
+        return self.config.state_dir / "mcp-discovery" / f"{digest}-{identity}.json"
+
+    @staticmethod
+    def _read_json(path: Path) -> dict[str, Any] | None:
+        try:
+            with path.open(encoding="utf-8") as handle:
+                value = json.load(handle)
+        except (OSError, ValueError):
+            return None
+        return value if isinstance(value, dict) else None
+
+    def _read_discovery(self, path: Path) -> dict[str, Any] | None:
+        value = self._read_json(path)
+        if (
+            isinstance(value, dict)
+            and value.get("version") == 1
+            and isinstance(value.get("tools"), list)
+            and isinstance(value.get("observed_at"), str)
+            and all(
+                isinstance(tool, dict)
+                and isinstance(tool.get("name"), str)
+                and isinstance(tool.get("ref"), str)
+                and isinstance(tool.get("input_schema"), dict)
+                and tool.get("effect") in {"read", "change"}
+                for tool in value["tools"]
+            )
+        ):
+            return value
+        return None
+
+    def _write_discovery(self, path: Path, value: dict[str, Any]) -> None:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(prefix=".discovery-", dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(value, handle, sort_keys=True, separators=(",", ":"))
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    async def _discover_server(
+        self,
+        name: str,
+        row: dict[str, Any],
+        identity: str,
+        deadline_at: float | None = None,
+    ) -> dict[str, Any]:
         server = {
             "name": name,
             "description": row.get("description"),
@@ -330,14 +480,49 @@ class McpBrokerService:
             }
         try:
             environment = self._environment(configured)
-            probe = await self._probe(configured, name, environment)
+            remaining = (
+                max(0.001, deadline_at - asyncio.get_running_loop().time())
+                if deadline_at is not None
+                else DEFAULT_MCP_CALL_TIMEOUT_SECONDS
+            )
+            probe = await self._probe(configured, name, environment, remaining)
         except McpBrokerError as exc:
-            return {
-                **server,
+            probe = {
                 "availability": "unavailable",
                 "failure_class": "environment_unavailable",
                 "reason": str(exc),
             }
+        observed_at = datetime.now(timezone.utc).isoformat()
+        path = self._discovery_path(name, identity)
+        previous = self._read_discovery(path)
+        complete = (
+            probe.get("availability") == "available"
+            and probe.get("coverage_complete") is not False
+            and isinstance(probe.get("tools"), list)
+        )
+        if complete:
+            previous = {
+                "version": 1,
+                "observed_at": observed_at,
+                "tools": probe["tools"],
+            }
+            try:
+                self._write_discovery(path, previous)
+            except OSError as exc:
+                probe["schema_storage_error"] = type(exc).__name__
+        elif previous is not None:
+            probe["tools"] = previous["tools"]
+            probe["tool_count"] = len(previous["tools"])
+            probe["read_only_tool_count"] = sum(
+                tool.get("effect") == "read" for tool in previous["tools"]
+            )
+        probe.update(
+            schema_complete=previous is not None,
+            schema_stale=not complete and previous is not None,
+            schema_observed_at=previous["observed_at"] if previous else None,
+            probed_at=observed_at,
+            owner_contract_digest=identity,
+        )
         return {**server, **probe}
 
     def _environment(self, server: dict[str, Any]) -> dict[str, str]:
@@ -349,7 +534,11 @@ class McpBrokerService:
         return environment
 
     async def _probe(
-        self, server: dict[str, Any], server_name: str, environment: dict[str, str]
+        self,
+        server: dict[str, Any],
+        server_name: str,
+        environment: dict[str, str],
+        remaining_seconds: float | None = None,
     ) -> dict[str, Any]:
         """Prove one upstream can initialize and disclose its live tools."""
         # Discovery stays bounded by the default even when a server declares a
@@ -360,6 +549,8 @@ class McpBrokerService:
         call_timeout = self._call_timeout(server)
         timeout = min(call_timeout, DEFAULT_MCP_CALL_TIMEOUT_SECONDS)
         discovery_truncated = timeout < call_timeout
+        if remaining_seconds is not None:
+            timeout = min(timeout, remaining_seconds)
         parameters = self._parameters(server, environment)
         stderr_directory = self.config.state_dir / "captures" / uuid.uuid4().hex
         stderr_directory.mkdir(mode=0o700, parents=True)
@@ -451,9 +642,11 @@ class McpBrokerService:
             result = {
                 "availability": "unavailable",
                 "failure_class": "upstream_unavailable",
-                "reason": str(exc)
-                if isinstance(exc, McpBrokerError)
-                else "upstream did not complete initialize and tools/list",
+                "reason": (
+                    str(exc)
+                    if isinstance(exc, McpBrokerError)
+                    else "upstream did not complete initialize and tools/list"
+                ),
             }
             if artifact_id is not None:
                 result["diagnostic_artifact_id"] = artifact_id

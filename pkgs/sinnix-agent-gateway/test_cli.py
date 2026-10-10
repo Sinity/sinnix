@@ -56,7 +56,9 @@ def test_cli_config_environment_overrides_the_deployed_default(
     assert cli.parser().parse_args(["info"]).config == configured
 
 
-def test_private_http_transport_serves_operator_tools(tmp_path: Path) -> None:
+def test_private_http_transport_serves_operator_tools(
+    tmp_path: Path, tmp_path_factory
+) -> None:
     class UnixHTTP(HTTPConnection):
         def __init__(self, path: Path) -> None:
             super().__init__("localhost", timeout=10)
@@ -70,7 +72,7 @@ def test_private_http_transport_serves_operator_tools(tmp_path: Path) -> None:
     config_path.write_text(
         json.dumps({"stateDir": str(tmp_path / "state"), "projects": {}})
     )
-    socket_path = tmp_path / "mcp.sock"
+    socket_path = tmp_path_factory.mktemp("uds") / "mcp.sock"
     command = [
         sys.executable,
         "-c",

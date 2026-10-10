@@ -349,10 +349,12 @@ class _UnixHTTP(HTTPConnection):
         self.sock.connect(str(self.path))
 
 
-def test_disconnected_unix_request_cannot_steal_another_calls_response(tmp_path):
+def test_disconnected_unix_request_cannot_steal_another_calls_response(
+    tmp_path, tmp_path_factory
+):
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"stateDir": str(tmp_path / "state"), "projects": {}}))
-    socket_path = tmp_path / "mcp.sock"
+    socket_path = tmp_path_factory.mktemp("uds") / "mcp.sock"
     entered, release, completed = (
         tmp_path / name for name in ("entered", "release", "completed")
     )
@@ -426,9 +428,9 @@ main()
             assert response.status == 200, body
             result = json.loads(body)
             assert result["id"] == rid, result
-            assert result["result"]["structuredContent"]["result"]["outcome"] == "ok", (
-                result
-            )
+            assert (
+                result["result"]["structuredContent"]["result"]["outcome"] == "ok"
+            ), result
             data = result["result"]["structuredContent"]["data"]
             assert len(data["actions"]) == 1
             assert len(data["catalog_sha256"]) == 64
@@ -516,6 +518,7 @@ main()
 
 def test_serve_http_logs_the_tunnel_request_id_and_drains_on_sigterm(
     tmp_path: Path,
+    tmp_path_factory,
 ) -> None:
     """Fails if SIGTERM waits on an in-flight call, or calls lose correlation.
 
@@ -526,7 +529,7 @@ def test_serve_http_logs_the_tunnel_request_id_and_drains_on_sigterm(
     config_path.write_text(
         json.dumps({"stateDir": str(tmp_path / "state"), "projects": {}})
     )
-    socket_path = tmp_path / "mcp.sock"
+    socket_path = tmp_path_factory.mktemp("uds") / "mcp.sock"
     stderr_path = tmp_path / "stderr.log"
     command = [
         sys.executable,

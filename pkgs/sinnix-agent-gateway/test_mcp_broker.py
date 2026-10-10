@@ -3,6 +3,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import fcntl
+import hashlib
+import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -126,6 +130,245 @@ class RepeatingCursorSession(FakeSession):
         cursor = getattr(params, "cursor", None)
         self.calls.append(cursor)
         return SimpleNamespace(tools=[tool("first")], next_cursor="loop")
+
+
+def test_concurrent_catalog_refresh_shares_one_owner_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    calls = 0
+
+    async def probe(*_args: object) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.02)
+        return {"availability": "available", "tools": [], "tool_count": 0}
+
+    monkeypatch.setattr(broker, "_probe", probe)
+
+    async def run() -> None:
+        await asyncio.gather(
+            broker.catalog(server_names={"fixture"}),
+            broker.catalog(server_names={"fixture"}),
+        )
+
+    anyio.run(run)
+    assert calls == 1
+
+
+def test_concurrent_broker_instances_share_discovery_in_the_same_state_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = broker_service(tmp_path, "operator")
+    second = broker_service(tmp_path, "operator")
+    calls = 0
+
+    async def probe(*_args: object) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.02)
+        return {"availability": "available", "tools": [], "tool_count": 0}
+
+    monkeypatch.setattr(first, "_probe", probe)
+    monkeypatch.setattr(second, "_probe", probe)
+
+    async def run() -> None:
+        await asyncio.gather(
+            first.catalog(server_names={"fixture"}),
+            second.catalog(server_names={"fixture"}),
+        )
+
+    anyio.run(run)
+    assert calls == 1
+
+
+def test_separate_processes_share_owner_discovery(tmp_path: Path) -> None:
+    source = """import asyncio, json, sys
+from pathlib import Path
+import anyio
+from test_mcp_broker import broker_service
+root = Path(sys.argv[1])
+broker = broker_service(root, "operator")
+async def probe(*args):
+    with (root / "probes").open("a") as output:
+        output.write("probe\\n")
+    await asyncio.sleep(0.3)
+    return {"availability": "available", "tools": []}
+broker._probe = probe
+async def run():
+    (root / sys.argv[2]).touch()
+    while not all((root / name).exists() for name in ("first", "second")):
+        await asyncio.sleep(0.01)
+    print(json.dumps(await broker.catalog(server_names={"fixture"})))
+anyio.run(run)
+"""
+    environment = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+    processes = [
+        subprocess.Popen(
+            [sys.executable, "-c", source, str(tmp_path), name],
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for name in ("first", "second")
+    ]
+    try:
+        for process in processes:
+            output, error = process.communicate(timeout=15)
+            assert process.returncode == 0, error
+            assert json.loads(output)["servers"][0]["schema_complete"] is True
+        assert (tmp_path / "probes").read_text().splitlines() == ["probe"]
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+
+
+def test_discovery_wait_timeout_preserves_schema_and_private_permissions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
+    anyio.run(broker.catalog)
+    row = broker.config.mcp_broker_servers["fixture"]
+    identity = hashlib.sha256(
+        json.dumps(row, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    path = broker._discovery_path("fixture", identity)
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert path.parent.stat().st_mode & 0o777 == 0o700
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.DEFAULT_MCP_CALL_TIMEOUT_SECONDS", 0.03
+    )
+    with path.with_suffix(".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        result = anyio.run(broker.catalog)
+    server = next(s for s in result["servers"] if s["name"] == "fixture")
+    assert server["failure_class"] == "discovery_wait_timeout"
+    assert server["schema_stale"] and server["schema_complete"]
+    assert server["tools"][0]["name"] == "lookup"
+
+
+def test_catalog_failure_retains_complete_contract_across_broker_instances(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
+    good = anyio.run(broker.catalog)
+    contracts = next(s for s in good["servers"] if s["name"] == "fixture")["tools"]
+    reopened = broker_service(tmp_path, "operator")
+
+    async def failed(*_args: object) -> dict[str, Any]:
+        return {"availability": "unavailable", "reason": "fixture temporarily offline"}
+
+    monkeypatch.setattr(reopened, "_probe", failed)
+    result = anyio.run(reopened.catalog)
+    server = next(s for s in result["servers"] if s["name"] == "fixture")
+    assert server["availability"] == "unavailable"
+    assert server["tools"] == contracts
+    assert server["schema_stale"] is True
+    assert server["schema_complete"] is True
+
+
+def test_partial_discovery_cannot_replace_complete_schema_and_config_invalidates_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
+    anyio.run(broker.catalog)
+
+    async def partial(*_args: object) -> dict[str, Any]:
+        return {
+            "availability": "available",
+            "coverage_complete": False,
+            "tools": [],
+            "reason": "repeated cursor",
+        }
+
+    monkeypatch.setattr(broker, "_probe", partial)
+    result = anyio.run(broker.catalog)
+    row = next(s for s in result["servers"] if s["name"] == "fixture")
+    assert row["schema_stale"] and row["schema_complete"]
+    assert row["coverage_complete"] is False
+    assert [t["name"] for t in row["tools"]] == ["lookup"]
+    broker.config.mcp_broker_servers["fixture"]["args"] = ["--changed-owner"]
+    result = anyio.run(broker.catalog)
+    row = next(s for s in result["servers"] if s["name"] == "fixture")
+    assert row["schema_complete"] is False
+    assert row["tools"] == []
+
+
+def test_cancelled_catalog_reader_does_not_cancel_shared_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    calls = 0
+
+    async def run() -> None:
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def probe(*_args: object) -> dict[str, Any]:
+            nonlocal calls
+            calls += 1
+            entered.set()
+            await release.wait()
+            return {"availability": "available", "tools": []}
+
+        monkeypatch.setattr(broker, "_probe", probe)
+        first = asyncio.create_task(broker.catalog(server_names={"fixture"}))
+        await entered.wait()
+        second = asyncio.create_task(broker.catalog(server_names={"fixture"}))
+        await asyncio.sleep(0)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+        release.set()
+        result = await second
+        assert result["servers"][0]["schema_complete"]
+
+    anyio.run(run)
+    assert calls == 1
+
+
+def test_retained_read_schema_cannot_authorize_changed_live_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    broker = broker_service(tmp_path, "operator")
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client",
+        lambda _params, **_kwargs: FakeTransport(),
+    )
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
+    anyio.run(broker.catalog)
+
+    class ChangedSession(FakeSession):
+        async def list_tools(self, *, params: object | None = None) -> object:
+            result = await super().list_tools(params=params)
+            result.tools[0].annotations = None
+            return result
+
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", ChangedSession)
+
+    async def invoke() -> None:
+        await broker.call("fixture", "lookup", {"query": "neutral"}, write=False)
+
+    with pytest.raises(McpBrokerError, match="not explicitly declared read-only"):
+        anyio.run(invoke)
 
 
 def test_catalog_and_invocation_traverse_every_tool_page(
@@ -269,7 +512,13 @@ def test_catalog_probes_admitted_servers_and_keeps_exclusions_static(
     )
     monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
 
-    assert anyio.run(broker.catalog) == {
+    result = anyio.run(broker.catalog)
+    fixture = next(row for row in result["servers"] if row["name"] == "fixture")
+    assert fixture.pop("schema_complete") is True
+    assert fixture.pop("schema_stale") is False
+    assert fixture.pop("schema_observed_at") == fixture.pop("probed_at")
+    assert len(fixture.pop("owner_contract_digest")) == 64
+    assert result == {
         "servers": [
             {
                 "name": "blocked",
@@ -347,7 +596,12 @@ for line in sys.stdin:
 
     result = anyio.run(broker.catalog)
 
-    assert result["servers"][1] == {
+    row = result["servers"][1]
+    assert row.pop("schema_complete") is True
+    assert row.pop("schema_stale") is False
+    assert row.pop("schema_observed_at") == row.pop("probed_at")
+    assert len(row.pop("owner_contract_digest")) == 64
+    assert row == {
         "name": "fixture",
         "description": "Fixture server",
         "transport": "stdio",
@@ -852,7 +1106,7 @@ def test_probe_distinguishes_capped_discovery_from_call_route_timeout(
     )
     result = anyio.run(broker.catalog)
     row = next(row for row in result["servers"] if row["name"] == "fixture")
-    assert budgets[0] == probe_budget
+    assert budgets[0] == pytest.approx(probe_budget, abs=0.02)
     assert 0 < budgets[1] <= probe_budget
     assert row["availability"] == "unavailable"
     assert row["failure_class"] == failure_class

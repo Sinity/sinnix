@@ -180,6 +180,16 @@ live operator manifest and a direct current client observation before diagnosing
 the connector. Tool-call errors in the tunnel log are separate evidence from a
 discovery failure.
 
+Broker discovery retains the last complete tool schema in private gateway state,
+keyed by the configured owner and command contract. Concurrent catalog and status
+requests share one bounded refresh, including separate CLI processes. An owner
+failure or incomplete pagination preserves the complete schema and reports its
+observation time and staleness separately from current availability. Both
+`mcp.tools` and `gateway.catalog` can therefore describe known tools while marking
+their owner unavailable. A configured contract change invalidates that snapshot.
+Cached schemas never authorize invocation: calls still inspect the live owner
+and enforce the current read or change policy.
+
 For a personal ChatGPT connector, select the Sinnix app's app-specific **Allow all
 actions** permission in ChatGPT settings. That setting is what removes eligible
 per-call approval prompts for the operator; it does not bypass connector policy,
@@ -194,7 +204,7 @@ changing the gateway action family cannot suppress a client-side approval policy
 
 ## Generated reference
 
-This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `258785d5b6edd7df26bc0793a5b56d7a7e186c94a5d6af14e18bab8c44135ff6`.
+This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `15ef9eda5eff8ade6e929057604ff42e7a3974572dc25b42b40e0d42a8cf2754`.
 
 The full schemas and examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 

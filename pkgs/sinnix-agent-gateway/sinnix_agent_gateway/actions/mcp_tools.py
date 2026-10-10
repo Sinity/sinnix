@@ -53,8 +53,13 @@ class ServerRow(GatewayModel):
     probed_at: str | None = None
     last_successful_probe: str | None = Field(
         default=None,
-        description="probed_at when this probe succeeded; no probe history is kept.",
+        description="Observation time of the last complete schema discovery.",
     )
+    schema_complete: bool = False
+    schema_stale: bool = False
+    schema_observed_at: str | None = None
+    owner_contract_digest: str | None = None
+    schema_storage_error: str | None = None
     diagnostic_artifact_ref: str | None = Field(
         default=None,
         description="Captured upstream stderr when the probe failed or timed out.",
@@ -92,12 +97,17 @@ def _server_row(
         read_only_tool_count=probe.get("read_only_tool_count"),
         latency_ms=latency_ms,
         probed_at=probed_at,
-        last_successful_probe=probed_at
-        if probe.get("availability") == "available"
-        else None,
-        diagnostic_artifact_ref=f"{ARTIFACT_REF_PREFIX}{artifact_id}"
-        if isinstance(artifact_id, str)
-        else None,
+        last_successful_probe=probe.get("schema_observed_at"),
+        schema_complete=bool(probe.get("schema_complete")),
+        schema_stale=bool(probe.get("schema_stale")),
+        schema_observed_at=probe.get("schema_observed_at"),
+        owner_contract_digest=probe.get("owner_contract_digest"),
+        schema_storage_error=probe.get("schema_storage_error"),
+        diagnostic_artifact_ref=(
+            f"{ARTIFACT_REF_PREFIX}{artifact_id}"
+            if isinstance(artifact_id, str)
+            else None
+        ),
         tools_truncated=bool(probe.get("tools_truncated")),
     )
 
@@ -146,6 +156,9 @@ class ToolRow(GatewayModel):
     input_schema: dict[str, Any]
     input_schema_artifact: dict[str, Any] | None = None
     input_schema_bytes: int | None = None
+    availability: Literal["available", "unavailable"] = "available"
+    schema_stale: bool = False
+    schema_observed_at: str | None = None
 
 
 class ToolsInput(RequestControls):
@@ -201,11 +214,18 @@ async def _tools(runtime: Runtime, inp: ToolsInput) -> Tools:
             unavailable[server["name"]] = (
                 server.get("reason") or server.get("failure_class") or "unavailable"
             )
-            continue
         if server.get("coverage_complete") is False:
             incomplete[server["name"]] = server.get("reason") or "incomplete tools/list"
         for tool in server.get("tools", []):
-            rows.append({**tool, "server": server["name"]})
+            rows.append(
+                {
+                    **tool,
+                    "server": server["name"],
+                    "availability": server.get("availability", "unavailable"),
+                    "schema_stale": bool(server.get("schema_stale")),
+                    "schema_observed_at": server.get("schema_observed_at"),
+                }
+            )
     if inp.effect != "any":
         rows = [row for row in rows if row["effect"] == inp.effect]
     rows = search_rows(rows, inp.text, ("name", "description", "server"))
@@ -393,9 +413,11 @@ async def _invoke(
     return CallResult(
         ref=ref,
         **result,
-        affordances=["artifacts.read", "mcp.tools"]
-        if result.get("truncated")
-        else ["mcp.tools"],
+        affordances=(
+            ["artifacts.read", "mcp.tools"]
+            if result.get("truncated")
+            else ["mcp.tools"]
+        ),
     )
 
 

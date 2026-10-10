@@ -111,6 +111,9 @@ class CatalogMcpTool(GatewayModel):
     description: str | None = None
     effect: str | None = None
     invoke: str
+    availability: Literal["available", "unavailable"] = "available"
+    schema_stale: bool = False
+    schema_observed_at: str | None = None
 
 
 class Catalog(GatewayModel):
@@ -245,7 +248,6 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
         for server in broker.get("servers", []):
             if server.get("availability") != "available":
                 unavailable.append(f"mcp.{server.get('name')}")
-                continue
             if server.get("coverage_complete") is False:
                 incomplete[server["name"]] = (
                     server.get("reason") or "incomplete tools/list"
@@ -259,6 +261,9 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
                         "name": tool.get("name", ""),
                         "description": tool.get("description"),
                         "effect": tool.get("effect"),
+                        "availability": server.get("availability", "unavailable"),
+                        "schema_stale": bool(server.get("schema_stale")),
+                        "schema_observed_at": server.get("schema_observed_at"),
                         "invoke": (
                             "mcp.call"
                             if tool.get("effect", "read") == "read"
