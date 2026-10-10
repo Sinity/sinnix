@@ -1,15 +1,24 @@
 # Top-level recovery tarballs. Native CLI updates retain their own ownership.
 # Pi retains its publisher shrinkwrap with missing integrity hashes repaired.
-# Other transitive npm dependency trees remain outside this registry.
+# Claude and Codex platform packages have reviewed recovery shrinkwraps.
+# Gemini and Clodex dependency trees remain outside this registry.
 { pkgs }:
 {
-  "@anthropic-ai/claude-code" = pkgs.fetchurl {
-    url = "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.292.tgz";
-    hash = "sha512-ptT9UcOsyR2VLNgfHgF87To8B7tCrZktIpYC4dEGt+9MG42NAWsljEGBZ3spdHcJ2akednszESVNti7hWxZrJg==";
+  "@anthropic-ai/claude-code" = import ../../pkgs/agent-cli-recovery/platform-source.nix {
+    inherit pkgs;
+    name = "@anthropic-ai/claude-code";
+    src = pkgs.fetchurl {
+      url = "https://registry.npmjs.org/@anthropic-ai/claude-code/-/claude-code-2.1.292.tgz";
+      hash = "sha512-ptT9UcOsyR2VLNgfHgF87To8B7tCrZktIpYC4dEGt+9MG42NAWsljEGBZ3spdHcJ2akednszESVNti7hWxZrJg==";
+    };
   };
-  "@openai/codex" = pkgs.fetchurl {
-    url = "https://registry.npmjs.org/@openai/codex/-/codex-0.162.1.tgz";
-    hash = "sha512-NWZdi/kxyjv/8EUGFupziGU38YyleugZRM4JXgY5XFH7FUmaFA33NZS2Bmq0HPazf7S3jJQQWsZ/jAK9jsrV3Q==";
+  "@openai/codex" = import ../../pkgs/agent-cli-recovery/platform-source.nix {
+    inherit pkgs;
+    name = "@openai/codex";
+    src = pkgs.fetchurl {
+      url = "https://registry.npmjs.org/@openai/codex/-/codex-0.162.1.tgz";
+      hash = "sha512-NWZdi/kxyjv/8EUGFupziGU38YyleugZRM4JXgY5XFH7FUmaFA33NZS2Bmq0HPazf7S3jJQQWsZ/jAK9jsrV3Q==";
+    };
   };
   "@earendil-works/pi-coding-agent" = import ../../pkgs/agent-cli-recovery/pi-source.nix {
     inherit pkgs;

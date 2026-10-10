@@ -63,6 +63,74 @@ has_binary() {
   [ -f "$STATE/npm/bin/$binary_name" ] && [ -x "$STATE/npm/bin/$binary_name" ]
 }
 
+preserve_existing() {
+  local path=$1 recovery_dir relative
+  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+    return
+  fi
+  install -d -m 0700 "$STATE/npm-recovery"
+  recovery_dir=$(mktemp -d "$STATE/npm-recovery/attempt.XXXXXXXX")
+  relative=${path#"$STATE/npm/"}
+  install -d -m 0700 "$recovery_dir/$(dirname "$relative")"
+  mv -- "$path" "$recovery_dir/$relative"
+  echo "$binary_name: preserved replaced recovery target at $recovery_dir/$relative" >&2
+}
+
+recover_locked_package() {
+  local package_target package_parent staged relative_bin temporary_bin
+  package_target="$STATE/npm/lib/node_modules/$npm_package"
+  package_parent=$(dirname "$package_target")
+  mkdir -p "$package_parent"
+  staged=$(mktemp -d "$package_parent/.${npm_package##*/}.recovery.XXXXXXXX")
+  # Failed installs are retained beside the destination; publication uses a
+  # same-filesystem rename. Neither failure nor recovery deletes an old package.
+  echo "$binary_name: staging locked recovery at $staged" >&2
+  tar -xzf "$package_source" --strip-components=1 -C "$staged"
+  relative_bin=$(node - "$staged" "$npm_package" "$binary_name" <<'JS'
+const fs = require('node:fs');
+const path = require('node:path');
+const [root, expectedName, binary] = process.argv.slice(2);
+const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json')));
+const lock = JSON.parse(fs.readFileSync(path.join(root, 'npm-shrinkwrap.json')));
+if (pkg.name !== expectedName || lock.packages?.['']?.name !== pkg.name ||
+    lock.packages[''].version !== pkg.version) {
+  throw new Error('Recovery manifest and shrinkwrap identity differ');
+}
+const bins = typeof pkg.bin === 'string' ? { [pkg.name.split('/').pop()]: pkg.bin } : pkg.bin;
+const entry = bins?.[binary];
+if (typeof entry !== 'string' || !entry || /[\r\n]/.test(entry) ||
+    path.isAbsolute(entry) || path.relative(root, path.resolve(root, entry)).startsWith('..')) {
+  throw new Error('Recovery package does not declare the configured binary inside its root');
+}
+process.stdout.write(entry);
+JS
+  )
+  # Installing a local tarball globally ignores its shrinkwrap in npm 10.
+  # ci reads the extracted root's lock before acquiring any dependencies.
+  # A published package's prepare/prepublish scripts are not install hooks.
+  # ci would run them at a project root; rebuild instead runs the ordinary
+  # preinstall/install/postinstall hooks on the acquired tree and root.
+  npm ci --prefix "$staged" --global=false --ignore-scripts >&2
+  npm rebuild --prefix "$staged" --global=false >&2
+  node - "$staged" "$relative_bin" <<'JS'
+const fs = require('node:fs');
+const path = require('node:path');
+const [root, binary] = process.argv.slice(2);
+const target = fs.realpathSync(path.join(root, binary));
+if (!target.startsWith(fs.realpathSync(root) + path.sep) || !fs.statSync(target).isFile()) {
+  throw new Error('Recovered binary is not a regular file inside the package');
+}
+// npm's global bin-link operation normally applies executable bits.
+fs.chmodSync(target, fs.statSync(target).mode | 0o111);
+JS
+  preserve_existing "$package_target"
+  mv -- "$staged" "$package_target"
+  temporary_bin=$(mktemp "$STATE/npm/bin/.${binary_name}.recovery.XXXXXXXX")
+  ln -sf -- "$package_target/$relative_bin" "$temporary_bin"
+  preserve_existing "$STATE/npm/bin/$binary_name"
+  mv -T -- "$temporary_bin" "$STATE/npm/bin/$binary_name"
+}
+
 # A missing binary means an earlier install may have been interrupted after npm
 # retired the old package. Only recovery takes the lock: ordinary launches must
 # not contend with one another or rewrite a file another process is executing.
@@ -83,8 +151,13 @@ if ! has_binary; then
     exit 1
   fi
   preserve_reify_entries
-  echo "$binary_name: bootstrapping (npm install -g $package_source)..." >&2
-  npm install -g "$package_source" >&2
+  if archive_members=$(tar -tzf "$package_source" 2>/dev/null) &&
+    [[ $'\n'"$archive_members"$'\n' == *$'\npackage/npm-shrinkwrap.json\n'* ]]; then
+    recover_locked_package
+  else
+    echo "$binary_name: bootstrapping (npm install -g $package_source)..." >&2
+    npm install -g "$package_source" >&2
+  fi
   if ! has_binary; then
     echo "$binary_name: npm recovery returned success but did not produce an executable regular file at $STATE/npm/bin/$binary_name" >&2
     exit 1

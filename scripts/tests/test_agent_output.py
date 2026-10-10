@@ -480,7 +480,11 @@ class NativeOutputTest(unittest.TestCase):
     def test_bootstrap_installs_the_declared_tarball_not_a_registry_name(self):
         self.executable(
             "npm",
-            'printf "%s\\n" "$@" > "$HOME/npm-args"\n',
+            'printf "%s\\n" "$@" > "$HOME/npm-args"\n'
+            'mkdir -p "$npm_config_prefix/bin"\n'
+            f'printf "#!{shutil.which("bash")}\\nexit 0\\n"'
+            ' > "$npm_config_prefix/bin/fixture"\n'
+            'chmod +x "$npm_config_prefix/bin/fixture"\n',
         )
         source = self.root / "locked-package.tgz"
         outcome = subprocess.run(

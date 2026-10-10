@@ -29,6 +29,7 @@ in
     ./tests/pi-recovery.nix
     ./tests/bootstrap-outcome.nix
     ./tests/aichat-roster.nix
+    ./tests/platform-recovery.nix
     ./tests/agent-gateway-approval.nix
     ./tests/chrome-agent-window.nix
     ./tests/browser-workflow.nix
