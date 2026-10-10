@@ -34,11 +34,52 @@ set -euo pipefail
 # every lane at once -- drain, stream and dispatcher -- while the phone sat on
 # the same desk, healthy, still recording. Resolution now tries the tailnet
 # first (it works off-wifi, which the LAN paths cannot), then mDNS, then the
-# last address that worked, then a LAN sweep for a host answering on one of
-# the phone's ports. SINNIX_PHONE_IP still overrides everything.
+# last address that worked, then a LAN sweep for an authenticated phone.
+# SINNIX_PHONE_IP still overrides address selection; SSH still verifies identity.
 PHONE_TS_IP_DEFAULT="100.111.240.107"
 PHONE_MDNS_NAME="${SINNIX_PHONE_MDNS:-redmi-note-11.local}"
 PHONE_HOST_CACHE="${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}/last-host"
+
+PHONE_SSH_PORT="${SINNIX_PHONE_SSH_PORT:-8022}"
+PHONE_USER="${SINNIX_PHONE_USER:-u0_a460}"
+
+# -F /dev/null + explicit identity, not ~/.ssh/config: under a sandboxed
+# systemd unit's ProtectHome, ssh rejects the Home-Manager ~/.ssh/config
+# symlink outright ("Bad owner or permissions", exit 255). A script invoked
+# by both a human and a timer should not depend on interactive config.
+ssh_phone_opts=(
+  # -o Port=, not -p: the array must stay safe for every OpenSSH tool --
+  # scp's -p means "preserve file attributes" (a no-arg flag), not port, so
+  # `-p 8022` would silently misparse 8022 as a stray filename argument.
+  # -o Port= means the same thing everywhere.
+  -o "Port=$PHONE_SSH_PORT"
+  -F /dev/null
+  -o ConnectTimeout=10
+  -o StrictHostKeyChecking=yes
+  -o HostKeyAlias=sinnix-phone
+  -o "UserKnownHostsFile=${SINNIX_PHONE_KNOWN_HOSTS:-${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}/known_hosts}"
+  -o IdentitiesOnly=yes
+  # ssh-agent can hold a key that LOOKS like a match and still answer
+  # "signing failed... agent refused operation". IdentitiesOnly=yes restricts
+  # which identity FILES are tried but does not stop the agent being asked
+  # first, so go straight to the key file; this identity doesn't need
+  # agent-forwarding semantics.
+  -o IdentityAgent=none
+  -i "${SINNIX_PHONE_IDENTITY:-$HOME/.ssh/id_ed25519}"
+  # Connection multiplexing: raw tailnet RTT to the phone is ~4-11ms but a
+  # cold SSH handshake is ~380-586ms, and multi-step commands (`pull`,
+  # `status`) pay that 2-4x sequentially. ControlMaster reuses one
+  # authenticated connection for payload ssh/scp calls in an invocation;
+  # discovery disables reuse to verify each candidate connection afresh.
+  # ControlPersist=120 keeps it alive across quick successive commands
+  # without lingering on a device that roams networks. %C is ssh's
+  # single-token hash of user+host+port, so the socket path can't grow
+  # unboundedly long.
+  -o ControlMaster=auto
+  -o ControlPersist=120
+  -o "ControlPath=${SINNIX_PHONE_SSH_CONTROL_DIR:-$HOME/.cache/sinnix-phone-ssh}/%C"
+)
+mkdir -p "${SINNIX_PHONE_SSH_CONTROL_DIR:-$HOME/.cache/sinnix-phone-ssh}"
 
 # Re-enrolling the Android client creates a new Tailscale node identity and
 # therefore a new 100.64/10 address. Resolve the currently-online Android peer
@@ -55,16 +96,14 @@ tailscale_phone_ip() {
       ' 2>/dev/null
 }
 
-# A host counts as the phone if it answers on adbd or Termux's sshd. Ping is
-# not enough: the tailnet address answered ICMP for a full day while every
-# inbound service was down, which is exactly the state that looked like
-# "phone offline" and was not.
+# Reachability is not identity. Authenticate each candidate against the
+# phone's pinned host key before selecting or remembering its address. The
+# pin is enrolled through an authenticated device connection, never a scan.
 phone_answers() {
-  local host="$1" port
-  for port in 5555 8022; do
-    timeout 2 bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null && return 0
-  done
-  return 1
+  local host="$1"
+  timeout 2 bash -c "exec 3<>/dev/tcp/$host/$PHONE_SSH_PORT" 2>/dev/null || return 1
+  ssh -o BatchMode=yes -o ControlMaster=no -o ControlPath=none \
+    "${ssh_phone_opts[@]}" "${PHONE_USER}@${host}" true >/dev/null 2>&1
 }
 
 resolve_phone_host() {
@@ -84,8 +123,8 @@ resolve_phone_host() {
       return 0
     fi
   done
-  # LAN sweep, last: it is the slowest and the only one that can be wrong, so
-  # it runs only once the addressed paths have all failed.
+  # LAN sweep, last: every candidate must authenticate before it can win.
+  # It runs only once the addressed paths have all failed.
   local subnet ip
   subnet="$(ip -4 -o route get 1.1.1.1 2>/dev/null | grep -oE 'src [0-9.]+' | awk '{print $2}' | cut -d. -f1-3)"
   if [ -n "$subnet" ]; then
@@ -107,47 +146,10 @@ resolve_phone_host() {
 }
 
 PHONE_TS_IP="${SINNIX_PHONE_IP:-$(resolve_phone_host || true)}"
-PHONE_SSH_PORT="${SINNIX_PHONE_SSH_PORT:-8022}"
-PHONE_USER="${SINNIX_PHONE_USER:-u0_a460}"
 ADB_TARGET="${PHONE_TS_IP}:5555"
 LAKE_ROOT="${SINNIX_PHONE_LAKE:-/realm/device/shared/phone}"
 PHONE_STATE="${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}"
 
-# -F /dev/null + explicit identity, not ~/.ssh/config: under a sandboxed
-# systemd unit's ProtectHome, ssh rejects the Home-Manager ~/.ssh/config
-# symlink outright ("Bad owner or permissions", exit 255). A script invoked
-# by both a human and a timer should not depend on interactive config.
-ssh_phone_opts=(
-  # -o Port=, not -p: the array must stay safe for every OpenSSH tool --
-  # scp's -p means "preserve file attributes" (a no-arg flag), not port, so
-  # `-p 8022` would silently misparse 8022 as a stray filename argument.
-  # -o Port= means the same thing everywhere.
-  -o "Port=$PHONE_SSH_PORT"
-  -F /dev/null
-  -o ConnectTimeout=10
-  -o StrictHostKeyChecking=accept-new
-  -o "UserKnownHostsFile=${SINNIX_PHONE_KNOWN_HOSTS:-$HOME/.ssh/known_hosts}"
-  -o IdentitiesOnly=yes
-  # ssh-agent can hold a key that LOOKS like a match and still answer
-  # "signing failed... agent refused operation". IdentitiesOnly=yes restricts
-  # which identity FILES are tried but does not stop the agent being asked
-  # first, so go straight to the key file; this identity doesn't need
-  # agent-forwarding semantics.
-  -o IdentityAgent=none
-  -i "${SINNIX_PHONE_IDENTITY:-$HOME/.ssh/id_ed25519}"
-  # Connection multiplexing: raw tailnet RTT to the phone is ~4-11ms but a
-  # cold SSH handshake is ~380-586ms, and multi-step commands (`pull`,
-  # `status`) pay that 2-4x sequentially. ControlMaster reuses one
-  # authenticated connection for every ssh/scp call in a single invocation;
-  # ControlPersist=120 keeps it alive across quick successive commands
-  # without lingering on a device that roams networks. %C is ssh's
-  # single-token hash of user+host+port, so the socket path can't grow
-  # unboundedly long.
-  -o ControlMaster=auto
-  -o ControlPersist=120
-  -o "ControlPath=${SINNIX_PHONE_SSH_CONTROL_DIR:-$HOME/.cache/sinnix-phone-ssh}/%C"
-)
-mkdir -p "${SINNIX_PHONE_SSH_CONTROL_DIR:-$HOME/.cache/sinnix-phone-ssh}"
 # Same flags as a single shell-word, for rsync -e (which needs a word, not
 # an array) -- computed once at top level so every case branch can use it,
 # including a `"$0" subcmd` re-invocation, which is a separate process.
@@ -681,9 +683,9 @@ status)
     echo "tailnet   : UNREACHABLE ($PHONE_TS_IP)"
   fi
   if ssh_phone 'true' >/dev/null 2>&1; then
-    echo "ssh       : up (termux :$PHONE_SSH_PORT) — drain transport"
+    echo "ssh       : up (termux :$PHONE_SSH_PORT) — shell/file/clipboard route"
   else
-    echo "ssh       : down — drain blocked; open Termux, run: sshd"
+    echo "ssh       : down — Termux route unavailable; open Termux, run: sshd"
   fi
   "$0" app-status
   if adb_resolve; then
