@@ -51,3 +51,46 @@ def test_metadata_observation_does_not_rebind_inspection_or_manufacture_hash(tmp
     assert current['inspections'] == original['inspections']
     assert current['current_location']['content_continuity'] == 'unverified'
     assert 'sha256' not in current['current_location']['identity']
+
+
+def test_unavailable_observation_becomes_current_and_can_be_restored(tmp_path):
+    source = tmp_path / "note"
+    source.write_text("retained content")
+    catalog = tmp_path / "catalog.json"
+    assert import_rows(catalog, [observation(source)]).returncode == 0
+    original = assets(catalog)[0]
+    observations = tmp_path / "location-observations.json"
+
+    def observe(action, **extra):
+        observations.write_text(json.dumps([dict(
+            id=original["id"], action=action, actor="synthetic-test",
+            basis="reviewed current location", reason="location transition", **extra,
+        )]))
+        digest = hashlib.sha256(catalog.read_bytes()).hexdigest()
+        result = invoke(catalog, "observe", str(observations), "--expected-sha256", digest)
+        assert result.returncode == 0, result.stderr
+        return assets(catalog)[0]
+
+    identity = runpy.run_path(str(SCRIPT))["identity"](source)
+    available = observe("metadata", expected_identity=identity)
+    assert available["current_location"]["status"] == "available"
+    source.unlink()
+    unavailable = observe("unavailable")
+    latest = unavailable["location_observations"][-1]
+    assert latest["status"] == "missing"
+    assert unavailable["current_location"] == latest
+    assert unavailable["location_status"] == "missing"
+    assert unavailable["identity"] == original["identity"]
+    assert unavailable["inspections"] == original["inspections"]
+    assert unavailable["location_observations"][:-1] == available["location_observations"]
+
+    source.write_text("retained content")
+    identity = runpy.run_path(str(SCRIPT))["identity"](source)
+    restored = observe("metadata", expected_identity=identity)
+    assert restored["current_location"] == restored["location_observations"][-1]
+    assert restored["current_location"]["status"] == "available"
+    assert restored["location_status"] == "available"
+    assert restored["current_location"]["content_continuity"] == "unverified"
+    assert restored["identity"] == original["identity"]
+    assert restored["inspections"] == original["inspections"]
+    assert restored["location_observations"][:-1] == unavailable["location_observations"]

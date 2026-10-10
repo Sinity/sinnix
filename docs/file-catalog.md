@@ -55,9 +55,11 @@ The digest guards the whole catalog and refuses stale review before mutation.
 Metadata observations retain earlier identities and inspections without claiming
 byte continuity. Revisions retain the asset UUID, move earlier content evidence
 into revision history, and give the current revision metadata-only coverage.
-Missing paths, offline mounts, access denial and wrong object types are recorded
-separately. Device numbers are observations; filesystem UUID and Btrfs subvolume
-identity are recorded when available. These checks do not hash payloads.
+Every observation, including an unavailable source, advances the current
+location while retaining the earlier observation history. Missing paths, offline
+mounts, access denial and wrong object types are recorded separately. Device
+numbers are observations; filesystem UUID and Btrfs subvolume identity are
+recorded when available. These checks do not hash payloads.
 
 Record an observation after inspecting a file, while its content and scope are
 still available. Use specific descriptions, date roles and evidence for

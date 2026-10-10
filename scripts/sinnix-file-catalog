@@ -632,6 +632,7 @@ def cmd_observe(args: argparse.Namespace) -> int:
                 if diagnosis['status'] == 'available':
                     raise CatalogError("unavailable observation has a live source")
                 asset.setdefault('location_observations', []).append(observation)
+                asset['current_location'] = observation
                 asset['location_status'] = diagnosis['status']
                 continue
             if diagnosis['status'] != 'available':
