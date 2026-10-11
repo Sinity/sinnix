@@ -14,6 +14,8 @@ twice.
 
 from __future__ import annotations
 
+import sys
+
 import sinnix_phone_dispatcher.notifications as notifications_mod
 
 
@@ -31,6 +33,25 @@ def test_undecodable_record_does_not_discard_later_notifications(monkeypatch):
         "20260101",
         b'\xff\n{"kind":"notification_posted","title":"fixture","text":"retained"}\n',
     )
+    assert calls == [("fixture", "retained")]
+
+
+def test_integer_digit_limit_does_not_discard_later_notifications(monkeypatch):
+    _reset()
+    calls = []
+    monkeypatch.setattr(
+        notifications_mod, "notify_desktop", lambda *a, **kw: calls.append(a)
+    )
+    previous_limit = sys.get_int_max_str_digits()
+    try:
+        sys.set_int_max_str_digits(4300)
+        notifications_mod.mirror_new_events(
+            "20260101",
+            b'{"value":' + b"9" * 4301 + b'}\n'
+            b'{"kind":"notification_posted","title":"fixture","text":"retained"}\n',
+        )
+    finally:
+        sys.set_int_max_str_digits(previous_limit)
     assert calls == [("fixture", "retained")]
 
 

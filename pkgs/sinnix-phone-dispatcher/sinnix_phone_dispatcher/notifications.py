@@ -89,7 +89,9 @@ def mirror_new_events(day: str, new_bytes: bytes) -> None:
             continue
         try:
             event = json.loads(line)
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except ValueError:
+            # JSON syntax, UTF-8 decoding and integer digit-limit failures
+            # are record-local; raw bytes have already been captured.
             continue
         if not isinstance(event, dict):
             continue
