@@ -170,6 +170,7 @@ let
     pkgs.writeShellScriptBin name ''
       set -euo pipefail
       unset PYTHONPATH PYTHONHOME PYTHONBREAKPOINT PYTHONUSERBASE VIRTUAL_ENV
+      unset _PYTHON_SYSCONFIGDATA_NAME _PYTHON_HOST_PLATFORM
       exec ${target} "$@"
     '';
 
@@ -368,10 +369,10 @@ let
         '';
       };
 
-    lynchpin-python = pkgs.writeShellScriptBin "lynchpin-python" ''
-      set -euo pipefail
-      exec ${inputs.lynchpin.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python "$@"
-    '';
+    lynchpin-python = mkSanitizedPythonWrapper {
+      name = "lynchpin-python";
+      target = "${inputs.lynchpin.packages.${pkgs.stdenv.hostPlatform.system}.api-python}/bin/python";
+    };
 
     lynchpin-cli = mkSanitizedPythonWrappers {
       name = "lynchpin-cli";

@@ -10,7 +10,7 @@ let
 in
 {
   perSystem =
-    { system, ... }:
+    { system, sinnixScriptRegistry, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
       testLib = import ../test-lib.nix { inherit inputs lib; };
@@ -193,6 +193,27 @@ in
     {
       checks = {
         cli-core-runtime = cliCoreRuntime;
+        cli-lynchpin-python-runtime = pkgs.runCommand "cli-lynchpin-python-runtime" { } ''
+          mkdir poisoned
+          printf 'raise RuntimeError("foreign Python path was inherited")\n' > poisoned/duckdb.py
+          export PYTHONPATH="$PWD/poisoned"
+          export _PYTHON_SYSCONFIGDATA_NAME=foreign_sysconfig
+          export _PYTHON_HOST_PLATFORM=foreign_platform
+          ${sinnixScriptRegistry.packageSet.lynchpin-python}/bin/lynchpin-python - <<'EOF'
+          import os
+          import sys
+          import duckdb
+          import polylogue.api.sync
+          import polylogue.analysis.archive
+          import lynchpin
+          assert sys.version_info[:2] == (3, 14)
+          assert "site-packages" in lynchpin.__file__
+          assert not any(name in os.environ for name in (
+              "PYTHONPATH", "_PYTHON_SYSCONFIGDATA_NAME", "_PYTHON_HOST_PLATFORM"
+          ))
+          EOF
+          touch "$out"
+        '';
       };
 
       checks = {
