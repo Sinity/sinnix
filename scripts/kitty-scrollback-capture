@@ -23,18 +23,18 @@ RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 mkdir -p "$CAPTURE_DIR"
 
 slugify() {
-  echo "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-50
+  printf '%s' "$1" | tr '\n\r' '  ' | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-50
 }
 
 capture_window() {
   local socket="$1"
   local pid="$2"
   local win_id="$3"
-  local title="$4"
-  local cwd="$5"
+  local title_json="$4"
+  local cwd_json="$5"
 
   local title_slug
-  title_slug=$(slugify "$title")
+  title_slug=$(slugify "$(jq -r . <<< "$title_json")")
   [ -z "$title_slug" ] && title_slug="untitled"
 
   # Include PID to disambiguate window IDs across instances
@@ -56,8 +56,8 @@ capture_window() {
 {
   "window_id": $win_id,
   "kitty_pid": $pid,
-  "title": $(printf '%s' "$title" | jq -Rs .),
-  "cwd": $(printf '%s' "$cwd" | jq -Rs .),
+  "title": $title_json,
+  "cwd": $cwd_json,
   "captured_at": "$TIMESTAMP",
   "hostname": "$HOSTNAME",
   "ansi_file": "$filename"
@@ -125,14 +125,16 @@ if [ "$CURRENT_ONLY" = true ]; then
   fi
 
   windows_json=$(kitty @ ls 2>/dev/null)
-  while IFS=$'\t' read -r win_id title cwd; do
+  while IFS= read -r window_json; do
+    win_id=$(jq -r '.id' <<< "$window_json")
+    title_json=$(jq -c '.title' <<< "$window_json")
+    cwd_json=$(jq -c '.cwd' <<< "$window_json")
     if [ "$win_id" = "$KITTY_WINDOW_ID" ]; then
-      capture_window "$socket" "$pid" "$win_id" "$title" "$cwd"
+      capture_window "$socket" "$pid" "$win_id" "$title_json" "$cwd_json"
       exit $?
     fi
-  done < <(echo "$windows_json" | jq -r '
-    [.[] | .tabs[] | .windows[] | {id, title, cwd}] |
-    .[] | [.id, .title, .cwd] | @tsv
+  done < <(echo "$windows_json" | jq -c '
+    .[] | .tabs[] | .windows[] | {id, title, cwd}
   ')
   echo "Error: Window $KITTY_WINDOW_ID not found" >&2
   exit 1
@@ -168,9 +170,12 @@ for socket in "${sockets[@]}"; do
     continue
   }
 
-  while IFS=$'\t' read -r win_id title cwd; do
+  while IFS= read -r window_json; do
+    win_id=$(jq -r '.id' <<< "$window_json")
+    title_json=$(jq -c '.title' <<< "$window_json")
+    cwd_json=$(jq -c '.cwd' <<< "$window_json")
     [ -z "$win_id" ] && continue
-    if capture_window "$socket" "$pid" "$win_id" "$title" "$cwd"; then
+    if capture_window "$socket" "$pid" "$win_id" "$title_json" "$cwd_json"; then
       ((total_captured++)) || true
     else
       capture_status=$?
@@ -180,9 +185,8 @@ for socket in "${sockets[@]}"; do
         ((total_failed++)) || true
       fi
     fi
-  done < <(echo "$windows_json" | jq -r '
-    [.[] | .tabs[] | .windows[] | {id, title, cwd}] |
-    .[] | [.id, .title, .cwd] | @tsv
+  done < <(echo "$windows_json" | jq -c '
+    .[] | .tabs[] | .windows[] | {id, title, cwd}
   ')
 done
 
