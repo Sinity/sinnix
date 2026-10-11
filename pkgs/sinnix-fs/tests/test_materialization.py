@@ -298,3 +298,30 @@ def test_status_reports_invalid_manifest_without_probing_databases(tmp_path, mon
     assert report["valid"] is False
     assert "invalid generation" in report["reason"]
     assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("valid_generation", [False, True])
+def test_status_reports_unreadable_publication_lock(tmp_path, monkeypatch, capsys, valid_generation):
+    """A wrong-type lock must not erase the generation diagnosis."""
+    import json
+    fs = load_script()
+    (tmp_path / "publication.lock").mkdir()
+    if valid_generation:
+        generation = tmp_path / "generation"
+        generation.mkdir()
+        (generation / "manifest.json").write_text(json.dumps({
+            "scan": {}, "invalid_definitions": [], "ledger_sha256": "a" * 64,
+        }))
+        monkeypatch.setattr(fs, "resolve_generation", lambda _index: generation)
+        monkeypatch.setattr(fs, "validate_generation", lambda _generation: {})
+        monkeypatch.setattr(fs, "generation_coverage", lambda _generation: {})
+        monkeypatch.setattr(fs, "read_judgments", lambda _path: {"sha256": "a" * 64})
+    assert fs.cmd_status(SimpleNamespace(index_dir=tmp_path)) == 1
+    status = json.loads(capsys.readouterr().out)
+    assert status["publication_in_progress"] is None
+    assert status["publication_state_error"]
+    assert status["valid"] is valid_generation
+    if valid_generation:
+        assert status["classifications_stale"] is False
+    else:
+        assert "no published generation" in status["reason"]
