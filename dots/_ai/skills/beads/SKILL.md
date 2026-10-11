@@ -73,7 +73,11 @@ enough that neither has to reconstruct intent.
   never the ritual ("acceptance: emit receipt").
 - **Description** opens with one plain paragraph: the outcome and why it
   matters. It is the single current contract; supersede it by editing, not by
-  stacking correction notes.
+  stacking correction notes. When a current claim is disproved, correct the
+  record's body and check related claims from the same investigation. Preserve
+  the original evidence in native history. If review is partial, name the
+  claims checked and those still unverified. Dated historical claims that were
+  true when written stay intact.
 - **Design** names the seams: modules touched, the chosen approach and the
   rejected one, invariants that must hold, and the focused verification
   command. Date file:line citations ("as of 2026-09-27").
