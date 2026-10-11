@@ -42,7 +42,7 @@ capture_window() {
   local filepath="$CAPTURE_DIR/$filename"
 
   local capture_error
-  capture_error=$(mktemp)
+  capture_error=$(mktemp "$CAPTURE_DIR/.capture-error.XXXXXX") || return 1
   if kitty @ --to "unix:$socket" get-text --match="id:$win_id" --extent=all --ansi --add-wrap-markers > "$filepath" 2>"$capture_error"; then
     rm -f "$capture_error"
     local lines
