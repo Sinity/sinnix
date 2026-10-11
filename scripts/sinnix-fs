@@ -945,11 +945,16 @@ WHERE target LIKE 'prefix:%';
 -- generation without depending on the writer's temporary content attachment.
 DROP TABLE IF EXISTS all_paths;
 CREATE TABLE all_paths AS
-SELECT path, sha256 FROM (
+-- Directory boundaries and failed directory reads also occur in files.
+-- Count their location once, retaining the full hash from a file observation.
+-- Conflicting full hashes for one location cannot establish one content ID.
+SELECT path,
+       CASE WHEN count(DISTINCT sha256) <= 1 THEN max(sha256) ELSE NULL END AS sha256
+FROM (
     SELECT path, NULL AS sha256 FROM nodes
     UNION ALL
     SELECT path, sha256 FROM files
-);
+) GROUP BY path;
 
 -- Only paths that DO match something appear here (an inner join, not a
 -- left join): the "no row at all" case is what QUALIFYing against the full

@@ -83,6 +83,27 @@ def test_ledger_view_normalizes_role_without_changing_raw_evidence(tmp_path):
     assert '"capture"' in result.stdout
 
 
+def test_coverage_counts_locations_once_and_preserves_content_identity(tmp_path):
+    import json
+    fs = load_script()
+    db = tmp_path / "inventory.duckdb"
+    fs.run_duckdb_file(db, "CREATE TABLE nodes(path VARCHAR); INSERT INTO nodes VALUES ('/scope'), ('/scope/boundary'), ('/scope/file');", "fixture")
+    fs.run_duckdb_file(tmp_path / "content.duckdb", "CREATE TABLE files(schema VARCHAR, path VARCHAR, bytes BIGINT, sha256 VARCHAR, fingerprint_kind VARCHAR, error VARCHAR); INSERT INTO files VALUES ('sinnix-fs-content-v2', '/scope/boundary', NULL, NULL, NULL, NULL), ('sinnix-fs-content-v2', '/scope/file', 4, repeat('a', 64), 'sha256-full', NULL);", "fixture")
+    (tmp_path / "judgments.jsonl").write_text(json.dumps({
+        "target": "sha256:" + "a" * 64, "field": "subject", "value": "exact",
+        "method": "operator", "evidence": "synthetic", "ts": "2026-01-01T00:00:00Z",
+    }) + "\n")
+    assert fs.ledger_run(tmp_path) == 0
+    result = fs.duckdb_query(db, "SELECT count(*) FROM all_paths; SELECT sum(paths) FROM coverage; SELECT value FROM inherited_judgments WHERE path='/scope/file'; SELECT count(*) FROM files;")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["3", "3", '"exact"', "2"]
+    fs.run_duckdb_file(tmp_path / "content.duckdb", "INSERT INTO files VALUES ('sinnix-fs-content-v2', '/scope/file', 4, repeat('b', 64), 'sha256-full', NULL);", "fixture")
+    assert fs.ledger_run(tmp_path) == 0
+    result = fs.duckdb_query(db, "SELECT count(*) FROM all_paths; SELECT sum(paths) FROM coverage; SELECT count(*) FROM inherited_judgments; SELECT count(*) FROM files;")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == ["3", "3", "0", "3"]
+
+
 @pytest.mark.parametrize("failure", ["ledger", "pointer", "schema", "malformed", "memory", "disk", "interrupted"])
 def test_failed_generation_preserves_one_reader_generation(tmp_path, monkeypatch, capsys, failure):
     import json
