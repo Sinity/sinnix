@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import argparse
 import fcntl
+import hashlib
 import json
 import os
 import subprocess
@@ -9,11 +11,13 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from agentctl import artifacts, pueue
+from agentctl import artifacts, cli, pueue
 from agentctl import run as run_module
+from agentctl.config import Config
 from agentctl.run import (
     CANCELLED_EXIT_CODE,
     MAX_LOG_BYTES,
@@ -177,7 +181,88 @@ def test_run_records_execution_receipt_even_without_cache_policy(
     receipt = outcome["execution_receipt"]
     assert receipt["binding"] == "unchanged_endpoints"
     assert receipt["start"]["head"] == "a"
-    assert events(tmp_path)[-1]["execution_receipt"] == receipt
+    reference = events(tmp_path)[-1]["outcome_ref"]
+    assert (
+        json.loads(Path(reference["path"]).read_text())["execution_receipt"] == receipt
+    )
+    assert (
+        reference["sha256"]
+        == hashlib.sha256(Path(reference["path"]).read_bytes()).hexdigest()
+    )
+
+
+@pytest.mark.parametrize("follow", [False, True])
+def test_large_receipt_completion_reaches_tail_and_follow(
+    tmp_path: Path,
+    config: Config,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    follow: bool,
+) -> None:
+    # Exercise the real producer and reader, not a fabricated compact event.
+    # Before the fix this inventory duplicated into the spool and disappeared.
+    inventory = {
+        f"file-{i}.py": {"sha256": "a" * 64, "bytes": i} for i in range(15_000)
+    }
+    observation = {
+        "status": "observed",
+        "head": "a",
+        "tree": "b",
+        "dirty": False,
+        "content_manifest": {"sha256": "neutral", "files": inventory},
+    }
+    monkeypatch.setattr(run_module, "git_observation", lambda *_args: observation)
+    launch = write_launch(tmp_path)
+    config.event_spool.touch()
+
+    def produce() -> None:
+        assert main([str(launch)]) == 0
+
+    sleeps = 0
+
+    def on_idle(_seconds: float) -> None:
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps == 1:
+            produce()
+        else:
+            raise KeyboardInterrupt
+
+    if follow:
+        # Replace only the CLI's clock reference, not subprocess's time.sleep.
+        monkeypatch.setattr(cli, "time", SimpleNamespace(sleep=on_idle))
+    else:
+        produce()
+    arguments = argparse.Namespace(
+        project="fixture", follow=follow, lines=0 if follow else 40
+    )
+    assert cli._events(arguments, config, cli.Output(as_json=True, full=False)) == 0
+    observed = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [event["phase"] for event in observed] == ["started", "finished"]
+    terminal = observed[-1]
+    assert {
+        key: terminal[key]
+        for key in ("job_id", "attempt", "project", "operation", "outcome", "exit_code")
+    } == {
+        "job_id": "job-a",
+        "attempt": 1,
+        "project": "fixture",
+        "operation": "check",
+        "outcome": "success",
+        "exit_code": 0,
+    }
+    reference = terminal["outcome_ref"]
+    path = Path(reference["path"])
+    assert path == tmp_path / "job-a.attempts/1/output.outcome"
+    payload = path.read_bytes()
+    assert len(payload) > cli.MAX_EVENT_LINE_BYTES
+    assert reference["sha256"] == hashlib.sha256(payload).hexdigest()
+    receipt = json.loads(payload)["execution_receipt"]
+    assert receipt["start"] == receipt["end"] == observation
+    assert (
+        max(len(line) for line in config.event_spool.read_bytes().splitlines()) < 4096
+    )
+    assert "execution_receipt" not in terminal and "execution_evidence" not in terminal
 
 
 def described(pool: str, task: object) -> str:
@@ -291,6 +376,21 @@ def test_a_successful_command_spools_its_start_and_finish(tmp_path: Path) -> Non
     outcome = outcome_path_for(tmp_path / "job-a.log")
     assert outcome.stat().st_mode & 0o777 == 0o600
     assert not list(outcome.parent.glob(f".{outcome.name}.atomic-tmp-*"))
+
+
+def test_event_append_failure_preserves_the_completed_owner_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_append(*_args: Any, **_kwargs: Any) -> None:
+        raise OSError("synthetic spool unavailable")
+
+    monkeypatch.setattr(run_module, "append_jsonl", fail_append)
+    launch = write_launch(tmp_path)
+
+    assert main([str(launch)]) == 0
+    assert outcome_of(tmp_path)["outcome"] == "success"
+    assert outcome_of(tmp_path)["exit_code"] == 0
+    assert events(tmp_path) == []
 
 
 def test_worker_exports_queue_identity_to_the_child(
@@ -486,7 +586,8 @@ def test_a_declared_scratch_is_created_exported_measured_and_removed(
     assert footprint["kind"] == "tmpfs" and footprint["path"] == str(scratch)
     assert footprint["files"] == 1 and footprint["bytes"] == 4096
     assert footprint["truncated"] is False
-    assert events(tmp_path)[-1]["scratch"] == footprint
+    reference = events(tmp_path)[-1]["outcome_ref"]
+    assert json.loads(Path(reference["path"]).read_text())["scratch"] == footprint
     assert not scratch.exists() and (tmp_path / "tmpfs").is_dir()
     # The result artifact carries the command's stdout and nothing agentctl added.
     document = json.loads((tmp_path / "job-a.result").read_text())
@@ -1125,6 +1226,16 @@ def test_a_vanished_working_directory_refuses_before_running(tmp_path: Path) -> 
     assert outcome.stat().st_mode & 0o777 == 0o600
     assert not list(outcome.parent.glob(f".{outcome.name}.atomic-tmp-*"))
 
+    (finished,) = events(tmp_path)
+    assert finished["phase"] == "finished"
+    assert finished["project"] == "fixture" and finished["operation"] == "check"
+    assert finished["outcome"] == "refused"
+    canonical = tmp_path / "job-a.attempts" / "1" / "output.outcome"
+    assert finished["outcome_ref"]["path"] == str(canonical)
+    payload = canonical.read_bytes()
+    assert finished["outcome_ref"]["sha256"] == hashlib.sha256(payload).hexdigest()
+    assert json.loads(payload)["outcome"] == "refused"
+
 
 def test_the_launch_input_survives_for_a_restart(tmp_path: Path) -> None:
     launch = write_launch(tmp_path)
@@ -1324,10 +1435,17 @@ def test_a_restarted_task_accounts_its_outcome_again(
     ]
     assert {e["task_id"] for e in spooled if e["phase"] == "finished"} == {task_id}
     assert [
-        event["execution_receipt"]["binding"]
+        json.loads(Path(event["outcome_ref"]["path"]).read_text())["execution_receipt"][
+            "binding"
+        ]
         for event in spooled
         if event["phase"] == "finished"
     ] == ["unavailable", "unavailable"]
+    assert [
+        json.loads(Path(e["outcome_ref"]["path"]).read_text())["exit_code"]
+        for e in spooled
+        if e["phase"] == "finished"
+    ] == [3, 0]
 
 
 def test_event_append_takes_the_spool_lock_and_repairs_a_torn_tail(

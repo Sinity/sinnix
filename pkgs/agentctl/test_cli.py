@@ -10,6 +10,7 @@ import time
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable
 
 import pytest
@@ -507,11 +508,72 @@ def test_events_tail_memory_is_bounded_by_the_requested_lines(tmp_path: Path) ->
     assert peak < size // 10, (peak, size)
 
 
-def test_tail_skips_an_oversized_record_without_retaining_it(tmp_path: Path) -> None:
+def test_tail_reports_an_oversized_record_without_retaining_it(tmp_path: Path) -> None:
     spool = tmp_path / "events.jsonl"
     spool.write_bytes(b"a\n" + b"x" * (2 * cli.MAX_EVENT_LINE_BYTES) + b"\nb\n")
     with spool.open("rb") as handle:
-        assert cli._last_matching_lines(handle, 2, lambda line: True) == ["a", "b"]
+        lines = cli._last_matching_lines(handle, 3, lambda line: True)
+    assert lines[0] == "a" and lines[-1] == "b"
+    assert json.loads(lines[1]) == {
+        "schema_version": 1,
+        "kind": "event-gap",
+        "reason": "oversized_record",
+        "record_bytes": 2 * cli.MAX_EVENT_LINE_BYTES,
+        "scope": "unattributed",
+    }
+
+
+@pytest.mark.parametrize("follow", [False, True])
+def test_event_reader_reports_unattributed_gaps_and_resumes(
+    cli_config: Config,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    follow: bool,
+) -> None:
+    records = (
+        b'{"kind":"queue-task","project":"other","label":"other:check"}\n'
+        + b'{"kind":"queue-task","project":"fixture","label":"fixture:check","phase":"started"}\n'
+        + b"x" * (2 * cli.MAX_EVENT_LINE_BYTES)
+        + b"\n"
+        + b"not-json\n"
+        + b'"non-object"\n'
+        + b'{"kind":"queue-task","label":"fixture:check","bad":"\xff"}\n'
+        + b'{"kind":"queue-task", "project": "fixture", "label":"fixture:check","phase":"finished","outcome":"success"}\n'
+    )
+    cli_config.event_spool.touch()
+    idle = 0
+
+    def append_on_idle(_seconds: float) -> None:
+        nonlocal idle
+        idle += 1
+        if idle == 1:
+            with cli_config.event_spool.open("ab") as handle:
+                handle.write(records)
+        else:
+            raise KeyboardInterrupt
+
+    if follow:
+        monkeypatch.setattr(cli, "time", SimpleNamespace(sleep=append_on_idle))
+    else:
+        cli_config.event_spool.write_bytes(records)
+    arguments = ["--json", "events", "tail", "--project", "fixture"]
+    if follow:
+        arguments += ["--follow", "--lines", "0"]
+    assert cli.main(arguments) == 0
+    observed = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert observed[0]["phase"] == "started" and observed[0]["project"] == "fixture"
+    assert [event.get("reason") for event in observed[1:-1]] == [
+        "oversized_record",
+        "invalid_json",
+        "non_object_record",
+        "invalid_utf8",
+    ]
+    assert all(
+        event["scope"] == "unattributed" and "project" not in event
+        for event in observed[1:-1]
+    )
+    assert observed[1]["record_bytes"] == 2 * cli.MAX_EVENT_LINE_BYTES
+    assert observed[-1]["phase"] == "finished" and observed[-1]["project"] == "fixture"
 
 
 def test_follow_tail_process_rss_stays_bounded_on_large_spool(

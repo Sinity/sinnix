@@ -658,6 +658,40 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     )
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
+    event = {
+        "kind": "queue-task",
+        "job_id": launch["job_id"],
+        "attempt": launch["attempt"],
+        "task_id": None,
+        "label": launch.get("label", ""),
+        "job_kind": launch.get("kind", "declared-operation"),
+        "project": launch["project_id"],
+        "operation": launch["operation"],
+        "pool": launch.get("pool"),
+        "unit": None,
+        "working_directory": launch["working_directory"],
+    }
+
+    def publish_outcome(record: Mapping[str, Any]) -> None:
+        # Inventories stay with the attempt owner. A notification references
+        # the exact published bytes, never the mutable latest-attempt alias.
+        payload = json.dumps(record, sort_keys=True).encode()
+        path = outcome_path_for(log_path)
+        atomic_publish(path, payload, fsync=True, mode=0o600)
+        append_event(
+            spool_path,
+            {
+                **event,
+                "phase": "finished",
+                "outcome": record["outcome"],
+                "exit_code": record["exit_code"],
+                "outcome_ref": {
+                    "path": str(path.absolute()),
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                },
+            },
+        )
+
     checkout = launch.get("checkout")
 
     def candidate_parts() -> tuple[Path, str, Path, str] | None:
@@ -697,22 +731,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         request = artifacts.cancellation(declared_log_path, launch["attempt"])
         if request:
             record["cancellation"] = request
-        atomic_publish(
-            outcome_path_for(log_path),
-            json.dumps(record, sort_keys=True).encode(),
-            fsync=True,
-            mode=0o600,
-        )
-        append_event(
-            spool_path,
-            {
-                "kind": "queue-task",
-                "job_id": launch["job_id"],
-                "attempt": launch["attempt"],
-                "phase": "finished",
-                **record,
-            },
-        )
+        publish_outcome(record)
         release_candidate()
         return REFUSED_EXIT_CODE
 
@@ -791,19 +810,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     pool = unit_pool(os.environ.get("PUEUE_GROUP")) or unit_pool(launch.get("pool"))
     unit = unit_for(launch_input, pool) if pool else None
     daemon = pueue.daemon_tag()
-    event = {
-        "kind": "queue-task",
-        "job_id": launch["job_id"],
-        "attempt": launch["attempt"],
-        "task_id": None,
-        "label": launch.get("label", ""),
-        "job_kind": launch.get("kind", "declared-operation"),
-        "project": launch["project_id"],
-        "operation": launch["operation"],
-        "pool": pool,
-        "unit": unit,
-        "working_directory": launch["working_directory"],
-    }
+    event.update(pool=pool, unit=unit)
     append_event(spool_path, {**event, "phase": "started"})
 
     # The queue is the admission boundary. Pass its identity to the child so
@@ -979,13 +986,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             **scratch_footprint(scratch_dir),
         }
         remove_scratch(scratch_dir)
-    atomic_publish(
-        outcome_path_for(log_path),
-        json.dumps(record, sort_keys=True).encode(),
-        fsync=True,
-        mode=0o600,
-    )
-    append_event(spool_path, {**event, "phase": "finished", **record})
+    publish_outcome(record)
     release_candidate()
     return status
 

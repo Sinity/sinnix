@@ -860,6 +860,11 @@ def _evidence(arguments: argparse.Namespace, config: Config, out: Output) -> int
 
 
 def _event_line(event: Mapping[str, Any]) -> str:
+    if event.get("kind") == "event-gap":
+        return (
+            f"event gap: {event.get('reason', 'unavailable')} ({event.get('record_bytes', 'unknown')} bytes); "
+            "project/job attribution unavailable"
+        )
     stamp = local_clock(event.get("emitted_at"), seconds=True)
     kind = str(event.get("kind") or "")
     if kind == "queue-task":
@@ -890,6 +895,27 @@ def _event_line(event: Mapping[str, Any]) -> str:
 _TAIL_BLOCK_BYTES = 64 * 1024
 
 
+def _event_gap(reason: str, record_bytes: int) -> str:
+    """A reader disposition, not an invented lifecycle event or project."""
+    return json.dumps(
+        {
+            "schema_version": 1,
+            "kind": "event-gap",
+            "reason": reason,
+            "record_bytes": record_bytes,
+            "scope": "unattributed",
+        },
+        separators=(",", ":"),
+    )
+
+
+def _decode_event_line(raw: bytes) -> str:
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return _event_gap("invalid_utf8", len(raw))
+
+
 def _last_matching_lines(
     handle: Any, count: int, wanted: Callable[[str], bool]
 ) -> list[str]:
@@ -904,31 +930,41 @@ def _last_matching_lines(
     position = handle.tell()
     found: list[str] = []
     carry = b""
-    oversized = False
+    oversized_bytes = 0
+
+    def accept(raw: bytes, size: int) -> None:
+        if not size or len(found) == count:
+            return
+        line = (
+            _event_gap("oversized_record", size)
+            if size > MAX_EVENT_LINE_BYTES
+            else _decode_event_line(raw)
+        )
+        if size > MAX_EVENT_LINE_BYTES or wanted(line):
+            found.append(line)
+
     while position > 0 and len(found) < count:
         step = min(_TAIL_BLOCK_BYTES, position)
         position -= step
         handle.seek(position)
-        block = handle.read(step) + carry
+        block = handle.read(step)
         parts = block.split(b"\n")
-        # The first part may be a line cut by the block boundary; keep it for
-        # the next (earlier) block unless the file start was reached.
-        carry = parts[0] if position > 0 else b""
-        complete = parts[1:] if position > 0 else parts
-        if oversized and len(parts) > 1:
-            complete = complete[:-1]
-            oversized = False
-        if len(carry) > MAX_EVENT_LINE_BYTES:
-            carry = b""
-            oversized = True
-        for raw in reversed(complete):
-            if not raw or len(raw) > MAX_EVENT_LINE_BYTES:
-                continue
-            line = raw.decode("utf-8", errors="replace")
-            if wanted(line):
-                found.append(line)
-                if len(found) == count:
-                    break
+        size = len(parts[-1]) + (oversized_bytes or len(carry))
+        raw = b"" if oversized_bytes else parts[-1] + carry
+        if len(parts) == 1 and position > 0:
+            # Keep only the count once a line exceeds the decoding budget.
+            carry = raw if size <= MAX_EVENT_LINE_BYTES else b""
+            oversized_bytes = size if size > MAX_EVENT_LINE_BYTES else 0
+            continue
+        accept(raw, size)
+        carry, oversized_bytes = b"", 0
+        for raw in reversed(parts[1:-1]):
+            accept(raw, len(raw))
+        if len(parts) > 1:
+            if position == 0:
+                accept(parts[0], len(parts[0]))
+            else:
+                carry = parts[0]
     found.reverse()
     return found
 
@@ -956,23 +992,30 @@ def _events(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             return EXIT_REFUSED
 
     def wanted(line: str) -> bool:
-        return (
-            project is None
-            or f'"{project}:' in line
-            or f'"project":"{project}"' in line
-        )
+        try:
+            event = json.loads(line)
+        except (ValueError, RecursionError):
+            return True
+        if not isinstance(event, Mapping) or event.get("kind") == "event-gap":
+            # A rejected record cannot safely be assigned to a project.
+            return True
+        if project is None:
+            return True
+        if isinstance(event.get("project"), str):
+            return event["project"] == project
+        return str(event.get("label") or "").startswith(project + ":")
 
     def show(line: str) -> None:
         line = line.rstrip("\n")
-        if out.as_json:
-            print(line, flush=True)
-            return
         try:
             event = json.loads(line)
-        except json.JSONDecodeError:
-            print(line, flush=True)
-            return
-        print(_event_line(event) if isinstance(event, Mapping) else line, flush=True)
+        except (ValueError, RecursionError):
+            line = _event_gap("invalid_json", len(line.encode("utf-8")))
+            event = json.loads(line)
+        if not isinstance(event, Mapping):
+            line = _event_gap("non_object_record", len(line.encode("utf-8")))
+            event = json.loads(line)
+        print(line if out.as_json else _event_line(event), flush=True)
 
     try:
         with spool.open("rb") as handle:
@@ -984,24 +1027,30 @@ def _events(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                 return EXIT_OK
             handle.seek(0, os.SEEK_END)
             pending = b""
-            oversized = False
+            oversized_bytes = 0
             while True:
                 chunk = handle.read(64 * 1024)
                 if not chunk:
                     time.sleep(FOLLOW_POLL_SECONDS)
                     continue
                 for part in chunk.splitlines(keepends=True):
-                    if oversized:
+                    if oversized_bytes:
+                        oversized_bytes += len(part)
                         if part.endswith(b"\n"):
-                            oversized = False
+                            show(_event_gap("oversized_record", oversized_bytes - 1))
+                            oversized_bytes = 0
                         continue
-                    if len(pending) + len(part) > MAX_EVENT_LINE_BYTES:
+                    size = len(pending) + len(part) - int(part.endswith(b"\n"))
+                    if size > MAX_EVENT_LINE_BYTES:
                         pending = b""
-                        oversized = not part.endswith(b"\n")
+                        if part.endswith(b"\n"):
+                            show(_event_gap("oversized_record", size))
+                        else:
+                            oversized_bytes = size
                         continue
                     pending += part
                     if pending.endswith(b"\n"):
-                        line = pending.decode("utf-8", errors="replace")
+                        line = _decode_event_line(pending[:-1])
                         pending = b""
                         if wanted(line):
                             show(line)
