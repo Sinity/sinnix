@@ -89,7 +89,7 @@ def mirror_new_events(day: str, new_bytes: bytes) -> None:
             continue
         try:
             event = json.loads(line)
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             continue
         if not isinstance(event, dict):
             continue

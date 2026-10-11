@@ -21,6 +21,19 @@ def _reset():
     notifications_mod._tail_by_day.clear()
 
 
+def test_undecodable_record_does_not_discard_later_notifications(monkeypatch):
+    _reset()
+    calls = []
+    monkeypatch.setattr(
+        notifications_mod, "notify_desktop", lambda *a, **kw: calls.append(a)
+    )
+    notifications_mod.mirror_new_events(
+        "20260101",
+        b'\xff\n{"kind":"notification_posted","title":"fixture","text":"retained"}\n',
+    )
+    assert calls == [("fixture", "retained")]
+
+
 def test_notification_posted_is_forwarded_to_the_desktop(monkeypatch) -> None:
     _reset()
     calls = []
