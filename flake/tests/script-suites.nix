@@ -239,6 +239,12 @@
             pkgs.duckdb
           ];
         };
+        borg-drill-suite = mkScriptSuite {
+          name = "sinnix-borg-drill";
+          suiteDir = ../../pkgs/sinnix-borg-drill/tests;
+          scripts = [ "sinnix-borg-drill" ];
+          nativeBuildInputs = [ pkgs.bash pkgs.jq pkgs.util-linux ];
+        };
         fs-materialization-suite = mkScriptSuite {
           name = "sinnix-fs";
           suiteDir = ../../pkgs/sinnix-fs/tests;

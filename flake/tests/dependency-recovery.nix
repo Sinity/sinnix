@@ -12,7 +12,7 @@
       nativeInputs = pkgs.writeText "agent-recovery-inputs.json" (
         builtins.toJSON {
           helper = toString ../../scripts/sinnix-agent-npm-bootstrap;
-          sources = builtins.mapAttrs (_: source: toString source) sources;
+                sources = builtins.mapAttrs (_: toString) sources;
         }
       );
     in

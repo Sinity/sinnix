@@ -140,8 +140,27 @@ for repo in "${REPOS[@]}"; do
 
   # `borg list --json` is reliable across versions; filter to archives whose
   # `time` is newer than the cutoff and pick one uniformly at random.
-  archives_json="$(borg list --json "$repo" 2>/dev/null || echo '{"archives":[]}')"
-  candidate_count="$(echo "$archives_json" | jq --arg cutoff "$cutoff" '[.archives[] | select(.time > $cutoff)] | length')"
+  started_at="$(date -u -Iseconds)"
+  start_epoch="$(date +%s)"
+  stderr_file="$scratch/stderr"
+  listing_status=0
+  archives_json="$(borg list --json "$repo" 2>"$stderr_file")" || listing_status=$?
+  if [ "$listing_status" -eq 0 ]; then
+    candidate_count="$(printf '%s' "$archives_json" | jq -e --arg cutoff "$cutoff" '
+      if (.archives | type) == "array" and
+         all(.archives[]; (.archive | type) == "string" and (.archive | length) > 0 and
+                          (.time | type) == "string" and (.time | length) > 0)
+      then [.archives[] | select(.time > $cutoff)] | length
+      else error("invalid archive listing") end' 2>"$stderr_file")" || listing_status=$?
+  fi
+  if [ "$listing_status" -ne 0 ]; then
+    echo "  archive listing failed for $repo (exit $listing_status)" >&2
+    emit_jsonl "$repo" "" "$started_at" "$(date -u -Iseconds)" \
+      "$(( $(date +%s) - start_epoch ))" "$listing_status" "failed" \
+      "$(tail -c 2048 "$stderr_file")" "archive_verify_data"
+    overall_exit=1
+    continue
+  fi
   if [ "$candidate_count" -eq 0 ]; then
     echo "  no archives newer than $cutoff in $repo; skipping" >&2
     emit_jsonl "$repo" "" "$(date -u -Iseconds)" "$(date -u -Iseconds)" 0 0 "no_archives" "" "archive_verify_data"
@@ -155,7 +174,7 @@ for repo in "${REPOS[@]}"; do
   start_epoch="$(date +%s)"
   stderr_file="$scratch/stderr"
   set +e
-  borg check --verify-data --first 1 -P "$archive_name" "$repo" 2>"$stderr_file"
+  borg check --verify-data "$repo::$archive_name" 2>"$stderr_file"
   exit_code=$?
   set -e
   end_epoch="$(date +%s)"
