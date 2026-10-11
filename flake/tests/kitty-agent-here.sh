@@ -24,6 +24,7 @@ python3 -c 'import socket, sys; s = socket.socket(socket.AF_UNIX); s.bind(sys.ar
 
 cat >"$test_root/bin/hyprctl" <<'EOF'
 #!/usr/bin/env bash
+[[ -z ${LD_LIBRARY_PATH+x} ]] || exit 90
 if [[ "${HYPR_TEST_CLASS:-kitty}" == kitty ]]; then
   printf '%s\n' '{"class":"kitty","pid":100}'
 else
@@ -78,7 +79,7 @@ for fixture in "$test_root/bin"/*; do
 done
 
 run_helper() {
-  env PATH="$test_root/bin:$PATH" USER=test XDG_RUNTIME_DIR="$test_root/runtime" SINNIX_KITTY_PROC_ROOT="$test_root/proc" SINNIX_PROJECT_ROOT="$test_root/work/sinnix" HOME="$test_root/home" KITTY_TEST_LOG="$test_root/kitty.log" KITTY_TEST_CWD="$1" "$helper" launch-agent-here --agent codex
+  env LD_LIBRARY_PATH=/synthetic/foreign-abi PATH="$test_root/bin:$PATH" USER=test XDG_RUNTIME_DIR="$test_root/runtime" SINNIX_KITTY_PROC_ROOT="$test_root/proc" SINNIX_PROJECT_ROOT="$test_root/work/sinnix" HOME="$test_root/home" KITTY_TEST_LOG="$test_root/kitty.log" KITTY_TEST_CWD="$1" "$helper" launch-agent-here --agent codex
 }
 
 run_helper "$test_root/work/lynchpin"

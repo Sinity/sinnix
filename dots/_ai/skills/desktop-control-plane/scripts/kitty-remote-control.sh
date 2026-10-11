@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Desktop tools use their declared libraries, not a caller devshell ABI.
+unset LD_LIBRARY_PATH
+
 socket="${KITTY_LISTEN_ON:-}"
 raw_json=0
 proc_root="${SINNIX_KITTY_PROC_ROOT:-/proc}"
