@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import socket
 import subprocess
+import threading
 from typing import Any, Callable
 
 # Hyprland socket2 event lines this lane treats as capture triggers: any
@@ -45,6 +47,59 @@ def connect_socket2(path: str) -> socket.socket:
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.connect(path)
     return sock
+
+
+class SocketEventPump:
+    """Drain socket2 during slow captures, coalescing triggers without payloads."""
+
+    def __init__(self, sock: socket.socket):
+        self._sock = sock
+        self._condition = threading.Condition()
+        self._stop = threading.Event()
+        self._pending = False
+        self._error: str | None = None
+        self._thread = threading.Thread(target=self._read, daemon=True)
+        self._thread.start()
+
+    def _read(self) -> None:
+        buffer = b""
+        try:
+            while not self._stop.is_set():
+                ready, _, _ = select.select([self._sock], [], [], 0.25)
+                if not ready:
+                    continue
+                try:
+                    chunk = self._sock.recv(65536)
+                except BlockingIOError:
+                    continue
+                if not chunk:
+                    raise EOFError("Hyprland socket2 closed")
+                buffer += chunk
+                trigger = False
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    trigger |= is_trigger_event(line.decode("utf-8", "replace"))
+                if trigger:
+                    with self._condition:
+                        self._pending = True
+                        self._condition.notify_all()
+        except (OSError, EOFError) as exc:
+            with self._condition:
+                self._error = str(exc)
+                self._condition.notify_all()
+
+    def poll(self, timeout: float) -> tuple[bool, str | None]:
+        with self._condition:
+            self._condition.wait_for(
+                lambda: self._pending or self._error is not None, timeout=timeout
+            )
+            pending = self._pending
+            self._pending = False
+            return pending, self._error
+
+    def close(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=1.0)
 
 
 HyprctlJsonReader = Callable[[list[str]], str | None]

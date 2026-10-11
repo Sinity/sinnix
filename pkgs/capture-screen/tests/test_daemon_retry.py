@@ -40,12 +40,20 @@ def test_failed_frame_publication_does_not_suppress_identical_retry(
 
     sock = Socket()
 
-    def select(*args):
-        nonlocal iteration
-        iteration += 1
-        return ([sock] if iteration == (5 if unavailable else 4) else []), [], []
+    class EventPump:
+        def __init__(self, _sock):
+            pass
 
-    monkeypatch.setattr(daemon.select, "select", select)
+        def poll(self, timeout):
+            nonlocal iteration
+            iteration += 1
+            closed = iteration == (5 if unavailable else 4)
+            return False, "Hyprland socket2 closed" if closed else None
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(daemon.hypr, "SocketEventPump", EventPump)
     monkeypatch.setattr(
         daemon,
         "time",
@@ -141,3 +149,35 @@ def test_failed_frame_publication_does_not_suppress_identical_retry(
     assert len(writes) == 2  # Failed first write retried; successful frame deduped.
     assert writes[0]["webp_bytes"] == writes[1]["webp_bytes"]
     assert writes[0]["filename"] != writes[1]["filename"]
+
+
+def test_pending_trigger_is_consumed_before_socket_close(tmp_path, monkeypatch):
+    class Socket:
+        def setblocking(self, value):
+            pass
+
+        def close(self):
+            pass
+
+    class Pump:
+        def __init__(self, sock):
+            pass
+
+        def poll(self, timeout):
+            return True, "Hyprland socket2 closed"
+
+        def close(self):
+            pass
+
+    observations = []
+    monkeypatch.setattr(daemon.hypr, "connect_socket2", lambda *_: Socket())
+    monkeypatch.setattr(daemon.hypr, "SocketEventPump", Pump)
+    monkeypatch.setattr(daemon.hypr, "make_hyprctl_json_reader", lambda *_: None)
+    monkeypatch.setattr(daemon.hypr, "get_active_window", lambda *_: observations.append(True))
+    monkeypatch.setattr(daemon.hypr, "get_monitors", lambda *_: [])
+    args = daemon.build_arg_parser().parse_args([
+        "--capture-root", str(tmp_path), "--runtime-dir", str(tmp_path),
+        "--instance-signature", "fixture",
+    ])
+    assert daemon.run(args) == 1
+    assert observations == [True]

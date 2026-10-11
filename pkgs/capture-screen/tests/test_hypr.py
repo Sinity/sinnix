@@ -101,3 +101,33 @@ def test_get_cursor_pos_none_on_missing_fields() -> None:
 
 def test_get_cursor_pos_none_on_failure() -> None:
     assert get_cursor_pos(lambda args: None) is None
+
+
+def test_event_pump_drains_while_capture_consumer_is_busy():
+    import socket
+
+    from sinnix_capture_screen.hypr import SocketEventPump
+
+    reader, writer = socket.socketpair()
+    reader.setblocking(False)
+    writer.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+    writer.settimeout(2.0)
+    pump = SocketEventPump(reader)
+    try:
+        # Far more than the socket buffer: this blocks without a concurrent
+        # reader. The capture consumer deliberately does not poll while sending.
+        writer.sendall(b"moveresize>>fixture\n" * 20_000)
+        assert pump.poll(timeout=0) == (False, None)
+        writer.sendall(b"active")
+        writer.sendall(b"window>>fixture\nworkspace>>2\n")
+        pending, error = pump.poll(timeout=2.0)
+        assert pending
+        assert error is None
+        writer.shutdown(socket.SHUT_WR)
+        _, error = pump.poll(timeout=2.0)
+        assert error == "Hyprland socket2 closed"
+    finally:
+        pump.close()
+        reader.close()
+        writer.close()
+    assert not pump._thread.is_alive()

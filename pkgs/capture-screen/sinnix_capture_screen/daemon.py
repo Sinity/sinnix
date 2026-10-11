@@ -43,7 +43,6 @@ import argparse
 import hashlib
 import json
 import os
-import select
 import sys
 import time
 from pathlib import Path
@@ -146,7 +145,6 @@ def run(args: argparse.Namespace) -> int:
     last_capture_ts: float | None = None
     unavailable_monitor: str | None = None
     seq = 0
-    buf = b""
 
     def do_capture(trigger: str) -> None:
         nonlocal last_capture_ts, seq, unavailable_monitor
@@ -272,27 +270,15 @@ def run(args: argparse.Namespace) -> int:
             last_hash_by_window[window_key] = new_hash
             attempt_gate.record_success()
 
+    event_pump = hypr.SocketEventPump(sock)
     try:
         while True:
-            timeout = 1.0
-            ready, _, _ = select.select([sock], [], [], timeout)
-            if ready:
-                chunk = sock.recv(65536)
-                if chunk == b"":
-                    print(
-                        "sinnix-capture-screen: Hyprland socket2 closed",
-                        file=sys.stderr,
-                    )
-                    return 1
-                buf += chunk
-                capture_for_event_burst = False
-                while b"\n" in buf:
-                    line, buf = buf.split(b"\n", 1)
-                    text = line.decode("utf-8", "replace")
-                    if hypr.is_trigger_event(text):
-                        capture_for_event_burst = True
-                if capture_for_event_burst:
-                    do_capture("hyprland-event")
+            capture_for_event_burst, socket_error = event_pump.poll(timeout=1.0)
+            if capture_for_event_burst:
+                do_capture("hyprland-event")
+            if socket_error is not None:
+                print(f"sinnix-capture-screen: {socket_error}", file=sys.stderr)
+                return 1
 
             now = time.time()
             pos = hypr.get_cursor_pos(read_json)
@@ -304,6 +290,7 @@ def run(args: argparse.Namespace) -> int:
             ):
                 do_capture("periodic-floor")
     finally:
+        event_pump.close()
         sock.close()
 
 
