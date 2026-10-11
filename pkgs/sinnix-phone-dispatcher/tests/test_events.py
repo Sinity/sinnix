@@ -138,6 +138,13 @@ def test_cursor_rejects_a_malformed_day(isolated_state_dirs) -> None:
     assert payload["ok"] is False
 
 
+def test_noncanonical_days_are_refused_without_creating_files(isolated_state_dirs):
+    for day in ("20260818\n", "２０２６０８１８"):
+        assert uploads_mod.events_cursor(day)[0] == HTTPStatus.BAD_REQUEST
+        assert uploads_mod.append_events(day, 0, b"fixture\n", None)[0] == HTTPStatus.BAD_REQUEST
+    assert not isolated_state_dirs["events_dir"].exists()
+
+
 def test_a_landed_batch_is_mirrored_with_only_its_new_bytes(
     isolated_state_dirs, monkeypatch
 ) -> None:

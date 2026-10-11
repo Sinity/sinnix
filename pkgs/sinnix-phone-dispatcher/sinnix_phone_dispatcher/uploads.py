@@ -258,7 +258,7 @@ def events_cursor(day: str) -> tuple[HTTPStatus, dict]:
     the phone either re-shipping a day or skipping one. The file cannot
     disagree with itself.
     """
-    if not EVENTS_DAY_RE.match(day):
+    if not EVENTS_DAY_RE.fullmatch(day):
         return HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "day must be YYYYMMDD"}
     target = _day_file(day)
     return HTTPStatus.OK, {
@@ -300,7 +300,7 @@ def append_events(
     The write loops until every byte is down (a short `pwrite` is legal), and
     the whole batch's range is read back before it is acknowledged.
     """
-    if not EVENTS_DAY_RE.match(day):
+    if not EVENTS_DAY_RE.fullmatch(day):
         return HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "day must be YYYYMMDD"}
     if offset < 0:
         return HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "negative offset"}

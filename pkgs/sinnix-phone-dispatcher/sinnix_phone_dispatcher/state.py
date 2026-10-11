@@ -66,7 +66,7 @@ UPLOAD_LANES = {
 # (uploads.append_events) instead of as a whole file through /chunk.
 EVENTS_DIR = LAKE_ROOT / "events"
 
-EVENTS_DAY_RE = re.compile(r"^\d{8}$")
+EVENTS_DAY_RE = re.compile(r"[0-9]{8}")
 
 # A batch is a slice of a day file, sized by the phone. Generous next to the
 # 512 KiB the app actually ships, and far below MAX_UPLOAD: a client that

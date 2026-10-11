@@ -68,7 +68,7 @@ _NAME_RE = re.compile(r"^(receipts|notify|decks)/[A-Za-z0-9][A-Za-z0-9._-]{0,127
 
 
 def _resolve(name: str) -> Path | None:
-    if not _NAME_RE.match(name):
+    if not _NAME_RE.fullmatch(name):
         return None
     return INBOX_DIR / name
 

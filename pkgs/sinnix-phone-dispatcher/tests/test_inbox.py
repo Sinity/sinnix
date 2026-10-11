@@ -138,6 +138,7 @@ def test_confirming_a_deck_keeps_it(isolated_state_dirs) -> None:
         "tokens/abcd",
         "receipts/",
         "receipts/.hidden",
+        "receipts/fixture.json\n",
     ],
 )
 def test_traversal_names_are_refused(name) -> None:
