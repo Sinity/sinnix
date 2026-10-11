@@ -219,5 +219,27 @@ class ClaudeStateTest(unittest.TestCase):
         saved = next(self.config.glob(".sinnix-migration-*/commands/swarm.md"))
         self.assertEqual(os.readlink(saved), "../skills/swarm/SKILL.md")
 
+    def test_retired_hook_aliases_are_preserved_without_touching_custom_hooks(self):
+        source = self.home / "subject/repo/dots/claude/hooks/sessionstart-beads-prime.sh"
+        old_root = self.home / "subject/dots/claude/hooks"
+        hooks = self.config / "hooks"
+        hooks.mkdir()
+        names = (
+            "pretooluse-bash.sh",
+            "sessionstart-polylogue-recall.sh",
+            "sessionstart-sinex-recall.sh",
+            "sessionstart-steering.sh",
+        )
+        for name in names:
+            (hooks / name).symlink_to(old_root / name)
+        (hooks / "custom.sh").symlink_to(old_root / "custom.sh")
+        state.reconcile(self.home, self.managed, self.seed, source)
+        for name in names:
+            self.assertFalse((hooks / name).is_symlink())
+            saved = next(self.config.glob(f".sinnix-migration-*/hooks/{name}"))
+            self.assertEqual(os.readlink(saved), str(old_root / name))
+        self.assertTrue((hooks / "custom.sh").is_symlink())
+        state.reconcile(self.home, self.managed, self.seed, source)
+
 
 unittest.main()

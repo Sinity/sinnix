@@ -139,6 +139,18 @@ def reconcile(home, managed, seed, retired_hook, global_source=None):
         )
     }
     retired["hooks/sessionstart-beads-prime.sh"] = str(retired_hook)
+    # Managed settings now execute hooks at their source paths. Preserve the
+    # obsolete aliases from before repositories moved into subject/repo/.
+    hook_root = str(retired_hook.parent)
+    old_hook_root = hook_root.replace("/repo/dots/", "/dots/", 1)
+    if old_hook_root != hook_root:
+        for name in (
+            "pretooluse-bash.sh",
+            "sessionstart-polylogue-recall.sh",
+            "sessionstart-sinex-recall.sh",
+            "sessionstart-steering.sh",
+        ):
+            retired[f"hooks/{name}"] = str(Path(old_hook_root) / name)
     for relative, expected in retired.items():
         link = config / relative
         if link.is_symlink() and not link.exists() and os.readlink(link) == expected:
