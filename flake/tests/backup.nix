@@ -641,7 +641,7 @@ assert lib.assertMsg (
           &&
             backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.Slice
             == "borgdrain.slice"
-          && backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.MemoryHigh == "4G"
+          && backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.MemoryHigh == "6G"
           && backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.MemoryMax == "6G"
           && backupRuntimeEval.config.systemd.slices.borgdrain.sliceConfig.MemoryHigh == "6G"
           && backupRuntimeEval.config.systemd.slices.borgdrain.sliceConfig.MemoryMax == "8G"

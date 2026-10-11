@@ -1130,7 +1130,9 @@ in
               resourceClass = "backup";
               resources = {
                 Slice = "borgdrain.slice";
-                MemoryHigh = "4G";
+                # Let the file/chunk caches use the admitted memory budget
+                # before reclaim forces them through swap.
+                MemoryHigh = "6G";
                 MemoryMax = "6G";
               };
               observe = {
