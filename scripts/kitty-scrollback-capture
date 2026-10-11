@@ -41,7 +41,10 @@ capture_window() {
   local filename="${TIMESTAMP}-${HOSTNAME}-pid${pid}-win${win_id}-${title_slug}.ansi"
   local filepath="$CAPTURE_DIR/$filename"
 
-  if kitty @ --to "unix:$socket" get-text --match="id:$win_id" --extent=all --ansi --add-wrap-markers > "$filepath" 2>/dev/null; then
+  local capture_error
+  capture_error=$(mktemp)
+  if kitty @ --to "unix:$socket" get-text --match="id:$win_id" --extent=all --ansi --add-wrap-markers > "$filepath" 2>"$capture_error"; then
+    rm -f "$capture_error"
     local lines
     lines=$(wc -l < "$filepath")
     local size
@@ -65,8 +68,16 @@ EOF
     touch "$PROGRESS_MARKER"
     return 0
   else
-    echo "  ✗ win:$win_id - capture failed" >&2
-    rm -f "$filepath"
+    # A window can close between listing and capture. Only Kitty's exact
+    # missing-window response establishes this benign race.
+    local error
+    error=$(cat "$capture_error")
+    rm -f "$capture_error" "$filepath"
+    if [[ "$error" == "Error: No matching windows for expression: id:$win_id" ]]; then
+      echo "  ⚠ win:$win_id closed before capture, skipping"
+      return 2
+    fi
+    echo "  ✗ win:$win_id - capture failed: $error" >&2
     return 1
   fi
 }
@@ -162,7 +173,12 @@ for socket in "${sockets[@]}"; do
     if capture_window "$socket" "$pid" "$win_id" "$title" "$cwd"; then
       ((total_captured++)) || true
     else
-      ((total_failed++)) || true
+      capture_status=$?
+      if [[ "$capture_status" -eq 2 ]]; then
+        ((total_stale++)) || true
+      else
+        ((total_failed++)) || true
+      fi
     fi
   done < <(echo "$windows_json" | jq -r '
     [.[] | .tabs[] | .windows[] | {id, title, cwd}] |
