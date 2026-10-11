@@ -9,6 +9,9 @@ For anything a person reads: PR and issue bodies, review comments, commit
 message bodies, chat replies, reports, and prose documentation. Code comments
 follow the repository's own rules.
 
+- Write for a reader who has read none of the source material. Explain each
+  reference on first mention and why it matters; include an identifier only
+  when useful.
 - Write plain, specific, declarative sentences. Lead with the point; a claim
   earns an adjective only with the evidence beside it.
 - Do not use em or en dashes as punctuation. Use a period, comma, colon,
