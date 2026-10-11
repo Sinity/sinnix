@@ -63,7 +63,9 @@ def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
     assert added["label"] == "fixture:verify"
     assert added["command"][0] == "agentctl-run"
     assert added["working_directory"] == project_root
-    assert read_launch(config, fake_pueue.task(started["job_id"]))["project_root"] == str(project_root)
+    assert read_launch(config, fake_pueue.task(started["job_id"]))[
+        "project_root"
+    ] == str(project_root)
     input_path = Path(added["command"][1])
     assert input_path.stat().st_mode & 0o777 == 0o600
     written = json.loads(input_path.read_text())
@@ -81,6 +83,18 @@ def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
     assert started["project"] == "fixture"
     assert started["operation"] == "verify"
     assert started["kind"] == "declared-operation"
+
+
+def test_declared_readiness_is_preserved_in_queued_input(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    project = load_project_adapter(project_root)
+    operation = replace(project.operation("verify"), execution_readiness="notify")
+    started = launch.start_operation(config, project, operation)
+    written = read_launch(config, fake_pueue.task(started["job_id"]))
+    assert written["execution_readiness"] == "notify"
+    assert written["kind"] == "declared-operation"
+    assert written["timeout_seconds"] == operation.timeout_seconds
 
 
 def test_operation_started_by_an_agent_preserves_its_routing_principal(
@@ -2105,7 +2119,9 @@ def test_a_declared_admission_envelope_reaches_the_job_and_its_command(
 
 
 def test_wait_rechecks_terminal_state_at_observer_timeout(
-    fake_pueue: FakePueue, config: Config, project_root: Path,
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     project = load_project_adapter(project_root)

@@ -848,7 +848,8 @@ schedule = "*-*-* 03:17:00"
 
 An operation declares `description`, `exec` (argv, no shell), `pool` (a
 pueue group), `result` (`exit`, `json`, `pytest`), `timeout_seconds` (1 to
-28,800, or 0 for execution until completion or explicit cancellation; default 3,600), `checkout` (see below), `arguments` (`none`, or
+28,800, or 0 for execution until completion or explicit cancellation; default 3,600),
+`execution_readiness` (`exec` or `notify`, see below), `checkout` (see below), `arguments` (`none`, or
 `required` when the operation cannot execute without a caller-supplied
 selector; a focused profile may name a `required` operation, whose worker
 command must include a selector after `--`), `schedule`
@@ -857,6 +858,17 @@ command must include a selector after `--`), `schedule`
 `dependencies` (declared operation names). Dependencies are
 queued before their operation and cannot contain cycles. Any other operation
 field is ignored with a warning on stderr.
+
+`execution_readiness` is `exec` by default. An operation with project-native
+admission may declare `notify`: its managed service remains activating until
+the workload sends systemd `READY=1` after admission. The runtime budget then
+starts at readiness. Startup acknowledgement is nonblocking so cancellation
+never waits for admission under the launch lock. AgentCTL sets
+`AGENTCTL_EXECUTION_READINESS=notify` and systemd supplies `NOTIFY_SOCKET`;
+workloads must retain reservations and report admission separately from
+execution. There is no extra startup deadline for a progress-governed admission
+wait. Lost manager observation remains bounded and unresolved. Notify mode
+requires a managed systemd unit and refuses bare execution.
 
 Dirty execution endpoints include a versioned content manifest of Git-tracked
 and nonignored untracked paths, file modes, sizes and SHA-256 hashes. Symlinks

@@ -243,6 +243,13 @@ def read_input(path: Path) -> dict[str, Any]:
         )
     if value["result_kind"] not in RESULT_KINDS:
         raise QueueInputError(f"unknown result kind: {value['result_kind']!r}")
+    readiness = value.get("execution_readiness", "exec")
+    if not isinstance(readiness, str) or readiness not in {"exec", "notify"}:
+        raise QueueInputError("launch input execution_readiness must be exec or notify")
+    if readiness == "notify" and value.get("kind") != "declared-operation":
+        raise QueueInputError(
+            "notify execution readiness requires a declared operation"
+        )
     timeout = value["timeout_seconds"]
     if (
         not isinstance(timeout, int)

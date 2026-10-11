@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from agentctl import landing, run
 from agentctl.limits import valid_timeout_seconds
+from agentctl.launch_input import QueueInputError, read_input
 from agentctl.projects import load_project_adapter
 from conftest import write_project
 from test_run import write_launch
@@ -125,3 +126,67 @@ def test_foreground_no_deadline_cancellation_settles_original_group(
         )
     assert waits == [None, None]
     assert killed == [42]
+
+
+def test_notify_readiness_reaches_unit_without_holding_startup_ack(
+    tmp_path: Path,
+) -> None:
+    root = write_project(tmp_path / "project")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + '\n[operations.admitted]\ndescription="admitted test"\nexec=["true"]'
+        '\ntimeout_seconds=2\nexecution_readiness="notify"\n'
+    )
+    operation = load_project_adapter(root).operation("admitted")
+    assert operation.execution_readiness == "notify"
+    assert operation.catalog_row()["execution_readiness"] == "notify"
+    payload = {
+        "working_directory": str(root),
+        "timeout_seconds": 2,
+        "execution_readiness": operation.execution_readiness,
+    }
+    command = run._service_command(
+        payload,
+        unit="fixture.service",
+        pool="normal",
+        description="fixture",
+        argv=["true"],
+        environment={},
+        stdout=tmp_path / "out",
+        log_path=tmp_path / "log",
+    )
+    assert "--no-block" in command
+    assert "Type=notify" in command
+    assert "NotifyAccess=all" in command
+    assert "RuntimeMaxSec=2" in command
+    assert "TimeoutStartSec=infinity" in command
+    assert "--setenv=AGENTCTL_EXECUTION_READINESS=notify" in command
+
+
+def test_notify_readiness_cannot_silently_use_bare_execution(tmp_path: Path) -> None:
+    import io
+
+    log = io.BytesIO()
+    outcome, status = run._run_bare(
+        ["must-not-run"], {"execution_readiness": "notify"}, {}, log, log
+    )
+    assert outcome == run.Outcome.FAILED
+    assert status == 78
+    assert b"managed systemd unit" in log.getvalue()
+
+
+@pytest.mark.parametrize(
+    "readiness,kind",
+    [
+        ("invalid", "declared-operation"),
+        (True, "declared-operation"),
+        ("notify", "agent"),
+    ],
+)
+def test_launch_input_rejects_invalid_readiness_contract(
+    tmp_path: Path, readiness: object, kind: str
+) -> None:
+    path = write_launch(tmp_path, execution_readiness=readiness, kind=kind)
+    with pytest.raises(QueueInputError, match="readiness|declared operation"):
+        read_input(path)

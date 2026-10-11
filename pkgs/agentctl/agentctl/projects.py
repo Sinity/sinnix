@@ -116,6 +116,7 @@ _OPERATION_FIELDS = frozenset(
         "pool",
         "result",
         "timeout_seconds",
+        "execution_readiness",
         "schedule",
         "checkout",
         "cache",
@@ -275,6 +276,7 @@ class ProjectOperation:
     pool: str = "normal"
     result: str = "exit"
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
+    execution_readiness: str = "exec"
     schedule: str | None = None
     # Which tree the operation runs in; see `checkout.CHECKOUT_KINDS`.
     checkout: str = "any"
@@ -292,6 +294,7 @@ class ProjectOperation:
             "pool": self.pool,
             "result": self.result,
             "timeout_seconds": self.timeout_seconds,
+            "execution_readiness": self.execution_readiness,
             "schedule": self.schedule,
             "checkout": self.checkout,
             "cache": self.cache,
@@ -588,6 +591,13 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
                 f"{MAX_DECLARED_OPERATION_TIMEOUT_SECONDS}"
             )
         fields["timeout_seconds"] = timeout_seconds
+    if "execution_readiness" in definition:
+        readiness = definition["execution_readiness"]
+        if not isinstance(readiness, str) or readiness not in {"exec", "notify"}:
+            raise ProjectConfigError(
+                f"operations.{name}.execution_readiness must be exec or notify"
+            )
+        fields["execution_readiness"] = readiness
     if "checkout" in definition:
         if definition["checkout"] not in CHECKOUT_KINDS:
             raise ProjectConfigError(f"operations.{name}.checkout is invalid")

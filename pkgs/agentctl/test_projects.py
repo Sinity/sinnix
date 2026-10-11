@@ -16,6 +16,22 @@ from agentctl.projects import (
 from conftest import write_project
 
 
+@pytest.mark.parametrize("readiness", ['"unknown"', "true", "3"])
+def test_descriptor_rejects_invalid_execution_readiness(
+    tmp_path: Path, readiness: str
+) -> None:
+    root = write_project(tmp_path / "project")
+    descriptor = root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + '\n[operations.admitted]\ndescription="test"\nexec=["true"]\nexecution_readiness='
+        + readiness
+        + "\n"
+    )
+    with pytest.raises(ProjectConfigError, match="execution_readiness"):
+        load_project_adapter(root)
+
+
 def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -> None:
     project = load_project_adapter(project_root)
 

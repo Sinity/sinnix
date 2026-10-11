@@ -181,10 +181,10 @@ def _start_service(command: Sequence[str], marker: Path, attempt: int, log: Any)
         fcntl.flock(lock, fcntl.LOCK_EX)
         if _marker_targets(marker, attempt):
             return None
-        # Without --no-block, systemd-run waits for unit startup. Type=exec
-        # makes successful return an exec acknowledgement rather than a
-        # successful fork. This is the lock boundary; waiting for ActiveState
-        # here can retain the lock until workload exit if a property read fails.
+        # Exec services acknowledge executable startup. Notify services use
+        # --no-block to acknowledge unit creation instead: their admission
+        # wait must not retain this cancellation lock until READY=1.
+        # Observe either service outside the lock.
         return subprocess.run(
             command,
             stdout=subprocess.DEVNULL,
@@ -409,7 +409,10 @@ def _systemctl(*arguments: str) -> str | None:
 def _unit_snapshot(unit: str) -> dict[str, str] | None:
     """A successful show, including not-found, or None when observation failed."""
     shown = _systemctl(
-        "show", "-p", "LoadState,ActiveState,Result,ExecMainStatus,ExecMainCode", unit
+        "show",
+        "-p",
+        "LoadState,ActiveState,Result,ExecMainStatus,ExecMainCode,Type,ActiveEnterTimestampMonotonic",
+        unit,
     )
     if shown is None:
         return None
@@ -441,7 +444,7 @@ def _wait_for_unit(unit: str, timeout_seconds: int) -> dict[str, str] | None:
         else None
     )
     delay = UNIT_POLL_INITIAL_SECONDS
-    while deadline is None or time.monotonic() < deadline:
+    while True:
         properties = _unit_snapshot(unit)
         if properties is not None:
             load_state = properties.get("LoadState")
@@ -450,9 +453,32 @@ def _wait_for_unit(unit: str, timeout_seconds: int) -> dict[str, str] | None:
                 return {}
             if load_state == "loaded" and active_state in {"inactive", "failed"}:
                 return properties
+            if timeout_seconds and properties.get("Type") == "notify":
+                if active_state == "activating":
+                    # RuntimeMaxSec has not started. Keep a finite observation
+                    # allowance after the last confirmed admission wait, so a
+                    # lost manager connection still produces unresolved state.
+                    deadline = (
+                        time.monotonic()
+                        + timeout_seconds
+                        + UNIT_OBSERVATION_GRACE_SECONDS
+                    )
+                else:
+                    try:
+                        entered = (
+                            int(properties.get("ActiveEnterTimestampMonotonic", "0"))
+                            / 1_000_000
+                        )
+                    except (TypeError, ValueError):
+                        entered = 0.0
+                    if 0 < entered <= time.monotonic():
+                        deadline = (
+                            entered + timeout_seconds + UNIT_OBSERVATION_GRACE_SECONDS
+                        )
+        if deadline is not None and time.monotonic() >= deadline:
+            return None
         time.sleep(delay)
         delay = min(delay * 2, UNIT_POLL_MAX_SECONDS)
-    return None
 
 
 def active_units(daemon: str, pool: str) -> dict[str, int | None]:
@@ -531,9 +557,15 @@ def _service_command(
     stdout: Path,
     log_path: Path,
 ) -> list[str]:
+    notify = launch.get("execution_readiness", "exec") == "notify"
+    environment = {
+        **environment,
+        "AGENTCTL_EXECUTION_READINESS": "notify" if notify else "exec",
+    }
     properties = [
         f"RuntimeMaxSec={launch['timeout_seconds'] or 'infinity'}",
-        "Type=exec",
+        "Type=notify" if notify else "Type=exec",
+        *(["NotifyAccess=all", "TimeoutStartSec=infinity"] if notify else []),
         "ExitType=cgroup",
         "KillMode=control-group",
         "IOAccounting=yes",
@@ -546,6 +578,7 @@ def _service_command(
         "systemd-run",
         "--user",
         "--quiet",
+        *(["--no-block"] if notify else []),
         f"--unit={unit}",
         f"--slice={pool_slice(pool)}",
         f"--description={description}",
@@ -595,6 +628,9 @@ def _run_bare(
     log: Any,
 ) -> tuple[Outcome, int]:
     """Outside the queue there is no group and no unit; only the caller can cancel."""
+    if launch.get("execution_readiness", "exec") == "notify":
+        log.write(b"notify execution readiness requires a managed systemd unit\n")
+        return Outcome.FAILED, 78
     process = subprocess.Popen(
         argv,
         cwd=launch["working_directory"],
@@ -822,8 +858,14 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     environment.update(secrets)
     # Native invocation provenance is owned here, not inherited from a parent
     # job or caller. The launch reference joins this attempt to retained input.
-    for field in ("JOB_ID", "CORRELATION_ID", "PROJECT_ID", "OPERATION",
-                  "CHECKOUT_ID", "CHECKOUT_HEAD"):
+    for field in (
+        "JOB_ID",
+        "CORRELATION_ID",
+        "PROJECT_ID",
+        "OPERATION",
+        "CHECKOUT_ID",
+        "CHECKOUT_HEAD",
+    ):
         environment.pop(f"AGENTCTL_{field}", None)
     environment.update(
         {
@@ -843,7 +885,8 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     if isinstance(root, str) and root and checkout_path:
         path = Path(checkout_path).resolve()
         environment["AGENTCTL_CHECKOUT_ID"] = (
-            "default" if path == Path(root).resolve()
+            "default"
+            if path == Path(root).resolve()
             else "worktree-" + hashlib.sha256(str(path).encode()).hexdigest()[:16]
         )
     if isinstance(start_git.get("head"), str) and start_git["head"]:

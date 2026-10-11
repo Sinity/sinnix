@@ -329,6 +329,10 @@ def fake_systemd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeSystemd
     runner = fake_bin / "systemd-run"
     runner.write_text(
         "#!/bin/sh\n"
+        # A managed unit receives the supplied provenance, not the test
+        # runner's outer AgentCTL job identity.
+        "unset AGENTCTL_JOB_ID AGENTCTL_CORRELATION_ID AGENTCTL_PROJECT_ID "
+        "AGENTCTL_OPERATION AGENTCTL_CHECKOUT_ID AGENTCTL_CHECKOUT_HEAD\n"
         f"printf '%s\\n' \"$@\" > {tmp_path / 'systemd-run-argv'}\n"
         "out=/dev/stdout; err=/dev/stderr\n"
         'while [ "$1" != "--" ]; do\n'
@@ -1530,3 +1534,33 @@ def test_worker_does_not_invent_missing_checkout_evidence(
     )
     assert main([str(launch)]) == 0
     assert json.loads(log_of(tmp_path)) == {"CHECKOUT_ID": None, "CHECKOUT_HEAD": None}
+
+
+def test_notify_admission_wait_does_not_spend_execution_observation_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A notify service gets its declared runtime after readiness, not submission."""
+    clock = [0.0]
+
+    def sleep(delay: float) -> None:
+        clock[0] += delay
+
+    def snapshot(_unit: str) -> dict[str, str]:
+        state = "activating" if clock[0] < 5 else "active" if clock[0] < 6 else "inactive"
+        return {
+            "LoadState": "loaded",
+            "ActiveState": state,
+            "Type": "notify",
+            "ActiveEnterTimestampMonotonic": "5000000" if clock[0] >= 5 else "0",
+        }
+
+    monkeypatch.setattr(run_module, "_unit_snapshot", snapshot)
+    monkeypatch.setattr(run_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(run_module.time, "sleep", sleep)
+    monkeypatch.setattr(run_module, "UNIT_OBSERVATION_GRACE_SECONDS", 0)
+
+    properties = run_module._wait_for_unit("fixture.service", timeout_seconds=2)
+
+    assert properties is not None
+    assert properties["ActiveState"] == "inactive"
+    assert clock[0] >= 6
