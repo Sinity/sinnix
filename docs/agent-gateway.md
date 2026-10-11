@@ -167,6 +167,13 @@ bound one export page. A truncated page supplies `next_start_after`; pass that a
 against the same source state. Git history and live Beads evidence use their owner
 routes separately.
 
+`projects.read` and `projects.read_many` retain checkout-wide revision checks.
+Each operation observes the checkout before and after reading, refusing a result
+if its revision changed, including changes outside the requested files. A batch
+shares that pair of observations across its files. The verified file-hash cache
+avoids rereading unchanged bytes; both checkout enumerations remain part of the
+contract. These routes return checkout evidence, with no file-only fast mode.
+
 File search records a checkout-consistent immutable observation. `max_matches`
 selects how many matches to retain; `page_size` controls each response page.
 `next_cursor` retrieves the same retained matches after later checkout edits,
