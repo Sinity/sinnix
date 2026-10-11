@@ -424,6 +424,25 @@ only the selected server definitions.
 `events tail --follow` permits one reader per project for the current user;
 workers wait on their own job id with `job wait`.
 
+Queue-task completion events carry job reference, attempt, project/operation,
+queue task identity, outcome and exit code. `outcome_ref.path` names the canonical
+per-attempt outcome file and `outcome_ref.sha256` binds its exact bytes. Full
+execution receipts, inventories, scratch measurements and cancellation details
+remain in that authoritative outcome, available through `job get` and its
+artifact references; a retry does not replace an earlier event's target. These
+references bind the published bytes, not retention after normal owner cleanup.
+The spool is advisory notification, not another result ledger; notification
+paths are not a substitute for the job owner's result lookup.
+
+Both historical tail and follow bound event decoding to 1 MiB per record.
+Oversized, malformed JSON, non-object and invalid UTF-8 records produce an
+`event-gap` disposition with reason, byte count and `scope=unattributed`;
+their contents are not echoed. Gaps appear even with a project filter because
+the rejected record's job/project is unknown, and count toward the requested
+historical tail lines. Follow discards oversized payload bytes through the
+newline, reports one gap and resumes. A gap is not a completion: resolve
+terminal state and full results through the job owner.
+
 The integration and review agents a landing owns queue in the `land-agent`
 pool, not in `agent`: pausing `agent` holds back new worker dispatch without
 stranding a landing already in flight, and the landing task's own
