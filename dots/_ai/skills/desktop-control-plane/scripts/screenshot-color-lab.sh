@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Desktop tools use their declared libraries, not a caller devshell ABI.
+unset LD_LIBRARY_PATH
+
 # Practical screenshot workflow for Hyprland HDR setups.
 # Captures raw screenshot(s) and can produce an optional corrected variant.
 
