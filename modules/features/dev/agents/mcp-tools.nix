@@ -40,16 +40,31 @@ let
       FIRECRAWL_API_KEY = firecrawlSecretPath;
     };
   };
-  mcpLynchpinBin = pkgs.writeShellScriptBin "mcp-lynchpin" ''
-    set -euo pipefail
-    export LYNCHPIN_REPO_ROOT=/realm/project/sinity-lynchpin/repo
-    export LYNCHPIN_LOCAL_ROOT=/realm/project/sinity-lynchpin/repo/.lynchpin
-    ${lib.optionalString (config.environment.variables ? LYNCHPIN_CHISEL_CACHE_ROOT) ''
-      export LYNCHPIN_CHISEL_CACHE_ROOT=${lib.escapeShellArg config.environment.variables.LYNCHPIN_CHISEL_CACHE_ROOT}
-      export LYNCHPIN_CHISEL_SCRATCH_ROOT=${lib.escapeShellArg config.environment.variables.LYNCHPIN_CHISEL_SCRATCH_ROOT}
-    ''}
-    exec ${scriptPkgs.lynchpin-python}/bin/lynchpin-python -m lynchpin.mcp.cli "$@"
-  '';
+  mcpLynchpinBin = mkMcpWrapper "mcp-lynchpin" {
+    command = "${scriptPkgs.lynchpin-python}/bin/lynchpin-python";
+    args = [
+      "-m"
+      "lynchpin.mcp.cli"
+    ];
+    # A managed launcher must not inherit retired roots from an older session.
+    # Foundation owns these paths; standalone source overrides stay separate.
+    runtimeEnv = {
+      inherit (config.environment.variables)
+        LYNCHPIN_REPO_ROOT
+        SINEX_ROOT
+        POLYLOGUE_ROOT
+        RAWLOG_FILE
+        ;
+      LYNCHPIN_LOCAL_ROOT = "${config.environment.variables.LYNCHPIN_REPO_ROOT}/.lynchpin";
+    }
+    // lib.filterAttrs (
+      name: _:
+      builtins.elem name [
+        "LYNCHPIN_CHISEL_CACHE_ROOT"
+        "LYNCHPIN_CHISEL_SCRATCH_ROOT"
+      ]
+    ) config.environment.variables;
+  };
   mcpPolylogueBin = pkgs.writeShellScriptBin "mcp-polylogue" ''
     set -euo pipefail
     # The configured service data directory is the sole archive-root owner.

@@ -193,6 +193,42 @@ in
     {
       checks = {
         cli-core-runtime = cliCoreRuntime;
+        cli-lynchpin-mcp-roots =
+          let
+            probe = pkgs.writeShellScriptBin "lynchpin-python" ''
+              set -euo pipefail
+              [[ "$LYNCHPIN_REPO_ROOT" = /fixture/lynchpin/repo ]]
+              [[ "$LYNCHPIN_LOCAL_ROOT" = /fixture/lynchpin/repo/.lynchpin ]]
+              [[ "$SINEX_ROOT" = /fixture/sinex/repo ]]
+              [[ "$POLYLOGUE_ROOT" = /fixture/polylogue/repo ]]
+              [[ "$RAWLOG_FILE" = /fixture/journal/raw-log.md ]]
+              [[ "$LYNCHPIN_CHISEL_CACHE_ROOT" = /fixture/cache ]]
+              [[ "$1" = -m && "$2" = lynchpin.mcp.cli && "$3" = fixture-argument ]]
+            '';
+            wrappers = import ../../modules/features/dev/agents/mcp-tools.nix {
+              inherit lib pkgs;
+              scriptPkgs.lynchpin-python = probe;
+              config = {
+                environment.variables = {
+                  LYNCHPIN_REPO_ROOT = "/fixture/lynchpin/repo";
+                  SINEX_ROOT = "/fixture/sinex/repo";
+                  POLYLOGUE_ROOT = "/fixture/polylogue/repo";
+                  RAWLOG_FILE = "/fixture/journal/raw-log.md";
+                  LYNCHPIN_CHISEL_CACHE_ROOT = "/fixture/cache";
+                };
+                sinnix.services.polylogue.dataDir = "/fixture/archive";
+              };
+            };
+          in
+          pkgs.runCommand "cli-lynchpin-mcp-roots" { } ''
+            export LYNCHPIN_REPO_ROOT=/retired/lynchpin
+            export LYNCHPIN_LOCAL_ROOT=/retired/lynchpin/.lynchpin
+            export SINEX_ROOT=/retired/sinex
+            export POLYLOGUE_ROOT=/retired/polylogue
+            export RAWLOG_FILE=/retired/journal.md
+            ${wrappers.mcpLynchpinBin}/bin/mcp-lynchpin fixture-argument
+            touch "$out"
+          '';
         cli-lynchpin-python-runtime = pkgs.runCommand "cli-lynchpin-python-runtime" { } ''
           mkdir poisoned
           printf 'raise RuntimeError("foreign Python path was inherited")\n' > poisoned/duckdb.py
