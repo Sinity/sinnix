@@ -52,6 +52,16 @@ in
             }
           ];
       };
+      replayKeys = enabled:
+        map (binding: builtins.head binding._args)
+          (import ../../modules/features/desktop/hyprland/bindings.nix {
+            inherit lib;
+            scriptPkgs = { };
+            sinnix = {
+              paths.projectRoot = "/fixture/sinnix";
+              services.capture-replay.enable = enabled;
+            };
+          }).bindd;
       evaluated = evalTestSpec system spec;
       hyprland = evaluated.config.programs.hyprland.package;
       hm = hmFor evaluated.config;
@@ -59,6 +69,12 @@ in
     in
     {
       checks.hyprland-rules =
+        assert lib.assertMsg
+          (!(builtins.elem "F10" (replayKeys false)) && !(builtins.elem "SHIFT + F10" (replayKeys false)))
+          "Replay shortcuts must be absent when their service and helper packages are disabled";
+        assert lib.assertMsg
+          (builtins.elem "F10" (replayKeys true) && builtins.elem "SHIFT + F10" (replayKeys true))
+          "Enabled replay service must retain both save and stop shortcuts";
         assert lib.hasInfix "hyprctl" hm.xdg.configFile."hypr/hyprland.lua".onChange;
         assert lib.hasInfix "reload" hm.xdg.configFile."hypr/hyprland.lua".onChange;
         pkgs.runCommand "sinnix-hyprland-rules" { } ''
