@@ -773,11 +773,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791702233,
-        "narHash": "sha256-yuuF4QGnQjJIODbeueHiZQwAoqz5pzNpB6jARkXTb5k=",
+        "lastModified": 1791702802,
+        "narHash": "sha256-CWyTnlMyiojSmbr2hc8RzeOg68Y1qdQGoE1UeIx4dKQ=",
         "owner": "Sinity",
         "repo": "sinity-lynchpin",
-        "rev": "ba24d5810ba76401da1754f1ada54e32a7778cb0",
+        "rev": "c379252b0242eb28c5c996b1f34266a8f5a2e630",
         "type": "github"
       },
       "original": {
