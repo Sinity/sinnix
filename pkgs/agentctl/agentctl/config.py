@@ -64,6 +64,7 @@ class Config:
     # the same projects, state directory and event spool as the one that
     # queued it.
     config_path: Path | None = None
+    inherited_environment: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def inputs_dir(self) -> Path:
@@ -247,6 +248,12 @@ def load_config(path: Path | None = None) -> Config:
             project_roots.append(Path(root))
     if len(project_roots) != len(set(project_roots)):
         raise ConfigError("public and private project roots must be unique")
+    inherited_environment = raw.get("inherited_environment", {})
+    if not isinstance(inherited_environment, Mapping) or any(
+        not isinstance(name, str) or not name or not isinstance(value, str)
+        for name, value in inherited_environment.items()
+    ):
+        raise ConfigError("inherited_environment must map variable names to strings")
     return replace(
         config,
         config_path=location,
@@ -261,6 +268,7 @@ def load_config(path: Path | None = None) -> Config:
         agentctl_executable=str(raw.get("agentctl") or config.agentctl_executable),
         private_project_catalog=private_catalog_path,
         pools=_pools(raw.get("pools")),
+        inherited_environment=dict(inherited_environment),
     )
 
 

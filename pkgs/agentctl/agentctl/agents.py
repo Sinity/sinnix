@@ -230,7 +230,7 @@ def queue_agent(
         )
     else:
         payload = runner
-    environment = project.environment.values()
+    environment = project.environment.values(host_values=config.inherited_environment)
     environment.setdefault("BEADS_ACTOR", label.replace(":", "-"))
     environment["AGENTCTL_PRINCIPAL"] = "agent-control"
     environment["AGENTCTL_PROJECT_ID"] = project.project_id
@@ -365,7 +365,7 @@ def queue_landing(
         working_directory=project.root,
         timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS,
         result_kind="exit",
-        environment=project.environment.values(),
+        environment=project.environment.values(host_values=config.inherited_environment),
         after=after,
         stashed=stashed,
         before_enqueue=record_pending,

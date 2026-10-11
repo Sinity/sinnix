@@ -134,6 +134,22 @@ mkServiceModule {
       configFile = pkgs.writeText "agentctl.json" (
         builtins.toJSON {
           project_roots = cfg.projectRoots;
+          # Foundation owns workstation roots. Long-lived callers may still
+          # carry the values exported before a filesystem migration.
+          inherited_environment =
+            lib.filterAttrs (
+              name: _:
+              builtins.elem name [
+                "LYNCHPIN_REPO_ROOT"
+                "SINEX_ROOT"
+                "POLYLOGUE_ROOT"
+                "SINNIX_ROOT"
+                "RAWLOG_FILE"
+              ]
+            ) config.environment.variables
+            // {
+              LYNCHPIN_LOCAL_ROOT = "${config.environment.variables.LYNCHPIN_REPO_ROOT}/.lynchpin";
+            };
           private_project_catalog = config.sinnix.projects.privateCatalogFile;
           agent_runner = cfg.agentRunner;
           worker_contract = cfg.workerContract;

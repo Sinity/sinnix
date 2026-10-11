@@ -2135,3 +2135,44 @@ def test_wait_rechecks_terminal_state_at_observer_timeout(
     observed = launch.wait(started["job_id"], timeout_seconds=5)
     assert observed["phase"] == "succeeded"
     assert "wait_timed_out" not in observed
+
+
+@pytest.mark.parametrize(
+    "declared,unset,expected",
+    [
+        ((), (), "/current/fixture"),
+        ((("FIXTURE_ROOT", "/custom/fixture"),), (), "/custom/fixture"),
+        ((), ("FIXTURE_ROOT",), None),
+    ],
+)
+def test_queued_environment_uses_current_host_roots_without_losing_explicit_overrides(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    declared: tuple,
+    unset: tuple,
+    expected: str | None,
+) -> None:
+    monkeypatch.setenv("FIXTURE_ROOT", "/retired/fixture")
+    project = load_project_adapter(project_root)
+    project = replace(
+        project,
+        environment=replace(
+            project.environment,
+            inherit=("PATH", "FIXTURE_ROOT"),
+            declared=declared,
+            unset=unset,
+        ),
+    )
+    config = replace(
+        config,
+        inherited_environment={
+            "FIXTURE_ROOT": "/current/fixture",
+            "NOT_INHERITED": "must-not-leak",
+        },
+    )
+    started = launch.start_operation(config, project, project.operation("verify"))
+    env = read_launch(config, fake_pueue.task(started["job_id"]))["environment"]
+    assert env.get("FIXTURE_ROOT") == expected
+    assert "NOT_INHERITED" not in env

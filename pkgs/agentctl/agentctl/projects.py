@@ -9,6 +9,7 @@ tasks) belongs to pueue, worktrunk, GitHub and Beads.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import sys
 from dataclasses import dataclass, field
@@ -154,14 +155,22 @@ class ProjectEnvironment:
     # on them instead of re-evaluating (and re-copying a dirty tree) per job.
     cache_inputs: tuple[str, ...] = ()
 
-    def values(self) -> dict[str, str]:
+    def values(self, *, host_values: Mapping[str, str] | None = None) -> dict[str, str]:
         """Resolve the launch environment; a missing required variable fails loudly.
 
         Inherited names absent from the caller's environment are dropped
         silently; ``require`` names the ones whose absence is a defect.
         """
+        # Host-owned inherited values must come from the current declaration,
+        # not an agent session started before a path migration. Explicit
+        # descriptor values still select custom deployments.
+        source = dict(os.environ)
+        source.update(host_values or {})
         environment = build_environment(
-            inherit=self.inherit, unset=self.unset, values=dict(self.declared)
+            inherit=self.inherit,
+            unset=self.unset,
+            values=dict(self.declared),
+            source=source,
         )
         missing = sorted(name for name in self.require if name not in environment)
         if missing:

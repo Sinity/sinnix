@@ -647,3 +647,27 @@ def test_cache_inputs_are_validated(
     )
     with pytest.raises(ProjectConfigError, match=match):
         load_project_adapter(root)
+
+
+@pytest.mark.parametrize("value", [[], {"FIXTURE_ROOT": 42}])
+def test_host_environment_rejects_malformed_values(
+    tmp_path: Path, value: object
+) -> None:
+    import json
+
+    location = tmp_path / "agentctl.json"
+    location.write_text(json.dumps({"inherited_environment": value}))
+    with pytest.raises(ConfigError, match="inherited_environment"):
+        load_config(location)
+
+
+def test_host_environment_is_loaded_without_requiring_a_caller_value(
+    tmp_path: Path,
+) -> None:
+    import json
+
+    location = tmp_path / "agentctl.json"
+    location.write_text(
+        json.dumps({"inherited_environment": {"FIXTURE_ROOT": "/current"}})
+    )
+    assert load_config(location).inherited_environment == {"FIXTURE_ROOT": "/current"}

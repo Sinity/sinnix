@@ -926,7 +926,12 @@ only mirror the number by hand from Sinnix's slice definition. A historical
 "admission estimate" of 14,628,352,000 bytes came from no declaration at all:
 it is 14,285,500 kB, a live `/proc/meminfo` `MemAvailable` reading. `[environment]` declares `kind`, `command`,
 `inherit`, `unset`, `values` and `require`; a required variable missing at
-launch fails the launch with its name. `[workspace]` declares `root`,
+launch fails the launch with its name. For managed workstation roots,
+`agentctl.json` supplies current `inherited_environment` values in place of
+stale caller exports. Only names in the descriptor’s `inherit` list enter the
+job; `unset` still removes them and explicit `[environment.values]` wins.
+Standalone configurations without these host values retain caller inheritance.
+`[workspace]` declares `root`,
 `default_base`, `agent_memory_max` (a systemd size), `verify` (the
 `focused`, `candidate` and `corpus` operations; `candidate` may be
 `hosted:<check>` for a required PR check), `publish` (`pr` or `master`) and

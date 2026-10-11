@@ -983,7 +983,7 @@ def _start_operation(
         )
     if not working_directory.is_dir():
         raise JobError(f"working directory does not exist: {working_directory}")
-    environment = project.environment.values()
+    environment = project.environment.values(host_values=config.inherited_environment)
     for key in ("AGENTCTL_PRINCIPAL", "AGENTCTL_LANE_BEAD"):
         if value := os.environ.get(key):
             environment[key] = value
