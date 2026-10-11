@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from functools import lru_cache
 from typing import Any
 
 from ..action import Action, validate_actions
@@ -63,13 +64,15 @@ def visible(principal: str) -> tuple[Action, ...]:
     return tuple(action for action in ALL_ACTIONS if principal in action.principals)
 
 
+@lru_cache(maxsize=32)
 def catalog_hash(principal: str) -> str:
     """Digest of every principal-visible catalog row field.
 
     The generated contract promises that examples, affordances and principal
-    sets participate in this digest alongside names and schemas. Hashing the
-    complete catalog row keeps that promise true when another documented
-    action field is added later.
+    sets participate in this digest alongside names and schemas.
+    The action set is fixed for this process; cache each principal digest
+    after the server startup warm-up. Hashing the complete catalog row keeps
+    that promise true when another documented action field is added later.
     """
     rows = [action.catalog_row() for action in visible(principal)]
     rows.sort(key=lambda row: row["name"])

@@ -91,6 +91,27 @@ def test_catalog_hash_includes_examples_affordances_and_principals(
         )
         return tuple(rows)
 
+    action_set.catalog_hash.cache_clear()
     baseline = action_set.catalog_hash("operator")
     monkeypatch.setattr(action_set, "visible", changed)
-    assert action_set.catalog_hash("operator") != baseline
+    # A changed action set belongs to a new process, with an empty cache.
+    action_set.catalog_hash.cache_clear()
+    try:
+        assert action_set.catalog_hash("operator") != baseline
+    finally:
+        action_set.catalog_hash.cache_clear()
+
+
+def test_catalog_digest_reuses_startup_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    action_set.catalog_hash.cache_clear()
+    expected = action_set.catalog_hash("operator")
+
+    def unexpected(_principal: str):
+        raise AssertionError("warm catalog requests must not rebuild catalog rows")
+
+    monkeypatch.setattr(action_set, "visible", unexpected)
+    try:
+        assert action_set.catalog_hash("operator") == expected
+        assert action_set.catalog_hash("operator") == expected
+    finally:
+        action_set.catalog_hash.cache_clear()
