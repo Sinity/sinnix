@@ -2659,3 +2659,138 @@
 +		}
 +	}
 +}
+--- a/cmd/bd/routed.go
++++ b/cmd/bd/routed.go
+@@ -92,6 +92,14 @@
+ 		}
+ 	}
+ 
++	if isNotFoundErr(err) && localStore != nil {
++		if prefix, configErr := localStore.GetConfig(ctx, "issue_prefix"); configErr == nil {
++			allowed, _ := localStore.GetConfig(ctx, "allowed_prefixes")
++			if mismatch := taskStoreMismatch(id, prefix, allowed, resolveCommandBeadsDir(dbPath)); mismatch != nil {
++				return nil, mismatch
++			}
++		}
++	}
+ 	return nil, err
+ }
+ 
+--- a/cmd/bd/show.go
++++ b/cmd/bd/show.go
+@@ -1,6 +1,7 @@
+ package main
+ 
+ import (
++	"errors"
+ 	"fmt"
+ 	"os"
+ 	"strings"
+@@ -132,6 +133,10 @@
+ 			if err != nil {
+ 				if result != nil {
+ 					result.Close()
++				}
++				var mismatch *TaskStoreMismatchError
++				if errors.As(err, &mismatch) {
++					return HandleErrorRespectJSON("%v", mismatch)
+ 				}
+ 				if isNotFoundErr(err) {
+ 					fmt.Fprintf(os.Stderr, "Issue %s not found\n", id)
+--- /dev/null
++++ b/cmd/bd/task_store_mismatch.go
+@@ -0,0 +1,33 @@
++package main
++
++import (
++	"fmt"
++	"strings"
++)
++
++// TaskStoreMismatchError identifies an unresolved foreign-prefix lookup.
++// A failed local lookup does not establish absence in the requested store.
++type TaskStoreMismatchError struct {
++	RequestedPrefix string
++	SearchedPrefix  string
++	SearchedStore   string
++}
++
++func (e *TaskStoreMismatchError) Error() string {
++	return fmt.Sprintf("task_store_mismatch: requested prefix %q; searched prefix %q in store %q; use the requested project's directory or configure a native prefix route", e.RequestedPrefix, e.SearchedPrefix, e.SearchedStore)
++}
++
++func taskStoreMismatch(id, localPrefix, allowedPrefixes, storePath string) *TaskStoreMismatchError {
++	requested := extractBeadPrefix(id)
++	localPrefix = strings.TrimSuffix(localPrefix, "-")
++	if requested == "" || localPrefix == "" || strings.HasPrefix(id, localPrefix+"-") {
++		return nil
++	}
++	for _, allowed := range strings.Split(allowedPrefixes, ",") {
++		allowed = strings.TrimSuffix(strings.TrimSpace(allowed), "-")
++		if allowed != "" && strings.HasPrefix(id, allowed+"-") {
++			return nil
++		}
++	}
++	return &TaskStoreMismatchError{RequestedPrefix: requested, SearchedPrefix: localPrefix + "-", SearchedStore: storePath}
++}
+--- /dev/null
++++ b/cmd/bd/task_store_mismatch_test.go
+@@ -0,0 +1,58 @@
++//go:build cgo
++
++package main
++
++import (
++	"errors"
++	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
++	"path/filepath"
++	"testing"
++)
++
++func TestOwnerContractForeignPrefixReportsSearchedStore(t *testing.T) {
++	t.Setenv("DOLT_ROOT_PATH", t.TempDir())
++	ctx := t.Context()
++	dir := filepath.Join(t.TempDir(), ".beads")
++	st, err := embeddeddolt.Open(ctx, dir, "local", "main")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer st.Close()
++	if err := st.SetConfig(ctx, "issue_prefix", "local"); err != nil {
++		t.Fatal(err)
++	}
++	seedBatchTestIssues(t, ctx, st, "local-fixture")
++	old := dbPath
++	dbPath = filepath.Join(dir, "beads.db")
++	t.Cleanup(func() { dbPath = old })
++	_, err = resolveAndGetIssueWithRouting(ctx, st, "foreign-fixture")
++	var mismatch *TaskStoreMismatchError
++	if !errors.As(err, &mismatch) {
++		t.Fatalf("expected typed mismatch, got %v", err)
++	}
++	if mismatch.RequestedPrefix != "foreign-" || mismatch.SearchedPrefix != "local-" || mismatch.SearchedStore != dir {
++		t.Fatalf("wrong store diagnosis: %+v", mismatch)
++	}
++	for _, id := range []string{"local-fixture", "fixture"} {
++		result, err := resolveAndGetIssueWithRouting(ctx, st, id)
++		if err != nil {
++			t.Fatalf("local control %s: %v", id, err)
++		}
++		if result.ResolvedID != "local-fixture" {
++			t.Fatalf("wrong local resolution: %+v", result)
++		}
++		result.Close()
++	}
++	_, err = resolveAndGetIssueWithRouting(ctx, st, "local-missing")
++	if !isNotFoundErr(err) || errors.As(err, &mismatch) {
++		t.Fatalf("local absence changed: %v", err)
++	}
++}
++
++func TestOwnerContractLocalPrefixVariantsRemainLocal(t *testing.T) {
++	for _, row := range [][3]string{{"local-missing", "local-", ""}, {"local-team-missing", "local-team", ""}, {"allowed-missing", "local", " allowed- "}, {"fixture", "local", ""}} {
++		if err := taskStoreMismatch(row[0], row[1], row[2], "/fixture/store"); err != nil {
++			t.Fatalf("local control %v: %v", row, err)
++		}
++	}
++}

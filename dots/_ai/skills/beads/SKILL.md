@@ -7,9 +7,12 @@ description: Read, claim, update, relate, close, or write Beads tasks with bd â€
 
 Task state lives outside every checkout, in the Beads/Dolt database under
 `/realm/state/tasks/<project>`, reached through the repository's `.beads`
-redirect (`bd where` shows it). `bd` is the only write path, and it routes by
-the current directory: run it from the owning repository, or reads and new
-tasks land in the wrong project. Pass `--actor <name>` (or set `BEADS_ACTOR`);
+redirect (`bd where` shows it). `bd` is the only write path. The current
+directory selects the local store;
+configured native prefix routes can resolve foreign IDs. An unresolved foreign
+prefix reports `task_store_mismatch` with the requested prefix and searched
+store. Run from the owning repository, or use `-C`, for local reads and writes.
+Pass `--actor <name>` (or set `BEADS_ACTOR`);
 the default records the operator as author. Task mutations create no Git
 commits and never belong on a feature branch.
 
