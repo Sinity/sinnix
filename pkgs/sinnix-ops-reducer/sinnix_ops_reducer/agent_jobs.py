@@ -7,6 +7,8 @@ import subprocess
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from sinnix_lib.process import run_bounded
+
 MAX_RESPONSE_BYTES = 1_048_576
 MAX_SNAPSHOT_JOBS = 100
 DEFAULT_TIMEOUT_SECONDS = 5.0
@@ -23,7 +25,7 @@ class AgentCtlClient:
         self,
         command: str = "agentctl",
         *,
-        runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+        runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
         timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     ) -> None:
         self.command = command
@@ -126,19 +128,23 @@ class AgentCtlClient:
         return value
 
     def _call(self, argv: Sequence[str], *, timeout: float | None = None) -> Any:
-        try:
-            result = self.runner(
-                list(argv),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                timeout=self.timeout_seconds if timeout is None else timeout,
-                check=False,
+        deadline = self.timeout_seconds if timeout is None else timeout
+        if self.runner is None:
+            # agentctl starts native clients of its own. End the whole probe
+            # before closing pipes, so cancellation cannot orphan those clients.
+            probe = run_bounded(
+                argv, timeout=deadline, stdout_limit=MAX_RESPONSE_BYTES,
+                stderr_limit=65_536,
             )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise AgentCtlError(
-                f"{argv[0]} is unavailable: {type(error).__name__}"
-            ) from error
+            if probe.limited:
+                raise AgentCtlError(f"{argv[0]} response exceeds the protocol bound")
+            if probe.error is not None:
+                raise AgentCtlError(f"{argv[0]} is unavailable: {probe.error}")
+            result = subprocess.CompletedProcess(
+                argv, probe.returncode, probe.stdout.decode("utf-8", "replace"),
+            )
+        else:
+            result = self._run_injected(argv, deadline)
         if result.returncode != 0:
             raise AgentCtlError(f"{argv[0]} rejected the request")
         output = result.stdout
@@ -148,3 +154,22 @@ class AgentCtlClient:
             return json.loads(output)
         except json.JSONDecodeError as error:
             raise AgentCtlError(f"{argv[0]} returned malformed JSON") from error
+
+    def _run_injected(
+        self, argv: Sequence[str], timeout: float,
+    ) -> subprocess.CompletedProcess[str]:
+        assert self.runner is not None
+        try:
+            result = self.runner(
+                list(argv),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise AgentCtlError(
+                f"{argv[0]} is unavailable: {type(error).__name__}"
+            ) from error
+        return result

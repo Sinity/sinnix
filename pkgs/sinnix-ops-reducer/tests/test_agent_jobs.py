@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 from sinnix_ops_reducer.agent_jobs import (
@@ -14,6 +16,39 @@ from sinnix_ops_reducer.agent_jobs import (
 
 def response(value: object) -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess(["agentctl"], 0, stdout=json.dumps(value))
+
+
+def test_native_timeout_reaps_descendant_before_closing_output(tmp_path):
+    pidfile = tmp_path / "child.pid"
+    script = tmp_path / "probe.py"
+    script.write_text(
+        "import subprocess,sys,time\n"
+        "from pathlib import Path\n"
+        "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'])\n"
+        f"Path({str(pidfile)!r}).write_text(str(child.pid))\n"
+        "time.sleep(30)\n"
+    )
+    client = AgentCtlClient(timeout_seconds=1)
+    with pytest.raises(AgentCtlError, match="timed out"):
+        client._call([sys.executable, str(script)])
+    pid = int(pidfile.read_text())
+    state = Path(f"/proc/{pid}/stat")
+    try:
+        assert not state.exists() or state.read_text().split(") ", 1)[1].startswith("Z ")
+    finally:
+        if state.exists() and not state.read_text().split(") ", 1)[1].startswith("Z "):
+            import os
+            import signal
+            os.kill(pid, signal.SIGKILL)
+
+
+def test_native_protocol_limit_stops_oversized_response():
+    client = AgentCtlClient()
+    with pytest.raises(AgentCtlError, match="protocol bound"):
+        client._call([
+            sys.executable, "-c",
+            f"import sys;sys.stdout.write('x'*{MAX_RESPONSE_BYTES + 1})",
+        ])
 
 
 def test_snapshot_reads_one_bounded_owner_projection() -> None:

@@ -41,10 +41,12 @@ process list. It can, because sinnix already names its own work:
 - **Project commands in flight** come from the project ledger. A row is
   "sinex is running `test`, in flight 3m 14s, developer-build".
 - **Queue** is pueue's groups, one per pool, with running and queued counts;
-  a paused group is the backpressure timer holding new work back.
-- **Jobs** are pueue's tasks as `agentctl job list` reduces them — label,
-  phase, group, elapsed time — with an interrupt on any task that is not yet
-  terminal.
+  a paused group holds new work back, whether paused by the operator or automation.
+- **Jobs** come from `agentctl job snapshot --limit 100`, including label,
+  phase, group, elapsed time and explicit omitted-row coverage, with an
+  interrupt on any task that is not yet terminal. Reducer probes terminate
+  their entire process group on timeout or response-size overflow before
+  closing output pipes; nested native clients are not left running.
 - **Lanes** are `agentctl view` per project, read when the page is
   requested: each worktree with its bead, stage, agent and pull request.
 - **Slice budgets** show the resource policy carried by declared services and
