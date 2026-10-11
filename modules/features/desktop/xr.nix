@@ -172,6 +172,8 @@ mkFeatureModule {
           }
       ))
       (lib.mkIf cfg.desktop.enable {
+        # Sunshine's Run in Terminal desktop action invokes gio directly.
+        environment.systemPackages = [ pkgs.glib.bin ];
         services.sunshine = {
           enable = true;
           autoStart = false;
