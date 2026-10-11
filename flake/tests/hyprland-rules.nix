@@ -130,6 +130,51 @@ in
             touch "$out"
           '';
 
+      checks.hyprland-binding-reload =
+        pkgs.runCommand "sinnix-hyprland-binding-reload" { nativeBuildInputs = [ pkgs.lua ]; }
+          ''
+            cat > startup.lua <<'EOF_STARTUP'
+            ${hm.wayland.windowManager.hyprland.extraLuaFiles."sinnix-startup.lua".content}
+            EOF_STARTUP
+            cat > test.lua <<'EOF_TEST'
+            local hooks, bindings = {}, {}
+            local action = {}
+            setmetatable(action, {
+              __index = function() return action end,
+              __call = function() return action end,
+            })
+            hl = {
+              on = function(event, callback) hooks[event] = callback end,
+              unbind = function(key) assert(key == "all"); bindings = {} end,
+              bind = function(key, action) assert(bindings[key] == nil); bindings[key] = action end,
+              dsp = setmetatable({exec_cmd = function(command) return command end}, {
+                __index = function() return action end,
+              }),
+            }
+            dofile("startup.lua")
+            for attempt = 1, 2 do
+              -- The old main config runs after require(startup), overwriting
+              -- these callbacks on every config-only reload.
+              bindings.F6 = "uwsm app -- /retired/scripts/toggle-scratch weechat"
+              bindings.F8 = "uwsm app -- /retired/scripts/toggle-scratch rawlog"
+              bindings.Obsolete = "retired binding"
+              hooks["config.reloaded"]()
+              assert(bindings.F8 == ${
+                lib.generators.toLua { }
+                  "uwsm app -- ${evaluated.config.sinnix.paths.projectRoot}/scripts/toggle-scratch rawlog"
+              })
+              assert(bindings.F6 == ${
+                lib.generators.toLua { }
+                  "uwsm app -- ${evaluated.config.sinnix.paths.projectRoot}/scripts/toggle-scratch weechat"
+              })
+              assert(bindings.F7 == "sinnix-chrome-control toggle-agent-workspace")
+              assert(bindings.Obsolete == nil)
+            end
+            EOF_TEST
+            lua test.lua
+            touch "$out"
+          '';
+
       checks.hyprland-navigation =
         pkgs.runCommand "sinnix-hyprland-navigation"
           {

@@ -30,6 +30,10 @@ let
     inherit lib pkgs scriptPkgs;
     inherit (config) sinnix;
   };
+  currentBindings = bindings.bindd ++ bindings.binddl ++ bindings.binddm;
+  renderBinding = binding: ''
+    hl.bind(${lib.concatMapStringsSep ", " (lib.generators.toLua { }) binding._args})
+  '';
   rules = import ./rules.nix {
     inherit lib;
     scratchpadSpecs = scratchpadData.ruleSpecs;
@@ -278,7 +282,6 @@ in
                   ];
                 }
               ];
-              bind = bindings.bindd ++ bindings.binddl ++ bindings.binddm;
               window_rule = rules.windowRules;
               layer_rule = rules.layerRules;
             };
@@ -296,6 +299,13 @@ in
             extraLuaFiles."sinnix-startup.lua" = {
               autoLoad = true;
               content = ''
+                -- A desktop started with --config can remain pinned to an old
+                -- store file. Its require() still loads this current module;
+                -- replace callbacks after that file finishes loading.
+                hl.on("config.reloaded", function()
+                  hl.unbind("all")
+                  ${lib.concatMapStrings renderBinding currentBindings}
+                end)
                 hl.on("hyprland.start", function()
                   hl.exec_cmd("uwsm finalize")
                   -- Initial HDR modesets can leave Aquamarine waiting on a
