@@ -830,6 +830,9 @@ def sweep_probes(captures: Iterable[dict[str, Any]], emitter: Emitter) -> None:
 def mount_usage_percent(path: str) -> int | None:
     """df's own percentage, not a recomputation of it: the warn/fail lines were
     set against what df reports, reserved blocks and all."""
+    # df otherwise measures the parent filesystem when a drive is absent.
+    if not os.path.ismount(path):
+        return None
     try:
         result = subprocess.run(
             ["df", "-P", path], check=False, capture_output=True, text=True, timeout=10

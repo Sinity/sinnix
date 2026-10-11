@@ -354,6 +354,16 @@ def test_mount_capacity_uses_inclusive_existing_thresholds(
     assert "warn_percent=80;fail_percent=90" in event["evidence"]
 
 
+def test_unmounted_destination_does_not_measure_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def forbidden(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("df must not measure an absent destination's parent")
+
+    monkeypatch.setattr(health.subprocess, "run", forbidden)
+    assert health.mount_usage_percent(str(tmp_path)) is None
+
+
 def test_unavailable_mount_probe_is_unknown_not_full(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
