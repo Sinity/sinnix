@@ -254,6 +254,8 @@ recording fails that timer run instead of masquerading as a success. The same
 scheduled probe still warns when finished ambient chunks pile up on-device,
 which means capture is working and delivery is not.
 
+Capture destinations must be regular files. Event cursors report missing day files as zero bytes, but refuse directories, FIFOs and symlinks as storage errors. Upload reads and writes use nonblocking, no-follow handles; append verification and permissions apply to the same opened object. A replaced destination is not acknowledged. Closed-day repair also rejects nonregular destinations and recovery copies, preserving their existing objects for investigation.
+
 **Media sync resumes from acknowledged source timestamps and relative paths.** Each bounded batch selects the oldest files across the full source traversal, including files sharing a timestamp. It never seeds from workstation upload times. Upgrading from the old scalar cursor reoffers existing files; the workstation verifies duplicate bytes before acknowledging them. Missing listings, changed files and retryable upload refusals stop cursor advancement. Four relative path segments are supported.
 
 Files arriving with an old timestamp behind an established cursor still require an explicit rescan. This remains a directory mirror with that limitation.

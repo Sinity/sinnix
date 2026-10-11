@@ -19,6 +19,9 @@ an inode that repair is replacing.
 from __future__ import annotations
 
 import hashlib
+import errno
+import stat
+from contextlib import contextmanager
 import os
 import sys
 from http import HTTPStatus
@@ -48,15 +51,44 @@ _AMBIENT_PROGRESS_LOCK = Lock()
 _UPLOAD_LOCK = Lock()
 
 
+@contextmanager
+def _regular_file(target: Path, flags: int):
+    # Capture objects are regular files. Nonblocking, no-follow opens also
+    # reject a replacement FIFO or symlink between lookup and open.
+    safe_flags = os.O_NOFOLLOW | os.O_NONBLOCK
+    try:
+        fd = os.open(target, flags | safe_flags, 0o660)
+    except PermissionError:
+        if not flags & os.O_RDWR:
+            raise
+        # An exact replay needs only read access, as before. This cannot
+        # create a file or write a missing suffix through a read-only fd.
+        fd = os.open(target, os.O_RDONLY | safe_flags)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(errno.EINVAL, "capture destination is not a regular file", str(target))
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def _verify_capture_path(target: Path, fd: int) -> None:
+    opened = os.fstat(fd)
+    current = target.lstat()
+    if not stat.S_ISREG(current.st_mode) or (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+        raise OSError(errno.ESTALE, "capture destination changed during verification", str(target))
+
+
 def _retained_digest(target: Path) -> tuple[int, str] | None:
     """Size and sha256 of what the destination holds, or None if nothing."""
     size = 0
     digest = hashlib.sha256()
     try:
-        with target.open("rb") as stream:
-            for chunk in iter(lambda: stream.read(1 << 20), b""):
+        with _regular_file(target, os.O_RDONLY) as fd:
+            for chunk in iter(lambda: os.read(fd, 1 << 20), b""):
                 size += len(chunk)
                 digest.update(chunk)
+            _verify_capture_path(target, fd)
     except FileNotFoundError:
         return None
     return size, digest.hexdigest()
@@ -261,11 +293,15 @@ def events_cursor(day: str) -> tuple[HTTPStatus, dict]:
     if not EVENTS_DAY_RE.fullmatch(day):
         return HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "day must be YYYYMMDD"}
     target = _day_file(day)
-    return HTTPStatus.OK, {
-        "ok": True,
-        "day": day,
-        "bytes": target.stat().st_size if target.is_file() else 0,
-    }
+    try:
+        with _regular_file(target, os.O_RDONLY) as fd:
+            size = os.fstat(fd).st_size
+            _verify_capture_path(target, fd)
+    except FileNotFoundError:
+        size = 0
+    except OSError as exc:
+        return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
+    return HTTPStatus.OK, {"ok": True, "day": day, "bytes": size}
 
 
 def append_events(
@@ -323,54 +359,61 @@ def append_events(
     try:
         EVENTS_DIR.mkdir(parents=True, exist_ok=True)
         with flock(EVENTS_DIR / ".write.lock"):
-            size = target.stat().st_size if target.is_file() else 0
-            if offset > size:
+            try:
+                with _regular_file(target, os.O_RDWR | (os.O_CREAT if offset == 0 else 0)) as fd:
+                    size = os.fstat(fd).st_size
+                    if offset > size:
+                        return HTTPStatus.CONFLICT, {
+                            "ok": False,
+                            "detail": "prime is missing the bytes before this batch",
+                            "expected_offset": size,
+                            "day": day,
+                        }
+                    overlap = min(len(body), size - offset)
+                    if overlap and _read_range(fd, offset, overlap) != body[:overlap]:
+                        return HTTPStatus.CONFLICT, {
+                            "ok": False,
+                            "conflict": "range_differs",
+                            "detail": "prime holds different bytes in this batch's range",
+                            "day": day,
+                            "offset": offset,
+                        }
+                    if overlap == len(body):
+                        _verify_capture_path(target, fd)
+                        return HTTPStatus.OK, {
+                            "ok": True,
+                            "duplicate": True,
+                            "day": day,
+                            "bytes": len(body),
+                            "cursor": size,
+                            "sha256": digest,
+                        }
+                    written = overlap
+                    while written < len(body):
+                        count = os.pwrite(fd, body[written:], offset + written)
+                        if count <= 0:
+                            raise OSError(f"pwrite made no progress at byte {written}")
+                        written += count
+                    os.fsync(fd)
+                    if _read_range(fd, offset, len(body)) != body:
+                        return HTTPStatus.INTERNAL_SERVER_ERROR, {
+                            "ok": False,
+                            "detail": "retained range failed read-back verification",
+                            "day": day,
+                        }
+                    # Apply the capture mode to the same opened object, not
+                    # a path that may have been replaced after verification.
+                    os.fchmod(fd, 0o660)
+                    _verify_capture_path(target, fd)
+            except FileNotFoundError:
+                if offset == 0:
+                    raise
                 return HTTPStatus.CONFLICT, {
                     "ok": False,
                     "detail": "prime is missing the bytes before this batch",
-                    "expected_offset": size,
+                    "expected_offset": 0,
                     "day": day,
                 }
-            overlap = min(len(body), size - offset)
-            if overlap and _read_range(target, offset, overlap) != body[:overlap]:
-                return HTTPStatus.CONFLICT, {
-                    "ok": False,
-                    "conflict": "range_differs",
-                    "detail": "prime holds different bytes in this batch's range",
-                    "day": day,
-                    "offset": offset,
-                }
-            if overlap == len(body):
-                return HTTPStatus.OK, {
-                    "ok": True,
-                    "duplicate": True,
-                    "day": day,
-                    "bytes": len(body),
-                    "cursor": size,
-                    "sha256": digest,
-                }
-            fd = os.open(target, os.O_WRONLY | os.O_CREAT, 0o660)
-            try:
-                written = overlap
-                while written < len(body):
-                    count = os.pwrite(fd, body[written:], offset + written)
-                    if count <= 0:
-                        raise OSError(f"pwrite made no progress at byte {written}")
-                    written += count
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-            if _read_range(target, offset, len(body)) != body:
-                return HTTPStatus.INTERNAL_SERVER_ERROR, {
-                    "ok": False,
-                    "detail": "retained range failed read-back verification",
-                    "day": day,
-                }
-        # O_CREAT does not apply the mode to a file that already exists, and
-        # the day files the drain landed are 0660: a lane where half the files
-        # are group-readable and half are not is a bug waiting for its first
-        # group-reading consumer.
-        os.chmod(target, 0o660)
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
 
@@ -398,10 +441,24 @@ def append_events(
     }
 
 
-def _read_range(target: Path, offset: int, length: int) -> bytes:
-    with target.open("rb") as stream:
-        stream.seek(offset)
-        return stream.read(length)
+def _read_range(fd: int, offset: int, length: int) -> bytes:
+    chunks = []
+    remaining = length
+    while remaining:
+        chunk = os.pread(fd, remaining, offset + length - remaining)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        remaining -= len(chunk)
+    return b"".join(chunks)
+
+
+def _read_capture_bytes(target: Path) -> bytes:
+    with _regular_file(target, os.O_RDONLY) as fd:
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            body = stream.read()
+        _verify_capture_path(target, fd)
+        return body
 
 
 def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
@@ -414,7 +471,7 @@ def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
         "%Y%m%d"
     ):
         raise ValueError("repair requires a closed UTC day")
-    body = source.read_bytes()
+    body = _read_capture_bytes(source.resolve(strict=True))
     if not body or not body.endswith(b"\n"):
         raise ValueError("source must contain complete JSONL records")
     for line in body.splitlines():
@@ -422,7 +479,7 @@ def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
             raise ValueError("source contains a non-object record")
     target = _day_file(day)
     with flock(EVENTS_DIR / ".write.lock"):
-        previous = target.read_bytes()
+        previous = _read_capture_bytes(target)
         old_sha = hashlib.sha256(previous).hexdigest()
         if old_sha != expected_sha256:
             raise ValueError("destination changed; expected SHA-256 does not match")
@@ -434,7 +491,7 @@ def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
         backup = backups / f"{day}-{old_sha}.jsonl"
         if not backup.exists():
             os.link(target, backup)
-        if hashlib.sha256(backup.read_bytes()).hexdigest() != old_sha:
+        if hashlib.sha256(_read_capture_bytes(backup)).hexdigest() != old_sha:
             raise ValueError("backup verification failed")
         pending: Path | None = None
         try:
@@ -445,7 +502,7 @@ def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
                 out.write(body)
                 out.flush()
                 os.fsync(out.fileno())
-            if target.read_bytes() != previous:
+            if _read_capture_bytes(target) != previous:
                 raise ValueError("destination changed during repair")
             os.chmod(pending, 0o660)
             os.replace(pending, target)

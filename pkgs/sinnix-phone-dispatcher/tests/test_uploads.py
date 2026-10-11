@@ -247,3 +247,42 @@ def test_a_read_back_mismatch_is_not_acknowledged(monkeypatch, tmp_path) -> None
     )
     assert status == HTTPStatus.INTERNAL_SERVER_ERROR and payload["ok"] is False
     assert not (tmp_path / "ambient-progress").exists()
+
+
+@pytest.mark.parametrize("kind", ["fifo", "directory", "symlink"])
+def test_repair_refuses_nonregular_capture_destination(monkeypatch, tmp_path, kind):
+    monkeypatch.setattr(uploads_mod, "EVENTS_DIR", tmp_path)
+    target = tmp_path / "events-20200101.jsonl"
+    source = tmp_path / "source.jsonl"
+    source.write_bytes(b"{}\n")
+    if kind == "fifo":
+        os.mkfifo(target)
+    elif kind == "directory":
+        target.mkdir()
+    else:
+        retained = tmp_path / "retained.jsonl"
+        retained.write_bytes(b"old\n")
+        target.symlink_to(retained)
+    real_open = os.open
+
+    def checked_open(path, flags, *args, **kwargs):
+        if path == target:
+            assert flags & os.O_NONBLOCK and flags & os.O_NOFOLLOW
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(uploads_mod.os, "open", checked_open)
+    with pytest.raises(OSError):
+        uploads_mod.repair_event_day("20200101", source, hashlib.sha256(b"old\n").hexdigest())
+    assert source.read_bytes() == b"{}\n" and not (tmp_path / ".repairs").exists()
+    if kind == "symlink":
+        assert retained.read_bytes() == b"old\n"
+
+
+def test_retained_digest_refuses_a_symlink(tmp_path):
+    retained = tmp_path / "retained"
+    retained.write_bytes(b"fixture")
+    alias = tmp_path / "alias"
+    alias.symlink_to(retained)
+    with pytest.raises(OSError):
+        uploads_mod._retained_digest(alias)
+    assert retained.read_bytes() == b"fixture"

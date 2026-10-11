@@ -18,6 +18,9 @@ Mutations that would fail these:
 from __future__ import annotations
 
 import hashlib
+import os
+
+import pytest
 from http import HTTPStatus
 
 import sinnix_phone_dispatcher.uploads as uploads_mod
@@ -241,3 +244,96 @@ def test_a_pwrite_that_makes_no_progress_fails_visibly(
     body = b"abc\n"
     status, payload = uploads_mod.append_events("20260818", 0, body, _sha(body))
     assert status == HTTPStatus.INTERNAL_SERVER_ERROR and payload["ok"] is False
+
+
+@pytest.mark.parametrize("kind", ["fifo", "directory", "symlink", "dangling_symlink"])
+def test_nonregular_day_is_not_empty_or_acknowledged(isolated_state_dirs, monkeypatch, kind):
+    target = _day_file(isolated_state_dirs)
+    target.parent.mkdir(parents=True)
+    other = target.parent / "retained.jsonl"
+    original = b"retained fixture\n"
+    if kind == "fifo":
+        os.mkfifo(target)
+    elif kind == "directory":
+        target.mkdir()
+    else:
+        if kind == "symlink":
+            other.write_bytes(original)
+        target.symlink_to(other)
+    real_open = os.open
+
+    def checked_open(path, flags, *args, **kwargs):
+        if path == target:
+            assert flags & os.O_NONBLOCK and flags & os.O_NOFOLLOW
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(uploads_mod.os, "open", checked_open)
+    status, result = uploads_mod.events_cursor("20260818")
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR and result["ok"] is False
+    assert "bytes" not in result
+    body = b"new fixture\n"
+    status, result = uploads_mod.append_events("20260818", 0, body, _sha(body))
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR and result["ok"] is False
+    assert "cursor" not in result
+    if kind == "symlink":
+        assert other.read_bytes() == original
+    if kind == "dangling_symlink":
+        assert not other.exists()
+
+
+def test_replacement_during_append_is_not_acknowledged(isolated_state_dirs, monkeypatch):
+    target = _day_file(isolated_state_dirs)
+    retired = target.with_suffix(".retained")
+    real_write = os.pwrite
+    replacement = b"replacement fixture\n"
+
+    def replace_after_write(fd, data, offset):
+        count = real_write(fd, data, offset)
+        target.rename(retired)
+        target.write_bytes(replacement)
+        return count
+
+    monkeypatch.setattr(uploads_mod.os, "pwrite", replace_after_write)
+    body = b"new fixture\n"
+    status, result = uploads_mod.append_events("20260818", 0, body, _sha(body))
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR and result["ok"] is False
+    assert "cursor" not in result
+    assert target.read_bytes() == replacement and retired.read_bytes() == body
+
+
+def test_missing_day_gap_does_not_create_an_empty_file(isolated_state_dirs):
+    body = b"new fixture\n"
+    status, result = uploads_mod.append_events("20260818", 5, body, _sha(body))
+    assert status == HTTPStatus.CONFLICT and result["expected_offset"] == 0
+    assert not _day_file(isolated_state_dirs).exists()
+
+
+def test_short_preads_are_completed(isolated_state_dirs, monkeypatch):
+    real_read = os.pread
+    monkeypatch.setattr(uploads_mod.os, "pread", lambda fd, size, offset: real_read(fd, min(size, 2), offset))
+    body = b"new fixture\n"
+    status, result = uploads_mod.append_events("20260818", 0, body, _sha(body))
+    assert status == HTTPStatus.OK and result["cursor"] == len(body)
+    assert _day_file(isolated_state_dirs).read_bytes() == body
+
+
+def test_readonly_exact_replay_is_still_acknowledged(isolated_state_dirs):
+    target = _day_file(isolated_state_dirs)
+    target.parent.mkdir(parents=True)
+    body = b"retained fixture\n"
+    target.write_bytes(body)
+    target.chmod(0o440)
+    status, result = uploads_mod.append_events("20260818", 0, body, _sha(body))
+    assert status == HTTPStatus.OK and result["duplicate"] is True
+    assert target.read_bytes() == body and target.stat().st_mode & 0o777 == 0o440
+
+
+def test_readonly_capture_does_not_acknowledge_missing_suffix(isolated_state_dirs):
+    target = _day_file(isolated_state_dirs)
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"retained fixture\n")
+    target.chmod(0o440)
+    body = b"new fixture\n"
+    status, result = uploads_mod.append_events("20260818", target.stat().st_size, body, _sha(body))
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR and result["ok"] is False
+    assert target.read_bytes() == b"retained fixture\n"
