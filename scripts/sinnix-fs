@@ -1160,15 +1160,19 @@ def generation_coverage(path: Path) -> dict:
         raise ValueError(f"content coverage schema check failed: {columns.stderr}")
     has_boundaries = "kind" in columns.stdout.splitlines()
     boundary_count = "count(*) FILTER (WHERE kind = 'collection_boundary')" if has_boundaries else "NULL"
-    content = duckdb_query(path / "content.duckdb", f"SELECT count(*) FILTER (WHERE error IS NOT NULL), {boundary_count} FROM files")
+    # Alias targets are deliberately not traversed. Keep their coverage gap
+    # visible without diagnosing an intentional boundary as a read failure.
+    content = duckdb_query(path / "content.duckdb", f"SELECT count(*) FILTER (WHERE error IS NOT NULL AND error != 'alias not traversed'), {boundary_count}, count(*) FILTER (WHERE error = 'alias not traversed') FROM files")
     if content.returncode:
         raise ValueError(f"content coverage check failed: {content.stderr}")
-    observed_errors, observed_boundaries = content.stdout.strip().split('|')
+    observed_errors, observed_boundaries, observed_aliases = content.stdout.strip().split('|')
     content_errors = int(observed_errors)
+    content_aliases = int(observed_aliases)
     content_boundaries = int(observed_boundaries) if has_boundaries else None
-    return {"incomplete": bool(errors or pruned or content_errors or content_boundaries is None or content_boundaries),
+    return {"incomplete": bool(errors or pruned or content_errors or content_aliases or content_boundaries is None or content_boundaries),
             "directory_errors": errors, "pruned_directories": pruned,
             "content_errors": content_errors, "content_boundaries": content_boundaries,
+            "content_aliases_not_traversed": content_aliases,
             "scope": "generic metadata and bounded content scan; native payload coverage remains owner-specific"}
 
 

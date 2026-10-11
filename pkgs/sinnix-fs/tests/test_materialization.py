@@ -221,7 +221,7 @@ def test_public_query_cannot_write_outside_its_read_only_database(tmp_path):
         assert hashlib.sha256(db.read_bytes()).hexdigest() == before
 
 
-@pytest.mark.parametrize("omission", ["none", "denied", "boundary"])
+@pytest.mark.parametrize("omission", ["none", "denied", "boundary", "alias"])
 def test_generation_and_status_include_content_failures(tmp_path, monkeypatch, capsys, omission):
     import json
     fs = load_script()
@@ -229,6 +229,8 @@ def test_generation_and_status_include_content_failures(tmp_path, monkeypatch, c
     root.mkdir()
     source = root / "note.md"
     source.write_text("Synthetic content")
+    if omission == "alias":
+        (root / "alias.md").symlink_to(source)
     index = tmp_path / "index"
     index.mkdir()
     (index / "judgments.jsonl").write_text("")
@@ -240,12 +242,13 @@ def test_generation_and_status_include_content_failures(tmp_path, monkeypatch, c
         assert fs.publish_generation(index, roots=[str(root)]) == 0
         generation = fs.resolve_generation(index)
         observed = fs.duckdb_query(generation / "content.duckdb", "SELECT count(*) FROM files WHERE error IS NOT NULL")
-        assert observed.returncode == 0 and int(observed.stdout.strip()) == int(omission == "denied")
+        assert observed.returncode == 0 and int(observed.stdout.strip()) == int(omission in {"denied", "alias"})
         manifest = json.loads((generation / "manifest.json").read_text())
         coverage = manifest["coverage"]
         assert coverage["directory_errors"] == coverage["pruned_directories"] == 0
         assert coverage["incomplete"] is (omission != "none")
         assert coverage["content_errors"] == int(omission == "denied")
+        assert coverage["content_aliases_not_traversed"] == int(omission == "alias")
         assert coverage["content_boundaries"] == int(omission == "boundary")
         if omission == "boundary":
             assert manifest["scan"]["content_collection_boundaries"] == {str(root): "synthetic native owner"}
