@@ -63,3 +63,28 @@ def test_existing_output_refuses_without_changing_borrowed_store(tmp_path, occup
         assert not (tmp_path/"destination").exists()
     else:
         assert not receipt.exists()
+
+
+@pytest.mark.parametrize("layout", ["receipt-in-store", "destination-in-store", "receipt-in-destination"])
+def test_overlapping_paths_refuse_before_mutating_store(tmp_path, layout):
+    owner, store = borrowed_store(tmp_path)
+    destination = tmp_path / "archive"
+    receipt = tmp_path / "receipt"
+    if layout == "receipt-in-store":
+        receipt = store / "receipt"
+    elif layout == "destination-in-store":
+        destination = store / "archive"
+    else:
+        receipt = destination / "receipt"
+    original = (store / "objects/info/alternates").read_bytes()
+    head = (store / "HEAD").read_bytes()
+    refs = git(store, "show-ref")
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), str(store), str(owner / ".git/objects"),
+         str(destination), str(receipt)], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "must not overlap" in result.stderr
+    assert (store / "objects/info/alternates").read_bytes() == original
+    assert (store / "HEAD").read_bytes() == head
+    assert git(store, "show-ref") == refs
+    assert not destination.exists() and not receipt.exists()

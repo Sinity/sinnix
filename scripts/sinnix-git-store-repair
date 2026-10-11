@@ -26,6 +26,9 @@ def main() -> int:
     # Resolve caller paths before Git changes its working directory with -C.
     args.destination = args.destination.resolve()
     args.receipt = args.receipt.resolve()
+    if (args.destination.is_relative_to(store) or args.receipt.is_relative_to(store)
+            or args.receipt.is_relative_to(args.destination)):
+        raise ValueError("store, destination and receipt must not overlap")
     def git(*argv):
         return subprocess.run(["git", "-C", str(store), *argv], text=True, capture_output=True, check=True).stdout
     receipt = args.receipt
