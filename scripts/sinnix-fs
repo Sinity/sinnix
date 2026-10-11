@@ -949,7 +949,7 @@ CREATE TABLE all_paths AS
 -- Count their location once, retaining the full hash from a file observation.
 -- Conflicting full hashes for one location cannot establish one content ID.
 SELECT path,
-       CASE WHEN count(DISTINCT sha256) <= 1 THEN max(sha256) ELSE NULL END AS sha256
+       CASE WHEN min(sha256) = max(sha256) THEN min(sha256) ELSE NULL END AS sha256
 FROM (
     SELECT path, NULL AS sha256 FROM nodes
     UNION ALL
