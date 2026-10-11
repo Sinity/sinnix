@@ -21,8 +21,11 @@ def main() -> int:
     store, objects = args.store.resolve(strict=True), args.objects.resolve(strict=True)
     if not objects.is_dir() or not (store / "objects").is_dir() or not (store / "HEAD").is_file():
         raise ValueError("explicit bare store and object directory required")
-    if args.destination.exists() or args.receipt.exists():
+    if any(path.exists() or path.is_symlink() for path in (args.destination, args.receipt)):
         raise ValueError("destination or receipt already exists; inspect prior work")
+    # Resolve caller paths before Git changes its working directory with -C.
+    args.destination = args.destination.resolve()
+    args.receipt = args.receipt.resolve()
     def git(*argv):
         return subprocess.run(["git", "-C", str(store), *argv], text=True, capture_output=True, check=True).stdout
     receipt = args.receipt

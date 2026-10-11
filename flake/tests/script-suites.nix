@@ -239,6 +239,12 @@
             pkgs.duckdb
           ];
         };
+        git-store-repair-suite = mkScriptSuite {
+          name = "sinnix-git-store-repair";
+          suiteDir = ../../pkgs/sinnix-git-store-repair/tests;
+          scripts = [ "sinnix-git-store-repair" ];
+          nativeBuildInputs = [ pkgs.git ];
+        };
         lake-refs-suite = mkScriptSuite {
           name = "sinnix-lake-refs";
           suiteDir = ../../pkgs/sinnix-lake-refs/tests;
