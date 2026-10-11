@@ -14,7 +14,9 @@ clodex patch
 systemctl --user start sinnix-clodex
 ```
 
-The service declaration owns the `luna`, `sol`, and `astra` aliases. The legacy `terra` alias resolves to GPT-6 Sol for existing clients. It reconciles them with `clodex models --alias` on every start, including removal of undeclared aliases, so manual alias registration is not part of setup. `clodex patch` is an explicit repair operation: the service checks its structured patch manifest and refuses readiness when the Claude Code version or patched bytes no longer match. It never rewrites the CLI during session startup.
+The credential helper is published at `~/.local/bin/sinnix-clodex-credential-helper`. Clodex binds credentials to that stable command address, so changing its backing Nix package does not change the recorded helper identity.
+
+The service requires the declared models to be saved as favorites through `clodex models`; a missing favorite leaves the proxy inactive with an explicit explanation rather than restarting repeatedly. The service declaration owns the `luna`, `sol`, and `astra` aliases. The legacy `terra` alias resolves to GPT-6 Sol for existing clients. It reconciles them with `clodex models --alias` on every start, including removal of undeclared aliases, so manual alias registration is not part of setup. `clodex patch` is an explicit repair operation: the service checks its structured patch manifest and refuses readiness when the Claude Code version or patched bytes no longer match. It never rewrites the CLI during session startup.
 
 ## Daily use
 

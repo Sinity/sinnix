@@ -1,14 +1,12 @@
 {
   mkServiceModule,
   config,
-  helpers,
   lib,
   pkgs,
   ...
 }@args:
 let
   user = config.sinnix.user.name;
-  scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   clodex = "/home/${user}/.local/bin/clodex";
 in
 mkServiceModule {
@@ -73,6 +71,13 @@ mkServiceModule {
               set +e
               (
               set -euo pipefail
+              models="$(${lib.escapeShellArg clodex} models --json)"
+              ${lib.concatMapStringsSep "\n" (target: ''
+                if ! printf '%s' "$models" | ${pkgs.jq}/bin/jq -e --arg target ${lib.escapeShellArg target} 'any(.[]; .id == $target)' >/dev/null; then
+                  echo "clodex: required favorite ${target} is missing; save it with clodex models and repatch before starting the proxy" >&2
+                  exit 78
+                fi
+              '') (lib.unique (lib.attrValues cfg.aliases))}
               manifest="/home/${user}/.clodex/patch-state.json"
               if [ ! -r "$manifest" ]; then
                 echo "clodex: Claude Code is not patched; run clodex patch, then systemctl --user start sinnix-clodex" >&2
@@ -101,7 +106,7 @@ mkServiceModule {
             ''}";
             ExecStart = "/home/${user}/.local/bin/sinnix-clodex-server";
             Environment = [
-              "CLODEX_CREDENTIAL_HELPER=${scriptPkgs.sinnix-clodex-credential-helper}/bin/sinnix-clodex-credential-helper"
+              "CLODEX_CREDENTIAL_HELPER=/home/${user}/.local/bin/sinnix-clodex-credential-helper"
             ];
             Restart = "on-failure";
             RestartSec = "5s";

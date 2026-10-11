@@ -441,6 +441,10 @@ mkFeatureModule {
                 };
                 ".local/bin/clodex-claude" = mkClodexChildWrapper;
                 ".local/bin/sinnix-clodex-server" = mkClodexServerWrapper;
+                ".local/bin/sinnix-clodex-credential-helper" = {
+                  source = "${scriptPkgs.sinnix-clodex-credential-helper}/bin/sinnix-clodex-credential-helper";
+                  force = true;
+                };
                 ".local/bin/clodex" = {
                   text = ''
                     #!/usr/bin/env bash
@@ -454,7 +458,7 @@ mkFeatureModule {
                       binaryName = "clodex";
                     }}
                     CLODEX_STATE="$STATE"
-                    export CLODEX_CREDENTIAL_HELPER=${lib.escapeShellArg "${scriptPkgs.sinnix-clodex-credential-helper}/bin/sinnix-clodex-credential-helper"}
+                    export CLODEX_CREDENTIAL_HELPER=${lib.escapeShellArg "/home/${user}/.local/bin/sinnix-clodex-credential-helper"}
 
                     ${mkNpmBootstrap {
                       stateDir = "claude-code";
