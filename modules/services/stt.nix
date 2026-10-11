@@ -80,6 +80,7 @@ mkAiService {
           user = user;
           serviceConfig = {
             Group = "users";
+            UMask = "0077";
           };
           environment = {
             SINNIX_STT_MODEL_ROOT = modelDir;
@@ -95,7 +96,7 @@ mkAiService {
       {
         systemd.tmpfiles.rules = [
           "d ${modelDir} 0755 ${user} users -"
-          "d ${config.sinnix.paths.capturePaths.transcripts} 0755 ${user} users -"
+          "d ${config.sinnix.paths.capturePaths.transcripts} 0700 ${user} users -"
         ];
 
         environment.systemPackages = [ scriptPkgs.sinnix-stt ];

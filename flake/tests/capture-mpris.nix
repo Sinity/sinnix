@@ -18,9 +18,14 @@
             sinnix.services.capture-netflow.enable = true;
             sinnix.services.xiaomi-witness.enable = true;
             sinnix.services.video-resolve.enable = true;
+            sinnix.services.stt.enable = true;
           }
         ];
         assertions = config: [
+          {
+            assertion = config.systemd.services.sinnix-stt-lake.serviceConfig.UMask == "0077";
+            message = "Transcript writers must create owner-only output.";
+          }
           {
             assertion = config.systemd.services.sinnix-video-resolve.serviceConfig.UMask == "0077";
             message = "Video recovery writers must create owner-only output.";
@@ -58,6 +63,7 @@
                   config.sinnix.paths.capturePaths.audio-devices
                   config.sinnix.paths.capturePaths.audio-topology
                   config.sinnix.paths.capturePaths.audio-index
+                  config.sinnix.paths.capturePaths.transcripts
                   "${config.sinnix.paths.machineRoot}/netflow"
                   "/realm/health/xiaomi-cloud"
                 ];
