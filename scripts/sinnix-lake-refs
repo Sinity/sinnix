@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: Generate and check literal filesystem path references under /realm
 # runtimeInputs: python3 ripgrep coreutils
+# pythonPackages: @sinnix-lib
 
 """Scan source code for literal paths under /realm and check their existence.
 
@@ -20,6 +21,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from sinnix_lib.atomic import atomic_text_writer
+
 REPOS = {
     "sinnix": Path("/realm/project/sinnix/repo"),
     "lynchpin": Path("/realm/project/sinity-lynchpin/repo"),
@@ -32,6 +35,10 @@ COSMETIC_EXTS = {".md"}
 COSMETIC_PREFIXES = ("#", "//", "*", '"""', "'''")
 
 
+class ScanError(RuntimeError):
+    """A configured source could not be scanned, rather than being empty."""
+
+
 def classify_line(line: str) -> str:
     stripped = line.strip()
     if stripped.startswith(COSMETIC_PREFIXES):
@@ -41,7 +48,7 @@ def classify_line(line: str) -> str:
 
 def scan_repo(name: str, root: Path) -> list[dict]:
     if not root.is_dir():
-        return []
+        raise ScanError(f"source repository is unavailable or not a directory: {name}: {root}")
     # Source files only, and only source files -- explicitly, not by
     # excluding known-noisy extensions one at a time. First attempt used -uu
     # (include hidden/gitignored) to catch generated files that might carry a
@@ -61,8 +68,7 @@ def scan_repo(name: str, root: Path) -> list[dict]:
         capture_output=True, text=True,
     )
     if proc.returncode not in (0, 1):  # 1 = no matches, not an error
-        print(f"sinnix-lake-refs: rg failed on {name}: {proc.stderr}", file=sys.stderr)
-        return []
+        raise ScanError(f"rg failed on {name} (exit {proc.returncode}): {proc.stderr}")
     rows = []
     # Split strictly on "\n", not str.splitlines(): a matched line containing
     # a literal \r (a minified/bundled JS blob did, in practice) makes
@@ -114,7 +120,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     rows = scan()
     out = args.out
     out.parent.mkdir(parents=True, exist_ok=True)
-    with out.open("w", encoding="utf-8") as f:
+    with atomic_text_writer(out, fsync=True, mode=0o600) as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     live = sum(1 for r in rows if r["kind"] == "live")
@@ -164,7 +170,11 @@ def main() -> int:
     p_check.set_defaults(func=cmd_check)
 
     args = ap.parse_args()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (ScanError, OSError) as exc:
+        print(f"sinnix-lake-refs: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

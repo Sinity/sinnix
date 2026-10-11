@@ -239,6 +239,13 @@
             pkgs.duckdb
           ];
         };
+        lake-refs-suite = mkScriptSuite {
+          name = "sinnix-lake-refs";
+          suiteDir = ../../pkgs/sinnix-lake-refs/tests;
+          scripts = [ "sinnix-lake-refs" ];
+          extraPythonPackages = [ sinnix-lib ];
+          nativeBuildInputs = [ pkgs.ripgrep ];
+        };
         borg-drill-suite = mkScriptSuite {
           name = "sinnix-borg-drill";
           suiteDir = ../../pkgs/sinnix-borg-drill/tests;
