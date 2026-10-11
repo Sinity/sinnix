@@ -29,6 +29,24 @@ def _handler(path: str, body: bytes, content_length: str | None):
     return handler, sent
 
 
+def test_oversized_event_batch_is_refused_before_reading(monkeypatch):
+    from sinnix_phone_dispatcher.state import MAX_EVENT_BATCH
+
+    class UnreadableBody:
+        def read(self, *_args):
+            raise AssertionError("oversized event body must not be read")
+
+    size = MAX_EVENT_BATCH + 1
+    handler, sent = _handler("/v1/events?day=20260101&offset=0", b"", str(size))
+    handler.rfile = UnreadableBody()
+    monkeypatch.setattr(
+        server_mod, "append_events",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("domain was called")),
+    )
+    handler.do_POST()
+    assert sent == [(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"ok": False, "bytes": size})]
+
+
 def test_malformed_content_length_is_rejected_before_intent(monkeypatch):
     handler, sent = _handler("/v1/intent", b'{"kind":"ping"}', "wat")
     called = False

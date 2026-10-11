@@ -27,7 +27,7 @@ from .execute import execute
 from .glance import build_glance, build_jobs, build_steering
 from .inbox import confirm_inbox, list_inbox, read_inbox
 from .receiver import start_phone_stream_server
-from .state import MAX_BODY, MAX_UPLOAD, ensure_dirs
+from .state import MAX_BODY, MAX_EVENT_BATCH, MAX_UPLOAD, ensure_dirs
 from .uploads import append_events, events_cursor, store_upload
 
 
@@ -162,7 +162,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if route == "/events":
-            body = self._read_body(MAX_UPLOAD)
+            body = self._read_body(MAX_EVENT_BATCH)
             if body is None:
                 return
             query = self._query()
