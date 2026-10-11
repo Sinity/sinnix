@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 import multiprocessing
 from http import HTTPStatus
 
@@ -286,3 +287,68 @@ def test_retained_digest_refuses_a_symlink(tmp_path):
     with pytest.raises(OSError):
         uploads_mod._retained_digest(alias)
     assert retained.read_bytes() == b"fixture"
+
+
+@pytest.mark.parametrize("fail_directory", [False, True])
+def test_existing_upload_is_not_acknowledged_after_failed_sync(monkeypatch, tmp_path, fail_directory):
+    lanes = {"camera": tmp_path / "camera"}
+    monkeypatch.setattr(uploads_mod, "UPLOAD_LANES", lanes)
+    target = lanes["camera"] / "fixture.jpg"
+    target.parent.mkdir(parents=True)
+    body = b"retained fixture"
+    target.write_bytes(body)
+    real_sync = os.fsync
+
+    def fail(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode) is fail_directory:
+            raise OSError("synthetic sync failure")
+        real_sync(fd)
+
+    monkeypatch.setattr(uploads_mod.os, "fsync", fail)
+    status, result = uploads_mod.store_upload("camera", "fixture.jpg", body, None)
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR and result["ok"] is False
+    assert target.read_bytes() == body
+    monkeypatch.setattr(uploads_mod.os, "fsync", real_sync)
+    status, result = uploads_mod.store_upload("camera", "fixture.jpg", body, None)
+    assert status == HTTPStatus.OK and result["duplicate"] is True
+
+
+def test_changed_upload_during_sync_is_not_acknowledged(monkeypatch, tmp_path):
+    lanes = {"camera": tmp_path / "camera"}
+    monkeypatch.setattr(uploads_mod, "UPLOAD_LANES", lanes)
+    target = lanes["camera"] / "fixture.jpg"
+    target.parent.mkdir(parents=True)
+    body = b"retained fixture"
+    target.write_bytes(body)
+    real_sync = os.fsync
+
+    def change(fd):
+        real_sync(fd)
+        if stat.S_ISREG(os.fstat(fd).st_mode):
+            target.write_bytes(b"replacement fixture")
+
+    monkeypatch.setattr(uploads_mod.os, "fsync", change)
+    status, result = uploads_mod.store_upload("camera", "fixture.jpg", body, None)
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR and result["ok"] is False
+    assert target.read_bytes() == b"replacement fixture"
+
+
+def test_repair_sync_failure_preserves_previous_payload(monkeypatch, tmp_path):
+    monkeypatch.setattr(uploads_mod, "EVENTS_DIR", tmp_path)
+    target = tmp_path / "events-20200101.jsonl"
+    previous = b"old fixture\n"
+    target.write_bytes(previous)
+    source = tmp_path / "source.jsonl"
+    source.write_bytes(b"{}\n")
+    real_sync = os.fsync
+
+    def fail_directory(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError("synthetic directory sync failure")
+        real_sync(fd)
+
+    monkeypatch.setattr(uploads_mod.os, "fsync", fail_directory)
+    with pytest.raises(OSError):
+        uploads_mod.repair_event_day("20200101", source, hashlib.sha256(previous).hexdigest())
+    assert target.read_bytes() == previous and source.read_bytes() == b"{}\n"
+    assert next((tmp_path / ".repairs").iterdir()).read_bytes() == previous

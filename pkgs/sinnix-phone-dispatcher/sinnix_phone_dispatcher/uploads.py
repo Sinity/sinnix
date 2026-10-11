@@ -79,16 +79,42 @@ def _verify_capture_path(target: Path, fd: int) -> None:
         raise OSError(errno.ESTALE, "capture destination changed during verification", str(target))
 
 
+def _sync_capture_path(target: Path, fd: int, observed: os.stat_result) -> None:
+    # A file fsync alone does not persist a newly published directory entry.
+    # Replays also need this: an earlier failed sync may have left readable
+    # bytes which have never been durably acknowledged.
+    os.fsync(fd)
+    directory_path = target.parent.absolute()
+    while True:
+        directory = os.open(directory_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            info = os.fstat(directory)
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+        parent = directory_path.parent
+        if parent == directory_path or parent.stat().st_dev != info.st_dev:
+            break
+        # This also persists freshly created capture subdirectories. A retry
+        # cannot know which ancestor creation preceded an earlier failed sync.
+        directory_path = parent
+    current = os.fstat(fd)
+    if (current.st_size, current.st_mtime_ns, current.st_ctime_ns) != (observed.st_size, observed.st_mtime_ns, observed.st_ctime_ns):
+        raise OSError(errno.ESTALE, "capture contents changed during verification", str(target))
+    _verify_capture_path(target, fd)
+
+
 def _retained_digest(target: Path) -> tuple[int, str] | None:
     """Size and sha256 of what the destination holds, or None if nothing."""
     size = 0
     digest = hashlib.sha256()
     try:
         with _regular_file(target, os.O_RDONLY) as fd:
+            observed = os.fstat(fd)
             for chunk in iter(lambda: os.read(fd, 1 << 20), b""):
                 size += len(chunk)
                 digest.update(chunk)
-            _verify_capture_path(target, fd)
+            _sync_capture_path(target, fd, observed)
     except FileNotFoundError:
         return None
     return size, digest.hexdigest()
@@ -361,7 +387,8 @@ def append_events(
         with flock(EVENTS_DIR / ".write.lock"):
             try:
                 with _regular_file(target, os.O_RDWR | (os.O_CREAT if offset == 0 else 0)) as fd:
-                    size = os.fstat(fd).st_size
+                    observed = os.fstat(fd)
+                    size = observed.st_size
                     if offset > size:
                         return HTTPStatus.CONFLICT, {
                             "ok": False,
@@ -379,7 +406,7 @@ def append_events(
                             "offset": offset,
                         }
                     if overlap == len(body):
-                        _verify_capture_path(target, fd)
+                        _sync_capture_path(target, fd, observed)
                         return HTTPStatus.OK, {
                             "ok": True,
                             "duplicate": True,
@@ -394,17 +421,17 @@ def append_events(
                         if count <= 0:
                             raise OSError(f"pwrite made no progress at byte {written}")
                         written += count
-                    os.fsync(fd)
+                    # Apply the capture mode to the same opened object, not
+                    # a path that may have been replaced after verification.
+                    os.fchmod(fd, 0o660)
+                    observed = os.fstat(fd)
                     if _read_range(fd, offset, len(body)) != body:
                         return HTTPStatus.INTERNAL_SERVER_ERROR, {
                             "ok": False,
                             "detail": "retained range failed read-back verification",
                             "day": day,
                         }
-                    # Apply the capture mode to the same opened object, not
-                    # a path that may have been replaced after verification.
-                    os.fchmod(fd, 0o660)
-                    _verify_capture_path(target, fd)
+                    _sync_capture_path(target, fd, observed)
             except FileNotFoundError:
                 if offset == 0:
                     raise
@@ -485,13 +512,15 @@ def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
             raise ValueError("destination changed; expected SHA-256 does not match")
         new_sha = hashlib.sha256(body).hexdigest()
         if body == previous:
+            if _retained_digest(target) != (len(previous), old_sha):
+                raise ValueError("destination changed during repair verification")
             return {"ok": True, "changed": False, "sha256": new_sha}
         backups = EVENTS_DIR / ".repairs"
         backups.mkdir(exist_ok=True)
         backup = backups / f"{day}-{old_sha}.jsonl"
         if not backup.exists():
             os.link(target, backup)
-        if hashlib.sha256(_read_capture_bytes(backup)).hexdigest() != old_sha:
+        if _retained_digest(backup) != (len(previous), old_sha):
             raise ValueError("backup verification failed")
         pending: Path | None = None
         try:
@@ -507,6 +536,8 @@ def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
             os.chmod(pending, 0o660)
             os.replace(pending, target)
             pending = None
+            if _retained_digest(target) != (len(body), new_sha):
+                raise ValueError("replacement verification failed")
         finally:
             if pending is not None:
                 pending.unlink(missing_ok=True)

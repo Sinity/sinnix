@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 
 import pytest
 from http import HTTPStatus
@@ -337,3 +338,74 @@ def test_readonly_capture_does_not_acknowledge_missing_suffix(isolated_state_dir
     status, result = uploads_mod.append_events("20260818", target.stat().st_size, body, _sha(body))
     assert status == HTTPStatus.INTERNAL_SERVER_ERROR and result["ok"] is False
     assert target.read_bytes() == b"retained fixture\n"
+
+
+def test_append_and_exact_replay_sync_file_and_directory(isolated_state_dirs, monkeypatch):
+    real_sync = os.fsync
+    synced = []
+
+    def sync(fd):
+        synced.append("directory" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file")
+        real_sync(fd)
+
+    monkeypatch.setattr(uploads_mod.os, "fsync", sync)
+    body = b"retained fixture\n"
+    assert uploads_mod.append_events("20260818", 0, body, _sha(body))[0] == HTTPStatus.OK
+    assert synced[0] == "file" and synced[1:] and set(synced[1:]) == {"directory"}
+    synced.clear()
+    assert uploads_mod.append_events("20260818", 0, body, _sha(body))[1]["duplicate"] is True
+    assert synced[0] == "file" and synced[1:] and set(synced[1:]) == {"directory"}
+
+
+@pytest.mark.parametrize("fail_directory", [False, True])
+def test_failed_sync_is_not_acknowledged_on_replay(isolated_state_dirs, monkeypatch, fail_directory):
+    body = b"retained fixture\n"
+    real_sync = os.fsync
+
+    def fail(fd):
+        if stat.S_ISDIR(os.fstat(fd).st_mode) is fail_directory:
+            raise OSError("synthetic sync failure")
+        real_sync(fd)
+
+    monkeypatch.setattr(uploads_mod.os, "fsync", fail)
+    for _ in range(2):
+        status, result = uploads_mod.append_events("20260818", 0, body, _sha(body))
+        assert status == HTTPStatus.INTERNAL_SERVER_ERROR and result["ok"] is False
+        assert _day_file(isolated_state_dirs).read_bytes() == body
+    monkeypatch.setattr(uploads_mod.os, "fsync", real_sync)
+    assert uploads_mod.append_events("20260818", 0, body, _sha(body))[1]["duplicate"] is True
+
+
+def test_changed_event_range_during_sync_is_not_acknowledged(isolated_state_dirs, monkeypatch):
+    target = _day_file(isolated_state_dirs)
+    real_sync = os.fsync
+    replacement = b"replacement fixture\n"
+
+    def change(fd):
+        real_sync(fd)
+        if stat.S_ISREG(os.fstat(fd).st_mode):
+            target.write_bytes(replacement)
+
+    monkeypatch.setattr(uploads_mod.os, "fsync", change)
+    body = b"retained fixture\n"
+    status, result = uploads_mod.append_events("20260818", 0, body, _sha(body))
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR and result["ok"] is False
+    assert "cursor" not in result and target.read_bytes() == replacement
+
+
+def test_append_syncs_new_directory_ancestors(isolated_state_dirs, monkeypatch):
+    real_sync = os.fsync
+    directories = set()
+
+    def sync(fd):
+        info = os.fstat(fd)
+        if stat.S_ISDIR(info.st_mode):
+            directories.add((info.st_dev, info.st_ino))
+        real_sync(fd)
+
+    monkeypatch.setattr(uploads_mod.os, "fsync", sync)
+    body = b"retained fixture\n"
+    assert uploads_mod.append_events("20260818", 0, body, _sha(body))[0] == HTTPStatus.OK
+    for path in [_day_file(isolated_state_dirs).parent, _day_file(isolated_state_dirs).parent.parent]:
+        info = path.stat()
+        assert (info.st_dev, info.st_ino) in directories
