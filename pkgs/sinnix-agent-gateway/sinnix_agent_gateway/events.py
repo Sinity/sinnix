@@ -530,12 +530,29 @@ class NormalizedEventService:
                     jobs = page.get("jobs", []) if isinstance(page, Mapping) else []
                     observation = {
                         "jobs": [
-                            {"job_id": job.get("job_id"), "state": job.get("state")}
+                            {
+                                "job_id": job.get("job_id"),
+                                "launch_reference": job.get("launch_reference"),
+                                "attempt": job.get("attempt"),
+                                "state": job.get("state"),
+                            }
                             for job in jobs
                             if isinstance(job, Mapping)
                             and isinstance(job.get("job_id"), str)
                         ]
                     }
+                    # Owner page order is incidental; queue position remains an
+                    # observation, while launch and attempt identify the work.
+                    observation["jobs"].sort(
+                        key=lambda job: (job["job_id"], _digest(job))
+                    )
+                    identity_incomplete = any(
+                        not isinstance(job["launch_reference"], str)
+                        or not job["launch_reference"]
+                        or type(job["attempt"]) is not int
+                        or job["attempt"] < 1
+                        for job in observation["jobs"]
+                    )
                     observed_revision = _digest(observation)
                     coverage = (
                         page.get("coverage") if isinstance(page, Mapping) else None
@@ -551,6 +568,7 @@ class NormalizedEventService:
                     sources["jobs"] = {
                         "availability": "available",
                         "count": len(observation["jobs"]),
+                        "identity_incomplete": identity_incomplete,
                         "revision": observed_revision,
                         "incomplete": incomplete,
                     }
@@ -571,6 +589,7 @@ class NormalizedEventService:
                                 if isinstance(page, Mapping)
                                 else None,
                                 "jobs": observation["jobs"],
+                                "identity_incomplete": identity_incomplete,
                             },
                             exact=False,
                             subject_ref="sinnix://jobs",

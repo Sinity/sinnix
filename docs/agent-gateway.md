@@ -114,7 +114,7 @@ Beads query snapshots and composed contexts use the shared immutable result stor
 
 Audit events live in a private SQLite WAL ledger; every call, including reads, appends a receipt and persists an immutable result snapshot. `events.tail` is principal-scoped and binds every row to `sinnix://receipts/{receipt_id}`; `audit.verify` checks the chain. `machine.snapshot` and `machine.query` delegate to `sinnix-observe`; `machine.prepare` obtains a target-specific comparison token and `machine.operate` sends it with one typed request to the ops reducer. Snapshot revisions remain observation metadata.
 
-`events.tail` rotates page priority across audit receipts, Git revisions, Beads revisions, job state, and runtime transitions. It also rotates the first project considered for owner revisions. This keeps a busy source from hiding pending events from another source while retaining each source's continuation position. Existing version 2 event cursors continue; version 1 cursors remain stale because they predate runtime generation tracking.
+`events.tail` rotates page priority across audit receipts, Git revisions, Beads revisions, job state, and runtime transitions. It also rotates the first project considered for owner revisions. This keeps a busy source from hiding pending events from another source while retaining each source's continuation position. Existing version 2 event cursors continue; version 1 cursors remain stale because they predate runtime generation tracking. Sampled job events preserve owner launch references and attempts alongside queue IDs, ignore incidental owner-list ordering, and explicitly label incomplete identity. They remain `exact=false`.
 
 ## NixOS configuration
 

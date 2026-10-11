@@ -465,3 +465,71 @@ def test_oversized_runtime_row_is_compacted_without_advancing_past_next_row(
     assert [
         row["event_id"] for row in second["events"] if row["event_id"] == "after"
     ] == ["after"]
+
+
+@pytest.mark.parametrize("change", ["launch", "attempt", "phase"])
+def test_job_observation_preserves_owner_launch_and_attempt(
+    tmp_path: Path, change: str
+) -> None:
+    from sinnix_agent_gateway.execution import job_payload
+
+    events, *_ = service(tmp_path)
+    owner = {"job_id": 7, "reference": "fixture-A", "attempt": 1, "phase": "running"}
+    events.jobs = lambda _limit, _cursor: {"jobs": [job_payload(owner)]}
+    first = events.read(limit=50)
+    if change == "launch":
+        owner["reference"] = "fixture-B"
+    elif change == "attempt":
+        owner["attempt"] = 2
+    else:
+        owner["phase"] = "succeeded"
+    changed = events.read(limit=50, cursor=first["next_cursor"])
+    rows = [row for row in changed["events"] if row["kind"] == "job_state"]
+    assert len(rows) == 1
+    assert (
+        changed["sources"]["jobs"]["revision"] != first["sources"]["jobs"]["revision"]
+    )
+    assert rows[0]["data"]["jobs"][0]["launch_reference"] == owner["reference"]
+    assert rows[0]["data"]["jobs"][0]["attempt"] == owner["attempt"]
+    assert rows[0]["exact"] is False
+    unchanged = events.read(limit=50, cursor=changed["next_cursor"])
+    assert not [row for row in unchanged["events"] if row["kind"] == "job_state"]
+
+
+def test_job_observation_ignores_owner_list_reordering(tmp_path: Path) -> None:
+    from sinnix_agent_gateway.execution import job_payload
+
+    events, *_ = service(tmp_path)
+    owners = [
+        {"job_id": n, "reference": f"fixture-{n}", "attempt": 1, "phase": "running"}
+        for n in (7, 8)
+    ]
+    events.jobs = lambda _limit, _cursor: {
+        "jobs": [job_payload(owner) for owner in owners]
+    }
+    first = events.read(limit=50)
+    owners.reverse()
+    same = events.read(limit=50, cursor=first["next_cursor"])
+    assert same["sources"]["jobs"]["revision"] == first["sources"]["jobs"]["revision"]
+    assert not [row for row in same["events"] if row["kind"] == "job_state"]
+    owners[0]["job_id"] = 9
+    moved = events.read(limit=50, cursor=same["next_cursor"])
+    assert [row for row in moved["events"] if row["kind"] == "job_state"]
+
+
+def test_job_observation_labels_missing_owner_identity(tmp_path: Path) -> None:
+    from sinnix_agent_gateway.execution import job_payload
+
+    events, *_ = service(tmp_path)
+    owner = {"job_id": 7, "phase": "running"}
+    events.jobs = lambda _limit, _cursor: {"jobs": [job_payload(owner)]}
+    first = events.read(limit=50)
+    assert first["sources"]["jobs"]["identity_incomplete"] is True
+    row = next(row for row in first["events"] if row["kind"] == "job_state")
+    assert row["data"]["jobs"][0]["launch_reference"] is None
+    assert row["data"]["jobs"][0]["attempt"] is None
+    assert row["data"]["identity_incomplete"] is True
+    owner.update(reference="fixture-A", attempt=1)
+    recovered = events.read(limit=50, cursor=first["next_cursor"])
+    assert recovered["sources"]["jobs"]["identity_incomplete"] is False
+    assert [row for row in recovered["events"] if row["kind"] == "job_state"]
