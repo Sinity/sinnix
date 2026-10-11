@@ -588,6 +588,7 @@ it is only starting daemons that must not happen there).
 The dispatcher camera destination is configured with `SINNIX_PHONE_CAMERA_DIR`,
 independently of its telemetry and other upload roots. Syncthing's receive-only
 DCIM mirror remains at `/realm/personal/photo/phone-sync/DCIM`, including its
-version history. Neither mirror proves complete phone coverage. The current
-MediaMirror mtime cursor can skip undelivered files; do not seed live camera
-verification with a synthetic new file that advances the receiver watermark.
+version history. Neither mirror proves complete phone coverage. Device discovery, refused media
+and late arrivals still require independent coverage evidence. The retired
+server-mtime seeding route is absent. Live camera route verification can retry
+an existing retained file without creating a new object or changing its mtime.
