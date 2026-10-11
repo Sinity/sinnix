@@ -189,3 +189,54 @@ def test_http_upload_receipt_describes_retained_bytes(monkeypatch, tmp_path):
         assert receipt["bytes"] == len(retained)
         assert receipt["sha256"] == hashlib.sha256(retained).hexdigest()
     assert conflict["conflicts_with"] == hashlib.sha256(b"first").hexdigest()
+
+
+def test_camera_configured_home_over_unix_socket(monkeypatch, tmp_path):
+    import http.client
+    import runpy
+    import socket
+    import threading
+    import sinnix_phone_dispatcher.state as state
+
+    camera = tmp_path / "photo" / "DCIM"
+    lake = tmp_path / "telemetry"
+    monkeypatch.setenv("SINNIX_PHONE_CAMERA_DIR", str(camera))
+    monkeypatch.setenv("SINNIX_PHONE_LAKE", str(lake))
+    configured = runpy.run_path(state.__file__)["UPLOAD_LANES"]
+    assert configured["camera"] == camera
+    assert configured["ambient"] == lake / "ambient"
+    monkeypatch.setattr(uploads_mod, "UPLOAD_LANES", configured)
+    address = str(tmp_path / "api.sock")
+    server = server_mod.UnixHTTPServer(address, server_mod.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    connection = http.client.HTTPConnection("localhost", timeout=5)
+    try:
+        connection.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        connection.sock.connect(address)
+        body = b"synthetic camera payload"
+        digest = hashlib.sha256(body).hexdigest()
+        connection.request("POST", "/v1/chunk?lane=camera&name=Camera/fixture.jpg",
+                           body, {"X-Sinnix-Sha256": digest})
+        response = connection.getresponse()
+        receipt = json.loads(response.read())
+        assert response.status == HTTPStatus.OK
+        assert receipt["path"] == str(camera / "Camera" / "fixture.jpg")
+        assert (camera / "Camera" / "fixture.jpg").read_bytes() == body
+        assert not (lake / "camera").exists()
+    finally:
+        connection.close()
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_camera_default_is_independent_of_telemetry_root(monkeypatch, tmp_path):
+    import runpy
+    import sinnix_phone_dispatcher.state as state
+
+    monkeypatch.delenv("SINNIX_PHONE_CAMERA_DIR", raising=False)
+    monkeypatch.setenv("SINNIX_PHONE_LAKE", str(tmp_path / "telemetry"))
+    configured = runpy.run_path(state.__file__)["UPLOAD_LANES"]
+    assert str(configured["camera"]) == "/realm/personal/photo/phone-dispatcher/DCIM"
+    assert configured["download"] == tmp_path / "telemetry" / "download"

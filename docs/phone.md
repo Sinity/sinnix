@@ -201,7 +201,8 @@ lie.
 | `events/events-*.jsonl`                              | out       | every screen → `POST /events?day=&offset=` → lake day file  |
 | `outbox/intent-*.json`                               | out       | app → `POST /intent` → executed, receipt back               |
 | `outbox/{voice,trace,shared}-*` + `.json`            | out       | app → `POST /chunk?lane=outbox` → lake                      |
-| `/sdcard/{DCIM,Download}`                            | out       | MediaMirror → `POST /chunk?lane={camera,download}` → lake   |
+| `/sdcard/DCIM` | out | MediaMirror → `POST /chunk?lane=camera` → `/realm/personal/photo/phone-dispatcher/DCIM` |
+| `/sdcard/Download` | out | MediaMirror → `POST /chunk?lane=download` → `/realm/device/shared/phone/download` |
 | `epoch.json`                                         | local     | instruments only                                            |
 | `inbox/glance.json`                                  | in        | built on request → `GET /inbox/file` → home + widget        |
 | `inbox/steering.json`                                | in        | built on request → `GET /inbox/file` → steering trio        |
@@ -583,3 +584,10 @@ a shell, not a data path, but the repair is still worth knowing. Restart the
 in the app's own `untrusted_app` domain. If an old blind tree still holds
 :8022, kill it first (`run-as com.termux kill <pids>` is fine for killing;
 it is only starting daemons that must not happen there).
+
+The dispatcher camera destination is configured with `SINNIX_PHONE_CAMERA_DIR`,
+independently of its telemetry and other upload roots. Syncthing's receive-only
+DCIM mirror remains at `/realm/personal/photo/phone-sync/DCIM`, including its
+version history. Neither mirror proves complete phone coverage. The current
+MediaMirror mtime cursor can skip undelivered files; do not seed live camera
+verification with a synthetic new file that advances the receiver watermark.

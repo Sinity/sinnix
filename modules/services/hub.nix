@@ -446,6 +446,8 @@ mkServiceModule {
       ++ lib.mapAttrsToList (_: frontend: frontend.port) activeFrontends;
 
       systemd.tmpfiles.rules = [
+        "d ${config.sinnix.paths.photosRoot}/phone-dispatcher 0700 ${userName} users -"
+        "d ${config.sinnix.paths.photosRoot}/phone-dispatcher/DCIM 0700 ${userName} users -"
         "d ${cfg.stateDir} 0755 ${userName} users -"
         "d ${cfg.feedbackDir} 0755 ${userName} users -"
         # Absorbed from an earlier standalone receiver module. The
@@ -609,6 +611,7 @@ mkServiceModule {
             Environment = [
               "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
               "SINNIX_PHONE_AMBIENT_PROGRESS_MARKER=${phoneAmbientProgressPath}"
+              "SINNIX_PHONE_CAMERA_DIR=${config.sinnix.paths.photosRoot}/phone-dispatcher/DCIM"
             ];
             # Resolves the tailnet bind address for the embedded telemetry
             # receiver (SINNIX_PHONE_STREAM_HOST), same pattern as the hub's

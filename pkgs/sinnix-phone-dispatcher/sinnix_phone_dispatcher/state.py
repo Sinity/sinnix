@@ -52,7 +52,9 @@ MAX_UPLOAD = 128 << 20
 # that could also choose the directory could write anywhere this service can.
 UPLOAD_LANES = {
     "ambient": LAKE_ROOT / "ambient",
-    "camera": LAKE_ROOT / "camera",
+    "camera": Path(os.environ.get(
+        "SINNIX_PHONE_CAMERA_DIR", "/realm/personal/photo/phone-dispatcher/DCIM"
+    )),
     "download": LAKE_ROOT / "download",
     # Voice notes, PPG/IMU traces and shared files, with their metadata
     # sidecars. `sinnix-score` reads this directory by the same name.
