@@ -132,12 +132,11 @@ def test_failed_backup_removes_all_temporary_sidecars(tmp_path: Path) -> None:
     assert not list(tmp_path.glob("*.tmp*"))
 
 
-def test_backup_sweeps_orphaned_sidecar_from_a_prior_crashed_run(
+def test_backup_preserves_other_invocations_sidecars(
     tmp_path: Path,
 ) -> None:
-    # A run under a different (e.g. earlier timestamp-derived) name was
-    # killed before its own `finally: cleanup()` ran, leaving a sidecar this
-    # run's per-run cleanup() -- scoped to its own raw_path -- cannot see.
+    # Age cannot establish that another invocation is terminal. Even old
+    # scratch belongs to its creator, not to this publication.
     source = tmp_path / "source.sqlite"
     output = tmp_path / "telemetry-later.sqlite.zst"
     seed_database(source)
@@ -156,14 +155,11 @@ def test_backup_sweeps_orphaned_sidecar_from_a_prior_crashed_run(
 
     assert result.returncode == 0, result.stderr
     assert output.exists()
-    assert not orphan.exists()
+    assert orphan.read_bytes() == b"stale"
 
 
 def test_backup_of_a_parked_walless_database_succeeds(tmp_path: Path) -> None:
-    """A cleanly-checkpointed (parked) db has no -wal sidecar; that is the
-    clean state, not an error. Mutation: reverting the exists() check to the
-    old try/except-FileNotFoundError shape fails this (cp exits 1 ->
-    CalledProcessError, which that handler never caught)."""
+    """Native acquisition supports a checkpointed source without sidecars."""
     source = tmp_path / "parked.sqlite"
     with sqlite3.connect(source) as connection:
         connection.execute("CREATE TABLE t (x INTEGER)")
@@ -517,20 +513,19 @@ with module["cancellation_wakeup"]():
 def test_cancellation_during_compression_leaves_no_partial_artifact(
     tmp_path: Path,
 ) -> None:
-    """Mutation: dropping cleanup() from the cancellation path leaves the
-    half-written .zst.tmp the stub created."""
+    """Cancellation removes this invocation's partially compressed scratch."""
     source = tmp_path / "telemetry.sqlite"
     with sqlite3.connect(source) as connection:
         connection.execute("CREATE TABLE samples (value TEXT NOT NULL)")
     output = tmp_path / "out.zst"
-    partial = tmp_path / "out.zst.tmp"
+    partial = tmp_path / "compression-ready"
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     zstd = fake_bin / "zstd"
     # exec so the sleeping compressor is the direct child holding the pipes,
     # as the real zstd is; otherwise an orphan outlives the cancelled run and
     # the test waits on it rather than on the run.
-    zstd.write_text(f"#!/bin/sh\nprintf 'partial' > {partial}\nexec sleep 60\n")
+    zstd.write_text(f'#!/bin/sh\nfor arg do target="$arg"; done\nprintf partial > "$target"\ntouch "{partial}"\nexec sleep 60\n')
     zstd.chmod(0o755)
 
     process = subprocess.Popen(
@@ -549,7 +544,7 @@ def test_cancellation_during_compression_leaves_no_partial_artifact(
 
     assert process.returncode == 143, errors
     assert not output.exists()
-    assert not list(tmp_path.glob("*.tmp*"))
+    assert not list(tmp_path.glob(".sqlite-backup-*"))
 
 
 def test_publication_requires_the_archive_to_decompress(tmp_path: Path) -> None:
@@ -648,3 +643,101 @@ def test_immutable_snapshot_does_not_publish_when_compression_fails(
 
     assert result.returncode != 0
     assert not output.exists()
+
+
+def test_live_backup_keeps_native_selected_cut(tmp_path: Path, monkeypatch) -> None:
+    import runpy
+    helper = runpy.run_path(str(SCRIPT))
+    source = tmp_path / "source.sqlite"
+    writer = sqlite3.connect(source)
+    writer.execute("PRAGMA journal_mode=WAL")
+    writer.execute("CREATE TABLE t(value)")
+    writer.executemany("INSERT INTO t VALUES (?)", [("a",), ("b",)])
+    writer.commit()
+    original_connect = sqlite3.connect
+
+    class CutConnection(sqlite3.Connection):
+        def backup(self, target, **kwargs):
+            writer.execute("INSERT INTO t VALUES ('later')")
+            writer.commit()
+            return super().backup(target, **kwargs)
+
+    def connect(database, *args, **kwargs):
+        if database == source.as_uri() + "?mode=ro":
+            kwargs["factory"] = CutConnection
+        return original_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", connect)
+    output = tmp_path / "selected.sqlite.zst"
+    try:
+        helper["backup_database"](source, output)
+        restored = tmp_path / "restored.sqlite"
+        subprocess.run(["zstd", "-q", "-d", str(output), "-o", str(restored)], check=True)
+        with original_connect(restored) as connection:
+            assert connection.execute("SELECT value FROM t").fetchall() == [("a",), ("b",)]
+            assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+        assert writer.execute("SELECT count(*) FROM t").fetchone() == (3,)
+    finally:
+        writer.close()
+
+
+def test_immutable_uri_checks_the_actual_archived_object(tmp_path: Path) -> None:
+    prefix = tmp_path / "source"
+    seed_database(prefix)
+    actual = tmp_path / "source#? with space.sqlite"
+    seed_database(actual)
+    connection = sqlite3.connect(actual)
+    connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    connection.close()
+    output = tmp_path / "archive.zst"
+    result = subprocess.run([str(SCRIPT), str(actual), str(output), "--immutable-source"], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    restored = tmp_path / "restored.sqlite"
+    subprocess.run(["zstd", "-q", "-d", str(output), "-o", str(restored)], check=True)
+    with sqlite3.connect(restored) as connection:
+        assert connection.execute("SELECT count(*) FROM samples").fetchone() == (1000,)
+    retained = output.read_bytes()
+    actual.write_bytes(b"not a SQLite database")
+    for args in ([str(output), "--immutable-source"], ["--immutable-source", "--verify-only", "--check-budget-seconds", "10"]):
+        result = subprocess.run([str(SCRIPT), str(actual), *args], capture_output=True, text=True)
+        assert result.returncode != 0
+        assert output.read_bytes() == retained
+
+
+def test_overlapping_backup_cleanup_keeps_outer_scratch(tmp_path: Path) -> None:
+    import runpy
+    helper = runpy.run_path(str(SCRIPT))
+    source = tmp_path / "source.sqlite"
+    seed_database(source)
+    output = tmp_path / "shared.sqlite.zst"
+    backup = helper["backup_database"]
+    globals_ = backup.__globals__
+    original_compress = globals_["compress"]
+    nested = False
+
+    def compress_with_overlap(raw, compressed):
+        nonlocal nested
+        if not nested:
+            nested = True
+            backup(source, output)
+            assert raw.is_file()
+            assert raw.parent.is_dir()
+        original_compress(raw, compressed)
+
+    globals_["compress"] = compress_with_overlap
+    backup(source, output)
+    assert output.is_file()
+    assert not list(tmp_path.glob(".sqlite-backup-*"))
+
+
+def test_acquisition_failure_preserves_selected_archive(tmp_path: Path) -> None:
+    import runpy
+    helper = runpy.run_path(str(SCRIPT))
+    source = tmp_path / "source.sqlite"
+    seed_database(source)
+    output = tmp_path / "archive.zst"
+    output.write_bytes(b"previous archive")
+    with pytest.raises(RuntimeError, match="acquisition exceeded"):
+        helper["backup_database"](source, output, acquire_budget_seconds=1e-12)
+    assert output.read_bytes() == b"previous archive"
+    assert not list(tmp_path.glob(".sqlite-backup-*"))

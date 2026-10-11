@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 from contextlib import contextmanager
 import os
 import select
@@ -14,6 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 from pathlib import Path
 from typing import Iterator
@@ -27,15 +29,6 @@ cancel_requested = False
 cancel_wakeup_read_fd: int | None = None
 FULL_INTEGRITY_PAGE_LIMIT = 100_000
 CHECK_POLL_SECONDS = 0.02
-# Every sidecar cleanup() ever creates ends in one of these compound
-# suffixes: raw_path (".tmp"), its journal/WAL siblings (".tmp-journal",
-# ".tmp-wal"), and compressed_path (output suffix + ".tmp", e.g. ".zst.tmp",
-# which already ends in plain ".tmp").
-STALE_SIDECAR_SUFFIXES = (".tmp", ".tmp-journal", ".tmp-wal")
-# Grace window applied only when no completed backup exists yet to anchor
-# the threshold against (first-ever run in a directory) -- guards against
-# sweeping a concurrently in-flight run's just-created tmp file.
-STALE_SIDECAR_GRACE_SECONDS = 3600
 
 
 def request_cancel(_signum: int, _frame: object) -> None:
@@ -59,33 +52,6 @@ def cancellation_wakeup() -> Iterator[int]:
         signal.set_wakeup_fd(previous_fd)
         os.close(read_fd)
         os.close(write_fd)
-
-
-def sweep_stale_sidecars(output_path: Path) -> None:
-    """Remove .tmp/.tmp-journal/.tmp-wal debris left by a run that was
-    killed (OOM, reboot, SIGKILL) before its own `finally: cleanup()` could
-    run. Each run's raw_path embeds a caller-chosen unique name (typically a
-    timestamp), so a later run's own per-run cleanup() -- scoped to its own
-    raw_path -- never revisits an earlier run's leftovers. This directory-wide
-    sweep is what actually reclaims them, bounded to files older than the
-    newest completed backup so it never touches a run genuinely in flight."""
-    parent = output_path.parent
-    if not parent.is_dir():
-        return
-    completed = [p for p in parent.glob(f"*{output_path.suffix}") if p.is_file()]
-    threshold = max(
-        (p.stat().st_mtime for p in completed),
-        default=time.time() - STALE_SIDECAR_GRACE_SECONDS,
-    )
-    for path in parent.iterdir():
-        if not path.is_file() or not path.name.endswith(STALE_SIDECAR_SUFFIXES):
-            continue
-        try:
-            if path.stat().st_mtime >= threshold:
-                continue
-            path.unlink()
-        except FileNotFoundError:
-            pass
 
 
 def run_command(command: list[str]) -> None:
@@ -214,21 +180,21 @@ def backup_database(
     immutable_source: bool = False,
     check_budget_seconds: float = 0.0,
     check_mode: str = "structural",
+    acquire_budget_seconds: float = 300.0,
 ) -> None:
-    raw_path = output_path.with_name(output_path.name.removesuffix(".zst") + ".tmp")
-    compressed_path = output_path.with_suffix(output_path.suffix + ".tmp")
-    sidecars = (raw_path, raw_path.with_name(raw_path.name + "-journal"), raw_path.with_name(raw_path.name + "-wal"), compressed_path)
+    """Publish a checked archive from a native cut or an owner-frozen source.
 
-    def cleanup() -> None:
-        for path in sidecars:
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-
+    Live acquisition fails if its native read transaction outlasts the budget.
+    Scratch is private and owned by this invocation; other runs and retained
+    crash debris are never removed by publication.
+    """
+    if not math.isfinite(acquire_budget_seconds) or acquire_budget_seconds <= 0:
+        raise ValueError("acquisition budget must be finite and positive")
+    source_path = source_path.resolve(strict=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    sweep_stale_sidecars(output_path)
-    cleanup()
+    scratch = tempfile.TemporaryDirectory(prefix=".sqlite-backup-", dir=output_path.parent)
+    raw_path = Path(scratch.name) / "snapshot.sqlite"
+    compressed_path = Path(scratch.name) / "snapshot.sqlite.zst"
     source: sqlite3.Connection | None = None
     target: sqlite3.Connection | None = None
     try:
@@ -238,7 +204,7 @@ def backup_database(
                 raise RuntimeError("immutable SQLite source must not have a WAL")
             source_bytes = source_path.stat().st_size
             source = sqlite3.connect(
-                f"file:{source_path}?mode=ro&immutable=1", uri=True, timeout=5.0
+                source_path.resolve(strict=True).as_uri() + "?mode=ro&immutable=1", uri=True, timeout=5.0
             )
             source.execute("PRAGMA busy_timeout=5000")
             # Map the immutable database so integrity walks use kernel
@@ -276,31 +242,25 @@ def backup_database(
                 f" compress_seconds={compress_seconds:.1f}"
             )
             return
-        source = sqlite3.connect(source_path, timeout=5.0)
-        source.execute("PRAGMA busy_timeout=5000")
-        # Ask SQLite to advance the WAL before taking the filesystem copy. A
-        # regular sparse copy is bounded by the database file size, while the
-        # online-backup API can restart from page zero whenever concurrent
-        # commits invalidate a copied chunk, causing unbounded amplification.
-        source.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        acquisition_deadline = time.monotonic() + acquire_budget_seconds
+        source = sqlite3.connect(source_path.as_uri() + "?mode=ro", uri=True, timeout=min(5.0, acquire_budget_seconds))
+        # Pin a native read transaction before copying pages. Later commits
+        # cannot restart the backup or produce a main/WAL mixture.
+        source.execute("BEGIN")
+        source.execute("SELECT rootpage FROM sqlite_master LIMIT 1").fetchone()
+        target = sqlite3.connect(raw_path, timeout=5.0)
+
+        def acquisition_progress(_status: int, _remaining: int, _total: int) -> None:
+            if cancel_requested:
+                raise BackupCancelled
+            if time.monotonic() >= acquisition_deadline:
+                raise RuntimeError("SQLite snapshot acquisition exceeded its budget")
+
+        acquisition_progress(0, 0, 0)
+        source.backup(target, pages=1024, progress=acquisition_progress, sleep=0.05)
         source.close()
         source = None
-        run_command(["cp", "--sparse=always", str(source_path), str(raw_path)])
-        wal_path = Path(f"{source_path}-wal")
-        raw_wal_path = Path(f"{raw_path}-wal")
-        # A missing -wal sidecar is the CLEAN state (a parked/checkpointed
-        # database has none -- polylogue's dbs, 2026-08-18). The old handler
-        # caught FileNotFoundError, which cp never raises for a missing
-        # SOURCE (it exits 1 -> CalledProcessError), so the "handled" branch
-        # was unreachable and the first WAL-less backup failed.
-        if wal_path.exists():
-            run_command(["cp", "--sparse=always", str(wal_path), str(raw_wal_path)])
-        else:
-            raw_wal_path.unlink(missing_ok=True)
-        target = sqlite3.connect(raw_path, timeout=5.0)
         target.execute("PRAGMA busy_timeout=5000")
-        # The copy carries any WAL sidecar, so the walk consumes both before
-        # anything is published, same as the immutable route.
         target.execute(f"PRAGMA mmap_size={raw_path.stat().st_size}")
         started = time.monotonic()
         check, verdict = check_immutable_snapshot(
@@ -337,16 +297,17 @@ def backup_database(
             target.close()
         if source is not None:
             source.close()
-        cleanup()
+        scratch.cleanup()
 
 
 def verify_immutable_source(source_path: Path, check_budget_seconds: float) -> None:
+    source_path = source_path.resolve(strict=True)
     wal_path = Path(f"{source_path}-wal")
     if wal_path.exists() and wal_path.stat().st_size > 0:
         raise RuntimeError("immutable SQLite source must not have a WAL")
     source_bytes = source_path.stat().st_size
     source = sqlite3.connect(
-        f"file:{source_path}?mode=ro&immutable=1", uri=True, timeout=5.0
+        source_path.resolve(strict=True).as_uri() + "?mode=ro&immutable=1", uri=True, timeout=5.0
     )
     try:
         source.execute(f"PRAGMA mmap_size={source_bytes}")
@@ -381,6 +342,12 @@ def main() -> int:
         help="compress a verified WAL-free filesystem snapshot without copying it",
     )
     parser.add_argument(
+        "--acquire-budget-seconds",
+        type=float,
+        default=300.0,
+        help="maximum seconds for native live-source snapshot acquisition",
+    )
+    parser.add_argument(
         "--check-budget-seconds",
         type=float,
         default=0.0,
@@ -396,6 +363,8 @@ def main() -> int:
         help="structural page walk or a qualified, bounded schema/header check",
     )
     args = parser.parse_args()
+    if not math.isfinite(args.acquire_budget_seconds) or args.acquire_budget_seconds <= 0:
+        parser.error("--acquire-budget-seconds must be positive")
     if args.verify_only:
         if not args.immutable_source or args.output is not None:
             parser.error("--verify-only requires --immutable-source and no output")
@@ -420,6 +389,7 @@ def main() -> int:
                     immutable_source=args.immutable_source,
                     check_budget_seconds=args.check_budget_seconds,
                     check_mode=args.check_mode,
+                    acquire_budget_seconds=args.acquire_budget_seconds,
                 )
     except BackupCancelled:
         print("SQLite backup cancelled", file=sys.stderr)
