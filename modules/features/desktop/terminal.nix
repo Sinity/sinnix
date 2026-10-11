@@ -26,6 +26,11 @@ mkFeatureModule {
         in
         {
           home.sessionVariables.TERMINAL = "kitty";
+          # Gio's Terminal=true launch path uses the XDG terminal selector.
+          xdg.terminal-exec = {
+            enable = true;
+            settings.default = [ "kitty.desktop" ];
+          };
           # Stylix injects an include pointing at a generated Nix-store color
           # file. Kitty's config watcher can fan that into huge inotify watch
           # counts, which breaks Hyprland-spawned app scopes.
