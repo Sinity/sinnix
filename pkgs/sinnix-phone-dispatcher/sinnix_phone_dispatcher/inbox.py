@@ -33,7 +33,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
+import tempfile
 from http import HTTPStatus
 from pathlib import Path
 
@@ -149,6 +152,29 @@ def read_inbox(name: str) -> tuple[HTTPStatus, bytes | dict]:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
 
 
+def _read_claim(claim: Path) -> bytes:
+    fd = os.open(claim, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            raise OSError("claimed inbox entry is not a regular file")
+        return stream.read()
+
+
+def _preserve_claim(claim: Path, original: Path) -> dict:
+    """Restore visibility without overwriting another publication.
+
+    Retain the claim even after linking it back: a writer can replace that
+    restored pathname immediately. Recovery bytes must not depend on it.
+    """
+    restored = False
+    try:
+        os.link(claim, original, follow_symlinks=False)
+        restored = True
+    except OSError:
+        pass
+    return {"retained_at": str(claim), "current_path_restored": restored}
+
+
 def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict]:
     """The phone has it. Forget the one-shots; keep the state.
 
@@ -198,5 +224,54 @@ def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict
             "expected": digest,
             "received": (declared_sha or "").lower(),
         }
-    path.unlink(missing_ok=True)
+    # Receipt publishers replace files atomically. Claim a pathname before
+    # the final digest check, so a concurrent publication cannot be unlinked
+    # merely because an earlier file at that name matched the acknowledgement.
+    try:
+        fd, temporary = tempfile.mkstemp(prefix=".confirmation-", suffix=".json", dir=INBOX_DIR)
+        try:
+            reserved = os.fstat(fd)
+            reservation_identity = (reserved.st_dev, reserved.st_ino)
+        finally:
+            os.close(fd)
+        claim = Path(temporary)
+    except OSError as exc:
+        return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
+    try:
+        path.replace(claim)
+    except OSError as exc:
+        preserved = {}
+        try:
+            current = claim.lstat()
+            if (current.st_dev, current.st_ino) == reservation_identity:
+                claim.unlink()  # only our still-empty reservation
+            else:
+                preserved = _preserve_claim(claim, path)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            preserved = {"retained_at": str(claim)}
+        return HTTPStatus.INTERNAL_SERVER_ERROR, {
+            "ok": False, "detail": str(exc), **preserved,
+        }
+    try:
+        claimed_digest = _sha(_read_claim(claim))
+    except OSError as exc:
+        return HTTPStatus.INTERNAL_SERVER_ERROR, {
+            "ok": False, "detail": str(exc), **_preserve_claim(claim, path),
+        }
+    if claimed_digest != declared_sha.lower():
+        return HTTPStatus.UNPROCESSABLE_ENTITY, {
+            "ok": False,
+            "detail": "inbox entry changed during confirmation; not deleting",
+            "expected": claimed_digest,
+            "received": declared_sha.lower(),
+            **_preserve_claim(claim, path),
+        }
+    try:
+        claim.unlink()
+    except OSError as exc:
+        return HTTPStatus.INTERNAL_SERVER_ERROR, {
+            "ok": False, "detail": str(exc), **_preserve_claim(claim, path),
+        }
     return HTTPStatus.OK, {"ok": True, "name": name, "deleted": True, "at": utc_ts()}

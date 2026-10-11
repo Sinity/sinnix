@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from http import HTTPStatus
+from pathlib import Path
 
 import pytest
 import sinnix_phone_dispatcher.inbox as inbox_mod
@@ -98,6 +100,133 @@ def test_confirming_a_receipt_deletes_it(isolated_state_dirs) -> None:
     assert status == HTTPStatus.OK
     assert payload["deleted"] is True
     assert not (isolated_state_dirs["receipts_dir"] / "r1.json").exists()
+    assert not list(isolated_state_dirs["inbox_dir"].glob(".confirmation-*.json"))
+
+
+@pytest.mark.parametrize("publish_again", [False, True])
+def test_confirmation_preserves_replacement_before_claim(
+    isolated_state_dirs, monkeypatch, publish_again,
+):
+    original = b'{"title":"original"}\n'
+    replacement = b'{"title":"replacement"}\n'
+    latest = b'{"title":"latest"}\n'
+    _write(isolated_state_dirs, "receipts", "r1.json", original.decode())
+    path = isolated_state_dirs["receipts_dir"] / "r1.json"
+    sha = inbox_mod._sha
+    calls = 0
+
+    def digest(body):
+        nonlocal calls
+        calls += 1
+        if calls == 1 or (calls == 2 and publish_again):
+            temporary = path.with_suffix(".next")
+            temporary.write_bytes(replacement if calls == 1 else latest)
+            temporary.replace(path)
+        return sha(body)
+
+    monkeypatch.setattr(inbox_mod, "_sha", digest)
+    status, payload = inbox_mod.confirm_inbox("receipts/r1.json", sha(original))
+    assert status == HTTPStatus.UNPROCESSABLE_ENTITY
+    assert path.read_bytes() == (latest if publish_again else replacement)
+    assert Path(payload["retained_at"]).read_bytes() == replacement
+    assert payload["current_path_restored"] is not publish_again
+
+
+def test_confirmation_keeps_new_publication_after_claim(isolated_state_dirs, monkeypatch):
+    original = b'{"title":"original"}\n'
+    replacement = b'{"title":"replacement"}\n'
+    _write(isolated_state_dirs, "receipts", "r1.json", original.decode())
+    path = isolated_state_dirs["receipts_dir"] / "r1.json"
+    sha = inbox_mod._sha
+    calls = 0
+
+    def digest(body):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            path.write_bytes(replacement)
+        return sha(body)
+
+    monkeypatch.setattr(inbox_mod, "_sha", digest)
+    status, payload = inbox_mod.confirm_inbox("receipts/r1.json", sha(original))
+    assert status == HTTPStatus.OK and payload["deleted"] is True
+    assert path.read_bytes() == replacement
+    assert not list(isolated_state_dirs["inbox_dir"].glob(".confirmation-*.json"))
+
+
+def test_claim_read_failure_preserves_receipt(isolated_state_dirs, monkeypatch):
+    text = '{"title":"retained"}\n'
+    _write(isolated_state_dirs, "receipts", "r1.json", text)
+    open_file = os.open
+
+    def fail_claim(path, flags, *args, **kwargs):
+        if Path(path).name.startswith(".confirmation-") and flags & os.O_NONBLOCK:
+            raise OSError("synthetic claim read failure")
+        return open_file(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", fail_claim)
+    status, payload = inbox_mod.confirm_inbox(
+        "receipts/r1.json", hashlib.sha256(text.encode()).hexdigest(),
+    )
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert Path(payload["retained_at"]).read_bytes() == text.encode()
+    assert (isolated_state_dirs["receipts_dir"] / "r1.json").read_bytes() == text.encode()
+
+
+def test_nonregular_replacement_is_preserved_without_blocking(isolated_state_dirs, monkeypatch):
+    text = '{"title":"original"}\n'
+    _write(isolated_state_dirs, "receipts", "r1.json", text)
+    path = isolated_state_dirs["receipts_dir"] / "r1.json"
+    sha = inbox_mod._sha
+
+    def replace_with_fifo(body):
+        path.unlink()
+        os.mkfifo(path)
+        return sha(body)
+
+    monkeypatch.setattr(inbox_mod, "_sha", replace_with_fifo)
+    status, payload = inbox_mod.confirm_inbox("receipts/r1.json", sha(text.encode()))
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert "not a regular file" in payload["detail"]
+    assert Path(payload["retained_at"]).is_fifo() and path.is_fifo()
+
+
+def test_interrupted_confirmation_retains_claimed_bytes(isolated_state_dirs, monkeypatch):
+    text = '{"title":"retained"}\n'
+    _write(isolated_state_dirs, "receipts", "r1.json", text)
+    sha = inbox_mod._sha
+    calls = 0
+
+    def interrupt(body):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise KeyboardInterrupt
+        return sha(body)
+
+    monkeypatch.setattr(inbox_mod, "_sha", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        inbox_mod.confirm_inbox("receipts/r1.json", sha(text.encode()))
+    claims = list(isolated_state_dirs["inbox_dir"].glob(".confirmation-*.json"))
+    assert len(claims) == 1 and claims[0].read_bytes() == text.encode()
+
+
+def test_ambiguous_rename_failure_never_removes_claimed_receipt(isolated_state_dirs, monkeypatch):
+    text = '{"title":"retained"}\n'
+    _write(isolated_state_dirs, "receipts", "r1.json", text)
+    replace = Path.replace
+
+    def committed_then_failed(path, target):
+        replace(path, target)
+        raise OSError("synthetic ambiguous rename failure")
+
+    monkeypatch.setattr(Path, "replace", committed_then_failed)
+    status, payload = inbox_mod.confirm_inbox(
+        "receipts/r1.json", hashlib.sha256(text.encode()).hexdigest(),
+    )
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert Path(payload["retained_at"]).read_bytes() == text.encode()
+    assert (isolated_state_dirs["receipts_dir"] / "r1.json").read_bytes() == text.encode()
 
 
 def test_reconfirming_a_gone_receipt_is_a_success(isolated_state_dirs) -> None:

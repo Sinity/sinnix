@@ -212,6 +212,15 @@ lie.
 | logcat                                               | **in**    | `sinnix phone logcat` over adb → lake                       |
 | BCR staging `*.oga` (export: `/sdcard/sinnix-calls`) | out       | BCR → scheduled adb preservation/audit → `phone-calls` lake |
 
+Inbox confirmation claims a one-shot file before its final digest check,
+then deletes only the claimed bytes matching the acknowledgement. A publication
+arriving at the original name stays intact. A conflicting claim or failed read
+is preserved as `.confirmation-*.json` in the private inbox root; the refusal
+returns `retained_at` and whether the original name was restored without
+overwriting another publication. These files are recovery evidence, outside the
+phone's normal inbox listing. An interrupted confirmation can also leave a
+claim there; retain it for owner reconciliation rather than deleting by age.
+
 The two device directories stay deliberately separate. `/sdcard/sinnix-ambient`
 is the uploader's: each closed chunk is POSTed, sha256-verified against what
 prime wrote, and deleted locally only on an ok, with `sinnix phone
