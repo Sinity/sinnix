@@ -75,7 +75,9 @@ wherever the queue has moved it; without one it addresses whatever the queue
 holds at the id it is given. A wait also re-reads which id holds its job
 while the job can still move. Batch manifests store each worker's and the
 landing's reference, so view, resume, cancellation and cleanup address the
-job the run queued.
+job the run queued. A wait timeout rechecks the addressed job before returning;
+it reports a terminal result if the job finished at the deadline. The displayed
+age includes the time spent waiting.
 
 Cleanup is bound to the same name. A launch input records the id its job was
 queued at, so a vacant id is no evidence that the job written there is gone;

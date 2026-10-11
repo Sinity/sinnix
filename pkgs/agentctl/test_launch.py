@@ -2102,3 +2102,20 @@ def test_a_declared_admission_envelope_reaches_the_job_and_its_command(
     assert not any(
         item.startswith("Memory") for item in written.get("unit_properties", [])
     )
+
+
+def test_wait_rechecks_terminal_state_at_observer_timeout(
+    fake_pueue: FakePueue, config: Config, project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+
+    def wait(task_id: int, *, timeout_seconds: float) -> None:
+        fake_pueue.succeed(task_id)
+        raise pueue.PueueTimeout("observer expired as the task finished")
+
+    monkeypatch.setattr(pueue, "wait", wait)
+    observed = launch.wait(started["job_id"], timeout_seconds=5)
+    assert observed["phase"] == "succeeded"
+    assert "wait_timed_out" not in observed

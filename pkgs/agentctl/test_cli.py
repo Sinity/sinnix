@@ -8,11 +8,12 @@ import subprocess
 import sys
 import time
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
 import pytest
-from agentctl import cli, github, manifest, pueue
+from agentctl import cli, github, manifest, operator_view, pueue
 from agentctl.config import Config
 from conftest import SELF_REVIEW, FakePueue, read_launch
 
@@ -950,3 +951,29 @@ def test_batch_queue_replaces_a_lost_landing_once_the_results_are_in(
 
     assert cli.main(["batch", "status", "0123abcd"]) == 0
     assert "pueue no longer has it" not in capsys.readouterr().out
+
+
+def test_wait_reports_elapsed_age_after_blocking(
+    fake_pueue: FakePueue, cli_config: Config,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+) -> None:
+    clock = datetime(2026, 1, 1, 12, tzinfo=UTC)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock
+
+    monkeypatch.setattr(operator_view, "datetime", Clock)
+
+    def wait(*args, **kwargs):
+        nonlocal clock
+        started = clock.isoformat()
+        clock += timedelta(minutes=10)
+        return {"job_id": 1, "label": "fixture:check", "phase": "running",
+                "started_at": started, "wait_timed_out": True}
+
+    monkeypatch.setattr(cli.launch, "wait", wait)
+    assert cli.main(["job", "wait", "1"]) == cli.EXIT_JOB_NOT_SUCCEEDED
+    text = capsys.readouterr().out
+    assert "(10m) (wait timed out)" in text

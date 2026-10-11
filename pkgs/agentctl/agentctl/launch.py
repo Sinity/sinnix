@@ -2493,6 +2493,9 @@ def wait(
             # A slice covering the whole remaining wait is the caller's own
             # timeout; a shorter one expired only to re-read the queue.
             if blocking >= remaining:
+                task = addressed(task_id, reference)
+                if task.terminal:
+                    return job_view(task)
                 return {**job_view(task), "wait_timed_out": True}
         except PueueError as error:
             detail = str(error)

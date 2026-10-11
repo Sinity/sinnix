@@ -769,12 +769,14 @@ class Output:
         return local.strftime("%m-%d %H:%M")
 
     def job_line(self, job: Mapping[str, Any]) -> str:
+        # A blocking wait can outlive the command-start snapshot.
+        now = datetime.now(UTC)
         started = job.get("started_at") or job.get("enqueued_at")
         ended = job.get("ended_at")
         when = (
-            f"finished {local_clock(ended)} after {age(started, parse_stamp(ended) or self.now)}"
+            f"finished {local_clock(ended)} after {age(started, parse_stamp(ended) or now)}"
             if ended
-            else f"since {local_clock(started)} ({age(started, self.now)})"
+            else f"since {local_clock(started)} ({age(started, now)})"
         )
         exit_text = (
             f" exit {job['exit_code']}" if job.get("exit_code") not in (None, 0) else ""
