@@ -198,10 +198,10 @@ in
               # line rather than embedding shell bodies.
               assertion =
                 let
-                  preStart = toString hm.systemd.user.services.sinnix-clodex.Service.ExecStartPre;
+                  condition = hm.systemd.user.services.sinnix-clodex.Service.ExecCondition;
                 in
-                lib.hasInfix "sinnix-clodex-aliases" preStart && !(lib.hasInfix "\n" preStart);
-              message = "Clodex alias reconciliation must run as a one-line store script.";
+                lib.hasInfix "sinnix-clodex-patch-check" condition && !(lib.hasInfix "\n" condition);
+              message = "Clodex alias reconciliation and patch validation must share one startup condition.";
             }
             {
               assertion =
@@ -780,6 +780,7 @@ in
             grep -Fq '.claudeVersion' "$patch_check"
             grep -Fq '.patchedSize' "$patch_check"
             grep -Fq 'run clodex patch' "$patch_check"
+            SINNIX_CLODEX_MODULE=${../../modules/services/clodex.nix} python3 ${../../scripts/tests/test_clodex_patch_check.py}
             test -x "$HOME/.local/bin/lane"
             bash -n "$HOME/.local/bin/lane"
             python3 - "$HOME/.hermes/config.yaml" <<'PYCODE'
