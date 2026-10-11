@@ -977,3 +977,26 @@ def test_wait_reports_elapsed_age_after_blocking(
     assert cli.main(["job", "wait", "1"]) == cli.EXIT_JOB_NOT_SUCCEEDED
     text = capsys.readouterr().out
     assert "(10m) (wait timed out)" in text
+
+
+@pytest.mark.parametrize("verb", ["start", "fire"])
+def test_job_launch_wait_timeout_is_not_success(
+    verb: str, fake_pueue: FakePueue, cli_config: Config,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert cli.main(["job", verb, "fixture", "check", "--wait",
+                     "--timeout-seconds", "1"]) == cli.EXIT_JOB_NOT_SUCCEEDED
+    observed = json.loads(capsys.readouterr().out)
+    assert observed["wait_timed_out"] is True
+    assert observed["phase"] == "running"
+    assert fake_pueue.task(observed["job_id"]).status == "Running"
+
+
+@pytest.mark.parametrize("verb", ["start", "fire"])
+def test_job_launch_wait_success_is_success(
+    verb: str, fake_pueue: FakePueue, cli_config: Config,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
+    assert cli.main(["job", verb, "fixture", "check", "--wait"]) == cli.EXIT_OK
+    assert json.loads(capsys.readouterr().out)["phase"] == "succeeded"

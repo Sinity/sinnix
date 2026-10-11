@@ -525,7 +525,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                 config=config,
             )
         out.write(started, out.job_line(started))
-        if started.get("terminal"):
+        if started.get("terminal") or started.get("wait_timed_out"):
             return (
                 EXIT_OK
                 if started.get("phase") == "succeeded"
@@ -551,7 +551,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             else f"{fired['label']} not fired: task(s) {fired['active']} still active"
         )
         out.write(fired, text)
-        if fired.get("terminal"):
+        if fired.get("terminal") or fired.get("wait_timed_out"):
             return (
                 EXIT_OK if fired.get("phase") == "succeeded" else EXIT_JOB_NOT_SUCCEEDED
             )
