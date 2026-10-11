@@ -58,6 +58,16 @@ action failed; 2 usage; 3 a tool agentctl drives failed; 4 the waited job
 The CLI decides nothing: it dispatches what it is told and reports; a run's
 "next" on the view describes its state.
 
+`view [p]` keeps jobs, runs and attention scoped to the selected project. Its
+group rows distinguish that project's work from global queue occupancy:
+the existing flat counts have `scope=project`, while `global` carries active
+counts and the queue's observed nominal `parallel` width from the same status
+response. Text names both scopes. Running, queued, paused and stashed tasks
+are counted; unavailable global data is unknown, never inferred from project
+zeroes. These counts do not promise admission order or free slots: dependencies,
+pause state and promotion policy also affect admission. Use bounded `job snapshot`
+or gateway `jobs.queues` for global job and holder details.
+
 ## Jobs
 
 A job is a pueue task. Its id is pueue's task id, its pool is pueue's group,

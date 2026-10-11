@@ -337,8 +337,8 @@ def test_render_shows_groups_attention_jobs_runs_with_timing_and_ready() -> None
     text = operator_view.render(snapshot())
 
     assert "== fixture at" in text
-    assert "normal idle PAUSED" in text
-    assert "agent 1 running" in text
+    assert "normal global unknown; fixture idle PAUSED" in text
+    assert "agent global unknown; fixture 1 running" in text
     assert "! job 3 fixture:check failed exit 2 at" in text and "(20m ago)" in text
     assert "! run run-2 landing dependency-failed: job logs 7" in text
     assert "== jobs: 5 active" in text
@@ -466,6 +466,98 @@ def test_collect_reads_each_source_and_keeps_going_when_one_is_down(
     assert degraded.tasks == ()
     assert degraded.errors and degraded.errors[0].startswith("pueue:")
     assert "! pueue:" in operator_view.render(degraded)
+    assert "pueue unavailable" in operator_view.render(degraded)
+    assert degraded.to_dict()["groups"] == {}
+    assert degraded.to_dict()["queue_read"] is False
+
+
+@pytest.mark.parametrize("group_paused", [False, True])
+def test_collect_distinguishes_global_occupancy_from_project_work(
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    group_paused: bool,
+) -> None:
+    project = load_project_adapter(project_root)
+    first = fake_pueue.add(
+        group="bulk",
+        label="other:scan",
+        command=("true",),
+        working_directory=project_root,
+    )
+    fake_pueue.add(
+        group="bulk",
+        label="third:check",
+        command=("true",),
+        working_directory=project_root,
+    )
+    queued = fake_pueue.add(
+        group="bulk",
+        label="fixture:check",
+        command=("true",),
+        working_directory=project_root,
+        after=(first,),
+    )
+    stashed = fake_pueue.add(
+        group="bulk",
+        label="fixture:later",
+        command=("true",),
+        working_directory=project_root,
+        stashed=True,
+    )
+    paused = fake_pueue.add(
+        group="bulk",
+        label="other:paused",
+        command=("true",),
+        working_directory=project_root,
+    )
+    fake_pueue._set(paused, status="Paused")
+    if group_paused:
+        fake_pueue.pause("bulk")
+    reads = 0
+
+    def status() -> operator_view.pueue.Status:
+        nonlocal reads
+        reads += 1
+        return fake_pueue.status()
+
+    def unexpected_read() -> None:
+        raise AssertionError("collect must use one coherent pueue status response")
+
+    monkeypatch.setattr(operator_view.pueue, "status", status)
+    monkeypatch.setattr(operator_view.pueue, "tasks", unexpected_read)
+    monkeypatch.setattr(operator_view.pueue, "groups_status", unexpected_read)
+    monkeypatch.setattr(operator_view, "SubprocessBdReader", lambda root: FakeBd())
+    collected = operator_view.collect(config, project, now=NOW)
+    payload = collected.to_dict()
+    text = operator_view.render(collected)
+
+    assert reads == 1 and payload["queue_read"] is True
+    assert [row["job_id"] for row in payload["jobs"]] == [queued, stashed]
+    assert payload["groups"]["bulk"] == {
+        "status": "Paused" if group_paused else "Running",
+        "scope": "project",
+        "running": 0,
+        "queued": 1,
+        "paused": 0,
+        "stashed": 1,
+        "global": {"running": 2, "queued": 1, "paused": 1, "stashed": 1, "parallel": 1},
+    }
+    assert (
+        "bulk global 2 running 1 queued 1 paused 1 stashed, parallel 1; fixture 1 queued 1 stashed"
+        in text
+    )
+    assert ("fixture 1 queued 1 stashed PAUSED" in text) is group_paused
+    assert "bulk global idle" not in text
+
+    fake_pueue.fail_tasks = True
+    unavailable = operator_view.collect(config, project, now=NOW)
+    assert reads == 2
+    assert unavailable.to_dict()["queue_read"] is False
+    assert unavailable.to_dict()["groups"] == {}
+    assert "pueue unavailable" in operator_view.render(unavailable)
+    assert "global idle" not in operator_view.render(unavailable)
 
 
 def test_to_dict_carries_stage_next_timing_and_group_counts() -> None:
@@ -473,9 +565,12 @@ def test_to_dict_carries_stage_next_timing_and_group_counts() -> None:
     assert payload["schema"] == "sinnix.agentctl.view.v3"
     assert payload["groups"]["normal"] == {
         "status": "Paused",
+        "scope": "project",
         "running": 0,
         "queued": 0,
         "paused": 0,
+        "stashed": 0,
+        "global": None,
     }
     assert payload["groups"]["agent"]["running"] == 1
     runs = {row["run"]: row for row in payload["runs"]}

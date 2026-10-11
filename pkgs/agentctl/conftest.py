@@ -156,13 +156,9 @@ class FakePueue:
             if fragment in task.command
         }
 
-    def live(self) -> Status:
+    def status(self) -> Status:
         return Status(
-            {
-                task_id: task
-                for task_id, task in self.tasks().items()
-                if not task.terminal
-            },
+            self.tasks(),
             {
                 name: {
                     "status": "Paused" if name in self.paused else "Running",
@@ -170,6 +166,13 @@ class FakePueue:
                 }
                 for name, width in self.groups.items()
             },
+        )
+
+    def live(self) -> Status:
+        queue = self.status()
+        return Status(
+            {task_id: task for task_id, task in queue.tasks.items() if not task.terminal},
+            queue.groups,
         )
 
     def start(self, task_id: int) -> None:
@@ -377,6 +380,7 @@ def fake_pueue(monkeypatch: pytest.MonkeyPatch) -> FakePueue:
     for name in (
         "add",
         "tasks",
+        "status",
         "running_tasks",
         "task",
         "tasks_by_command",

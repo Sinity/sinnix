@@ -222,6 +222,11 @@ class Snapshot:
     # Whether `tasks` is the queue's answer. When it is not, an empty task
     # list says nothing about the jobs a run recorded.
     queue_read: bool = True
+    # Global active counts and nominal width from the same queue response.
+    # Missing metadata is unknown, never inferred from project-only tasks.
+    global_groups: Mapping[str, Mapping[str, int | None]] = field(
+        default_factory=dict
+    )
 
     def to_dict(self) -> dict[str, Any]:
         references: dict[str, Task] = {}
@@ -238,10 +243,13 @@ class Snapshot:
             "schema": "sinnix.agentctl.view.v3",
             "project": self.project_id,
             "at": self.now.isoformat(),
+            "queue_read": self.queue_read,
             "groups": {
                 name: {
                     "status": status,
+                    "scope": "project",
                     **_group_counts(self.tasks, name),
+                    "global": self.global_groups.get(name) if self.queue_read else None,
                 }
                 for name, status in sorted(self.groups.items())
             },
@@ -445,6 +453,7 @@ def _group_counts(
         "running": counts.get("running", 0),
         "queued": counts.get("queued", 0),
         "paused": counts.get("paused", 0),
+        "stashed": counts.get("stashed", 0),
     }
 
 
@@ -460,15 +469,29 @@ def collect(
     prefix = f"{project.project_id}:"
     queue_read = True
     try:
-        every = pueue.tasks()
+        queue = pueue.status()
+        every = tuple(sorted(queue.tasks.values(), key=lambda item: item.task_id))
+        groups = {
+            name: str(detail.get("status") or "")
+            for name, detail in queue.groups.items()
+        }
+        global_groups: dict[str, dict[str, int | None]] = {}
+        for name, detail in queue.groups.items():
+            parallel = detail.get("parallel_tasks")
+            global_groups[name] = {
+                **_group_counts(every, name),
+                "parallel": parallel
+                if isinstance(parallel, int) and not isinstance(parallel, bool)
+                else None,
+            }
         tasks = tuple(
             task
-            for task in sorted(every.values(), key=lambda item: item.task_id)
+            for task in every
             if task.label.startswith(prefix)
         )
-        groups = pueue.groups_status()
     except PueueError as error:
         tasks, groups, queue_read = (), {}, False
+        global_groups = {}
         errors.append(f"pueue: {error}")
     runs = tuple(list_runs(config, project.project_id))
     reader = SubprocessBdReader(project.root)
@@ -490,6 +513,7 @@ def collect(
         ready=ready,
         errors=tuple(errors),
         queue_read=queue_read,
+        global_groups=global_groups,
     )
 
 
@@ -586,8 +610,25 @@ def render(snapshot: Snapshot) -> str:
         detail = " ".join(
             f"{count} {state}" for state, count in counts.items() if count
         )
+        global_counts = (
+            snapshot.global_groups.get(group) if snapshot.queue_read else None
+        )
+        if global_counts is None:
+            global_detail = "unknown"
+        else:
+            global_detail = (
+                " ".join(
+                    f"{global_counts[state]} {state}"
+                    for state in ("running", "queued", "paused", "stashed")
+                    if global_counts.get(state)
+                )
+                or "idle"
+            )
+            parallel = global_counts.get("parallel")
+            global_detail += f", parallel {parallel if parallel is not None else '?'}"
         group_text.append(
-            f"{group} {detail or 'idle'}{' PAUSED' if status == 'Paused' else ''}"
+            f"{group} global {global_detail}; {snapshot.project_id} {detail or 'idle'}"
+            f"{' PAUSED' if status == 'Paused' else ''}"
         )
     lines.append("== queue: " + (" · ".join(group_text) or "pueue unavailable"))
 
