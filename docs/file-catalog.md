@@ -55,7 +55,8 @@ leave a partially written catalog.
 
 Use `observe observations.json --expected-sha256 DIGEST` for reviewed location
 changes. Each row names an asset ID, actor, basis, reason and explicit action:
-`metadata`, `content_revision`, `collection_replacement` or `unavailable`.
+`metadata`, `content_revision`, `collection_replacement`, `unavailable` or
+`recover_copy`.
 Available locations also require the exact reviewed `expected_identity`.
 The digest guards the whole catalog and refuses stale review before mutation.
 The returned digest identifies this operation’s committed catalog, even if a
@@ -71,6 +72,16 @@ recorded when available. External locations require a mounted ancestor within
 their declared external root before payload metadata is probed. A mounted child
 of `/mnt` is checked even when `/mnt` itself is a container directory. These
 checks do not hash payloads.
+
+For an exact retained copy of a missing inspected file, use `observe` with
+`action: recover_copy`, `new_path`, and the reviewed `expected_identity`.
+The catalog digest guard still applies. Recovery requires a recorded full
+SHA-256 and a regular, non-symlink destination of at most 8 MiB; sampled hashes,
+unavailable mounts, occupied original addresses and conflicting catalog paths
+are refused. The destination is hashed with descriptor and path race checks.
+Matching bytes retain the UUID, inspections and earlier identity evidence,
+while recording the new filesystem metadata and original address. This proves
+byte equality with the recorded digest, not a rename or unchanged inode.
 
 Record an observation after inspecting a file, while its content and scope are
 still available. Use specific descriptions, date roles and evidence for

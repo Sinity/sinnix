@@ -672,6 +672,53 @@ def location_diagnosis(path: Path, kind: str) -> dict:
         return {"status": "inaccessible", "reason": str(exc)}
 
 
+def recover_copy(asset: dict[str, Any], row: dict[str, Any], assets: dict) -> None:
+    """Recover an unavailable inspected file, not a guessed replacement."""
+    prior = copy.deepcopy(asset['identity'])
+    digest = prior.get('sha256')
+    limit = 8 * 1024 * 1024
+    if (asset['kind'] != 'file' or not isinstance(digest, str)
+            or len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest)
+            or prior.get('fingerprint_kind', 'sha256-full') != 'sha256-full'
+            or not isinstance(prior.get('size'), int) or not 0 <= prior['size'] <= limit):
+        raise CatalogError("recovery requires a recorded full SHA-256 for a regular file up to 8 MiB")
+    old = Path(asset['current_path'])
+    if old.is_symlink() or location_diagnosis(old, 'file')['status'] != 'missing':
+        raise CatalogError("recovery requires the original location to be missing")
+    destination = Path(normalized(row['new_path']))
+    if any(a is not asset and a['current_path'] == str(destination) for a in assets.values()):
+        raise CatalogError("recovery destination already belongs to another asset")
+    diagnosis = location_diagnosis(destination, 'file')
+    if diagnosis['status'] != 'available' or diagnosis['identity'] != row.get('expected_identity'):
+        raise CatalogError("recovery source metadata differs from reviewed observation")
+    with os.fdopen(os.open(destination, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as handle:
+        before = os.fstat(handle.fileno())
+        if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
+            raise CatalogError("recovery requires a bounded regular file")
+        for key, attr in [('device', 'st_dev'), ('inode', 'st_ino'), ('size', 'st_size'),
+                          ('mtime_ns', 'st_mtime_ns')]:
+            if getattr(before, attr) != diagnosis['identity'][key]:
+                raise CatalogError("recovery source changed before hashing")
+        raw = handle.read(limit + 1)
+        after = os.fstat(handle.fileno())
+    fields = ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns', 'st_mode')
+    if (any(getattr(before, k) != getattr(after, k) for k in fields)
+            or identity(destination) != diagnosis['identity']):
+        raise CatalogError("recovery source changed while hashing")
+    if len(raw) != prior['size'] or hashlib.sha256(raw).hexdigest() != digest:
+        raise CatalogError("recovered bytes differ from recorded full SHA-256")
+    if str(old) not in asset.setdefault('previous_paths', []):
+        asset['previous_paths'].append(str(old))
+    asset['current_path'] = str(destination)
+    asset['identity'] = {**diagnosis['identity'], 'sha256': digest}
+    record_location(asset, {
+        'observed_at': now(), 'actor': row['actor'], 'action': 'recover_copy',
+        'basis': row['basis'], 'reason': row['reason'], 'source': str(old),
+        'path': str(destination), **diagnosis, 'prior_catalog_identity': prior,
+        'content_continuity': 'verified_full_sha256', 'sha256': digest,
+    })
+
+
 def cmd_observe(args: argparse.Namespace) -> int:
     """Explicit reviewed metadata observations or revisions, never guessed continuity."""
     path = Path(args.catalog)
@@ -688,10 +735,13 @@ def cmd_observe(args: argparse.Namespace) -> int:
             seen.add(row.get('id'))
             asset = assets[row['id']]
             action = row.get('action')
-            if action not in ('metadata', 'content_revision', 'collection_replacement', 'unavailable'):
+            if action not in ('metadata', 'content_revision', 'collection_replacement', 'unavailable', 'recover_copy'):
                 raise CatalogError("explicit observation action required")
             if not all(isinstance(row.get(k), str) and row[k].strip() for k in ('actor', 'basis', 'reason')):
                 raise CatalogError("actor, basis and reason required")
+            if action == 'recover_copy':
+                recover_copy(asset, row, assets)
+                continue
             diagnosis = location_diagnosis(Path(asset['current_path']), asset['kind'])
             observation = {"observed_at": now(), "actor": row['actor'], "basis": row['basis'], "reason": row['reason'],
                            "action": action, "path": asset['current_path'], **diagnosis,
