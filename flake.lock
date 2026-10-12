@@ -773,11 +773,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1791775098,
-        "narHash": "sha256-8s0+M5fvLvBGWluc9yAhCSY7Fy2L6p46Dv2MSBBZELM=",
+        "lastModified": 1791780122,
+        "narHash": "sha256-ad98rfNiZGU7e/MMxvc4pjxeUrmPe+KA9JSyI5T1xfQ=",
         "ref": "master",
-        "rev": "e3b21e44535f5e4426119a46c522d4a67d933f48",
-        "revCount": 715,
+        "rev": "ebe8382eb959604c6e82862ad154e6be18c30042",
+        "revCount": 716,
         "type": "git",
         "url": "https://github.com/Sinity/sinity-lynchpin.git"
       },
