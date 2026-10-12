@@ -1169,7 +1169,10 @@ print((b[0] + b[2]) // 2, (b[1] + b[3]) // 2)
   sleep 3
   tap_control com.xiaomi.wearable:id/device_tv_synchronize Sync Synchronizuj
   sleep 30
-  adb_any shell am broadcast -n dev.sinnix.phone/.capture.WatchdogReceiver >/dev/null 2>&1
+  # The watchdog is deliberately not exported. Shell broadcasts finish with
+  # result=0 even when Android refuses delivery; the rooted phone must send it
+  # as root to run the Health Connect sweep after the band sync.
+  adb_shell_args su -c "$(sinnix-remote-command am broadcast -n dev.sinnix.phone/.capture.WatchdogReceiver)"
   adb_any shell rm -f "$ui_dump"
   echo "health-sync: Mi Fitness sync triggered; verify imported measurement timestamps"
   ;;
