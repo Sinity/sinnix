@@ -1,43 +1,9 @@
-"""Prime's answer to the phone.
+"""Prime's phone transport and retained-state tools.
 
-The phone has two ways to reach prime and they carry identical JSON:
-
-  * the FILE plane -- the app writes intents into its outbox, the wifi-gated
-    drain collects them, and `dispatch` executes whatever landed. Always
-    correct, cadence-limited to the drain interval;
-  * the LIVE plane -- the app POSTs the same object to /phone/v1/* through the
-    hub over the tailnet, and `serve` executes it immediately.
-
-One implementation handles both, which is the point. If the live path had its
-own execution logic the two planes would drift, and the drift would show up as
-"it worked when I was home" -- the least debuggable class of bug.
-
-Idempotency is the send_token. The drain can legitimately deliver the same
-intent twice (a transfer whose exit status lied, a re-run after a partial
-sweep), and an intent the phone also sent live arrives a second time by
-design. Every execution records its token, and a token already seen is a
-no-op that still emits its receipt, so the phone's confirmation does not
-depend on which delivery won.
-
-No auth, same as the rest of the hub: the tailnet is the boundary. Unlike the
-feedback spool this surface does execute things, but everything it can execute
-is something the operator's own account could do from a shell on this machine,
-and every agent on this host is already root-equivalent.
-
-A third channel lives in this same process, started by the same `serve`
-command: the phone's persistent always-on telemetry push (speech, the app's
-event mirror) used to be a separate unit, `sinnix-phone-receiver`, listening
-on its own tailscale0 TCP port. It moved in here (sinnix-tjqi) because it was
-already the dispatcher's sibling in everything but process boundary -- same
-host, same tailnet, same "the app connects, prime demuxes" shape -- and a
-second always-running Python process bought nothing a second thread did not.
-The wire protocol, port, and on-disk lane layout are unchanged; the app was
-not touched.
-
-This was `scripts/sinnix-phone-dispatcher` until it moved to
-pkgs/sinnix-phone-dispatcher (sinnix-svvz): a real Python package so it can
-depend on pkgs/sinnix-capture instead of carrying a private port of its
-writer, rather than a `runtimeInputs`-only shell wrapper around one file.
+The app pushes durable requests and captures over HTTP. Local dispatch handles
+retained requests through the same execution boundary. Only verified completed
+outcomes acknowledge identical retries; partial or unknown effects stay retained.
+The service also owns the phone's always-on telemetry receiver.
 """
 
 from __future__ import annotations
@@ -118,6 +84,10 @@ def build_parser() -> argparse.ArgumentParser:
     repair.add_argument("--expected-sha256", required=True)
     repair.set_defaults(func=_repair_events)
 
+    event_status = sub.add_parser("event-status", help="read the bounded retained event tail")
+    event_status.add_argument("--file", type=Path)
+    event_status.set_defaults(func=_event_status)
+
     return parser
 
 
@@ -134,4 +104,11 @@ def _repair_events(args: argparse.Namespace) -> int:
             repair_event_day(args.day, args.source, args.expected_sha256), indent=2
         )
     )
+    return 0
+
+
+def _event_status(args: argparse.Namespace) -> int:
+    from .event_status import read_event_status
+
+    print(json.dumps(read_event_status(args.file)))
     return 0

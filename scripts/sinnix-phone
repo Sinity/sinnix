@@ -728,27 +728,23 @@ app-status)
     for f in "$LAKE_ROOT"/events/events-*.jsonl; do
       [ -e "$f" ] && events_file="$f"
     done
-    # Tailed, not slurped: one day file reached 3.5 GB after a Health Connect
-    # backfill, and `jq -s` on that is an OOM rather than an answer. The
-    # questions here are all about the newest records.
-    pushed=$([ -n "$events_file" ] && tail -n 2000 "$events_file" | jq -rs '
-      [ .[] | select(type == "object") ] as $e
-      | ($e | map(select(.ts)) | sort_by(.ts) | last) as $last
-      | if $last == null then "" else
-          "ts\t\($last.ts)",
-          ($e | map(select(.kind == "chunk_closed")) | last | if . then "chunk\t\(.chunk)" else empty end),
-          ($e | map(select((.kind // "") | startswith("chunk_upload"))) | last
-             | if . then "upload\t\(.kind)\(if .reason then " — \(.reason)" else "" end)" else empty end)
-        end' 2>/dev/null)
-    if [ -z "$pushed" ]; then
-      echo "            and nothing has been pushed either — phone offline, or capture stopped"
+    # Limit payload bytes as well as individual records; line counts alone
+    # cannot bound Health Connect records. This reads only complete JSON lines.
+    if [ -n "$events_file" ]; then
+      pushed=$(sinnix-phone-dispatcher event-status --file "$events_file")
+    else
+      pushed=$(sinnix-phone-dispatcher event-status)
+    fi
+    pushed_state=$(printf '%s' "$pushed" | jq -r '.state')
+    if [ "$pushed_state" != "observed" ]; then
+      echo "events    : retained source $pushed_state; capture and upload state unavailable"
       exit 0
     fi
-    pushed_ts=$(echo "$pushed" | awk -F'\t' '$1 == "ts" { print $2 }')
-    echo "events    : $(( $(date -u +%s) - $(date -u -d "$pushed_ts" +%s) ))s since the phone's last event"
-    echo "$pushed" | awk -F'\t' '
-      $1 == "chunk"  { printf "last chunk: %s (closed, per the phone)\n", $2 }
-      $1 == "upload" { printf "uploads   : %s\n", $2 }'
+    pushed_ts=$(printf '%s' "$pushed" | jq -r '.ts')
+    echo "events    : $(( $(date -u +%s) - $(date -u -d "$pushed_ts" +%s) ))s since newest readable retained event"
+    printf '%s' "$pushed" | jq -r '
+      if .chunk then "last chunk: \(.chunk) (closed, per the phone)" else empty end,
+      if .upload then "uploads   : \(.upload)" else empty end'
     exit 0
   fi
   installed=$(adb_any shell pm list packages "$APP_ID" 2>/dev/null | tr -d '\r')

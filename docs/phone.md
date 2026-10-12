@@ -111,6 +111,8 @@ sinnix phone nix-switch     # activate the declared Nix-on-Droid profile
 sinnix phone chroot-verify  # verify the near-native Debian environment
 ```
 
+When device control is unavailable, `app-status` reads at most the final 4 MiB of the retained event day and skips oversized or partial records. It reports the newest readable event and distinguishes missing, unreadable and empty sources; it cannot establish current capture state from an unavailable source.
+
 `app-install` needs adb over USB or the tailnet. Android still requires the
 phone to be unlocked for some package and permission operations.
 

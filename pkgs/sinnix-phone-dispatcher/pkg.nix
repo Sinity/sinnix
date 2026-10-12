@@ -48,7 +48,7 @@ python3Packages.buildPythonApplication {
     runHook postCheck
   '';
   meta = {
-    description = "Prime's half of the phone's dual transport -- the live JSON API, the drained-intent dispatcher, and the always-on telemetry receiver";
+    description = "Prime's phone transport, retained-request dispatcher, and telemetry receiver";
     mainProgram = "sinnix-phone-dispatcher";
     license = lib.licenses.mit;
   };
