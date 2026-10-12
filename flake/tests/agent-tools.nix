@@ -434,7 +434,8 @@ in
             managedWork.CPUWeight < userSlices.app.CPUWeight
             && managedWork.IOWeight < userSlices.app.IOWeight
             && managedWork.MemoryHigh == "20G"
-            && !(managedWork ? MemoryMax)
+            && managedWork.MemoryMax == "20G"
+            && managedWork.MemorySwapMax == "0"
             && !(managedWork ? ManagedOOMSwap)
             && !(managedWork ? ManagedOOMMemoryPressure)
             && userSlices.app.MemoryLow == "6G"
@@ -493,12 +494,12 @@ in
             && poolSlices.agentctl-pytest-heavy.ManagedOOMMemoryPressure == "kill"
             && poolSlices.agentctl-pytest-heavy.CPUWeight == 200
             && poolSlices.agentctl-pytest-heavy.IOWeight == 200
-            && poolSlices.agentctl-bulk.MemoryHigh == "16G"
-            && poolSlices.agentctl-bulk.MemoryMax == "20G"
+            && poolSlices.agentctl-bulk.MemoryHigh == "10G"
+            && poolSlices.agentctl-bulk.MemoryMax == "10G"
             && poolSlices.agentctl-bulk.MemorySwapMax == "0"
             && poolSlices.agentctl-bulk.ManagedOOMMemoryPressure == "kill"
-            && poolSlices.agentctl-bulk.CPUWeight == 100
-            && poolSlices.agentctl-bulk.IOWeight == 100
+            && poolSlices.agentctl-bulk.CPUWeight == 20
+            && poolSlices.agentctl-bulk.IOWeight == 10
             && lib.all (slice: slice.IOAccounting == true) (lib.attrValues poolSlices)
           )
           "agentctl coordinator work must yield to protected interactive slices; pool slices own fixed caps";

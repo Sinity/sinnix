@@ -378,15 +378,12 @@ rec {
         # starved behind an idle desktop and the coordinator's own polls.
         CPUWeight = 90;
         IOWeight = 100;
-        # The whole job plane's memory policy, and the only one: host memory
-        # (31 GB) minus the desktop reservation below (app 6G + session 5G +
-        # desktop-shell 512M, measured 2026-09-02 21:30 against app.slice peak
-        # 9 GB and desktop.slice peak 10 GB). Jobs collectively use what is
-        # left; nothing meters bytes per job or per pool.
+        # Bound the aggregate job plane, not only its individual pools.
+        # Desktop reservations are reclaim protection, not a substitute for
+        # a hard limit on background allocations.
         MemoryHigh = "20G";
-        # A little swap absorbs a burst; more of it is where the host went to
-        # die (14 GB of swap, ten-minute preflights, 2026-09-02).
-        MemorySwapMax = "2G";
+        MemoryMax = "20G";
+        MemorySwapMax = "0";
       };
       agentctl-work = {
         IOAccounting = true;
@@ -506,21 +503,15 @@ rec {
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
       };
-      # Sized from 30 days of cgroup_memory_sample (2026-09-14), not from a
-      # guess: user.build p95 9.35G / p99 12.10G / peak 16.43G, and the
-      # agentctl work slice p99 14.63G / peak 18.86G. At MemoryHigh 10G a full
-      # `check` peaked at 10.6G, crossed the throttle line into sustained
-      # reclaim (82k high events), drove its own memory PSI past the 50% limit
-      # below, and systemd-oomd killed 18 of its processes -- a kill loop the
-      # hard MemoryMax never even participated in. The ceiling stays at the
-      # parent plane's own MemoryHigh so a genuine runaway is still bounded,
-      # and swap stays at zero so it is killed rather than paging the desktop.
+      # Bulk work yields to interactive readers and fails within its memory
+      # budget. Keeping the soft and hard limits equal avoids prolonged
+      # memory.high reclaim before an oversized workload reaches its cap.
       agentctl-bulk = {
         IOAccounting = true;
-        CPUWeight = 100;
-        IOWeight = 100;
-        MemoryHigh = "16G";
-        MemoryMax = "20G";
+        CPUWeight = 20;
+        IOWeight = 10;
+        MemoryHigh = "10G";
+        MemoryMax = "10G";
         MemorySwapMax = "0";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";

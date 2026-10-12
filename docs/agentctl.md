@@ -264,6 +264,13 @@ pytest-heavy and bulk slices have fixed memory, swap, CPU and IO budgets,
 `MemorySwapMax=0`, and are killed by systemd-oomd at their own memory
 pressure; they do not choose capacity from instantaneous free RAM.
 
+The aggregate AgentCTL slice has a 20 GiB hard memory cap and cannot swap.
+Bulk work has a 10 GiB hard cap, with its soft threshold at the same value to
+avoid a prolonged reclaim loop before failure. Bulk CPU and IO weights are
+20 and 10, below interactive app and session weights. App and session memory
+reservations remain 6 GiB and 5 GiB. Oversized bulk operations must reduce
+their working set; a declared launch does not permit starving the desktop.
+
 `job cancel --actor <requester> --reason <reason>` retains the latest request
 for the selected attempt before stopping it. The default actor is the OS user;
 the observed UID is recorded separately from that declared label. An omitted
