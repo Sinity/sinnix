@@ -145,7 +145,9 @@ resolve_phone_host() {
   return 1
 }
 
-PHONE_TS_IP="${SINNIX_PHONE_IP:-$(resolve_phone_host || true)}"
+PHONE_TS_IP="${SINNIX_PHONE_IP:-$(tailscale_phone_ip || true)}"
+PHONE_TS_IP="${PHONE_TS_IP:-$PHONE_TS_IP_DEFAULT}"
+PHONE_SSH_HOST=""
 ADB_TARGET="${PHONE_TS_IP}:5555"
 LAKE_ROOT="${SINNIX_PHONE_LAKE:-/realm/device/shared/phone}"
 PHONE_STATE="${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}"
@@ -155,7 +157,14 @@ PHONE_STATE="${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}"
 # including a `"$0" subcmd` re-invocation, which is a separate process.
 rsync_ssh="ssh ${ssh_phone_opts[*]}"
 # Raw command text is reserved for fixed scripts and the explicit shell command.
-ssh_phone() { ssh "${ssh_phone_opts[@]}" "${PHONE_USER}@${PHONE_TS_IP}" "$@"; }
+ssh_phone() {
+  # Device-only commands need no Termux discovery. Resolve authenticated SSH
+  # routing only when a command actually asks for that transport.
+  if [ -z "$PHONE_SSH_HOST" ]; then
+    PHONE_SSH_HOST=$(resolve_phone_host || true)
+  fi
+  ssh "${ssh_phone_opts[@]}" "${PHONE_USER}@${PHONE_SSH_HOST}" "$@"
+}
 adb_phone() { ANDROID_SERIAL="$ADB_TARGET" adb "$@"; }
 
 # `adb connect` to an unreachable host never returns on its own -- it is not
@@ -164,10 +173,8 @@ adb_phone() { ANDROID_SERIAL="$ADB_TARGET" adb "$@"; }
 # here is time-boxed; without that a status check hangs indefinitely instead
 # of reporting "adb down".
 ensure_adb() {
-  if ! ANDROID_SERIAL="$ADB_TARGET" adb get-state >/dev/null 2>&1; then
-    timeout 8 adb connect "$ADB_TARGET" >/dev/null 2>&1 || true
-    sleep 1
-  fi
+  adb_resolve || return 1
+  ADB_TARGET="$ADB_RESOLVED"
 }
 
 APP_ID="dev.sinnix.phone"
@@ -194,16 +201,30 @@ ADB_RESOLVED="${ADB_RESOLVED:-}"
 # resolve first; everything after is a direct adb invocation.
 adb_resolve() {
   [ -n "$ADB_RESOLVED" ] && return 0
-  if ANDROID_SERIAL="$ADB_TARGET" adb get-state >/dev/null 2>&1; then
-    ADB_RESOLVED="$ADB_TARGET"
-    return 0
+  local host target cached
+  cached=$(cat "$PHONE_HOST_CACHE" 2>/dev/null || true)
+  local -a network_hosts=("$PHONE_TS_IP")
+  if [ -z "${SINNIX_PHONE_IP:-}" ]; then
+    network_hosts+=("$PHONE_MDNS_NAME")
+    [ -z "$cached" ] || network_hosts+=("$cached")
   fi
-  timeout 8 adb connect "$ADB_TARGET" >/dev/null 2>&1 || true
-  if ANDROID_SERIAL="$ADB_TARGET" adb get-state >/dev/null 2>&1; then
-    ADB_RESOLVED="$ADB_TARGET"
-    return 0
+  for host in "${network_hosts[@]}"; do
+    target="${host}:5555"
+    if ! ANDROID_SERIAL="$target" adb get-state >/dev/null 2>&1; then
+      timeout 8 adb connect "$target" >/dev/null 2>&1 || true
+    fi
+    if ANDROID_SERIAL="$target" adb get-state >/dev/null 2>&1; then
+      ADB_RESOLVED="$target"
+      return 0
+    fi
+  done
+  local usb_targets
+  usb_targets=$(adb devices | awk '$2 == "device" && $1 !~ /:/ { print $1 }')
+  if [ "$(printf '%s\n' "$usb_targets" | awk 'NF { count++ } END { print count+0 }')" -gt 1 ]; then
+    echo "multiple USB devices; select the intended device with ADB_RESOLVED" >&2
+    return 1
   fi
-  ADB_RESOLVED=$(adb devices | awk '$2 == "device" && $1 !~ /:/ { print $1; exit }')
+  ADB_RESOLVED="$usb_targets"
   [ -n "$ADB_RESOLVED" ]
 }
 
@@ -673,6 +694,9 @@ cmd="${1:-status}"
 shift || true
 
 case "$cmd" in
+help|--help|-h)
+  usage
+  ;;
 status)
   echo "== phone =="
   # TCP, not ICMP: a dozing Android drops pings while still accepting
@@ -690,7 +714,7 @@ status)
   "$0" app-status
   if adb_resolve; then
     case "$ADB_RESOLVED" in
-      *:*) adb_transport="tailnet" ;;
+      *:*) adb_transport="network" ;;
       *) adb_transport="USB" ;;
     esac
     echo "adb       : up ($adb_transport, $ADB_RESOLVED)"
@@ -1087,7 +1111,7 @@ shell)
   ;;
 mirror)
   ensure_adb
-  exec scrcpy -s "$ADB_TARGET" --window-title "phone (tailnet)" "$@"
+  exec scrcpy -s "$ADB_TARGET" --window-title "phone" "$@"
   ;;
 screenshot)
   ensure_adb
@@ -1250,7 +1274,7 @@ pull-ambient)
   # not the same question as "can read the chunks".
   if ssh_phone 'test -r /sdcard/sinnix-ambient' >/dev/null 2>&1; then
     rsync -av --ignore-existing --exclude='*.part' --exclude='status.json*' -e "$rsync_ssh" \
-      "${PHONE_USER}@${PHONE_TS_IP}:/sdcard/sinnix-ambient/" "$LAKE_ROOT/ambient/"
+      "${PHONE_USER}@${PHONE_SSH_HOST}:/sdcard/sinnix-ambient/" "$LAKE_ROOT/ambient/"
   elif adb_any get-state >/dev/null 2>&1; then
     echo "ssh unavailable; pulling ambient over adb instead"
     drain_ambient_adb

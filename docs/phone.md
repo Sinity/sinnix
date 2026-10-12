@@ -48,7 +48,7 @@ The explicit `shell` commands continue to accept operator-authored command text.
 Phone SSH uses one pinned `sinnix-phone` host identity across tailnet, mDNS and
 LAN addresses. Enroll its public host key through an authenticated device
 connection in the owner-managed `known_hosts` file under the phone state home;
-`SINNIX_PHONE_KNOWN_HOSTS` may select another enrolled file. Discovery verifies
+`SINNIX_PHONE_KNOWN_HOSTS` may select another enrolled file. SSH discovery runs only when an operation actually needs SSH. ADB-only operations use their configured tailnet, mDNS, cached-address or USB route without an SSH or LAN scan. Ambiguous USB lists require explicit `ADB_RESOLVED` selection. Discovery verifies
 both the host key and login before remembering an address. An open port is
 insufficient, and no scan automatically learns a key. An explicit address
 changes routing but retains strict SSH identity checks.

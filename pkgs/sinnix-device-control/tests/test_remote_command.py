@@ -48,6 +48,9 @@ pathlib.Path(os.environ['CAPTURE']).write_text(json.dumps(sys.argv[1:]))
 """,
     )
     executable(binary / "getprop", "print('Quest 3')\n")
+    # The logcat watchdog consults the selected always-on VPN. This fixture
+    # has none; it must not execute Android settings on the host shell.
+    executable(binary / "settings", "print('null')\n")
     executable(binary / "pm", "print('package:com.termux.nix uid:2000')\n")
     executable(
         binary / "ls", "import os; print(os.environ['FIXTURE_CONTEXT']+' neutral')\n"
