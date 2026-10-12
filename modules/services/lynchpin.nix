@@ -135,6 +135,10 @@ mkServiceModule {
           LYNCHPIN_MCP_PROVIDED = "1";
         };
 
+        systemd.tmpfiles.rules = [
+          "d ${config.sinnix.paths.stateRoot}/lynchpin 0700 ${config.sinnix.user.name} ${config.sinnix.user.name} -"
+        ];
+
         systemd.services.lynchpin-local-attrs = {
           description = "Prepare Lynchpin local cache directories";
           wantedBy = [ "multi-user.target" ];
@@ -147,10 +151,10 @@ mkServiceModule {
             RemainAfterExit = true;
           };
           script = ''
-            install -d -m 0775 -o sinity -g users ${lib.escapeShellArg localRoot}
+            install -d -m 0700 -o sinity -g users ${lib.escapeShellArg localRoot}
             install -d -m 0775 -o sinity -g users ${lib.escapeShellArg machineTelemetryLakeRoot}
             for dir in ${localHotDirArgs}; do
-              install -d -m 0775 -o sinity -g users "$dir"
+              install -d -m 0700 -o sinity -g users "$dir"
               chattr +C "$dir" || true
             done
           '';
