@@ -1572,26 +1572,6 @@ def init_db(conn: sqlite3.Connection) -> None:
             "command_line": "TEXT",
         },
     )
-    optimize_query_plans(conn)
-
-
-def optimize_query_plans(conn: sqlite3.Connection) -> None:
-    """Refresh bounded index statistics without rewriting captured rows.
-
-    Time tails can use the existing unit/time and label/time indexes through
-    skip-scans only when SQLite knows that their leading values repeat.
-    Limit analysis explicitly so maintenance never scans the whole history.
-    """
-    previous_limit = conn.execute("PRAGMA analysis_limit").fetchone()[0]
-    try:
-        conn.execute("PRAGMA analysis_limit=400")
-        conn.execute("PRAGMA optimize=0x10002")
-    except sqlite3.Error as exc:
-        # Advisory maintenance must not terminate capture or masquerade as a
-        # failed checkpoint. Live query-plan verification detects missing stats.
-        print(f"query-plan-maintenance: {exc}", flush=True)
-    finally:
-        conn.execute(f"PRAGMA analysis_limit={int(previous_limit)}")
 
 
 def parse_ping(ip: str) -> dict[str, object]:
@@ -2579,7 +2559,6 @@ def main() -> int:
                 checkpoint_started = time.monotonic()
                 try:
                     ck = conn.execute("PRAGMA wal_checkpoint(TRUNCATE);").fetchone()
-                    optimize_query_plans(conn)
                     elapsed = time.monotonic() - checkpoint_started
                     if ck and ck[0]:
                         print(

@@ -18,31 +18,6 @@ def _collector():
     return module
 
 
-@pytest.mark.parametrize("prefix", ["unit", "label"])
-def test_bounded_statistics_enable_indexed_time_tail_without_changing_rows(prefix):
-    import sqlite3
-
-    collector = _collector()
-    with sqlite3.connect(":memory:") as conn:
-        conn.execute(f"CREATE TABLE sample ({prefix} TEXT, observed_at TEXT, value INTEGER)")
-        conn.execute(f"CREATE INDEX sample_prefix_time ON sample ({prefix}, observed_at)")
-        conn.executemany("INSERT INTO sample VALUES (?,?,?)", [
-            (f"fixture-{i % 10}", "2026-05-01" if i < 9900 else "2026-05-02", i)
-            for i in range(10000)
-        ])
-        query = f"SELECT * FROM sample WHERE observed_at>=? ORDER BY observed_at,{prefix},value"
-        before = conn.execute(query, ["2026-05-02"]).fetchall()
-        original_rows = conn.execute("SELECT rowid,* FROM sample ORDER BY rowid").fetchall()
-        conn.execute("PRAGMA analysis_limit=123")
-        collector.optimize_query_plans(conn)
-        plan = conn.execute("EXPLAIN QUERY PLAN " + query, ["2026-05-02"]).fetchall()
-        assert any("SEARCH sample USING INDEX sample_prefix_time" in row[3] for row in plan)
-        assert not any("SCAN sample" in row[3] for row in plan)
-        assert conn.execute(query, ["2026-05-02"]).fetchall() == before
-        assert conn.execute("SELECT rowid,* FROM sample ORDER BY rowid").fetchall() == original_rows
-        assert conn.execute("PRAGMA analysis_limit").fetchone() == (123,)
-
-
 def test_systemd_unescape_fragment_decodes_hex_escapes() -> None:
     collector = _collector()
 
