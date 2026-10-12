@@ -16,8 +16,9 @@ tool and by the managed statusline (which receives the same percentages from
 Claude Code on every render). The burn rate is computed from that history.
 
 `wait-reset` is the StopFailure hook body: after a rate_limit stop it waits
-until the 5-hour window resets, then exits 2 so Claude Code's asyncRewake
-wakes the session with the resume instruction.
+for available quota or a recorded reset, then exits 2 so Claude Code's
+asyncRewake retries the session. Its bounded deadline leaves the session
+stopped when neither is established.
 """
 
 from __future__ import annotations
@@ -39,13 +40,13 @@ SAMPLES = STATE / "samples.jsonl"
 RATE_SPAN = 60 * 60  # use the last hour of readings for the burn rate
 MIN_RATE_SPAN = 10 * 60
 HISTORY_BYTES = 1024 * 1024
-# A 5-hour window resets within 5 hours; a still-exhausted weekly window just
-# stops the next turn again and restarts the wait.
+# A five-hour reset fits this budget. A longer weekly exhaustion leaves the
+# session stopped when the deadline expires, rather than claiming recovery.
 WAIT_CAP = 5 * 60 * 60 + 5 * 60
 POLL = 10 * 60
 
 RESUME = (
-    "Claude usage is available again (5-hour window {five}, weekly {week}). The "
+    "{availability} (5-hour window {five}, weekly {week}). The "
     "usage limit ended this session's last turn and stopped any background agents "
     "mid-task. Continue the interrupted work. If you coordinate agents, run "
     "`claude-agents`, resume every agent whose work was unfinished with "
@@ -221,10 +222,10 @@ def cmd_wait_reset(args) -> int:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError:
         return 0  # an earlier stop in this session is already waiting
-    deadline = time.time() + WAIT_CAP
+    deadline = time.monotonic() + WAIT_CAP
     current: dict = {}
     first = True
-    while time.time() < deadline:
+    while time.monotonic() < deadline:
         try:
             current = fetch()
             record(current)
@@ -239,8 +240,9 @@ def cmd_wait_reset(args) -> int:
             if (current.get(window) or 0) >= 100
         ]
         if not live:
-            # Without a live reading, trust the last known reset time.
-            reset = current.get("five_hour_resets_at")
+            # A recorded weekly exhaustion must not be bypassed by an earlier
+            # five-hour reset. A missing reset stays a deferred retry.
+            reset = max(blocked) if blocked else current.get("five_hour_resets_at")
             if reset is not None and time.time() > reset + 60:
                 break
             blocked = [reset] if reset else [time.time() + POLL]
@@ -248,15 +250,19 @@ def cmd_wait_reset(args) -> int:
             if not first:
                 break
             # Stopped by a transient rate limit, not an exhausted window.
-            time.sleep(5 * 60)
+            time.sleep(min(5 * 60, max(0, deadline - time.monotonic())))
             break
         first = False
-        time.sleep(min(POLL, max(30, max(blocked) + 60 - time.time())))
+        time.sleep(min(POLL, max(30, max(blocked) + 60 - time.time()), max(0, deadline - time.monotonic())))
+    else:
+        print("claude-quota: recovery deadline reached without available quota; session remains stopped", file=sys.stderr)
+        return 0
     def pct(window: str) -> str:
         value = current.get(window)
         return "unknown" if value is None else f"{value:.0f}%"
 
-    print(RESUME.format(five=pct("five_hour"), week=pct("seven_day")), file=sys.stderr)
+    availability = "Claude usage is available again" if live else "The last recorded quota reset has passed; retry usage"
+    print(RESUME.format(availability=availability, five=pct("five_hour"), week=pct("seven_day")), file=sys.stderr)
     return 2
 
 

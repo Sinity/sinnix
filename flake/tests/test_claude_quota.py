@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import runpy
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -65,6 +66,49 @@ class QuotaTests(unittest.TestCase):
             self.assertEqual(len(rows), 2000)
             self.assertEqual(rows[0]["ts"], 100)
             self.assertEqual(rows[-1]["ts"], 2099)
+
+    def wait_fixture(self, fetch, history=lambda: []):
+        elapsed = [0]
+        sleeps = []
+        def sleep(seconds):
+            sleeps.append(seconds)
+            elapsed[0] += seconds
+        clock = SimpleNamespace(time=lambda: elapsed[0], monotonic=lambda: elapsed[0], sleep=sleep)
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            self.ns, STATE=Path(tmp), WAIT_CAP=90, POLL=10, time=clock,
+            fetch=fetch, history=history, record=lambda _: None,
+            interactive_session=lambda: True,
+        ), patch("sys.stdin", io.StringIO('{"session_id":"fixture","error":"rate_limit"}')):
+            output = io.StringIO()
+            with contextlib.redirect_stderr(output):
+                code = self.module["cmd_wait_reset"](argparse.Namespace())
+        return code, output.getvalue(), elapsed[0]
+
+    def test_exhausted_deadline_does_not_rewake(self):
+        code, output, elapsed = self.wait_fixture(lambda: {"five_hour": 100, "five_hour_resets_at": 1000})
+        self.assertEqual(code, 0)
+        self.assertNotIn("available again", output)
+        self.assertLessEqual(elapsed, 90)
+
+    def test_unavailable_endpoint_deadline_does_not_rewake(self):
+        def failed(): raise OSError("offline")
+        code, output, elapsed = self.wait_fixture(failed)
+        self.assertEqual(code, 0)
+        self.assertNotIn("available again", output)
+        self.assertLessEqual(elapsed, 90)
+
+    def test_live_available_quota_rewakes(self):
+        code, output, _ = self.wait_fixture(lambda: {"five_hour": 20, "seven_day": 50})
+        self.assertEqual(code, 2)
+        self.assertIn("available again", output)
+
+    def test_offline_weekly_exhaustion_is_not_bypassed(self):
+        def failed(): raise OSError("offline")
+        history = lambda: [{"five_hour": 100, "five_hour_resets_at": -100,
+                            "seven_day": 100, "seven_day_resets_at": 1000}]
+        code, output, _ = self.wait_fixture(failed, history)
+        self.assertEqual(code, 0)
+        self.assertNotIn("available again", output)
 
 
 if __name__ == "__main__":
