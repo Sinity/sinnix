@@ -38,6 +38,7 @@ STATE = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "
 SAMPLES = STATE / "samples.jsonl"
 RATE_SPAN = 60 * 60  # use the last hour of readings for the burn rate
 MIN_RATE_SPAN = 10 * 60
+HISTORY_BYTES = 1024 * 1024
 # A 5-hour window resets within 5 hours; a still-exhausted weekly window just
 # stops the next turn again and restarts the wait.
 WAIT_CAP = 5 * 60 * 60 + 5 * 60
@@ -101,13 +102,24 @@ def record(sample: dict) -> None:
 
 def history() -> list[dict]:
     try:
-        lines = SAMPLES.read_text().splitlines()[-2000:]
+        with SAMPLES.open("rb") as handle:
+            size = handle.seek(0, os.SEEK_END)
+            start = max(0, size - HISTORY_BYTES)
+            handle.seek(max(0, start - 1))
+            previous = handle.read(1) if start else b"\n"
+            data = handle.read(HISTORY_BYTES)
+        if previous != b"\n":
+            _, _, data = data.partition(b"\n")
+        # A writer may still be appending the last record.
+        lines = data.split(b"\n")[:-1][-2000:]
     except FileNotFoundError:
         return []
     rows = []
     for line in lines:
         try:
-            rows.append(json.loads(line))
+            row = json.loads(line)
+            if isinstance(row, dict) and isinstance(row.get("ts"), (int, float)):
+                rows.append(row)
         except ValueError:
             continue
     return rows
@@ -115,6 +127,8 @@ def history() -> list[dict]:
 
 def burn_rate(current: dict) -> float | None:
     """Percentage points per hour over the last hour of the current window."""
+    if current.get("five_hour") is None:
+        return None
     reset = current.get("five_hour_resets_at")
     now = current["ts"]
     window = [
@@ -147,6 +161,10 @@ def duration(seconds: float) -> str:
     return f"{minutes // 60}h{minutes % 60:02d}m"
 
 
+def percentage(value: float | None) -> str:
+    return "unknown" if value is None else f"{value:.0f}%"
+
+
 def cmd_status(args) -> int:
     try:
         current = fetch()
@@ -168,11 +186,9 @@ def cmd_status(args) -> int:
         return 0
     now = time.time()
     age = "" if now - current["ts"] < 90 else f" (reading {duration(now - current['ts'])} old)"
-    print(
-        f"5h  {current['five_hour']:.0f}%  resets {clock(reset)}"
-        f" (in {duration((reset or now) - now)}){age}"
-    )
-    print(f"7d  {current['seven_day']:.0f}%  resets {clock(current.get('seven_day_resets_at'))}")
+    until = "" if reset is None else f" (in {duration(reset - now)})"
+    print(f"5h  {percentage(current.get('five_hour'))}  resets {clock(reset)}{until}{age}")
+    print(f"7d  {percentage(current.get('seven_day'))}  resets {clock(current.get('seven_day_resets_at'))}")
     if rate is None:
         print("burn: needs readings spanning 10+ minutes of this window")
     elif projection and reset and projection < reset:
