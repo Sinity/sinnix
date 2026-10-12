@@ -97,3 +97,28 @@ def test_recovery_batch_failure_publishes_no_partial_change(tmp_path):
     before = catalog.read_bytes()
     assert recover(catalog, [row, bad]).returncode != 0
     assert catalog.read_bytes() == before
+
+
+def test_validation_distinguishes_unavailable_history_from_broken_current_path(tmp_path):
+    catalog, original, source, restored, row = prepared(tmp_path)
+    assert invoke(catalog, 'validate').returncode != 0
+    unavailable = dict(id=original['id'], action='unavailable', actor='synthetic-test',
+                       basis='Fresh source diagnosis', reason='Retained historical record')
+    assert recover(catalog, [unavailable]).returncode == 0
+    result = invoke(catalog, 'validate')
+    assert result.returncode == 0, result.stderr
+    source.write_text('Newly reappearing content')
+    result = invoke(catalog, 'validate')
+    assert result.returncode != 0 and 'availability observation is stale' in result.stderr
+
+
+def test_unavailable_history_cannot_hide_a_different_path(tmp_path):
+    catalog, original, source, restored, row = prepared(tmp_path)
+    unavailable = dict(id=original['id'], action='unavailable', actor='synthetic-test',
+                       basis='Fresh source diagnosis', reason='Retained historical record')
+    assert recover(catalog, [unavailable]).returncode == 0
+    data = json.loads(catalog.read_bytes())
+    data['assets'][0]['current_location']['path'] = str(restored)
+    catalog.write_text(json.dumps(data))
+    result = invoke(catalog, 'validate')
+    assert result.returncode != 0 and 'consistent path' in result.stderr

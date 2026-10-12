@@ -83,6 +83,12 @@ Matching bytes retain the UUID, inspections and earlier identity evidence,
 while recording the new filesystem metadata and original address. This proves
 byte equality with the recorded digest, not a rename or unchanged inode.
 
+`validate` checks available locations against their recorded identity and type.
+Explicitly unavailable history is valid only with consistent, attributed
+location evidence whose diagnosis still matches the filesystem. Reappearing
+objects or a changed availability reason require a fresh observation. This does
+not hide unavailable records: `audit` continues to report them as findings.
+
 Record an observation after inspecting a file, while its content and scope are
 still available. Use specific descriptions, date roles and evidence for
 relationships. Distinguish a whole still image, a sampled video frame, an

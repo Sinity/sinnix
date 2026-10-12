@@ -256,6 +256,19 @@ def check_asset(asset: Any, *, require_path: bool = True, require_identity: bool
             raise CatalogError(f"relation target is not a UUID: {relation['target_id']}")
     if require_path:
         path = Path(asset["current_path"])
+        location = asset.get('current_location')
+        if isinstance(location, dict) and location.get('status') in (
+            'missing', 'offline_mount', 'denied', 'inaccessible', 'wrong_type'
+        ):
+            if (location.get('path') != asset['current_path']
+                    or asset.get('location_status') != location['status']
+                    or not all(isinstance(location.get(k), str) and location[k].strip()
+                               for k in ('actor', 'basis', 'reason', 'observed_at'))):
+                raise CatalogError("unavailable location requires consistent path, status and attributed evidence")
+            actual = location_diagnosis(path, asset['kind'])
+            if actual['status'] != location['status']:
+                raise CatalogError(f"availability observation is stale for {path}; record a fresh observation")
+            return
         check_path_kind(path, asset["kind"])
         actual = identity(path)
         if not same_identity(location_identity(asset), actual, asset["kind"]):
