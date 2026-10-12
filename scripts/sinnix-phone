@@ -1113,6 +1113,19 @@ logcat)
     exit 0
   fi
   ensure_device_capture_settings
+  # Android can leave its always-on VPN service registered with no process
+  # after a low-memory kill. Restore only the operator-selected VPN, without
+  # opening an activity or changing VPN preferences.
+  configured_vpn=$(adb_shell_args settings get secure always_on_vpn_app | tr -d '\r')
+  if [ "$configured_vpn" = com.tailscale.ipn ] &&
+    ! adb_shell_args pidof com.tailscale.ipn >/dev/null 2>&1; then
+    adb_shell_args su -c "$(sinnix-remote-command am startservice -n com.tailscale.ipn/.IPNService -a android.net.VpnService)" || exit 1
+    sleep 1
+    adb_shell_args pidof com.tailscale.ipn >/dev/null || {
+      echo "logcat: configured always-on VPN did not restart; phone uploads remain blocked" >&2
+      exit 1
+    }
+  fi
   drain_logcat_adb
   bcr_rc=0
   drain_bcr_calls_adb || bcr_rc=$?

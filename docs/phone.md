@@ -114,6 +114,13 @@ sinnix phone chroot-verify  # verify the near-native Debian environment
 `app-install` needs adb over USB or the tailnet. Android still requires the
 phone to be unlocked for some package and permission operations.
 
+The scheduled `logcat` check also restarts a missing Tailscale process when
+Android's selected always-on VPN is Tailscale. It uses the rooted phone's
+service route and leaves VPN preferences unchanged. This recovery needs an
+available ADB connection; without one, uploads retain their device backlog.
+`health-sync` sends its final Health Connect sweep as root because the app's
+watchdog receiver is private. A successful shell broadcast is not delivery.
+
 Nix-on-Droid owns the routine CLI profile. The separate
 `sinnix_debian_chroot` Magisk module provides Debian Trixie arm64 for native
 compilers and distro tooling. `sinnix phone chroot-build`,
