@@ -52,6 +52,7 @@ class GatedJobs(DirectJobs):
 
     gates: dict[str, threading.Event] = field(default_factory=dict)
     entered: dict[str, threading.Event] = field(default_factory=dict)
+    returned: dict[str, threading.Event] = field(default_factory=dict)
 
     def __getattr__(self, name: str) -> Any:
         inner = super().__getattr__(name)
@@ -62,8 +63,11 @@ class GatedJobs(DirectJobs):
 
         def gated(**arguments: Any) -> Any:
             self.entered.setdefault(operation, threading.Event()).set()
-            gate.wait(20)
-            return inner(**arguments)
+            try:
+                gate.wait(20)
+                return inner(**arguments)
+            finally:
+                self.returned.setdefault(operation, threading.Event()).set()
 
         return gated
 
@@ -173,15 +177,6 @@ def test_a_blocking_shell_start_does_not_stall_concurrent_calls(
     jobs.responses["job.shell.start"] = {**DONE, "job_id": "51"}
     jobs.responses["job.list"] = EMPTY_PAGE
     runtime.jobs = jobs  # type: ignore[assignment]
-    released_at: list[float] = []
-
-    def release_later() -> None:
-        released_at.append(time.monotonic())
-        release.set()
-
-    timer = threading.Timer(3.0, release_later)
-    listed_at: list[float] = []
-
     async def scenario() -> None:
         async with anyio.create_task_group() as group:
             group.start_soon(
@@ -194,19 +189,22 @@ def test_a_blocking_shell_start_does_not_stall_concurrent_calls(
                 },
             )
             entered = jobs.entered.setdefault("job.shell.start", threading.Event())
-            timer.start()
-            await anyio.to_thread.run_sync(entered.wait, 10)
-            result = await server.call_tool("jobs.list", {})
-            assert result.structured_content["result"]["outcome"] == "ok"
-            listed_at.append(time.monotonic())
+            try:
+                assert await anyio.to_thread.run_sync(entered.wait, 10)
+                result = await server.call_tool("jobs.list", {})
+                assert result.structured_content["result"]["outcome"] == "ok"
+                # The owner must still be blocked when the read answers.
+                # Its bounded gate timeout also marks returned, so a serial
+                # event loop cannot pass by waiting for that timeout.
+                returned = jobs.returned.get("job.shell.start")
+                assert returned is None or not returned.is_set()
+            finally:
+                release.set()
 
     try:
         anyio.run(scenario)
     finally:
-        timer.cancel()
         release.set()
-    assert listed_at and released_at
-    assert listed_at[0] < released_at[0]
 
 
 def test_a_remote_read_answers_with_a_typed_deadline_inside_its_budget(
