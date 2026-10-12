@@ -214,6 +214,11 @@ rec {
 
   slices = {
     system = {
+      # memory.low protection is limited by every ancestor. This carries the
+      # user-manager app/session/shell allocations to the root hierarchy.
+      user = {
+        MemoryLow = "11776M";
+      };
       background = {
         CPUWeight = 3;
         IOWeight = 1;
@@ -342,6 +347,14 @@ rec {
         # 7 GB current. Its 23 GB peak is Claude-session subagents running
         # pytest, which belong in the work slice, not behind this guarantee.
         MemoryLow = "5G";
+      };
+      # systemd creates this dash-hierarchy parent for desktop-shell.slice.
+      # Carry the shell policy to its competition with the other user slices.
+      desktop = {
+        IOAccounting = true;
+        CPUWeight = 400;
+        IOWeight = 300;
+        MemoryLow = "512M";
       };
       desktop-shell = {
         IOAccounting = true;

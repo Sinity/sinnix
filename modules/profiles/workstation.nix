@@ -15,6 +15,8 @@
 }:
 let
   runtimeInventory = config.sinnix.runtime.inventory;
+  primaryUserUid = toString config.users.users.${config.sinnix.user.name}.uid;
+  interactiveMemoryLow = runtimeInventory.slices.system.user.MemoryLow;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   userTmpRoot = "/realm/tmp/work";
   earlyoomAvoidPattern = runtimeInventory.earlyoomEmergencyAvoidPattern;
@@ -355,9 +357,26 @@ in
         # dash-hierarchy parent systemd creates for nix-build.slice, and with a
         # single child its own CPUWeight/IOWeight would have no sibling to compete
         # against.
-        systemd.slices = lib.mapAttrs (_: sliceConfig: {
+        systemd.slices = (lib.mapAttrs (_: sliceConfig: {
           inherit sliceConfig;
-        }) runtimeInventory.slices.system;
+        }) runtimeInventory.slices.system) // {
+          "user-${primaryUserUid}".sliceConfig.MemoryLow = interactiveMemoryLow;
+        };
+
+        # This native systemd instance owns the whole desktop and job plane.
+        # A drop-in updates its resources without replacing the template or
+        # restarting the user manager during activation.
+        systemd.units."user@${primaryUserUid}.service" = {
+          overrideStrategy = "asDropin";
+          # The service builder also injects environment settings. This native
+          # drop-in sets only resource policy and activation flags.
+          text = ''
+            [Service]
+            MemoryLow=${interactiveMemoryLow}
+            X-RestartIfChanged=false
+            X-StopIfChanged=false
+          '';
+        };
 
         systemd.user.slices = lib.mapAttrs (_: sliceConfig: {
           inherit sliceConfig;

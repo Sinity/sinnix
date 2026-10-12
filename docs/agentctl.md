@@ -291,6 +291,14 @@ to `avg60` when `avg10` is unavailable). One group reopens per tick.
 Unavailable or malformed memory PSI cannot reopen a pause. Operator pauses
 remain paused unless the recorded event ownership belongs to agentctl.
 
+The workstation carries the app/session slices' 6 GiB and 5 GiB and the
+desktop shell's 512 MiB protection through `user.slice`, the primary user's
+slice and its user manager with an 11.5 GiB ancestor allocation.
+`desktop.slice` carries the reservation and priorities above
+`desktop-shell.slice`. Child reservations need that hierarchy to protect
+interactive memory during host reclaim. AgentCTL retains its separate
+20 GiB aggregate ceiling and 10 GiB bulk ceiling with no swap.
+
 I/O PSI remains visible in the result but does not close admission or delay
 recovery. Global I/O stalls include background and tool workloads outside
 these queues; the former blanket I/O veto could block useful work without
