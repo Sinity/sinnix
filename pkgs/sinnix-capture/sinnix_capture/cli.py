@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+from datetime import datetime, timezone
 import sys
 from pathlib import Path
 
@@ -11,14 +13,25 @@ from .writer import CaptureWriter
 
 
 def _cmd_write(args: argparse.Namespace) -> int:
+    if args.ts is not None:
+        try:
+            if not math.isfinite(args.ts):
+                raise ValueError("non-finite timestamp")
+            datetime.fromtimestamp(args.ts, timezone.utc)
+        except (ValueError, OverflowError, OSError):
+            print("--ts must be a finite, representable Unix timestamp", file=sys.stderr)
+            return 2
     writer = CaptureWriter(args.capture_root, args.lane)
 
     def emit(payload: dict) -> None:
-        envelope = writer.write(payload, raw_ref=args.raw_ref)
+        envelope = writer.write(payload, raw_ref=args.raw_ref, ts=args.ts)
         if args.print_envelope:
             print(json.dumps(envelope, sort_keys=True))
 
     if args.stream:
+        if args.ts is not None:
+            print("--ts is for one record, not a stream", file=sys.stderr)
+            return 2
         if args.payload is not None:
             print("--stream and --payload are mutually exclusive", file=sys.stderr)
             return 2
@@ -86,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     write_p.add_argument("--capture-root", required=True, type=Path)
     write_p.add_argument("--lane", required=True)
     write_p.add_argument("--payload", help="JSON payload; reads stdin if omitted")
+    write_p.add_argument("--ts", type=float, default=None, help="Observed Unix timestamp for a queued single record")
     write_p.add_argument(
         "--raw-ref",
         default=None,

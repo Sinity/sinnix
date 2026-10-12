@@ -98,3 +98,17 @@ def test_stream_rejects_a_payload_argument(tmp_path: Path) -> None:
         ]
     )
     assert rc == 2
+
+
+def test_queued_record_preserves_observed_timestamp(tmp_path):
+    ts = 1767225600.25
+    assert main(["write", "--capture-root", str(tmp_path), "--lane", "fixture", "--payload", '{"event":"track"}', "--ts", str(ts)]) == 0
+    records = _records(tmp_path, "fixture")
+    assert len(records) == 1 and records[0]["ts"] == ts
+    assert records[0]["schema"] == "sinnix-capture-v1"
+
+
+@pytest.mark.parametrize("ts", ["nan", "inf", "1e300"])
+def test_invalid_queued_timestamp_refuses_before_reserving(tmp_path, ts):
+    assert main(["write", "--capture-root", str(tmp_path), "--lane", "fixture", "--payload", "{}", "--ts", ts]) == 2
+    assert not list(tmp_path.rglob("*.seq"))

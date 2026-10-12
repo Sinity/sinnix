@@ -13,24 +13,30 @@ line when the *rendered format string* changes for the most recently
 updated player. The format used here deliberately tracks player identity,
 playback status, and title/artist/album -- and deliberately excludes
 position, which changes every second and would turn "follow" into a tight
-poll loop. Position and duration are instead queried fresh, on demand, at
-write time (both for change events and for heartbeats).
+poll loop. Position and duration are instead queried fresh when observed, before
+queuing the capture (both for change events and for heartbeats).
 
 Every actual capture write shells out to the ``sinnix-capture`` CLI
 (``sinnix-capture write --lane mpris``) rather than importing the writer
 library directly. Command execution uses the shared ``sinnix_lib`` result
-contract so timeouts and spawn failures remain ordinary collector outcomes.
+contract for player probes. Capture writes wait for completion on a separate
+worker; a storage stall must not kill an in-flight append. Change events are
+queued in order and only waiting heartbeats are coalesced. The queue is
+process-local; a failed write retains pending events without an automatic
+retry, because that write may already have committed.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
 import subprocess
 import sys
 import threading
 import time
 from dataclasses import dataclass, field
+from collections import deque
 
 from sinnix_lib.process import run
 
@@ -61,13 +67,21 @@ def fetch_position_and_duration(
 ) -> tuple[float | None, float | None]:
     position = run([playerctl_bin, "-p", player, "position"], timeout=10)
     position_text = position.text
-    position_seconds = float(position_text) if position_text else None
+    try:
+        position_seconds = float(position_text) if position_text else None
+        if position_seconds is not None and not math.isfinite(position_seconds):
+            position_seconds = None
+    except (ValueError, OverflowError):
+        position_seconds = None
 
     duration = run(
         [playerctl_bin, "-p", player, "metadata", "mpris:length"], timeout=10
     )
     duration_text = duration.text
-    duration_seconds = (int(duration_text) / 1_000_000.0) if duration_text else None
+    try:
+        duration_seconds = (int(duration_text) / 1_000_000.0) if duration_text else None
+    except (ValueError, OverflowError):
+        duration_seconds = None
 
     return position_seconds, duration_seconds
 
@@ -77,8 +91,9 @@ def write_envelope(
     capture_root: str,
     lane: str,
     payload: dict,
+    ts: float,
 ) -> None:
-    result = run(
+    result = subprocess.run(
         [
             sinnix_capture_bin,
             "write",
@@ -88,13 +103,77 @@ def write_envelope(
             lane,
             "--payload",
             json.dumps(payload),
+            "--ts",
+            str(ts),
         ],
-        timeout=10,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
     )
-    if not result.ok:
-        detail = result.error or result.stderr.strip()
-        log(f"sinnix-capture write failed (rc={result.returncode}): {detail}")
+    if result.returncode:
+        raise RuntimeError(f"sinnix-capture write failed (rc={result.returncode}): {result.stderr.strip()}")
 
+
+
+class EnvelopeWriter:
+    """One in-flight write, preserving change events while storage is slow."""
+
+    def __init__(self, capture_bin: str, root: str, lane: str):
+        self.args = (capture_bin, root, lane)
+        self.condition = threading.Condition()
+        self.pending: deque[tuple[float, dict]] = deque()
+        self.current: tuple[float, dict] | None = None
+        self.closing = False
+        self.failure: Exception | None = None
+        self.thread = threading.Thread(target=self._drain, daemon=True, name="mpris-writer")
+        self.thread.start()
+
+    def enqueue(self, payload: dict, ts: float) -> None:
+        item = (ts, dict(payload))
+        with self.condition:
+            if self.closing:
+                raise RuntimeError("capture writer is closing")
+            # Only replace a waiting heartbeat for the same playback state;
+            # never replace a change event or the write already in flight.
+            if self.pending and self.pending[-1] is not self.current:
+                previous = self.pending[-1][1]
+                keys = ("player", "status", "title", "artist", "album")
+                if payload.get("event") == previous.get("event") == "heartbeat" and all(
+                    payload.get(key) == previous.get(key) for key in keys
+                ):
+                    self.pending[-1] = item
+                    self.condition.notify()
+                    return
+            self.pending.append(item)
+            self.condition.notify()
+
+    def _drain(self) -> None:
+        while True:
+            with self.condition:
+                self.condition.wait_for(lambda: self.pending or self.closing)
+                if not self.pending:
+                    return
+                self.current = self.pending[0]
+                ts, payload = self.current
+            try:
+                write_envelope(*self.args, payload, ts)
+            except Exception as exc:
+                # An error may follow a committed record. Keep the current and
+                # waiting events; a blind retry could allocate duplicate seqs.
+                with self.condition:
+                    self.failure = exc
+                log(f"capture writer stopped; pending events retained in memory: {exc}")
+                return
+            with self.condition:
+                self.pending.popleft()
+                self.current = None
+
+    def close(self) -> None:
+        with self.condition:
+            self.closing = True
+            self.condition.notify()
+        self.thread.join()
 
 def classify_change(
     state: PlayerState, player: str, status: str, title: str, artist: str, album: str
@@ -117,10 +196,9 @@ def handle_follow_line(
     line: str,
     state: PlayerState,
     playerctl_bin: str,
-    sinnix_capture_bin: str,
-    capture_root: str,
-    lane: str,
+    writer: EnvelopeWriter,
 ) -> None:
+    observed_at = time.time()
     parts = line.split(FIELD_SEP)
     if len(parts) != len(FOLLOW_FIELDS):
         log(f"ignoring malformed follow line ({len(parts)} fields): {line!r}")
@@ -161,15 +239,13 @@ def handle_follow_line(
         "position_seconds": position_seconds,
         "duration_seconds": duration_seconds,
     }
-    write_envelope(sinnix_capture_bin, capture_root, lane, payload)
+    writer.enqueue(payload, observed_at)
 
 
 def follow_loop(
     state: PlayerState,
     playerctl_bin: str,
-    sinnix_capture_bin: str,
-    capture_root: str,
-    lane: str,
+    writer: EnvelopeWriter,
     retry_backoff_seconds: float,
 ) -> None:
     follow_cmd = [playerctl_bin, "--follow", "metadata", "--format", FOLLOW_FORMAT]
@@ -193,7 +269,7 @@ def follow_loop(
                 continue
             try:
                 handle_follow_line(
-                    line, state, playerctl_bin, sinnix_capture_bin, capture_root, lane
+                    line, state, playerctl_bin, writer
                 )
             except (
                 Exception
@@ -211,9 +287,7 @@ def follow_loop(
 def heartbeat_loop(
     state: PlayerState,
     playerctl_bin: str,
-    sinnix_capture_bin: str,
-    capture_root: str,
-    lane: str,
+    writer: EnvelopeWriter,
     interval_seconds: float,
 ) -> None:
     while True:
@@ -229,6 +303,7 @@ def heartbeat_loop(
                 state.album,
             )
 
+        observed_at = time.time()
         position_seconds, duration_seconds = fetch_position_and_duration(
             playerctl_bin, player
         )
@@ -242,7 +317,7 @@ def heartbeat_loop(
             "position_seconds": position_seconds,
             "duration_seconds": duration_seconds,
         }
-        write_envelope(sinnix_capture_bin, capture_root, lane, payload)
+        writer.enqueue(payload, observed_at)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -268,15 +343,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     state = PlayerState()
+    writer = EnvelopeWriter(args.sinnix_capture_bin, args.capture_root, args.lane)
 
     heartbeat_thread = threading.Thread(
         target=heartbeat_loop,
         args=(
             state,
             args.playerctl_bin,
-            args.sinnix_capture_bin,
-            args.capture_root,
-            args.lane,
+            writer,
             args.heartbeat_interval,
         ),
         daemon=True,
@@ -287,9 +361,7 @@ def main(argv: list[str] | None = None) -> int:
     follow_loop(
         state,
         args.playerctl_bin,
-        args.sinnix_capture_bin,
-        args.capture_root,
-        args.lane,
+        writer,
         args.retry_backoff,
     )
     return 0  # unreachable: follow_loop retries forever
