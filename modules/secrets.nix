@@ -120,8 +120,7 @@ let
     # their owning capture lane -- no reason to widen their blast radius to
     # every login shell.
     "mail-app-password".exportEnv = false;
-    # Retired registration token; the runner registers with github-token.
-    # Ciphertext retirement is the operator's call, so keep it out of shells.
+    # Retained former runner registration material stays out of login shells.
     "github-runner-polylogue-token".exportEnv = false;
   };
 

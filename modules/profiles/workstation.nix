@@ -343,11 +343,8 @@ in
         # private to the operator (0700) rather than a shared 1777 tree, so the
         # sweeper below can decide ownership from the filesystem.
         #
-        # Three places can start a process, and all three are set:
-        # login sessions (sessionVariables), the systemd user manager
-        # (DefaultEnvironment), and the CI runner unit (its own extraEnvironment,
-        # in modules/services/github-runner-polylogue.nix). System services keep
-        # the default /tmp.
+        # Login sessions and the systemd user manager both use this scratch
+        # root. System services keep the default /tmp.
         environment.sessionVariables.TMPDIR = userTmpRoot;
         systemd.user.settings.Manager.DefaultEnvironment = "TMPDIR=${userTmpRoot}";
         # The root is declared once in core.nix. Claude Code's separate
@@ -357,11 +354,13 @@ in
         # dash-hierarchy parent systemd creates for nix-build.slice, and with a
         # single child its own CPUWeight/IOWeight would have no sibling to compete
         # against.
-        systemd.slices = (lib.mapAttrs (_: sliceConfig: {
-          inherit sliceConfig;
-        }) runtimeInventory.slices.system) // {
-          "user-${primaryUserUid}".sliceConfig.MemoryLow = interactiveMemoryLow;
-        };
+        systemd.slices =
+          (lib.mapAttrs (_: sliceConfig: {
+            inherit sliceConfig;
+          }) runtimeInventory.slices.system)
+          // {
+            "user-${primaryUserUid}".sliceConfig.MemoryLow = interactiveMemoryLow;
+          };
 
         # This native systemd instance owns the whole desktop and job plane.
         # A drop-in updates its resources without replacing the template or

@@ -34,9 +34,6 @@
 
   sinnix.persistence.enable = true;
   sinnix.services = {
-    # Keep public CI off until both listener and verification workloads are
-    # confined independently of the operator (sinnix-n4n5).
-    github-runner-polylogue.enable = false;
     agent-gateway = {
       enable = true;
       endpoints = {
