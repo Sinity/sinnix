@@ -116,6 +116,8 @@ When device control is unavailable, `app-status` reads at most the final 4 MiB o
 `app-install` needs adb over USB or the tailnet. Android still requires the
 phone to be unlocked for some package and permission operations.
 
+Logcat pulls publish only after ADB succeeds. Failed or interrupted output stays in owner-private `.logcat-pull.*` files beside the daily logs; the resume cursor stays unchanged. Those incomplete files are retained evidence, not daily-log input. Missing transport and failed pulls return nonzero, while a successful empty pull remains valid. Malformed or future UTC cursors trigger a full dump. A logcat failure still allows the independent BCR drain to run. New files from the standalone phone command are owner-private.
+
 The scheduled `logcat` check also restarts a missing Tailscale process when
 Android's selected always-on VPN is Tailscale. It uses the rooted phone's
 service route and leaves VPN preferences unchanged. This recovery needs an

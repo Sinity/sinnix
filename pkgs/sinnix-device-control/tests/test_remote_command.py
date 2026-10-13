@@ -111,13 +111,16 @@ sys.exit(subprocess.run([os.environ['REMOTE_SHELL'],'-c',command]).returncode)
     executable(
         binary / "adb",
         """
-import os,sys,subprocess,pathlib,shutil
+import os,sys,subprocess,pathlib,shutil,json
 args=sys.argv[1:]
 if args[:1] == ['-s']: args=args[2:]
-if args == ['get-state']: print('device'); sys.exit(0)
+if args == ['get-state']: print('device'); sys.exit(int(os.environ.get('ADB_STATE_STATUS','0')))
 if args[:1] == ['logcat']:
     if '-d' in args:
-        sys.stdout.buffer.write(pathlib.Path(os.environ['LOGCAT_CAPTURE']).read_bytes())
+        payload=pathlib.Path(os.environ['LOGCAT_CAPTURE']).read_bytes()
+        if os.environ.get('LOGCAT_ARGS'): pathlib.Path(os.environ['LOGCAT_ARGS']).write_text(json.dumps(args))
+        if os.environ.get('LOGCAT_ENFORCE_CURSOR') and '-T' in args and payload and args[args.index('-T')+1] > payload[:23].decode(): payload=b''
+        sys.stdout.buffer.write(payload)
         sys.exit(int(os.environ.get('LOGCAT_STATUS','0')))
     sys.exit(0)
 mapping={'/sdcard/Oculus/Videoshots':str(pathlib.Path(os.environ['REMOTE'])/'Videoshots'),
@@ -200,6 +203,7 @@ def run(
         capture_output=True,
         text=True,
         timeout=15,
+        umask=0,
     )
 
 
@@ -376,3 +380,59 @@ def test_logcat_zero_matches_are_one_numeric_count(device, existing, incoming):
         assert cursor.read_text().strip() == "2026-10-09 00:00:01.123"
     else:
         assert not cursor.exists()
+
+
+@pytest.mark.parametrize("incoming", [b"", b"2026-10-09 00:00:02.123 incomplete record"])
+def test_failed_logcat_pull_preserves_bytes_and_cursor_and_still_checks_bcr(device, incoming):
+    root, env = device
+    capture = root / "logcat-input"
+    capture.write_bytes(incoming)
+    env.update(LOGCAT_CAPTURE=str(capture), LOGCAT_STATUS="1")
+    day = time.strftime("%Y%m%d", time.gmtime())
+    output = root / "lake" / "logcat" / f"logcat-{day}.txt"
+    output.parent.mkdir(parents=True)
+    original = b"2026-10-09 00:00:01.123 previous complete record\n"
+    output.write_bytes(original)
+    cursor = root / "phone-state" / "logcat.cursor"
+    cursor.parent.mkdir()
+    cursor.write_text("2026-10-09 00:00:01.123\n")
+    result = run(device, "sinnix-phone", "logcat")
+    assert result.returncode != 0
+    assert "pull failed" in result.stderr
+    assert "bcr: synced" in result.stdout
+    assert output.read_bytes() == original
+    assert cursor.read_text() == "2026-10-09 00:00:01.123\n"
+    pending = list(output.parent.glob(".logcat-pull.*"))
+    assert len(pending) == bool(incoming)
+    if incoming:
+        assert pending[0].read_bytes() == incoming
+        assert pending[0].stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("previous", ["2099-01-01 00:00:00.000", "invalid timestamp"])
+def test_invalid_or_future_logcat_cursor_requests_full_dump(device, previous):
+    root, env = device
+    capture = root / "logcat-input"
+    incoming = b"2026-10-09 00:00:01.123 complete record\n"
+    capture.write_bytes(incoming)
+    args = root / "logcat-args.json"
+    env.update(LOGCAT_CAPTURE=str(capture), LOGCAT_ENFORCE_CURSOR="1", LOGCAT_ARGS=str(args))
+    cursor = root / "phone-state" / "logcat.cursor"
+    cursor.parent.mkdir()
+    cursor.write_text(previous + "\n")
+    result = run(device, "sinnix-phone", "logcat")
+    assert result.returncode == 0, result.stderr
+    assert "-T" not in json.loads(args.read_text())
+    assert cursor.read_text().strip() == "2026-10-09 00:00:01.123"
+    output = next((root / "lake" / "logcat").glob("logcat-*.txt"))
+    assert output.read_bytes() == incoming
+    assert output.stat().st_mode & 0o777 == 0o600
+    assert not list(output.parent.glob(".logcat-pull.*"))
+
+
+def test_logcat_without_transport_is_not_success(device):
+    _, env = device
+    env["ADB_STATE_STATUS"] = "1"
+    result = run(device, "sinnix-phone", "logcat")
+    assert result.returncode != 0
+    assert "no adb transport" in result.stdout

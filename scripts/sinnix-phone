@@ -27,6 +27,7 @@
 # need Termux kept foregrounded or an AccessibilityService-based reader.
 # PRIMARY has no Android equivalent; this covers CLIPBOARD only.
 set -euo pipefail
+umask 077
 
 # Where the phone is, in preference order, not where it is assumed to be.
 #
@@ -311,55 +312,63 @@ ensure_device_capture_settings() {
 # Drain the phone's system log into the lake. Bigger ring buffers only buy
 # time; without this the log is never captured at all.
 #
-# `-T <ts>` resumes from the last drained line. A missing or future cursor (a
-# fresh ring after reboot) falls back to a full dump -- logcat answers a future
-# timestamp with silence, and losing a duplicate is cheaper than losing a boot.
+# `-T <ts>` resumes from the last drained line. A missing, malformed or
+# future cursor relative to the host UTC clock requests a full dump; logcat
+# answers a future timestamp with silence. Failed pulls do not advance it.
 # Raw threadtime lines, not JSON: every Android tool already speaks the format.
 drain_logcat_adb() {
-  local dest cursor since day out lines total before pull_ok
+  local dest cursor since day out lines total before stage cursor_epoch now_epoch
+  local -a logcat_args=(-b all -d -v threadtime -v UTC -v year)
   adb_resolve || return 1
   dest="$LAKE_ROOT/logcat"
   cursor="$PHONE_STATE/logcat.cursor"
-  mkdir -p "$dest" "$(dirname "$cursor")"
-  day="$(date -u +%Y%m%d)"
+  mkdir -p "$dest" "$(dirname "$cursor")" || return 1
+  day="$(date -u +%Y%m%d)" || return 1
   out="$dest/logcat-$day.txt"
 
   since=""
-  [ -s "$cursor" ] && since="$(cat "$cursor")"
+  if [ -s "$cursor" ]; then
+    since="$(cat "$cursor")" || return 1
+    now_epoch="$(date -u +%s)" || return 1
+    if ! cursor_epoch="$(date -u -d "$since" +%s 2>/dev/null)" ||
+      [ "$cursor_epoch" -gt "$now_epoch" ]; then
+      echo "logcat: invalid or future UTC cursor; requesting a full dump" >&2
+      since=""
+    fi
+  fi
 
-  # -b all: main is the app chatter, but system/crash/kernel carry the
-  # package-manager, OOM and driver events that explain an outage.
-  #
-  # $out is the whole day's file, so count what THIS run appended rather than
-  # its cumulative total -- a failed pull would otherwise report the stale
-  # total and read as a successful drain.
   before=0
   if [ -e "$out" ]; then
-    # grep prints 0 and exits 1 for an empty match set. Only that status is
-    # expected; adding another zero corrupts the arithmetic count.
-    before=$(grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' "$out" || [ "$?" -eq 1 ])
+    # grep prints one zero and exits 1 for an empty match set.
+    before=$(grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' "$out" || [ "$?" -eq 1 ]) || return 1
   fi
-  pull_ok=1
-  if [ -n "$since" ]; then
-    adb_any logcat -b all -d -v threadtime -v UTC -v year -T "$since" 2>/dev/null >>"$out" || pull_ok=0
-  else
-    adb_any logcat -b all -d -v threadtime -v UTC -v year 2>/dev/null >>"$out" || pull_ok=0
+  stage="$(mktemp "$dest/.logcat-pull.XXXXXX")" || return 1
+  # Interrupted or failed pulls retain their exact bytes outside the daily
+  # reader entrance. Never advance the cursor from incomplete output.
+  [ -z "$since" ] || logcat_args+=(-T "$since")
+  if ! adb_any logcat "${logcat_args[@]}" >"$stage"; then
+    if [ -s "$stage" ]; then
+      echo "logcat: pull failed; incomplete output retained at $stage" >&2
+    else
+      rm -f "$stage"
+      echo "logcat: pull failed; no output captured" >&2
+    fi
+    return 1
   fi
-  [ "$pull_ok" -eq 1 ] || echo "  WARNING: adb logcat pull failed; nothing new drained" >&2
-
-  # The cursor is the last real log line's timestamp. Blank lines and the
-  # `--------- beginning of` banners logcat interleaves are not lines it will
-  # accept back as -T, so they are filtered before the tail is taken.
-  total="$(grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' "$out" || [ "$?" -eq 1 ])"
+  if ! cat "$stage" >>"$out"; then
+    echo "logcat: publication failed; complete pull retained at $stage" >&2
+    return 1
+  fi
+  total=$(grep -cE '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' "$out" || [ "$?" -eq 1 ]) || return 1
   lines=$(( total - before ))
-  grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' "$out" 2>/dev/null \
-    | tail -n 1 \
-    | awk '{ print $1 " " $2 }' > "$cursor.tmp" || true
-  if [ -s "$cursor.tmp" ]; then
-    mv -f "$cursor.tmp" "$cursor"
-  else
-    rm -f "$cursor.tmp"
+  if [ "$total" -gt 0 ]; then
+    if ! grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2} ' "$out" | tail -n 1 | awk '{ print $1 " " $2 }' > "$cursor.tmp"; then
+      echo "logcat: cursor extraction failed; pull retained at $stage" >&2
+      return 1
+    fi
+    mv -f "$cursor.tmp" "$cursor" || return 1
   fi
+  rm -f "$stage"
   echo "logcat: $lines new lines ($total total) in $out"
 }
 
@@ -1130,7 +1139,7 @@ logcat)
   if ! adb_any get-state >/dev/null 2>&1; then
     echo "logcat: no adb transport — adbd's TCP mode does not survive a reboot"
     echo "        restore it over USB with: sinnix-phone adb-restore"
-    exit 0
+    exit 1
   fi
   ensure_device_capture_settings
   # Android can leave its always-on VPN service registered with no process
@@ -1146,7 +1155,8 @@ logcat)
       exit 1
     }
   fi
-  drain_logcat_adb
+  logcat_rc=0
+  drain_logcat_adb || logcat_rc=$?
   bcr_rc=0
   drain_bcr_calls_adb || bcr_rc=$?
 
@@ -1159,6 +1169,9 @@ logcat)
   fi
   if [ "$bcr_rc" -ne 0 ]; then
     exit "$bcr_rc"
+  fi
+  if [ "$logcat_rc" -ne 0 ]; then
+    exit "$logcat_rc"
   fi
   ;;
 bcr-sync)
