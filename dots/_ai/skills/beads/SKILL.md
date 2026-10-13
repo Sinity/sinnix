@@ -5,6 +5,10 @@ description: Read, claim, update, relate, close, or write Beads tasks with bd â€
 
 # Beads
 
+On this host, run `/run/current-system/sw/bin/bd` from the owning repository.
+Long-lived project devshells can retain an older Beads build in PATH. The
+commands below use `bd` as shorthand for the installed host executable.
+
 Task state lives outside every checkout, in the Beads/Dolt database under
 `/realm/state/tasks/<project>`, reached through the repository's `.beads`
 redirect (`bd where` shows it). `bd` is the only write path. The current
