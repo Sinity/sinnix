@@ -158,3 +158,79 @@ restore = source.split("adb-restore)\n", 1)[1].split("  ;;\nclip-push)", 1)[0]
 result = subprocess.run(["bash", "-c", "set -euo pipefail\nadb() { return 0; }\ninstall_wireless_adb_boot() { echo boot-installed; }\nset -- --persistent\n" + restore], env={**os.environ,"SINNIX_PHONE_ADB_SERIAL":"enrolled"}, capture_output=True, text=True)
 assert result.returncode == 0, result.stderr
 assert "boot-installed" in result.stdout
+
+# Ambient recovery must qualify bytes rather than infer identity from length.
+ambient = source[source.index("drain_ambient_adb() {"):source.index("# Preserve and audit BCR call recordings.")]
+ambient_mock = r'''
+sinnix-remote-command() { python3 "$BCR_ENCODER" "$@"; }
+adb_resolve() { return 0; }
+adb_any() {
+  case "$1" in
+    pull)
+      case "$AMBIENT_MODE" in
+        failed) printf cut > "$3"; return 1 ;;
+        truncated) printf cut > "$3" ;;
+        changed) cp "$BCR_FIXTURE" "$3"; printf changed > "$BCR_FIXTURE" ;;
+        *) cp "$BCR_FIXTURE" "$3" ;;
+      esac
+      ;;
+    shell)
+      shift
+      if [ "$1" = -T ]; then shift; fi
+      case "$1" in
+        find*) printf '%s\0' '/sdcard/sinnix-ambient/neutral chunk.m4a' ;;
+        sha256sum*)
+          [ "$AMBIENT_MODE" != unavailable ] || return 1
+          sha256sum "$BCR_FIXTURE" ;;
+        *) return 1 ;;
+      esac
+      ;;
+    *) return 1 ;;
+  esac
+}
+'''
+with tempfile.TemporaryDirectory() as scratch:
+    root = Path(scratch)
+    fixture = root / "payload"
+    fixture.write_bytes(b"verified neutral fixture")
+    lake = root / "lake"
+    harness = "set -euo pipefail\n" + ambient_mock + builder + ambient + "\ndrain_ambient_adb\n"
+
+    def run_ambient(mode):
+        fixture.write_bytes(b"verified neutral fixture")
+        return subprocess.run(["bash", "-c", harness], capture_output=True, text=True,
+                              env={**os.environ, "AMBIENT_MODE": mode, "BCR_FIXTURE": str(fixture),
+                                   "BCR_ENCODER": sys.argv[2], "LAKE_ROOT": str(lake)})
+
+    result = run_ambient("normal")
+    assert result.returncode == 0, result.stdout + result.stderr
+    target = lake / "ambient" / "neutral chunk.m4a"
+    assert target.read_bytes() == fixture.read_bytes()
+    # Same length is not continuity. Preserve both versions; retries are stable.
+    original = b"X" * fixture.stat().st_size
+    target.write_bytes(original)
+    result = run_ambient("normal")
+    assert result.returncode == 0, result.stdout + result.stderr
+    versions = list(target.parent.glob("*.conflict-*"))
+    assert len(versions) == 1 and versions[0].read_bytes() == fixture.read_bytes()
+    assert target.read_bytes() == original
+    result = run_ambient("normal")
+    assert result.returncode == 0 and len(list(target.parent.glob("*.conflict-*"))) == 1
+    for mode in ["failed", "truncated", "unavailable", "changed"]:
+        result = run_ambient(mode)
+        assert result.returncode != 0
+        assert target.read_bytes() == original
+        assert any(p.read_bytes() == b"cut" for p in target.parent.glob(".incoming.*"))
+    outside = root / "outside"
+    outside.write_bytes(b"unrelated")
+    target.unlink()
+    target.symlink_to(outside)
+    result = run_ambient("normal")
+    assert result.returncode == 0 and outside.read_bytes() == b"unrelated"
+
+    # A directory at the conflict destination must never receive a nested link.
+    versions[0].unlink()
+    versions[0].mkdir()
+    result = run_ambient("normal")
+    assert result.returncode != 0 and not list(versions[0].iterdir())
+    assert outside.read_bytes() == b"unrelated"

@@ -398,46 +398,65 @@ drain_logcat_adb() {
 # reliably records still cannot reach the lake. adb is a second transport with
 # a different failure mode: over USB it works when the network does not.
 #
-# Copies only what the lake does not already hold, and never deletes on the
-# phone -- the rsync path's `--ignore-existing` semantics, kept deliberately so
-# whichever transport ran last does not change what the other one will do.
+# Verify staged bytes before publication. Existing different bytes remain
+# evidence; preserve the incoming version separately rather than overwriting.
 drain_ambient_adb() {
-  local dest name remote listing local_size remote_size pulled=0 repaired=0
+  local dest name remote listing staging digest copied_digest after_digest target
+  local pulled=0 conflicts=0 failed=0
   adb_resolve || return 1
   dest="$LAKE_ROOT/ambient"
   mkdir -p "$dest"
   listing=$(mktemp "$dest/.inventory.XXXXXX") || return 1
   if ! adb_shell_args find /sdcard/sinnix-ambient -maxdepth 1 -type f -print0 >"$listing"; then
-    rm -f "$listing"
+    rm -- "$listing"
     echo "ambient: inventory failed" >&2
     return 1
   fi
   while IFS= read -r -d '' remote; do
     name=${remote##*/}
-    case "$name" in
-      '' | *.part | status.json*) continue ;;
-    esac
-    remote_size=$(adb_shell_args stat -c %s "$remote" 2>/dev/null </dev/null | tr -d '\r')
-    if [ -e "$dest/$name" ]; then
-      # A closed chunk never changes, so a lake copy smaller than the phone's
-      # is a transfer that was cut short, not a different recording. Skipping
-      # anything already present would leave it truncated permanently; the
-      # lake held one such chunk at 311392 of 1844320 bytes.
-      local_size=$(stat -c %s "$dest/$name" 2>/dev/null || echo 0)
-      if [ -z "$remote_size" ] || [ "$local_size" -ge "$remote_size" ]; then
-        continue
-      fi
-      if adb_any pull "/sdcard/sinnix-ambient/$name" "$dest/$name" >/dev/null 2>&1; then
-        repaired=$((repaired + 1))
-      fi
+    case "$name" in *.m4a | *.m4a.orphan) ;; *) continue ;; esac
+    if ! digest=$(adb_shell_args sha256sum "$remote" </dev/null); then
+      failed=$((failed + 1)); continue
+    fi
+    digest=${digest%% *}
+    [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { failed=$((failed + 1)); continue; }
+    target="$dest/$name"
+    if [ -f "$target" ] && [ ! -L "$target" ] && [ "$(sha256sum "$target" | cut -d ' ' -f 1)" = "$digest" ]; then
       continue
     fi
-    if adb_any pull "/sdcard/sinnix-ambient/$name" "$dest/$name" >/dev/null 2>&1; then
+    staging=$(mktemp "$dest/.incoming.XXXXXX") || return 1
+    if ! adb_any pull "$remote" "$staging" >/dev/null 2>&1; then
+      echo "ambient: failed transfer retained at $staging" >&2
+      failed=$((failed + 1)); continue
+    fi
+    copied_digest=$(sha256sum "$staging" | cut -d ' ' -f 1)
+    after_digest=$(adb_shell_args sha256sum "$remote" </dev/null) || after_digest=""
+    after_digest=${after_digest%% *}
+    if [ "$copied_digest" != "$digest" ] || [ "$after_digest" != "$digest" ]; then
+      echo "ambient: unverified transfer retained at $staging" >&2
+      failed=$((failed + 1)); continue
+    fi
+    # Hard-link publication never overwrites a concurrent arrival or follows
+    # an existing symlink. A conflict has a full-content identity in its name.
+    if [ -e "$target" ] || [ -L "$target" ]; then
+      target="$dest/${name}.conflict-$digest"
+      conflicts=$((conflicts + 1))
+    fi
+    python3 -c 'import os, sys; fd = os.open(sys.argv[1], os.O_RDONLY); os.fsync(fd); os.close(fd)' "$staging" || return 1
+    if ln -T -- "$staging" "$target"; then
+      python3 -c 'import os, sys; fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY); os.fsync(fd); os.close(fd)' "$dest" || return 1
+      rm -- "$staging"
       pulled=$((pulled + 1))
+    elif [ -f "$target" ] && [ ! -L "$target" ] && [ "$(sha256sum "$target" | cut -d ' ' -f 1)" = "$digest" ]; then
+      rm -- "$staging"
+    else
+      echo "ambient: publication conflict retained at $staging" >&2
+      failed=$((failed + 1))
     fi
   done <"$listing"
-  rm -f "$listing"
-  echo "ambient: drained $pulled new chunk(s) over adb, repaired $repaired truncated"
+  rm -- "$listing"
+  echo "ambient: retained $pulled verified version(s), $conflicts differing name(s), $failed failed"
+  [ "$failed" -eq 0 ]
 }
 
 # Preserve and audit BCR call recordings.
@@ -868,10 +887,9 @@ app-install)
   # re-run: a stable signing key makes this an upgrade, so runtime grants and
   # the capture-enabled preference survive.
   #
-  # THE PHONE MUST BE UNLOCKED. MIUI routes every adb install through its own
-  # com.miui.permcenter.install.AdbInstallActivity confirmation dialog, which
-  # cannot be shown over the keyguard, so the install is auto-cancelled with
-  # INSTALL_FAILED_USER_RESTRICTED. Nothing on this side can work around it.
+  # The phone must be unlocked for a foreground microphone restart; some
+  # ROMs also put installation confirmation behind the keyguard. Authorized
+  # root devices can use a bounded `sinnix phone unlock` maintenance window.
   if ! adb_any get-state >/dev/null 2>&1; then
     echo "app-install: no adb transport — plug in USB or run adb-restore" >&2
     exit 1

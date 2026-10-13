@@ -644,3 +644,19 @@ version history. Neither mirror proves complete phone coverage. Device discovery
 and late arrivals still require independent coverage evidence. The retired
 server-mtime seeding route is absent. Live camera route verification can retry
 an existing retained file without creating a new object or changing its mtime.
+
+## Ambient recovery over ADB
+
+`pull-ambient` uses the normal SSH drain when available. Its ADB fallback
+verifies a full SHA-256 before and after transferring each closed chunk,
+then publishes the staged copy without overwriting another file. Identical
+copies are skipped by digest, rather than size. Different bytes at the same
+name remain separate: the incoming version is retained with a
+`.conflict-<full-sha256>` suffix. Failed or changing-source transfers retain
+their staging file and report failure. This recovery path never deletes phone
+chunks; normal unattended delivery uses the app's verified HTTP receipts.
+
+The Capture screen measures delivery from verified upload events, not the
+inbox context file. It refreshes the upload receipt, exported audio queue and
+closed recorder files awaiting publication on an I/O worker. Missing directory
+observations remain unavailable; a currently open recording is not queued.
