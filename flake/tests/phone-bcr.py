@@ -153,3 +153,8 @@ with tempfile.TemporaryDirectory() as scratch:
             assert result.returncode != 0
             assert "unavailable" in result.stderr
 print("Wireless ADB: changing TLS endpoint, enrolled serial, wrong device and unavailable discovery passed")
+
+restore = source.split("adb-restore)\n", 1)[1].split("  ;;\nclip-push)", 1)[0]
+result = subprocess.run(["bash", "-c", "set -euo pipefail\nadb() { return 0; }\ninstall_wireless_adb_boot() { echo boot-installed; }\nset -- --persistent\n" + restore], env={**os.environ,"SINNIX_PHONE_ADB_SERIAL":"enrolled"}, capture_output=True, text=True)
+assert result.returncode == 0, result.stderr
+assert "boot-installed" in result.stdout

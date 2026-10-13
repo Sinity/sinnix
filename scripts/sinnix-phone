@@ -237,6 +237,26 @@ adb_shell_args() {
   adb_any shell -T "$command"
 }
 
+install_wireless_adb_boot() {
+  local boot_script write_command
+  boot_script=$(cat <<'BOOT'
+#!/system/bin/sh
+# Sinnix-owned authenticated wireless ADB startup hook.
+i=0
+while [ "$(getprop sys.boot_completed)" != 1 ]; do
+  [ "$i" -lt 180 ] || exit 1
+  sleep 2
+  i=$((i + 1))
+done
+settings put global adb_wifi_enabled 1
+BOOT
+)
+  write_command=$(sinnix-remote-command printf '%s\n' "$boot_script") || return
+  # Only replace this owner's hook. Root authority comes from the phone's
+  # existing su grant; no authentication or listening-port policy is bypassed.
+  adb_shell_args su -c "set -e; umask 077; test -d /data/adb/service.d; if [ -e /data/adb/service.d/sinnix-wireless-adb.sh ]; then grep -q '^# Sinnix-owned authenticated wireless ADB startup hook.$' /data/adb/service.d/sinnix-wireless-adb.sh; fi; $write_command > /data/adb/service.d/.sinnix-wireless-adb.sh.new; chmod 700 /data/adb/service.d/.sinnix-wireless-adb.sh.new; mv /data/adb/service.d/.sinnix-wireless-adb.sh.new /data/adb/service.d/sinnix-wireless-adb.sh"
+}
+
 # The grants the app needs that only shell-uid can make. RECORD_AUDIO is
 # deliberately NOT forced to `allow` here: the app declares
 # foregroundServiceType="microphone", so the default MODE_FOREGROUND is
@@ -690,6 +710,7 @@ sinnix-phone <command>
                 itself; this is for when that is failing)
   adb-connect   discover and attach authenticated wireless ADB
   adb-restore   enable authenticated Wireless debugging over authorized USB
+                --persistent also installs the rooted phone’s Magisk boot hook
   clip-push     push the current desktop clipboard to the phone, once
   clip-watch    watch desktop clipboard, push on change (foreground loop)
 EOF
@@ -1321,11 +1342,15 @@ adb-connect)
   ;;
 adb-restore)
   usb_serial="${SINNIX_PHONE_ADB_SERIAL:-$(cat "$PHONE_STATE/adb-serial" 2>/dev/null || true)}"
-  [ -n "$serial" ] || { echo "phone ADB serial not enrolled" >&2; return 1; }
+  [ -n "$usb_serial" ] || { echo "phone ADB serial not enrolled" >&2; exit 1; }
   adb -s "$usb_serial" get-state >/dev/null
   adb -s "$usb_serial" shell settings put global adb_wifi_enabled 1
-  ADB_RESOLVED=""
-  ensure_adb
+  ADB_RESOLVED="$usb_serial"
+  case "${1:-}" in
+    "") ;;
+    --persistent) install_wireless_adb_boot ;;
+    *) echo "adb-restore: expected --persistent or no argument" >&2; exit 2 ;;
+  esac
   echo "Wireless debugging enabled; endpoint discovery follows port changes."
   ;;
 clip-push)
