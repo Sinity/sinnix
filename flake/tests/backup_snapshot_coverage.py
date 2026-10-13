@@ -239,6 +239,26 @@ class CoverageFixture(unittest.TestCase):
         self.assertFalse(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 6, 26)))
         self.assertFalse(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 7, 5)))
 
+    def test_missing_cutoff_cannot_prune_or_suppress_new_archival(self):
+        queue = self.root / "replacement-queue"
+        queue.mkdir()
+        current = "realm.20260403T010000+0000"
+        cutoff = "realm.20260402T070000+0000"
+        (queue / current).mkdir()
+        archive = "realm-" + cutoff
+        marker = self.root / "missing-cutoff"
+        marker.write_text(
+            f"archive={archive}\nsnapshot={cutoff}\ngeneration=200\nsubvolume_id=102\n"
+            f"coverage={json.dumps({'snapshot_uuid': self.snapshot_uuid, 'archive': archive, 'archive_id': 'a' * 64})}\n"
+        )
+        # Lower generations can belong to a replacement filesystem. Neither
+        # the old marker nor an existing Borg archive orders its snapshots.
+        with patch.object(COVERAGE, "snapshot_details", return_value=(str(uuid.uuid4()), 10, 101)), \
+             patch.object(COVERAGE, "archive_identity", return_value="a" * 64):
+            with self.assertRaisesRegex(ValueError, "cutoff snapshot is unavailable"):
+                COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3")
+            self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", marker), current)
+
     def test_inventory_failure_cleans_private_scratch(self):
         real_temp = tempfile.TemporaryDirectory
         created = []
@@ -1903,7 +1923,13 @@ else: sys.exit(1)
                 ),
                 "site data",
             )
-            run("missing")
+            marker_path = root / "state/borg-drain/realm.latest-archived"
+            marker_before = marker_path.read_bytes()
+            snapshots_before = sorted((root / "realm-snapshots").iterdir())
+            refused = run("missing", ok=False)
+            self.assertIn("verified cutoff snapshot is unavailable", refused.stderr)
+            self.assertEqual(marker_path.read_bytes(), marker_before)
+            self.assertEqual(sorted((root / "realm-snapshots").iterdir()), snapshots_before)
             for directory in (
                 "live-holder/snapshots",
                 "live-holder/repo",

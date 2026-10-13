@@ -102,7 +102,11 @@ def choose_snapshot(directory, glob, latest_marker):
     newest, details = max(records, key=lambda row: row[1][1:])
     fields = read_marker_fields(latest_marker)
     cutoff = marker_order(fields)
-    if cutoff is None or details[1:] > cutoff:
+    # A missing cutoff cannot establish ordering on the current filesystem.
+    # Archive a current snapshot before relying on a new verified cutoff.
+    if cutoff is None or not any(name == fields["snapshot"] for name, _ in records):
+        return newest
+    if details[1:] > cutoff:
         return newest
     if (
         details[1] == cutoff[0]
@@ -150,7 +154,9 @@ def verified_prune_plan(directory, glob, marker, prefix, replacement_suffix):
         for name in snapshot_names(directory, glob)
     ]
     selected = next((details for name, details in records if name == snapshot), None)
-    if selected is not None and selected != (uuid, *cutoff):
+    if selected is None:
+        raise ValueError("verified cutoff snapshot is unavailable")
+    if selected != (uuid, *cutoff):
         raise ValueError("verified cutoff snapshot identity changed")
     return [
         (name, *details)

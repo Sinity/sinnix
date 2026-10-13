@@ -2,6 +2,8 @@
 
 The realm and persist drains retain each read-only Btrfs snapshot until a named Borg archive has been accepted. A successful create must have exit status zero; Borg warnings count as failure. Creation uses only declared static exclusions. Cache tags and `.nobackup` files cannot exclude a canonical directory.
 
+Pruning requires the verified cutoff snapshot to remain available with its recorded UUID, creation generation and subvolume ID. If it is absent, the drain retains snapshots and selects a current snapshot for a fresh proof instead of treating old generation numbers as coverage on the current filesystem.
+
 The realm drain accepts a fresh, warning-free create as a producer-backed proof, including its first archive. Before acknowledgement, it binds the read-only snapshot UUID, generation and subvolume ID to Borg's create result, the archive's UUID comment and immutable ID, the exact create command, and a hash of the coverage policy. The policy includes Borg exclusion patterns after their bind-path qualification. This proves which immutable snapshot Borg reported archiving successfully. It does not independently compare all source and archive bytes.
 
 Immediately after a successful realm create, the drain atomically writes an unacknowledged creation receipt. If the process stops before publishing the acknowledgement, a later drain can accept the existing archive only when that receipt still matches the snapshot, archive ID, policy and command. An older archive without a matching receipt gets a new `-producer-vN` name and a fresh create. No marker or prune follows a failed create, receipt check or proof.
