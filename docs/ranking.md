@@ -165,7 +165,10 @@ sinnix-deck-forge keybinds                     # a phone recall deck
 
 The inventory is the Lua Home Manager renders from
 `modules/features/desktop/hyprland/bindings.nix`
-(`~/.config/hypr/hyprland.lua`, or `--inventory`). Nothing here writes to that
+(`$XDG_CONFIG_HOME/hypr/sinnix-startup.lua`, defaulting to
+`~/.config/hypr/sinnix-startup.lua`, or `--inventory`). The main
+`hyprland.lua` loads this module; its reload callback installs the bindings.
+Nothing here writes to that
 module or to the compositor.
 
 Identity is the chord plus the intent, hashed. Not the action: it carries

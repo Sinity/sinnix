@@ -9,7 +9,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from conftest import BINDINGS_NIX, FIXTURE_BINDINGS, FORGE, Adapter
+from conftest import BINDINGS_NIX, FIXTURE_BINDINGS, FORGE, Adapter, render_lua
 
 DOMAIN = "keybinds"
 
@@ -59,13 +59,32 @@ def test_ids_ignore_a_store_path_move_but_follow_the_declarative_identity(
 
 
 def test_the_fixture_layout_matches_what_home_manager_renders(adapter: Adapter):
-    live = Path.home() / ".config/hypr/hyprland.lua"
+    live = Path.home() / ".config/hypr/sinnix-startup.lua"
     if not live.is_file():
         return
     result = adapter.ok("--inventory", str(live), "inventory", "--json")
     records = json.loads(result.stdout)
     assert len(records) > 10
     assert all(record["chord"] and record["intent"] for record in records)
+
+
+def test_default_inventory_reads_current_startup_callback(adapter: Adapter):
+    config = adapter.tmp / "config"
+    hypr = config / "hypr"
+    hypr.mkdir(parents=True)
+    (hypr / "hyprland.lua").write_text('require("sinnix-startup")\n')
+    content = render_lua(FIXTURE_BINDINGS)
+    (hypr / "sinnix-startup.lua").write_text(
+        'hl.on("config.reloaded", function()\n  hl.unbind("all")\n'
+        + "\n".join("  " + line for line in content.splitlines())
+        + "\nend)\n"
+    )
+    adapter.env["XDG_CONFIG_HOME"] = str(config)
+    adapter.env.pop("SINNIX_HYPR_LUA", None)
+    result = adapter.ok("inventory", "--json")
+    records = json.loads(result.stdout)
+    assert [row["chord"] for row in records] == [row[0] for row in FIXTURE_BINDINGS]
+    assert [row["intent"] for row in records] == [row[1] for row in FIXTURE_BINDINGS]
 
 
 # -- criterion 2: usage priors are bounded, labelled, and honest about gaps ---

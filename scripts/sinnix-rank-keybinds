@@ -9,7 +9,7 @@
 
 The declarative source is modules/features/desktop/hyprland/bindings.nix; the
 evaluated inventory is the Lua that Home Manager renders from it
-(~/.config/hypr/hyprland.lua). This reads the rendered file, never the module
+(~/.config/hypr/sinnix-startup.lua). This reads the rendered file, never the module
 and never the compositor: the module needs a Nix evaluation to mean anything,
 and `hyprctl binds` needs a running session, so neither can answer the
 question offline. Nothing here writes to either.
@@ -54,11 +54,22 @@ USAGE_SCHEMA = "sinnix.keybind.usage/1"
 
 DEFAULT_INVENTORY = Path(
     os.environ.get(
-        "SINNIX_HYPR_LUA", str(Path.home() / ".config/hypr/hyprland.lua")
+        "SINNIX_HYPR_LUA",
+        str(
+            Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+            / "hypr/sinnix-startup.lua"
+        ),
     )
 )
-CAPTURE_ROOT = Path(os.environ.get("SINNIX_RANK_ROOT", "/realm/activity/shared/ranking"))
-KEYBIND_MANIFEST = Path(os.environ.get("SINNIX_KEYBIND_MANIFEST", "/realm/activity/desktop/keyboard/keybinds/manifest.json"))
+CAPTURE_ROOT = Path(
+    os.environ.get("SINNIX_RANK_ROOT", "/realm/activity/shared/ranking")
+)
+KEYBIND_MANIFEST = Path(
+    os.environ.get(
+        "SINNIX_KEYBIND_MANIFEST",
+        "/realm/activity/desktop/keyboard/keybinds/manifest.json",
+    )
+)
 ATUIN_DB = Path(
     os.environ.get("ATUIN_DB", str(Path.home() / ".local/share/atuin/history.db"))
 )
@@ -80,7 +91,9 @@ USAGE_PRIOR_CAP = 1.0
 #: not outrank a known-valuable one on ignorance alone.
 UNCERTAINTY_WEIGHT = 0.5
 
-BIND_HEADER = re.compile(r'^hl\.bind\("(?P<chord>(?:[^"\\]|\\.)*)", \((?P<action>.*)\), \{$')
+BIND_HEADER = re.compile(
+    r'^\s*hl\.bind\("(?P<chord>(?:[^"\\]|\\.)*)", \((?P<action>.*)\), \{$'
+)
 FLAG_LINE = re.compile(r'^\s*\["(?P<key>[^"]+)"\]\s*=\s*(?P<value>.*?),?$')
 EXEC_CMD = re.compile(r'^hl\.dsp\.exec_cmd\("(?P<command>(?:[^"\\]|\\.)*)"\)$')
 STORE_PATH = re.compile(r"/nix/store/[a-z0-9]{32}-")
@@ -118,7 +131,7 @@ def parse_inventory(path: Path) -> list[dict]:
             continue
         flags: dict[str, str] = {}
         index += 1
-        while index < len(lines) and lines[index] != "})":
+        while index < len(lines) and lines[index].strip() != "})":
             flag = FLAG_LINE.match(lines[index])
             if flag is not None:
                 flags[flag.group("key")] = flag.group("value").strip()
@@ -154,8 +167,7 @@ def command_head(command: str) -> str | None:
     prefixes stripped, so it can be looked for in shell history."""
     tokens = command.split()
     while tokens and (
-        tokens[0] in ("uwsm", "app", "sudo", "exec", "--", "-n")
-        or "=" in tokens[0]
+        tokens[0] in ("uwsm", "app", "sudo", "exec", "--", "-n") or "=" in tokens[0]
     ):
         tokens.pop(0)
     if not tokens:
@@ -193,7 +205,9 @@ def usage_from_file(bindings: list[dict], path: Path) -> dict[str, dict]:
     return records
 
 
-def usage_from_atuin(bindings: list[dict], db: Path, window_days: int) -> dict[str, dict]:
+def usage_from_atuin(
+    bindings: list[dict], db: Path, window_days: int
+) -> dict[str, dict]:
     """How often each binding's command was typed at a shell instead.
 
     Shell history is a prior, never a preference: it says which capabilities
@@ -233,9 +247,7 @@ def usage_from_atuin(bindings: list[dict], db: Path, window_days: int) -> dict[s
         return records
 
     cutoff_ns = int(
-        (
-            dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=window_days)
-        ).timestamp()
+        (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=window_days)).timestamp()
         * 1_000_000_000
     )
     connection = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
@@ -531,8 +543,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=f"write the manifest here (deck-forge default: {KEYBIND_MANIFEST})",
     )
-    manifest.add_argument("--evidence-threshold", type=float, default=EVIDENCE_THRESHOLD)
-    manifest.add_argument("--uncertainty-weight", type=float, default=UNCERTAINTY_WEIGHT)
+    manifest.add_argument(
+        "--evidence-threshold", type=float, default=EVIDENCE_THRESHOLD
+    )
+    manifest.add_argument(
+        "--uncertainty-weight", type=float, default=UNCERTAINTY_WEIGHT
+    )
     manifest.set_defaults(func=cmd_manifest)
 
     return parser
