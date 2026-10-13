@@ -31,6 +31,7 @@ in
           config:
           let
             sources = config.services.sinex.sources;
+            runtimeTarget = builtins.fromJSON config.environment.etc."sinex/runtime-target.json".source.text;
             sourceIds = map (binding: binding.source_id) config.sinex._sourceBindingsManifest;
             postgresPartOf = config.systemd.targets.postgresql.unitConfig.PartOf or [ ];
             natsTlsEnvironment = lib.filter (
@@ -38,6 +39,13 @@ in
             ) config.systemd.services.sinexd.serviceConfig.Environment;
           in
           [
+            {
+              assertion =
+                runtimeTarget.gateway.ca_cert_file == "${config.services.sinex.stateRoot}/api-ca.pem"
+                && !runtimeTarget.gateway.insecure
+                && lib.any (lib.hasPrefix "d ${config.services.sinex.stateRoot}/run 0750 ") config.systemd.tmpfiles.rules;
+              message = "Runtime clients need the public CA outside the private runtime directory, with TLS verification enabled.";
+            }
             {
               assertion =
                 sources.terminal.enable
