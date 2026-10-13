@@ -87,7 +87,7 @@ def drain_is_active(unit: str = DRAIN_UNIT) -> bool:
     except (OSError, subprocess.SubprocessError) as exc:
         print(f"cannot probe {unit}: {exc}", file=sys.stderr)
         return True
-    return result.stdout.strip() not in ("inactive", "failed", "unknown")
+    return not (result.returncode == 3 and result.stdout.strip() in ("inactive", "failed"))
 
 
 def migrate(old_root: Path, new_root: Path, dry_run: bool = False) -> int:

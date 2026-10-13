@@ -157,3 +157,26 @@ def test_an_absent_source_is_a_completed_migration(tmp_path, monkeypatch, capsys
         == 0
     )
     assert "nothing to migrate" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("status", "returncode", "refused"),
+    [
+        ("inactive", 3, False),
+        ("failed", 3, False),
+        ("active", 0, True),
+        ("activating", 0, True),
+        ("unknown", 4, True),
+        ("", 1, True),
+        ("inactive", 1, True),
+    ],
+)
+def test_only_known_stopped_drain_permits_migration(monkeypatch, status, returncode, refused):
+    from subprocess import CompletedProcess
+
+    monkeypatch.setattr(
+        migrate_mod.subprocess,
+        "run",
+        lambda *_args, **_kwargs: CompletedProcess([], returncode, stdout=status + "\n"),
+    )
+    assert migrate_mod.drain_is_active("synthetic.service") is refused
