@@ -149,3 +149,16 @@ def test_polylogue_evidence_is_cached_by_query_and_window(monkeypatch):
     assert census.polylogue_evidence("shared", 90) == {"n": 1, "last": None}
     assert census.polylogue_evidence("shared", 30) == {"n": 1, "last": None}
     assert len(calls) == 2
+    assert calls[0][-1] == "shared since:90d"
+    assert calls[1][-1] == "shared since:30d"
+
+
+@pytest.mark.parametrize(
+    "body", ['{"error":"unavailable"}', '{"items":"invalid"}', '"unavailable"']
+)
+def test_unavailable_polylogue_response_is_not_measured_zero(monkeypatch, body):
+    census._POLYLOGUE_EVIDENCE.clear()
+    monkeypatch.setattr(
+        census, "run", lambda *_args, **_kwargs: type("Result", (), {"text": body})()
+    )
+    assert census.polylogue_evidence("neutral", 90) is None

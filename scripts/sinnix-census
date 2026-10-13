@@ -100,7 +100,8 @@ def polylogue_evidence(name: str, window_days: int) -> dict | None:
     # `search` was renamed to the query-first `find QUERY` dispatch; root
     # flags (--json/--limit) precede the subcommand, and results come back
     # as {"items": [...]} rather than a bare list or {"results": [...]}.
-    out = run(["polylogue", "--json", "--limit", "5", "find", name], timeout=60).text
+    query = f"{name} since:{window_days}d"
+    out = run(["polylogue", "--json", "--limit", "5", "find", query], timeout=60).text
     if out is None:
         _POLYLOGUE_EVIDENCE[key] = None
         return None
@@ -110,11 +111,14 @@ def polylogue_evidence(name: str, window_days: int) -> dict | None:
         _POLYLOGUE_EVIDENCE[key] = None
         return None
     if isinstance(data, dict):
-        items = data.get("items", [])
+        items = data.get("items")
     elif isinstance(data, list):
         items = data
     else:
-        items = []
+        items = None
+    if not isinstance(items, list):
+        _POLYLOGUE_EVIDENCE[key] = None
+        return None
     evidence = {"n": len(items), "last": None}
     _POLYLOGUE_EVIDENCE[key] = evidence
     return evidence
