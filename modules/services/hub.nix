@@ -631,9 +631,9 @@ mkServiceModule {
             Restart = "on-failure";
             RestartSec = "5s";
             # sd_notify from the serve loop's own thread (server.py), same
-            # qokz/ops-reducer pattern: a wedged HTTP server or a hung
-            # phone-stream receiver is restarted rather than sitting there
-            # answering nothing. Type stays simple rather than notify --
+            # qokz/ops-reducer pattern: this detects a stalled main loop,
+            # not an independently blocked HTTP worker or stream receiver.
+            # Type stays simple rather than notify --
             # READY does not gate start ordering here any more than it does
             # for the reducer, and the value wanted is the crash detection
             # WatchdogSec buys, not a start-order dependency on it.
