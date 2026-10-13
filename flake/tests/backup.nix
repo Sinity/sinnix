@@ -666,6 +666,7 @@ assert lib.assertMsg (
             pkgs.util-linux
           ];
           script = ''
+            ${pkgs.python3}/bin/python3 ${./borg-drill-arguments.py} ${../../scripts/sinnix-borg-drill}
             ${pkgs.python3}/bin/python3 ${./backup_snapshot_coverage.py} \
               --verifier ${../../modules/lib/backup/snapshot-coverage.py} \
               --scripts ${

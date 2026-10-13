@@ -42,6 +42,14 @@ REPOS=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --repo|--log|--within-days|--max-duration)
+      if [ $# -lt 2 ] || [ -z "$2" ]; then
+        echo "$1 requires a value" >&2
+        exit 2
+      fi
+      ;;
+  esac
+  case "$1" in
     --repo)         IFS=',' read -ra REPOS <<<"$2"; shift 2 ;;
     --log)          LOG_FILE="$2"; shift 2 ;;
     --within-days)  WITHIN_DAYS="$2"; shift 2 ;;
@@ -53,6 +61,15 @@ while [ $# -gt 0 ]; do
       ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
+done
+# Borg treats a zero duration as an unbounded check. Reject it before any
+# filesystem or repository access; decimal values also keep jq receipts valid.
+for numeric_option in MAX_DURATION WITHIN_DAYS; do
+  numeric_value="${!numeric_option}"
+  if [[ ! "$numeric_value" =~ ^[1-9][0-9]*$ ]]; then
+    echo "$numeric_option must be a positive decimal integer" >&2
+    exit 2
+  fi
 done
 [ ${#REPOS[@]} -eq 0 ] && REPOS=("${DEFAULT_REPOS[@]}")
 
