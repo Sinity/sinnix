@@ -277,7 +277,7 @@ def render_capability_sections(view: dict) -> tuple[str, int]:
             0,
         )
     status = view.get("census_status") or {}
-    html = f"<p>Census: {esc(status.get('status', 'unavailable'))}; collected at {esc(str(status.get('ts', 'unknown')))}; {len(status.get('coverage_gaps') or [])} coverage gaps.</p>"
+    html = f"<p data-census-snapshot-id=\"{esc(status.get('snapshot_id', ''))}\">Census: {esc(status.get('status', 'unavailable'))}; collected at {esc(str(status.get('ts', 'unknown')))}; {len(status.get('coverage_gaps') or [])} coverage gaps.</p>"
     if view.get("census_details"):
         html += "<details><summary>Snapshot coverage</summary><ul>" + "".join(f"<li>{esc(line)}</li>" for line in view["census_details"]) + "</ul></details>"
     counted = 0

@@ -140,7 +140,7 @@ def render_capabilities(
     off = sum(1 for entry in rows if entry.get("enabled") is False)
 
     status = view.get("census_status") or {}
-    missing += f'<p class="sub">Census: {esc(status.get("status", "unavailable"))}; collected at {esc(status.get("ts", "unknown"))}; {len(status.get("coverage_gaps") or [])} inventory/observation gaps.</p>'
+    missing += f'<p class="sub" data-census-snapshot-id="{esc(status.get("snapshot_id", ""))}">Census: {esc(status.get("status", "unavailable"))}; collected at {esc(status.get("ts", "unknown"))}; {len(status.get("coverage_gaps") or [])} inventory/observation gaps.</p>'
     gaps = coverage_lines(status)
     if gaps:
         missing += '<details><summary>Snapshot coverage</summary><ul>' + "".join(f"<li>{esc(line)}</li>" for line in gaps) + "</ul></details>"

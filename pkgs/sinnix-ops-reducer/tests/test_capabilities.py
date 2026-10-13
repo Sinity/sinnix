@@ -658,6 +658,8 @@ def test_evidence_reasons_outcomes_and_paths_are_visible_in_all_human_consumers(
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     cheatsheet, _ = module.render_capability_sections(view)
+    marker = f'data-census-snapshot-id="{snapshot["snapshot_id"]}"'
+    assert marker in page and marker in cheatsheet
     for rendered in (page, cli, cheatsheet):
         for evidence in (
             "agentctl: unavailable",
