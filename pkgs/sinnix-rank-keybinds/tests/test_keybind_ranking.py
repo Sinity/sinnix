@@ -11,6 +11,7 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
 from conftest import BINDINGS_NIX, FIXTURE_BINDINGS, FORGE, Adapter, render_lua
 
 DOMAIN = "keybinds"
@@ -166,6 +167,41 @@ def test_unreadable_atuin_database_is_unavailable_not_zero(adapter: Adapter):
     record = usage[ids_by_chord(adapter.inventory_records())["SUPER + O"]]
     assert record["state"] == "unavailable" and record["reason"]
     assert "count" not in record
+
+
+@pytest.mark.parametrize(
+    "name,near_miss",
+    [("tool_name", "toolXname"), ("tool%name", "toolXname"), ("CaseTool", "casetool")],
+)
+def test_atuin_command_head_is_literal_and_case_sensitive(
+    adapter: Adapter, name, near_miss
+):
+    adapter.write_inventory(
+        [("SUPER + O", "Neutral command", f'hl.dsp.exec_cmd("{name}")')]
+    )
+    database = adapter.tmp / "history.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "create table history (command text collate nocase, timestamp integer, deleted_at integer)"
+        )
+        connection.executemany(
+            "insert into history values (?, ?, null)",
+            [
+                (command, time.time_ns())
+                for command in (
+                    name,
+                    name + " --arg",
+                    near_miss + " --arg",
+                    name + "-other",
+                    "other " + name,
+                )
+            ],
+        )
+    adapter.adapter("usage", "--source", "atuin", "--atuin-db", str(database))
+    records = json.loads((adapter.rank_root / DOMAIN / "usage-prior.json").read_text())[
+        "records"
+    ]
+    assert next(iter(records.values()))["count"] == 2
 
 
 def test_shell_deck_reads_punctuated_database_path(adapter: Adapter):

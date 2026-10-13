@@ -5,13 +5,8 @@ executed by its shebang), so it is loaded here via importlib.util rather than
 a normal package import -- same technique as
 scripts/tests/test_capture_notifications_listener.py.
 
-The bead's spec calls for matching "anchored at word starts... to avoid
-substring false positives". The real query at import time only guarded
-three of the four word-boundary positions (exact, prefix, middle) and
-silently dropped hits where the name is the *last* token of a longer command
-(e.g. `sudo sinnix-cat`, no trailing space) -- a false negative that would
-misreport a used script as unused. Fixed in the same change as these tests;
-see the `f"% {name}"` clause in atuin_evidence().
+Matching covers exact, prefix, middle and final tokens, preserving literal
+punctuation and case. Live SQLite records remain visible before checkpoint.
 """
 
 from __future__ import annotations
@@ -21,6 +16,8 @@ import sqlite3
 import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+
+import pytest
 
 SCRIPT_PATH = Path(__file__).resolve().parents[3] / "scripts" / "sinnix-census"
 
@@ -99,6 +96,41 @@ def test_name_as_final_token_is_not_lost(tmp_path, monkeypatch):
 
     assert result is not None
     assert result["sinnix-cat"]["n"] == 1
+
+
+@pytest.mark.parametrize(
+    "name,near_miss",
+    [("tool_name", "toolXname"), ("tool%name", "toolXname"), ("CaseTool", "casetool")],
+)
+def test_token_matching_is_literal_and_case_sensitive(
+    tmp_path, monkeypatch, name, near_miss
+):
+    _make_atuin_db(
+        tmp_path / ".local/share/atuin/history.db",
+        [name, name + " --arg", "sudo " + name, near_miss + " --arg"],
+    )
+    monkeypatch.setattr(census, "HOME", tmp_path)
+    assert census.atuin_evidence([name], since_ns=0)[name]["n"] == 3
+
+
+@pytest.mark.parametrize("home_name", ["home", "home?#"])
+def test_live_wal_records_and_punctuated_home_are_read(
+    tmp_path, monkeypatch, home_name
+):
+    home = tmp_path / home_name
+    database = home / ".local/share/atuin/history.db"
+    database.parent.mkdir(parents=True)
+    with sqlite3.connect(database) as writer:
+        writer.execute("pragma journal_mode=wal")
+        writer.execute("create table history (command text, timestamp integer)")
+        writer.commit()
+        writer.execute("pragma wal_checkpoint(truncate)")
+        writer.execute("insert into history values ('neutral-tool', 1000000000)")
+        writer.commit()
+        assert database.with_name(database.name + "-wal").stat().st_size > 0
+        monkeypatch.setattr(census, "HOME", home)
+        result = census.atuin_evidence(["neutral-tool"], since_ns=0)
+        assert result is not None and result["neutral-tool"]["n"] == 1
 
 
 def test_polylogue_evidence_is_cached_by_query_and_window(monkeypatch):

@@ -253,11 +253,13 @@ def usage_from_atuin(
     connection = None
     try:
         connection = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)
+        connection.execute("BEGIN")
         for item_id, head in heads.items():
+            # Shell command names are literal and case-sensitive, not LIKE patterns.
             (count,) = connection.execute(
                 "select count(*) from history where deleted_at is null "
-                "and timestamp >= ? and (command = ? or command like ?)",
-                (cutoff_ns, head, f"{head} %"),
+                "and timestamp >= ? and (command = ? COLLATE BINARY or instr(command, ?) = 1)",
+                (cutoff_ns, head, head + " "),
             ).fetchone()
             records[item_id] = {
                 "state": "measured",

@@ -52,6 +52,7 @@ import re
 import sqlite3
 import sys
 import time
+from contextlib import closing
 from pathlib import Path
 
 from sinnix_lib.ledger import append_jsonl
@@ -73,15 +74,16 @@ def atuin_evidence(names: list[str], since_ns: int) -> dict | None:
         return None
     out: dict[str, dict] = {}
     try:
-        conn = sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True)
-        for name in names:
-            row = conn.execute(
-                "SELECT count(*), max(timestamp) FROM history WHERE timestamp > ?"
-                " AND (command = ? OR command LIKE ? OR command LIKE ? OR command LIKE ?)",
-                (since_ns, name, f"{name} %", f"% {name} %", f"% {name}"),
-            ).fetchone()
-            out[name] = {"n": row[0], "last": row[1] and int(row[1] // 1_000_000_000)}
-        conn.close()
+        # This is live storage: immutable mode would ignore committed WAL records.
+        with closing(sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
+            conn.execute("BEGIN")
+            for name in names:
+                row = conn.execute(
+                    "SELECT count(*), max(timestamp) FROM history WHERE timestamp > ?"
+                    " AND instr(' ' || command || ' ', ?) > 0",
+                    (since_ns, f" {name} "),
+                ).fetchone()
+                out[name] = {"n": row[0], "last": row[1] and int(row[1] // 1_000_000_000)}
     except sqlite3.Error:
         return None
     return out
