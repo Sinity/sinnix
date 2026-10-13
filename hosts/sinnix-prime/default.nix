@@ -267,6 +267,10 @@
     MaxRetentionSec = lib.mkForce "365day";
     SystemMaxUse = lib.mkForce "100G";
     SystemKeepFree = lib.mkForce "200G";
+    # Sinex's imported ten-file default would rotate this window at about
+    # 1 GiB despite the host's 100 GiB budget. Keep count secondary to size
+    # and time, including journals split across system and user streams.
+    SystemMaxFiles = lib.mkForce 10000;
     SystemMaxFileSize = lib.mkForce "128M";
     MaxFileSec = lib.mkForce "1week";
     ForwardToSyslog = lib.mkForce false;

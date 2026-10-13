@@ -22,6 +22,9 @@
         assert builtins.elem "var-log-journal.mount" journalSource.before;
         assert journalSource.unitConfig.DefaultDependencies == false;
         assert host.fileSystems."/var/log/journal".device == "/realm/state/journal";
+        assert host.services.journald.settings.Journal.SystemMaxFiles == 10000;
+        assert host.services.journald.settings.Journal.SystemMaxUse == "100G";
+        assert host.services.journald.settings.Journal.MaxRetentionSec == "365day";
         pkgs.runCommand "journal-source-check"
           {
             nativeBuildInputs = [ pkgs.python3 pkgs.bash ];
