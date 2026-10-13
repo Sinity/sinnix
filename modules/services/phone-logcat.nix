@@ -60,7 +60,7 @@ mkServiceModule {
     ];
   };
   configFn = _: {
-    # Signing key for the phone capture app (pkgs/sinnix-phone-app,
+    # Signing key for the phone capture app (the phone-app flake input,
     # docs/phone.md). Android identifies an app by its signing certificate, so
     # losing this key turns every future install into a signature conflict
     # resolvable only by uninstalling -- which also discards the app's runtime

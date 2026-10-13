@@ -45,11 +45,6 @@ _: {
         "result"
         ".direnv/*"
         "secret/*"
-        # The phone app's Gradle dependency lock is written by mitm-cache's
-        # update script, wholesale, every time it runs. Formatting it would
-        # make every regeneration a several-hundred-line diff against a file
-        # nobody reads by hand.
-        "pkgs/sinnix-phone-app/deps.json"
         # Gateway codegen output has exactly one correct form, checked byte
         # for byte by `sinnix-agent-gateway-generate --check`.
         "pkgs/sinnix-agent-gateway/fixtures/*.json"

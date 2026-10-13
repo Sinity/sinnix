@@ -409,3 +409,61 @@ def test_append_syncs_new_directory_ancestors(isolated_state_dirs, monkeypatch):
     for path in [_day_file(isolated_state_dirs).parent, _day_file(isolated_state_dirs).parent.parent]:
         info = path.stat()
         assert (info.st_dev, info.st_ino) in directories
+
+
+def test_cursor_waits_for_pending_append_durability(isolated_state_dirs, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import contextmanager
+    from threading import Event, get_ident
+
+    syncing, release, querying = Event(), Event(), Event()
+    writer_thread = []
+    real_sync = uploads_mod._sync_capture_path
+    real_lock = uploads_mod.flock
+
+    def paused_sync(*args):
+        if not syncing.is_set():
+            writer_thread.append(get_ident())
+            syncing.set()
+            assert release.wait(5)
+        return real_sync(*args)
+
+    @contextmanager
+    def observed_lock(*args, **kwargs):
+        if syncing.is_set() and get_ident() != writer_thread[0]:
+            querying.set()
+        with real_lock(*args, **kwargs):
+            yield
+
+    monkeypatch.setattr(uploads_mod, "_sync_capture_path", paused_sync)
+    monkeypatch.setattr(uploads_mod, "flock", observed_lock)
+    body = b'{"kind":"neutral"}\n'
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        writer = pool.submit(uploads_mod.append_events, "20260818", 0, body, _sha(body))
+        try:
+            assert syncing.wait(2)
+            reader = pool.submit(uploads_mod.events_cursor, "20260818")
+            assert querying.wait(2), "cursor did not enter the shared lock"
+            assert not reader.done(), "cursor acknowledged an unsynchronized write"
+        finally:
+            release.set()
+        assert writer.result(timeout=2)[0] == HTTPStatus.OK
+        status, payload = reader.result(timeout=2)
+    assert status == HTTPStatus.OK and payload["bytes"] == len(body)
+
+
+@pytest.mark.parametrize("error", [OSError, FileNotFoundError])
+def test_cursor_sync_failure_does_not_acknowledge_bytes(isolated_state_dirs, monkeypatch, error):
+    body = b'{"kind":"neutral"}\n'
+    target = _day_file(isolated_state_dirs)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(body)
+
+    def failure(*args):
+        raise error("synthetic sync failure")
+
+    monkeypatch.setattr(uploads_mod, "_sync_capture_path", failure)
+    status, payload = uploads_mod.events_cursor("20260818")
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert payload["ok"] is False and "bytes" not in payload
+    assert target.read_bytes() == body

@@ -21,7 +21,7 @@ from __future__ import annotations
 import hashlib
 import errno
 import stat
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import os
 import sys
 from http import HTTPStatus
@@ -320,11 +320,17 @@ def events_cursor(day: str) -> tuple[HTTPStatus, dict]:
         return HTTPStatus.BAD_REQUEST, {"ok": False, "detail": "day must be YYYYMMDD"}
     target = _day_file(day)
     try:
-        with _regular_file(target, os.O_RDONLY) as fd:
-            size = os.fstat(fd).st_size
-            _verify_capture_path(target, fd)
-    except FileNotFoundError:
-        size = 0
+        # A concurrent append can expose its new size before verification and
+        # fsync. A resume cursor must not acknowledge that unfinished write.
+        with flock(EVENTS_DIR / ".write.lock"), ExitStack() as opened:
+            try:
+                fd = opened.enter_context(_regular_file(target, os.O_RDONLY))
+            except FileNotFoundError:
+                size = 0
+            else:
+                observed = os.fstat(fd)
+                _sync_capture_path(target, fd, observed)
+                size = observed.st_size
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
     return HTTPStatus.OK, {"ok": True, "day": day, "bytes": size}

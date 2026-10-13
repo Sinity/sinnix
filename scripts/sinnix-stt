@@ -88,7 +88,7 @@ MODEL_SET = [
     (
         SILERO,
         # Pinned to a commit, not master. The phone app fetches this same file
-        # at build time and pins it (pkgs/sinnix-phone-app/pkg.nix); one VAD
+        # at build time and pins it (phone-app flake input, pkg.nix); one VAD
         # behaviour across sinnix only holds if both sides fetch the same
         # bytes, and a floating ref would silently end that the next time
         # upstream changes the model. Verified identical today: md5
