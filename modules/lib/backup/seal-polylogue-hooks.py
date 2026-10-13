@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Synchronize append-only hook journals into a stable reflink cache tree."""
+"""Synchronize append-only hook journals into a stable cache tree."""
 
 from __future__ import annotations
 
@@ -252,7 +252,7 @@ def _cached_file_matches(
         return False
 
 
-def _clone_file(
+def _copy_file(
     source: Path,
     relative: str,
     destination: Path,
@@ -275,7 +275,7 @@ def _clone_file(
         if before_signature != tuple(
             expected[key] for key in ("dev", "ino", "size", "mtime_ns", "ctime_ns")
         ):
-            raise OSError(f"source changed before reflink: {relative}")
+            raise OSError(f"source changed before copy: {relative}")
         output_fd = os.open(
             temporary,
             os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC,
@@ -283,15 +283,35 @@ def _clone_file(
         )
         try:
             _count("clone_attempts")
-            with _phase("reflink"):
-                fcntl.ioctl(output_fd, FICLONE, source_fd)
-            _count("cloned_files")
-            _count("cloned_logical_bytes", before.st_size)
+            try:
+                with _phase("reflink"):
+                    fcntl.ioctl(output_fd, FICLONE, source_fd)
+            except OSError as error:
+                # NoCoW files cannot reflink into a CoW destination. Unsupported
+                # cloning must not prevent sealing the immutable source cut.
+                if error.errno not in (
+                    errno.EINVAL, errno.EXDEV, errno.EOPNOTSUPP, errno.ENOTTY
+                ):
+                    raise
+                os.ftruncate(output_fd, 0)
+                os.lseek(output_fd, 0, os.SEEK_SET)
+                os.lseek(source_fd, 0, os.SEEK_SET)
+                with _phase("stream_copy"):
+                    with (
+                        os.fdopen(os.dup(source_fd), "rb") as source_stream,
+                        os.fdopen(os.dup(output_fd), "wb") as output_stream,
+                    ):
+                        shutil.copyfileobj(source_stream, output_stream, length=1024 * 1024)
+                _count("copied_files")
+                _count("copied_logical_bytes", before.st_size)
+            else:
+                _count("cloned_files")
+                _count("cloned_logical_bytes", before.st_size)
             with _phase("metadata_checkpoint"):
                 os.fchown(output_fd, before.st_uid, before.st_gid)
                 os.fchmod(output_fd, int(expected["mode"]))
                 os.utime(output_fd, ns=(before.st_atime_ns, before.st_mtime_ns))
-                # Persist origin metadata with the clone, before its existing
+                # Persist origin metadata with the copied file, before its existing
                 # durability barrier. A later invocation can reuse this verified
                 # inode even if the whole-tree pass was interrupted.
                 try:
@@ -304,7 +324,7 @@ def _clone_file(
                     )
                 except OSError as error:
                     # Without xattrs, retain the original whole-manifest reuse
-                    # rule. Never treat an untagged partial clone as verified.
+                    # rule. Never treat an untagged partial copy as verified.
                     if error.errno != errno.EOPNOTSUPP:
                         raise
             _fsync_file(output_fd)
@@ -319,12 +339,12 @@ def _clone_file(
             after.st_ctime_ns,
         )
         if before_signature != after_signature:
-            raise OSError(f"source changed during reflink: {relative}")
+            raise OSError(f"source changed during copy: {relative}")
         if temporary.stat().st_size != before.st_size:
-            raise OSError(f"reflink size mismatch: {relative}")
+            raise OSError(f"copy size mismatch: {relative}")
         os.replace(temporary, destination)
         _fsync_directory(destination.parent)
-        _count("durable_clones")
+        _count("durable_files")
     finally:
         os.close(source_fd)
         temporary.unlink(missing_ok=True)
@@ -379,7 +399,7 @@ def _sync_once(
             if not unchanged:
                 if dst.exists() and dst.is_dir() and not dst.is_symlink():
                     _remove_node(dst)
-                _clone_file(source, relative, dst, record)
+                _copy_file(source, relative, dst, record)
                 # Reuse verified clones if another file changes during this pass.
                 # The durable manifest is still published only after a stable pass.
                 old_manifest[relative] = record

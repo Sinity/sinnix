@@ -1,5 +1,6 @@
 """Synthetic source-cut ownership and cache-continuity regressions."""
 
+import errno
 import importlib.util
 import sys
 import tempfile
@@ -20,6 +21,44 @@ cut = load("cut", sys.argv.pop(1))
 sealer = load("sealer", sys.argv.pop(1))
 ORIGIN = "bd4b5bed-7abc-1e48-b9ff-1a3df8651105"
 CUT_UUID = "79daa3e5-d30a-44c8-8e50-f73316d27a95"
+
+
+class CopyTests(unittest.TestCase):
+    def test_unsupported_clone_streams_complete_payload_and_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            source.mkdir()
+            original = source / "event"
+            payload = b"neutral hook payload\n" * 120000
+            original.write_bytes(payload)
+            original.chmod(0o600)
+            record = sealer._file_record(original.stat())
+            destination = root / "sealed"
+            with patch.object(sealer.fcntl, "ioctl", side_effect=OSError(errno.EINVAL, "incompatible NoCoW")), patch.object(sealer.shutil, "copyfileobj", wraps=sealer.shutil.copyfileobj) as copied:
+                sealer._copy_file(source, "event", destination, record)
+            self.assertEqual(destination.read_bytes(), payload)
+            self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(destination.stat().st_mtime_ns, original.stat().st_mtime_ns)
+            self.assertLessEqual(copied.call_args.kwargs["length"], 1024 * 1024)
+            self.assertFalse(destination.with_name(".sealed.seal-tmp").exists())
+
+    def test_io_error_keeps_previous_cache_and_removes_temporary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            source.mkdir()
+            original = source / "event"
+            original.write_text("new neutral payload")
+            record = sealer._file_record(original.stat())
+            destination = root / "sealed"
+            destination.write_text("previous verified payload")
+            with patch.object(sealer.fcntl, "ioctl", side_effect=OSError(errno.EIO, "read error")), patch.object(sealer.shutil, "copyfileobj") as copied:
+                with self.assertRaises(OSError):
+                    sealer._copy_file(source, "event", destination, record)
+                copied.assert_not_called()
+            self.assertEqual(destination.read_text(), "previous verified payload")
+            self.assertFalse(destination.with_name(".sealed.seal-tmp").exists())
 
 
 class CutTests(unittest.TestCase):
@@ -48,7 +87,7 @@ class CutTests(unittest.TestCase):
             records["journal"]["dev"] += 1
             with patch.object(
                 sealer,
-                "_clone_file",
+                "_copy_file",
                 side_effect=AssertionError("unchanged cut recopied"),
             ):
                 sealer._sync_once(source, stage, records, ORIGIN)

@@ -806,7 +806,7 @@ assert lib.assertMsg (
             original.unlink()
             original.symlink_to(outside)
             try:
-                sealer._clone_file(source, "event", root / "sealed-event", record)
+                sealer._copy_file(source, "event", root / "sealed-event", record)
                 raise AssertionError("final symlink replacement was followed")
             except OSError:
                 pass
@@ -824,7 +824,7 @@ assert lib.assertMsg (
             nested.rename(source / "held-directory")
             nested.symlink_to(outside_directory, target_is_directory=True)
             try:
-                sealer._clone_file(source, "nested/event", root / "sealed-nested", nested_record)
+                sealer._copy_file(source, "nested/event", root / "sealed-nested", nested_record)
                 raise AssertionError("intermediate symlink replacement was followed")
             except OSError:
                 pass
@@ -840,7 +840,7 @@ assert lib.assertMsg (
             (retry_source / "a-stable").write_text("stable")
             (retry_source / "z-changing").write_text("first")
             retry_destination = root / "retry-sealed"
-            real_clone = sealer._clone_file
+            real_clone = sealer._copy_file
             calls = []
 
             def clone_then_change(source, relative, destination, expected):
@@ -849,7 +849,7 @@ assert lib.assertMsg (
                 if calls == ["a-stable"]:
                     (source / "z-changing").write_text("second")
 
-            sealer._clone_file = clone_then_change
+            sealer._copy_file = clone_then_change
             sys.argv = ["seal", str(retry_source), str(retry_destination)]
             assert sealer.main() == 0
             assert calls.count("a-stable") == 1
@@ -873,7 +873,7 @@ assert lib.assertMsg (
                     raise OSError("synthetic interruption")
                 real_clone(source, relative, destination, expected)
 
-            sealer._clone_file = interrupt_after_stable
+            sealer._copy_file = interrupt_after_stable
             sys.argv = ["seal", str(resume_source), str(resume_destination)]
             assert sealer.main() == 1
             resume_manifest = resume_destination.with_name(
@@ -893,7 +893,7 @@ assert lib.assertMsg (
                 calls.append(relative)
                 real_clone(source, relative, destination, expected)
 
-            sealer._clone_file = trace_clone
+            sealer._copy_file = trace_clone
             assert sealer.main() == 0
             assert calls == (["z-blocked"] if checkpoint_supported else ["a-stable", "z-blocked"])
             assert json.loads(resume_manifest.read_text()) == sealer._manifest(resume_source)
@@ -924,7 +924,7 @@ assert lib.assertMsg (
                     raise OSError(sealer.errno.EIO, "synthetic durability failure")
                 real_fsync(fd)
 
-            sealer._clone_file = real_clone
+            sealer._copy_file = real_clone
             os.fsync = reject_file_barrier
             sys.argv = ["seal", str(barrier_source), str(barrier_destination)]
             assert sealer.main() == 1
