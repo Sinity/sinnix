@@ -7,12 +7,12 @@ observations; incomplete route coverage cannot establish unusedness.
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
+import sys
 import time
 from pathlib import Path
-from typing import Any, Iterable, Callable
-import sys
+from typing import Any, Callable, Iterable
 
 SCHEMA = "sinnix-capability-index-v1"
 DEFAULT_INDEX = Path("/etc/sinnix/capability-index.json")

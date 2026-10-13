@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..capabilities import VERDICT_TONES, evidence_lines, coverage_lines
+from ..capabilities import VERDICT_TONES, coverage_lines, evidence_lines
 from .probes import unit_states
 from .services import unit_status
 from .shell import badge, card, esc, page, row, tile

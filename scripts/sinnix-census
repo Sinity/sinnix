@@ -48,15 +48,15 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import shlex
-import uuid
 import os
 import re
+import shlex
 import sqlite3
 import sys
 import time
-from pathlib import Path
+import uuid
 from contextlib import closing
+from pathlib import Path
 
 from sinnix_lib.lock import flock
 from sinnix_lib.process import run
@@ -71,30 +71,46 @@ CAPABILITY_INDEX = Path("/etc/sinnix/capability-index.json")
 
 # ---------- evidence sources ----------
 
-def atuin_evidence(names: list[str], since_ns: int, until_ns: int | None = None) -> dict | None:
+
+def atuin_evidence(
+    names: list[str], since_ns: int, until_ns: int | None = None
+) -> dict | None:
     """Literal shell-history matches, including quoted arguments, NOT executions.
 
-    One read-only aggregate per public invocation; LIKE wildcards are escaped.
+    One read-only snapshot; token matching is literal and case-sensitive.
     History retention, import provenance and caller identity are unknown.
     """
     db = HOME / ".local/share/atuin/history.db"
+    until_ns = time.time_ns() if until_ns is None else until_ns
     out = {}
     try:
-        with closing(sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2)) as conn:
+        with closing(
+            sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)
+        ) as conn:
             conn.execute("BEGIN")
-            bounds = conn.execute("SELECT min(timestamp), max(timestamp) FROM history").fetchone()
+            bounds = conn.execute(
+                "SELECT min(timestamp), max(timestamp) FROM history"
+            ).fetchone()
             for name in names:
                 row = conn.execute(
                     "SELECT count(*), max(timestamp) FROM history WHERE timestamp >= ? AND timestamp <= ?"
                     " AND instr(' ' || command || ' ', ?) > 0",
-                    (since_ns, until_ns or time.time_ns(), f" {name} "),
+                    (since_ns, until_ns, f" {name} "),
                 ).fetchone()
-                out[name] = {"n": row[0], "last": int(row[1] // 1_000_000_000) if row[1] else None,
-                             "status": "partial", "type": "shell-history-match", "caller_identity": "unknown",
-                             "time_basis": "history.timestamp ns", "retention": "unknown",
-                             "earliest_retained": bounds[0], "latest_retained": bounds[1],
-                             "since_ns": since_ns, "until_ns": until_ns,
-                             "limitation": "literal matches may be quoted arguments or imported history; not invocation proof"}
+                out[name] = {
+                    "n": row[0],
+                    "last": int(row[1] // 1_000_000_000) if row[1] else None,
+                    "status": "partial",
+                    "type": "shell-history-match",
+                    "caller_identity": "unknown",
+                    "time_basis": "history.timestamp ns",
+                    "retention": "unknown",
+                    "earliest_retained": bounds[0],
+                    "latest_retained": bounds[1],
+                    "since_ns": since_ns,
+                    "until_ns": until_ns,
+                    "limitation": "literal matches may be quoted arguments or imported history; not invocation proof",
+                }
     except sqlite3.Error:
         return None
     return out
@@ -106,41 +122,77 @@ def gateway_evidence(path: Path, since: int, until: int, limit: int = 1000) -> d
     Latest sequence prefix is bounded and may omit earlier in-window events;
     no cursor, archive scan, new authority or retention mutation is needed.
     """
-    result = {"status": "unavailable", "source": "gateway-audit", "actions": {},
-              "since": since, "until": until, "time_basis": "occurred_at epoch seconds",
-              "caller_identity": "unknown", "retention": "unknown", "limit": limit,
-              "limitation": "gateway routes only; no mapping to scripts, skills or MCP launches"}
+    result = {
+        "status": "unavailable",
+        "source": "gateway-audit",
+        "actions": {},
+        "since": since,
+        "until": until,
+        "time_basis": "occurred_at epoch seconds",
+        "caller_identity": "unknown",
+        "retention": "unknown",
+        "limit": limit,
+        "limitation": "gateway routes only; no mapping to scripts, skills or MCP launches",
+    }
     try:
-        with closing(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)) as conn:
+        with closing(
+            sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)
+        ) as conn:
             events = conn.execute(
                 "SELECT event_id, occurred_at, operation, outcome FROM events ORDER BY sequence DESC LIMIT ?",
                 (limit + 1,),
             ).fetchall()
         capped = len(events) > limit
-        result.update(status="partial", capped=capped, count_basis="lower-bound" if capped else "retained-audit-rows",
-                      earliest_observed=min((e[1] for e in events[:limit]), default=None),
-                      latest_observed=max((e[1] for e in events[:limit]), default=None))
+        result.update(
+            status="partial",
+            capped=capped,
+            count_basis="lower-bound" if capped else "retained-audit-rows",
+            earliest_observed=min((e[1] for e in events[:limit]), default=None),
+            latest_observed=max((e[1] for e in events[:limit]), default=None),
+        )
         seen = set()
         for receipt, occurred, action, outcome in events[:limit]:
-            if (not isinstance(occurred, (int, float)) or not isinstance(action, str)
-                    or re.fullmatch(r"[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)+", action) is None
-                    or outcome not in {"ok", "error"}):
+            if (
+                not isinstance(occurred, (int, float))
+                or not isinstance(action, str)
+                or re.fullmatch(r"[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)+", action)
+                is None
+                or outcome not in {"ok", "error"}
+            ):
                 raise ValueError("unsupported audit metadata")
             if receipt in seen or not since <= occurred <= until:
                 continue
             seen.add(receipt)
-            entry = result["actions"].setdefault(action, {"n": 0, "outcomes": {}, "last": None})
+            entry = result["actions"].setdefault(
+                action, {"n": 0, "outcomes": {}, "last": None}
+            )
             entry["n"] += 1
             entry["outcomes"][outcome] = entry["outcomes"].get(outcome, 0) + 1
             entry["last"] = max(entry["last"] or 0, occurred)
     except (OSError, sqlite3.Error, ValueError, TypeError):
-        result.update(status="unavailable", actions={}, reason="missing-or-unsupported-audit")
+        result.update(
+            status="unavailable", actions={}, reason="missing-or-unsupported-audit"
+        )
     return result
 
 
-def journal_count(unit: str, days: int, manager_user: bool, pattern: str | None = None, until: int | None = None) -> int | None:
-    until = until or int(time.time())
-    argv = ["journalctl", f"--since=@{until - days * 86400}", f"--until=@{until}", "-u", unit, "-o", "cat"]
+def journal_count(
+    unit: str,
+    days: int,
+    manager_user: bool,
+    pattern: str | None = None,
+    until: int | None = None,
+) -> int | None:
+    until = int(time.time()) if until is None else until
+    argv = [
+        "journalctl",
+        f"--since=@{until - days * 86400}",
+        f"--until=@{until}",
+        "-u",
+        unit,
+        "-o",
+        "cat",
+    ]
     if manager_user:
         argv.insert(1, "--user")
     out = run(argv, timeout=60).text
@@ -151,7 +203,9 @@ def journal_count(unit: str, days: int, manager_user: bool, pattern: str | None 
     return sum(1 for line in out.splitlines() if line.strip())
 
 
-def lane_freshness(path_str: str | None, since_epoch: int, until_epoch: int | None = None) -> dict | None:
+def lane_freshness(
+    path_str: str | None, since_epoch: int, until_epoch: int | None = None
+) -> dict | None:
     """A capture lane's evidence isn't a shell/agent/journal event -- it is
     whether the path it owns has been written to inside the window. `None`
     means "cannot tell" (missing path, permission error), never "unused"."""
@@ -169,7 +223,12 @@ def lane_freshness(path_str: str | None, since_epoch: int, until_epoch: int | No
             return None
     except OSError:
         return None
-    return {"n": 1 if since_epoch <= last <= (until_epoch or time.time()) else 0, "last": int(last)}
+    return {
+        "n": 1
+        if since_epoch <= last <= (time.time() if until_epoch is None else until_epoch)
+        else 0,
+        "last": int(last),
+    }
 
 
 STATIC_COVERAGE = {}
@@ -178,21 +237,53 @@ STATIC_COVERAGE = {}
 def static_refs(name: str) -> list[str]:
     refs: list[str] = []
     statuses = []
-    probe = run(["grep", "-rlIF", "--exclude-dir=.git", "--exclude-dir=__pycache__", "--exclude-dir=.pytest_cache", "--exclude-dir=.venv", "--exclude-dir=node_modules", "--", name, *[str(REPO / d) for d in ("modules", "flake", "scripts", "pkgs", "dots", "docs", ".agentctl")]], timeout=60)
+    probe = run(
+        [
+            "grep",
+            "-rlIF",
+            "--exclude-dir=.git",
+            "--exclude-dir=__pycache__",
+            "--exclude-dir=.pytest_cache",
+            "--exclude-dir=.venv",
+            "--exclude-dir=node_modules",
+            "--",
+            name,
+            *[
+                str(REPO / d)
+                for d in (
+                    "modules",
+                    "flake",
+                    "scripts",
+                    "pkgs",
+                    "dots",
+                    "docs",
+                    ".agentctl",
+                )
+            ],
+        ],
+        timeout=60,
+    )
     out = probe.text
-    statuses.append("available" if probe.returncode in (0, 1) and not probe.error else "partial")
+    statuses.append(
+        "available" if probe.returncode in (0, 1) and not probe.error else "partial"
+    )
     if out:
         refs += [p.removeprefix(str(REPO) + "/") for p in out.splitlines()]
     etc_probe = run(["grep", "-rlF", "--", name, "/etc/systemd/system"], timeout=30)
     etc = etc_probe.text
-    statuses.append("available" if etc_probe.returncode in (0, 1) and not etc_probe.error else "partial")
+    statuses.append(
+        "available"
+        if etc_probe.returncode in (0, 1) and not etc_probe.error
+        else "partial"
+    )
     if etc:
         refs += etc.splitlines()
     STATIC_COVERAGE[name] = statuses
-    return sorted(set(r for r in refs if r != f"scripts/{name}"))
+    return sorted({r for r in refs if r != f"scripts/{name}"})
 
 
 # ---------- declaration inventories ----------
+
 
 def load_capability_index(data: dict | None = None) -> dict[str, list[dict]] | None:
     """/etc/sinnix/capability-index.json, grouped by kind, or None.
@@ -213,7 +304,11 @@ def load_capability_index(data: dict | None = None) -> dict[str, list[dict]] | N
         return None
     by_kind: dict[str, list[dict]] = {}
     for row in rows:
-        if not isinstance(row, dict) or not isinstance(row.get("kind"), str) or not isinstance(row.get("name"), str):
+        if (
+            not isinstance(row, dict)
+            or not isinstance(row.get("kind"), str)
+            or not isinstance(row.get("name"), str)
+        ):
             return None
         if any(r["name"] == row["name"] for r in by_kind.get(row["kind"], [])):
             return None
@@ -241,8 +336,17 @@ def declared_scripts() -> dict[str, dict]:
 
 
 def declared_models() -> dict[str, dict]:
-    out = run(["curl", "-sm", "20", "-H", "Authorization: Bearer sk-local",
-               "http://127.0.0.1:4000/v1/models"], timeout=25).text
+    out = run(
+        [
+            "curl",
+            "-sm",
+            "20",
+            "-H",
+            "Authorization: Bearer sk-local",
+            "http://127.0.0.1:4000/v1/models",
+        ],
+        timeout=25,
+    ).text
     models: dict[str, dict] = {}
     if out:
         try:
@@ -256,7 +360,9 @@ def declared_models() -> dict[str, dict]:
 def declared_secrets() -> dict[str, dict]:
     if not SECRET_DIR.is_dir():
         return {}
-    return {p.stem: {"declared_in": "secret/"} for p in sorted(SECRET_DIR.glob("*.age"))}
+    return {
+        p.stem: {"declared_in": "secret/"} for p in sorted(SECRET_DIR.glob("*.age"))
+    }
 
 
 def declared_services(inv: dict | None = None) -> dict[str, dict]:
@@ -270,18 +376,31 @@ def declared_services(inv: dict | None = None) -> dict[str, dict]:
         except (OSError, json.JSONDecodeError):
             return {}
     return {
-        name: {"declared_in": "runtime-inventory", "unit": s.get("unit"),
-               "manager": s.get("manager", "system"), "kind": s.get("kind", "service"),
-               "captures": [c.get("path") for c in s.get("captures", [])]}
+        name: {
+            "declared_in": "runtime-inventory",
+            "unit": s.get("unit"),
+            "manager": s.get("manager", "system"),
+            "kind": s.get("kind", "service"),
+            "captures": [c.get("path") for c in s.get("captures", [])],
+        }
         for name, s in inv.get("surfaces", {}).items()
     }
 
 
 # ---------- census ----------
 
-CLASSES = {"scripts": "script", "mcp-servers": "mcp-server", "skills": "skill",
-           "features": "feature", "commands": "command", "capture-lanes": "capture-lane",
-           "agent-lanes": "agent-lane", "services": "service", "models": "model", "secrets": "secret"}
+CLASSES = {
+    "scripts": "script",
+    "mcp-servers": "mcp-server",
+    "skills": "skill",
+    "features": "feature",
+    "commands": "command",
+    "capture-lanes": "capture-lane",
+    "agent-lanes": "agent-lane",
+    "services": "service",
+    "models": "model",
+    "secrets": "secret",
+}
 
 
 def verdict(ev: dict, refs: list[str], reachable: bool) -> str:
@@ -297,7 +416,9 @@ def verdict(ev: dict, refs: list[str], reachable: bool) -> str:
 def append_snapshot(path: Path, snapshot: dict) -> None:
     """One completed observation per append, preserving even a torn old tail."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = (json.dumps(snapshot, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    payload = (
+        json.dumps(snapshot, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
     with flock(path.with_name(path.name + ".lock")):
         fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o644)
         try:
@@ -322,7 +443,11 @@ def main() -> int:
     ap.add_argument("--classes", default=",".join(CLASSES))
     ap.add_argument("--jsonl-out", default=str(CAPTURES / "usage-census.jsonl"))
     ap.add_argument("--no-write", action="store_true")
-    ap.add_argument("--json", action="store_true", help="print the same complete snapshot without raw evidence")
+    ap.add_argument(
+        "--json",
+        action="store_true",
+        help="print the same complete snapshot without raw evidence",
+    )
     ap.add_argument("--index", type=Path, default=CAPABILITY_INDEX)
     ap.add_argument("--gateway-audit", type=Path, default=None)
     args = ap.parse_args()
@@ -342,7 +467,13 @@ def main() -> int:
         index_data = {}
     index = load_capability_index(index_data)
     revision = index_data.get("revision") if isinstance(index_data, dict) else None
-    digest = hashlib.sha256(json.dumps(index_data, sort_keys=True, separators=(",", ":")).encode()).hexdigest() if index is not None else None
+    digest = (
+        hashlib.sha256(
+            json.dumps(index_data, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        if index is not None
+        else None
+    )
     gaps = []
     rows = []
     audit_path = args.gateway_audit
@@ -351,7 +482,9 @@ def main() -> int:
             config = json.loads(Path("/etc/sinnix/agent-gateway.json").read_text())
             audit_path = Path(config["stateDir"]) / "audit/events.sqlite3"
         except (OSError, ValueError, KeyError, TypeError):
-            audit_path = HOME / ".local/state/sinnix/agent-gateway/operator/audit/events.sqlite3"
+            audit_path = (
+                HOME / ".local/state/sinnix/agent-gateway/operator/audit/events.sqlite3"
+            )
     gateway = gateway_evidence(audit_path, since, until_epoch)
     try:
         runtime_bytes = INVENTORY.read_bytes()
@@ -360,8 +493,12 @@ def main() -> int:
     except (OSError, ValueError):
         runtime_data, runtime_digest = {}, None
     catalog = {}
-    loaders = {"scripts": declared_scripts, "services": lambda: declared_services(runtime_data),
-               "secrets": declared_secrets, "models": declared_models}
+    loaders = {
+        "scripts": declared_scripts,
+        "services": lambda: declared_services(runtime_data),
+        "secrets": declared_secrets,
+        "models": declared_models,
+    }
     for cls in sorted(wanted):
         print(f"sinnix-census: collecting {cls}", file=sys.stderr)
         if cls in loaders:
@@ -370,18 +507,44 @@ def main() -> int:
             except (OSError, ValueError, TypeError, AttributeError):
                 catalog[cls] = {}
             if not catalog[cls]:
-                gaps.append({"class": cls, "source": "declaration", "status": "unavailable-or-empty",
-                             "reason": "empty inventory cannot establish owner availability"})
+                gaps.append(
+                    {
+                        "class": cls,
+                        "source": "declaration",
+                        "status": "unavailable-or-empty",
+                        "reason": "empty inventory cannot establish owner availability",
+                    }
+                )
         else:
             if index is None:
-                gaps.append({"class": cls, "source": "capability-index", "status": "unavailable"})
+                gaps.append(
+                    {
+                        "class": cls,
+                        "source": "capability-index",
+                        "status": "unavailable",
+                    }
+                )
             if index is not None and CLASSES[cls] not in index:
-                gaps.append({"class": cls, "source": "capability-index", "status": "unavailable-or-empty",
-                             "reason": "declaration kind absent from supplied inventory"})
-            catalog[cls] = {r["name"]: {"declared_in": r.get("owner"), "enabled": r.get("enabled"),
-                                      "path": r.get("path"), "invoke": r.get("invoke")}
-                            for r in (index or {}).get(CLASSES[cls], [])}
-    identities = {(r["kind"], r["name"]): r for group in (index or {}).values() for r in group}
+                gaps.append(
+                    {
+                        "class": cls,
+                        "source": "capability-index",
+                        "status": "unavailable-or-empty",
+                        "reason": "declaration kind absent from supplied inventory",
+                    }
+                )
+            catalog[cls] = {
+                r["name"]: {
+                    "declared_in": r.get("owner"),
+                    "enabled": r.get("enabled"),
+                    "path": r.get("path"),
+                    "invoke": r.get("invoke"),
+                }
+                for r in (index or {}).get(CLASSES[cls], [])
+            }
+    identities = {
+        (r["kind"], r["name"]): r for group in (index or {}).values() for r in group
+    }
     shell_names = {}
     for cls, items in catalog.items():
         for name, meta in items.items():
@@ -389,19 +552,29 @@ def main() -> int:
             # Public dispatch spelling comes from the index, never guessed leaf aliases.
             invoke = declaration.get("invoke") or meta.get("invoke")
             spellings = [name] if cls in {"scripts", "commands", "agent-lanes"} else []
-            if cls in {"scripts", "commands", "agent-lanes"} and isinstance(invoke, str):
+            if cls in {"scripts", "commands", "agent-lanes"} and isinstance(
+                invoke, str
+            ):
                 spellings.append(invoke)
             shell_names[(cls, name)] = sorted(set(spellings))
-    atuin = atuin_evidence(sorted({n for names in shell_names.values() for n in names}), since * 10**9, collection_ns)
+    atuin = atuin_evidence(
+        sorted({n for names in shell_names.values() for n in names}),
+        since * 10**9,
+        collection_ns,
+    )
     for cls, items in catalog.items():
         for name, meta in items.items():
             ev = {"atuin": None, "gateway": None, "journald": None, "filesystem": None}
             spellings = shell_names[(cls, name)]
             if atuin is not None and spellings:
                 matches = [atuin[n] for n in spellings]
-                ev["atuin"] = {**matches[0], "n": sum(m["n"] for m in matches),
-                               "last": max((m["last"] or 0 for m in matches), default=0) or None,
-                               "identities": spellings, "count_basis": "literal-spelling-matches; may overlap"}
+                ev["atuin"] = {
+                    **matches[0],
+                    "n": sum(m["n"] for m in matches),
+                    "last": max((m["last"] or 0 for m in matches), default=0) or None,
+                    "identities": spellings,
+                    "count_basis": "literal-spelling-matches; may overlap",
+                }
             refs = static_refs(name) if cls in {"scripts", "secrets"} else []
             declaration = identities.get((CLASSES[cls], name), {})
             invoke = declaration.get("invoke") or meta.get("invoke")
@@ -413,31 +586,79 @@ def main() -> int:
             if len(tokens) == 3 and tokens[:2] == ["sinnix-agent-gateway", "call"]:
                 hit = gateway["actions"].get(tokens[2])
                 if hit:
-                    ev["gateway"] = {**hit, "action": tokens[2], "status": gateway["status"],
-                                     "count_basis": gateway.get("count_basis"), "caller_identity": "unknown"}
+                    ev["gateway"] = {
+                        **hit,
+                        "action": tokens[2],
+                        "status": gateway["status"],
+                        "count_basis": gateway.get("count_basis"),
+                        "caller_identity": "unknown",
+                    }
             if cls == "services" and meta.get("unit"):
-                n = journal_count(meta["unit"], args.window_days, meta.get("manager") == "user",
-                                  r"Started|Starting|Triggering|Incoming|Listening|Reached", until=until_epoch)
-                ev["journald"] = {"n": n, "type": "activation-log-match", "status": "partial" if n is not None else "unavailable",
-                                  "retention": "unknown", "time_basis": "journal realtime within snapshot since/until"}
+                n = journal_count(
+                    meta["unit"],
+                    args.window_days,
+                    meta.get("manager") == "user",
+                    r"Started|Starting|Triggering|Incoming|Listening|Reached",
+                    until=until_epoch,
+                )
+                ev["journald"] = {
+                    "n": n,
+                    "type": "activation-log-match",
+                    "status": "partial" if n is not None else "unavailable",
+                    "retention": "unknown",
+                    "time_basis": "journal realtime within snapshot since/until",
+                }
             if cls == "capture-lanes":
                 fresh = lane_freshness(meta.get("path"), since, until_epoch)
-                ev["filesystem"] = {"status": "partial" if fresh else "unavailable", "type": "producer-path-mtime",
-                                    "scope": "path and immediate children only; not client use", **(fresh or {})}
-            coverage = [{"source": "typed-invocations", "status": "partial" if ev["gateway"] else "unavailable",
-                         "reason": "only exact declared gateway call mappings; other routes unknown"},
-                        {"source": "polylogue", "status": "unsupported", "reason": "prose mentions are not invocation evidence"},
-                        {"source": "agentctl", "status": "unavailable", "reason": "no indexed exact capability mapping; spool not scanned"}]
+                ev["filesystem"] = {
+                    "status": "partial" if fresh else "unavailable",
+                    "type": "producer-path-mtime",
+                    "scope": "path and immediate children only; not client use",
+                    **(fresh or {}),
+                }
+            coverage = [
+                {
+                    "source": "typed-invocations",
+                    "status": "partial" if ev["gateway"] else "unavailable",
+                    "reason": "only exact declared gateway call mappings; other routes unknown",
+                },
+                {
+                    "source": "polylogue",
+                    "status": "unsupported",
+                    "reason": "prose mentions are not invocation evidence",
+                },
+                {
+                    "source": "agentctl",
+                    "status": "unavailable",
+                    "reason": "no indexed exact capability mapping; spool not scanned",
+                },
+            ]
             if refs or cls in {"scripts", "secrets"}:
-                coverage.append({"source": "static-references", "status": "partial",
-                                 "reason": "literal scoped search; indirect consumers unknown",
-                                 "reads": STATIC_COVERAGE.get(name, [])})
+                coverage.append(
+                    {
+                        "source": "static-references",
+                        "status": "partial",
+                        "reason": "literal scoped search; indirect consumers unknown",
+                        "reads": STATIC_COVERAGE.get(name, []),
+                    }
+                )
             if spellings and atuin is None:
                 coverage.append({"source": "atuin", "status": "unavailable"})
-            rows.append({"class": cls, "name": name, **meta, "invoke": invoke, "evidence": ev,
-                         "static_refs": refs, "static_ref_scope": "literal substrings in repository modules, flake, scripts, pkgs, dots, docs, .agentctl and /etc/systemd/system; not complete indirect consumers",
-                         "coverage_gaps": coverage, "used_via_edges": False,
-                         "never_prune": cls == "secrets", "verdict": verdict(ev, refs, False)})
+            rows.append(
+                {
+                    "class": cls,
+                    "name": name,
+                    **meta,
+                    "invoke": invoke,
+                    "evidence": ev,
+                    "static_refs": refs,
+                    "static_ref_scope": "literal substrings in repository modules, flake, scripts, pkgs, dots, docs, .agentctl and /etc/systemd/system; not complete indirect consumers",
+                    "coverage_gaps": coverage,
+                    "used_via_edges": False,
+                    "never_prune": cls == "secrets",
+                    "verdict": verdict(ev, refs, False),
+                }
+            )
     # Declared build dependencies are references even when their parent has no observed use.
     scripts = catalog.get("scripts", {})
     incoming = {}
@@ -446,10 +667,19 @@ def main() -> int:
             target = edge if edge in scripts else f"sinnix-{edge}"
             if target in scripts:
                 incoming.setdefault(target, []).append(parent)
-    roots = {r["name"] for r in rows if r["class"] == "scripts" and r["verdict"] in {"shell-match-observed", "attempt-observed"}}
+    roots = {
+        r["name"]
+        for r in rows
+        if r["class"] == "scripts"
+        and r["verdict"] in {"shell-match-observed", "attempt-observed"}
+    }
     reachable = set(roots)
     while True:
-        more = {target for target, parents in incoming.items() if any(p in reachable for p in parents)}
+        more = {
+            target
+            for target, parents in incoming.items()
+            if any(p in reachable for p in parents)
+        }
         if more <= reachable:
             break
         reachable |= more
@@ -457,16 +687,33 @@ def main() -> int:
         if row["class"] == "scripts":
             row["dependency_consumers"] = incoming.get(row["name"], [])
             row["used_via_edges"] = row["name"] in reachable - roots
-            row["verdict"] = verdict(row["evidence"], row["static_refs"], bool(row["dependency_consumers"]))
-    snapshot = {"schema": "sinnix-usage-census-v2", "snapshot_id": str(uuid.uuid4()), "complete": True,
-                "ts": now, "collected_at": int(time.time()), "since": since, "until": until_epoch,
-                "window_days": args.window_days, "declaration_revision": revision, "index_digest": digest,
-                "declaration_sources": {"scripts": {n: m for n, m in catalog.get("scripts", {}).items()},
-                                        "runtime_inventory": {"path": str(INVENTORY),
-                                                              "digest": runtime_digest},
-                                        "repository_revision": run(["git", "-C", str(REPO), "rev-parse", "HEAD"], timeout=5).text},
-                "classes": sorted(wanted), "coverage_gaps": gaps, "gateway": gateway,
-                "row_count": len(rows), "rows": rows}
+            row["verdict"] = verdict(
+                row["evidence"], row["static_refs"], bool(row["dependency_consumers"])
+            )
+    snapshot = {
+        "schema": "sinnix-usage-census-v2",
+        "snapshot_id": str(uuid.uuid4()),
+        "complete": True,
+        "ts": now,
+        "collected_at": int(time.time()),
+        "since": since,
+        "until": until_epoch,
+        "window_days": args.window_days,
+        "declaration_revision": revision,
+        "index_digest": digest,
+        "declaration_sources": {
+            "scripts": dict(catalog.get("scripts", {})),
+            "runtime_inventory": {"path": str(INVENTORY), "digest": runtime_digest},
+            "repository_revision": run(
+                ["git", "-C", str(REPO), "rev-parse", "HEAD"], timeout=5
+            ).text,
+        },
+        "classes": sorted(wanted),
+        "coverage_gaps": gaps,
+        "gateway": gateway,
+        "row_count": len(rows),
+        "rows": rows,
+    }
     if not args.no_write:
         append_snapshot(Path(args.jsonl_out), snapshot)
     if args.json:

@@ -21,8 +21,9 @@ Three real contracts here, none of them a restatement of the code:
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
+import os
 import time
 from typing import Any
 
@@ -119,11 +120,21 @@ def write_census(tmp_path, rows=CENSUS_LINES, index=INDEX):
     selected = {}
     for row in sorted(rows, key=lambda r: r["ts"]):
         selected[(row["class"], row["name"])] = row
-    snapshot = {"schema": "sinnix-usage-census-v2", "complete": True, "ts": int(time.time()),
-                "window_days": 90, "row_count": len(selected), "rows": list(selected.values()),
-                "snapshot_id": "fixture", "classes": sorted({r["class"] for r in selected.values()}),
-                "declaration_revision": index["revision"], "coverage_gaps": [],
-                "index_digest": hashlib.sha256(json.dumps(index, sort_keys=True, separators=(",", ":")).encode()).hexdigest()}
+    snapshot = {
+        "schema": "sinnix-usage-census-v2",
+        "complete": True,
+        "ts": int(time.time()),
+        "window_days": 90,
+        "row_count": len(selected),
+        "rows": list(selected.values()),
+        "snapshot_id": "fixture",
+        "classes": sorted({r["class"] for r in selected.values()}),
+        "declaration_revision": index["revision"],
+        "coverage_gaps": [],
+        "index_digest": hashlib.sha256(
+            json.dumps(index, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+    }
     path.write_text(json.dumps(snapshot) + "\n", encoding="utf-8")
     return path
 
@@ -345,201 +356,323 @@ def test_capabilities_is_a_page_route_and_renders_from_the_shell() -> None:
 def test_incomplete_snapshot_and_removed_row_cannot_mix_runs(tmp_path):
     path = write_census(tmp_path)
     first = json.loads(path.read_text())
-    second = {**first, 'snapshot_id': 'second', 'rows': [next(r for r in first['rows'] if r['class'] == 'services')], 'row_count': 1}
-    path.write_text(path.read_text() + json.dumps(second) + '\n' + '{"schema":"sinnix-usage-census-v2"')
+    second = {
+        **first,
+        "snapshot_id": "second",
+        "rows": [next(r for r in first["rows"] if r["class"] == "services")],
+        "row_count": 1,
+    }
+    path.write_text(
+        path.read_text()
+        + json.dumps(second)
+        + "\n"
+        + '{"schema":"sinnix-usage-census-v2"'
+    )
     view = capabilities.build(write_index(tmp_path), path)
-    assert view['census_status']['snapshot_id'] == 'second'
-    assert view['census_status']['ignored_incomplete_tail']
-    assert view['censused'] == 1
-    assert next(r for r in view['rows'] if r['name'] == 'sinnix-census')['census'] is None
+    assert view["census_status"]["snapshot_id"] == "second"
+    assert view["census_status"]["ignored_incomplete_tail"]
+    assert view["censused"] == 1
+    assert (
+        next(r for r in view["rows"] if r["name"] == "sinnix-census")["census"] is None
+    )
 
 
 def test_legacy_and_new_declaration_are_historical(tmp_path):
-    path = tmp_path / 'legacy.jsonl'
-    path.write_text(json.dumps(CENSUS_LINES[1]) + '\n')
+    path = tmp_path / "legacy.jsonl"
+    path.write_text(json.dumps(CENSUS_LINES[1]) + "\n")
     view = capabilities.build(write_index(tmp_path), path)
-    assert view['censused'] == 0
-    assert view['census_status']['status'] == 'historical-or-unavailable'
+    assert view["censused"] == 0
+    assert view["census_status"]["status"] == "historical-or-unavailable"
     path = write_census(tmp_path)
-    view = capabilities.build(write_index(tmp_path, {**INDEX, 'revision': 'new'}), path)
-    assert view['censused'] == 0
-    assert view['census_status']['status'] == 'declaration-mismatch'
+    view = capabilities.build(write_index(tmp_path, {**INDEX, "revision": "new"}), path)
+    assert view["censused"] == 0
+    assert view["census_status"]["status"] == "declaration-mismatch"
     # A new index with the same revision still requires the exact declaration digest.
-    view = capabilities.build(write_index(tmp_path, {**INDEX, 'rows': INDEX['rows'][:1]}), path)
-    assert view['census_status']['status'] == 'declaration-mismatch'
+    view = capabilities.build(
+        write_index(tmp_path, {**INDEX, "rows": INDEX["rows"][:1]}), path
+    )
+    assert view["census_status"]["status"] == "declaration-mismatch"
 
 
 def test_stale_and_malformed_snapshot_are_not_current(tmp_path):
     path = write_census(tmp_path)
     snapshot = json.loads(path.read_text())
-    snapshot['ts'] = int(time.time()) - 15 * 86400
-    path.write_text(json.dumps(snapshot) + '\n')
+    snapshot["ts"] = int(time.time()) - 15 * 86400
+    path.write_text(json.dumps(snapshot) + "\n")
     view = capabilities.build(write_index(tmp_path), path)
-    assert view['census_status']['status'] == 'stale'
-    assert view['censused'] == 0
-    snapshot['rows'].append({'class': 'scripts', 'name': 'duplicate'})
-    path.write_text(json.dumps(snapshot) + '\n')
+    assert view["census_status"]["status"] == "stale"
+    assert view["censused"] == 0
+    snapshot["rows"].append({"class": "scripts", "name": "duplicate"})
+    path.write_text(json.dumps(snapshot) + "\n")
     assert not capabilities.load_census(path)
 
 
 def test_cli_and_page_preserve_selected_snapshot_gaps(tmp_path, capsys):
     from sinnix_ops_reducer.cli import capabilities_command
+
     index_path = write_index(tmp_path)
     census_path = write_census(tmp_path)
     snap = json.loads(census_path.read_text())
-    snap['coverage_gaps'] = [{'class': 'skills', 'status': 'unavailable'}]
-    census_path.write_text(json.dumps(snap) + '\n')
-    assert capabilities_command(['--index', str(index_path), '--census', str(census_path), '--json']) == 0
+    snap["coverage_gaps"] = [{"class": "skills", "status": "unavailable"}]
+    census_path.write_text(json.dumps(snap) + "\n")
+    assert (
+        capabilities_command(
+            ["--index", str(index_path), "--census", str(census_path), "--json"]
+        )
+        == 0
+    )
     view = json.loads(capsys.readouterr().out)
-    assert view['census_status']['snapshot_id'] == 'fixture'
-    assert view['census_status']['coverage_gaps'] == snap['coverage_gaps']
-    html = render_capabilities({'host': 'fixture'}, view, 'now')
-    assert '1 inventory/observation gaps' in html
-    assert 'shell invocations' not in html
-    assert capabilities_command(['--index', str(index_path), '--census', str(census_path)]) == 0
-    assert 'Census: selected' in capsys.readouterr().out
+    assert view["census_status"]["snapshot_id"] == "fixture"
+    assert view["census_status"]["coverage_gaps"] == snap["coverage_gaps"]
+    html = render_capabilities({"host": "fixture"}, view, "now")
+    assert "1 inventory/observation gaps" in html
+    assert "shell invocations" not in html
+    assert (
+        capabilities_command(["--index", str(index_path), "--census", str(census_path)])
+        == 0
+    )
+    assert "Census: selected" in capsys.readouterr().out
 
 
-def test_wrapper_and_cheatsheet_use_the_same_selected_observation(tmp_path, monkeypatch):
+def test_wrapper_and_cheatsheet_use_the_same_selected_observation(
+    tmp_path, monkeypatch
+):
     import importlib.util
     import os
     import subprocess
+    import sys
     from importlib.machinery import SourceFileLoader
     from pathlib import Path
-    import sys
+
     root = Path(__file__).resolve().parents[3]
     index = write_index(tmp_path)
     report = write_census(tmp_path)
-    launcher = tmp_path / 'sinnix-ops-reducer'
-    launcher.write_text(f'#!{sys.executable}\nfrom sinnix_ops_reducer.cli import capabilities_command\nimport sys\nraise SystemExit(capabilities_command(sys.argv[2:]+["--index",{str(index)!r},"--census",{str(report)!r}]))\n')
+    launcher = tmp_path / "sinnix-ops-reducer"
+    launcher.write_text(
+        f'#!{sys.executable}\nfrom sinnix_ops_reducer.cli import capabilities_command\nimport sys\nraise SystemExit(capabilities_command(sys.argv[2:]+["--index",{str(index)!r},"--census",{str(report)!r}]))\n'
+    )
     launcher.chmod(0o755)
-    monkeypatch.setenv('PATH', str(tmp_path) + os.pathsep + os.environ['PATH'])
-    monkeypatch.setenv('PYTHONPATH', str(root / 'pkgs/sinnix-ops-reducer') + os.pathsep + str(root / 'pkgs/sinnix-lib'))
-    result = subprocess.run(['bash', str(root / 'scripts/sinnix-capabilities'), '--json'], capture_output=True, text=True, check=True)
+    monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        os.pathsep.join(
+            [str(Path(capabilities.__file__).resolve().parents[1]), *sys.path]
+        ),
+    )
+    result = subprocess.run(
+        [
+            "bash",
+            os.environ.get(
+                "SINNIX_CAPABILITIES_WRAPPER", str(root / "scripts/sinnix-capabilities")
+            ),
+            "--json",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     wrapper = json.loads(result.stdout)
-    loader = SourceFileLoader('fixture_cheatsheet', str(root / 'scripts/sinnix-cheatsheet'))
+    loader = SourceFileLoader(
+        "fixture_cheatsheet",
+        os.environ.get(
+            "SINNIX_CHEATSHEET_SOURCE", str(root / "scripts/sinnix-cheatsheet")
+        ),
+    )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     view = module.collect_capabilities()
-    assert view['census_status']['snapshot_id'] == wrapper['census_status']['snapshot_id'] == 'fixture'
+    assert (
+        view["census_status"]["snapshot_id"]
+        == wrapper["census_status"]["snapshot_id"]
+        == "fixture"
+    )
     html, count = module.render_capability_sections(view)
-    assert 'Census: selected' in html and count > 0
+    assert "Census: selected" in html and count > 0
 
 
 def test_runtime_inventory_fingerprint_mismatch_is_historical(tmp_path):
     report = write_census(tmp_path)
     snapshot = json.loads(report.read_text())
-    inventory = tmp_path / 'runtime.json'; inventory.write_text('{}')
-    snapshot['declaration_sources'] = {'runtime_inventory': {'digest': hashlib.sha256(b'{}').hexdigest()}}
-    report.write_text(json.dumps(snapshot) + '\n')
-    assert capabilities.build(write_index(tmp_path), report, runtime_inventory_path=inventory)['censused'] == 2
+    inventory = tmp_path / "runtime.json"
+    inventory.write_text("{}")
+    snapshot["declaration_sources"] = {
+        "runtime_inventory": {"digest": hashlib.sha256(b"{}").hexdigest()}
+    }
+    report.write_text(json.dumps(snapshot) + "\n")
+    assert (
+        capabilities.build(
+            write_index(tmp_path), report, runtime_inventory_path=inventory
+        )["censused"]
+        == 2
+    )
     inventory.write_text('{"surfaces":{}}')
-    view = capabilities.build(write_index(tmp_path), report, runtime_inventory_path=inventory)
-    assert view['censused'] == 0 and view['census_status']['status'] == 'declaration-mismatch'
+    view = capabilities.build(
+        write_index(tmp_path), report, runtime_inventory_path=inventory
+    )
+    assert (
+        view["censused"] == 0
+        and view["census_status"]["status"] == "declaration-mismatch"
+    )
 
 
 def test_source_limits_and_raw_argument_exclusion_survive_reader_projection(tmp_path):
     path = write_census(tmp_path)
     snapshot = json.loads(path.read_text())
-    target = next(r for r in snapshot['rows'] if r['class'] == 'scripts')
-    target['evidence']['atuin'].update(status='partial', retention='unknown', since_ns=100,
-                                     until_ns=200, raw_arguments='PRIVATE', transcript='PRIVATE')
-    path.write_text(json.dumps(snapshot) + '\n')
+    target = next(r for r in snapshot["rows"] if r["class"] == "scripts")
+    target["evidence"]["atuin"].update(
+        status="partial",
+        retention="unknown",
+        since_ns=100,
+        until_ns=200,
+        raw_arguments="PRIVATE",
+        transcript="PRIVATE",
+    )
+    path.write_text(json.dumps(snapshot) + "\n")
     view = capabilities.build(write_index(tmp_path), path)
-    row = next(r for r in view['rows'] if r['name'] == 'sinnix-census')['census']
-    assert row['sources']['atuin']['retention'] == 'unknown'
-    assert row['sources']['atuin']['status'] == 'partial'
-    assert row['sources']['atuin']['since_ns'] == 100
-    assert 'PRIVATE' not in json.dumps(view)
-
+    row = next(r for r in view["rows"] if r["name"] == "sinnix-census")["census"]
+    assert row["sources"]["atuin"]["retention"] == "unknown"
+    assert row["sources"]["atuin"]["status"] == "partial"
+    assert row["sources"]["atuin"]["since_ns"] == 100
+    assert "PRIVATE" not in json.dumps(view)
 
 
 def test_malformed_declaration_fingerprint_degrades_without_crashing(tmp_path):
     report = write_census(tmp_path)
     snapshot = json.loads(report.read_text())
-    snapshot['declaration_sources'] = {'runtime_inventory': 'unsupported-shape'}
-    report.write_text(json.dumps(snapshot) + '\n')
+    snapshot["declaration_sources"] = {"runtime_inventory": "unsupported-shape"}
+    report.write_text(json.dumps(snapshot) + "\n")
     view = capabilities.build(write_index(tmp_path), report)
-    assert view['censused'] == 0
-    assert view['census_status']['status'] == 'historical-or-unavailable'
+    assert view["censused"] == 0
+    assert view["census_status"]["status"] == "historical-or-unavailable"
 
 
-def test_record_larger_than_old_tail_limit_is_selected_without_scanning_history(tmp_path):
+def test_record_larger_than_old_tail_limit_is_selected_without_scanning_history(
+    tmp_path,
+):
     path = write_census(tmp_path)
     snapshot = json.loads(path.read_text())
-    snapshot['padding'] = 'x' * (17 * 1024 * 1024)
-    encoded = (json.dumps(snapshot) + '\n').encode()
+    snapshot["padding"] = "x" * (17 * 1024 * 1024)
+    encoded = (json.dumps(snapshot) + "\n").encode()
     history = b'{"legacy":true}\n' * 150_000
     path.write_bytes(history + encoded)
     progress = []
-    census = capabilities.load_census(path, progress=lambda read, total: progress.append((read, total)))
-    assert census.metadata['snapshot_id'] == 'fixture'
+    census = capabilities.load_census(
+        path, progress=lambda read, total: progress.append((read, total))
+    )
+    assert census.metadata["snapshot_id"] == "fixture"
     assert len(census) == 2
     assert progress[-1][0] <= len(encoded) + 64 * 1024
     assert progress[-1][0] < progress[-1][1]
-    assert all(0 < after[0] - before[0] <= 64 * 1024 for before, after in zip(progress, progress[1:]))
+    assert all(
+        0 < after[0] - before[0] <= 64 * 1024
+        for before, after in zip(progress, progress[1:], strict=False)
+    )
 
 
-def test_long_interrupted_tail_is_discarded_in_chunks_and_previous_snapshot_survives(tmp_path):
+def test_long_interrupted_tail_is_discarded_in_chunks_and_previous_snapshot_survives(
+    tmp_path,
+):
     import tracemalloc
+
     path = write_census(tmp_path)
     snapshot = path.read_bytes()
     history = b'{"legacy":true}\n' * 150_000
-    tail = b'{"torn": "' + b'x' * (18 * 1024 * 1024)
+    tail = b'{"torn": "' + b"x" * (18 * 1024 * 1024)
     path.write_bytes(history + snapshot + tail)
     progress = []
     tracemalloc.start()
     try:
-        census = capabilities.load_census(path, progress=lambda read, total: progress.append((read, total)))
+        census = capabilities.load_census(
+            path, progress=lambda read, total: progress.append((read, total))
+        )
         _, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
-    assert census.metadata['snapshot_id'] == 'fixture'
-    assert census.metadata['ignored_incomplete_tail']
+    assert census.metadata["snapshot_id"] == "fixture"
+    assert census.metadata["ignored_incomplete_tail"]
     assert progress[-1][0] < progress[-1][1]
     assert peak < 2 * 1024 * 1024  # the torn tail must never accumulate as a record
     cancelled = capabilities.load_census(path, cancelled=lambda: True)
-    assert cancelled.metadata['status'] == 'cancelled'
+    assert cancelled.metadata["status"] == "cancelled"
     assert not cancelled
-    assert 'no absence inferred' in cancelled.metadata['coverage_gaps'][0]['reason']
+    assert "no absence inferred" in cancelled.metadata["coverage_gaps"][0]["reason"]
 
 
-def test_evidence_reasons_outcomes_and_paths_are_visible_in_all_human_consumers(tmp_path, capsys):
+def test_evidence_reasons_outcomes_and_paths_are_visible_in_all_human_consumers(
+    tmp_path, capsys
+):
     import importlib.util
     from importlib.machinery import SourceFileLoader
     from pathlib import Path
+
     from sinnix_ops_reducer.cli import capabilities_command
+
     report = write_census(tmp_path)
     snapshot = json.loads(report.read_text())
     snapshot.update(since=100, until=200)
-    snapshot['coverage_gaps'] = [{'source': 'models', 'status': 'unavailable', 'reason': 'model owner unreachable'}]
-    target = next(row for row in snapshot['rows'] if row['class'] == 'scripts')
-    target['coverage_gaps'] = [{'source': 'agentctl', 'status': 'unavailable', 'reason': 'no indexed exact capability mapping'}]
-    target['static_refs'] = ['scripts/real-consumer']
-    target['evidence']['gateway'] = {'n': 2, 'status': 'partial', 'count_basis': 'lower-bound',
-                                     'action': 'files.read', 'outcomes': {'ok': 1, 'error': 1}}
-    target['evidence']['atuin'].update(status='partial', retention='unknown', since_ns=100, until_ns=200,
-                                     limitation='literal history matches are not invocations')
-    report.write_text(json.dumps(snapshot) + '\n')
+    snapshot["coverage_gaps"] = [
+        {
+            "source": "models",
+            "status": "unavailable",
+            "reason": "model owner unreachable",
+        }
+    ]
+    target = next(row for row in snapshot["rows"] if row["class"] == "scripts")
+    target["coverage_gaps"] = [
+        {
+            "source": "agentctl",
+            "status": "unavailable",
+            "reason": "no indexed exact capability mapping",
+        }
+    ]
+    target["static_refs"] = ["scripts/real-consumer"]
+    target["evidence"]["gateway"] = {
+        "n": 2,
+        "status": "partial",
+        "count_basis": "lower-bound",
+        "action": "files.read",
+        "outcomes": {"ok": 1, "error": 1},
+    }
+    target["evidence"]["atuin"].update(
+        status="partial",
+        retention="unknown",
+        since_ns=100,
+        until_ns=200,
+        limitation="literal history matches are not invocations",
+    )
+    report.write_text(json.dumps(snapshot) + "\n")
     index = write_index(tmp_path)
     view = capabilities.build(index, report)
-    page = render_capabilities({'host': 'fixture'}, view, 'now')
-    assert capabilities_command(['--index', str(index), '--census', str(report)]) == 0
+    page = render_capabilities({"host": "fixture"}, view, "now")
+    assert capabilities_command(["--index", str(index), "--census", str(report)]) == 0
     cli = capsys.readouterr().out
     root = Path(__file__).resolve().parents[3]
-    loader = SourceFileLoader('evidence_cheatsheet', str(root / 'scripts/sinnix-cheatsheet'))
+    loader = SourceFileLoader(
+        "evidence_cheatsheet",
+        os.environ.get(
+            "SINNIX_CHEATSHEET_SOURCE", str(root / "scripts/sinnix-cheatsheet")
+        ),
+    )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     cheatsheet, _ = module.render_capability_sections(view)
     for rendered in (page, cli, cheatsheet):
-        for evidence in ('agentctl: unavailable', 'no indexed exact capability mapping',
-                         'models: unavailable', 'model owner unreachable',
-                         'gateway outcomes: error=1, ok=1', 'lower-bound',
-                         'Reference: scripts/real-consumer', 'window 100 to 200',
-                         'since_ns=100', 'retention=unknown', 'not invocations'):
+        for evidence in (
+            "agentctl: unavailable",
+            "no indexed exact capability mapping",
+            "models: unavailable",
+            "model owner unreachable",
+            "gateway outcomes: error=1, ok=1",
+            "lower-bound",
+            "Reference: scripts/real-consumer",
+            "window 100 to 200",
+            "since_ns=100",
+            "retention=unknown",
+            "not invocations",
+        ):
             assert evidence in rendered, evidence
     for html in (page, cheatsheet):
-        assert '<details>' in html and '<summary>' in html
-        assert '<details open' not in html  # concise until the reader expands evidence
+        assert "<details>" in html and "<summary>" in html
+        assert "<details open" not in html  # concise until the reader expands evidence

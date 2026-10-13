@@ -31,6 +31,8 @@ python3Packages.buildPythonApplication {
     ])
   ];
   nativeCheckInputs = [ python3Packages.pytest ];
+  SINNIX_CAPABILITIES_WRAPPER = ../../scripts/sinnix-capabilities;
+  SINNIX_CHEATSHEET_SOURCE = ../../scripts/sinnix-cheatsheet;
   checkPhase = ''
     runHook preCheck
     pytest -q
