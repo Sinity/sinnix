@@ -32,6 +32,17 @@ COVERAGE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(COVERAGE)
 
 
+class FilesystemIdentityFixture(unittest.TestCase):
+    def test_exact_filesystem_uuid_is_required(self):
+        with patch.object(COVERAGE, "run", return_value=f"Label: 'fixture'  uuid: {FS_UUID}\n") as probe:
+            self.assertEqual(COVERAGE.filesystem_identity("/synthetic"), FS_UUID)
+            probe.assert_called_once_with("btrfs", "filesystem", "show", "--raw", "/synthetic")
+        for output in ("", f"UUID: {FS_UUID}\n", f"Label: none uuid: {FS_UUID}\n" * 2):
+            with patch.object(COVERAGE, "run", return_value=output):
+                with self.assertRaisesRegex(ValueError, "identify one Btrfs filesystem"):
+                    COVERAGE.filesystem_identity("/synthetic")
+
+
 class CoverageMemoryFixture(unittest.TestCase):
     def test_streamed_large_inventory_stays_below_memory_budget(self):
         # Exercise verify's actual walk, metadata and content passes without
@@ -103,6 +114,9 @@ class CoverageMemoryFixture(unittest.TestCase):
         self.assertLess(peak, 8 * 1024 * 1024)
 
 
+FS_UUID = "22222222-2222-2222-2222-222222222222"
+
+
 class CoverageFixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(
@@ -123,6 +137,9 @@ class CoverageFixture(unittest.TestCase):
         (self.source / "same-name").write_text("old version")
         (self.source / "old-only").write_text("unique historical bytes")
         self.snapshot_uuid = str(uuid.uuid4())
+        filesystem_probe = patch.object(COVERAGE, "filesystem_identity", return_value=FS_UUID)
+        filesystem_probe.start()
+        self.addCleanup(filesystem_probe.stop)
 
     def tearDown(self):
         os.environ.clear()
@@ -159,7 +176,7 @@ class CoverageFixture(unittest.TestCase):
         }
         marker = self.root / "latest"
         marker.write_text(
-            f"archive={archive}\nsnapshot={new}\ngeneration=20\nsubvolume_id=102\n"
+            f"archive={archive}\nsnapshot={new}\nfilesystem_uuid={FS_UUID}\ngeneration=20\nsubvolume_id=102\n"
             f"coverage={json.dumps(proof)}\n"
         )
         # A later acquisition can have an older wall-clock name after a clock
@@ -248,7 +265,7 @@ class CoverageFixture(unittest.TestCase):
         archive = "realm-" + cutoff
         marker = self.root / "missing-cutoff"
         marker.write_text(
-            f"archive={archive}\nsnapshot={cutoff}\ngeneration=200\nsubvolume_id=102\n"
+            f"archive={archive}\nsnapshot={cutoff}\nfilesystem_uuid={FS_UUID}\ngeneration=200\nsubvolume_id=102\n"
             f"coverage={json.dumps({'snapshot_uuid': self.snapshot_uuid, 'archive': archive, 'archive_id': 'a' * 64})}\n"
         )
         # Lower generations can belong to a replacement filesystem. Neither
@@ -257,6 +274,28 @@ class CoverageFixture(unittest.TestCase):
              patch.object(COVERAGE, "archive_identity", return_value="a" * 64):
             with self.assertRaisesRegex(ValueError, "cutoff snapshot is unavailable"):
                 COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3")
+            self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", marker), current)
+
+    def test_cutoff_on_another_filesystem_never_authorizes_pruning(self):
+        queue = self.root / "replacement-filesystem"
+        queue.mkdir()
+        current = "realm.20260403T010000+0000"
+        (queue / current).mkdir()
+        marker = self.root / "foreign-cutoff"
+        archive = "realm-" + current
+        marker.write_text(
+            f"archive={archive}\nsnapshot={current}\nfilesystem_uuid={uuid.uuid4()}\n"
+            "generation=20\nsubvolume_id=102\n"
+            f"coverage={json.dumps({'snapshot_uuid': self.snapshot_uuid, 'archive': archive, 'archive_id': 'a' * 64})}\n"
+        )
+        with patch.object(COVERAGE, "snapshot_details", return_value=(self.snapshot_uuid, 20, 102)):
+            self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", marker), current)
+            with self.assertRaisesRegex(ValueError, "filesystem identity changed"):
+                COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3")
+        # An older marker is history, not authority over current generations.
+        marker.write_text(marker.read_text().replace(next(line for line in marker.read_text().splitlines(True) if line.startswith("filesystem_uuid=")), ""))
+        self.assertEqual(COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3"), [])
+        with patch.object(COVERAGE, "snapshot_details", return_value=(self.snapshot_uuid, 20, 102)):
             self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", marker), current)
 
     def test_inventory_failure_cleans_private_scratch(self):
@@ -336,7 +375,7 @@ class CoverageFixture(unittest.TestCase):
         marker = self.root / "latest"
         marker.write_text(
             "archive=first\nsnapshot=realm.20260402T010000+0000\n"
-            "generation=20\nsubvolume_id=102\n"
+            f"filesystem_uuid={FS_UUID}\ngeneration=20\nsubvolume_id=102\n"
             f"coverage={json.dumps(previous)}\n"
         )
         details = (self.snapshot_uuid, 20, 102)
@@ -909,6 +948,11 @@ class CoverageFixture(unittest.TestCase):
 
 
 class ProducerReceiptFixture(unittest.TestCase):
+    def setUp(self):
+        filesystem_probe = patch.object(COVERAGE, "filesystem_identity", return_value=FS_UUID)
+        filesystem_probe.start()
+        self.addCleanup(filesystem_probe.stop)
+
     def test_create_receipt_binds_exact_command_snapshot_archive_and_policy(self):
         with tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR")) as scratch:
             root = Path(scratch)
@@ -954,6 +998,18 @@ class ProducerReceiptFixture(unittest.TestCase):
                 self.assertEqual(proof["proof_mode"], "created")
                 self.assertEqual(proof["source_hashed_bytes"], 0)
                 self.assertEqual(proof["archive_id"], archive_id)
+                self.assertEqual(proof["filesystem_uuid"], FS_UUID)
+                for altered in (
+                    receipt | {"filesystem_uuid": str(uuid.uuid4())},
+                    {key: value for key, value in receipt.items() if key != "filesystem_uuid"},
+                ):
+                    receipt_path.write_text(json.dumps(altered))
+                    with self.assertRaisesRegex(ValueError, "receipt does not bind"):
+                        COVERAGE.verify_created(source, archive, uuid_value, policy, receipt_path)
+                receipt_path.write_text(json.dumps(receipt))
+                with patch.object(COVERAGE, "filesystem_identity", return_value=str(uuid.uuid4())):
+                    with self.assertRaisesRegex(ValueError, "receipt does not bind"):
+                        COVERAGE.verify_created(source, archive, uuid_value, policy, receipt_path)
                 bad_stats = json.loads(json.dumps(stats))
                 bad_stats["archive"]["command_line"].extend(
                     [
@@ -1143,7 +1199,9 @@ elif command=='btrfs':
     generations=json.loads((root/'generations.json').read_text())
     parents_path=root/'cut-parents.json'
     parents=json.loads(parents_path.read_text()) if parents_path.exists() else {}
-    if args[:2]==['subvolume','list']: pass
+    if args[:3]==['filesystem','show','--raw']:
+        print("Label: 'fixture'  uuid: 22222222-2222-2222-2222-222222222222")
+    elif args[:2]==['subvolume','list']: pass
     elif args[:3]==['subvolume','snapshot','-r']:
         source,target=args[3:]
         shutil.copytree(source,target,symlinks=True)

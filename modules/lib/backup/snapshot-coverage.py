@@ -106,6 +106,8 @@ def choose_snapshot(directory, glob, latest_marker):
     # Archive a current snapshot before relying on a new verified cutoff.
     if cutoff is None or not any(name == fields["snapshot"] for name, _ in records):
         return newest
+    if fields.get("filesystem_uuid") != filesystem_identity(directory):
+        return newest
     if details[1:] > cutoff:
         return newest
     if (
@@ -131,10 +133,12 @@ def verified_prune_plan(directory, glob, marker, prefix, replacement_suffix):
         raise ValueError("verified cutoff names another snapshot volume")
     snapshot_epoch(snapshot)
     cutoff = marker_order(fields)
-    # Old markers were written before creation generations were recorded.
-    # Archive a fresh generation-bound cutoff before deleting any backlog.
-    if cutoff is None:
+    # Markers lacking ordering identity cannot authorize backlog deletion.
+    # Archive a fresh filesystem-bound cutoff before deleting any backlog.
+    if cutoff is None or "filesystem_uuid" not in fields:
         return []
+    if fields["filesystem_uuid"] != filesystem_identity(directory):
+        raise ValueError("verified cutoff filesystem identity changed")
     expected_archive = f"{prefix}-{snapshot}"
     replacement = re.escape(expected_archive) + r"-coverage-v(?:[2-9]|[1-9][0-9]+)"
     producer = re.escape(expected_archive) + r"-producer-v[1-9][0-9]*"
@@ -167,6 +171,17 @@ def verified_prune_plan(directory, glob, marker, prefix, replacement_suffix):
 
 def run(*args):
     return subprocess.check_output(args, text=True)
+
+
+def filesystem_identity(source):
+    output = run("btrfs", "filesystem", "show", "--raw", str(source))
+    identities = re.findall(
+        r"^Label:.*\buuid:\s*([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\s*$",
+        output, re.M,
+    )
+    if len(identities) != 1:
+        raise ValueError(f"cannot identify one Btrfs filesystem: {source}")
+    return identities[0]
 
 
 def snapshot_details(source):
@@ -234,7 +249,8 @@ def previous_proof(marker, policy_hash, now, snapshot_directory):
         full_epoch = proof["full_proof_epoch"]
         details = snapshot_details(Path(snapshot_directory) / fields["snapshot"])
         if (
-            proof["policy_sha256"] != policy_hash
+            fields.get("filesystem_uuid") != filesystem_identity(snapshot_directory)
+            or proof["policy_sha256"] != policy_hash
             or proof["proof_mode"] not in ("full", "created")
             or not re.fullmatch(r"[0-9a-f]{64}", proof["full_proof_content_sha256"])
             or not isinstance(full_epoch, int)
@@ -316,6 +332,7 @@ def record_create(source, archive, policy_path, create_stats):
         raise ValueError("created archive identity changed")
     return {
         "producer_contract": REALM_PRODUCER_CONTRACT,
+        "filesystem_uuid": filesystem_identity(source),
         "snapshot_uuid": uuid,
         "generation": generation,
         "subvolume_id": subvolume_id,
@@ -338,6 +355,7 @@ def verify_created(source, archive, uuid, policy_path, receipt_path):
     if (
         policy.get("producer_contract") != REALM_PRODUCER_CONTRACT
         or receipt["producer_contract"] != REALM_PRODUCER_CONTRACT
+        or receipt.get("filesystem_uuid") != filesystem_identity(source)
         or details
         != (receipt["snapshot_uuid"], receipt["generation"], receipt["subvolume_id"])
         or uuid != details[0]
@@ -364,6 +382,7 @@ def verify_created(source, archive, uuid, policy_path, receipt_path):
         "subvolume_id": details[2],
         "policy_sha256": policy_hash,
         "proof_mode": "created",
+        "filesystem_uuid": receipt["filesystem_uuid"],
         "producer": REALM_PRODUCER_CONTRACT,
         "create_receipt_sha256": hashlib.sha256(
             Path(receipt_path).read_bytes()
@@ -1011,6 +1030,8 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     ident = sub.add_parser("identity")
     ident.add_argument("source")
+    filesystem = sub.add_parser("filesystem-identity")
+    filesystem.add_argument("source")
     details = sub.add_parser("details")
     details.add_argument("source")
     check = sub.add_parser("verify")
@@ -1066,6 +1087,8 @@ def main():
     args = parser.parse_args()
     if args.command == "identity":
         print(identity(args.source))
+    elif args.command == "filesystem-identity":
+        print(filesystem_identity(args.source))
     elif args.command == "details":
         print("\t".join(map(str, snapshot_details(args.source))))
     elif args.command == "select":

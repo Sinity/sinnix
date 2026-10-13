@@ -436,6 +436,7 @@ let
         archive_name=${lib.escapeShellArg archivePrefix}-"$snapshot"
         original_archive_name="$archive_name"
         snapshot_details="$(${snapshotCoverage} details "$snapshot_path")"
+        snapshot_filesystem="$(${snapshotCoverage} filesystem-identity "$snapshot_path")"
         IFS=$'\t' read -r snapshot_uuid snapshot_generation snapshot_id <<< "$snapshot_details"
         mount --bind "$snapshot_path" ${lib.escapeShellArg bindTarget}
         archives="$(with_borg_lock borg list --short "$BORG_REPO")"
@@ -583,13 +584,15 @@ let
           '. + {create_seconds:(.create_seconds // $create_seconds),create_original_bytes:(.create_original_bytes // $create_original_bytes)}')"
         echo "backup_phase=verify label=${label} archive=$archive_name mode=$proof_mode $(printf '%s' "$proof" | ${pkgs.jq}/bin/jq -r '"elapsed_seconds=\(.verification_seconds) source_hashed_bytes=\(.source_hashed_bytes) archive_content_verified_bytes=\(.archive_content_verified_bytes)"')"
         cleanup_snapshot_bind_mount
-        if [ "$(${snapshotCoverage} details "$snapshot_path")" != "$snapshot_details" ]; then
+        if [ "$(${snapshotCoverage} details "$snapshot_path")" != "$snapshot_details" ] ||
+          [ "$(${snapshotCoverage} filesystem-identity "$snapshot_path")" != "$snapshot_filesystem" ]; then
           echo "Snapshot identity changed; retaining $snapshot_path" >&2
           exit 1
         fi
         {
           printf 'archive=%s\n' "$archive_name"
           printf 'snapshot=%s\n' "$snapshot"
+          printf 'filesystem_uuid=%s\n' "$snapshot_filesystem"
           printf 'generation=%s\n' "$snapshot_generation"
           printf 'subvolume_id=%s\n' "$snapshot_id"
           printf 'coverage=%s\n' "$proof"
@@ -605,6 +608,11 @@ let
           [ -n "$old" ] || continue
           old_path=${lib.escapeShellArg snapshotDir}/"$old"
           actual_details="$(${snapshotCoverage} details "$old_path")"
+          cutoff_filesystem="$(${pkgs.gnused}/bin/sed -n 's/^filesystem_uuid=//p' "$latest_marker")"
+          if [ "$(${snapshotCoverage} filesystem-identity "$old_path")" != "$cutoff_filesystem" ]; then
+            echo "Snapshot filesystem changed; retaining $old_path" >&2
+            exit 1
+          fi
           if [ "$actual_details" != "$(printf '%s\t%s\t%s' "$expected_uuid" "$expected_generation" "$expected_id")" ]; then
             echo "Snapshot identity changed; retaining $old_path" >&2
             exit 1
