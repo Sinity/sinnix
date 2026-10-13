@@ -15,7 +15,11 @@ Consumers:
 - ChatGPT desktop reads `/etc/sinnix/openai-proxy-url` and starts
   Electron/Chromium with `--proxy-server`.
 - The default subscription-authenticated `codex` wrapper exports HTTP(S)
-  proxy variables. `codex-deepseek` and `codex-local` remain direct.
+  proxy variables for its model process. The managed shell-environment policy
+  excludes those variables, including lowercase names, from spawned commands
+  so unrelated CLI requests use ordinary egress. `codex-deepseek` and
+  `codex-local` remain direct. A shell command that deliberately calls OpenAI
+  can select `/etc/sinnix/openai-proxy-url` explicitly.
 - Chrome receives an inline data URL rendered from the same script as
   `/etc/sinnix/openai-proxy.pac`; only ChatGPT/OpenAI origins are
   proxied and every other site is `DIRECT`.

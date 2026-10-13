@@ -12,6 +12,12 @@ project_doc_max_bytes = 262144
 project_doc_fallback_filenames = ["CLAUDE.md"]
 plan_mode_reasoning_effort = "xhigh"
 
+# The subscription client uses the OpenAI tunnel. General shell tools keep
+# their ordinary egress rather than inheriting that model-specific proxy.
+[shell_environment_policy.filters]
+HTTP_PROXY = "exclude"
+HTTPS_PROXY = "exclude"
+
 [projects."/home/sinity"]
 trust_level = "trusted"
 
