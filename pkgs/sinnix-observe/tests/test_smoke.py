@@ -838,3 +838,64 @@ def test_storage_mount_json_preserves_spaces_and_provider_failures(monkeypatch):
         result = storage.collect_storage(offline=False)
         mount = next(row for row in result["mounts"] if row["path"] == "/fixture with space")
         assert mount == {"path": "/fixture with space", "unresolved": True}
+
+
+def test_chrome_partial_counters_preserve_unknown_and_measured_subtotals():
+    processes = [
+        {"cgroup": "group", "rss_kb": 1024, "io": {"read_bytes": 0, "write_bytes": 0}},
+        {"cgroup": "group", "rss_kb": None, "io": {"write_bytes": 0}},
+    ]
+    row = chrome.group_process_counters(processes)[0]
+    assert row["rss_kb"] is None
+    assert row["read_bytes"] is None
+    assert row["write_bytes"] == 0
+    assert row["counter_coverage"]["rss_kb"] == {"measured": 1, "missing": 1, "measured_sum": 1024}
+    assert row["counter_coverage"]["read_bytes"] == {"measured": 1, "missing": 1, "measured_sum": 0}
+    assert chrome.is_chrome_process("chrome", "")
+
+
+def test_chrome_complete_counters_preserve_totals():
+    row = chrome.group_process_counters([
+        {"cgroup": "group", "rss_kb": 10, "io": {"read_bytes": 20, "write_bytes": 30}},
+        {"cgroup": "group", "rss_kb": 40, "io": {"read_bytes": 50, "write_bytes": 60}},
+    ])[0]
+    assert (row["rss_kb"], row["read_bytes"], row["write_bytes"]) == (50, 70, 90)
+    assert row["counter_coverage"]["read_bytes"]["missing"] == 0
+
+
+def test_chrome_render_distinguishes_unknown_from_measured_zero():
+    process = {"pid": 1, "cgroup": "group", "comm": "chrome", "rss_kb": None, "io": {"write_bytes": 0}}
+    report = {"generated_at": "synthetic", "window": {"since": "synthetic"}, "chrome_io": {
+        "available": True, "by_cgroup": chrome.group_process_counters([process]), "processes": [process],
+    }}
+    text = render.render_human(report)
+    assert "rss_MiB=unknown read_MiB=unknown write_MiB=0.0" in text
+
+
+def test_chrome_collector_retains_counter_gaps_before_process_limit(tmp_path, monkeypatch):
+    for pid in ("1", "2"):
+        directory = tmp_path / pid
+        directory.mkdir()
+        (directory / "comm").write_text("chrome\n")
+        (directory / "cgroup").write_text("0::/group\n")
+    (tmp_path / "1/status").write_text("VmRSS: 1024 kB\n")
+    (tmp_path / "1/io").write_text("read_bytes: 1024\nwrite_bytes: 0\n")
+    # The second process remains identifiable when cmdline/status/io are unreadable.
+    monkeypatch.setattr(chrome, "chrome_profile_candidates", lambda: [])
+    monkeypatch.setattr(chrome, "Path", lambda path: tmp_path if path == "/proc" else None)
+    result = chrome.collect_chrome_io(False, {}, 1)
+    assert len(result["processes"]) == 1
+    group = result["by_cgroup"][0]
+    assert group["processes"] == 2
+    assert group["read_bytes"] is None
+    assert group["counter_coverage"]["read_bytes"] == {"measured": 1, "missing": 1, "measured_sum": 1024}
+
+
+def test_missing_peak_counters_render_unknown_instead_of_crashing():
+    peak = {"max_rw_bps": None, "max_rss_bytes": None, "max_cpu_pct": None}
+    report = {"generated_at": "synthetic", "window": {"since": "synthetic"},
+              "chrome_io": {"available": True, "below_process_peaks": [peak]},
+              "below": {"process_peaks": [peak]}}
+    text = render.render_human(report)
+    assert "rw_Bps=unknown rss_MiB=unknown" in text
+    assert "cpu=unknown" in text

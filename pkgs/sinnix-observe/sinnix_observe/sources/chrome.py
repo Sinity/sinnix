@@ -60,6 +60,8 @@ def chrome_profile_candidates() -> list[Path]:
 
 
 def is_chrome_process(comm: str, cmdline: str) -> bool:
+    if comm.strip().lower() in {"chrome", "chromium", "google-chrome"}:
+        return True
     text = f"{comm} {cmdline}".lower()
     return any(
         token in text
@@ -115,12 +117,40 @@ def chrome_path_row(path: Path, include_size: bool = True) -> dict[str, Any]:
     return row
 
 
+def group_process_counters(processes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    metrics = ("rss_kb", "rchar", "wchar", "read_bytes", "write_bytes", "cancelled_write_bytes")
+    groups: dict[str, dict[str, Any]] = {}
+    for proc in processes:
+        cgroup = proc.get("cgroup") or "(unknown)"
+        row = groups.setdefault(cgroup, {
+            "cgroup": cgroup, "processes": 0,
+            "counter_coverage": {key: {"measured": 0, "missing": 0, "measured_sum": 0}
+                                 for key in metrics},
+        })
+        row["processes"] += 1
+        values = {**(proc.get("io") or {}), "rss_kb": proc.get("rss_kb")}
+        for key in metrics:
+            coverage = row["counter_coverage"][key]
+            value = values.get(key)
+            if value is None:
+                coverage["missing"] += 1
+            else:
+                coverage["measured"] += 1
+                coverage["measured_sum"] += int(value)
+    for row in groups.values():
+        for key, coverage in row["counter_coverage"].items():
+            row[key] = None if coverage["missing"] else coverage["measured_sum"]
+    return sorted(groups.values(), key=lambda row: (
+        row["counter_coverage"]["write_bytes"]["measured_sum"]
+        + row["counter_coverage"]["read_bytes"]["measured_sum"]), reverse=True)
+
+
 def collect_chrome_io(
     offline: bool, below: dict[str, Any], limit: int
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "available": False,
-        "counter_scope": "live /proc/<pid>/io counters since each Chrome process started",
+        "counter_scope": "live /proc/<pid>/io counters since each Chrome process started; cgroup totals are unknown when any observed process lacks a counter; counter_coverage retains measured subtotals",
         "profiles": [],
         "processes": [],
         "by_cgroup": [],
@@ -152,47 +182,21 @@ def collect_chrome_io(
             continue
         status = parse_proc_status(proc_dir / "status")
         io = parse_proc_io(proc_dir / "io")
+        rss = (status.get("VmRSS") or "").split()
         result["processes"].append(
             {
                 "pid": pid,
                 "ppid": int_or_none(status.get("PPid")),
                 "comm": comm,
                 "state": status.get("State"),
-                "rss_kb": int_or_none((status.get("VmRSS") or "").split()[0]),
+                "rss_kb": int_or_none(rss[0] if rss else None),
                 "cgroup": parse_proc_cgroup(proc_dir / "cgroup"),
                 "io": io,
                 "cmdline": cmdline[:300],
             }
         )
 
-    by_cgroup: dict[str, dict[str, Any]] = {}
-    for proc in result["processes"]:
-        cgroup = proc.get("cgroup") or "(unknown)"
-        current = by_cgroup.setdefault(
-            cgroup,
-            {
-                "cgroup": cgroup,
-                "processes": 0,
-                "rss_kb": 0,
-                "rchar": 0,
-                "wchar": 0,
-                "read_bytes": 0,
-                "write_bytes": 0,
-                "cancelled_write_bytes": 0,
-            },
-        )
-        current["processes"] += 1
-        current["rss_kb"] += int(proc.get("rss_kb") or 0)
-        io = proc.get("io") or {}
-        for key in (
-            "rchar",
-            "wchar",
-            "read_bytes",
-            "write_bytes",
-            "cancelled_write_bytes",
-        ):
-            current[key] += int(io.get(key) or 0)
-
+    result["by_cgroup"] = group_process_counters(result["processes"])
     result["processes"] = sorted(
         result["processes"],
         key=lambda proc: (
@@ -201,11 +205,6 @@ def collect_chrome_io(
         ),
         reverse=True,
     )[:limit]
-    result["by_cgroup"] = sorted(
-        by_cgroup.values(),
-        key=lambda row: row["write_bytes"] + row["read_bytes"],
-        reverse=True,
-    )
 
     for proc in below.get("process_peaks", []):
         text = f"{proc.get('comm') or ''} {proc.get('cmdline') or ''}".lower()

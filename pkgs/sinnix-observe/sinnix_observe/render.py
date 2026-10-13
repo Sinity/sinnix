@@ -7,6 +7,10 @@ from typing import Any
 from .util import normalize_timestamp
 
 
+def format_number(value: int | float | None, divisor: int = 1, precision: int = 1) -> str:
+    return "unknown" if value is None else f"{value / divisor:.{precision}f}"
+
+
 def render_human(report: dict[str, Any]) -> str:
     lines: list[str] = []
 
@@ -153,24 +157,24 @@ def render_human(report: dict[str, Any]) -> str:
         lines.append("cgroups:")
         for row in chrome.get("by_cgroup", [])[:12]:
             lines.append(
-                f"  procs={row.get('processes')} rss_MiB={row.get('rss_kb', 0) / 1024:.1f} "
-                f"read_MiB={row.get('read_bytes', 0) / 1048576:.1f} "
-                f"write_MiB={row.get('write_bytes', 0) / 1048576:.1f} {row.get('cgroup')}"
+                f"  procs={row.get('processes')} rss_MiB={format_number(row.get('rss_kb'), 1024)} "
+                f"read_MiB={format_number(row.get('read_bytes'), 1048576)} "
+                f"write_MiB={format_number(row.get('write_bytes'), 1048576)} {row.get('cgroup')}"
             )
         lines.append("top live processes:")
         for proc in chrome.get("processes", [])[:12]:
             io = proc.get("io") or {}
             lines.append(
-                f"  pid={proc.get('pid')} rss_MiB={(proc.get('rss_kb') or 0) / 1024:.1f} "
-                f"read_MiB={io.get('read_bytes', 0) / 1048576:.1f} "
-                f"write_MiB={io.get('write_bytes', 0) / 1048576:.1f} "
+                f"  pid={proc.get('pid')} rss_MiB={format_number(proc.get('rss_kb'), 1024)} "
+                f"read_MiB={format_number(io.get('read_bytes'), 1048576)} "
+                f"write_MiB={format_number(io.get('write_bytes'), 1048576)} "
                 f"cg={proc.get('cgroup')} {proc.get('comm')}"
             )
         if chrome.get("below_process_peaks"):
             lines.append("recent below Chrome peaks:")
             for row in chrome["below_process_peaks"][:8]:
                 lines.append(
-                    f"  rw_Bps={row.get('max_rw_bps'):.0f} rss_MiB={row.get('max_rss_bytes', 0) / 1048576:.1f} "
+                    f"  rw_Bps={format_number(row.get('max_rw_bps'), precision=0)} rss_MiB={format_number(row.get('max_rss_bytes'), 1048576)} "
                     f"pid={row.get('pid')} {row.get('comm')} {row.get('cgroup')}"
                 )
 
@@ -217,15 +221,15 @@ def render_human(report: dict[str, Any]) -> str:
     lines.append("cgroup peaks:")
     for row in below.get("cgroup_peaks", [])[:12]:
         lines.append(
-            f"  rw_Bps={row.get('max_rw_bps'):.0f} io_full={row.get('max_io_full_pct'):.2f} "
-            f"rss_MiB={row.get('max_rss_bytes', 0) / 1048576:.1f} cpu={row.get('max_cpu_pct'):.1f} "
+            f"  rw_Bps={format_number(row.get('max_rw_bps'), precision=0)} io_full={row.get('max_io_full_pct'):.2f} "
+            f"rss_MiB={format_number(row.get('max_rss_bytes'), 1048576)} cpu={format_number(row.get('max_cpu_pct'))} "
             f"{row.get('cgroup')}"
         )
     lines.append("process I/O peaks:")
     for row in below.get("process_peaks", [])[:12]:
         lines.append(
-            f"  rw_Bps={row.get('max_rw_bps'):.0f} rss_MiB={row.get('max_rss_bytes', 0) / 1048576:.1f} "
-            f"cpu={row.get('max_cpu_pct'):.1f} pid={row.get('pid')} {row.get('comm')} {row.get('cmdline')}"
+            f"  rw_Bps={format_number(row.get('max_rw_bps'), precision=0)} rss_MiB={format_number(row.get('max_rss_bytes'), 1048576)} "
+            f"cpu={format_number(row.get('max_cpu_pct'))} pid={row.get('pid')} {row.get('comm')} {row.get('cmdline')}"
         )
 
     section("gaps")
