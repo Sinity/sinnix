@@ -65,4 +65,5 @@ NOCTALIA_OPS_PLUGIN="$plugin" \
   NOCTALIA_OPS_REDUCER="$reducer_root" \
   NOCTALIA_OPS_OBSERVE="$observe_root" \
   python3 "$contract"
+python3 "${NOCTALIA_OPS_ORDERING:-$repo_root/flake/tests/noctalia-ops-ordering.py}"
 echo "noctalia ops bridge fixture passed"

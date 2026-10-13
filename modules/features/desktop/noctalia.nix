@@ -121,9 +121,9 @@ mkFeatureModule {
           home.file.".local/share/noctalia/pinned/community/keybind-cheatsheet".source =
             "${communityPlugins}/keybind-cheatsheet";
           home.file.".local/share/noctalia/local/sinnix-ops".source =
-            mkDotsFile "/noctalia/plugins/sinnix-ops";
+            ../../../dots/noctalia/plugins/sinnix-ops;
           home.file.".local/share/noctalia/local/sinnix-cockpit".source =
-            mkDotsFile "/noctalia/plugins/sinnix-cockpit";
+            ../../../dots/noctalia/plugins/sinnix-cockpit;
           # The cockpit reading-stack widget dispatches the picker by a stable path.
           home.file.".local/bin/sinnix-picker".source = "${scriptPkgs.sinnix-picker}/bin/sinnix-picker";
 
