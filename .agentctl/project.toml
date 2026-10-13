@@ -199,6 +199,14 @@ result = "exit"
 cache = "none"
 timeout_seconds = 300
 
+[operations.ambient_audit]
+description = "Refresh content-bound decode inspections for retained phone audio"
+exec = ["bash", "scripts/sinnix-phone", "ambient-audit"]
+pool = "bulk"
+result = "exit"
+cache = "none"
+timeout_seconds = 14400
+
 [operations.phone_app_build]
 description = "Build the phone application and its signing installer"
 exec = ["nix", "build", ".#sinnix-phone-app-install", "--no-link", "--print-out-paths"]

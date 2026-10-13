@@ -1228,17 +1228,23 @@ ambient-audit)
   # the level is recorded at intake and a dead window becomes visible data
   # rather than a later suspicion.
   ledger="$LAKE_ROOT/ambient-levels.jsonl"
-  mkdir -p "$LAKE_ROOT/ambient"
+  if [ ! -d "$LAKE_ROOT/ambient" ] || [ ! -r "$LAKE_ROOT/ambient" ] || [ ! -x "$LAKE_ROOT/ambient" ]; then
+    echo "ambient-audit: source unavailable: $LAKE_ROOT/ambient" >&2
+    exit 1
+  fi
   touch "$ledger"
-  # Keyed on size as well as name: a chunk repaired from a truncated transfer
-  # keeps its name but is a different file.
-  seen=$(jq -r '"\(.chunk) \(.bytes // 0)"' "$ledger" 2>/dev/null | sort -u)
+  # Previous inspections remain history. Only content-bound decode results
+  # qualify for reuse; size alone cannot identify a repaired/replaced chunk.
+  seen=$(jq -r 'select(has("decode_ok") and .sha256 != null) | "\(.chunk) \(.sha256)"' "$ledger" | sort -u)
   added=0
   silent=0
+  changed=0
   while IFS= read -r chunk; do
     name=$(basename "$chunk")
-    bytes=$(stat -c %s "$chunk" 2>/dev/null || echo 0)
-    if printf '%s\n' "$seen" | grep -qxF "$name $bytes"; then
+    bytes=$(stat -c %s "$chunk")
+    digest=$(sha256sum "$chunk")
+    digest=${digest%% *}
+    if printf '%s\n' "$seen" | grep -qxF "$name $digest"; then
       continue
     fi
     # A chunk this tool cannot decode is a finding, not an error: `set -e`
@@ -1247,35 +1253,52 @@ ambient-audit)
     duration=$(ffprobe -v error -show_entries format=duration -of default=nw=1:nk=1 "$chunk" 2>/dev/null </dev/null || true)
     rate=$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate -of default=nw=1:nk=1 "$chunk" 2>/dev/null </dev/null || true)
     decode_ok=true
-    levels=$(ffmpeg -nostdin -hide_banner -nostats -i "$chunk" -af volumedetect -f null - 2>&1 |
-      awk '/mean_volume:/ {mean=$(NF-1)} /max_volume:/ {max=$(NF-1)} END {print mean, max}' || true)
+    if ! levels=$(ffmpeg -nostdin -hide_banner -nostats -i "$chunk" -af volumedetect -f null - 2>&1 |
+      awk '/mean_volume:/ {mean=$(NF-1)} /max_volume:/ {max=$(NF-1)} END {print mean, max}'); then
+      decode_ok=false
+    fi
+    after_digest=$(sha256sum "$chunk")
+    after_digest=${after_digest%% *}
+    if [ "$after_digest" != "$digest" ]; then
+      echo "ambient-audit: source changed during inspection: $chunk" >&2
+      changed=$((changed + 1))
+      continue
+    fi
     mean=${levels% *}
     max=${levels#* }
     # -91 dB is what a stream of exact zeroes decodes to; anything at or below
     # it captured no sound at all, however healthy the file looks.
-    dead=false
-    case "$max" in
-      -9[1-9]*|-inf) dead=true; silent=$((silent + 1)) ;;
-    esac
+    dead=$(jq -n --arg max "$max" --argjson decoded "$decode_ok" '
+      if $decoded | not then null
+      elif $max == "-inf" then true
+      else ($max | tonumber?) as $level | if $level == null then null else $level <= -91 end end')
+    # tonumber? can produce no value, which is also an unknown measurement.
+    dead=${dead:-null}
+    [ "$dead" != true ] || silent=$((silent + 1))
     jq -nc --arg chunk "$name" --argjson bytes "${bytes:-0}" --arg dur "${duration:-}" --arg rate "${rate:-}" \
       --arg mean "${mean:-}" --arg max "${max:-}" --argjson dead "$dead" \
+      --argjson decoded "$decode_ok" --arg sha256 "$digest" \
       '{chunk: $chunk, bytes: $bytes, duration_seconds: ($dur | tonumber? // null),
         sample_rate: ($rate | tonumber? // null),
         mean_db: ($mean | tonumber? // null), max_db: ($max | tonumber? // null),
-        captured_nothing: $dead}' >>"$ledger"
+        captured_nothing: $dead, decode_ok: $decoded, sha256: $sha256}' >>"$ledger"
     added=$((added + 1))
-  done < <(find "$LAKE_ROOT/ambient" -maxdepth 1 \( -name '*.m4a' -o -name '*.m4a.orphan' \) | sort)
+    if [ "$((added % 100))" -eq 0 ]; then
+      echo "ambient-audit: progress $added inspected"
+    fi
+  done < <(find "$LAKE_ROOT/ambient" -maxdepth 1 -type f \( -name '*.m4a' -o -name '*.m4a.orphan' \) | sort)
   echo "ambient-audit: measured $added new chunk(s), $silent captured nothing"
   # The ledger is append-only and a chunk may be measured more than once (a
   # repaired transfer is a different file under the same name), so the newest
   # record per chunk is the true one. Report that rather than raw line counts,
   # which overstate the lake by however many re-measurements have happened.
   jq -rs 'group_by(.chunk) | map(last)
-    | "  lake now: \(length) chunks, \([.[] | select(.captured_nothing)] | length) captured nothing, \(([.[] | select(.captured_nothing | not) | .duration_seconds // 0] | add / 3600 * 10 | round / 10)) hours of real audio"' \
-    "$ledger" 2>/dev/null || true
+    | "  lake now: \(length) inspected files, \([.[] | select(.decode_ok == true and .captured_nothing == true)] | length) captured nothing, \([.[] | select(.decode_ok != true or .captured_nothing == null)] | length) unknown, \((([.[] | select(.decode_ok == true and .captured_nothing == false) | .duration_seconds // 0] | add // 0) / 3600 * 10 | round / 10)) hours in sound-bearing chunks"' \
+    "$ledger"
   if [ "$silent" -gt 0 ]; then
     echo "  silent chunks are listed in $ledger (captured_nothing: true)" >&2
   fi
+  [ "$changed" -eq 0 ] || exit 1
   ;;
 pull-ambient)
   # The manual recovery path for chunks the app could not upload. Not part of

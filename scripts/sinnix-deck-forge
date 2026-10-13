@@ -291,13 +291,13 @@ def lake_facts() -> list[tuple[str, float, str]]:
     if ambient.is_dir():
         n = sum(1 for p in ambient.iterdir() if p.suffix == ".m4a")
         if n:
-            facts.append(("five-minute ambient audio chunks on the phone right now", n, "chunks"))
+            facts.append(("ambient .m4a files retained in the host lake", n, "chunks"))
 
     levels = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/device/shared/phone")) / "ambient-levels.jsonl"
     if levels.is_file():
         n = _count_lines(levels)
         if n:
-            facts.append(("ambient chunks measured into the levels ledger", n, "records"))
+            facts.append(("inspection records retained in the ambient levels ledger", n, "records"))
 
     transcripts = capture_lane_path(ACTIVITY, "transcripts")
     if transcripts.is_dir():

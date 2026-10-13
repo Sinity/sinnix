@@ -436,3 +436,50 @@ def test_logcat_without_transport_is_not_success(device):
     result = run(device, "sinnix-phone", "logcat")
     assert result.returncode != 0
     assert "no adb transport" in result.stdout
+
+
+@pytest.mark.parametrize("status,maximum,expected", [(1, "-1.0", None), (0, "", None), (0, "-91.0", True), (0, "-10.0", False)])
+def test_ambient_audit_distinguishes_failed_unknown_silent_and_sound(device, status, maximum, expected):
+    root, env = device
+    ambient = root / "lake" / "ambient"
+    ambient.mkdir(parents=True)
+    (ambient / "neutral.m4a").write_bytes(b"neutral audio fixture")
+    executable(root / "bin" / "ffprobe", "print('3600')")
+    executable(root / "bin" / "ffmpeg", f"import sys\nprint('mean_volume: -20.0 dB', file=sys.stderr)\nprint('max_volume: {maximum} dB', file=sys.stderr)\nsys.exit({status})")
+    result = run(device, "sinnix-phone", "ambient-audit")
+    assert result.returncode == 0, result.stderr
+    row = json.loads((root / "lake" / "ambient-levels.jsonl").read_text())
+    assert row["decode_ok"] is (status == 0)
+    assert row["captured_nothing"] is expected
+    assert row["sha256"] == hashlib.sha256(b"neutral audio fixture").hexdigest()
+    if expected is None:
+        assert "1 unknown" in result.stdout and "0 hours in sound-bearing chunks" in result.stdout
+
+
+def test_ambient_audit_revises_legacy_and_same_size_replacements(device):
+    root, env = device
+    ambient = root / "lake" / "ambient"
+    ambient.mkdir(parents=True)
+    capture = ambient / "neutral.m4a"
+    capture.write_bytes(b"first")
+    ledger = root / "lake" / "ambient-levels.jsonl"
+    original = '{"chunk":"neutral.m4a","bytes":5,"captured_nothing":false}\n'
+    ledger.write_text(original)
+    executable(root / "bin" / "ffprobe", "print('3600')")
+    executable(root / "bin" / "ffmpeg", "import sys\nprint('mean_volume: -20.0 dB\\nmax_volume: -10.0 dB', file=sys.stderr)")
+    assert run(device, "sinnix-phone", "ambient-audit").returncode == 0
+    assert ledger.read_text().startswith(original)
+    assert len(ledger.read_text().splitlines()) == 2
+    assert run(device, "sinnix-phone", "ambient-audit").returncode == 0
+    assert len(ledger.read_text().splitlines()) == 2
+    capture.write_bytes(b"other")
+    assert run(device, "sinnix-phone", "ambient-audit").returncode == 0
+    rows = [json.loads(line) for line in ledger.read_text().splitlines()]
+    assert len(rows) == 3 and rows[-1]["sha256"] != rows[-2]["sha256"]
+
+
+def test_ambient_audit_missing_source_is_not_empty(device):
+    root, _ = device
+    result = run(device, "sinnix-phone", "ambient-audit")
+    assert result.returncode != 0 and "source unavailable" in result.stderr
+    assert not (root / "lake" / "ambient").exists()

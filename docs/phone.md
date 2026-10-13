@@ -340,8 +340,12 @@ process, at three cadences:
   The hourly ribbon requires verified coverage; legacy unchecked chunks
   remain unverified.
 - **Decoding, at intake.** `sinnix phone ambient-audit` decodes every chunk as
-  it lands into `ambient-levels.jsonl` with duration, rate, mean and peak,
-  flagging the −91 dB a stream of exact zeroes decodes to. Run against the
+  it lands into `ambient-levels.jsonl` with duration, rate, mean, peak,
+  decode status and a full content digest. Failed or unmeasured decodes stay
+  unknown and are excluded from sound-bearing duration. Reinspection appends
+  a new record for legacy unqualified rows or changed content, even at the
+  same size; original rows remain history. A missing source reports unavailable.
+  Successful measurements flag the −91 dB a stream of exact zeroes decodes to. Run against the
   Termux-era lake it found 29 of 111 chunks had captured nothing and 14 more
   did not decode at all.
 
