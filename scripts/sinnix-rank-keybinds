@@ -250,8 +250,9 @@ def usage_from_atuin(
         (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=window_days)).timestamp()
         * 1_000_000_000
     )
-    connection = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    connection = None
     try:
+        connection = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)
         for item_id, head in heads.items():
             (count,) = connection.execute(
                 "select count(*) from history where deleted_at is null "
@@ -265,8 +266,17 @@ def usage_from_atuin(
                 "command": head,
                 "window_days": window_days,
             }
+    except sqlite3.Error as exc:
+        for item_id, head in heads.items():
+            records[item_id] = {
+                "state": "unavailable",
+                "source": "atuin",
+                "reason": f"history database unreadable: {exc}",
+                "command": head,
+            }
     finally:
-        connection.close()
+        if connection is not None:
+            connection.close()
     return records
 
 

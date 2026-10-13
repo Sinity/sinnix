@@ -33,12 +33,10 @@ import datetime as dt
 import json
 import os
 import random
-import re
 import sqlite3
-import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
-from typing import Any, Iterable
 
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.layout import capture_lane_path
@@ -134,13 +132,14 @@ def atuin_commands(limit: int = 40000) -> list[str]:
     if not ATUIN_DB.is_file():
         return []
     try:
-        con = sqlite3.connect(f"file:{ATUIN_DB}?mode=ro", uri=True)
-        rows = con.execute(
-            "select command from history where deleted_at is null "
-            "order by timestamp desc limit ?",
-            (limit,),
-        ).fetchall()
-        con.close()
+        with closing(
+            sqlite3.connect(ATUIN_DB.resolve().as_uri() + "?mode=ro", uri=True)
+        ) as con:
+            rows = con.execute(
+                "select command from history where deleted_at is null "
+                "order by timestamp desc limit ?",
+                (limit,),
+            ).fetchall()
     except sqlite3.Error as exc:
         print(f"forge: atuin unreadable ({exc})", file=sys.stderr)
         return []
@@ -268,7 +267,7 @@ def build_shell_deck(n_trials: int, rng: random.Random) -> dict | None:
 def _count_lines(path: Path, limit: int = 5_000_000) -> int:
     try:
         with path.open("rb") as fh:
-            return sum(1 for _ in zip(range(limit), fh))
+            return sum(1 for _ in zip(range(limit), fh, strict=False))
     except OSError:
         return 0
 

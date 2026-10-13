@@ -34,7 +34,7 @@ the tool that created it.
 - `draw` — which item to hand over now: `top`, `softmax`, or Thompson
   sampling (the default).
 
-Raw comparisons live at `/realm/activity/ranking/<domain>/` and are never
+Raw comparisons live at `/realm/activity/shared/ranking/<domain>/` and are never
 pruned. Fits are always recomputed from them, never cached back into the
 domain directory. `SINNIX_RANK_ROOT` moves the root for fixtures.
 

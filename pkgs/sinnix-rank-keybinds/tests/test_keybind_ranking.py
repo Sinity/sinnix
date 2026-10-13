@@ -6,7 +6,9 @@ import hashlib
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
+import time
 from pathlib import Path
 
 from conftest import BINDINGS_NIX, FIXTURE_BINDINGS, FORGE, Adapter, render_lua
@@ -135,6 +137,52 @@ def test_compositor_dispatches_report_usage_as_unavailable(adapter: Adapter):
     close_window = usage[by_chord["SUPER + Q"]]
     assert close_window["state"] == "unavailable"
     assert "compositor dispatch" in close_window["reason"]
+
+
+def test_atuin_database_path_preserves_uri_punctuation(adapter: Adapter):
+    database = adapter.tmp / "history?#.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "create table history (command text, timestamp integer, deleted_at integer)"
+        )
+        connection.execute(
+            "insert into history values (?, ?, null)", ("sinnix-picker", time.time_ns())
+        )
+    adapter.adapter("usage", "--source", "atuin", "--atuin-db", str(database))
+    usage = json.loads((adapter.rank_root / DOMAIN / "usage-prior.json").read_text())[
+        "records"
+    ]
+    record = usage[ids_by_chord(adapter.inventory_records())["SUPER + O"]]
+    assert record["state"] == "measured" and record["count"] == 1
+
+
+def test_unreadable_atuin_database_is_unavailable_not_zero(adapter: Adapter):
+    database = adapter.tmp / "broken.db"
+    database.write_bytes(b"not a SQLite database")
+    adapter.adapter("usage", "--source", "atuin", "--atuin-db", str(database))
+    usage = json.loads((adapter.rank_root / DOMAIN / "usage-prior.json").read_text())[
+        "records"
+    ]
+    record = usage[ids_by_chord(adapter.inventory_records())["SUPER + O"]]
+    assert record["state"] == "unavailable" and record["reason"]
+    assert "count" not in record
+
+
+def test_shell_deck_reads_punctuated_database_path(adapter: Adapter):
+    database = adapter.tmp / "history?#.db"
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "create table history (command text, timestamp integer, deleted_at integer)"
+        )
+        connection.executemany(
+            "insert into history values (?, 0, null)",
+            [(f"git --option{index % 18}",) for index in range(600)],
+        )
+    adapter.env["ATUIN_DB"] = str(database)
+    result = adapter.ok(
+        "--dry-run", "--seed", "11", "--trials", "12", "shell", script=FORGE
+    )
+    assert len(json.loads(result.stdout)["trials"]) == 12
 
 
 # -- criterion 3: comparisons dominate a conflicting prior -------------------
