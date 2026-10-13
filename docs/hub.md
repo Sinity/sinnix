@@ -285,6 +285,8 @@ service whose module is not enabled renders as "not registered" rather than
 silently disappearing, and a unit with no `observe.restartable` renders as "not
 restartable" rather than with a button that would 403.
 
+Flattened capture entries retain their declared producer surface, unit, and manager. Standalone captures carry a null producer; consumers cannot infer a service binding from the capture name or path. These are current declarations, not proof of historical capture continuity.
+
 **The backends are socket-activated.** They sit behind `systemd-socket-proxyd`
 and exit after a 30s idle timeout, so _idle_ is the normal resting state, not a
 fault, and connecting to the public endpoint starts one with no privileged

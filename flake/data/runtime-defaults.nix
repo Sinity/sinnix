@@ -71,9 +71,9 @@ let
     };
 
   # One lane, normalized for the inventory. Split out of captureRows so the
-  # same shape is produced whether the lane hangs off a runtime surface or
-  # stands alone in sinnix.runtime.captures -- a consumer reading the
-  # flattened list cannot tell, and should not need to.
+  # shared capture fields are preserved for both surface-owned and standalone
+  # lanes. captureRows adds the declared producer binding without guessing
+  # a unit for standalone data.
   captureRow =
     capture:
     {
@@ -110,11 +110,21 @@ let
   captureRows =
     surfaces: standalone:
     (lib.concatLists (
-      lib.mapAttrsToList (_name: surface: map captureRow surface.captures) (
-        lib.mapAttrs (_: normalizeSurface) surfaces
-      )
+      lib.mapAttrsToList (
+        name: surface:
+        map (
+          capture:
+          (captureRow capture)
+          // {
+            producer = {
+              surface = name;
+              inherit (surface) unit manager;
+            };
+          }
+        ) surface.captures
+      ) (lib.mapAttrs (_: normalizeSurface) surfaces)
     ))
-    ++ map captureRow standalone;
+    ++ map (capture: (captureRow capture) // { producer = null; }) standalone;
 
   observedServiceRows =
     surfaces:

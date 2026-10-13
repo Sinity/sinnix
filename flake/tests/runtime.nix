@@ -24,6 +24,12 @@ in
                   Nice = 7;
                 };
                 observe.enable = true;
+                captures = [
+                  {
+                    name = "fixture-system-capture";
+                    path = "/srv/fixture-system";
+                  }
+                ];
               };
               runtime-policy-user = {
                 unit = "runtime-policy-user.service";
@@ -33,8 +39,20 @@ in
                   MemoryLow = "768M";
                 };
                 observe.enable = true;
+                captures = [
+                  {
+                    name = "fixture-user-capture";
+                    path = "/srv/fixture-user";
+                  }
+                ];
               };
             };
+            sinnix.runtime.captures = [
+              {
+                name = "fixture-standalone-capture";
+                path = "/srv/fixture-standalone";
+              }
+            ];
             # A declared class has to reach its unit, so this fixture applies
             # it the way a real owning module does; the assertions below still
             # read the inventory's own projection of the same surface.
@@ -87,6 +105,26 @@ in
               (import ../data/runtime-defaults.nix { inherit lib; }).classes.background.serviceConfig;
           in
           [
+            {
+              assertion =
+                let
+                  captures = config.sinnix.runtime.inventory.captures;
+                  capture = name: lib.findFirst (row: row.name == name) { producer = "missing"; } captures;
+                in
+                (capture "fixture-system-capture").producer == {
+                  surface = "runtime-policy-system";
+                  unit = "runtime-policy-system.service";
+                  manager = "system";
+                }
+                &&
+                  (capture "fixture-user-capture").producer == {
+                    surface = "runtime-policy-user";
+                    unit = "runtime-policy-user.service";
+                    manager = "user";
+                  }
+                && (capture "fixture-standalone-capture").producer == null;
+              message = "flattened captures must preserve declared manager/unit ownership and leave standalone producers unknown";
+            }
             {
               # Both fixture surfaces override a key their class also sets
               # (MemoryMax 3G, Nice 10) -- the override must win.
