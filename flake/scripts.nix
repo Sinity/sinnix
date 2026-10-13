@@ -42,6 +42,7 @@ let
       # @sinnix-phone-dispatcher in its own runtimeInputs and resolves here,
       # same pattern as sinnix-steer above.
       sinnix-phone-dispatcher = externalPackages.sinnix-phone-dispatcher;
+      sinnix-phone-keyguard = externalPackages.sinnix-phone-keyguard;
       # Sinnix's bd, not nixpkgs'. A script naming bare `beads` in its
       # frontmatter gets pkgs.beads (1.0.3), whose `export` has no -C flag --
       # which failed as a usage dump swallowed by `|| true`.
@@ -544,6 +545,9 @@ let
     # The Android capture app. `sinnix-phone-app` is the unsigned APK;
     # `sinnix-phone-app-install` signs it with the host-local keystore and
     # sideloads it over adb.
+    sinnix-phone-keyguard = pkgs.callPackage ../pkgs/sinnix-phone-keyguard/pkg.nix {
+      inherit (phoneAppPackage) jdk buildTools;
+    };
     sinnix-phone-app = phoneAppPackage;
     sinnix-phone-app-install = phoneAppPackage.install;
 

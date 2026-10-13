@@ -53,6 +53,30 @@ both the host key and login before remembering an address. An open port is
 insufficient, and no scan automatically learns a key. An explicit address
 changes routing but retains strict SSH identity checks.
 
+## Root-authorized maintenance unlock
+
+`sinnix phone unlock [seconds]` opens a bounded maintenance window (60 seconds
+by default, maximum 600). It uses the installed LineageOS profile service on
+this rooted ROM, after authenticating the enrolled ADB device. It preserves the
+PIN and changes only the active profile's lock policy temporarily. The command
+stays in the foreground; run device checks through another terminal during the
+window. It verifies that the native keyguard actually dismissed.
+
+A separate root watchdog restores the original policy even if the caller or
+ADB connection disappears. Expiry puts the screen to sleep. The root-only
+recovery record and Sinnix-owned Magisk recovery hook retain restoration across
+reboots; reboot behavior still needs a normal-restart verification. The helper
+refuses overlapping leases and profiles that already disable locking. It does
+not overwrite later operator policy changes or select a different profile.
+
+User 0 must already have unlocked encrypted storage since boot. Root profile
+control does not supply that first credential or decrypt credential-encrypted
+storage. This command requires the native profile service and authorized
+Magisk root; it does not clear credentials, weaken pairing, or enable a network
+listener. Its helper and recovery record live beneath
+`/data/adb/sinnix-phone-keyguard/`; the boot hook is
+`/data/adb/service.d/sinnix-keyguard-recovery.sh`.
+
 ## Build
 
 A normal Android project — Kotlin, Compose, AndroidX, Gradle — made

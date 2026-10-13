@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Reach the phone over the tailnet — status, shell, screen mirror, media pull, clipboard push
-# runtimeInputs: bash python3 coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl tailscale debootstrap zip avahi @sinnix-phone-dispatcher @sinnix-remote-command
+# runtimeInputs: bash python3 coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl tailscale debootstrap zip avahi @sinnix-phone-dispatcher @sinnix-remote-command @sinnix-phone-keyguard
 
 #
 # Device control uses authenticated Android wireless debugging. Its connection
@@ -708,6 +708,7 @@ sinnix-phone <command>
                 audit every new recording for digital silence/truncated export
   pull-ambient  rescue chunks the app could not upload (the app ships them
                 itself; this is for when that is failing)
+  unlock [SEC]  root-authorized unlock lease (default 60, maximum 600 seconds)
   adb-connect   discover and attach authenticated wireless ADB
   adb-restore   enable authenticated Wireless debugging over authorized USB
                 --persistent also installs the rooted phone’s Magisk boot hook
@@ -1335,6 +1336,12 @@ pull-ambient)
     echo "no transport to the phone: ambient chunks stay on the device" >&2
     exit 1
   fi
+  ;;
+unlock)
+  ensure_adb
+  helper=$(command -v sinnix-phone-keyguard)
+  dex="$(dirname "$(dirname "$helper")")/share/keyguard.dex"
+  exec sinnix-phone-keyguard "$ADB_TARGET" "$dex" "${1:-60}"
   ;;
 adb-connect)
   ensure_adb
