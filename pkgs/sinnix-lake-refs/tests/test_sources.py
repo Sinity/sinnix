@@ -1,4 +1,5 @@
 from importlib.machinery import SourceFileLoader
+from importlib.util import module_from_spec, spec_from_loader
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -9,10 +10,18 @@ import pytest
 SCRIPT = Path(__file__).parents[3] / "scripts/sinnix-lake-refs"
 
 
+def load_refs():
+    loader = SourceFileLoader("lake_refs", str(SCRIPT))
+    spec = spec_from_loader(loader.name, loader)
+    module = module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
 @pytest.mark.parametrize("failure", ["missing", "file", "rg", "spawn"])
 @pytest.mark.parametrize("command", ["scan", "check"])
 def test_unavailable_scan_fails_without_overwriting_ledger(tmp_path, monkeypatch, capsys, failure, command):
-    refs = SourceFileLoader("lake_refs", str(SCRIPT)).load_module()
+    refs = load_refs()
     root = tmp_path / "source"
     if failure == "file":
         root.write_text("wrong object type")
@@ -34,13 +43,13 @@ def test_unavailable_scan_fails_without_overwriting_ledger(tmp_path, monkeypatch
 
 
 def test_readable_empty_source_is_a_valid_empty_result(tmp_path):
-    refs = SourceFileLoader("lake_refs", str(SCRIPT)).load_module()
+    refs = load_refs()
     assert refs.scan_repo("fixture", tmp_path) == []
 
 
 def test_failed_publication_preserves_existing_ledger(tmp_path, monkeypatch):
     from sinnix_lib import atomic
-    refs = SourceFileLoader("lake_refs", str(SCRIPT)).load_module()
+    refs = load_refs()
     monkeypatch.setattr(refs, "REPOS", {"fixture": tmp_path})
     out = tmp_path / "ledger.jsonl"
     out.write_text("retained observations\n")
@@ -56,7 +65,7 @@ def test_failed_publication_preserves_existing_ledger(tmp_path, monkeypatch):
 def test_missing_path_reports_nearest_managed_ancestor(monkeypatch, existing, expected):
     from pathlib import PurePosixPath
 
-    refs = SourceFileLoader("lake_refs_ancestor", str(SCRIPT)).load_module()
+    refs = load_refs()
 
     class SyntheticPath(PurePosixPath):
         def exists(self):
@@ -65,3 +74,34 @@ def test_missing_path_reports_nearest_managed_ancestor(monkeypatch, existing, ex
     monkeypatch.setattr(refs, "Path", SyntheticPath)
     actual = refs.existing_ancestor("/realm/subject/missing")
     assert (str(actual) if actual is not None else None) == expected
+
+
+def test_source_roles_retain_fixtures_and_documentation_without_live_false_alarms(tmp_path):
+    refs = load_refs()
+    paths = {
+        "src/reader.py": '\"\"\"Example:\n/realm/example/doc\n\"\"\"\nROOT = \"/realm/runtime/source\"\nCOMMAND = \"\"\"/realm/runtime/command\"\"\"\n',
+        "scripts/tool": '#!/usr/bin/env python3\n"""Example:\n/realm/example/script\n"""\nROOT = "/realm/runtime/script"\n',
+        "scripts/bash-tool": '#!/bin/sh\n"/realm/runtime/bash"\n',
+        "src/unparsed.py": 'print "/realm/runtime/unparsed"\n',
+        "tests/test_reader.py": 'ROOT = \"/realm/fixture/tests\"\n',
+        "pkgs/worker/test_worker.py": 'ROOT = \"/realm/fixture/package\"\n',
+        "flake/tests/runtime.nix": 'root = \"/realm/fixture/vm\";\n',
+    }
+    for name, text in paths.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    rows = refs.scan_repo("fixture", tmp_path)
+    by_path = {row["path"]: row["kind"] for row in rows}
+    assert by_path == {
+        "/realm/example/doc": "cosmetic",
+        "/realm/example/script": "cosmetic",
+        "/realm/runtime/script": "live",
+        "/realm/runtime/bash": "live",
+        "/realm/runtime/unparsed": "live",
+        "/realm/runtime/source": "live",
+        "/realm/runtime/command": "live",
+        "/realm/fixture/tests": "fixture",
+        "/realm/fixture/package": "fixture",
+        "/realm/fixture/vm": "fixture",
+    }

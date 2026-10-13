@@ -101,3 +101,7 @@ python3 scripts/sinnix-fs judgments import reviewed.jsonl --expected-sha256 HASH
 ```
 
 Path and role reports are projections of the same ledger, including source detail. They do not require native-store traversal or rebuilding large SQL materializations. Existing older binaries can still read the additive records, but do not acquire new validation or grouping behavior until their source/package is updated.
+
+Literal-reference checks retain test-suite observations as `kind: fixture` and Python documentation strings as `kind: cosmetic`. Assigned multiline command strings remain live. Unparsed Python source remains eligible for live checks. A missing fixture or documentation example does not establish a broken current consumer.
+
+This is a literal-candidate audit. Missing live literals still need caller review for optional outputs, examples stored in metadata and deliberate retirement guards. The repository-relative scan includes extensionless scripts and reports absolute source locations.

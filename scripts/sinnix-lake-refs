@@ -15,6 +15,7 @@ separately from executable lines; captured history is not scanned.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import subprocess
@@ -46,6 +47,32 @@ def classify_line(line: str) -> str:
     return "live"
 
 
+def fixture_file(path: Path, root: Path) -> bool:
+    parts = path.relative_to(root).parts
+    return (parts[0] == "tests" or parts[:2] == ("flake", "tests")
+            or (parts[0] == "pkgs" and ("tests" in parts[:-1]
+                or path.name.startswith("test_"))))
+
+
+def docstring_lines(path: Path) -> set[int]:
+    if path.suffix not in {".py", ""}:
+        return set()
+    try:
+        source = path.read_text(encoding="utf-8")
+        first = source.partition("\n")[0]
+        if path.suffix != ".py" and not (first.startswith("#!") and "python" in first):
+            return set()
+        tree = ast.parse(source)
+    except (SyntaxError, UnicodeError):
+        # Unparsed source stays eligible for live-path checks.
+        return set()
+    lines = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            lines.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    return lines
+
+
 def scan_repo(name: str, root: Path) -> list[dict]:
     if not root.is_dir():
         raise ScanError(f"source repository is unavailable or not a directory: {name}: {root}")
@@ -60,16 +87,17 @@ def scan_repo(name: str, root: Path) -> list[dict]:
     # code is what gets searched.
     proc = subprocess.run(
         ["rg", "--line-number", "--no-heading",
-         "--glob", "*.nix", "--glob", "*.py", "--glob", "*.sh",
          "--glob", "scripts/*", "--glob", "!scripts/*.*",
+         "--glob", "*.nix", "--glob", "*.py", "--glob", "*.sh",
          "--glob", "!.git/**", "--glob", "!node_modules/**",
          "--glob", "!result/**", "--glob", "!result-*/**",
-         PATH_RE.pattern, str(root)],
-        capture_output=True, text=True,
+         PATH_RE.pattern, "."],
+        cwd=root, capture_output=True, text=True,
     )
     if proc.returncode not in (0, 1):  # 1 = no matches, not an error
         raise ScanError(f"rg failed on {name} (exit {proc.returncode}): {proc.stderr}")
     rows = []
+    documentation: dict[str, set[int]] = {}
     # Split strictly on "\n", not str.splitlines(): a matched line containing
     # a literal \r (a minified/bundled JS blob did, in practice) makes
     # splitlines() -- which treats \r as a line break too -- fragment one rg
@@ -84,12 +112,18 @@ def scan_repo(name: str, root: Path) -> list[dict]:
             continue
         if not lineno.isdigit():
             continue
-        ext = Path(file_part).suffix
-        kind = "cosmetic" if ext in COSMETIC_EXTS else classify_line(text)
+        path = root / file_part
+        if fixture_file(path, root):
+            kind = "fixture"
+        else:
+            if file_part not in documentation:
+                documentation[file_part] = docstring_lines(path)
+            kind = ("cosmetic" if path.suffix in COSMETIC_EXTS
+                    or int(lineno) in documentation[file_part] else classify_line(text))
         for m in PATH_RE.finditer(text):
             rows.append({
                 "repo": name,
-                "file": file_part,
+                "file": str(path),
                 "line": int(lineno),
                 "path": m.group(0).rstrip("/,;)\"'"),
                 "kind": kind,
@@ -125,7 +159,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     live = sum(1 for r in rows if r["kind"] == "live")
     print(f"sinnix-lake-refs: {len(rows)} references ({live} live, "
-          f"{len(rows) - live} cosmetic) -> {out}")
+          f"{len(rows) - live} non-runtime) -> {out}")
     return 0
 
 
