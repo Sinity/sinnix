@@ -174,7 +174,11 @@ def run(*args):
 
 
 def filesystem_identity(source):
-    output = run("btrfs", "filesystem", "show", "--raw", str(source))
+    mounts = json.loads(run("findmnt", "--json", "--output", "TARGET,FSTYPE", "--target", str(source))).get("filesystems", [])
+    if len(mounts) != 1 or mounts[0].get("fstype") != "btrfs" or not mounts[0].get("target"):
+        raise ValueError(f"cannot identify one Btrfs mount: {source}")
+    # btrfs filesystem show accepts a mount point, not an arbitrary child.
+    output = run("btrfs", "filesystem", "show", "--raw", mounts[0]["target"])
     identities = re.findall(
         r"^Label:.*\buuid:\s*([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\s*$",
         output, re.M,

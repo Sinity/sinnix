@@ -34,13 +34,21 @@ SPEC.loader.exec_module(COVERAGE)
 
 class FilesystemIdentityFixture(unittest.TestCase):
     def test_exact_filesystem_uuid_is_required(self):
-        with patch.object(COVERAGE, "run", return_value=f"Label: 'fixture'  uuid: {FS_UUID}\n") as probe:
-            self.assertEqual(COVERAGE.filesystem_identity("/synthetic"), FS_UUID)
-            probe.assert_called_once_with("btrfs", "filesystem", "show", "--raw", "/synthetic")
+        mount = json.dumps({"filesystems": [{"target": "/synthetic", "fstype": "btrfs"}]})
+        with patch.object(COVERAGE, "run", side_effect=[mount, f"Label: 'fixture'  uuid: {FS_UUID}\n"]) as probe:
+            self.assertEqual(COVERAGE.filesystem_identity("/synthetic/nested/snapshot"), FS_UUID)
+            self.assertEqual(probe.call_args_list[0].args,
+                             ("findmnt", "--json", "--output", "TARGET,FSTYPE", "--target", "/synthetic/nested/snapshot"))
+            self.assertEqual(probe.call_args_list[1].args,
+                             ("btrfs", "filesystem", "show", "--raw", "/synthetic"))
         for output in ("", f"UUID: {FS_UUID}\n", f"Label: none uuid: {FS_UUID}\n" * 2):
-            with patch.object(COVERAGE, "run", return_value=output):
+            with patch.object(COVERAGE, "run", side_effect=[mount, output]):
                 with self.assertRaisesRegex(ValueError, "identify one Btrfs filesystem"):
-                    COVERAGE.filesystem_identity("/synthetic")
+                    COVERAGE.filesystem_identity("/synthetic/nested/snapshot")
+        for mounts in ([], [{"target": "/synthetic", "fstype": "ext4"}]):
+            with patch.object(COVERAGE, "run", return_value=json.dumps({"filesystems": mounts})):
+                with self.assertRaisesRegex(ValueError, "identify one Btrfs mount"):
+                    COVERAGE.filesystem_identity("/synthetic/nested/snapshot")
 
 
 class CoverageMemoryFixture(unittest.TestCase):
@@ -1179,6 +1187,8 @@ if command=='systemctl':
     lane={'borgbackup-job-persist.service':'persist', 'borgbackup-job-realm.service':'realm'}[args[-1]]
     if lane=='persist' and (root/'fail-persist-unit').exists(): sys.exit(1)
     sys.exit(subprocess.run(['bash',str(root/(lane+'.sh'))],env=os.environ).returncode)
+if command=='findmnt':
+    print(json.dumps({'filesystems':[{'target':args[-1],'fstype':'btrfs'}]})); sys.exit(0)
 if command=='mountpoint': sys.exit(0 if (root/'logs/mounted').exists() else 1)
 if command=='mount':
     source,target=args[-2:]; subprocess.run(['cp','-a',source+'/.',target],check=True); (root/'logs/mounted').touch()
@@ -1223,7 +1233,7 @@ elif command=='btrfs':
         shutil.rmtree(args[2])
     else: sys.exit(64)
 """.replace("PYTHON", sys.executable).replace("REAL_BORG", repr(shutil.which("borg")))
-            for name in ("mountpoint", "mount", "umount", "btrfs", "borg", "systemctl"):
+            for name in ("findmnt", "mountpoint", "mount", "umount", "btrfs", "borg", "systemctl"):
                 (root / "mock-bin" / name).write_text(mock)
                 (root / "mock-bin" / name).chmod(0o755)
             (root / "mock-bin/dolt").write_text(
