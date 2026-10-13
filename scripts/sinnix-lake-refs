@@ -109,7 +109,7 @@ def existing_ancestor(path: str) -> Path | None:
     style roots are gone -- returns None only in a scenario worth flagging
     loudly, since those roots should always exist."""
     p = Path(path)
-    while len(p.parts) > 2:  # stop above bare "/realm"
+    while len(p.parts) >= 2:  # include the managed root, but not bare "/"
         if p.exists():
             return p
         p = p.parent

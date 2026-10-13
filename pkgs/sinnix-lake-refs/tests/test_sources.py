@@ -50,3 +50,18 @@ def test_failed_publication_preserves_existing_ledger(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", [str(SCRIPT), "scan", "--out", str(out)])
     assert refs.main() == 2
     assert out.read_text() == "retained observations\n"
+
+
+@pytest.mark.parametrize("existing,expected", [({"/realm"}, "/realm"), ({"/realm", "/realm/subject"}, "/realm/subject"), ({"/"}, None)])
+def test_missing_path_reports_nearest_managed_ancestor(monkeypatch, existing, expected):
+    from pathlib import PurePosixPath
+
+    refs = SourceFileLoader("lake_refs_ancestor", str(SCRIPT)).load_module()
+
+    class SyntheticPath(PurePosixPath):
+        def exists(self):
+            return str(self) in existing
+
+    monkeypatch.setattr(refs, "Path", SyntheticPath)
+    actual = refs.existing_ancestor("/realm/subject/missing")
+    assert (str(actual) if actual is not None else None) == expected
