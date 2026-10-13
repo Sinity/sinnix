@@ -48,7 +48,7 @@ The explicit `shell` commands continue to accept operator-authored command text.
 Phone SSH uses one pinned `sinnix-phone` host identity across tailnet, mDNS and
 LAN addresses. Enroll its public host key through an authenticated device
 connection in the owner-managed `known_hosts` file under the phone state home;
-`SINNIX_PHONE_KNOWN_HOSTS` may select another enrolled file. SSH discovery runs only when an operation actually needs SSH. ADB-only operations use their configured tailnet, mDNS, cached-address or USB route without an SSH or LAN scan. Ambiguous USB lists require explicit `ADB_RESOLVED` selection. Discovery verifies
+`SINNIX_PHONE_KNOWN_HOSTS` may select another enrolled file. SSH discovery runs only when an operation actually needs SSH. ADB-only operations reuse an authenticated connection or discover Android wireless debugging through Avahi, checking the enrolled serial before selection. The phone state home’s private `adb-serial` file records the serial enrolled through authenticated USB; `SINNIX_PHONE_ADB_SERIAL` may override it and `SINNIX_PHONE_ADB_ENDPOINT` supplies an explicit endpoint. No SSH or LAN scan is needed. `adb-connect` follows changing TLS ports; `adb-restore` enables wireless debugging over authorized USB. It does not enable legacy port 5555. Android must keep Wireless debugging enabled on a trusted Wi-Fi network; host discovery cannot enable it after a phone reboot without another authenticated route. Discovery verifies
 both the host key and login before remembering an address. An open port is
 insufficient, and no scan automatically learns a key. An explicit address
 changes routing but retains strict SSH identity checks.

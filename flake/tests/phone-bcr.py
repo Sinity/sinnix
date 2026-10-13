@@ -114,3 +114,42 @@ with tempfile.TemporaryDirectory() as scratch:
 print(
     "BCR intake: real decode, repeat, cut transfer, recovery, inventory and corrupt audio passed"
 )
+
+# Transport selection must follow changing TLS ports and ignore other devices.
+resolver = source[source.index("adb_resolve() {"):source.index("\nadb_any() {")]
+transport_mock = r"""
+timeout() { shift; "$@"; }
+adb() {
+  case "$1" in
+    devices) printf 'List of devices attached\nother-device\tdevice\n' ;;
+    connect) printf '%s\n' "$2" >> "$CONNECT_LOG" ;;
+    -s)
+      case "$3" in
+        get-state) [ "$2" = other-device ] ;;
+        shell)
+          case "$2" in
+            other-device) echo other-serial ;;
+            192.0.2.5:45678) echo enrolled ;;
+            *) return 1 ;;
+          esac ;;
+      esac ;;
+  esac
+}
+avahi-browse() {
+  printf '%s\n' '=;eth0;IPv4;adb-other-random;_adb-tls-connect._tcp;local;other.local;192.0.2.6;44444;'
+  [ "$DISCOVERY" != missing ] || return 0
+  printf '%s\n' '=;eth0;IPv4;adb-enrolled-random;_adb-tls-connect._tcp;local;phone.local;192.0.2.5;45678;'
+}
+"""
+with tempfile.TemporaryDirectory() as scratch:
+    log = Path(scratch) / "connections"
+    for mode in ("available", "missing"):
+        result = subprocess.run(["bash", "-c", "set -euo pipefail\nADB_RESOLVED=''\n" + transport_mock + resolver + "\nadb_resolve\nprintf '%s' \"$ADB_RESOLVED\""], env={**os.environ, "SINNIX_PHONE_ADB_SERIAL":"enrolled", "DISCOVERY":mode, "CONNECT_LOG":str(log)}, capture_output=True, text=True)
+        if mode == "available":
+            assert result.returncode == 0, result.stderr
+            assert result.stdout == "192.0.2.5:45678"
+            assert log.read_text().splitlines() == ["192.0.2.5:45678"]
+        else:
+            assert result.returncode != 0
+            assert "unavailable" in result.stderr
+print("Wireless ADB: changing TLS endpoint, enrolled serial, wrong device and unavailable discovery passed")

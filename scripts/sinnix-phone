@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Reach the phone over the tailnet — status, shell, screen mirror, media pull, clipboard push
-# runtimeInputs: bash python3 coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl tailscale debootstrap zip @sinnix-phone-dispatcher @sinnix-remote-command
+# runtimeInputs: bash python3 coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl tailscale debootstrap zip avahi @sinnix-phone-dispatcher @sinnix-remote-command
 
 #
-# The phone (Redmi Note 11, Evolution X with Magisk) is a tailnet peer with two control
-# surfaces: Termux sshd on :8022 for shell/file work, and adbd on :5555 for
-# device-level control (input, screencap, packages, settings). Both ride the
-# tailnet, so this works from anywhere the tailnet reaches — not just the LAN.
-#
-# adbd over TCP does NOT survive a phone reboot; `sinnix-phone adb-restore`
-# re-enables it over USB. Everything else survives.
+# Device control uses authenticated Android wireless debugging. Its connection
+# port changes; discover the enrolled phone with Avahi rather than assuming 5555.
+# USB remains a recovery route. `adb-restore` enables wireless debugging through
+# an authorized USB connection without opening legacy TCP debugging.
 #
 # Ambient audio and durable delivery are produced by the native Sinnix app,
 # not by Termux. Termux remains an emergency shell and clipboard surface, but
@@ -149,7 +146,7 @@ resolve_phone_host() {
 PHONE_TS_IP="${SINNIX_PHONE_IP:-$(tailscale_phone_ip || true)}"
 PHONE_TS_IP="${PHONE_TS_IP:-$PHONE_TS_IP_DEFAULT}"
 PHONE_SSH_HOST=""
-ADB_TARGET="${PHONE_TS_IP}:5555"
+ADB_TARGET=""
 LAKE_ROOT="${SINNIX_PHONE_LAKE:-/realm/device/shared/phone}"
 PHONE_STATE="${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}"
 
@@ -202,31 +199,31 @@ ADB_RESOLVED="${ADB_RESOLVED:-}"
 # resolve first; everything after is a direct adb invocation.
 adb_resolve() {
   [ -n "$ADB_RESOLVED" ] && return 0
-  local host target cached
-  cached=$(cat "$PHONE_HOST_CACHE" 2>/dev/null || true)
-  local -a network_hosts=("$PHONE_TS_IP")
-  if [ -z "${SINNIX_PHONE_IP:-}" ]; then
-    network_hosts+=("$PHONE_MDNS_NAME")
-    [ -z "$cached" ] || network_hosts+=("$cached")
-  fi
-  for host in "${network_hosts[@]}"; do
-    target="${host}:5555"
-    if ! ANDROID_SERIAL="$target" adb get-state >/dev/null 2>&1; then
-      timeout 8 adb connect "$target" >/dev/null 2>&1 || true
+  local target serial
+  serial="${SINNIX_PHONE_ADB_SERIAL:-$(cat "$PHONE_STATE/adb-serial" 2>/dev/null || true)}"
+  [ -n "$serial" ] || { echo "phone ADB serial not enrolled" >&2; return 1; }
+  local -a targets=()
+  [ -z "${SINNIX_PHONE_ADB_ENDPOINT:-}" ] || targets+=("$SINNIX_PHONE_ADB_ENDPOINT")
+  # Reuse a connected transport only after checking the enrolled serial. A
+  # connected headset or another phone must not receive phone commands.
+  while IFS= read -r target; do
+    [ -z "$target" ] || targets+=("$target")
+  done < <(adb devices | awk '$2 == "device" { print $1 }')
+  while IFS= read -r target; do
+    [ -z "$target" ] || targets+=("$target")
+  done < <(timeout 3 avahi-browse -rtp _adb-tls-connect._tcp 2>/dev/null |
+    awk -F';' -v serial="$serial" '$1 == "=" && $3 == "IPv4" && index($4, "adb-" serial "-") == 1 && $5 == "_adb-tls-connect._tcp" { print $8 ":" $9 }' || true)
+  for target in "${targets[@]}"; do
+    if ! adb -s "$target" get-state >/dev/null 2>&1; then
+      timeout 5 adb connect "$target" >/dev/null 2>&1 || continue
     fi
-    if ANDROID_SERIAL="$target" adb get-state >/dev/null 2>&1; then
+    if [ "$(timeout 3 adb -s "$target" shell getprop ro.serialno 2>/dev/null | tr -d '\r')" = "$serial" ]; then
       ADB_RESOLVED="$target"
       return 0
     fi
   done
-  local usb_targets
-  usb_targets=$(adb devices | awk '$2 == "device" && $1 !~ /:/ { print $1 }')
-  if [ "$(printf '%s\n' "$usb_targets" | awk 'NF { count++ } END { print count+0 }')" -gt 1 ]; then
-    echo "multiple USB devices; select the intended device with ADB_RESOLVED" >&2
-    return 1
-  fi
-  ADB_RESOLVED="$usb_targets"
-  [ -n "$ADB_RESOLVED" ]
+  echo "phone ADB unavailable; enable Wireless debugging or attach authorized USB" >&2
+  return 1
 }
 
 adb_any() {
@@ -691,9 +688,8 @@ sinnix-phone <command>
                 audit every new recording for digital silence/truncated export
   pull-ambient  rescue chunks the app could not upload (the app ships them
                 itself; this is for when that is failing)
-  adb-connect   (re)attach adb over the tailnet
-  adb-restore   re-enable adbd TCP mode (requires the phone on USB), then
-                re-assert the capture app's grants (see app-grants)
+  adb-connect   discover and attach authenticated wireless ADB
+  adb-restore   enable authenticated Wireless debugging over authorized USB
   clip-push     push the current desktop clipboard to the phone, once
   clip-watch    watch desktop clipboard, push on change (foreground loop)
 EOF
@@ -860,7 +856,7 @@ app-install)
   fi
   require_unlocked_phone || exit 1
   # The TRANSPORT serial, not ro.serialno. Over the tailnet adb addresses the
-  # phone as "<ip>:5555" and its hardware serial names no transport at all, so
+  # phone as "<ip>:<port>" and its hardware serial names no transport at all, so
   # passing the latter made every network install fail with "device not found"
   # -- while the rest of this case carried on re-asserting grants and retiring
   # the Termux recorder as though a new APK were running.
@@ -1320,17 +1316,17 @@ pull-ambient)
   fi
   ;;
 adb-connect)
-  adb connect "$ADB_TARGET"
-  ensure_device_capture_settings
+  ensure_adb
+  echo "Connected to $ADB_TARGET"
   ;;
 adb-restore)
-  echo "Phone must be on USB with debugging authorized."
-  adb devices
-  adb tcpip 5555
-  sleep 3
-  adb connect "$ADB_TARGET"
-  ensure_app_grants
-  ensure_device_capture_settings
+  usb_serial="${SINNIX_PHONE_ADB_SERIAL:-$(cat "$PHONE_STATE/adb-serial" 2>/dev/null || true)}"
+  [ -n "$serial" ] || { echo "phone ADB serial not enrolled" >&2; return 1; }
+  adb -s "$usb_serial" get-state >/dev/null
+  adb -s "$usb_serial" shell settings put global adb_wifi_enabled 1
+  ADB_RESOLVED=""
+  ensure_adb
+  echo "Wireless debugging enabled; endpoint discovery follows port changes."
   ;;
 clip-push)
   # text/* only -- termux-clipboard-set takes a string argument; pushing raw
