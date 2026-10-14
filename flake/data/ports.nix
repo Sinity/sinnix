@@ -22,6 +22,7 @@
 {
   # ── Operator surfaces ────────────────────────────────────────────────────
   hub = {
+    reports = 8883; # isolated report scripts and assets
     self = 8880; # Caddy: dashboard, reports, AI panel (loopback + tailscale0)
     openWebui = 8881; # tailnet republish of the Open WebUI frontend
     comfyui = 8882; # tailnet republish of the ComfyUI frontend

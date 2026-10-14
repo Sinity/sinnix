@@ -67,7 +67,7 @@ let
       "noctalia msg panel-toggle kenn/keybind-cheatsheet:cheatsheet"
     )
     (run "SUPER + SHIFT + Slash" "Open the full sinnix cheatsheet"
-      "${script "sinnix-cheatsheet"} && ${script "sinnix-browser-app"} http://127.0.0.1:8880/reports/cheatsheet.html"
+      "${script "sinnix-cheatsheet"} && ${script "sinnix-browser-app"} http://127.0.0.1:${toString sinnix.services.hub.reportsPort}/reports/cheatsheet.html"
     )
     (run "SUPER + H" "Focus the window to the left" "${script "kitty-hypr-nav"} focus left")
     (run "SUPER + J" "Focus the window below" "${script "kitty-hypr-nav"} focus down")

@@ -5,12 +5,12 @@ generated reports, a live dashboard, and a control panel for the local AI
 backends, reachable from a phone or the desktop and from nowhere else.
 
 It makes each generated report a URL rather than a `file://` path, puts the
-system's current state on the same origin, and gives report annotations
+system's current state on its control origin, and gives report annotations
 somewhere to go.
 
 ## Routes
 
-Everything below is on the hub port (8880 by default), and every page carries
+Control pages below use the hub port (8880 by default); `/reports/` uses the isolated report port (8883 by default), and every page carries
 the same nav, so the routes are reachable from each other rather than by URL.
 
 | Route            | What it is                                                          |
@@ -22,7 +22,7 @@ the same nav, so the routes are reachable from each other rather than by URL.
 | `/ai/`           | The local AI backends and their activation semantics                |
 | `/shaders/`      | The Hyprland screen-shader library, and which one is applied        |
 | `/capabilities/` | Everything this machine can do and how to invoke it — see below     |
-| `/reports/`      | The generated report tree, browsable and linkable                   |
+| `/reports/`      | Report-origin only; generated reports, scripts and relative assets  |
 | `/ops/v1/*`      | Reverse proxy onto the ops-reducer's read and action API            |
 | `/feedback`      | Append-only spool for report annotations                            |
 | `/terminals/`    | Live kitty terminal contents, control, and scrollback history       |
@@ -483,3 +483,5 @@ rather than the wear-limited root and needs no persistence entry.
 - **No auth beyond the tailnet.** Consistent with the rest of sinnix: the
   tailnet is the boundary, and every agent on this host is already
   root-equivalent.
+
+Report HTTP serving uses a separate origin so received or captured report scripts cannot read or invoke the operator control API. It serves the original publication bytes and relative assets. Only report feedback is proxied there; action, terminal, phone and private catalog routes are absent. The old control-origin report serving route is removed. Report links and the cheatsheet entrance use the declared report port. Local file reports retain their opaque-origin feedback compatibility.

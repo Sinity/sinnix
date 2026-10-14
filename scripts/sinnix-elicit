@@ -441,7 +441,7 @@ def cmd_session(domain, args):
     publish_text(out, page)
     rel = out.relative_to(REPORTS_DIR)
     print(f"session page: {out}")
-    print(f"hub URL:      http://<hub>/reports/{rel}   ({len(pairs)} pairs)")
+    print(f"hub URL:      <report-origin>/reports/{rel}   ({len(pairs)} pairs)")
     print(f"afterwards:   sinnix elicit ingest {domain.name}")
 
 

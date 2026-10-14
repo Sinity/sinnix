@@ -160,7 +160,7 @@ def render_services(
             "refuse every target anyway.</p>",
             wide=True,
         )
-        return page("services", host, [], "/services/", body)
+        return page("services", host, [], "/services/", body, reports_port=manifest.get("reportsPort"))
 
     states = unit_states([(entry["manager"], entry["unit"]) for entry in rows])
     groups: dict[str, list[str]] = {}
@@ -237,4 +237,5 @@ def render_services(
         "/services/",
         body,
         tail=ACTION_SCRIPT,
+        reports_port=manifest.get("reportsPort"),
     )

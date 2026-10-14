@@ -447,4 +447,4 @@ def render_pressure(
     body += log_card()
 
     chips = [regime.name, f"rendered {generated[11:19]}"]
-    return page("pressure", host, chips, "/pressure/", body, tail=ACTION_SCRIPT)
+    return page("pressure", host, chips, "/pressure/", body, tail=ACTION_SCRIPT, reports_port=manifest.get("reportsPort"))

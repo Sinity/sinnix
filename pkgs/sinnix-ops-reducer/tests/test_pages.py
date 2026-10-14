@@ -42,6 +42,7 @@ MANIFEST: dict[str, Any] = {
     "schema": "sinnix-hub-manifest-v1",
     "host": "fixture",
     "port": 8880,
+    "reportsPort": 8883,
     "aiServices": ["read-only", "absent"],
     "reportsDir": "/nonexistent",
     "frontends": [],

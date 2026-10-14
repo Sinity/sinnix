@@ -358,7 +358,9 @@ def links_card(manifest: dict[str, Any]) -> str:
     )
 
 
-def reports_card(reports_dir: Path, now: dt.datetime) -> str:
+def reports_card(reports_dir: Path, now: dt.datetime, port: int | None) -> str:
+    if type(port) is not int or not 1 <= port <= 65535:
+        return card("Reports unavailable", empty("report origin is not configured"))
     try:
         entries = []
         for entry in reports_dir.iterdir():
@@ -374,7 +376,7 @@ def reports_card(reports_dir: Path, now: dt.datetime) -> str:
     for entry, modified_at in entries[:8]:
         age = duration_human(now.timestamp() - modified_at)
         items += (
-            f'<li><a href="/reports/{esc(quote(entry.name, safe=""))}">{esc(entry.stem)}</a>'
+            f'<li><a data-port="{port}" href="http://127.0.0.1:{port}/reports/{esc(quote(entry.name, safe=""))}">{esc(entry.stem)}</a>'
             f'<div class="sub">{esc(age)} ago</div></li>'
         )
     return card(
@@ -382,7 +384,7 @@ def reports_card(reports_dir: Path, now: dt.datetime) -> str:
         f'<ul class="links">{items}</ul>'
         if items
         else empty("no reports generated yet"),
-        f'<a href="/reports/">all {len(entries)} reports →</a>',
+        f'<a data-port="{port}" href="http://127.0.0.1:{port}/reports/">all {len(entries)} reports →</a>',
     )
 
 
@@ -404,8 +406,8 @@ def render_dashboard(
         )
         body += live_work_card({}, now)
         body += links_card(manifest)
-        body += reports_card(reports, now)
-        return page("hub", host, ["degraded"], "/", body, tail=ACTION_SCRIPT)
+        body += reports_card(reports, now, manifest.get("reportsPort"))
+        return page("hub", host, ["degraded"], "/", body, tail=ACTION_SCRIPT, reports_port=manifest.get("reportsPort"))
 
     state = snapshot.get("state")
     state = state if isinstance(state, dict) else {}
@@ -472,7 +474,7 @@ def render_dashboard(
     body += storage_card(state)
     body += sources_card(snapshot)
     body += links_card(manifest)
-    body += reports_card(reports, now)
+    body += reports_card(reports, now, manifest.get("reportsPort"))
     if not failed:
         body += failed_card(state)
 
@@ -483,4 +485,4 @@ def render_dashboard(
     observed = parse_iso(snapshot.get("observed_at"))
     if observed is not None:
         chips.append(f"observed {duration_human((now - observed).total_seconds())} ago")
-    return page("hub", host, chips, "/", body, tail=ACTION_SCRIPT)
+    return page("hub", host, chips, "/", body, tail=ACTION_SCRIPT, reports_port=manifest.get("reportsPort"))

@@ -9,7 +9,7 @@ from html.parser import HTMLParser
 from types import SimpleNamespace
 from urllib.parse import unquote, urlsplit
 
-from sinnix_ops_reducer.pages import dashboard, pressure, queue, services
+from sinnix_ops_reducer.pages import dashboard, pressure, queue, services, shell
 
 
 class Attributes(HTMLParser):
@@ -57,9 +57,9 @@ for (const item of cases) {
 def test_report_filename_is_one_url_component(tmp_path):
     filename = 'neutral #?%&ż.html'
     (tmp_path / filename).write_text('neutral report')
-    markup = dashboard.reports_card(tmp_path, dt.datetime.now(dt.timezone.utc))
+    markup = dashboard.reports_card(tmp_path, dt.datetime.now(dt.timezone.utc), 8883)
     links = Attributes(markup).links
-    target = next(link for link in links if link != '/reports/')
+    target = next(link for link in links if urlsplit(link).path != '/reports/')
     parsed = urlsplit(target)
     assert parsed.query == parsed.fragment == ''
     assert unquote(parsed.path.removeprefix('/reports/')) == filename
@@ -74,7 +74,7 @@ def test_report_inspection_failure_is_unavailable_not_empty(tmp_path, monkeypatc
         if path == target: raise error
         return original(path, *args, **kwargs)
     monkeypatch.setattr(Path, 'stat', inspect)
-    markup = dashboard.reports_card(tmp_path, dt.datetime.now(dt.timezone.utc))
+    markup = dashboard.reports_card(tmp_path, dt.datetime.now(dt.timezone.utc), 8883)
     assert 'Reports unavailable' in markup
     assert 'no reports generated yet' not in markup
     assert '&lt;neutral&gt;' in markup and '<neutral>' not in markup
@@ -91,13 +91,30 @@ def test_report_render_retains_metadata_without_a_racy_second_read(tmp_path, mon
             observed.append(True)
         return original(path, *args, **kwargs)
     monkeypatch.setattr(Path, 'stat', inspect)
-    markup = dashboard.reports_card(tmp_path, dt.datetime.now(dt.timezone.utc))
+    markup = dashboard.reports_card(tmp_path, dt.datetime.now(dt.timezone.utc), 8883)
     assert '/reports/neutral.html' in markup and 'Recent reports' in markup
 
 
 def test_report_empty_and_wrong_type_root_are_distinct(tmp_path):
     now = dt.datetime.now(dt.timezone.utc)
-    assert 'no reports generated yet' in dashboard.reports_card(tmp_path, now)
+    assert 'no reports generated yet' in dashboard.reports_card(tmp_path, now, 8883)
     target = tmp_path / 'ordinary-file'
     target.write_text('neutral')
-    assert 'Reports unavailable' in dashboard.reports_card(target, now)
+    assert 'Reports unavailable' in dashboard.reports_card(target, now, 8883)
+
+
+def test_browser_port_rewrite_retains_report_paths():
+    script = shell.SHELL_SCRIPT.removeprefix('\n<script>').removesuffix('</script>\n')
+    fixture = r"""
+const assert = require('node:assert/strict');
+const links = [{href:'http://127.0.0.1:8883/reports/neutral%23.html',dataset:{port:'8883'}},{href:'http://127.0.0.1:8881/',dataset:{port:'8881'}}];
+global.location = {protocol:'http:',hostname:'neutral.tailnet.invalid'};
+global.localStorage = {getItem:()=>null};
+global.document = {documentElement:{dataset:{},style:{}},querySelectorAll:()=>links,getElementById:()=>null};
+"""
+    expected = r"""
+assert.equal(links[0].href,'http://neutral.tailnet.invalid:8883/reports/neutral%23.html');
+assert.equal(links[1].href,'http://neutral.tailnet.invalid:8881/');
+"""
+    result = subprocess.run(['node','-e',fixture+script+expected],capture_output=True,text=True,timeout=5)
+    assert result.returncode == 0, result.stderr

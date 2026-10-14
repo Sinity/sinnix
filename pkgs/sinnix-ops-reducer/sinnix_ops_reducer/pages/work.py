@@ -250,4 +250,5 @@ def render_work(
         "/work/",
         body,
         tail=ACTION_SCRIPT,
+        reports_port=manifest.get("reportsPort"),
     )

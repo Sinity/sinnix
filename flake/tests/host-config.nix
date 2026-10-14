@@ -60,9 +60,10 @@
           {
             nativeBuildInputs = [ pkgs.python3 pkgs.caddy ];
             inherit caddyfile resolver;
+            reportPort = toString host.sinnix.services.hub.reportsPort;
           }
           ''
-            python ${./hub_http_boundary.py} "$caddyfile" "$resolver"
+            python ${./hub_http_boundary.py} "$caddyfile" "$resolver" "$reportPort"
             touch "$out"
           '';
 

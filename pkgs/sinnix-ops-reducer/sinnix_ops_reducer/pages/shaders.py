@@ -312,4 +312,5 @@ def render_shaders(manifest: dict[str, Any], generated: str) -> str:
         [f"rendered {generated[11:19]}"],
         "/shaders/",
         body,
+        reports_port=manifest.get("reportsPort"),
     )

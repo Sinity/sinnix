@@ -79,13 +79,19 @@ with tempfile.TemporaryDirectory() as temporary:
             assert bind_environment.read_bytes() == preimage
         assert not list(root.glob(".SINNIX_HUB_TAILNET_IP.tmp.*"))
     port = free_port()
+    report_port = int(sys.argv[3])
     source = Path(sys.argv[1]).read_text()
-    frontend_ports = [int(value) for value in re.findall(r"http://:(\d+)\s*\{", source) if int(value) != 8880]
+    frontend_ports = [int(value) for value in re.findall(r"http://:(\d+)\s*\{", source) if int(value) not in (8880, report_port)]
     # Only the transport addresses and log destination change. Guards and
     # route ordering remain those rendered for the real host.
     source = source.replace(":8880", f":{port}")
     source = re.sub(r"reverse_proxy [^\s]+", f"reverse_proxy 127.0.0.1:{owner.server_port}", source)
     source = re.sub(r"output file [^\s]+", f"output file {root / 'access.log'}", source)
+    reports = root / 'reports'
+    reports.mkdir()
+    (reports / 'neutral.html').write_text('<script>window.neutralReport=true</script><img src="asset.svg">')
+    (reports / 'asset.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg"/>')
+    source = re.sub(r"root \* [^\s]+", f"root * {reports}", source)
     config = root / "Caddyfile"
     config.write_text(source)
     environment = {**os.environ, "SINNIX_HUB_TAILNET_IP": "127.0.0.2", "SINNIX_HUB_DNS_NAME": "neutral.tailnet.invalid"}
@@ -125,6 +131,22 @@ with tempfile.TemporaryDirectory() as temporary:
             for frontend_port in frontend_ports:
                 request("/", {"Host": f"rebound.example.invalid:{frontend_port}"}, 403, request_port=frontend_port)
                 request("/", {"Host": f"neutral.tailnet.invalid:{frontend_port}"}, 200, request_port=frontend_port)
+            before = len(Owner.calls)
+            for path in ('/ops/v1/actions', '/v1/actions', '/terminals/', '/phone/v1/ping', '/private/file-catalog'):
+                request(path, {}, 404, request_port=report_port)
+            assert len(Owner.calls) == before
+            client = http.client.HTTPConnection('127.0.0.1', report_port, timeout=2)
+            client.request('GET', '/reports/neutral.html')
+            response = client.getresponse()
+            assert response.status == 200 and response.read() == (reports / 'neutral.html').read_bytes()
+            client.close()
+            client = http.client.HTTPConnection('127.0.0.1', report_port, timeout=2)
+            client.request('GET', '/reports/asset.svg')
+            response = client.getresponse(); assert response.status == 200; response.read(); client.close()
+            request('/feedback', {'Origin': f'http://127.0.0.1:{report_port}', 'Sec-Fetch-Site': 'same-origin'}, 200, request_port=report_port)
+            request('/feedback', {'Origin': 'https://example.invalid'}, 403, request_port=report_port)
+            request('/ops/v1/actions', {'Origin': f'http://127.0.0.1:{report_port}'}, 403)
+            request('/feedback', {'Origin': f'http://127.0.0.1:{report_port}', 'Sec-Fetch-Site': 'same-site'}, 200)
             same_origin = f"http://127.0.0.1:{port}"
             for path in ("/ops/v1/actions", "/terminals/not-a-terminal", "/v1/actions", "/feedback"):
                 request(path, {"Origin": "https://example.invalid"}, 403)

@@ -114,6 +114,12 @@ mkServiceModule {
       description = "Port the hub itself listens on, on loopback and the tailnet address.";
     };
 
+    reportsPort = lib.mkOption {
+      type = lib.types.port;
+      default = helpers.data.ports.hub.reports;
+      description = "Separate report origin, with no operator action or private read routes.";
+    };
+
     stateDir = lib.mkOption {
       type = lib.types.str;
       default = "/realm/state/sinnix-hub";
@@ -227,6 +233,7 @@ mkServiceModule {
         @${label}Origin {
           header Origin *
           ${lib.concatMapStringsSep "\n" (host: "not header Origin http://${host}:${toString cfg.port}") acceptedHosts}
+          ${lib.optionalString allowOpaque (lib.concatMapStringsSep "\n" (host: "not header Origin http://${host}:${toString cfg.reportsPort}") acceptedHosts)}
           ${lib.optionalString allowOpaque "not header Origin null"}
         }
         respond @${label}Origin "cross-origin request refused" 403
@@ -242,6 +249,7 @@ mkServiceModule {
             header Sec-Fetch-User ?1
           }
           ${lib.optionalString allowOpaque "not header Origin null"}
+          ${lib.optionalString allowOpaque (lib.concatMapStringsSep "\n" (host: "not header Origin http://${host}:${toString cfg.reportsPort}") acceptedHosts)}
         }
         respond @${label}Fetch "cross-site request refused" 403
       '';
@@ -255,7 +263,7 @@ mkServiceModule {
         builtins.toJSON {
           schema = "sinnix-hub-manifest-v1";
           host = config.networking.hostName;
-          inherit (cfg) port aiServices;
+          inherit (cfg) port reportsPort aiServices;
           reportsDir = cfg.reportsDir;
           feedbackDir = cfg.feedbackDir;
           shadersDir = "${config.sinnix.paths.dotsRoot}/hypr/shaders";
@@ -287,6 +295,16 @@ mkServiceModule {
       # side needs the uid at evaluation time.
       opsSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/ops.sock";
       phoneSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/phone-dispatcher.sock";
+
+      accessLog = ''
+          log {
+            output file ${cfg.stateDir}/access.log {
+              roll_size 10mb
+              roll_keep 5
+            }
+            level INFO
+          }
+      '';
 
       frontendSites = lib.concatStringsSep "\n" (
         lib.mapAttrsToList (_name: frontend: ''
@@ -327,21 +345,10 @@ mkServiceModule {
           # the global logger above stays at ERROR for Caddy's own
           # diagnostics, so without a dedicated access logger page usage is
           # otherwise unmeasurable.
-          log {
-            output file ${cfg.stateDir}/access.log {
-              roll_size 10mb
-              roll_keep 5
-            }
-            level INFO
-          }
+          ${accessLog}
 
           route {
             ${hostGuard "hub"}
-          redir /reports /reports/
-          handle_path /reports/* {
-            root * ${cfg.reportsDir}
-            file_server browse
-          }
 
           # The reducer trusts this Unix socket. Apply the same browser
           # boundary to its API and page/terminal routes, before proxying.
@@ -404,6 +411,25 @@ mkServiceModule {
         http://:${toString cfg.port} {
           bind {$SINNIX_HUB_TAILNET_IP} 127.0.0.1
           import hub
+        }
+
+        http://:${toString cfg.reportsPort} {
+          bind {$SINNIX_HUB_TAILNET_IP} 127.0.0.1
+          ${accessLog}
+          route {
+            ${hostGuard "reports"}
+            redir / /reports/
+            redir /reports /reports/
+            handle /feedback* {
+              ${browserGuard "reportFeedback" true}
+              reverse_proxy unix/${opsSocket}
+            }
+            handle_path /reports/* {
+              root * ${cfg.reportsDir}
+              file_server browse
+            }
+            respond "report resource not found" 404
+          }
         }
 
         ${frontendSites}
@@ -481,7 +507,7 @@ mkServiceModule {
         {
           assertion =
             let
-              ports = [ cfg.port ] ++ (lib.mapAttrsToList (_: f: f.port) cfg.frontends);
+              ports = [ cfg.port cfg.reportsPort ] ++ (lib.mapAttrsToList (_: f: f.port) cfg.frontends);
             in
             lib.length (lib.unique ports) == lib.length ports;
           message = "sinnix.services.hub: the hub port and every frontend port must be distinct.";
@@ -503,6 +529,7 @@ mkServiceModule {
       # the only place these ports are reachable from.
       networking.firewall.interfaces.${tailscaleInterface}.allowedTCPPorts = [
         cfg.port
+        cfg.reportsPort
         phoneStreamPort
       ]
       ++ lib.mapAttrsToList (_: frontend: frontend.port) activeFrontends;

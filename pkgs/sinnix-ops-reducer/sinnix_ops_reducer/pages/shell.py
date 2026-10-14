@@ -346,7 +346,11 @@ function fs(step){
   localStorage.setItem('hub-fs', next);
 }
 document.querySelectorAll('a[data-port]').forEach(function(a){
-  a.href = location.protocol + '//' + location.hostname + ':' + a.dataset.port + '/';
+  var url = new URL(a.href);
+  url.protocol = location.protocol;
+  url.hostname = location.hostname;
+  url.port = a.dataset.port;
+  a.href = url.href;
 });
 var filter = document.getElementById('filter');
 if (filter) filter.addEventListener('input', function(){
@@ -484,11 +488,17 @@ PAGES = (
 )
 
 
-def nav(active: str) -> str:
-    items = "".join(
-        f'<a href="{esc(href)}" class="{"on" if href == active else ""}">{esc(label)}</a>'
-        for href, label, _ in PAGES
-    )
+def nav(active: str, reports_port: int | None) -> str:
+    items = ""
+    for href, label, _ in PAGES:
+        if href == "/reports/":
+            if type(reports_port) is not int or not 1 <= reports_port <= 65535:
+                continue
+            target = f"http://127.0.0.1:{reports_port}/reports/"
+            items += f'<a data-port="{reports_port}" href="{esc(target)}">{esc(label)}</a>'
+        else:
+            items += f'<a href="{esc(href)}" class="{"on" if href == active else ""}">{esc(label)}</a>'
+
     return f'<nav class="tabs">{items}</nav>'
 
 
@@ -500,6 +510,7 @@ def page(
     body: str,
     footnote: str = "",
     tail: str = "",
+    reports_port: int | None = None,
 ) -> str:
     chip_html = "".join(f'<span class="chip">{esc(chip)}</span>' for chip in chips)
     note = footnote or (
@@ -518,7 +529,7 @@ def page(
 <button class="hbtn" onclick="fs(-1)" title="smaller text">A−</button>
 <button class="hbtn" onclick="fs(1)" title="larger text">A+</button>
 <button class="hbtn" onclick="tgl()" title="switch between light and dark">theme</button></div>
-{nav(active)}
+{nav(active, reports_port)}
 </header>
 <main>{body}</main>
 <footer>{note}</footer>

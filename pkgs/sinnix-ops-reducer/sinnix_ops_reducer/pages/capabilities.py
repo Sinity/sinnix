@@ -122,7 +122,7 @@ def render_capabilities(
             wide=True,
         )
     if not groups:
-        return page("capabilities", host, [], "/capabilities/", missing)
+        return page("capabilities", host, [], "/capabilities/", missing, reports_port=manifest.get("reportsPort"))
 
     rows = view.get("rows") or []
     unit_targets = [
@@ -178,4 +178,4 @@ def render_capabilities(
     revision = view.get("revision")
     if revision:
         chips.append(f"rev {str(revision)[:12]}")
-    return page("capabilities", host, chips, "/capabilities/", body)
+    return page("capabilities", host, chips, "/capabilities/", body, reports_port=manifest.get("reportsPort"))
