@@ -92,6 +92,16 @@
       checks.capture-lane-privacy =
         assert builtins.seq privacy true;
         pkgs.runCommand "capture-lane-privacy-check" { } ''touch "$out"'';
+      checks.kitty-scrollback =
+        pkgs.runCommand "kitty-scrollback-capture-check"
+          {
+            nativeBuildInputs = [ pkgs.python3 pkgs.bash pkgs.coreutils pkgs.hostname pkgs.jq pkgs.gnused ];
+            KITTY_CAPTURE_SCRIPT = ../../scripts/kitty-scrollback-capture;
+          }
+          ''
+            python3 ${../../scripts/tests/test_kitty_scrollback_capture.py}
+            touch "$out"
+          '';
       checks.capture-mpris =
         pkgs.runCommand "capture-mpris-check"
           {

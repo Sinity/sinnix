@@ -41,10 +41,16 @@ capture_window() {
   local filename="${TIMESTAMP}-${HOSTNAME}-pid${pid}-win${win_id}-${title_slug}.ansi"
   local filepath="$CAPTURE_DIR/$filename"
 
-  local capture_error
+  local capture_error capture_output
   capture_error=$(mktemp "$CAPTURE_DIR/.capture-error.XXXXXX") || return 1
-  if kitty @ --to "unix:$socket" get-text --match="id:$win_id" --extent=all --ansi --add-wrap-markers > "$filepath" 2>"$capture_error"; then
-    rm -f "$capture_error"
+  capture_output=$(mktemp "$CAPTURE_DIR/.capture-output.XXXXXX") || return 1
+  if kitty @ --to "unix:$socket" get-text --match="id:$win_id" --extent=all --ansi --add-wrap-markers > "$capture_output" 2>"$capture_error"; then
+    # Publish only complete bytes, and never replace an earlier capture.
+    if ! ln "$capture_output" "$filepath"; then
+      echo "  ✗ win:$win_id - publication failed; retained $capture_output and $capture_error" >&2
+      return 1
+    fi
+    rm -f "$capture_output" "$capture_error"
     local lines
     lines=$(wc -l < "$filepath")
     local size
@@ -52,7 +58,7 @@ capture_window() {
     echo "  ✓ win:$win_id ($lines lines, $size) → $filename"
 
     # Write metadata sidecar
-    cat > "${filepath%.ansi}.meta.json" <<EOF
+    if ! cat > "${filepath%.ansi}.meta.json" <<EOF
 {
   "window_id": $win_id,
   "kitty_pid": $pid,
@@ -63,21 +69,24 @@ capture_window() {
   "ansi_file": "$filename"
 }
 EOF
+    then
+      return 1
+    fi
     # The health sweep stats this stable path when the archive's bounded
     # sample cannot reach the newest file. Write it only after real output.
-    touch "$PROGRESS_MARKER"
+    touch "$PROGRESS_MARKER" || return 1
     return 0
   else
     # A window can close between listing and capture. Only Kitty's exact
     # missing-window response establishes this benign race.
     local error
     error=$(cat "$capture_error")
-    rm -f "$capture_error" "$filepath"
-    if [[ "$error" == "Error: No matching windows for expression: id:$win_id" ]]; then
+    if [[ ! -s "$capture_output" && "$error" == "Error: No matching windows for expression: id:$win_id" ]]; then
+      rm -f "$capture_error" "$capture_output"
       echo "  ⚠ win:$win_id closed before capture, skipping"
       return 2
     fi
-    echo "  ✗ win:$win_id - capture failed: $error" >&2
+    echo "  ✗ win:$win_id - capture failed: $error; retained $capture_output and $capture_error" >&2
     return 1
   fi
 }
