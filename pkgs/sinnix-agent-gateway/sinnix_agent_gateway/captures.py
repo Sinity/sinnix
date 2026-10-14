@@ -11,6 +11,10 @@ from .config import GatewayConfig
 from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
+class CaptureInventoryUnavailableError(RuntimeError):
+    """The capture authority could not be read or interpreted."""
+
+
 @dataclass(frozen=True)
 class CaptureLane:
     """One runtime-declared capture lane and its exact native contract."""
@@ -45,11 +49,15 @@ def queryable_capture_lanes(runtime_inventory: Path) -> dict[str, CaptureLane]:
     """
     try:
         inventory = json.loads(runtime_inventory.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
-    captures = inventory.get("captures")
-    if not isinstance(captures, list):
-        return {}
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise CaptureInventoryUnavailableError(
+            f"capture runtime inventory unavailable: {error}"
+        ) from error
+    if not isinstance(inventory, dict) or not isinstance(inventory.get("captures"), list):
+        raise CaptureInventoryUnavailableError(
+            "capture runtime inventory must contain a captures list"
+        )
+    captures = inventory["captures"]
     lanes: dict[str, CaptureLane] = {}
     for row in captures:
         if not isinstance(row, dict):

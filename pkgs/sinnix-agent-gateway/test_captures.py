@@ -336,3 +336,34 @@ def test_capture_read_without_a_lane_access_entry_is_a_config_error() -> None:
         del caps.PRINCIPAL_CAPABILITIES["fixture-principal"]
         caps.PRINCIPAL_LANE_ACCESS.clear()
         caps.PRINCIPAL_LANE_ACCESS.update(original)
+
+
+@pytest.mark.parametrize("payload", ["{", "[]", "{}", '{"captures":null}'])
+def test_unusable_inventory_is_not_measured_as_zero_lanes(tmp_path, payload):
+    from sinnix_agent_gateway.captures import CaptureInventoryUnavailableError
+    gateway_config, _ = config(tmp_path)
+    gateway_config.runtime_inventory.write_text(payload)
+    service = CaptureService(gateway_config, Principal.for_name("operator"))
+    with pytest.raises(CaptureInventoryUnavailableError):
+        service.lanes_visible()
+
+
+def test_missing_and_denied_inventory_are_not_empty(tmp_path, monkeypatch):
+    from sinnix_agent_gateway.captures import CaptureInventoryUnavailableError
+    gateway_config, _ = config(tmp_path)
+    gateway_config.runtime_inventory.unlink()
+    service = CaptureService(gateway_config, Principal.for_name("operator"))
+    with pytest.raises(CaptureInventoryUnavailableError, match="unavailable"):
+        service.lanes_visible()
+    def denied(*args, **kwargs):
+        raise PermissionError("synthetic denied inventory")
+    monkeypatch.setattr(Path, "read_text", denied)
+    with pytest.raises(CaptureInventoryUnavailableError, match="denied inventory"):
+        service.lanes_visible()
+
+
+def test_accessible_empty_inventory_is_valid(tmp_path):
+    gateway_config, _ = config(tmp_path)
+    gateway_config.runtime_inventory.write_text('{"captures": []}')
+    service = CaptureService(gateway_config, Principal.for_name("operator"))
+    assert service.lanes_visible() == {"lanes": [], "total_declared_lanes": 0}
