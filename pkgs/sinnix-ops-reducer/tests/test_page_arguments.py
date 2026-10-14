@@ -2,6 +2,9 @@
 import datetime as dt
 import json
 import subprocess
+
+import pytest
+from pathlib import Path
 from html.parser import HTMLParser
 from types import SimpleNamespace
 from urllib.parse import unquote, urlsplit
@@ -60,3 +63,41 @@ def test_report_filename_is_one_url_component(tmp_path):
     parsed = urlsplit(target)
     assert parsed.query == parsed.fragment == ''
     assert unquote(parsed.path.removeprefix('/reports/')) == filename
+
+
+@pytest.mark.parametrize("error", [PermissionError("denied <neutral>"), FileNotFoundError("disappeared <neutral>"), OSError("inspection failed <neutral>")])
+def test_report_inspection_failure_is_unavailable_not_empty(tmp_path, monkeypatch, error):
+    target = tmp_path / "neutral.html"
+    target.write_text('neutral')
+    original = Path.stat
+    def inspect(path, *args, **kwargs):
+        if path == target: raise error
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'stat', inspect)
+    markup = dashboard.reports_card(tmp_path, dt.datetime.now(dt.timezone.utc))
+    assert 'Reports unavailable' in markup
+    assert 'no reports generated yet' not in markup
+    assert '&lt;neutral&gt;' in markup and '<neutral>' not in markup
+
+
+def test_report_render_retains_metadata_without_a_racy_second_read(tmp_path, monkeypatch):
+    target = tmp_path / "neutral.html"
+    target.write_text('neutral')
+    original = Path.stat
+    observed = []
+    def inspect(path, *args, **kwargs):
+        if path == target:
+            if observed: raise FileNotFoundError('removed after observation')
+            observed.append(True)
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'stat', inspect)
+    markup = dashboard.reports_card(tmp_path, dt.datetime.now(dt.timezone.utc))
+    assert '/reports/neutral.html' in markup and 'Recent reports' in markup
+
+
+def test_report_empty_and_wrong_type_root_are_distinct(tmp_path):
+    now = dt.datetime.now(dt.timezone.utc)
+    assert 'no reports generated yet' in dashboard.reports_card(tmp_path, now)
+    target = tmp_path / 'ordinary-file'
+    target.write_text('neutral')
+    assert 'Reports unavailable' in dashboard.reports_card(target, now)

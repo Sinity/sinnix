@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import os
+import stat
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -359,19 +360,19 @@ def links_card(manifest: dict[str, Any]) -> str:
 
 def reports_card(reports_dir: Path, now: dt.datetime) -> str:
     try:
-        entries = [
-            entry
-            for entry in reports_dir.iterdir()
-            if entry.is_file()
-            and entry.suffix == ".html"
-            and entry.name != "index.html"
-        ]
+        entries = []
+        for entry in reports_dir.iterdir():
+            if entry.suffix != ".html" or entry.name == "index.html":
+                continue
+            metadata = entry.stat()
+            if stat.S_ISREG(metadata.st_mode):
+                entries.append((entry, metadata.st_mtime))
     except OSError as error:
-        return card("Reports", f'<p class="sub">{esc(error)}</p>')
-    entries.sort(key=lambda entry: entry.stat().st_mtime, reverse=True)
+        return card("Reports unavailable", f'<p class="sub">{esc(error)}</p>')
+    entries.sort(key=lambda observation: observation[1], reverse=True)
     items = ""
-    for entry in entries[:8]:
-        age = duration_human(now.timestamp() - entry.stat().st_mtime)
+    for entry, modified_at in entries[:8]:
+        age = duration_human(now.timestamp() - modified_at)
         items += (
             f'<li><a href="/reports/{esc(quote(entry.name, safe=""))}">{esc(entry.stem)}</a>'
             f'<div class="sub">{esc(age)} ago</div></li>'
