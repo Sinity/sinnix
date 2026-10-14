@@ -84,6 +84,12 @@ curl -F file=@clip.wav -F model=parakeet-tdt-0.6b-v3 \
      http://127.0.0.1:8090/v1/audio/transcriptions
 ```
 
+The STT HTTP receiver serves native clients. It refuses supplied Origin or
+Fetch Metadata before reading audio, and validates Host against its listener
+and the declared proxy endpoint. Native multipart uploads retain the OpenAI
+audio protocol; no wildcard CORS is offered. This receiver check does not
+prevent the TCP socket proxy from starting the service on connection.
+
 It is socket-activated behind `stt-proxy`, and still is even without a GPU to
 release: the encoder is 650 MB of resident RSS that a mostly-idle service has
 no business holding. The idle window is 300 s rather than the GPU services'

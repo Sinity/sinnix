@@ -146,7 +146,10 @@ mkAiService {
                 "serve"
                 "--listen 127.0.0.1:${toString helpers.data.ports.stt.backend}"
               ];
-              Environment = [ "SINNIX_STT_MODEL_ROOT=${modelDir}" ];
+              Environment = [
+                "SINNIX_STT_MODEL_ROOT=${modelDir}"
+                "SINNIX_STT_PUBLIC_ENDPOINT=${config.sinnix.runtime.surfaces.stt.activation.publicEndpoint}"
+              ];
             }
             (lib.sinnix.mkRuntimeServiceConfig {
               runtimeInventory = config.sinnix.runtime.inventory;

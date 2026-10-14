@@ -126,9 +126,12 @@ def test_http_framing_precedes_transcription(lake, monkeypatch, framing, raw, su
     class Server:
         def __init__(self, address, handler):
             self.handler = handler
+            self.server_address = address
         def serve_forever(self):
             handler = object.__new__(self.handler)
+            handler.server = self
             handler.headers = Message()
+            handler.headers["Host"] = "127.0.0.1:0"
             for key, value in framing:
                 handler.headers[key] = value
             handler.rfile = ShortReader(raw)
@@ -174,11 +177,14 @@ def test_upload_scratch_is_removed_even_after_partial_write(lake, monkeypatch, t
     class Server:
         def __init__(self, address, handler):
             self.handler = handler
+            self.server_address = address
 
         def serve_forever(self):
             import io
             handler = object.__new__(self.handler)
+            handler.server = self
             handler.headers = Message()
+            handler.headers["Host"] = "127.0.0.1:0"
             handler.headers["Content-Length"] = "2"
             handler.rfile = io.BytesIO(b"{}")
             handler.path = "/v1/audio/transcriptions"
@@ -196,3 +202,66 @@ def test_upload_scratch_is_removed_even_after_partial_write(lake, monkeypatch, t
     else:
         assert module.cmd_serve(args) == 0
     assert list(scratch.iterdir()) == []
+
+
+def test_native_http_guard_before_upload_and_transcription(lake, monkeypatch):
+    import http.client
+    import socketserver
+    import threading
+
+    module, calls, _, _ = lake
+    monkeypatch.setenv("SINNIX_STT_PUBLIC_ENDPOINT", "127.0.0.1:18090")
+    original = socketserver.ThreadingTCPServer
+    statuses = []
+
+    class Server(original):
+        def serve_forever(self):
+            worker = threading.Thread(target=super().serve_forever, daemon=True)
+            worker.start()
+            try:
+                for name in ("Origin", "Sec-Fetch-Site", "Sec-Fetch-Mode",
+                             "Sec-Fetch-Dest", "Sec-Fetch-User"):
+                    for method in ("GET", "POST"):
+                        client = http.client.HTTPConnection("127.0.0.1", self.server_address[1], timeout=2)
+                        client.putrequest(method, "/v1/audio/transcriptions")
+                        client.putheader(name, "")
+                        client.putheader("Content-Length", "100")
+                        client.endheaders()  # No body: refusal must precede reading.
+                        response = client.getresponse()
+                        response.read()
+                        client.close()
+                        assert response.status == 403
+                        statuses.append(response.status)
+                for hosts in ([], ["rebound.example.invalid:18090"],
+                              ["127.0.0.1:18090", "localhost:18090"],
+                              ["user@127.0.0.1:18090"], ["127.0.0.1:80"]):
+                    client = http.client.HTTPConnection("127.0.0.1", self.server_address[1], timeout=2)
+                    client.putrequest("GET", "/health", skip_host=True)
+                    for host in hosts:
+                        client.putheader("Host", host)
+                    client.endheaders()
+                    response = client.getresponse(); response.read(); client.close()
+                    assert response.status == 403
+                assert calls == []
+                for host in (f"127.0.0.1:{self.server_address[1]}", "localhost:18090"):
+                    client = http.client.HTTPConnection("127.0.0.1", self.server_address[1], timeout=2)
+                    client.request("GET", "/health", headers={"Host": host})
+                    response = client.getresponse(); response.read(); client.close()
+                    assert response.status == 200
+                body = (b'--neutral\r\nContent-Disposition: form-data; name="file"; filename="neutral.wav"\r\n'
+                        b'Content-Type: audio/wav\r\n\r\nneutral audio\r\n--neutral--\r\n')
+                client = http.client.HTTPConnection("127.0.0.1", self.server_address[1], timeout=2)
+                client.request("POST", "/v1/audio/transcriptions", body,
+                               {"Host": "localhost:18090", "Content-Type": "multipart/form-data; boundary=neutral"})
+                response = client.getresponse()
+                assert response.status == 200
+                assert json.loads(response.read())["text"] == "neutral audio"
+                client.close()
+                assert len(calls) == 1
+            finally:
+                self.shutdown()
+                worker.join(timeout=2)
+
+    monkeypatch.setattr(socketserver, "ThreadingTCPServer", Server)
+    assert module.cmd_serve(argparse.Namespace(socket=None, listen="127.0.0.1:0")) == 0
+    assert statuses == [403] * 10

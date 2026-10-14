@@ -45,6 +45,7 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Iterable
+from urllib.parse import urlsplit
 
 from sinnix_lib.http import RequestBodyError, read_body
 from sinnix_lib.layout import capture_lane_path
@@ -630,13 +631,42 @@ def cmd_serve(args: argparse.Namespace) -> int:
             self.end_headers()
             self.wfile.write(body)
 
+        def _request_allowed(self) -> bool:
+            browser_headers = (
+                "Origin", "Sec-Fetch-Site", "Sec-Fetch-Mode",
+                "Sec-Fetch-Dest", "Sec-Fetch-User",
+            )
+            hosts = self.headers.get_all("Host", [])
+            valid = len(hosts) == 1 and not any(
+                self.headers.get_all(name) for name in browser_headers
+            )
+            try:
+                authority = urlsplit("http://" + hosts[0]) if valid else None
+                valid = valid and (
+                    authority.hostname in self.server.allowed_hosts
+                    and (authority.port if authority.port is not None else 80)
+                    in self.server.allowed_ports
+                    and authority.username is None and authority.password is None
+                    and not authority.path and not authority.query and not authority.fragment
+                )
+            except ValueError:
+                valid = False
+            if not valid:
+                self.close_connection = True
+                self._json(HTTPStatus.FORBIDDEN, {"error": "browser request or host refused"})
+            return valid
+
         def do_GET(self) -> None:  # noqa: N802
+            if not self._request_allowed():
+                return
             if self.path.rstrip("/") in ("/health", ""):
                 self._json(HTTPStatus.OK, {"ok": True, "engine": "parakeet-tdt-0.6b-v3-int8"})
             else:
                 self._json(HTTPStatus.NOT_FOUND, {"error": "no such route"})
 
         def do_POST(self) -> None:  # noqa: N802
+            if not self._request_allowed():
+                return
             if not self.path.rstrip("/").endswith("/audio/transcriptions"):
                 self._json(HTTPStatus.NOT_FOUND, {"error": "no such route"})
                 return
@@ -690,6 +720,22 @@ def cmd_serve(args: argparse.Namespace) -> int:
         host, _, port = args.listen.rpartition(":")
         server = Server((host or "127.0.0.1", int(port)), Handler)
         print(f"stt: serving on {args.listen}", file=sys.stderr)
+    bind_host, _, bind_port = args.listen.rpartition(":")
+    server.allowed_hosts = {bind_host or "127.0.0.1"}
+    server.allowed_ports = {int(bind_port)} if args.socket else {server.server_address[1]}
+    if server.allowed_hosts & {"127.0.0.1", "localhost", "::1"}:
+        server.allowed_hosts.update({"127.0.0.1", "localhost", "::1"})
+    if args.socket:
+        server.allowed_ports.add(80)  # curl's default Unix-socket authority
+    public_endpoint = os.environ.get("SINNIX_STT_PUBLIC_ENDPOINT")
+    if public_endpoint:
+        public = urlsplit("http://" + public_endpoint)
+        if (public.hostname not in server.allowed_hosts or public.port is None
+                or public.username is not None or public.password is not None
+                or public.path or public.query or public.fragment):
+            server.server_close()
+            raise ValueError("invalid SINNIX_STT_PUBLIC_ENDPOINT")
+        server.allowed_ports.add(public.port)
     try:
         server.serve_forever()
     finally:
