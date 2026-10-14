@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import stat
 from pathlib import Path
 
 
@@ -24,10 +25,17 @@ def store_path() -> Path:
 
 def get_db() -> sqlite3.Connection:
     path = store_path()
+    entry = path.lstat()
+    try:
+        metadata = path.stat() if stat.S_ISLNK(entry.st_mode) else entry
+    except FileNotFoundError as error:
+        raise OSError("steering store link target is unavailable") from error
+    if not stat.S_ISREG(metadata.st_mode):
+        raise OSError("steering store is not a regular file")
     # Read-only: if the store doesn't exist yet (sinnix-steer never ran),
     # connect in read-only mode against a file URI so sqlite doesn't silently
     # create an empty (schema-less) database out from under the CLI.
-    uri = f"file:{path}?mode=ro"
+    uri = f"{path.absolute().as_uri()}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
     conn.row_factory = sqlite3.Row
     return conn

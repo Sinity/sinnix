@@ -20,6 +20,8 @@ def main() -> None:
 
     from .app import app
 
+    app.state.listen_host = args.host
+    app.state.listen_port = args.port
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
 

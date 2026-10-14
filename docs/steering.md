@@ -81,6 +81,13 @@ long-running service:
 | `sinnix-steering-export`  | 23:50  | Full store to `/realm/activity/steering/<date>.jsonl` — the lake copy lynchpin joins against telemetry.                                                            |
 | `sinnix-cockpit`          | always | Read-only web view on loopback port 8791.                                                                                                                          |
 
+The cockpit checks Host against its configured listener and rejects foreign or
+opaque browser Origins before reading the private store. Native clients,
+same-origin requests and deliberate top-level navigation remain supported;
+there is no wildcard CORS. An absent store displays the initialization hint.
+Access, object-type and SQLite failures display an unavailable view with HTTP
+503. SQLite filenames are URI-encoded, and each read closes its connection.
+
 ## The surfaces, and why each exists
 
 - **Session-start block** ("Personal Steering", in every agent session) — the

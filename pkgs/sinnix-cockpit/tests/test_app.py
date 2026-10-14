@@ -50,7 +50,7 @@ def seeded_store(tmp_path, monkeypatch):
 
 
 def test_today_renders_open_commitment_with_forecast(seeded_store):
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1:8791")
     resp = client.get("/today")
     assert resp.status_code == 200
     assert "ship the walking skeleton" in resp.text
@@ -59,7 +59,7 @@ def test_today_renders_open_commitment_with_forecast(seeded_store):
 
 
 def test_activities_renders_registry(seeded_store):
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1:8791")
     resp = client.get("/activities")
     assert resp.status_code == 200
     assert "deep work block" in resp.text
@@ -67,7 +67,7 @@ def test_activities_renders_registry(seeded_store):
 
 
 def test_calibration_renders_bucket_for_closed_forecasted_commitment(seeded_store):
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1:8791")
     resp = client.get("/calibration")
     assert resp.status_code == 200
     assert "41-60%" in resp.text  # c2's 0.5 forecast falls in this bucket
@@ -76,7 +76,117 @@ def test_calibration_renders_bucket_for_closed_forecasted_commitment(seeded_stor
 
 def test_today_handles_missing_store_gracefully(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "store_path", lambda: tmp_path / "does-not-exist.sqlite")
-    client = TestClient(app)
+    client = TestClient(app, base_url="http://127.0.0.1:8791")
     resp = client.get("/today")
     assert resp.status_code == 200
     assert "not yet initialized" in resp.text
+
+
+@pytest.mark.parametrize("headers", [
+    {"Host": "rebound.example.invalid:8791"},
+    {"Host": "127.0.0.1:80"},
+    {"Host": "user@127.0.0.1:8791"},
+    {"Host": "127.0.0.1:8791/path"},
+    {"Origin": "https://example.invalid"},
+    {"Origin": "null"},
+    {"Origin": ""},
+    {"Origin": "http://127.0.0.1:80"},
+    {"Origin": "http://127.0.0.1:8791/"},
+    {"Origin": "http://user@127.0.0.1:8791"},
+    {"Sec-Fetch-Site": "cross-site"},
+    {"Sec-Fetch-Site": "same-site"},
+    {"Sec-Fetch-Mode": "cors"},
+    [("Origin", "http://127.0.0.1:8791"), ("Origin", "https://example.invalid")],
+    [("Host", "127.0.0.1:8791"), ("Host", "rebound.example.invalid:8791")],
+])
+def test_browser_refusal_precedes_private_store_access(monkeypatch, headers):
+    def forbidden():
+        pytest.fail("refused request reached private store")
+    monkeypatch.setattr(store, "get_db", forbidden)
+    client = TestClient(app, base_url="http://127.0.0.1:8791")
+    response = client.get("/today", headers=headers)
+    assert response.status_code == 403
+    assert response.headers["connection"] == "close"
+    assert "access-control-allow-origin" not in response.headers
+
+
+@pytest.mark.parametrize("headers", [
+    {},
+    {"Origin": "http://127.0.0.1:8791", "Sec-Fetch-Site": "same-origin"},
+    {"Sec-Fetch-Site": "none"},
+    {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate",
+     "Sec-Fetch-Dest": "document", "Sec-Fetch-User": "?1"},
+])
+def test_native_same_origin_and_deliberate_navigation_work(seeded_store, headers):
+    client = TestClient(app, base_url="http://127.0.0.1:8791")
+    assert client.get("/today", headers=headers).status_code == 200
+
+
+def test_cli_custom_listener_defines_the_boundary(monkeypatch):
+    import sys
+    import uvicorn
+    from sinnix_cockpit.cli import main
+    monkeypatch.setattr(app.state, "listen_host", app.state.listen_host)
+    monkeypatch.setattr(app.state, "listen_port", app.state.listen_port)
+    monkeypatch.setattr(sys, "argv", ["sinnix-cockpit", "--host", "localhost", "--port", "9876"])
+    calls = []
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append(kwargs))
+    main()
+    assert calls[0]["host"] == "localhost" and calls[0]["port"] == 9876
+    client = TestClient(app, base_url="http://localhost:9876")
+    assert client.get("/", headers={"Origin": "http://localhost:9876"}).status_code == 200
+    assert client.get("/", headers={"Host": "localhost:8791"}).status_code == 403
+
+
+def test_store_filename_is_encoded_in_read_only_uri(seeded_store, monkeypatch):
+    target = seeded_store.with_name("steering #?%.sqlite")
+    seeded_store.rename(target)
+    monkeypatch.setattr(store, "store_path", lambda: target)
+    client = TestClient(app, base_url="http://127.0.0.1:8791")
+    assert "ship the walking skeleton" in client.get("/today").text
+
+
+@pytest.mark.parametrize("route", ["/today", "/activities", "/calibration"])
+@pytest.mark.parametrize("failure", [PermissionError("denied"), sqlite3.OperationalError("locked")])
+def test_unavailable_store_is_not_reported_as_uninitialized(monkeypatch, route, failure):
+    def unavailable():
+        raise failure
+    monkeypatch.setattr(store, "get_db", unavailable)
+    response = TestClient(app, base_url="http://127.0.0.1:8791").get(route)
+    assert response.status_code == 503
+    assert "store unavailable" in response.text
+    assert "not yet initialized" not in response.text
+
+
+def test_activity_fields_remain_text(seeded_store):
+    hostile = '<img src=x onerror="alert(1)">'
+    with sqlite3.connect(seeded_store) as conn:
+        conn.execute("UPDATE activities SET kind=?, energy_tier=?, est_minutes=?", (hostile, hostile, hostile))
+    response = TestClient(app, base_url="http://127.0.0.1:8791").get("/activities")
+    assert hostile not in response.text
+    assert response.text.count("&lt;img") == 3
+
+
+@pytest.mark.parametrize("kind", ["directory", "broken-link", "invalid-database"])
+def test_present_unusable_store_is_unavailable(tmp_path, monkeypatch, kind):
+    target = tmp_path / "steering.sqlite"
+    if kind == "directory":
+        target.mkdir()
+    elif kind == "broken-link":
+        target.symlink_to(tmp_path / "missing-target")
+    else:
+        target.write_bytes(b"not a SQLite database")
+    monkeypatch.setattr(store, "store_path", lambda: target)
+    response = TestClient(app, base_url="http://127.0.0.1:8791").get("/today")
+    assert response.status_code == 503
+    assert "not yet initialized" not in response.text
+
+
+@pytest.mark.parametrize("route", ["/today", "/activities", "/calibration"])
+def test_failed_query_closes_its_read_connection(monkeypatch, route):
+    conn = sqlite3.connect(":memory:", check_same_thread=False)
+    monkeypatch.setattr(store, "get_db", lambda: conn)
+    response = TestClient(app, base_url="http://127.0.0.1:8791").get(route)
+    assert response.status_code == 503
+    with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+        conn.execute("SELECT 1")

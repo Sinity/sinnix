@@ -9,14 +9,68 @@ fully offline localhost service. Revisit if a write-capable route lands.
 from __future__ import annotations
 
 import html
+import os
 import sqlite3
+from contextlib import closing
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 
 from . import store
 
 app = FastAPI(title="sinnix-cockpit")
+app.state.listen_host = "127.0.0.1"
+app.state.listen_port = int(os.environ.get("SINNIX_COCKPIT_PORT", "8791"))
+
+
+@app.middleware("http")
+async def browser_boundary(request: Request, call_next):
+    headers = request.headers
+    fields = (
+        "host", "origin", "sec-fetch-site", "sec-fetch-mode",
+        "sec-fetch-dest", "sec-fetch-user",
+    )
+    values = {name: headers.getlist(name) for name in fields}
+    valid = len(values["host"]) == 1 and all(
+        len(values[name]) <= 1 for name in fields[1:]
+    )
+    allowed = {app.state.listen_host.lower()}
+    if allowed & {"127.0.0.1", "localhost", "::1"}:
+        allowed.update({"127.0.0.1", "localhost", "::1"})
+    try:
+        host = urlsplit("http://" + values["host"][0]) if valid else None
+        valid = valid and (
+            host.hostname in allowed
+            and (host.port if host.port is not None else 80) == app.state.listen_port
+            and host.username is None and host.password is None
+            and not host.path and not host.query and not host.fragment
+        )
+        if valid and values["origin"]:
+            origin = urlsplit(values["origin"][0])
+            valid = (
+                origin.scheme == "http" and origin.hostname == host.hostname
+                and (origin.port if origin.port is not None else 80) == app.state.listen_port
+                and origin.username is None and origin.password is None
+                and not origin.path and not origin.query and not origin.fragment
+            )
+    except ValueError:
+        valid = False
+    browser = any(values[name] for name in fields[2:])
+    navigation = (
+        request.method in {"GET", "HEAD"}
+        and headers.get("sec-fetch-mode") == "navigate"
+        and headers.get("sec-fetch-dest") == "document"
+        and headers.get("sec-fetch-user") == "?1"
+    )
+    if browser and not navigation:
+        valid = valid and headers.get("sec-fetch-site") in {"same-origin", "none"}
+    if not valid:
+        return HTMLResponse(
+            "browser request origin or host refused", status_code=403,
+            headers={"Connection": "close"},
+        )
+    return await call_next(request)
 
 _NAV = (
     '<nav><a href="/today">today</a> | '
@@ -54,6 +108,19 @@ def _store_unavailable(body: str) -> str:
     )
 
 
+def _read_store(label, query):
+    try:
+        with closing(store.get_db()) as conn:
+            return query(conn)
+    except FileNotFoundError:
+        return HTMLResponse(_page(label, _store_unavailable(label)))
+    except (OSError, sqlite3.Error) as error:
+        return HTMLResponse(
+            _page(label, f"<p>Steering store unavailable: {html.escape(str(error))}</p>"),
+            status_code=503,
+        )
+
+
 @app.get("/", response_class=HTMLResponse)
 def root() -> str:
     return _page(
@@ -67,12 +134,10 @@ def root() -> str:
 
 
 @app.get("/today", response_class=HTMLResponse)
-def today() -> str:
-    try:
-        conn = store.get_db()
-    except sqlite3.OperationalError:
-        return _page("Today", _store_unavailable("Today's intentions"))
-    rows = store.open_commitments(conn)
+def today():
+    rows = _read_store("Today", store.open_commitments)
+    if isinstance(rows, HTMLResponse):
+        return rows
     if not rows:
         body = '<p class="empty">No open commitments.</p>'
     else:
@@ -89,12 +154,10 @@ def today() -> str:
 
 
 @app.get("/calibration", response_class=HTMLResponse)
-def calibration() -> str:
-    try:
-        conn = store.get_db()
-    except sqlite3.OperationalError:
-        return _page("Calibration", _store_unavailable("Calibration curve"))
-    buckets = store.calibration_buckets(conn)
+def calibration():
+    buckets = _read_store("Calibration", store.calibration_buckets)
+    if isinstance(buckets, HTMLResponse):
+        return buckets
     total_scored = sum(b["n"] for b in buckets)
     if total_scored == 0:
         body = (
@@ -120,12 +183,10 @@ def calibration() -> str:
 
 
 @app.get("/activities", response_class=HTMLResponse)
-def activities() -> str:
-    try:
-        conn = store.get_db()
-    except sqlite3.OperationalError:
-        return _page("Activities", _store_unavailable("Activity menu"))
-    rows = store.activities(conn)
+def activities():
+    rows = _read_store("Activities", store.activities)
+    if isinstance(rows, HTMLResponse):
+        return rows
     if not rows:
         body = '<p class="empty">No activities in the registry.</p>'
     else:
@@ -133,8 +194,8 @@ def activities() -> str:
         for r in rows:
             mins = f"~{r['est_minutes']}m" if r["est_minutes"] else "—"
             table_rows.append(
-                f"<tr><td>{html.escape(r['name'])}</td><td>{r['kind']}</td>"
-                f"<td>{r['energy_tier']}</td><td>{mins}</td></tr>"
+                f"<tr><td>{html.escape(r['name'])}</td><td>{html.escape(r['kind'])}</td>"
+                f"<td>{html.escape(r['energy_tier'])}</td><td>{html.escape(mins)}</td></tr>"
             )
         body = (
             "<table><tr><th>Name</th><th>Kind</th><th>Energy</th><th>Est.</th></tr>"
