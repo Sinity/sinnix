@@ -898,7 +898,7 @@ def test_property_failures_do_not_hold_the_cancellation_lock(
         properties = run_module._wait_for_unit("fixture.service", 30)
         outcome.append(
             run_module._classify(
-                client.returncode, run_module._marker_targets(marker, 1), properties
+                run_module._marker_targets(marker, 1), properties
             )
         )
 
@@ -941,7 +941,7 @@ def test_persistent_unit_observation_failure_is_bounded_and_unresolved(
     properties = run_module._wait_for_unit("fixture.service", timeout_seconds=2)
 
     assert properties is None
-    assert run_module._classify(0, False, properties) == (
+    assert run_module._classify(False, properties) == (
         run_module.Outcome.VANISHED,
         run_module.VANISHED_EXIT_CODE,
     )
@@ -1101,7 +1101,9 @@ def test_a_unit_of_another_daemon_or_pool_does_not_hold_the_slot(
     launch = write_launch(tmp_path, pool="pytest")
 
     assert main([str(launch)]) == 0
-    assert [call for call in fake_systemd.systemctl_calls() if "stop" in call] == []
+    assert [call for call in fake_systemd.systemctl_calls() if "stop" in call] == [
+        ["systemctl", "--user", "stop", unit_for(launch, "pytest")]
+    ]
 
 
 def test_a_unit_whose_task_is_terminal_is_an_orphan_and_is_settled(
@@ -1623,7 +1625,7 @@ def test_real_unit_unload_after_startup_ack_is_unresolved(
 
 
 def test_missing_unit_cannot_prove_command_success() -> None:
-    assert run_module._classify(0, False, {}) == (
+    assert run_module._classify(False, {}) == (
         run_module.Outcome.VANISHED,
         VANISHED_EXIT_CODE,
     )
