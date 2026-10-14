@@ -68,6 +68,19 @@ in
       settings = hm.wayland.windowManager.hyprland.settings;
     in
     {
+      checks.hyprctl-native-abi = pkgs.runCommand "sinnix-hyprctl-native-abi" { } ''
+        mkdir -p "$TMPDIR/foreign" "$TMPDIR/runtime/hypr"
+        export XDG_RUNTIME_DIR="$TMPDIR/runtime"
+        printf 'synthetic incompatible library' > "$TMPDIR/foreign/libstdc++.so.6"
+        if LD_LIBRARY_PATH="$TMPDIR/foreign" ${pkgs.hyprland}/bin/hyprctl instances -j > original.out 2>&1; then
+          echo "fixture did not exercise the foreign-library override" >&2
+          exit 1
+        fi
+        LD_LIBRARY_PATH="$TMPDIR/foreign" ${hyprland}/bin/hyprctl instances -j > guarded.out
+        test -s guarded.out
+        touch "$out"
+      '';
+
       checks.hyprland-rules =
         assert lib.assertMsg
           (!(builtins.elem "F10" (replayKeys false)) && !(builtins.elem "SHIFT + F10" (replayKeys false)))

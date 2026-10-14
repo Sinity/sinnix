@@ -9,6 +9,29 @@ let
   cfg = config.sinnix.features.desktop.hyprland;
   user = config.sinnix.user.name;
   hyprlandPkg = config.programs.hyprland.package or pkgs.hyprland;
+  # Agent/devshell library overrides can outlive a host upgrade. The native
+  # control client must use its packaged C++ ABI, without changing the
+  # compositor's or applications' library environment.
+  hyprlandWithNativeCli = lib.makeOverridable
+    (lib.setFunctionArgs
+      (args:
+        let
+          unwrapped = pkgs.hyprland.override args;
+        in
+        pkgs.symlinkJoin {
+          name = "${unwrapped.name}-native-cli";
+          paths = [ unwrapped ];
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+          inherit (unwrapped) meta version;
+          passthru = unwrapped.passthru or { };
+          postBuild = ''
+            unlink "$out/bin/hyprctl"
+            makeWrapper ${unwrapped}/bin/hyprctl "$out/bin/hyprctl" \
+              --unset LD_LIBRARY_PATH
+          '';
+        })
+      (lib.functionArgs pkgs.hyprland.override))
+    { };
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 
   # Helpers for home-manager config
@@ -118,7 +141,7 @@ in
         # why mkForce: nixos-hyprland defaults withUWSM=false; UWSM is
         # required for proper systemd-managed session (XDG portal reliability).
         withUWSM = lib.mkForce true;
-        package = lib.mkDefault pkgs.hyprland;
+        package = lib.mkDefault hyprlandWithNativeCli;
         portalPackage = lib.mkDefault pkgs.xdg-desktop-portal-hyprland;
       };
 
