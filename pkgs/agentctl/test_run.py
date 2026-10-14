@@ -425,7 +425,9 @@ def test_worker_exports_queue_identity_to_the_child(
 
 @pytest.mark.parametrize("exit_type", ["main", "cgroup"])
 def test_a_declared_pool_runs_the_child_as_a_service_with_declared_exit_type(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue,
+    tmp_path: Path,
+    fake_systemd: FakeSystemd,
+    fake_pueue: FakePueue,
     exit_type: str,
 ) -> None:
     """The unit is recoverable from pueue; wrapper completion follows its cgroup."""
@@ -1497,16 +1499,42 @@ def test_worker_exports_observed_native_provenance(
     tmp_path, fake_systemd, fake_pueue, dirty, linked, subdirectory
 ):
     import hashlib
+
     subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=Fixture",
-                    "-c", "user.email=fixture@example.invalid", "commit",
-                    "--allow-empty", "-qm", "neutral"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "neutral",
+        ],
+        check=True,
+    )
     (tmp_path / ".git/info/exclude").write_text("*\n!neutral.txt\n")
     (tmp_path / "neutral.txt").write_text("committed fixture")
     subprocess.run(["git", "-C", str(tmp_path), "add", "neutral.txt"], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=Fixture",
-                    "-c", "user.email=fixture@example.invalid", "commit",
-                    "-qm", "track neutral fixture"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "track neutral fixture",
+        ],
+        check=True,
+    )
     head = subprocess.check_output(
         ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], text=True
     ).strip()
@@ -1514,26 +1542,46 @@ def test_worker_exports_observed_native_provenance(
         (tmp_path / "neutral.txt").write_text("uncommitted fixture")
     assert run_module.git_observation(tmp_path)["dirty"] is dirty
     root = tmp_path / "other-root" if linked else tmp_path
-    fields = ["JOB_ID", "CORRELATION_ID", "PROJECT_ID", "OPERATION",
-              "CHECKOUT_ID", "CHECKOUT_HEAD"]
-    command = "import os,json;print(json.dumps({k:os.environ.get('AGENTCTL_'+k) for k in " + repr(fields) + "}))"
+    fields = [
+        "JOB_ID",
+        "CORRELATION_ID",
+        "PROJECT_ID",
+        "OPERATION",
+        "CHECKOUT_ID",
+        "CHECKOUT_HEAD",
+    ]
+    command = (
+        "import os,json;print(json.dumps({k:os.environ.get('AGENTCTL_'+k) for k in "
+        + repr(fields)
+        + "}))"
+    )
     cwd = tmp_path / "sub" if subdirectory else tmp_path
     cwd.mkdir(exist_ok=True)
     launch = write_launch(
-        tmp_path, pool="pytest", project_root=str(root), working_directory=str(cwd),
+        tmp_path,
+        pool="pytest",
+        project_root=str(root),
+        working_directory=str(cwd),
         argv=[sys.executable, "-c", command],
         tree_receipt={"head": "stale-cache-head"},
-        environment={"PATH": os.environ["PATH"], "AGENTCTL_CHECKOUT_HEAD": "parent-head",
-                     "AGENTCTL_CORRELATION_ID": "parent-request"},
+        environment={
+            "PATH": os.environ["PATH"],
+            "AGENTCTL_CHECKOUT_HEAD": "parent-head",
+            "AGENTCTL_CORRELATION_ID": "parent-request",
+        },
     )
     assert main([str(launch)]) == 0
     row = json.loads(log_of(tmp_path))
     assert row == {
-        "JOB_ID": "job-a", "CORRELATION_ID": "job-a",
-        "PROJECT_ID": "fixture", "OPERATION": "check",
+        "JOB_ID": "job-a",
+        "CORRELATION_ID": "job-a",
+        "PROJECT_ID": "fixture",
+        "OPERATION": "check",
         "CHECKOUT_HEAD": head,
-        "CHECKOUT_ID": "worktree-" + hashlib.sha256(str(tmp_path).encode()).hexdigest()[:16]
-            if linked else "default",
+        "CHECKOUT_ID": "worktree-"
+        + hashlib.sha256(str(tmp_path).encode()).hexdigest()[:16]
+        if linked
+        else "default",
     }
 
 
@@ -1542,9 +1590,14 @@ def test_worker_does_not_invent_missing_checkout_evidence(
 ):
     command = "import os,json;print(json.dumps({k:os.environ.get('AGENTCTL_'+k) for k in ['CHECKOUT_ID','CHECKOUT_HEAD']}))"
     launch = write_launch(
-        tmp_path, pool="pytest", argv=[sys.executable, "-c", command],
-        environment={"PATH": os.environ["PATH"], "AGENTCTL_CHECKOUT_ID": "parent",
-                     "AGENTCTL_CHECKOUT_HEAD": "parent"},
+        tmp_path,
+        pool="pytest",
+        argv=[sys.executable, "-c", command],
+        environment={
+            "PATH": os.environ["PATH"],
+            "AGENTCTL_CHECKOUT_ID": "parent",
+            "AGENTCTL_CHECKOUT_HEAD": "parent",
+        },
     )
     assert main([str(launch)]) == 0
     assert json.loads(log_of(tmp_path)) == {"CHECKOUT_ID": None, "CHECKOUT_HEAD": None}
@@ -1560,7 +1613,9 @@ def test_notify_admission_wait_does_not_spend_execution_observation_budget(
         clock[0] += delay
 
     def snapshot(_unit: str) -> dict[str, str]:
-        state = "activating" if clock[0] < 5 else "active" if clock[0] < 6 else "inactive"
+        state = (
+            "activating" if clock[0] < 5 else "active" if clock[0] < 6 else "inactive"
+        )
         return {
             "LoadState": "loaded",
             "ActiveState": state,
@@ -1578,3 +1633,50 @@ def test_notify_admission_wait_does_not_spend_execution_observation_budget(
     assert properties is not None
     assert properties["ActiveState"] == "inactive"
     assert clock[0] >= 6
+
+
+@pytest.mark.parametrize("status", [0, 1])
+def test_real_terminal_status_is_captured_before_unit_collection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_pueue: FakePueue, status: int
+) -> None:
+    user_manager()
+    monkeypatch.setenv("PUEUE_GROUP", "fixture")
+    launch = write_launch(
+        tmp_path, argv=[sys.executable, "-c", f"raise SystemExit({status})"]
+    )
+
+    assert main([str(launch)]) == status
+    outcome = outcome_of(tmp_path)
+    assert outcome["outcome"] == ("success" if status == 0 else "failed")
+    assert outcome["exit_code"] == status
+    assert outcome["systemd_result"] == ("success" if status == 0 else "exit-code")
+    assert run_module.unit_properties(unit_for(launch, "fixture")) == {}
+
+
+def test_real_unit_unload_after_startup_ack_is_unresolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_pueue: FakePueue
+) -> None:
+    user_manager()
+    monkeypatch.setenv("PUEUE_GROUP", "fixture")
+    launch = write_launch(tmp_path, argv=["sleep", "60"])
+    unit = unit_for(launch, "fixture")
+    original = run_module._start_service
+
+    def start_then_unload(*args: Any, **kwargs: Any) -> Any:
+        client = original(*args, **kwargs)
+        assert client is not None and client.returncode == 0
+        run_module._systemctl("stop", unit)
+        run_module._systemctl("reset-failed", unit)
+        assert run_module.unit_properties(unit) == {}
+        return client
+
+    monkeypatch.setattr(run_module, "_start_service", start_then_unload)
+    assert main([str(launch)]) == VANISHED_EXIT_CODE
+    assert outcome_of(tmp_path)["outcome"] == "vanished"
+
+
+def test_missing_unit_cannot_prove_command_success() -> None:
+    assert run_module._classify(0, False, {}) == (
+        run_module.Outcome.VANISHED,
+        VANISHED_EXIT_CODE,
+    )
