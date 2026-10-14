@@ -142,8 +142,14 @@ The run ends in one outcome, written to `jobs/<ref>.outcome`, carried on the
 | `failed`        | n    | the command's own exit status                              |
 | `timeout`       | 124  | `RuntimeMaxSec` expired                                    |
 | `cancelled`     | 130  | the cancel marker `jobs/<ref>.cancel` existed at wait exit |
-| `vanished`      | 126  | the unit could not be observed after a failing wait        |
+| `vanished`      | 126  | the command's terminal unit status could not be observed   |
 | `slot_occupied` | 75   | a single-slot pool was held by another unit                |
+
+A startup acknowledgement proves execution began, not that the command succeeded.
+Transient units retain their terminal status with `RemainAfterExit=yes` until the
+wrapper observes completion. The wrapper then stops and clears its exact unit,
+including retained verifier descendants. Missing unit state is `vanished`; it
+never establishes success from the startup acknowledgement alone.
 
 `job logs` and `job result` read the paths the launch input
 named, which must be regular files under the task's own working directory

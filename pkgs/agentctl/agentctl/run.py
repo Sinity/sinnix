@@ -19,7 +19,8 @@ when verification ends. Without ``--no-block``,
 ``systemd-run`` waits for unit startup; ``Type=exec`` makes its successful
 return confirm the command was exec'd before releasing the allocation lock.
 After that, the wrapper observes service completion while a canceller can
-stop the unit without this wrapper's help.
+stop the unit without this wrapper's help. RemainAfterExit retains terminal
+status until the wrapper reads it, then the wrapper stops and releases its unit.
 
 The unit's Description is ``agentctl:<daemon>:<pool>:<pueue task id>``: the
 pueue daemon the task belongs to and the exact pool, so the single-slot guard
@@ -413,7 +414,7 @@ def _unit_snapshot(unit: str) -> dict[str, str] | None:
     shown = _systemctl(
         "show",
         "-p",
-        "LoadState,ActiveState,Result,ExecMainStatus,ExecMainCode,Type,ActiveEnterTimestampMonotonic",
+        "LoadState,ActiveState,SubState,Result,ExecMainStatus,ExecMainCode,Type,ActiveEnterTimestampMonotonic",
         unit,
     )
     if shown is None:
@@ -453,7 +454,10 @@ def _wait_for_unit(unit: str, timeout_seconds: int) -> dict[str, str] | None:
             active_state = properties.get("ActiveState")
             if load_state and load_state != "loaded":
                 return {}
-            if load_state == "loaded" and active_state in {"inactive", "failed"}:
+            if load_state == "loaded" and (
+                active_state in {"inactive", "failed"}
+                or (active_state == "active" and properties.get("SubState") == "exited")
+            ):
                 return properties
             if timeout_seconds and properties.get("Type") == "notify":
                 if active_state == "activating":
@@ -570,6 +574,7 @@ def _service_command(
         *(["NotifyAccess=all", "TimeoutStartSec=infinity"] if notify else []),
         f"ExitType={launch.get('exit_type', 'cgroup')}",
         "KillMode=control-group",
+        "RemainAfterExit=yes",
         "IOAccounting=yes",
         f"WorkingDirectory={launch['working_directory']}",
         f"StandardOutput={'append' if stdout == log_path else 'file'}:{stdout}",
@@ -596,17 +601,15 @@ def _classify(
 ) -> tuple[Outcome, int]:
     """What the started unit says it did, or what its start request says.
 
-    systemd unloads a successful transient service after it is inactive and
-    keeps a failed one. A confirmed missing unit after a successful start
-    request is therefore success; a failed observation is unresolved.
+    Startup acknowledgement does not report command completion. The retained
+    unit must supply its terminal status; a missing unit or failed observation
+    leaves the command outcome unresolved.
     """
     if cancelled:
         return Outcome.CANCELLED, CANCELLED_EXIT_CODE
     if properties is None:
         return Outcome.VANISHED, VANISHED_EXIT_CODE
     if not properties:
-        if client_status == 0:
-            return Outcome.SUCCESS, 0
         return Outcome.VANISHED, VANISHED_EXIT_CODE
     if properties.get("Result") == "timeout":
         return Outcome.TIMEOUT, TIMEOUT_EXIT_CODE
@@ -962,6 +965,9 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
                                 _marker_targets(marker, launch["attempt"]),
                                 properties,
                             )
+                            # Capture terminal status before releasing this unit.
+                            # Stop also settles retained verifier descendants.
+                            _systemctl("stop", unit)
                             _systemctl("reset-failed", unit)
                             if outcome is Outcome.VANISHED:
                                 log.write(
