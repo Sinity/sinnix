@@ -597,9 +597,9 @@ def _service_command(
 
 
 def _classify(
-    client_status: int, cancelled: bool, properties: Mapping[str, str] | None
+    cancelled: bool, properties: Mapping[str, str] | None
 ) -> tuple[Outcome, int]:
-    """What the started unit says it did, or what its start request says.
+    """What the unit's terminal state and cancellation say it did.
 
     Startup acknowledgement does not report command completion. The retained
     unit must supply its terminal status; a missing unit or failed observation
@@ -961,7 +961,6 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
                                 else unit_properties(unit)
                             )
                             outcome, status = _classify(
-                                return_code,
                                 _marker_targets(marker, launch["attempt"]),
                                 properties,
                             )
