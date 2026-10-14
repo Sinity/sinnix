@@ -10,6 +10,7 @@
 #
 # usage: claude-hang-capture [PID...]   (default: every running claude.exe)
 set -euo pipefail
+umask 077
 
 out_root="${TMPDIR:-/realm/tmp/work}/claude-hang"
 stamp=$(date +%Y%m%dT%H%M%S)
@@ -39,6 +40,7 @@ capture() {
   [ -d "/proc/$pid" ] || { echo "pid $pid: gone" >&2; return; }
   dir="$out_root/$stamp-$pid"
   mkdir -p "$dir"
+  chmod 700 "$out_root" "$dir"
 
   cmdline=$(tr '\0' ' ' <"/proc/$pid/cmdline")
   cwd=$(readlink "/proc/$pid/cwd" || true)
