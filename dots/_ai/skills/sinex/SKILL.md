@@ -34,9 +34,10 @@ operations include `check_default`, `build_default`, `fix_default`,
 `test_default`, `run_core`, `run_all_automatons`, `run_all_sources`,
 `vm_smoke`, and `vm_validate`.
 
-Database-backed operations acquire the declared `dev_services` dependency.
-Use the returned lease job ID as `SINEX_PRE_PUSH_AGENTCTL_LEASE_ID` when the
-pre-push drift guard must use that workspace's PostgreSQL and NATS coordinates.
+Read the descriptor for each database-backed operation's service requirements.
+An operation declaring `requires` owns those services inside its job unit.
+Standalone commands need an explicit `dev_services` job; use its job ID for
+cancellation. The checkout devshell owns PostgreSQL and NATS coordinates.
 SQLx compiles against the live dev database; do not create an offline cache.
 
 ## Verification and deployment
