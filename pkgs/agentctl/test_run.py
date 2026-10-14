@@ -1106,10 +1106,12 @@ def test_a_unit_of_another_daemon_or_pool_does_not_hold_the_slot(
     ]
 
 
+@pytest.mark.parametrize("parallel", [1, 2])
 def test_a_unit_whose_task_is_terminal_is_an_orphan_and_is_settled(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
+    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue, parallel: int
 ) -> None:
-    """A SIGKILLed wrapper leaves its service running; the next run stops it."""
+    """A lost wrapper's retained unit is settled in narrow and wider pools."""
+    fake_pueue.groups["pytest"] = parallel
     orphan = fake_pueue.add(
         group="pytest",
         label="other:verify",
@@ -1128,15 +1130,27 @@ def test_a_unit_whose_task_is_terminal_is_an_orphan_and_is_settled(
     assert fake_systemd.run_argv() != []
 
 
+@pytest.mark.parametrize("known_running", [False, True])
 def test_a_multi_slot_pool_is_not_guarded(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
+    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue, known_running: bool
 ) -> None:
-    fake_systemd.active(
-        ("agentctl-agent-other-0123456789ab.service", described("agent", 5))
-    )
+    if known_running:
+        task_id = fake_pueue.add(
+            group="agent", label="other:verify",
+            command=("agentctl-run", "/inputs/other.json"), working_directory=tmp_path,
+        )
+        fake_pueue.start(task_id)
+        other = unit_for("/inputs/other.json", "agent")
+    else:
+        task_id = 5
+        other = "agentctl-agent-other-0123456789ab.service"
+    fake_systemd.active((other, described("agent", task_id)))
     launch = write_launch(tmp_path, pool="agent")
 
     assert main([str(launch)]) == 0
+    assert [call for call in fake_systemd.systemctl_calls() if "stop" in call] == [
+        ["systemctl", "--user", "stop", unit_for(launch, "agent")]
+    ]
 
 
 def test_the_unit_description_names_the_daemon_pool_and_task(

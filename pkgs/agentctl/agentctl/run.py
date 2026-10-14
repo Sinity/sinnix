@@ -521,17 +521,16 @@ def active_units(daemon: str, pool: str) -> dict[str, int | None]:
 def _occupancy(
     pool: str, unit: str, daemon: str, log: Any
 ) -> tuple[str, pueue.Task | None]:
-    """Whether a single-slot pool is free, and the pueue task of this run.
+    """Settle terminal task orphans and enforce single-slot pool occupancy.
 
-    Returns ``("slot_occupied", ...)`` when a unit of this daemon's pool
-    belongs to a task pueue still has running, or to no task this queue
-    knows; a unit whose task is terminal is an orphan of a killed wrapper and
-    is stopped here.
+    A unit whose task is terminal is an orphan of a killed wrapper and is
+    stopped in every pool. Unknown or running owners hold a single-slot pool;
+    wider pools leave them untouched and retain their declared admission width.
     """
     try:
         parallel = pueue.groups().get(pool)
         tasks = pueue.running_tasks(pool)
-        units = active_units(daemon, pool) if parallel == 1 else {}
+        units = active_units(daemon, pool)
         if units:
             for task_id in units.values():
                 if task_id is not None and task_id not in tasks:
@@ -546,13 +545,13 @@ def _occupancy(
         if path is not None:
             owners[unit_for(path, pool)] = task
     own = owners.get(unit)
-    if parallel != 1:
-        return "", own
     for other in units:
         owner = owners.get(other)
         if other != unit and (owner is None or not owner.terminal):
-            log.write(f"pool {pool} is occupied by {other}\n".encode())
-            return "slot_occupied", own
+            if parallel == 1:
+                log.write(f"pool {pool} is occupied by {other}\n".encode())
+                return "slot_occupied", own
+            continue
         _systemctl("stop", other)
         _systemctl("reset-failed", other)
         log.write(f"settled_orphan {other}\n".encode())

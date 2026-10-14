@@ -150,6 +150,9 @@ Transient units retain their terminal status with `RemainAfterExit=yes` until th
 wrapper observes completion. The wrapper then stops and clears its exact unit,
 including retained verifier descendants. Missing unit state is `vanished`; it
 never establishes success from the startup acknowledgement alone.
+If its wrapper is lost, the next admission settles that exact unit only after
+pueue records its owner terminal. This applies to every pool; unknown or still
+running owners remain untouched in multi-slot pools.
 
 `job logs` and `job result` read the paths the launch input
 named, which must be regular files under the task's own working directory
