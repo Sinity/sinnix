@@ -8,6 +8,8 @@ buttons the action API answers with 403.
 
 from __future__ import annotations
 
+from html import unescape
+
 from typing import Any
 
 from sinnix_ops_reducer import pages
@@ -115,10 +117,10 @@ def test_policy_controls_only_offer_declared_properties() -> None:
         "x.service", {"CPUWeight": 5, "MemoryHigh": "8G", "Slice": "app.slice"}
     )
     assert controls.count("setPolicy(") == 2
-    assert "'CPUWeight','5'" in controls
-    assert "'MemoryHigh','8G'" in controls
+    assert '"CPUWeight", "5"' in unescape(controls)
+    assert '"MemoryHigh", "8G"' in unescape(controls)
     assert "Slice" not in controls
-    assert "act('reset_policy','unit','x.service'" in controls
+    assert 'act(\'reset_policy\',\'unit\',"x.service"' in unescape(controls)
 
 
 def test_work_page_renders_the_queue_jobs_and_lanes_and_interrupts_live_jobs() -> None:
@@ -208,9 +210,9 @@ def test_work_page_renders_the_queue_jobs_and_lanes_and_interrupts_live_jobs() -
     assert "1 running of 4" in html
     # Jobs are pueue tasks by label; only a live one can be interrupted.
     assert "sinnix:lane:sinnix-1" in html
-    assert "sinex:cache_prebuild" in html and "exit 2" in html
-    assert "act('interrupt','job_id','7'" in html
-    assert "act('interrupt','job_id','8'" not in html
+    assert "sinex:cache_prebuild" in html and "exit 2" in unescape(html)
+    assert 'act(\'interrupt\',\'job_id\',"7"'  in unescape(html)
+    assert 'act(\'interrupt\',\'job_id\',"8"'  not in unescape(html)
     # Lanes come from agentctl view; a project that refused is named, not hidden.
     assert "sinnix-feature-packet-sinnix-1" in html and "agent running" in html
     assert "polylogue: agentctl rejected the request" in html

@@ -9,11 +9,17 @@ from __future__ import annotations
 
 import datetime as dt
 import html
+import json
 from typing import Any
 
 
 def esc(value: Any) -> str:
     return html.escape("" if value is None else str(value), quote=True)
+
+
+def js_arg(value: Any) -> str:
+    """JSON literal inside an HTML event-handler attribute."""
+    return esc(json.dumps(value, ensure_ascii=True))
 
 
 def as_int(value: Any) -> int | None:

@@ -20,6 +20,8 @@ this machine, not a restatement of the code. The four that carry the design:
 
 from __future__ import annotations
 
+from html import unescape
+
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -470,10 +472,10 @@ def test_park_is_offered_exactly_where_the_action_api_resolves_the_unit() -> Non
         last_seconds=None,
     )
     html = scheduled_card([running, scrub], parkable)
-    assert "parkUnit('borgbackup-job-realm.service'" in html
+    assert 'parkUnit("borgbackup-job-realm.service"'  in unescape(html)
     assert "running now" in html
     assert "btrfs-scrub-realm.service" in html
-    assert "parkUnit('btrfs-scrub-realm.service'" not in html
+    assert 'parkUnit("btrfs-scrub-realm.service"'  not in unescape(html)
     assert "no park verb" in html
     # The historical duration is the reason the strip is worth reading.
     assert "took 1h 10m" in html

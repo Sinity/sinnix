@@ -12,6 +12,7 @@ from .shell import (
     badge,
     card,
     esc,
+    js_arg,
     log_card,
     page,
     row,
@@ -77,13 +78,13 @@ def policy_controls(unit: str, effective_resources: dict[str, Any]) -> str:
         return ""
     chips = "".join(
         f'<span class="sub"><code>{esc(key)}</code> {esc(str(value))} '
-        f"<button class=\"act\" onclick=\"setPolicy('{esc(unit)}','{esc(key)}',"
-        f"'{esc(str(value))}',this)\">adjust</button></span>"
+        f"<button class=\"act\" onclick=\"setPolicy({js_arg(unit)},{js_arg(key)},"
+        f" {js_arg(str(value))},this)\">adjust</button></span>"
         for key, value in declared
     )
     reset = (
         f"<button class=\"act\" onclick=\"act('reset_policy','unit',"
-        f"'{esc(unit)}',this)\">reset to inventory defaults</button>"
+        f"{js_arg(unit)},this)\">reset to inventory defaults</button>"
     )
     return chips + reset
 
@@ -139,7 +140,7 @@ def lifecycle_controls(
     verbs = ("stop", "restart") if active else ("start",)
     return "".join(
         f'<button class="act{" danger" if verb == "stop" else ""}" data-expected-target="{esc(json.dumps(expected))}" '
-        f"onclick=\"act('{verb}','unit','{esc(unit)}',this)\">{verb}</button>"
+        f"onclick=\"act('{verb}','unit',{js_arg(unit)},this)\">{verb}</button>"
         for verb in verbs
     )
 

@@ -13,6 +13,7 @@ from .shell import (
     duration_human,
     empty,
     esc,
+    js_arg,
     parse_iso,
     row,
 )
@@ -95,7 +96,7 @@ def job_row(job: dict[str, Any], now: dt.datetime) -> str:
     if job.get("terminal") is not True:
         controls = (
             f'<button class="act danger" data-expected-target="{esc(json.dumps(job.get("expected_target")))}" onclick="act(\'interrupt\',\'job_id\','
-            f"'{esc(str(job.get('job_id')))}',this)\">interrupt</button>"
+            f"{js_arg(str(job.get('job_id')))},this)\">interrupt</button>"
         )
     headline = (
         f"<strong>{esc(str(job.get('label') or job.get('job_id') or '?'))}</strong>"

@@ -6,6 +6,7 @@ import datetime as dt
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from .queue import active_jobs
 from .shell import (
@@ -372,7 +373,7 @@ def reports_card(reports_dir: Path, now: dt.datetime) -> str:
     for entry in entries[:8]:
         age = duration_human(now.timestamp() - entry.stat().st_mtime)
         items += (
-            f'<li><a href="/reports/{esc(entry.name)}">{esc(entry.stem)}</a>'
+            f'<li><a href="/reports/{esc(quote(entry.name, safe=""))}">{esc(entry.stem)}</a>'
             f'<div class="sub">{esc(age)} ago</div></li>'
         )
     return card(

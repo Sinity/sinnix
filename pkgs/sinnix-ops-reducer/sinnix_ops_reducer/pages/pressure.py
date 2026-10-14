@@ -39,6 +39,7 @@ from .shell import (
     duration_human,
     empty,
     esc,
+    js_arg,
     log_card,
     meter,
     page,
@@ -370,7 +371,7 @@ def scheduled_card(runs: list[pressure_model.ScheduledRun], parkable: set[str]) 
         if run.unit in parkable and run.active:
             controls = (
                 f'<button class="act" data-manager="system" onclick="parkUnit('
-                f"'{esc(run.unit)}',this)\">park it</button>"
+                f"{js_arg(run.unit)},this)\">park it</button>"
             )
         elif run.unit in parkable:
             # park writes cgroup.freeze, and an inactive unit has no cgroup to
