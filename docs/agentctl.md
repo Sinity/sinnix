@@ -150,9 +150,12 @@ Transient units retain their terminal status with `RemainAfterExit=yes` until th
 wrapper observes completion. The wrapper then stops and clears its exact unit,
 including retained verifier descendants. Missing unit state is `vanished`; it
 never establishes success from the startup acknowledgement alone.
-If its wrapper is lost, the next admission settles that exact unit only after
+If its wrapper is lost, the next admission settles a foreign unit only after
 pueue records its owner terminal. This applies to every pool; unknown or still
-running owners remain untouched in multi-slot pools.
+running foreign owners remain untouched in multi-slot pools. An explicit retry
+keeps the existing startup rule for its own launch: it may release the prior
+unit with the same name derived from that launch input even though the queue
+task now reports running again.
 
 `job logs` and `job result` read the paths the launch input
 named, which must be regular files under the task's own working directory
