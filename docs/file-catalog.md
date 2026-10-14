@@ -154,8 +154,10 @@ The report renderer accepts `--judgments` for authoritative current classificati
 Markdown links in explicitly selected current entrance documents. The JSON
 manifest has `schema_version: 1`, an absolute-path `documents` list, and an
 optional absolute-path `external_roots` list. Targets below mounted external
-roots are checked; offline or unobservable external roots are reported as
-unprobed without accessing them. Remote links and code examples are excluded;
+roots are checked; known offline external roots are reported as unprobed
+without accessing them. If the mount table cannot be read or parsed, external
+checks report inaccessible and return a nonzero exit status without probing
+those payloads. Local checks continue. Remote links and code examples are excluded;
 local failures return a nonzero exit status. The tool is read-only
 and does not scan imported packages or historical reports.
 

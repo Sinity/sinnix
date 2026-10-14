@@ -238,3 +238,38 @@ def test_automount_placeholder_is_not_probed(tmp_path, monkeypatch):
     audit = runpy.run_path(str(SCRIPT))["audit"]
     report = audit({"schema_version": 1, "documents": [str(document)], "external_roots": [str(external)]})
     assert report["links"][0]["status"] == "external-unprobed"
+
+
+def test_unknown_mount_state_fails_external_checks_without_probing_payload(tmp_path, monkeypatch):
+    import runpy
+
+    external = tmp_path / 'external'
+    remote = external / 'README.md'
+    document = tmp_path / 'README.md'
+    document.write_text('[local](README.md)\n[external](external/payload.md)')
+    original_stat = Path.stat
+    original_read = Path.read_text
+
+    def no_external_stat(path, *args, **kwargs):
+        assert not path.is_relative_to(external), 'unknown mount payload must not be probed'
+        return original_stat(path, *args, **kwargs)
+
+    for failure in ('denied', 'malformed'):
+        def read(path, *args, **kwargs):
+            if path == Path('/proc/self/mountinfo'):
+                if failure == 'denied':
+                    raise PermissionError('synthetic mountinfo denial')
+                return 'malformed mountinfo record\n'
+            assert not path.is_relative_to(external), 'unknown mount document must not be read'
+            return original_read(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, 'stat', no_external_stat)
+        monkeypatch.setattr(Path, 'read_text', read)
+        result = runpy.run_path(str(SCRIPT))['audit']({
+            'schema_version': 1, 'documents': [str(remote), str(document)],
+            'external_roots': [str(external)],
+        })
+        assert result['failures'] == 2
+        assert [row['status'] for row in result['links']] == ['inaccessible-document', 'ok', 'inaccessible']
+        assert all('cannot observe external mounts' in row['reason']
+                   for row in result['links'] if row['status'] != 'ok')

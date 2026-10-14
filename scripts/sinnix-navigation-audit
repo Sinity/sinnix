@@ -39,10 +39,12 @@ def audit(manifest: dict) -> dict:
     external = [Path(root) for root in manifest.get("external_roots", [])]
     if any(not root.is_absolute() for root in external):
         raise ValueError("external roots must be absolute")
+    mount_error = None
     try:
         mounted = read_mountpoints()
-    except (OSError, ValueError):
+    except (OSError, ValueError) as exc:
         mounted = frozenset()
+        mount_error = f"cannot observe external mounts: {exc}"
     rows = []
     for name in manifest["documents"]:
         if not isinstance(name, str) or "\0" in name:
@@ -53,6 +55,9 @@ def audit(manifest: dict) -> dict:
             rows.append({"document": str(document), "status": "invalid-document"})
             continue
         document = Path(os.path.abspath(document))
+        if mount_error is not None and any(document.is_relative_to(root) for root in external):
+            rows.append({"document": str(document), "status": "inaccessible-document", "reason": mount_error})
+            continue
         if any(document.is_relative_to(root) and not has_mounted_ancestor(document, root, mounted) for root in external):
             rows.append({"document": str(document), "status": "external-unprobed"})
             continue
@@ -95,7 +100,9 @@ def audit(manifest: dict) -> dict:
             offline = any(destination.is_relative_to(root) and not has_mounted_ancestor(destination, root, mounted) for root in external)
             row = {"document": str(document), "target": target,
                    "destination": str(destination), "status": "external-unprobed"}
-            if not offline:
+            if mount_error is not None and any(destination.is_relative_to(root) for root in external):
+                row.update(status="inaccessible", reason=mount_error)
+            elif not offline:
                 try:
                     destination.stat()
                     row["status"] = "ok"
