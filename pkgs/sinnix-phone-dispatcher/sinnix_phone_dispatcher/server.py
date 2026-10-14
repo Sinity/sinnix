@@ -74,7 +74,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _native_request(self) -> bool:
+        # This API belongs to native phone/drain clients. The hub forwards
+        # browser metadata unchanged, even across its Unix-socket proxy.
+        if any(
+            self.headers.get_all(name)
+            for name in (
+                "Origin", "Sec-Fetch-Site", "Sec-Fetch-Mode",
+                "Sec-Fetch-Dest", "Sec-Fetch-User",
+            )
+        ):
+            self.close_connection = True
+            self._send(
+                HTTPStatus.FORBIDDEN,
+                {"ok": False, "detail": "browser requests are not admitted on the native phone API"},
+            )
+            return False
+        return True
+
     def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler's contract
+        if not self._native_request():
+            return
         route = self._route()
         if route in ("/ping", "/"):
             self._send(HTTPStatus.OK, {"ok": True, "at": utc_ts()})
@@ -135,6 +155,8 @@ class Handler(BaseHTTPRequestHandler):
             return None
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._native_request():
+            return
         route = self._route()
 
         # An acknowledgement carries no body -- everything it says is in the

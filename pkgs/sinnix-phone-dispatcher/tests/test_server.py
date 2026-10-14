@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+
+import pytest
 from email.message import Message
 from http import HTTPStatus
 from types import MethodType
@@ -258,3 +260,56 @@ def test_camera_default_is_independent_of_telemetry_root(monkeypatch, tmp_path):
     configured = runpy.run_path(state.__file__)["UPLOAD_LANES"]
     assert str(configured["camera"]) == "/realm/personal/photo/phone-dispatcher/DCIM"
     assert configured["download"] == tmp_path / "telemetry" / "download"
+
+
+@pytest.mark.parametrize("path", ["/v1/intent", "/v1/job-answer", "/v1/inbox/confirm?name=neutral", "/v1/chunk?name=neutral", "/v1/events?day=20260101&offset=0"])
+@pytest.mark.parametrize("header,value", [("Origin", "https://example.invalid"), ("Origin", "null"), ("Origin", ""), ("Sec-Fetch-Site", "same-origin"), ("Sec-Fetch-Mode", "navigate"), ("Sec-Fetch-Dest", "image"), ("Sec-Fetch-User", "?1")])
+def test_browser_requests_are_refused_before_body_or_owner(path, header, value, monkeypatch):
+    handler, sent = _handler(path, b"", "100")
+    handler.headers[header] = value
+    class UnreadableBody:
+        def read(self, *_args): raise AssertionError("refused body was read")
+    handler.rfile = UnreadableBody()
+    def refused(*_args, **_kwargs): raise AssertionError("refused request reached owner")
+    for name in ("execute", "confirm_inbox", "store_upload", "append_events"):
+        monkeypatch.setattr(server_mod, name, refused)
+    handler.do_POST()
+    assert sent[0][0] == HTTPStatus.FORBIDDEN
+    assert handler.close_connection
+
+
+def test_browser_private_get_is_refused_before_owner(monkeypatch):
+    handler, sent = _handler("/v1/glance", b"", None)
+    handler.headers["Sec-Fetch-Site"] = "same-origin"
+    monkeypatch.setattr(server_mod, "build_glance", lambda: (_ for _ in ()).throw(AssertionError("private owner read")))
+    handler.do_GET()
+    assert sent[0][0] == HTTPStatus.FORBIDDEN
+
+
+def test_http_browser_refusal_does_not_wait_for_body_and_native_client_works(monkeypatch):
+    import http.client
+    import threading
+    from http.server import ThreadingHTTPServer
+    received = []
+    monkeypatch.setattr(server_mod, "execute", lambda payload: received.append(payload) or {"ok": True})
+    server = ThreadingHTTPServer(("127.0.0.1", 0), server_mod.Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        client = http.client.HTTPConnection(*server.server_address, timeout=2)
+        client.putrequest("POST", "/v1/intent")
+        client.putheader("Origin", "https://example.invalid")
+        client.putheader("Content-Length", "1000000")
+        client.endheaders()
+        response = client.getresponse()
+        assert response.status == 403
+        response.read(); client.close()
+        assert received == []
+        client = http.client.HTTPConnection(*server.server_address, timeout=2)
+        client.request("POST", "/v1/intent", body=b'{"kind":"ping"}', headers={"Content-Type": "application/json"})
+        response = client.getresponse()
+        assert response.status == 200
+        response.read(); client.close()
+        assert received == [{"kind": "ping"}]
+    finally:
+        server.shutdown(); server.server_close(); thread.join(timeout=2)

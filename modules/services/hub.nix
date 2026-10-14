@@ -324,13 +324,10 @@ mkServiceModule {
             reverse_proxy unix/${opsSocket}
           }
 
-          # The phone's live plane. Everything it carries also works through
-          # the wifi-gated drain, so this route removes a wait rather than
-          # enabling a capability -- and the app labels which path each action
-          # actually took. Deliberately NOT behind the same-origin gate above:
-          # a native client sends no Origin header, and the gate exists to stop
-          # a browser on another site from posting here, which is not a shape
-          # this route can be reached in.
+          # The phone's native live plane. The receiver rejects browser
+          # Origin/Fetch-Metadata before reading or acknowledging a request.
+          # Preserve those headers through the proxy; native app and drain
+          # clients omit them.
           handle_path /phone/* {
             reverse_proxy unix/${phoneSocket}
           }

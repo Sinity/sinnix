@@ -660,3 +660,5 @@ The Capture screen measures delivery from verified upload events, not the
 inbox context file. It refreshes the upload receipt, exported audio queue and
 closed recorder files awaiting publication on an I/O worker. Missing directory
 observations remain unavailable; a currently open recording is not queued.
+
+The native phone HTTP API rejects requests carrying `Origin` or browser Fetch Metadata headers before reading a body or reaching an upload, acknowledgement or intent owner. The hub preserves these headers through its Unix-socket proxy. Native app and drain clients omit them. This guard is browser-request protection; the socket permissions and tailnet binding remain the transport boundary.
