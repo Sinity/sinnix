@@ -419,9 +419,12 @@ drain_ambient_adb() {
       failed=$((failed + 1)); continue
     fi
     digest=${digest%% *}
+    # GNU sha256sum prefixes an escaped filename record with a backslash.
+    # The prefix describes the filename, not the digest itself.
+    digest=${digest#\\}
     [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || { failed=$((failed + 1)); continue; }
     target="$dest/$name"
-    if [ -f "$target" ] && [ ! -L "$target" ] && [ "$(sha256sum "$target" | cut -d ' ' -f 1)" = "$digest" ]; then
+    if [ -f "$target" ] && [ ! -L "$target" ] && [ "$(sha256sum < "$target" | cut -d ' ' -f 1)" = "$digest" ]; then
       continue
     fi
     staging=$(mktemp "$dest/.incoming.XXXXXX") || return 1
@@ -432,6 +435,7 @@ drain_ambient_adb() {
     copied_digest=$(sha256sum "$staging" | cut -d ' ' -f 1)
     after_digest=$(adb_shell_args sha256sum "$remote" </dev/null) || after_digest=""
     after_digest=${after_digest%% *}
+    after_digest=${after_digest#\\}
     if [ "$copied_digest" != "$digest" ] || [ "$after_digest" != "$digest" ]; then
       echo "ambient: unverified transfer retained at $staging" >&2
       failed=$((failed + 1)); continue
@@ -447,7 +451,7 @@ drain_ambient_adb() {
       python3 -c 'import os, sys; fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY); os.fsync(fd); os.close(fd)' "$dest" || return 1
       rm -- "$staging"
       pulled=$((pulled + 1))
-    elif [ -f "$target" ] && [ ! -L "$target" ] && [ "$(sha256sum "$target" | cut -d ' ' -f 1)" = "$digest" ]; then
+    elif [ -f "$target" ] && [ ! -L "$target" ] && [ "$(sha256sum < "$target" | cut -d ' ' -f 1)" = "$digest" ]; then
       rm -- "$staging"
     else
       echo "ambient: publication conflict retained at $staging" >&2

@@ -114,6 +114,8 @@ sys.exit(subprocess.run([os.environ['REMOTE_SHELL'],'-c',command]).returncode)
 import os,sys,subprocess,pathlib,shutil,json
 args=sys.argv[1:]
 if args[:1] == ['-s']: args=args[2:]
+if args == ['devices']: print('List of devices attached\\nfixture\\tdevice'); sys.exit(0)
+if args == ['shell', 'getprop', 'ro.serialno']: print('fixture'); sys.exit(0)
 if args == ['get-state']: print('device'); sys.exit(int(os.environ.get('ADB_STATE_STATUS','0')))
 if args[:1] == ['logcat']:
     if '-d' in args:
@@ -179,6 +181,7 @@ for value in sys.argv[1:]:
         "FIXTURE_CONTEXT": "u:object_r:app_data_file:s0:c1$(touch${IFS}sentinel)",
         "SINNIX_PHONE_IP": "fixture",
         "SINNIX_PHONE_USER": "fixture",
+        "SINNIX_PHONE_ADB_SERIAL": "fixture",
         "SINNIX_PHONE_SSH_CONTROL_DIR": str(tmp_path / "ssh-cache"),
         "SINNIX_PHONE_LAKE": str(tmp_path / "lake"),
         "SINNIX_PHONE_STATE_DIR": str(tmp_path / "phone-state"),
@@ -293,13 +296,16 @@ def test_prune_refuses_a_corrupt_content_addressed_archive(device) -> None:
 
 def test_ambient_drain_preserves_remote_names(device) -> None:
     root, _env = device
-    names = ["ambient'; touch sentinel; #.m4a", "ambient-雪\n\r.m4a"]
+    names = ["ambient'; touch sentinel; #.m4a", "ambient-雪\n\r.m4a", "ambient-back\\slash.m4a"]
     for name in names:
         (root / "remote" / "ambient" / name).write_bytes(b"neutral fixture")
     result = run(device, "sinnix-phone", "pull-ambient")
     assert result.returncode == 0, result.stderr
     for name in names:
         assert (root / "lake" / "ambient" / name).read_bytes() == b"neutral fixture"
+    retry = run(device, "sinnix-phone", "pull-ambient")
+    assert retry.returncode == 0, retry.stderr
+    assert {path.name for path in (root / "lake" / "ambient").iterdir()} == set(names)
     assert not (root / "sentinel").exists()
 
 

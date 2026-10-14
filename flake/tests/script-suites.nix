@@ -83,6 +83,7 @@
           scripts = [
             "sinnix-phone"
             "sinnix-quest"
+            "sinnix-xr"
             "sinnix-remote-command"
           ];
           nativeBuildInputs = [
