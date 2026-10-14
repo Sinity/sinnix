@@ -882,7 +882,9 @@ job's runtime budget. Required services cannot declare further requirements,
 queued dependencies or caller-supplied arguments. They are not separate pueue
 jobs. A readiness failure or service exit fails verification; normal completion
 settles the service process groups, and systemd cancellation kills the entire
-unit. Service and probe output goes to the job's stderr, preserving typed
+unit. These units use `ExitType=main`: when the verifier exits, systemd also
+stops service descendants which created a new session. Ordinary jobs retain
+`ExitType=cgroup`. Service and probe output goes to the job's stderr, preserving typed
 verification stdout.
 
 Each service and its probe receive `AGENTCTL_SERVICE_READY`, a fresh path below

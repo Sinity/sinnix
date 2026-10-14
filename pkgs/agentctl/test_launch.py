@@ -54,6 +54,7 @@ def test_required_services_share_the_verifiers_single_launch(
     assert argv[2].endswith("/service_run.py")
     assert json.loads(argv[3]) == [{"name": "database", "command": ["fixture-db"], "ready_probe": ["fixture-ready"], "ready_timeout_seconds": 12}]
     assert argv[4:] == ["--", "fixture-verify"]
+    assert written["exit_type"] == "main"
 
 
 def test_invalid_launch_input_preserves_existing_private_bytes(tmp_path: Path) -> None:

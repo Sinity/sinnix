@@ -244,6 +244,9 @@ def read_input(path: Path) -> dict[str, Any]:
     if value["result_kind"] not in RESULT_KINDS:
         raise QueueInputError(f"unknown result kind: {value['result_kind']!r}")
     readiness = value.get("execution_readiness", "exec")
+    exit_type = value.get("exit_type", "cgroup")
+    if not isinstance(exit_type, str) or exit_type not in {"main", "cgroup"}:
+        raise QueueInputError("launch input exit_type must be main or cgroup")
     if not isinstance(readiness, str) or readiness not in {"exec", "notify"}:
         raise QueueInputError("launch input execution_readiness must be exec or notify")
     if readiness == "notify" and value.get("kind") != "declared-operation":

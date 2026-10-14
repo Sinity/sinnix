@@ -40,6 +40,15 @@ def user_manager() -> None:
         pytest.skip("no user systemd bus is available")
 
 
+@pytest.mark.parametrize("value", [None, [], True, "unknown"])
+def test_launch_refuses_invalid_exit_type(tmp_path: Path, value: Any) -> None:
+    from agentctl.launch_input import QueueInputError, read_input
+
+    path = write_launch(tmp_path, exit_type=value)
+    with pytest.raises(QueueInputError, match="exit_type"):
+        read_input(path)
+
+
 def test_supervisor_import_rss_stays_small() -> None:
     # A queued job keeps this interpreter resident until its unit exits.
     child = subprocess.run(
@@ -414,8 +423,10 @@ def test_worker_exports_queue_identity_to_the_child(
     assert log_of(tmp_path) == "job-a fixture check pytest"
 
 
-def test_a_declared_pool_runs_the_child_as_a_service_that_exits_with_its_cgroup(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue
+@pytest.mark.parametrize("exit_type", ["main", "cgroup"])
+def test_a_declared_pool_runs_the_child_as_a_service_with_declared_exit_type(
+    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue,
+    exit_type: str,
 ) -> None:
     """The unit is recoverable from pueue; wrapper completion follows its cgroup."""
     launch = write_launch(
@@ -423,6 +434,9 @@ def test_a_declared_pool_runs_the_child_as_a_service_that_exits_with_its_cgroup(
         pool="pytest",
         argv=["sh", "-c", 'printf "%s" "$AGENTCTL_QUEUE_WORKER"'],
     )
+    value = json.loads(launch.read_text())
+    value["exit_type"] = exit_type
+    launch.write_text(json.dumps(value))
 
     assert main([str(launch)]) == 0
 
@@ -433,7 +447,7 @@ def test_a_declared_pool_runs_the_child_as_a_service_that_exits_with_its_cgroup(
     assert "--slice=agentctl-pytest.slice" in argv
     assert "--collect" not in argv
     for setting in (
-        "ExitType=cgroup",
+        f"ExitType={exit_type}",
         "KillMode=control-group",
         "IOAccounting=yes",
         "RuntimeMaxSec=30",

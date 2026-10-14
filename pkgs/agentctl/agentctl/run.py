@@ -13,7 +13,9 @@ shell does with it.
 That path also names the task's containment: a transient service
 ``agentctl-<pueue group>-<stem>-<digest of the path>.service`` in the pool's
 slice, every part of which a reader recovers from ``pueue status`` alone. The
-service exits with its cgroup (``ExitType=cgroup``). Without ``--no-block``,
+ordinary service exits with its cgroup (``ExitType=cgroup``). A verifier with
+required services uses ``ExitType=main`` so systemd settles daemonized children
+when verification ends. Without ``--no-block``,
 ``systemd-run`` waits for unit startup; ``Type=exec`` makes its successful
 return confirm the command was exec'd before releasing the allocation lock.
 After that, the wrapper observes service completion while a canceller can
@@ -566,7 +568,7 @@ def _service_command(
         f"RuntimeMaxSec={launch['timeout_seconds'] or 'infinity'}",
         "Type=notify" if notify else "Type=exec",
         *(["NotifyAccess=all", "TimeoutStartSec=infinity"] if notify else []),
-        "ExitType=cgroup",
+        f"ExitType={launch.get('exit_type', 'cgroup')}",
         "KillMode=control-group",
         "IOAccounting=yes",
         f"WorkingDirectory={launch['working_directory']}",
