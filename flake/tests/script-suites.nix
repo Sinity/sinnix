@@ -77,6 +77,12 @@
     in
     {
       checks = {
+        audit-drain-suite = mkScriptSuite {
+          name = "sinnix-audit-drain";
+          suiteDir = ../../pkgs/sinnix-audit-drain/tests;
+          scripts = [ "sinnix-audit-drain" ];
+          nativeBuildInputs = [ pkgs.bash ];
+        };
         device-remote-command-suite = mkScriptSuite {
           name = "sinnix-device-control";
           suiteDir = ../../pkgs/sinnix-device-control/tests;

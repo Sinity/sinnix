@@ -3,6 +3,7 @@
 # description: Archive all kernel audit records into the capture lake, raw plus structured JSONL
 # runtimeInputs: bash coreutils gnugrep jq audit python3 systemd
 set -euo pipefail
+umask 077
 
 # auditd's own log rotates and is binary-adjacent; the lake keeps it the way it
 # keeps syslog. Every record since the watermark is archived verbatim, and a
@@ -49,9 +50,13 @@ fi
 # lives beside the watermark (NVMe), not in TMPDIR, which is a small tmpfs
 # here.
 scratch_dir="$(dirname "$WATERMARK")"
-err_file="$(mktemp "$scratch_dir/drain-err.XXXXXX")"
-raw_file="$(mktemp "$scratch_dir/drain-raw.XXXXXX")"
-trap 'rm -f "$err_file" "$raw_file"' EXIT
+scratch="$(mktemp -d "$scratch_dir/drain.XXXXXX")"
+trap 'rm -rf -- "$scratch"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+err_file="$scratch/stderr"
+raw_file="$scratch/raw"
 set +e
 ausearch "${START_ARG[@]}" --format raw >"$raw_file" 2>"$err_file"
 ausearch_rc=$?
