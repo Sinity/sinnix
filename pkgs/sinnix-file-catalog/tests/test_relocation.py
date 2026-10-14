@@ -296,3 +296,72 @@ def test_import_rejects_an_unsupported_control_character_address(tmp_path):
     assert result.returncode != 0 and "control characters" in result.stderr
     assert not catalog.exists()
     assert source.read_text() == "neutral fixture"
+
+
+
+def deny_entry(monkeypatch, denied):
+    from pathlib import Path
+    original = Path.lstat
+    def lstat(path, *args, **kwargs):
+        if path == denied:
+            raise PermissionError("synthetic parent access denied")
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "lstat", lstat)
+
+
+def test_single_relocation_refuses_unknown_old_address_without_write(tmp_path, monkeypatch):
+    import runpy
+    from types import SimpleNamespace
+    from test_catalog import SCRIPT
+    import pytest
+    old = tmp_path / "original.txt"; old.write_text("neutral payload")
+    catalog = tmp_path / "catalog.json"
+    assert import_rows(catalog, [observation(old)]).returncode == 0
+    asset = assets(catalog)[0]; before = catalog.read_bytes()
+    new = tmp_path / "renamed.txt"; old.rename(new)
+    module = runpy.run_path(str(SCRIPT))
+    deny_entry(monkeypatch, old)
+    with pytest.raises(module["CatalogError"], match="cannot establish path presence"):
+        module["cmd_relocate"](SimpleNamespace(catalog=str(catalog), id=asset["id"], new_path=str(new)))
+    assert catalog.read_bytes() == before
+    assert new.read_text() == "neutral payload"
+
+
+def test_prepare_cannot_turn_denied_source_into_unavailable_exception(tmp_path, monkeypatch):
+    import runpy
+    from types import SimpleNamespace
+    from test_catalog import SCRIPT
+    import pytest
+    old, new, catalog, moves = fixture(tmp_path)
+    manifest = tmp_path / "moves.json"; manifest.write_text(json.dumps(moves))
+    receipt = tmp_path / "receipt.json"; before = catalog.read_bytes()
+    module = runpy.run_path(str(SCRIPT)); deny_entry(monkeypatch, old)
+    with pytest.raises(module["CatalogError"], match="cannot establish path presence"):
+        module["cmd_prepare_relocation"](SimpleNamespace(catalog=str(catalog), moves=str(manifest), output=str(receipt), retain_unavailable=True, record_existing_drift=False))
+    assert catalog.read_bytes() == before
+    assert not receipt.exists()
+
+
+def test_batch_relocation_refuses_unknown_old_address_without_partial_publish(tmp_path, monkeypatch):
+    import runpy
+    from types import SimpleNamespace
+    from test_catalog import SCRIPT
+    import pytest
+    old, new, catalog, moves = fixture(tmp_path)
+    result, receipt = prepare(tmp_path, catalog, moves)
+    assert result.returncode == 0
+    before = catalog.read_bytes(); old.rename(new)
+    module = runpy.run_path(str(SCRIPT)); deny_entry(monkeypatch, old)
+    with pytest.raises(module["CatalogError"], match="cannot establish path presence"):
+        module["cmd_relocate_batch"](SimpleNamespace(catalog=str(catalog), receipt=str(receipt)))
+    assert catalog.read_bytes() == before
+
+
+def test_prepare_preserves_existing_dangling_receipt_pointer(tmp_path):
+    old, new, catalog, moves = fixture(tmp_path)
+    receipt = tmp_path / "receipt.json"; receipt.symlink_to("retained-unavailable-receipt.json")
+    before = catalog.read_bytes()
+    result, _ = prepare(tmp_path, catalog, moves)
+    assert result.returncode != 0 and "refusing to overwrite" in result.stderr
+    assert receipt.is_symlink() and str(receipt.readlink()) == "retained-unavailable-receipt.json"
+    assert catalog.read_bytes() == before

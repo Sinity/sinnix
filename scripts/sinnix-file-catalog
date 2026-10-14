@@ -42,6 +42,17 @@ class CatalogError(ValueError):
     pass
 
 
+def entry_exists(path: Path) -> bool:
+    """Only a confirmed missing entry proves absence, including broken links."""
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError as error:
+        raise CatalogError(f"cannot establish path presence: {path}: {error}") from error
+    return True
+
+
 def fail(message: str) -> int:
     display = json.dumps(message, ensure_ascii=True) if sys.stderr.isatty() else message
     print(f"sinnix-file-catalog: {display}", file=sys.stderr)
@@ -411,7 +422,7 @@ def cmd_import(args: argparse.Namespace) -> int:
     path = Path(args.catalog)
     rows = [row for source in args.observations for row in observation_list(read_json(Path(source)))]
     with locked(path):
-        if path.exists():
+        if entry_exists(path):
             # Existing unrelated paths may be temporarily absent while a
             # batch of external renames is being repaired.
             catalog = load_catalog(path, paths=False)
@@ -508,7 +519,7 @@ def cmd_relocate(args: argparse.Namespace) -> int:
         target = next((a for a in catalog["assets"] if a["id"] == args.id), None)
         if target is None: raise CatalogError(f"asset id not found: {args.id}")
         old_path = Path(target["current_path"])
-        if old_path.exists() or old_path.is_symlink(): raise CatalogError(f"old path still exists; perform the external rename first: {old_path}")
+        if entry_exists(old_path): raise CatalogError(f"old path still exists; perform the external rename first: {old_path}")
         if any(a is not target and a["current_path"] == str(new_path) for a in catalog["assets"]):
             raise CatalogError(f"new path already belongs to another asset: {new_path}")
         actual = identity(new_path)
@@ -558,7 +569,7 @@ def cmd_prepare_relocation(args: argparse.Namespace) -> int:
             if destination == old:
                 continue
             source = Path(old)
-            if not source.exists() and args.retain_unavailable:
+            if not entry_exists(source) and args.retain_unavailable:
                 unavailable.append({"id": asset["id"], "source": old, "destination": destination,
                                     "reason": "Already unavailable before cutover; no physical continuity or new current location asserted."})
                 continue
@@ -575,7 +586,7 @@ def cmd_prepare_relocation(args: argparse.Namespace) -> int:
                    "catalog_sha256": hashlib.sha256(raw).hexdigest(), "moves": moves, "assets": rows,
                    "unavailable": unavailable}
         output = Path(args.output)
-        if output.exists():
+        if entry_exists(output):
             raise CatalogError(f"refusing to overwrite relocation receipt: {output}")
         atomic_publish(output, (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode(),
                        fsync=True, mode=0o600)
@@ -604,7 +615,7 @@ def cmd_relocate_batch(args: argparse.Namespace) -> int:
             asset = by_id[row["id"]]
             if asset["current_path"] != row["source"]:
                 raise CatalogError("stale unavailable-asset exception")
-            if Path(row["source"]).exists() or Path(row["destination"]).exists():
+            if entry_exists(Path(row["source"])) or entry_exists(Path(row["destination"])):
                 raise CatalogError("unavailable-asset exception now has a live candidate; inspect its identity")
             record_location(asset, {
                 "observed_at": now(), **row, "path": row["source"], "status": "unavailable",
@@ -619,7 +630,7 @@ def cmd_relocate_batch(args: argparse.Namespace) -> int:
                 raise CatalogError(f"stale receipt for {row['id']}")
             if relocate_path(old, receipt["moves"]) != destination:
                 raise CatalogError(f"receipt destination disagrees with moves: {destination}")
-            if Path(old).exists() or Path(old).is_symlink():
+            if entry_exists(Path(old)):
                 source = Path(old)
                 reused = (row.get("source_reused_as_container") and destination.startswith(old.rstrip("/") + "/")
                           and source.is_dir() and not source.is_symlink()
