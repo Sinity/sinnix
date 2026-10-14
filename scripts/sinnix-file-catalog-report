@@ -18,6 +18,7 @@ import sys
 from pathlib import Path
 
 from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.catalog_paths import resolve_historical_path
 
 
 STYLE = """
@@ -105,7 +106,7 @@ def document_type(asset: dict) -> str:
     return value if isinstance(value, str) else ""
 
 
-def render_enrichment(asset: dict) -> str:
+def render_enrichment(asset: dict, catalog: dict | None = None) -> str:
     """A readable projection of optional observations; raw fields stay intact.
 
     Annotation strings are text, never markup. A source locator is not treated
@@ -157,7 +158,20 @@ def render_enrichment(asset: dict) -> str:
         parts.append('<details><summary>Extraction evidence and limits</summary>')
         path = extraction.get("path")
         if isinstance(path, str) and path.startswith("/") and not path.startswith("//") and not any(ord(c) < 32 for c in path):
-            parts.append('<p>Evidence: ' + path_link(path) + '</p>')
+            historical = catalog is not None and any(
+                path == address or (owner["kind"] == "collection" and path.startswith(address.rstrip("/") + "/"))
+                for owner in catalog["assets"] for address in owner.get("previous_paths", [])
+            )
+            if historical:
+                parts.append(f'<p>Recorded evidence locator: <code>{esc(path)}</code></p>')
+                try:
+                    current = resolve_historical_path(catalog, path)
+                except ValueError as error:
+                    parts.append(f'<p>Evidence unavailable: {esc(error)}</p>')
+                else:
+                    parts.append('<p>Evidence: ' + path_link(current) + '</p>')
+            else:
+                parts.append('<p>Evidence: ' + path_link(path) + '</p>')
         elif path is not None:
             parts.append(f'<p>Evidence locator: <code>{esc(path)}</code></p>')
         for key, label in (("source_sha256", "Inspected source SHA-256"), ("recipe", "Inspection recipe")):
@@ -177,7 +191,7 @@ def render_enrichment(asset: dict) -> str:
     return '\n'.join(parts)
 
 
-def render_asset(asset: dict, by_id: dict, judgments: dict | None = None) -> str:
+def render_asset(asset: dict, by_id: dict, judgments: dict | None = None, catalog: dict | None = None) -> str:
     asset_id = asset["id"]
     inspections = asset["inspections"]
     methods = sorted({item["method"] for item in inspections})
@@ -220,7 +234,7 @@ def render_asset(asset: dict, by_id: dict, judgments: dict | None = None) -> str
         denominator = coverage.get("discovered_count")
         count = f'{coverage["inspected_count"]} / {denominator if denominator is not None else "unknown"} {coverage["unit"]}'
         parts.append(f'<p><strong>Inspection: {esc(coverage["status"])}</strong> · {esc(count)}. {esc(coverage["scope"])}</p>')
-    parts.append(render_enrichment(asset))
+    parts.append(render_enrichment(asset, catalog))
     if asset.get("organization"):
         organization = asset["organization"]
         parts.append(f'<p><strong>Organization proposal: {esc(organization["action"])}</strong>. {esc(organization["rationale"])}</p>')
@@ -311,7 +325,7 @@ def render(catalog: dict, source: Path, template: str, command: str, judgments: 
                 f'<td><a href="#asset-{esc(target["id"])}">{esc(target["title"])}</a></td>'
                 f'<td>{esc(relation["basis"])}</td></tr>'
             )
-    cards = '\n'.join(render_asset(asset, by_id, judgments) for asset in sorted(assets, key=lambda a: a["title"].casefold()))
+    cards = '\n'.join(render_asset(asset, by_id, judgments, catalog) for asset in sorted(assets, key=lambda a: a["title"].casefold()))
     # The canonical data is embedded losslessly, but cannot terminate its script element.
     data = json.dumps(catalog, ensure_ascii=False).replace("<", "\\u003c").replace("&", "\\u0026")
     return f'''{preamble}

@@ -364,3 +364,30 @@ def test_available_and_unobserved_current_addresses_keep_their_links(tmp_path):
             description="Evidence", inspections=[], relations=[], location_status=status)
         page = MODULE["render_asset"](asset, {"fixture": asset})
         assert MODULE["path_link"](path) in page
+
+
+def test_evidence_projection_resolves_history_without_changing_annotations():
+    import copy
+    asset = {"enrichment": {"extraction": {"path": "/old/catalog/evidence/sample.txt"}}}
+    catalog = {"assets": [
+        {"id": "broad", "kind": "collection", "current_path": "/history", "previous_paths": ["/old"]},
+        {"id": "evidence", "kind": "collection", "current_path": "/current/catalog", "previous_paths": ["/old/catalog"]},
+    ]}
+    before = copy.deepcopy((asset, catalog))
+    page = MODULE["render_enrichment"](asset, catalog)
+    assert 'href="file:///current/catalog/evidence/sample.txt"' in page
+    assert 'href="file:///old/' not in page
+    assert '/old/catalog/evidence/sample.txt</code>' in page
+    assert (asset, catalog) == before
+
+
+def test_ambiguous_or_unavailable_evidence_has_no_active_link():
+    asset = {"enrichment": {"extraction": {"path": "/old/evidence.txt"}}}
+    owner = {"id": "first", "kind": "collection", "current_path": "/first", "previous_paths": ["/old"]}
+    second = {**owner, "id": "second", "current_path": "/second"}
+    page = MODULE["render_enrichment"](asset, {"assets": [owner, second]})
+    assert "ambiguous historical address" in page
+    assert 'href=' not in page
+    page = MODULE["render_enrichment"](asset, {"assets": [{**owner, "location_status": "denied"}]})
+    assert "explicitly unavailable" in page
+    assert 'href=' not in page

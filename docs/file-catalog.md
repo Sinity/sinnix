@@ -108,7 +108,10 @@ sinnix-file-catalog-report --catalog /path/catalog.json \
 The renderer embeds the canonical data without external assets or network
 requests. Search, inspection-method filters and related-file controls operate
 locally. Original-file links require local filesystem access. Neither command
-depends on a running indexing service.
+depends on a running indexing service. Extraction evidence links resolve through
+the catalog’s recorded location history. The original inspection address remains
+visible; ambiguous or explicitly unavailable locations have an explanation instead
+of an active link. Rendering does not open or validate evidence payloads.
 
 ## Parallel collection surveys
 
