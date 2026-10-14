@@ -148,6 +148,11 @@ if ! command -v asciinema >/dev/null 2>&1 || ! command -v setsid >/dev/null 2>&1
   exec "$shell_bin"
 fi
 
+# The recorder owns private captures; the interactive shell keeps its caller's
+# file-creation policy.
+shell_umask=$(umask)
+umask 077
+
 tty_path="$(tty 2>/dev/null || true)"
 if [[ "$tty_path" == "not a tty" ]]; then
   tty_path=""
@@ -176,6 +181,7 @@ start_repo_commit="$(repo_commit "$start_repo_root")"
 start_repo_dirty="$(repo_dirty "$start_repo_root")"
 
 mkdir -p "$session_dir"
+chmod 700 "$capture_root" "$session_dir"
 
 export SINNIX_CAPTURE_ACTIVE=1
 export SINNIX_CAPTURE_CAST_FILE="$cast_path"
@@ -423,7 +429,7 @@ asciinema session \
   --return \
   --output-format asciicast-v3 \
   --capture-env SHELL,TERM,SINNIX_CAPTURE_SESSION_ID,SINNIX_CAPTURE_HOST,SINNIX_CAPTURE_USER,SINNIX_CAPTURE_TTY,SINNIX_CAPTURE_TERMINAL,SINNIX_CAPTURE_START_CWD,SINNIX_CAPTURE_START_REPO_ROOT,SINNIX_CAPTURE_START_REPO_BRANCH,SINNIX_CAPTURE_START_REPO_COMMIT,SINNIX_CAPTURE_START_REPO_DIRTY,SINNIX_CAPTURE_PROJECT_ROOT \
-  --command "$shell_bin" \
+  --command "umask $shell_umask; exec \"\$SINNIX_CAPTURE_SHELL\"" \
   --output-file "$cast_path" &
 recorder_pid=$!
 

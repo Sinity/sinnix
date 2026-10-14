@@ -44,7 +44,7 @@ mkServiceModule {
       ];
 
       systemd.tmpfiles.rules = [
-        "d ${recordingsDir} 0755 ${username} users -"
+        "d ${recordingsDir} 0700 ${username} users -"
       ];
 
       home-manager.users.${username} =

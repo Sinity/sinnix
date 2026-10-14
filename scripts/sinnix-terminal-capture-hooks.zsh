@@ -156,7 +156,9 @@ _sinnix_capture_append_session_start() {
   local ts_ms="$(_sinnix_capture_now_ms)"
   local project_root="${SINNIX_CAPTURE_PROJECT_ROOT:-${SINNIX_CAPTURE_START_REPO_ROOT:-}}"
 
-  {
+  (
+    umask 077
+    {
     _sinnix_capture_append_prefix "session_start" "$ts_ms"
     print -nr -- ',"cwd":'
     _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_START_CWD:-$PWD}"
@@ -175,7 +177,8 @@ _sinnix_capture_append_session_start() {
     print -nr -- ',"terminal":'
     _sinnix_capture_json_nullable_string "${SINNIX_CAPTURE_TERMINAL:-}"
     print -r -- '}'
-  } >>| "$SINNIX_CAPTURE_EVENTS_FILE"
+    } >>| "$SINNIX_CAPTURE_EVENTS_FILE"
+  )
 
   SINNIX_CAPTURE_EVENT_COUNT=$((SINNIX_CAPTURE_EVENT_COUNT + 1))
 }
@@ -187,7 +190,9 @@ _sinnix_capture_append_command_start() {
   local repo_root="$4"
   local project_root="$5"
 
-  {
+  (
+    umask 077
+    {
     _sinnix_capture_append_prefix "command_start" "$ts_ms"
     print -nr -- ',"command":'
     _sinnix_capture_json_string "$cmd"
@@ -198,7 +203,8 @@ _sinnix_capture_append_command_start() {
     print -nr -- ',"repo_root":'
     _sinnix_capture_json_nullable_string "$repo_root"
     print -r -- '}'
-  } >>| "$SINNIX_CAPTURE_EVENTS_FILE"
+    } >>| "$SINNIX_CAPTURE_EVENTS_FILE"
+  )
 
   SINNIX_CAPTURE_EVENT_COUNT=$((SINNIX_CAPTURE_EVENT_COUNT + 1))
 }
@@ -208,14 +214,17 @@ _sinnix_capture_append_command_end() {
   local exit_code="$2"
   local duration_ms="$3"
 
-  {
+  (
+    umask 077
+    {
     _sinnix_capture_append_prefix "command_end" "$ts_ms"
     print -nr -- ',"exit_code":'
     _sinnix_capture_json_nullable_int "$exit_code"
     print -nr -- ',"duration_ms":'
     _sinnix_capture_json_nullable_int "$duration_ms"
     print -r -- '}'
-  } >>| "$SINNIX_CAPTURE_EVENTS_FILE"
+    } >>| "$SINNIX_CAPTURE_EVENTS_FILE"
+  )
 
   SINNIX_CAPTURE_EVENT_COUNT=$((SINNIX_CAPTURE_EVENT_COUNT + 1))
 }
@@ -231,7 +240,9 @@ _sinnix_capture_append_session_end() {
   local final_repo_commit="$8"
   local final_repo_dirty="$9"
 
-  {
+  (
+    umask 077
+    {
     _sinnix_capture_append_prefix "session_end" "$ts_ms"
     print -nr -- ',"exit_code":'
     _sinnix_capture_json_nullable_int "$exit_code"
@@ -254,7 +265,8 @@ _sinnix_capture_append_session_end() {
     print -nr -- ',"idle_ms":'
     _sinnix_capture_json_nullable_int "$SINNIX_CAPTURE_IDLE_MS"
     print -r -- '}'
-  } >>| "$SINNIX_CAPTURE_EVENTS_FILE"
+    } >>| "$SINNIX_CAPTURE_EVENTS_FILE"
+  )
 
   SINNIX_CAPTURE_EVENT_COUNT=$((SINNIX_CAPTURE_EVENT_COUNT + 1))
 }
@@ -276,7 +288,9 @@ _sinnix_capture_write_session_file() {
     duration_ms=$((finished_at_ms - SINNIX_CAPTURE_STARTED_AT_MS))
   fi
 
-  {
+  (
+    umask 077
+    {
     print -r -- "{"
     print -nr -- '  "schema": '; _sinnix_capture_json_string "terminal-session-v1"; print -r -- ","
     print -nr -- '  "schema_generation": '; _sinnix_capture_json_string "terminal-session-v1"; print -r -- ","
@@ -311,7 +325,8 @@ _sinnix_capture_write_session_file() {
     print -nr -- '  "exit_code": '; _sinnix_capture_json_nullable_int "$exit_code"; print -r -- ","
     print -nr -- '  "exit_reason": '; _sinnix_capture_json_string "$exit_reason"; print
     print -r -- "}"
-  } >| "$SINNIX_CAPTURE_SESSION_FILE"
+    } >| "$SINNIX_CAPTURE_SESSION_FILE"
+  )
 }
 
 _sinnix_capture_preexec() {
@@ -370,7 +385,6 @@ _sinnix_capture_zshexit() {
   _sinnix_capture_write_session_file "$now_ms" "$exit_code" "$exit_reason" "$final_cwd" "$final_repo_root" "$final_repo_branch" "$final_repo_commit" "$final_repo_dirty"
 }
 
-touch "$SINNIX_CAPTURE_EVENTS_FILE"
 _sinnix_capture_append_session_start
 _sinnix_capture_write_session_file \
   "" \

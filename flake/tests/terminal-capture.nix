@@ -55,6 +55,12 @@ in
             set -eu
             jq -e --arg capture_user "$USER" '.user == $capture_user' "$SINNIX_CAPTURE_SESSION_FILE" >/dev/null
             source ${../../scripts/sinnix-terminal-capture-hooks.zsh}
+            original_events_file=$SINNIX_CAPTURE_EVENTS_FILE
+            SINNIX_CAPTURE_EVENTS_FILE="$TMPDIR/fresh-events.jsonl"
+            _sinnix_capture_append_session_start
+            SINNIX_CAPTURE_EVENTS_FILE=$original_events_file
+            [[ $(umask) == *000 ]]
+            touch "$TMPDIR/user-created-file"
             print -r -- "terminal-capture-ready"
             print -r -- "inherited-capture-marker: ''${SINNIX_CAPTURE_POISON:-stripped}"
             true
@@ -65,7 +71,7 @@ in
             transcript="$TMPDIR/terminal-capture-runtime.typescript"
             capture_user=$'tester\001\002\003\004\005\006\007\010\011\012\013\014\015\016\017\020\021\022\023\024\025\026\027\030\031\032\033\034\035\036\037'
 
-            script -qfec "stty rows 24 cols 80; exec env \
+            script -qfec "umask 000; stty rows 24 cols 80; exec env \
               EPOCHREALTIME='1773285652,647035000' \
               HOME='$HOME' \
               HOSTNAME='terminal-capture-test' \
@@ -94,6 +100,10 @@ in
             test -n "$session_json"
             test -n "$events_json"
             test -n "$cast_file"
+            test "$(stat -c %a "$TMPDIR/user-created-file")" = 666
+            test "$(stat -c %a "$TMPDIR/fresh-events.jsonl")" = 600
+            test "$(stat -c %a "$TMPDIR/captures")" = 700
+            test -z "$(find "$TMPDIR/captures" -type f ! -perm 0600 -print -quit)"
 
             session_dir="$(dirname "$session_json")"
             session_id="$(basename "$session_dir")"
@@ -205,7 +215,7 @@ in
             test -n "$output_path"
             mkdir -p "$(dirname "$output_path")"
             printf '{"version": 3, "width": 80, "height": 24, "timestamp": 0}\n' > "$output_path"
-            "$command_path"
+            bash -c "$command_path"
             exit 42
             EOF
             chmod +x "$TMPDIR/bin/asciinema"
