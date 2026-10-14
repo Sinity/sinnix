@@ -85,6 +85,25 @@ else:
         self.assertEqual(len(list(self.capture.glob("*.ansi"))), 1)
         self.assertIn("1 failed", result.stdout)
 
+    def test_directory_target_is_refused_without_writing_inside_it(self):
+        self.assertEqual(self.run_capture("success").returncode, 0)
+        output, = self.capture.glob("*.ansi")
+        output.unlink()
+        output.mkdir()
+        self.assertEqual(self.run_capture("success").returncode, 1)
+        self.assertEqual(list(output.iterdir()), [])
+        staged, = self.capture.glob(".capture-output.*")
+        self.assertEqual(staged.read_text(), "complete scrollback")
+
+    def test_batch_reports_metadata_publication_failure(self):
+        self.capture.mkdir()
+        name = "20260101T010203Z-" + socket.gethostname() + "-pid123-win7-fixture.meta.json"
+        (self.capture/name).mkdir()
+        result = self.run_capture("success", current=False)
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertNotIn("✓", result.stdout)
+        self.assertFalse((self.root/"progress").exists())
+
     def test_filename_collision_preserves_previous_capture(self):
         self.assertEqual(self.run_capture("success").returncode, 0)
         output, = self.capture.glob("*.ansi")
