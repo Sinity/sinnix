@@ -208,6 +208,31 @@ mkServiceModule {
     let
       tailscaleInterface = config.sinnix.services.tailscale.interfaceName;
 
+      browserGuard = label: allowOpaque: ''
+        @${label}Origin {
+          header Origin *
+          not header Origin http://{$SINNIX_HUB_TAILNET_IP}:${toString cfg.port}
+          not header Origin http://127.0.0.1:${toString cfg.port}
+          not header Origin http://localhost:${toString cfg.port}
+          ${lib.optionalString allowOpaque "not header Origin null"}
+        }
+        respond @${label}Origin "cross-origin request refused" 403
+        @${label}Fetch {
+          header Sec-Fetch-Site *
+          not header Sec-Fetch-Site same-origin
+          not header Sec-Fetch-Site none
+          # A deliberate link opens a document; it does not submit an API act.
+          not {
+            method GET HEAD
+            header Sec-Fetch-Mode navigate
+            header Sec-Fetch-Dest document
+            header Sec-Fetch-User ?1
+          }
+          ${lib.optionalString allowOpaque "not header Origin null"}
+        }
+        respond @${label}Fetch "cross-site request refused" 403
+      '';
+
       # Only republish a frontend whose owning service is actually enabled.
       activeFrontends = lib.filterAttrs (
         name: _: (config.sinnix.services.${name} or { }).enable or false
@@ -300,20 +325,10 @@ mkServiceModule {
             file_server browse
           }
 
-          # Same-origin gate on the action API. A browser sends Origin on POST
-          # even same-origin, so this cannot be a blanket "reject any Origin";
-          # it rejects any Origin that is not one of the hub's own. Together
-          # with the reducer's expected_target check -- which needs a prior
-          # read that CORS denies cross-origin -- a blind cross-site POST has
-          # nothing to work with.
+          # The reducer trusts this Unix socket. Apply the same browser
+          # boundary to its API and page/terminal routes, before proxying.
           handle_path /ops/* {
-            @crossOrigin {
-              header Origin *
-              not header Origin http://{$SINNIX_HUB_TAILNET_IP}:${toString cfg.port}
-              not header Origin http://127.0.0.1:${toString cfg.port}
-              not header Origin http://localhost:${toString cfg.port}
-            }
-            respond @crossOrigin "cross-origin request refused" 403
+            ${browserGuard "ops" false}
             reverse_proxy unix/${opsSocket}
           }
 
@@ -321,6 +336,7 @@ mkServiceModule {
           # the CORS answer it gives this route (reports are opened off disk
           # as file://, Origin null) is deliberately not given to /ops/*.
           handle /feedback* {
+            ${browserGuard "feedback" true}
             reverse_proxy unix/${opsSocket}
           }
 
@@ -353,6 +369,7 @@ mkServiceModule {
           redir /shaders /shaders/
 
           handle {
+            ${browserGuard "pages" false}
             reverse_proxy unix/${opsSocket}
           }
         }

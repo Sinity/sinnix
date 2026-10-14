@@ -432,8 +432,13 @@ Serving the pages over the reducer's Unix socket is what keeps the auth model
 intact. The reducer treats that socket as authorized — it is 0600 in the
 operator's runtime directory — and still demands a bearer token on its loopback
 TCP listener, so the page routes expose exactly what the action API already
-exposed there. POSTs to `/ops/*` keep the same-origin gate and the reducer's
-target identity check. Pressure freeze/thaw/park actions use the system manager,
+exposed there. `/ops/*` and the page/terminal routes reject foreign Origins
+and cross-site Fetch Metadata before proxying. Native clients omit those headers;
+same-origin browser clients and user-activated top-level GET/HEAD navigation remain
+supported. Cross-site writes receive no navigation exception. `/feedback*` also rejects foreign
+web origins but preserves `Origin: null` for local reports. The phone API is
+native-only and rejects all browser Origin/Fetch Metadata. The reducer's target
+identity checks remain in effect. Pressure freeze/thaw/park actions use the system manager,
 as required by their owning helper.
 
 The visual language is sinnix's own: the same CSS custom properties, status

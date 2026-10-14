@@ -35,6 +35,24 @@
             touch "$out"
           '';
 
+      checks.hub-http-boundary =
+        let
+          service = host.home-manager.users.${host.sinnix.user.name}.systemd.user.services.sinnix-hub;
+          command = builtins.head service.Service.ExecStart;
+          caddyfile = builtins.appendContext
+            (builtins.elemAt (builtins.match ".*--config ([^ ]+) .*" command) 0)
+            (builtins.getContext command);
+        in
+        pkgs.runCommand "hub-http-boundary"
+          {
+            nativeBuildInputs = [ pkgs.python3 pkgs.caddy ];
+            inherit caddyfile;
+          }
+          ''
+            python ${./hub_http_boundary.py} "$caddyfile"
+            touch "$out"
+          '';
+
       checks.sinnix-prime-assertions =
         if failures == [ ] then
           pkgs.runCommand "sinnix-prime-assertions" { } ''
