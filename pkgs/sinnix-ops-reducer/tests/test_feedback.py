@@ -239,3 +239,39 @@ def test_elicit_model_refuses_a_traversal_shaped_domain(hub_server) -> None:
     with pytest.raises(urllib.error.HTTPError) as raised:
         urllib.request.urlopen(base + "/feedback/elicit/..%2f..%2fetc", timeout=10)
     assert raised.value.code == 400
+
+
+@pytest.mark.parametrize("stage", ["resolve", "read"])
+@pytest.mark.parametrize("failure", [PermissionError("denied"), OSError("device unavailable")])
+def test_elicit_model_access_errors_are_unavailable(hub_server, monkeypatch, stage, failure):
+    from sinnix_ops_reducer import server
+    base, _ = hub_server
+    def fail(*args, **kwargs):
+        raise failure
+    if stage == "resolve":
+        monkeypatch.setattr(server, "resolve_elicit_model", fail)
+    else:
+        monkeypatch.setattr(Path, "read_text", fail)
+    with pytest.raises(urllib.error.HTTPError) as raised:
+        urllib.request.urlopen(base + "/feedback/elicit/neutral", timeout=2)
+    assert raised.value.code == 503
+    assert "unavailable" in json.loads(raised.value.read())["error"]
+
+
+@pytest.mark.parametrize("kind, status", [("directory", 503), ("broken-link", 503), ("utf8", 502), ("json", 502)])
+def test_elicit_model_unusable_entries_are_not_absent(hub_server, tmp_path, kind, status):
+    base, _ = hub_server
+    path = tmp_path / "preferences" / "neutral" / "model.json"
+    path.parent.mkdir(parents=True)
+    if kind == "directory":
+        path.mkdir()
+    elif kind == "broken-link":
+        path.symlink_to(path.parent / "missing-model.json")
+    elif kind == "utf8":
+        path.write_bytes(b"\xff")
+    else:
+        path.write_text("{invalid")
+    with pytest.raises(urllib.error.HTTPError) as raised:
+        urllib.request.urlopen(base + "/feedback/elicit/neutral", timeout=2)
+    assert raised.value.code == status
+    assert "no fitted model" not in json.loads(raised.value.read())["error"]

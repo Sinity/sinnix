@@ -139,18 +139,44 @@ class Handler(BaseHTTPRequestHandler):
         does the admission (charset, path-under-root); a missing file is a
         normal "no rank yet" 404, not a rejected request."""
         base_dir: Path = self.server.elicit_model_dir  # type: ignore[attr-defined]
-        model_path = resolve_elicit_model(base_dir, domain)
-        if model_path is None:
+        try:
+            model_path = resolve_elicit_model(base_dir, domain)
+            if model_path is None:
+                self._write_feedback(
+                    HTTPStatus.BAD_REQUEST, {"error": "invalid elicit domain name"}
+                )
+                return
+            raw = model_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            try:
+                (base_dir / domain / "model.json").lstat()
+            except FileNotFoundError:
+                self._write_feedback(
+                    HTTPStatus.NOT_FOUND,
+                    {"error": "no fitted model for this domain yet"},
+                )
+                return
+            except OSError as error:
+                self._write_feedback(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {"error": f"fitted model unavailable: {error}"},
+                )
+                return
             self._write_feedback(
-                HTTPStatus.BAD_REQUEST, {"error": "invalid elicit domain name"}
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": "fitted model entry exists but its target is unavailable"},
             )
             return
-        try:
-            raw = model_path.read_text(encoding="utf-8")
-        except OSError:
+        except OSError as error:
             self._write_feedback(
-                HTTPStatus.NOT_FOUND,
-                {"error": "no fitted model for this domain yet"},
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                {"error": f"fitted model unavailable: {error}"},
+            )
+            return
+        except UnicodeError as error:
+            self._write_feedback(
+                HTTPStatus.BAD_GATEWAY,
+                {"error": f"model.json is malformed: {error}"},
             )
             return
         try:

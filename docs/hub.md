@@ -387,6 +387,10 @@ domain's model mid-session instead of only after the next full page load.
 Wiring that poll into the session page's own JS is `scripts/sinnix-elicit`'s
 follow-up, not this route's.
 
+An absent model returns 404; inaccessible files, broken links and wrong object
+types return 503. Invalid UTF-8 or JSON returns 502. These failures do not mean
+that the domain has never been ranked.
+
 ## Terminal views
 
 Terminal titles, working directories, send history and capture labels are rendered as text, and history filenames are encoded as URL path components. Captured metadata cannot supply page markup.
