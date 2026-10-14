@@ -435,3 +435,19 @@ def test_config_rejects_retired_ambiguous_selector_syntax(tmp_path):
     with pytest.raises(ValueError, match="capture-scope-v1"): GatewayConfig.load(path)
     path.write_text(json.dumps({"endpoint": {"scope": {"captures": ["subject:activity", "lane:clipboard"]}}}))
     assert GatewayConfig.load(path).capture_scope == frozenset({"subject:activity", "lane:clipboard"})
+
+
+
+def test_scope_and_principal_limits_apply_before_filesystem_probes(tmp_path, monkeypatch):
+    from dataclasses import replace
+    cfg, paths = scoped_config(tmp_path, ["subject:activity"])
+    principal = replace(Principal.for_name("operator"), allowed_lanes=frozenset({"clipboard"}))
+    original = Path.is_file
+    observed = []
+    def probe(path):
+        observed.append(path)
+        assert path == paths["clipboard"] / "clipboard-index.jsonl", "excluded capture path was probed"
+        return original(path)
+    monkeypatch.setattr(Path, "is_file", probe)
+    assert [row["name"] for row in CaptureService(cfg, principal).lanes_visible()["lanes"]] == ["clipboard"]
+    assert observed == [paths["clipboard"] / "clipboard-index.jsonl"]

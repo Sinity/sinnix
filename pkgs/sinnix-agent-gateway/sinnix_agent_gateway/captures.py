@@ -40,7 +40,7 @@ class CaptureLane:
         return None
 
 
-def queryable_capture_lanes(runtime_inventory: Path, selectors: frozenset[str] = frozenset()) -> dict[str, CaptureLane]:
+def queryable_capture_lanes(runtime_inventory: Path, selectors: frozenset[str] = frozenset(), allowed_lanes: frozenset[str] | None = None) -> dict[str, CaptureLane]:
     """Derive capture query contracts from every declared runtime lane.
 
     The inventory is the capture authority.  Every valid declared path is
@@ -62,7 +62,7 @@ def queryable_capture_lanes(runtime_inventory: Path, selectors: frozenset[str] =
             "capture runtime inventory must contain a captures list"
         )
     captures = inventory["captures"]
-    lanes: dict[str, CaptureLane] = {}
+    declarations: dict[str, Path] = {}
     for row in captures:
         if not isinstance(row, dict):
             continue
@@ -72,6 +72,14 @@ def queryable_capture_lanes(runtime_inventory: Path, selectors: frozenset[str] =
             continue
         lane_path = Path(path)
         if not lane_path.is_absolute():
+            continue
+        declarations[name] = lane_path
+    selected = _selected_capture_names(inventory, set(declarations), selectors)
+    if allowed_lanes is not None:
+        selected.intersection_update(allowed_lanes)
+    lanes: dict[str, CaptureLane] = {}
+    for name, lane_path in declarations.items():
+        if name not in selected:
             continue
         native_lane = lane_path.name
         index_path = lane_path / f"{native_lane}-index.jsonl"
@@ -89,8 +97,12 @@ def queryable_capture_lanes(runtime_inventory: Path, selectors: frozenset[str] =
                 path=lane_path,
                 native_contract="runtime-declared-path",
             )
+    return lanes
+
+
+def _selected_capture_names(inventory: dict, names: set[str], selectors: frozenset[str]) -> set[str]:
     if not selectors:
-        return lanes
+        return names
     scope = inventory.get("capture_scopes")
     subjects = None
     if any(selector.startswith("subject:") for selector in selectors):
@@ -103,19 +115,19 @@ def queryable_capture_lanes(runtime_inventory: Path, selectors: frozenset[str] =
         if not separator or not name:
             raise CaptureScopeError(f"invalid capture-scope-v1 selector: {selector}")
         if kind == "lane":
-            if name not in lanes:
+            if name not in names:
                 raise CaptureScopeError(f"unknown runtime capture lane selector: {selector}")
             selected.add(name)
         elif kind == "subject":
             if name not in subjects:
                 raise CaptureScopeError(f"unknown runtime capture subject selector: {selector}")
             members = subjects[name]
-            if not isinstance(members, list) or any(not isinstance(member, str) or member not in lanes for member in members):
+            if not isinstance(members, list) or any(not isinstance(member, str) or member not in names for member in members):
                 raise CaptureScopeError(f"invalid runtime capture subject membership: {name}")
             selected.update(members)
         else:
             raise CaptureScopeError(f"unknown capture selector kind: {kind}")
-    return {name: lane for name, lane in lanes.items() if name in selected}
+    return selected
 
 
 class CaptureService:
@@ -127,7 +139,7 @@ class CaptureService:
         self.execution = OwnerExecution()
 
     def _available_lanes(self) -> dict[str, CaptureLane]:
-        return queryable_capture_lanes(self.config.runtime_inventory, self.config.capture_scope)
+        return queryable_capture_lanes(self.config.runtime_inventory, self.config.capture_scope, self.principal.allowed_lanes)
 
     def lanes_visible(self) -> dict[str, Any]:
         """List runtime-declared native lane contracts visible to this principal."""
