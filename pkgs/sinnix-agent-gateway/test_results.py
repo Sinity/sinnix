@@ -679,3 +679,88 @@ def test_snapshot_page_refuses_corrupt_offset_index(tmp_path) -> None:
     )
     with pytest.raises(ResultError, match="snapshot row index"):
         results.continue_snapshot(cursor, query_sha256=query_sha)
+
+
+
+def test_snapshot_first_page_matches_serialized_rows_after_nested_mutation(tmp_path):
+    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    writer = results.start_snapshot(query_sha256="query", source_revision="source", page_size=1)
+    row = {"nested": {"values": [1, 2]}}
+    writer.append(row)
+    row["nested"]["values"].append(3)
+    exposed = writer.first_page; exposed[0]["nested"]["values"].append(4)
+    first = results.finish_snapshot(writer)
+    snapshot = results.snapshots_root / writer.snapshot_id
+    assert first["rows"] == [json.loads((snapshot / "rows.jsonl").read_text())] == [{"nested": {"values": [1, 2]}}]
+    first["rows"][0]["nested"]["values"].append(5)
+    assert writer.first_page == [{"nested": {"values": [1, 2]}}]
+
+
+@pytest.mark.parametrize("stage", ["rows_fsync", "offsets_fsync", "metadata", "rename", "parent_fsync"])
+def test_snapshot_failure_finalizes_resources_and_preserves_commit(tmp_path, monkeypatch, stage):
+    import os
+    import sinnix_agent_gateway.results as module
+    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    writer = results.start_snapshot(query_sha256="query", source_revision="source", page_size=1)
+    writer.append({"neutral": "row"})
+    destination = results.snapshots_root / writer.snapshot_id
+    original_sync, original_replace = os.fsync, os.replace
+    row_fd, offset_fd = writer.handle.fileno(), writer.offsets_handle.fileno()
+    fired = []
+    def fsync(fd):
+        should_fail = ((stage == "rows_fsync" and fd == row_fd and not writer.handle.closed)
+                       or (stage == "offsets_fsync" and fd == offset_fd and not writer.offsets_handle.closed)
+                       or (stage == "parent_fsync" and destination.exists()))
+        if should_fail and not fired:
+            fired.append(stage); raise OSError("synthetic " + stage)
+        return original_sync(fd)
+    def replace(source, target, **kwargs):
+        if stage == "rename" and Path(source) == writer.directory:
+            fired.append(stage); raise OSError("synthetic rename")
+        return original_replace(source, target, **kwargs)
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(os, "replace", replace)
+    if stage == "metadata":
+        def failed(*args, **kwargs): fired.append(stage); raise OSError("synthetic metadata")
+        monkeypatch.setattr(module, "atomic_publish", failed)
+    with pytest.raises(OSError, match="synthetic"):
+        writer.finish()
+    assert fired, "fault did not reach its intended stage"
+    writer.abort(); writer.abort()
+    assert writer.handle.closed and writer.offsets_handle.closed
+    assert not writer.directory.exists()
+    assert destination.exists() == (stage == "parent_fsync")
+    if destination.exists():
+        assert json.loads((destination / "rows.jsonl").read_text()) == {"neutral": "row"}
+        assert (destination / "metadata.json").is_file()
+
+
+@pytest.mark.parametrize("attribute", ["handle", "offsets_handle"])
+def test_close_failure_still_closes_both_snapshot_resources(tmp_path, attribute):
+    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    writer = results.start_snapshot(query_sha256="query", source_revision="source", page_size=1)
+    writer.append({"neutral": True})
+    original = getattr(writer, attribute)
+    class Fault:
+        def __getattr__(self, name): return getattr(original, name)
+        def close(self): raise OSError("synthetic close failure")
+    setattr(writer, attribute, Fault())
+    with pytest.raises(OSError, match="synthetic close"):
+        writer.finish()
+    assert writer.handle.closed and writer.offsets_handle.closed
+    assert not writer.directory.exists()
+
+
+def test_second_resource_open_failure_does_not_leak_first_resource_or_stage(tmp_path, monkeypatch):
+    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    original = Path.open; opened = []
+    def open_file(path, *args, **kwargs):
+        if path.name == "offsets.bin": raise OSError("synthetic second open")
+        handle = original(path, *args, **kwargs)
+        if path.name == "rows.jsonl": opened.append(handle)
+        return handle
+    monkeypatch.setattr(Path, "open", open_file)
+    with pytest.raises(OSError, match="synthetic second open"):
+        results.start_snapshot(query_sha256="query", source_revision="source", page_size=1)
+    assert opened and all(handle.closed for handle in opened)
+    assert not list(results.snapshots_root.glob("*.writing"))

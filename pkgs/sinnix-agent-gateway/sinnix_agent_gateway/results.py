@@ -136,13 +136,25 @@ class ResultSnapshotWriter:
         self.directory = service.snapshots_root / f".{self.snapshot_id}.writing"
         self.directory.mkdir(mode=0o700)
         self.rows_path = self.directory / "rows.jsonl"
-        self.handle = self.rows_path.open("xb")
+        self.handle = None
         self.offsets_path = self.directory / "offsets.bin"
-        self.offsets_handle = self.offsets_path.open("xb")
-        self.first_page: list[Any] = []
+        self.offsets_handle = None
+        self._first_page: list[bytes] = []
         self.row_count = 0
         self.hasher = hashlib.sha256()
         self.closed = False
+        self.published = False
+        try:
+            self.handle = self.rows_path.open("xb")
+            self.offsets_handle = self.offsets_path.open("xb")
+        except BaseException:
+            self.abort()
+            raise
+
+    @property
+    def first_page(self) -> list[Any]:
+        # Presentation cannot mutate the canonical retained observation.
+        return [json.loads(encoded) for encoded in self._first_page]
 
     def append(self, row: Any) -> None:
         if self.closed:
@@ -158,56 +170,74 @@ class ResultSnapshotWriter:
         self.handle.write(line)
         self.hasher.update(line)
         self.row_count += 1
-        if len(self.first_page) < self.page_size:
-            self.first_page.append(row)
+        if len(self._first_page) < self.page_size:
+            self._first_page.append(encoded)
 
     def abort(self) -> None:
-        if self.closed:
-            return
         self.closed = True
-        self.handle.close()
-        self.offsets_handle.close()
-        for path in self.directory.glob("*"):
-            path.unlink(missing_ok=True)
-        self.directory.rmdir()
+        errors = []
+        try:
+            for handle in (self.handle, self.offsets_handle):
+                if handle is not None and not handle.closed:
+                    try:
+                        handle.close()
+                    except OSError:
+                        # Buffered close can fail while flushing. Finalize the
+                        # owned raw descriptor without another write attempt.
+                        try:
+                            handle.raw.close()
+                        except OSError as error:
+                            errors.append(error)
+        finally:
+            if not self.published and self.directory.exists():
+                for path in self.directory.glob("*"):
+                    path.unlink(missing_ok=True)
+                self.directory.rmdir()
+        if errors:
+            raise errors[0]
 
     def finish(self) -> dict[str, Any]:
         if self.closed:
             raise ResultError("snapshot writer is closed", "unavailable")
         self.closed = True
-        self.handle.flush()
-        os.fsync(self.handle.fileno())
-        self.handle.close()
-        self.offsets_handle.flush()
-        os.fsync(self.offsets_handle.fileno())
-        self.offsets_handle.close()
-        expires_at = time.time() + self.service.cursor_ttl_seconds
-        metadata = {
-            "schema": "sinnix.gateway-result-snapshot.v1",
-            "snapshot_id": self.snapshot_id,
-            "principal": self.service.principal.name,
-            "query_sha256": self.query_sha256,
-            "source_revision": self.source_revision,
-            "row_count": self.row_count,
-            "expires_at": expires_at,
-            "rows_sha256": self.hasher.hexdigest(),
-            "row_offsets_bytes": self.row_count * 8,
-            "metadata": self.metadata,
-        }
-        metadata_path = self.directory / "metadata.json"
-        self.rows_path.chmod(0o600)
-        self.offsets_path.chmod(0o600)
-        atomic_publish(metadata_path, _canonical(metadata), fsync=True)
-        destination = self.service.snapshots_root / self.snapshot_id
-        os.replace(self.directory, destination)
-        directory_fd = os.open(
-            self.service.snapshots_root, os.O_RDONLY | os.O_DIRECTORY
-        )
         try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-        return metadata
+            self.handle.flush()
+            os.fsync(self.handle.fileno())
+            self.handle.close()
+            self.offsets_handle.flush()
+            os.fsync(self.offsets_handle.fileno())
+            self.offsets_handle.close()
+            expires_at = time.time() + self.service.cursor_ttl_seconds
+            metadata = {
+                "schema": "sinnix.gateway-result-snapshot.v1",
+                "snapshot_id": self.snapshot_id,
+                "principal": self.service.principal.name,
+                "query_sha256": self.query_sha256,
+                "source_revision": self.source_revision,
+                "row_count": self.row_count,
+                "expires_at": expires_at,
+                "rows_sha256": self.hasher.hexdigest(),
+                "row_offsets_bytes": self.row_count * 8,
+                "metadata": self.metadata,
+            }
+            metadata_path = self.directory / "metadata.json"
+            self.rows_path.chmod(0o600)
+            self.offsets_path.chmod(0o600)
+            atomic_publish(metadata_path, _canonical(metadata), fsync=True)
+            destination = self.service.snapshots_root / self.snapshot_id
+            os.replace(self.directory, destination)
+            self.published = True
+            directory_fd = os.open(
+                self.service.snapshots_root, os.O_RDONLY | os.O_DIRECTORY
+            )
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+            return metadata
+        except BaseException:
+            self.abort()
+            raise
 
 
 class ResultService:
