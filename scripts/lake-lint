@@ -5,15 +5,27 @@
 # pythonPackages: @sinnix-lib
 
 import os
+import stat
 from pathlib import Path
 import sys
 
 from sinnix_lib.layout import COLLECTION_PATHS, MACHINE_LANES, OPTIONAL, RETIRED_PATHS, ROOTS
 
 
+def metadata(path: Path):
+    try:
+        return path.lstat()
+    except FileNotFoundError:
+        return None
+
+
 def is_tool_cache(path: Path) -> bool:
+    node = metadata(path)
     tag = path / "CACHEDIR.TAG"
-    if path.is_symlink() or not path.is_dir() or tag.is_symlink() or not tag.is_file():
+    if node is None or not stat.S_ISDIR(node.st_mode):
+        return False
+    marker = metadata(tag)
+    if marker is None or not stat.S_ISREG(marker.st_mode):
         return False
     with tag.open("rb") as handle:
         return handle.read(43) == b"Signature: 8a477f597d28d172789f06886806bc55"
@@ -21,47 +33,87 @@ def is_tool_cache(path: Path) -> bool:
 
 def main() -> int:
     status = 0
+    inspected = 0
+    skipped = 0
+    realm_present = False
     prefix = os.environ.get("LAKE_LINT_ROOT_PREFIX", "")
     for absolute, subjects in ROOTS.items():
         root = Path(prefix + absolute)
-        if not root.is_dir():
-            print(f"lake-lint: SKIP {root} (not present)", file=sys.stderr)
+        try:
+            node = metadata(root)
+            if node is None:
+                print(f"lake-lint: SKIP {root} (not present)", file=sys.stderr)
+                skipped += 1
+                continue
+            if not stat.S_ISDIR(node.st_mode):
+                print(f"lake-lint: INVALID root (expected directory without alias): {root}")
+                status = 1
+                continue
+            children = sorted(root.iterdir())
+        except OSError as error:
+            print(f"lake-lint: INACCESSIBLE root: {root}: {error}")
+            status = 1
             continue
+        inspected += 1
+        if absolute == "/realm":
+            realm_present = True
         required = {*subjects, "INVENTORY.md"}
-        for path in sorted(root.iterdir()):
-            if path.name not in required | OPTIONAL[absolute] and not is_tool_cache(path):
-                print(f"lake-lint: UNEXPECTED node: {path}")
+        for path in children:
+            try:
+                if path.name not in required | OPTIONAL[absolute] and not is_tool_cache(path):
+                    print(f"lake-lint: UNEXPECTED node: {path}")
+                    status = 1
+            except OSError as error:
+                print(f"lake-lint: INACCESSIBLE node: {path}: {error}")
                 status = 1
         for name in sorted(required):
             path = root / name
-            if path.is_symlink():
-                print(f"lake-lint: SYMLINK at canonical node: {path}")
-            elif not path.exists():
+            try:
+                node = metadata(path)
+            except OSError as error:
+                print(f"lake-lint: INACCESSIBLE required node: {path}: {error}")
+                status = 1
+                continue
+            if node is None:
                 print(f"lake-lint: MISSING required node: {path}")
-            elif name == "INVENTORY.md" and not path.is_file():
+            elif stat.S_ISLNK(node.st_mode):
+                print(f"lake-lint: SYMLINK at canonical node: {path}")
+            elif name == "INVENTORY.md" and not stat.S_ISREG(node.st_mode):
                 print(f"lake-lint: WRONG TYPE (expected regular file): {path}")
-            elif name != "INVENTORY.md" and not path.is_dir():
+            elif name != "INVENTORY.md" and not stat.S_ISDIR(node.st_mode):
                 print(f"lake-lint: WRONG TYPE (expected directory): {path}")
             else:
                 continue
             status = 1
     realm = Path(prefix + "/realm")
-    if realm.is_dir():
+    if realm_present:
         managed = list(COLLECTION_PATHS.values()) + [
             f"device/sinnix-prime/{relative}" for relative in MACHINE_LANES.values()
         ]
         for relative in managed:
             path = realm / relative
-            if path.is_symlink() or not path.is_dir():
+            try:
+                node = metadata(path)
+                if node is not None and stat.S_ISDIR(node.st_mode):
+                    continue
                 print(f"lake-lint: INVALID managed directory: {path}")
-                status = 1
+            except OSError as error:
+                print(f"lake-lint: INACCESSIBLE managed directory: {path}: {error}")
+            status = 1
         for relative in RETIRED_PATHS:
             path = realm / relative
-            if path.exists() or path.is_symlink():
-                print(f"lake-lint: RETIRED managed path recreated: {path}")
+            try:
+                if metadata(path) is not None:
+                    print(f"lake-lint: RETIRED managed path recreated: {path}")
+                    status = 1
+            except OSError as error:
+                print(f"lake-lint: INACCESSIBLE retired-path check: {path}: {error}")
                 status = 1
     if status == 0:
-        print("lake-lint: all roots match taxonomy")
+        if skipped:
+            print(f"lake-lint: {inspected} present roots match taxonomy; {skipped} absent roots skipped")
+        else:
+            print("lake-lint: all roots match taxonomy")
     return status
 
 

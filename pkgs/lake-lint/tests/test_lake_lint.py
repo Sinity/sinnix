@@ -214,3 +214,37 @@ def test_missing_nested_managed_home_fails(tmp_path):
     result = run(prefix)
     assert result.returncode == 1
     assert f"INVALID managed directory: {home}" in result.stdout
+
+
+
+def test_wrong_root_type_is_not_skipped(tmp_path):
+    root = tmp_path / ROOTS[0]; root.parent.mkdir(parents=True, exist_ok=True)
+    root.write_text("wrong root type")
+    result = run(tmp_path)
+    assert result.returncode == 1
+    assert "INVALID root" in result.stdout
+    assert f"SKIP {root}" not in result.stderr
+
+
+def test_denied_root_is_not_absent_or_success(tmp_path, monkeypatch, capsys):
+    import runpy
+    module = runpy.run_path(str(SCRIPT))
+    root = tmp_path / ROOTS[0]
+    original = Path.lstat
+    def denied(path, *args, **kwargs):
+        if path == root: raise PermissionError("synthetic denied root")
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "lstat", denied)
+    monkeypatch.setenv("LAKE_LINT_ROOT_PREFIX", str(tmp_path))
+    assert module["main"]() == 1
+    output = capsys.readouterr()
+    assert "INACCESSIBLE root" in output.out
+    assert f"SKIP {root}" not in output.err
+    assert "match taxonomy" not in output.out
+
+
+def test_absent_roots_do_not_claim_complete_coverage(tmp_path):
+    result = run(tmp_path / "absent")
+    assert result.returncode == 0
+    assert "0 present roots" in result.stdout
+    assert "all roots match taxonomy" not in result.stdout
