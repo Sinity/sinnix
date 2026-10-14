@@ -10,6 +10,7 @@ import json
 import math
 import os
 import time
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -17,6 +18,7 @@ from typing import Any, Mapping
 from sinnix_lib.atomic_json import read_json, write_json_atomic
 from sinnix_lib.ledger import append_jsonl
 
+from .config import PoolPolicy
 from . import pueue
 from .pueue import PueueError
 
@@ -258,7 +260,7 @@ def _can_reopen(
     )
 
 
-def _append(spool: Path | None, event: Mapping[str, object]) -> dict[str, Any]:
+def _append(spool: Path | None, event: Mapping[str, object], *, required: bool = False) -> dict[str, Any]:
     record = {
         "schema_version": 1,
         "emitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -270,7 +272,10 @@ def _append(spool: Path | None, event: Mapping[str, object]) -> dict[str, Any]:
         try:
             append_jsonl(spool, record, fsync=False)
         except OSError:
-            pass
+            if required:
+                raise
+    elif required:
+        raise ValueError("adaptive width changes require an event spool")
     return record
 
 
@@ -305,11 +310,89 @@ def _vanished_hold_retirements(state: SpoolState) -> list[dict[str, Any]]:
     ]
 
 
+
+def slice_headroom(unit: str, root: Path = Path("/sys/fs/cgroup")) -> int:
+    """Read effective high/max headroom, including finite ancestor bounds."""
+    result = subprocess.run(
+        ["systemctl", "--user", "show", unit, "--property=ControlGroup", "--value"],
+        capture_output=True, text=True, check=True, timeout=5,
+    )
+    relative = result.stdout.strip()
+    if not relative.startswith("/") or relative == "/" or ".." in Path(relative).parts:
+        raise ValueError("slice has no active cgroup")
+    current = root / relative.lstrip("/")
+    bounds = []
+    while current != root:
+        used = int((current / "memory.current").read_text().strip())
+        if used < 0:
+            raise ValueError("negative memory.current")
+        for field in ("memory.high", "memory.max"):
+            raw = (current / field).read_text().strip()
+            if raw != "max":
+                bound = int(raw)
+                if bound < 0:
+                    raise ValueError("negative memory bound")
+                bounds.append(bound - used)
+        current = current.parent
+    if not bounds:
+        raise ValueError("slice has no finite memory bound")
+    return min(bounds)
+
+
+def adaptive_widths(pools, groups, pressure, spool):
+    """Resize admission only. Missing pressure/accounting cannot raise width."""
+    policies = {name: policy for name, policy in pools.items() if policy.adaptive is not None}
+    if policies and spool is None:
+        return [{"status": "unavailable", "error": "adaptive admission requires an event spool"}]
+    if not policies:
+        return []
+    try:
+        widths = pueue.groups()
+    except PueueError as error:
+        return [{"status": "unavailable", "error": str(error)}]
+    observations = []
+    for group, policy in sorted(policies.items()):
+        if groups.get(group) != "Running" or group not in widths:
+            observations.append({"group": group, "status": "not-running"})
+            continue
+        adaptive = policy.adaptive
+        try:
+            headroom = slice_headroom(adaptive.slice)
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
+            observations.append({"group": group, "status": "unavailable", "error": str(error)})
+            continue
+        psi = [_value(pressure, key) for key in ("memory_full_avg10", "memory_full_avg60")]
+        if any(value is None for value in psi):
+            observations.append({"group": group, "status": "unknown-pressure"})
+            continue
+        before = widths[group]
+        if max(psi) >= RESUME_BELOW or headroom <= adaptive.job_memory_bytes:
+            after = max(adaptive.floor, before - 1)
+        else:
+            after = min(policy.parallel, before + 1)
+        after = max(adaptive.floor, min(policy.parallel, after))
+        observation = {"group": group, "from": before, "to": after,
+                       "headroom_bytes": headroom, "job_memory_bytes": adaptive.job_memory_bytes}
+        if after != before:
+            try:
+                pueue.set_parallel(group, after)
+            except PueueError as error:
+                observations.append({**observation, "status": "failed", "error": str(error)})
+                continue
+            try:
+                _append(spool, {"action": "resized", **observation, **pressure}, required=True)
+            except (OSError, ValueError) as error:
+                observations.append({**observation, "status": "recording-failed", "error": str(error)})
+                continue
+        observations.append({**observation, "status": "resized" if after != before else "unchanged"})
+    return observations
+
 def tick(
     *,
     spool: Path | None,
     pressure_root: Path = Path("/proc/pressure"),
     checkpoint: Path | None = None,
+    pools: Mapping[str, PoolPolicy] | None = None,
 ) -> dict[str, Any]:
     """Close or reopen one admission group. Never stops or stashes tasks."""
     pressure = read_pressure(pressure_root)
@@ -325,6 +408,7 @@ def tick(
     for event in _vanished_hold_retirements(state):
         state.apply(_append(spool, event))
     _save_checkpoint(checkpoint_path, state)
+    adaptive = adaptive_widths(pools or {}, groups, pressure, spool)
     signals = over_threshold(pressure)
     signal = "+".join(signals) or None
     paused = [name for name in MANAGED_GROUPS if groups.get(name) == "Paused"]
@@ -378,6 +462,7 @@ def tick(
         action = "hold" if paused or signals else "clear"
     return {
         "action": action,
+        "adaptive": adaptive,
         "frozen": paused,
         "signal": signal,
         **pressure,

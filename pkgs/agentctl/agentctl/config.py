@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -34,10 +35,18 @@ class ConfigError(ValueError):
 
 
 @dataclass(frozen=True)
+class AdaptivePool:
+    floor: int
+    job_memory_bytes: int
+    slice: str
+
+
+@dataclass(frozen=True)
 class PoolPolicy:
     """One pueue group's declared parallelism."""
 
     parallel: int
+    adaptive: AdaptivePool | None = None
     exclusive_with: tuple[str, ...] = ()
     # A running task older than this stops counting against the width: when
     # every slot is held by such tasks, a queued task is started anyway
@@ -138,6 +147,7 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
         if isinstance(declaration, Mapping):
             unknown = set(declaration) - {
                 "parallel",
+                "adaptive",
                 "exclusive_with",
                 "promote_after_seconds",
             }
@@ -159,8 +169,19 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
                 raise ConfigError(
                     f"pools.{name}.promote_after_seconds must be a positive integer"
                 )
+            adaptive = declaration.get("adaptive")
+            if adaptive is not None:
+                if not isinstance(adaptive, Mapping) or set(adaptive) != {"floor", "job_memory_bytes", "slice"}:
+                    raise ConfigError(f"pools.{name}.adaptive requires floor, job_memory_bytes and slice")
+                floor = _parallel(name, adaptive["floor"])
+                budget = _parallel(name, adaptive["job_memory_bytes"])
+                unit = adaptive["slice"]
+                if floor > _parallel(name, declaration.get("parallel")) or not isinstance(unit, str) or not re.fullmatch(r"[a-zA-Z0-9_-]+\.slice", unit):
+                    raise ConfigError(f"pools.{name}.adaptive has an invalid floor or slice")
+                adaptive = AdaptivePool(floor=floor, job_memory_bytes=budget, slice=unit)
             parsed[name] = PoolPolicy(
                 parallel=_parallel(name, declaration.get("parallel")),
+                adaptive=adaptive,
                 exclusive_with=tuple(excluded),
                 promote_after_seconds=promote,
             )

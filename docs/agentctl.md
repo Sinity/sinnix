@@ -1054,3 +1054,7 @@ declared by the CLI feature and runtime registry
 
 `nix build .#agentctl` runs the package suite, which drives a private pueued
 end to end for the adapter and fakes it for the launch and batch routes.
+
+### Adaptive pytest admission
+
+The pytest-quick declaration uses parallel as a ceiling of eight and an adaptive floor of one. Each backpressure tick changes its width by at most one: it raises admission only when both memory PSI windows are below the recovery threshold and effective slice headroom exceeds the declared 1 GiB per-job budget. Pressure or insufficient headroom lowers the width. Headroom uses the minimum remaining memory.high/memory.max budget across the slice and its ancestors, excluding the cgroup root. Missing accounting or pressure is reported and cannot raise admission. Paused groups are untouched, running tasks continue, and width changes are recorded in the existing event spool. Applying pool configuration preserves a valid adaptive width instead of resetting it to the ceiling. The per-job budget is an admission estimate; slice limits remain the enforcement boundary.

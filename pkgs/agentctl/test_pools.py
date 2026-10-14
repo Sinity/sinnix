@@ -214,3 +214,59 @@ def test_an_invalid_declaration_is_refused(
     monkeypatch.setenv("AGENTCTL_CONFIG", str(configuration))
 
     assert cli.main(["pools", "apply"]) == cli.EXIT_REFUSED
+
+
+def test_pool_apply_preserves_adaptive_width(monkeypatch):
+    from agentctl.config import AdaptivePool
+    changes = []
+    monkeypatch.setattr(pueue, "groups", lambda: {"quick": 3})
+    monkeypatch.setattr(pueue, "set_parallel", lambda group, count: changes.append((group, count)))
+    policy = {"quick": PoolPolicy(8, adaptive=AdaptivePool(1, 1024, "quick.slice"))}
+    assert pools.apply(policy)["unchanged"] == ["quick"]
+    assert changes == []
+
+
+def test_adaptive_resize_keeps_live_mixed_jobs_and_operator_pause(live_pueue, tmp_path, monkeypatch):
+    from agentctl import backpressure
+    from agentctl.config import AdaptivePool
+    subprocess.run(["pueue", "group", "add", "quick", "--parallel", "2"], check=True)
+    subprocess.run(["pueue", "group", "add", "other", "--parallel", "1"], check=True)
+    jobs = [pueue.add(group=group, label="fixture:adaptive:"+group,
+                     command=("sleep", "60"), working_directory=tmp_path)
+            for group in ["quick", "other"]]
+    deadline = time.monotonic() + 20
+    while not all(pueue.task(job).status == "Running" for job in jobs):
+        assert time.monotonic() < deadline
+        time.sleep(0.1)
+    monkeypatch.setattr(backpressure, "slice_headroom", lambda unit: 2048)
+    policy = {"quick": PoolPolicy(8, adaptive=AdaptivePool(1, 1024, "quick.slice"))}
+    spool = tmp_path / "adaptive-events.jsonl"
+    for psi, expected in [(0, 3), (11, 2)]:
+        result = backpressure.adaptive_widths(policy, pueue.groups_status(),
+                   {"memory_full_avg10": psi, "memory_full_avg60": psi}, spool)
+        assert result[0]["to"] == expected
+        assert pueue.groups()["quick"] == expected
+        assert all(pueue.task(job).status == "Running" for job in jobs)
+    subprocess.run(["pueue", "pause", "--group", "quick"], check=True)
+    deadline = time.monotonic() + 20
+    while pueue.task(jobs[0]).status != "Paused":
+        assert time.monotonic() < deadline
+        time.sleep(0.1)
+    before = [pueue.task(job).status for job in jobs]
+    assert before == ["Paused", "Running"]
+    result = backpressure.adaptive_widths(policy, pueue.groups_status(),
+                 {"memory_full_avg10": 0, "memory_full_avg60": 0}, spool)
+    assert result[0]["status"] == "not-running"
+    assert _groups(live_pueue)["quick"]["status"] == "Paused"
+    assert [pueue.task(job).status for job in jobs] == before
+
+
+@pytest.mark.parametrize("adaptive", [
+    {"floor": 9, "job_memory_bytes": 1024, "slice": "quick.slice"},
+    {"floor": 1, "job_memory_bytes": True, "slice": "quick.slice"},
+    {"floor": 1, "job_memory_bytes": 1024, "slice": "../quick.slice"},
+    {},
+])
+def test_invalid_adaptive_declaration_is_rejected(adaptive):
+    from agentctl.config import _pools, ConfigError
+    with pytest.raises(ConfigError): _pools({"quick": {"parallel": 8, "adaptive": adaptive}})

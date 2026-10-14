@@ -60,6 +60,17 @@ mkServiceModule {
             type = lib.types.ints.positive;
             description = "How many tasks this pueue group admits at once.";
           };
+          adaptive = lib.mkOption {
+            default = null;
+            description = "Optional headroom-based admission. Parallel is the ceiling.";
+            type = lib.types.nullOr (lib.types.submodule {
+              options = {
+                floor = lib.mkOption { type = lib.types.ints.positive; };
+                jobMemoryBytes = lib.mkOption { type = lib.types.ints.positive; };
+                slice = lib.mkOption { type = lib.types.str; };
+              };
+            });
+          };
           exclusiveWith = lib.mkOption {
             type = lib.types.listOf lib.types.str;
             default = [ ];
@@ -94,7 +105,14 @@ mkServiceModule {
       # slice's 9G MemoryHigh even at the observed maximum (six running jobs
       # measured 5.2 GiB together). The width is an interim static bound;
       # sinnix-tisc makes admission follow live headroom.
-      pytest-quick.parallel = 8;
+      pytest-quick = {
+        parallel = 8;
+        adaptive = {
+          floor = 1;
+          jobMemoryBytes = 1073741824;
+          slice = "agentctl-pytest-quick.slice";
+        };
+      };
       bulk.parallel = 2;
       # Three Polylogue verify_quick runs fit the 9G normal slice now that one
       # peaks under 1 GiB (polylogue #5754); at 3.3 GiB each they had held it
@@ -160,6 +178,12 @@ mkServiceModule {
             {
               inherit (pool) parallel;
               exclusive_with = pool.exclusiveWith;
+            }
+            // lib.optionalAttrs (pool.adaptive != null) {
+              adaptive = {
+                inherit (pool.adaptive) floor slice;
+                job_memory_bytes = pool.adaptive.jobMemoryBytes;
+              };
             }
             // lib.optionalAttrs (pool.promoteAfterSeconds != null) {
               promote_after_seconds = pool.promoteAfterSeconds;
