@@ -965,3 +965,37 @@ def test_chrome_profile_discovery_uses_config_home_and_preserves_explicit_overri
     monkeypatch.setenv('SINNIX_CHROME_PROFILE', str(override))
     monkeypatch.setattr(chrome.glob, 'glob', lambda pattern: [])
     assert chrome.chrome_profile_candidates() == [override, configured / 'chrome-ws']
+
+
+@pytest.mark.parametrize('helper', ['rows', 'columns', 'table'])
+def test_sqlite_filesystem_failure_is_recorded_without_aborting(tmp_path, monkeypatch, helper):
+    db = tmp_path / 'database.sqlite'
+    method = 'stat' if helper == 'table' else 'resolve'
+    original = getattr(type(db), method)
+
+    def inaccessible(self, *args, **kwargs):
+        if self == db:
+            raise PermissionError('synthetic database lookup denial')
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(db), method, inaccessible)
+    sqlite_util.clear_sqlite_errors()
+    try:
+        if helper == 'rows':
+            assert sqlite_util.sqlite_rows(db, 'select 1') == []
+        elif helper == 'columns':
+            assert sqlite_util.sqlite_columns(db, 'history') == set()
+        else:
+            assert sqlite_util.table_exists(db, 'history') is False
+        errors = sqlite_util.sqlite_errors()
+        assert len(errors) == 1
+        assert errors[0]['db'] == str(db)
+        assert 'PermissionError' in errors[0]['error']
+    finally:
+        sqlite_util.clear_sqlite_errors()
+
+
+def test_missing_optional_sqlite_table_probe_is_not_an_access_failure(tmp_path):
+    sqlite_util.clear_sqlite_errors()
+    assert not sqlite_util.table_exists(tmp_path / 'missing.sqlite', 'history')
+    assert sqlite_util.sqlite_errors() == []

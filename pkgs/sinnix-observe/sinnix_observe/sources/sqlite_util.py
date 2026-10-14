@@ -50,7 +50,7 @@ def sqlite_columns(db: Path, table: str) -> set[str]:
     try:
         with closing(sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
             return {row[1] for row in conn.execute(f"pragma table_info({table})")}
-    except sqlite3.Error as exc:
+    except (sqlite3.Error, OSError) as exc:
         _record(db, f"table_info({table})", exc)
         return set()
 
@@ -62,13 +62,18 @@ def sqlite_rows(
         with closing(sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)) as conn:
             conn.row_factory = sqlite3.Row
             return [dict(row) for row in conn.execute(sql, params)]
-    except sqlite3.Error as exc:
+    except (sqlite3.Error, OSError) as exc:
         _record(db, sql.split()[0].lower() if sql.split() else "query", exc)
         return []
 
 
 def table_exists(db: Path, table: str) -> bool:
-    if not db.exists():
+    try:
+        db.stat()
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        _record(db, "stat", exc)
         return False
     rows = sqlite_rows(
         db,
