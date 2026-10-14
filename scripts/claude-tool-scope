@@ -41,6 +41,7 @@ esac
 # kills still reach the command. Without a user manager to ask, run in place.
 if [ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/systemd/private" ]; then
   exec systemd-run --user --scope --quiet --collect \
+    --expand-environment=no \
     --slice=agenttool.slice -- "${cmd[@]}"
 fi
 exec "${cmd[@]}"

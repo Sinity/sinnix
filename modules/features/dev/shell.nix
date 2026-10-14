@@ -18,6 +18,7 @@ mkFeatureModule {
   # dotfile symlink would still be created (harmless but unused).
   meta.dotfiles.configFile = {
     "zsh/init.zsh" = "zsh/init.zsh";
+    "zsh/agent-tool-scope.zsh" = "zsh/agent-tool-scope.zsh";
     "atuin/config.toml" = "atuin/config.toml";
     "nvim" = "nvim";
     "tmux/user.conf" = "tmux/tmux.conf";
@@ -73,9 +74,12 @@ mkFeatureModule {
             programs.zsh = {
               enable = true;
               enableCompletion = true;
-              # Existing agent sessions can pass the retired bytecode cache
-              # address to new shells after a repository move.
-              envExtra = lib.optionalString (sinnixCfg.projects.entries ? polylogue) ''
+              envExtra = ''
+                # Shell tools leave the interactive agent's memory domain
+                # before executing, including tools from existing sessions.
+                source ~/.config/zsh/agent-tool-scope.zsh
+              '' + lib.optionalString (sinnixCfg.projects.entries ? polylogue) ''
+                # Existing sessions may retain the retired cache address.
                 if [ "''${PYTHONPYCACHEPREFIX:-}" = /realm/project/polylogue/.cache/pycache ] || [ "''${PYTHONPYCACHEPREFIX:-}" = /realm/projects/polylogue/repo/.cache/pycache ]; then
                   export PYTHONPYCACHEPREFIX=${lib.escapeShellArg "${sinnixCfg.projects.entries.polylogue.path}/.cache/pycache"}
                 fi

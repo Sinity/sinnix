@@ -187,6 +187,11 @@ mkServiceModule {
           scope = "user";
           path = "${userSliceRoot}/agent.slice";
         }
+        {
+          label = "user.agenttool";
+          scope = "user";
+          path = "${userSliceRoot}/agenttool.slice";
+        }
         # Historical label: this samples the job plane ROOT (agentctl.slice),
         # not the agentctl-work.slice nested inside it. The name predates the
         # inner slice and is kept so the existing series stays comparable; the

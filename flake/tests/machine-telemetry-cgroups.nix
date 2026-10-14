@@ -42,6 +42,7 @@ in
           name: "user.agentctl-pool-${lib.removePrefix "agentctl-" name}|user|${expectedPoolPath name}"
         ) poolSliceNames
         ++ [
+          "user.agenttool|user|${userSliceRoot}/agenttool.slice"
           "user.agentctl-work|user|${userSliceRoot}/agentctl.slice"
           "user.app|user|${userSliceRoot}/app.slice"
           "user.session|user|${userSliceRoot}/session.slice"

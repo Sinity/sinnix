@@ -9,6 +9,10 @@
 
 set -euo pipefail
 
+# Key repeat must not start concurrent stop/kill sequences.
+exec 9>/run/lock/sinnix-nuke-builds.lock
+flock -n 9 || exit 0
+
 SYSTEM_UNITS=(
   "borgbackup-job-persist.service"
   "borgbackup-job-realm.service"
