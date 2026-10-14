@@ -20,9 +20,10 @@ let
         in
         pkgs.symlinkJoin {
           name = "${unwrapped.name}-native-cli";
-          paths = [ unwrapped ];
+          paths = map (output: unwrapped.${output}) (unwrapped.meta.outputsToInstall or [ "out" ]);
           nativeBuildInputs = [ pkgs.makeWrapper ];
-          inherit (unwrapped) meta version;
+          inherit (unwrapped) version;
+          meta = unwrapped.meta // { outputsToInstall = [ "out" ]; };
           passthru = unwrapped.passthru or { };
           postBuild = ''
             unlink "$out/bin/hyprctl"

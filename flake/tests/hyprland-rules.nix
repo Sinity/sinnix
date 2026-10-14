@@ -68,7 +68,9 @@ in
       settings = hm.wayland.windowManager.hyprland.settings;
     in
     {
-      checks.hyprctl-native-abi = pkgs.runCommand "sinnix-hyprctl-native-abi" { } ''
+      checks.hyprctl-native-abi =
+        assert lib.all (output: builtins.hasAttr output hyprland) hyprland.meta.outputsToInstall;
+        pkgs.runCommand "sinnix-hyprctl-native-abi" { } ''
         mkdir -p "$TMPDIR/foreign" "$TMPDIR/runtime/hypr"
         export XDG_RUNTIME_DIR="$TMPDIR/runtime"
         printf 'synthetic incompatible library' > "$TMPDIR/foreign/libstdc++.so.6"
