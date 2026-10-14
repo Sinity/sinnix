@@ -160,7 +160,9 @@ def normalize_url(raw: str) -> str | None:
     try:
         port = parsed.port
     except ValueError:
-        port = None
+        return None
+    if ":" in host:
+        host = f"[{host}]"
     netloc = host if port in (None, default_port) else f"{host}:{port}"
     try:
         query_pairs = parse_qsl(parsed.query, keep_blank_values=True)

@@ -7,6 +7,24 @@ import pytest
 from test_commoncrawl import ledger
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("http://[2001:db8::1]/path", "http://[2001:db8::1]/path"),
+        ("https://[2001:DB8::1]:443/path#fragment", "https://[2001:db8::1]/path"),
+        ("https://[2001:db8::1]:8443/path", "https://[2001:db8::1]:8443/path"),
+        ("http://[::1]:80/", "http://[::1]/"),
+        ("https://example.invalid:invalid/path", None),
+        ("https://example.invalid:65536/path", None),
+        ("https://[2001:db8::1]:invalid/path", None),
+    ],
+)
+def test_normalization_keeps_ipv6_authorities_and_refuses_invalid_ports(raw, expected):
+    assert ledger.normalize_url(raw) == expected
+    if expected is not None:
+        assert ledger.normalize_url(expected) == expected
+
+
 def arguments(tmp_path, records):
     history = tmp_path / 'history.ndjson'
     history.write_text('\n'.join(json.dumps(row) for row in records) + '\n')
