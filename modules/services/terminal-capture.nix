@@ -43,10 +43,6 @@ mkServiceModule {
         pkgs.jq
       ];
 
-      systemd.tmpfiles.rules = [
-        "d ${recordingsDir} 0700 ${username} users -"
-      ];
-
       home-manager.users.${username} =
         {
           lib,

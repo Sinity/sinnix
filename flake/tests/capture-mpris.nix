@@ -12,6 +12,7 @@
           testLib.mountTmpfsRoots
           testLib.baseTestConfig
           {
+            sinnix.services.terminal-capture.enable = true;
             sinnix.services.capture-kitty-scrollback.enable = true;
             sinnix.services.capture-mpris.enable = true;
             sinnix.services.capture-audio.enable = true;
@@ -54,12 +55,23 @@
               builtins.all
                 (
                   path:
-                  builtins.elem "d ${path} 0700 ${config.sinnix.user.name} users -" config.systemd.tmpfiles.rules
+                  let
+                    rules = builtins.filter (rule: lib.hasPrefix "d ${path} " rule) config.systemd.tmpfiles.rules;
+                    expected = "d ${path} 0700 ${config.sinnix.user.name} users -";
+                  in
+                  rules != [ ] && builtins.all (rule: rule == expected) rules
                 )
                 [
+                  config.sinnix.paths.capturePaths.activitywatch
+                  "${config.sinnix.paths.capturePaths.activitywatch}/raw"
+                  config.sinnix.paths.capturePaths.screenshot
+                  "${config.sinnix.paths.capturePaths.screenshot}/mpv"
+                  config.sinnix.paths.capturePaths.asciinema
                   config.sinnix.paths.capturePaths.kitty-scrollback
                   config.sinnix.paths.capturePaths.mpris
                   config.sinnix.paths.capturePaths.audio
+                  "${config.sinnix.paths.capturePaths.audio}/raw"
+                  "${config.sinnix.paths.capturePaths.audio}/archive"
                   config.sinnix.paths.capturePaths.audio-devices
                   config.sinnix.paths.capturePaths.audio-topology
                   config.sinnix.paths.capturePaths.audio-index
