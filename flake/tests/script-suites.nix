@@ -84,6 +84,7 @@
             "sinnix-phone"
             "sinnix-quest"
             "sinnix-xr"
+            "rawlog"
             "sinnix-remote-command"
           ];
           nativeBuildInputs = [

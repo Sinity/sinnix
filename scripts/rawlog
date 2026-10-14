@@ -3,6 +3,7 @@
 # description: Append and browse the operator raw-log stream
 # runtimeInputs: coreutils less gnused tofi libnotify
 set -euo pipefail
+umask 077
 
 # Quick append-only logger for the raw-log stream.
 # Usage: rawlog [message...]
