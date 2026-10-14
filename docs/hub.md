@@ -171,6 +171,11 @@ sinnix-ops-reducer capabilities --kind script  # one kind
 page next to the live Hyprland binds, so the same answer is one keystroke away
 from the desktop and one tab away from the phone.
 
+The capability page and CLI distinguish a missing declaration index from an
+unavailable or invalid one. A valid index with no declarations remains present.
+Read diagnostics are excluded from declaration fingerprints, and census access
+errors remain visible without implying zero observed usage.
+
 ## Why it cannot be seen from the LAN
 
 Two independent layers, either of which would suffice alone.

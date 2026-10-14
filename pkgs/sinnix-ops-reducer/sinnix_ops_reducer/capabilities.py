@@ -63,21 +63,41 @@ VERDICT_TONES = {
 }
 
 
-def load_index(path: Path | None) -> dict[str, Any]:
-    """The Nix-generated index, or an empty one.
+class DeclarationIndex(dict):
+    """Read diagnostics stay outside the declaration fingerprint."""
 
-    Schema-checked the same way the hub manifest is: a document of the wrong
-    shape is treated as absent rather than rendered as if it were ours.
+    def __init__(self, value=(), *, status: str, reason: str = ""):
+        super().__init__(value)
+        self.metadata = {"status": status, "reason": reason}
+
+
+def load_index(path: Path | None) -> dict[str, Any]:
+    """Read declarations with separate missing/access/format diagnostics.
+
+    Invalid declarations supply no rows. Diagnostics are attributes, so they
+    do not change the digest used to join a census to its declarations.
     """
     if path is None:
-        return {}
+        return DeclarationIndex(status="not-configured")
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+    except FileNotFoundError:
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            return DeclarationIndex(status="missing")
+        except OSError as error:
+            return DeclarationIndex(status="unavailable", reason=str(error))
+        return DeclarationIndex(status="unavailable", reason="index link target is unavailable")
+    except OSError as error:
+        return DeclarationIndex(status="unavailable", reason=str(error))
+    except (UnicodeError, json.JSONDecodeError) as error:
+        return DeclarationIndex(status="invalid", reason=str(error))
     if not isinstance(value, dict) or value.get("schema") != SCHEMA:
-        return {}
-    return value
+        return DeclarationIndex(status="invalid", reason="unsupported declaration schema")
+    if not isinstance(value.get("rows"), list):
+        return DeclarationIndex(status="invalid", reason="declaration rows must be an array")
+    return DeclarationIndex(value, status="selected")
 
 
 class Census(dict):
@@ -160,8 +180,9 @@ def load_census(path: Path | None, *, progress: Callable[[int, int], None] | Non
     except InterruptedError:
         return Census(metadata={"status": "cancelled", "bytes_scanned": scanned,
                                 "coverage_gaps": [{"source": "census", "status": "cancelled", "reason": "observation selection cancelled; no absence inferred"}]})
-    except OSError:
-        return Census()
+    except OSError as error:
+        return Census(metadata={"status": "unavailable", "coverage_gaps": [
+            {"source": "census", "status": "unavailable", "reason": str(error)}]})
 
 
 def _select_census(records, scan_counts) -> Census:
@@ -348,7 +369,8 @@ def merge(
         "revision": index.get("revision"),
         # The hub supplies its own rows, so a non-empty view is NOT evidence
         # that the Nix-side index was read. Consumers say which one is missing.
-        "index_present": bool(index.get("rows")),
+        "index_present": index.get("schema") == SCHEMA,
+        "index_status": getattr(index, "metadata", {"status": "selected" if index.get("schema") == SCHEMA else "unavailable"}),
         "rows": rows,
         "groups": groups,
         "counts": {group["kind"]: len(group["rows"]) for group in groups},

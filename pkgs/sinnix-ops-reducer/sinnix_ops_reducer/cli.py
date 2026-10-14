@@ -164,6 +164,8 @@ def capabilities_command(argv: list[str]) -> int:
         )
         return 1
     from .capabilities import coverage_lines, evidence_lines
+    index_status = view.get("index_status") or {}
+    print(f"Declaration index: {index_status.get('status', 'unavailable')}; {index_status.get('reason', '')}")
     status = view.get("census_status") or {}
     print(f"Census: {status.get('status', 'unavailable')}; collected at {status.get('ts', 'unknown')}; {len(status.get('coverage_gaps') or [])} coverage gaps")
     for detail in coverage_lines(status):

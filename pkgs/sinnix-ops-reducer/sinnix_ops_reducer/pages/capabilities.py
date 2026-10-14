@@ -107,11 +107,14 @@ def render_capabilities(
     host = str(manifest.get("host") or view.get("host") or "sinnix")
     groups = view.get("groups") or []
     missing = ""
+    index_status = view.get("index_status") or {}
+    if index_status.get("status") != "selected":
+        missing = f'<p class="sub">Declaration index: {esc(index_status.get("status", "unavailable"))}; {esc(index_status.get("reason", ""))}</p>'
     if not view.get("index_present"):
         # The hub's own routes are supplied by this process, so rows exist even
         # with no index at all. Saying "unavailable" only when the page is empty
         # would hide exactly that case.
-        missing = card(
+        missing += card(
             "Capability index unavailable",
             '<p class="sub">Only the hub\'s own routes are listed below. The '
             "rest of this page renders "

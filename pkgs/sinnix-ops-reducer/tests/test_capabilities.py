@@ -25,7 +25,10 @@ import hashlib
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any
+
+import pytest
 
 from sinnix_ops_reducer import capabilities, pages
 from sinnix_ops_reducer.pages.capabilities import render_capabilities
@@ -302,6 +305,58 @@ def test_a_missing_census_degrades_to_verdictless_rows(tmp_path) -> None:
     assert view["censused"] == 0
     assert view["index_present"]
     assert len(view["rows"]) == len(INDEX["rows"]) + len(pages.PAGES)
+
+
+@pytest.mark.parametrize("kind, status", [("utf8", "invalid"), ("directory", "unavailable"), ("broken-link", "unavailable"), ("missing", "missing")])
+def test_index_read_failures_keep_their_diagnosis(tmp_path, kind, status):
+    path = tmp_path / "index.json"
+    if kind == "utf8":
+        path.write_bytes(b"\xff")
+    elif kind == "directory":
+        path.mkdir()
+    elif kind == "broken-link":
+        path.symlink_to(tmp_path / "missing-target")
+    view = capabilities.build(path, None)
+    assert view["index_status"]["status"] == status
+    assert not view["index_present"]
+
+
+def test_access_errors_remain_visible(tmp_path, monkeypatch):
+    def denied(*args, **kwargs):
+        raise PermissionError("neutral denied")
+    monkeypatch.setattr(Path, "read_text", denied)
+    view = capabilities.build(tmp_path / "index.json", None)
+    assert view["index_status"] == {"status": "unavailable", "reason": "neutral denied"}
+
+
+def test_valid_empty_index_is_present_and_keeps_its_fingerprint(tmp_path):
+    path = tmp_path / "index.json"
+    value = {**INDEX, "rows": []}
+    path.write_text(json.dumps(value))
+    selected = capabilities.load_index(path)
+    assert json.dumps(selected, sort_keys=True) == json.dumps(value, sort_keys=True)
+    view = capabilities.build(path, None)
+    assert view["index_present"]
+    assert view["index_status"]["status"] == "selected"
+
+
+def test_index_error_is_escaped_in_the_page(tmp_path, monkeypatch):
+    def denied(*args, **kwargs):
+        raise PermissionError("<img src=x onerror=alert(1)>")
+    monkeypatch.setattr(Path, "read_text", denied)
+    view = capabilities.build(tmp_path / "index.json", None)
+    body = render_capabilities({}, view, "neutral timestamp")
+    assert "&lt;img" in body
+    assert "<img src=x" not in body
+
+
+def test_census_access_reason_survives_the_projection(tmp_path, monkeypatch):
+    def denied(*args, **kwargs):
+        raise PermissionError("neutral census denied")
+    monkeypatch.setattr(Path, "open", denied)
+    view = capabilities.build(None, tmp_path / "census.jsonl")
+    assert view["census_status"]["status"] == "unavailable"
+    assert any("neutral census denied" in line for line in view["census_details"])
 
 
 def test_hub_routes_are_capabilities_the_index_cannot_supply() -> None:
