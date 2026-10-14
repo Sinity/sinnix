@@ -1693,3 +1693,46 @@ def test_running_unit_cannot_prove_command_success() -> None:
         "Result": "success", "ExecMainStatus": "0", "ExecMainCode": "0",
     }
     assert run_module._classify(False, properties) == (run_module.Outcome.VANISHED, VANISHED_EXIT_CODE)
+
+
+
+def test_real_retained_orphan_is_released_by_the_next_multi_slot_admission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_pueue: FakePueue
+) -> None:
+    user_manager()
+    monkeypatch.setenv("PUEUE_GROUP", "fixture")
+    fake_pueue.groups["fixture"] = 2
+    first = write_launch(tmp_path, name="first.json", argv=["true"])
+    task_id = fake_pueue.add(
+        group="fixture", label="fixture:check", command=("agentctl-run", str(first)),
+        working_directory=tmp_path,
+    )
+    fake_pueue.start(task_id)
+    first_unit = unit_for(first, "fixture")
+    next_launch = write_launch(tmp_path, name="next.json", argv=["true"])
+    next_unit = unit_for(next_launch, "fixture")
+    original = run_module._wait_for_unit
+
+    class LostObserver(RuntimeError):
+        pass
+
+    def lose_observer(*args: Any, **kwargs: Any) -> Any:
+        properties = original(*args, **kwargs)
+        assert properties is not None and properties["SubState"] == "exited"
+        raise LostObserver
+
+    try:
+        with monkeypatch.context() as fault:
+            fault.setattr(run_module, "_wait_for_unit", lose_observer)
+            with pytest.raises(LostObserver):
+                main([str(first)])
+        assert run_module.unit_properties(first_unit)["SubState"] == "exited"
+        fake_pueue.kill_directly(task_id)
+        assert main([str(next_launch)]) == 0
+        assert run_module.unit_properties(first_unit) == {}
+        assert run_module.unit_properties(next_unit) == {}
+        assert f"settled_orphan {first_unit}" in log_of(tmp_path)
+    finally:
+        for unit in (first_unit, next_unit):
+            run_module._systemctl("stop", unit)
+            run_module._systemctl("reset-failed", unit)
