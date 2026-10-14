@@ -229,6 +229,37 @@ in
             ${wrappers.mcpLynchpinBin}/bin/mcp-lynchpin fixture-argument
             touch "$out"
           '';
+        cli-lynchpin-host-storage =
+          let
+            host = inputs.self.nixosConfigurations.sinnix-prime.config;
+            runtime = lib.findFirst (
+              package: lib.getName package == "lynchpin-host-runtime"
+            ) (throw "Lynchpin host runtime is absent") host.environment.systemPackages;
+          in
+          pkgs.runCommand "cli-lynchpin-host-storage" { } ''
+            unset LYNCHPIN_CHISEL_CACHE_ROOT LYNCHPIN_CHISEL_SCRATCH_ROOT
+            export LYNCHPIN_REPO_ROOT="$TMPDIR/repo"
+            export LYNCHPIN_LOCAL_ROOT="$TMPDIR/local"
+            export LYNCHPIN_FILESYSTEM_LAYOUT=${../../pkgs/sinnix-lib/sinnix_lib/filesystem-layout.json}
+            ${runtime}/bin/lynchpin-python - <<'EOF'
+            from lynchpin.core.config import get_config
+            cfg = get_config()
+            assert str(cfg.chisel_cache()) == ${builtins.toJSON host.environment.variables.LYNCHPIN_CHISEL_CACHE_ROOT}
+            assert str(cfg.chisel_scratch()) == ${builtins.toJSON host.environment.variables.LYNCHPIN_CHISEL_SCRATCH_ROOT}
+            EOF
+            export LYNCHPIN_CHISEL_CACHE_ROOT="$TMPDIR/explicit-cache"
+            export LYNCHPIN_CHISEL_SCRATCH_ROOT="$TMPDIR/explicit-scratch"
+            ${runtime}/bin/lynchpin-python - <<'EOF'
+            import os
+            from lynchpin.core.config import get_config
+            cfg = get_config()
+            assert str(cfg.chisel_cache()) == os.environ["LYNCHPIN_CHISEL_CACHE_ROOT"]
+            assert str(cfg.chisel_scratch()) == os.environ["LYNCHPIN_CHISEL_SCRATCH_ROOT"]
+            os.environ["AGENTCTL_SCRATCH"] = os.environ["TMPDIR"] + "/job"
+            assert str(cfg.chisel_scratch()) == os.environ["AGENTCTL_SCRATCH"] + "/chisel"
+            EOF
+            touch "$out"
+          '';
         cli-lynchpin-python-runtime = pkgs.runCommand "cli-lynchpin-python-runtime" { } ''
           mkdir poisoned
           printf 'raise RuntimeError("foreign Python path was inherited")\n' > poisoned/duckdb.py

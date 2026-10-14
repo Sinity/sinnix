@@ -1,7 +1,9 @@
 # Lynchpin substrate service
 #
 # Makes the lynchpin-mcp binary available on PATH and sets env vars for
-# ergonomic CLI use. No persistent daemon — the MCP server is invoked on
+# ergonomic CLI use. Host entry points also bind Chisel cache and scratch
+# defaults for sessions without those variables, preserving explicit overrides.
+# No persistent daemon — the MCP server is invoked on
 # demand by AI agent runtimes via the stdio transport registered in
 # mcp-registry.nix.
 #
@@ -67,6 +69,35 @@ mkServiceModule {
         LYNCHPIN_CHISEL_CACHE_ROOT = "${config.sinnix.paths.stateRoot}/cache/chisel";
         LYNCHPIN_CHISEL_SCRATCH_ROOT = "${config.sinnix.paths.realmRoot}/tmp/work/lynchpin-chisel";
       };
+      # Existing sessions do not acquire newly declared login variables.
+      # Bind defaults at the host entry points, retaining explicit overrides.
+      hostRuntime =
+        pkgs.runCommand "lynchpin-host-runtime"
+          {
+            nativeBuildInputs = [ pkgs.makeWrapper ];
+          }
+          ''
+            mkdir -p "$out/bin"
+            ${lib.concatStringsSep "\n" (
+              lib.mapAttrsToList
+                (name: package: ''
+                  makeWrapper ${package}/bin/${name} "$out/bin/${name}" \
+                    ${lib.escapeShellArgs (
+                      lib.concatLists (
+                        lib.mapAttrsToList (key: value: [
+                          "--set-default"
+                          key
+                          value
+                        ]) chiselEnvironment
+                      )
+                    )}
+                '')
+                {
+                  lynchpin-python = scriptPkgs.lynchpin-python;
+                  lynchpin-mcp = scriptPkgs.lynchpin-cli;
+                }
+            )}
+          '';
       localHotDirs = [
         "cache"
         "enrich"
@@ -126,10 +157,7 @@ mkServiceModule {
     in
     lib.mkMerge [
       {
-        environment.systemPackages = [
-          scriptPkgs.lynchpin-cli
-          scriptPkgs.lynchpin-python
-        ];
+        environment.systemPackages = [ hostRuntime ];
 
         environment.variables = chiselEnvironment // {
           LYNCHPIN_MCP_PROVIDED = "1";
