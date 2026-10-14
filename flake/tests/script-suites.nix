@@ -77,6 +77,12 @@
     in
     {
       checks = {
+        memory-audit-suite = mkScriptSuite {
+          name = "sinnix-memory-audit";
+          suiteDir = ../../pkgs/sinnix-memory-audit/tests;
+          scripts = [ "sinnix-memory-audit" ];
+          nativeBuildInputs = [ pkgs.bash pkgs.findutils pkgs.gawk ];
+        };
         audit-drain-suite = mkScriptSuite {
           name = "sinnix-audit-drain";
           suiteDir = ../../pkgs/sinnix-audit-drain/tests;

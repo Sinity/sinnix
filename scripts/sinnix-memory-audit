@@ -3,6 +3,7 @@
 # description: Produce a read-only proposal report for stale agent memory entries
 # runtimeInputs: bash coreutils findutils gawk gnugrep jq
 set -euo pipefail
+umask 077
 
 report_dir="${SINNIX_MEMORY_AUDIT_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/memory-audit}"
 days="${SINNIX_MEMORY_STALE_DAYS:-90}"
@@ -28,7 +29,7 @@ if [ -z "$output" ]; then
   output="$report_dir/$(date -u +%Y%m%dT%H%M%SZ).jsonl"
 fi
 mkdir -p "$(dirname "$output")"
-tmp="${output}.tmp"
+tmp="$(mktemp "$(dirname "$output")/.memory-audit.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
 
 now="$(date +%s)"
@@ -36,18 +37,30 @@ stale_seconds=$((days * 86400))
 files=()
 for root in "${roots[@]}"; do
   [ -d "$root" ] || continue
-  while IFS= read -r file; do
+  while IFS= read -r -d '' file; do
     files+=("$file")
-  done < <(find "$root" -type f \( -name MEMORY.md -o -name '*memory*.md' \) -print)
+  done < <(find "$root" -type f \( -name MEMORY.md -o -name '*memory*.md' \) -print0)
 done
 
-printf '%s\n' "${files[@]}" | sort -u | while IFS= read -r file; do
+printf '%s\0' "${files[@]}" | sort -zu | while IFS= read -r -d '' file; do
   [ -n "$file" ] || continue
-  awk -v file="$file" -v now="$now" -v stale_seconds="$stale_seconds" '
-    function json(value) {
-      gsub(/"/, "\\\"", value)
-      gsub(/\\/, "\\\\", value)
-      return "\"" value "\""
+  SINNIX_MEMORY_AUDIT_FILE="$file" awk -v now="$now" -v stale_seconds="$stale_seconds" '
+    BEGIN {
+      file = ENVIRON["SINNIX_MEMORY_AUDIT_FILE"]
+      for (code = 0; code < 32; code++) controls = controls sprintf("%c", code)
+    }
+    function json(value, result, position, character, control) {
+      result = "\""
+      for (position = 1; position <= length(value); position++) {
+        character = substr(value, position, 1)
+        if (character == "\\") result = result "\\\\"
+        else if (character == "\"") result = result "\\\""
+        else {
+          control = index(controls, character)
+          result = result (control ? sprintf("\\u%04x", control - 1) : character)
+        }
+      }
+      return result "\""
     }
     function emit(kind, line_no, detail, value) {
       printf "{\"file\":%s,\"line\":%d,\"kind\":%s,\"detail\":%s%s}\n", json(file), line_no, json(kind), json(detail), value == "" ? "" : ",\"value\":" json(value)
@@ -64,13 +77,14 @@ printf '%s\n' "${files[@]}" | sort -u | while IFS= read -r file; do
         emit("stale_date", NR, "dated entry is older than the configured threshold", date_value)
     }
     {
+      original_line = $0
       while (match($0, /\/[A-Za-z0-9_.+@%~-]+(\/[A-Za-z0-9_.+@%~-]+)+/)) {
         path = substr($0, RSTART, RLENGTH)
         if (filesystem_path(path) && system("test -e " path) != 0)
           emit("dead_path", NR, "absolute path does not exist", path)
         $0 = substr($0, RSTART + RLENGTH)
       }
-      if ($0 ~ /(contradict|no longer|instead|obsolete|supersed)/)
+      if (original_line ~ /(contradict|no longer|instead|obsolete|supersed)/)
         emit("review_required", NR, "possible semantic contradiction requires human review", "")
     }
   ' "$file"
