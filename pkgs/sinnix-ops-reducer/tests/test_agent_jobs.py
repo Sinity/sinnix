@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -33,10 +34,21 @@ def test_native_timeout_reaps_descendant_before_closing_output(tmp_path):
         client._call([sys.executable, str(script)])
     pid = int(pidfile.read_text())
     state = Path(f"/proc/{pid}/stat")
+    def stopped():
+        try:
+            return state.read_text().split(") ", 1)[1].startswith("Z ")
+        except FileNotFoundError:
+            return True
+
     try:
-        assert not state.exists() or state.read_text().split(") ", 1)[1].startswith("Z ")
+        # SIGKILL delivery is asynchronous for non-child descendants. The
+        # parent is reaped, but this child may still be exiting on another CPU.
+        deadline = time.monotonic() + 1
+        while not stopped() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert stopped()
     finally:
-        if state.exists() and not state.read_text().split(") ", 1)[1].startswith("Z "):
+        if not stopped():
             import os
             import signal
             os.kill(pid, signal.SIGKILL)

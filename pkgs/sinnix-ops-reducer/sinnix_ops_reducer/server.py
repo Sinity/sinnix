@@ -620,6 +620,29 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized():
             self._write(HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
             return
+        json_route = self.path in {
+            FEEDBACK_PATH,
+            FAILURE_PATH,
+            "/v1/actions",
+            "/v1/actions/prepare",
+        } or terminals.SEND_RE.match(self.path) is not None
+        if json_route:
+            content_types = self.headers.get_all("Content-Type", [])
+            if len(content_types) != 1 or (
+                content_types[0].split(";", 1)[0].strip().casefold()
+                != "application/json"
+            ):
+                # Refuse before consuming a body or invoking its owner. Closing
+                # also prevents unread body bytes becoming another request.
+                self.close_connection = True
+                writer = (
+                    self._write_feedback if self.path == FEEDBACK_PATH else self._write
+                )
+                writer(
+                    HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+                    {"error": "one application/json Content-Type is required"},
+                )
+                return
         if self.path == FEEDBACK_PATH:
             self._spool_feedback()
             return

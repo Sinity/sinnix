@@ -360,6 +360,11 @@ The spool itself is write-only. There is no route that reads it back: serving
 arbitrary posted payloads would turn a sink into an exfiltration surface for
 the personal analysis those annotations describe. That refusal stands.
 
+Feedback, terminal send, action prepare/execute and failure-notification POSTs
+require exactly one `application/json` Content-Type (parameters are accepted).
+Missing, duplicate or other media types receive 415 before any body read or
+owner call. The phone receiver keeps its separate native upload protocol.
+
 A `sinnix-elicit-v1` record arriving in the spool starts the drain
 (`sinnix-elicit autoingest`, as a transient `sinnix-elicit-autoingest` unit)
 instead of a 120s timer looking for one. The trigger coalesces: a comparison

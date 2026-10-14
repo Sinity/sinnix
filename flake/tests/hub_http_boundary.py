@@ -163,6 +163,7 @@ with tempfile.TemporaryDirectory() as temporary:
             for header in ("Origin", "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest", "Sec-Fetch-User"):
                 request("/phone/v1/intent", {header: "same-origin"}, 403)
             request("/terminals/not-a-terminal", {"Origin": "https://example.invalid"}, 403, send_body=False)
+            request("/terminals/v1/windows/1/2/send", {"Origin": "https://example.invalid", "Content-Type": "text/plain"}, 403, send_body=False)
             print("hub browser boundary: native, same-origin and local-report routes preserved; forged requests never reached owner")
         finally:
             process.terminate()

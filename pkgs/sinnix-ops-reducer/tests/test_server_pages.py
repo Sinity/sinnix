@@ -15,6 +15,83 @@ from urllib.parse import urlsplit
 import pytest
 
 
+@pytest.mark.parametrize(
+    "route",
+    [
+        "/feedback",
+        "/v1/health/failure",
+        "/v1/actions",
+        "/v1/actions/prepare",
+        "/terminals/v1/windows/1/2/send",
+    ],
+)
+@pytest.mark.parametrize(
+    "content_types",
+    [[], ["text/plain"], [""], ["application/json", "application/json"]],
+)
+def test_json_posts_refuse_media_types_before_body_or_owner(
+    hub_server_factory, monkeypatch, route, content_types
+) -> None:
+    from sinnix_ops_reducer.server import Handler
+
+    calls = []
+    for method in ("_spool_feedback", "_record_failure", "_serve_terminal_post"):
+        monkeypatch.setattr(Handler, method, lambda self: calls.append("owner"))
+
+    class Actions:
+        def prepare(self, value):
+            calls.append("prepare")
+
+        def execute(self, value):
+            calls.append("execute")
+
+    parsed = urlsplit(hub_server_factory(actions=Actions()))
+    connection = HTTPConnection(parsed.hostname, parsed.port, timeout=2)
+    try:
+        connection.putrequest("POST", route)
+        for value in content_types:
+            connection.putheader("Content-Type", value)
+        connection.putheader("Content-Length", "100")
+        connection.endheaders()
+        # Deliberately send no body. A reader would block instead of refusing.
+        response = connection.getresponse()
+        assert response.status == 415
+        assert "application/json" in json.loads(response.read())["error"]
+        assert calls == []
+    finally:
+        connection.close()
+
+
+@pytest.mark.parametrize(
+    "content_type", ["application/json", "Application/JSON; charset=utf-8"]
+)
+def test_json_action_media_type_preserves_native_dispatch(
+    hub_server_factory, content_type
+) -> None:
+    calls = []
+
+    class Actions:
+        def prepare(self, value):
+            calls.append(value)
+            return {"status": "prepared"}
+
+    parsed = urlsplit(hub_server_factory(actions=Actions()))
+    connection = HTTPConnection(parsed.hostname, parsed.port, timeout=2)
+    try:
+        connection.request(
+            "POST",
+            "/v1/actions/prepare",
+            b'{"fixture":true}',
+            {"Content-Type": content_type},
+        )
+        response = connection.getresponse()
+        assert response.status == 200
+        assert json.loads(response.read()) == {"status": "prepared"}
+        assert calls == [{"fixture": True}]
+    finally:
+        connection.close()
+
+
 @pytest.fixture
 def hub_server(hub_server_factory, tmp_path: Path) -> str:
     inventory = tmp_path / "inventory.json"
