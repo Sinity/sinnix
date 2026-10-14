@@ -326,9 +326,21 @@ mkServiceModule {
 
           # The phone's native live plane. The receiver rejects browser
           # Origin/Fetch-Metadata before reading or acknowledging a request.
-          # Preserve those headers through the proxy; native app and drain
-          # clients omit them.
+          # Reject at the proxy too, before it can wait for a request body.
+          # Native app and drain clients omit these headers.
           handle_path /phone/* {
+            ${lib.concatStringsSep "\n" (
+              lib.imap0 (index: header: ''
+                @phoneBrowser${toString index} header ${header} *
+                respond @phoneBrowser${toString index} "browser request refused" 403
+              '') [
+                "Origin"
+                "Sec-Fetch-Site"
+                "Sec-Fetch-Mode"
+                "Sec-Fetch-Dest"
+                "Sec-Fetch-User"
+              ]
+            )}
             reverse_proxy unix/${phoneSocket}
           }
 
