@@ -1,6 +1,6 @@
 # Local AI activation
 
-This host keeps local AI services on demand. The public loopback port is a stable client-facing socket. A systemd proxy starts the backend when the first request arrives and tears it down after the configured idle window. This keeps model weights and GPU allocations out of the way when they are not being used.
+Most local AI backends use on-demand socket activation. A systemd proxy starts them on the first request and stops them after their idle window. Open WebUI is a direct, manually started frontend; its URL does not start the service. `sinnix ai list` distinguishes boot, on-demand and manual services from the runtime inventory and installed units.
 
 ## Service map
 
@@ -10,7 +10,7 @@ This host keeps local AI services on demand. The public loopback port is a stabl
 | LiteLLM gateway        | `127.0.0.1:4000`  | OpenAI `/v1/chat/completions` and Anthropic `/v1/messages`                                                                                | on demand                        | translates agent clients to local backends           |
 | Muse Glimmer           | `127.0.0.1:8083`  | direct llama.cpp model `muse-glimmer` (abliterated Q4_K_M)                                                                                | on demand, 15 minute idle window | CUDA plus CPU/RAM hybrid, one GPU inference occupant |
 | Qwen VRAM profile      | `127.0.0.1:8085`  | direct llama.cpp fully resident Qwen profile                                                                                              | on demand, 15 minute idle window | CUDA, one GPU inference occupant                     |
-| Open WebUI             | `127.0.0.1:8080`  | browser chat over Ollama                                                                                                                  | on demand                        | frontend only; currently targets Ollama              |
+| Open WebUI             | `127.0.0.1:8080`  | browser chat over Ollama and LiteLLM                                                                                                       | manual start                     | frontend only; no idle socket proxy                  |
 | llama.cpp reranker     | `127.0.0.1:8081`  | `/v1/rerank`                                                                                                                              | on demand                        | CPU resident by policy, outside GPU admission        |
 | Speech to text         | `127.0.0.1:8090`  | `/v1/audio/transcriptions` or `sinnix stt`                                                                                                | on demand                        | Parakeet CPU service                                 |
 | Kokoro TTS             | `127.0.0.1:8890`  | `/v1/audio/speech`                                                                                                                        | on demand                        | CPU service                                          |
@@ -161,7 +161,9 @@ The same wrappers can select `local-coder`, `local-reasoner`, `local-thinker`, o
 
 ## Open WebUI
 
-Open WebUI is available at `http://127.0.0.1:8080`. Its current configuration points directly at Ollama and uses the roster's embedding model for document chat. It does not currently list Glimmer because Glimmer is behind the LiteLLM gateway rather than Ollama. Use the direct Glimmer endpoint or LiteLLM for Glimmer sessions.
+Start it with `sinnix ai start open-webui`, then open `http://127.0.0.1:8080` or its hub frontend on port 8881. When the backend is stopped, the hub proxy returns 502; visiting the URL does not activate it. `sinnix ai stop open-webui` stops it explicitly, and pinning is unavailable because there is no idle proxy.
+
+The configuration provides Ollama models and LiteLLM lanes, including the direct llama.cpp profiles, through `OPENAI_API_BASE_URLS`. Document embeddings use the roster's Ollama embedding model. The actual model list still depends on those owners being reachable.
 
 ## Speech, reranking, and media generation
 

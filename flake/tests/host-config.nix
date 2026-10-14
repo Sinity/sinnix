@@ -35,6 +35,15 @@
             touch "$out"
           '';
 
+      checks.ai-control-cli = pkgs.runCommand "ai-control-cli"
+        {
+          nativeBuildInputs = [ pkgs.python3 pkgs.bash pkgs.jq pkgs.gnugrep pkgs.gawk pkgs.gnused pkgs.coreutils ];
+        }
+        ''
+          python ${./ai_control_cli.py} ${../../scripts/sinnix-ai}
+          touch "$out"
+        '';
+
       checks.hub-http-boundary =
         let
           service = host.home-manager.users.${host.sinnix.user.name}.systemd.user.services.sinnix-hub;

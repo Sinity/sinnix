@@ -18,15 +18,8 @@ DEFAULT_PIN_DURATION="2h"
 INVENTORY="${SINNIX_RUNTIME_INVENTORY_FILE:-/etc/sinnix/runtime-inventory.json}"
 OPS_SOCKET="${XDG_RUNTIME_DIR:-/run/user/1000}/sinnix/ops.sock"
 
-# Every service fact below (unit, endpoint, idle timeout, admission key,
-# manager, restartability) is resolved live from the runtime inventory --
-# this script carries no second copy of ai-control.nix's registry. Exactly
-# two things identify a service by name at all: the surface's `ai` field and
-# (for the one registered AI frontend with no such
-# proxy -- open-webui, which fronts Ollama directly) the hub module's own
-# declared `aiServices` list, read out of the live reducer's ExecStart
-# rather than duplicated here. Neither is a private table: both are the
-# actual Nix-declared source, read at run time.
+# AI membership and service facts come from the runtime inventory, including
+# direct services. Discovery does not depend on the hub being enabled or up.
 inventory_json() {
   if [[ ! -r "$INVENTORY" ]]; then
     echo "sinnix-ai: runtime inventory unreadable: $INVENTORY" >&2
@@ -35,28 +28,15 @@ inventory_json() {
   cat "$INVENTORY"
 }
 
-hub_manifest_path() {
-  systemctl --user show sinnix-ops-reducer.service -p ExecStart --value 2>/dev/null \
-    | grep -oE -- '--hub-manifest [^ ]+' | awk '{print $2}' || true
-}
-
-manifest_ai_services() {
-  local path
-  path="$(hub_manifest_path)"
-  [[ -n "$path" && -r "$path" ]] || return 0
-  jq -r '.aiServices[]?' "$path" 2>/dev/null || true
-}
-
-proxy_backed_services() {
-  inventory_json | jq -r '
-    .surfaces as $s
-    | $s | keys[]
-    | select($s[.].ai != null and $s[.].activation.mode == "socket-proxy")
-  '
-}
-
 service_names() {
-  { proxy_backed_services; manifest_ai_services; } | sort -u
+  inventory_json | jq -r '
+    if (.surfaces | type) != "object" then
+      error("runtime inventory surfaces must be an object")
+    else
+      .surfaces | to_entries | sort_by(.key)[]
+      | select(.value.ai != null) | .key
+    end
+  '
 }
 
 usage() {
@@ -112,7 +92,9 @@ unit_state() {
 autostart_state() {
   local wanted
   wanted=$(systemctl show -p WantedBy --value "$1" 2>/dev/null || true)
-  if [[ -n "$wanted" ]]; then echo "boot"; else echo "on-demand"; fi
+  if [[ -n "$wanted" ]]; then echo "boot"
+  elif [[ "${2:-0}" == 1 ]]; then echo "on-demand"
+  else echo "manual"; fi
 }
 
 # TCP-connect only, deliberately -- an HTTP health-check path is per-backend
@@ -163,12 +145,12 @@ pin_summary() {
 
 # Populates REG_NAME/REG_REGISTERED/REG_UNIT/REG_ENDPOINT/REG_IDLE/
 # REG_ADMISSION/REG_HAS_PROXY for one service name.
-# REG_REGISTERED=0 means the name is a known AI service on this system but
-# has no live surface here (module disabled) -- distinct from an unknown
-# name entirely, which is rejected before this runs.
+# REG_REGISTERED=0 covers a surface removed between the membership and
+# detail reads. Unknown names are rejected before the detail read.
 lookup() {
-  local name="$1" surface
-  if ! service_names | grep -qxF "$name"; then
+  local name="$1" surface names
+  names="$(service_names)"
+  if ! grep -qxF "$name" <<<"$names"; then
     echo "unknown service: ${name} (see: sinnix-ai list)" >&2
     exit 1
   fi
@@ -189,6 +171,8 @@ lookup() {
 }
 
 cmd_list() {
+  local names
+  names="$(service_names)"
   printf '%-12s %-13s %-22s %-10s %-14s %s\n' NAME STATE ENDPOINT START PIN ADMISSION
   while IFS= read -r name; do
     [[ -n "$name" ]] || continue
@@ -196,11 +180,11 @@ cmd_list() {
     local state="not-installed" astart="-" pin="-" admission="${REG_ADMISSION:--}"
     if [[ "$REG_REGISTERED" == 1 ]]; then
       state=$(unit_state "$REG_UNIT")
-      [[ "$state" == "not-installed" ]] || astart=$(autostart_state "$REG_UNIT")
+      [[ "$state" == "not-installed" ]] || astart=$(autostart_state "$REG_UNIT" "$REG_HAS_PROXY")
       pin=$(pin_summary "$name")
     fi
     printf '%-12s %-13s %-22s %-10s %-14s %s\n' "$name" "$state" "${REG_ENDPOINT:--}" "$astart" "$pin" "$admission"
-  done < <(service_names)
+  done <<<"$names"
 }
 
 cmd_gpu() {
@@ -225,7 +209,7 @@ cmd_status() {
     return
   fi
   echo "service: $REG_NAME"
-  echo "unit:    $REG_UNIT ($(unit_state "$REG_UNIT"), $(autostart_state "$REG_UNIT"))"
+  echo "unit:    $REG_UNIT ($(unit_state "$REG_UNIT"), $(autostart_state "$REG_UNIT" "$REG_HAS_PROXY"))"
   local host="" port=""
   if [[ -n "$REG_ENDPOINT" ]]; then
     host="${REG_ENDPOINT%%:*}"; port="${REG_ENDPOINT##*:}"
