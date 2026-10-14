@@ -899,3 +899,69 @@ def test_missing_peak_counters_render_unknown_instead_of_crashing():
     text = render.render_human(report)
     assert "rw_Bps=unknown rss_MiB=unknown" in text
     assert "cpu=unknown" in text
+
+
+@pytest.mark.parametrize('failure,status', [(PermissionError('synthetic denial'), 'denied'),
+                                          (OSError('synthetic lookup error'), 'inaccessible')])
+def test_chrome_path_lookup_failure_is_unknown_not_missing(tmp_path, monkeypatch, failure, status):
+    path = tmp_path / 'profile'
+    original = type(path).lstat
+
+    def observed(self, *args, **kwargs):
+        if self == path:
+            raise failure
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(path), 'lstat', observed)
+    row = chrome.chrome_path_row(path)
+    assert row['exists'] is None
+    assert row['status'] == status
+    assert 'du_bytes' not in row
+
+
+def test_chrome_collection_retains_unavailable_profiles_and_text_diagnosis(tmp_path, monkeypatch):
+    path = tmp_path / 'profile'
+    row = dict(path=str(path), exists=None, status='denied', error='synthetic denial')
+    monkeypatch.setattr(chrome, 'chrome_profile_candidates', lambda: [path])
+    monkeypatch.setattr(chrome, 'chrome_path_row', lambda *args, **kwargs: dict(row))
+    monkeypatch.setattr(chrome.Path, 'glob', lambda *args, **kwargs: [])
+    result = chrome.collect_chrome_io(False, {}, 1)
+    assert not result['available']
+    assert result['profiles'][0]['status'] == 'denied'
+    assert result['gaps'] == ['chrome_io.profile_unavailable']
+    text = render.render_human({'generated_at': 'synthetic', 'window': {'since': 'synthetic'}, 'chrome_io': result})
+    assert 'status=denied' in text and 'synthetic denial' in text
+
+
+def test_chrome_profile_file_is_explicitly_wrong_type(tmp_path, monkeypatch):
+    path = tmp_path / 'profile'
+    path.write_text('neutral')
+    monkeypatch.setattr(chrome, 'chrome_profile_candidates', lambda: [path])
+    monkeypatch.setattr(chrome, 'find_mount_for_path', lambda path: {})
+    monkeypatch.setattr(chrome.Path, 'glob', lambda *args, **kwargs: [])
+    result = chrome.collect_chrome_io(False, {}, 1)
+    assert not result['available']
+    assert result['profiles'][0]['status'] == 'wrong-type'
+
+
+def test_chrome_dangling_profile_link_is_not_an_absent_candidate(tmp_path, monkeypatch):
+    path = tmp_path / 'profile'
+    path.symlink_to(tmp_path / 'missing-target')
+    row = chrome.chrome_path_row(path)
+    assert row['exists'] is False
+    assert row['is_symlink'] is True
+    assert row['status'] == 'dangling-link'
+    monkeypatch.setattr(chrome, 'chrome_profile_candidates', lambda: [path])
+    monkeypatch.setattr(chrome.Path, 'glob', lambda *args, **kwargs: [])
+    result = chrome.collect_chrome_io(False, {}, 1)
+    assert not result['available']
+    assert result['profiles'][0]['status'] == 'dangling-link'
+
+
+def test_chrome_profile_discovery_uses_config_home_and_preserves_explicit_override(tmp_path, monkeypatch):
+    configured = tmp_path / 'configured-home'
+    override = tmp_path / 'selected-profile'
+    monkeypatch.setenv('XDG_CONFIG_HOME', str(configured))
+    monkeypatch.setenv('SINNIX_CHROME_PROFILE', str(override))
+    monkeypatch.setattr(chrome.glob, 'glob', lambda pattern: [])
+    assert chrome.chrome_profile_candidates() == [override, configured / 'chrome-ws']

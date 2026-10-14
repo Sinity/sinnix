@@ -139,19 +139,21 @@ def render_human(report: dict[str, Any]) -> str:
     section("chrome I/O attribution")
     chrome = report.get("chrome_io", {})
     lines.append(chrome.get("counter_scope", "unavailable"))
-    if not chrome.get("available"):
+    if not chrome.get("available") and not chrome.get("profiles"):
         lines.append("none")
     else:
         for profile in chrome.get("profiles", []):
             mount = profile.get("mount", {})
             lines.append(
-                f"profile {profile.get('path')} real={profile.get('realpath')} "
+                f"profile {profile.get('path')} status={profile.get('status', 'unknown')} "
+                f"error={profile.get('error')} real={profile.get('realpath')} "
                 f"mount={mount.get('source')} target={mount.get('target')}"
             )
             for cache in profile.get("cache_paths", [])[:16]:
                 cache_mount = cache.get("mount", {})
                 lines.append(
-                    f"  cache {cache.get('path')} bytes={cache.get('du_bytes')} "
+                    f"  cache {cache.get('path')} status={cache.get('status', 'unknown')} "
+                    f"error={cache.get('error')} bytes={cache.get('du_bytes')} "
                     f"mount={cache_mount.get('source')}"
                 )
         lines.append("cgroups:")
