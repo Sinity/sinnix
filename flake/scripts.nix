@@ -138,6 +138,7 @@ let
     }
   );
   agentctlPackage = pkgs.callPackage ../pkgs/agentctl/pkg.nix {
+    pueue = pkgs.callPackage ../pkgs/pueue/pkg.nix { };
     sinnix-lib = externalPackages.sinnix-lib;
     beads = externalPackages.beads;
   };

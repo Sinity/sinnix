@@ -300,8 +300,16 @@ eligible group per tick: `pytest-heavy`, `pytest`, `normal`, `bulk`, then
 `pytest-quick`. Running jobs continue. An agentctl-owned pause can reopen
 when memory is known and its `full avg10` value is below 10% (falling back
 to `avg60` when `avg10` is unavailable). One group reopens per tick.
-Unavailable or malformed memory PSI cannot reopen a pause. Operator pauses
-remain paused unless the recorded event ownership belongs to agentctl.
+Unavailable or malformed memory PSI cannot reopen a pause. Pueue commits an admission token under its state lock when AgentCTL pauses a
+running group. The token is retained in the existing event/checkpoint projection.
+Recovery uses native compare-and-release, so an operator pause (including a
+same-state repeat or pause-all) invalidates automation ownership. Reopening
+admission does not start individually paused tasks. Legacy pauses without a token
+remain paused and appear as unverified; the controller never manufactures their
+ownership from a historical event. Clean restart preserves tokens, but Pueue's
+crash-recovery pause for queued work invalidates them and remains protected.
+An older daemon that lacks this protocol cannot perform owned transitions and
+reports an explicit failure instead of falling back to unconditional resume.
 
 The workstation carries the app/session slices' 6 GiB and 5 GiB and the
 desktop shell's 512 MiB protection through `user.slice`, the primary user's

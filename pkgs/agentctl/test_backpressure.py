@@ -21,17 +21,17 @@ def _tick(monkeypatch, pressure, groups, spool=None):
     monkeypatch.setattr(backpressure, "read_pressure", lambda _root: pressure)
     monkeypatch.setattr(backpressure.pueue, "groups_status", lambda: groups)
     monkeypatch.setattr(
-        backpressure.pueue, "pause", lambda group: calls.append(("pause", group))
+        backpressure.pueue, "pause_owned", lambda group: (calls.append(("pause", group)) or f"test:{group}")
     )
     monkeypatch.setattr(
-        backpressure.pueue, "resume", lambda group: calls.append(("resume", group))
+        backpressure.pueue, "resume_owned", lambda group, token: calls.append(("resume", group))
     )
     result = backpressure.tick(spool=spool, pressure_root=Path("unused"))
     return result, calls
 
 
 def _ours(group: str) -> dict:
-    return {"action": "closed", "group": group, "owner": backpressure.OWNER}
+    return {"action": "closed", "group": group, "owner": backpressure.OWNER, "pause_token": f"test:{group}"}
 
 
 @pytest.mark.parametrize("io", [26.0, 80.0])
@@ -102,7 +102,7 @@ def test_no_paused_groups_below_closure_threshold_reports_clear(
     assert result["frozen"] == [] and result["signal"] is None
 
 
-def test_owned_legacy_pause_recovers_on_memory_even_with_busy_io(
+def test_owned_pause_without_signal_recovers_on_memory_even_with_busy_io(
     monkeypatch, tmp_path
 ) -> None:
     result, calls = _tick(
@@ -134,6 +134,40 @@ def test_unowned_pause_is_preserved_with_busy_io(monkeypatch) -> None:
     )
 
     assert calls == []
+    assert result["action"] == "hold"
+
+
+@pytest.mark.parametrize("token", [None, "", 0, {}])
+def test_legacy_or_invalid_pause_token_never_authorizes_resume(monkeypatch, tmp_path, token):
+    event = {**_ours("bulk"), "pause_token": token}
+    result, calls = _tick(
+        monkeypatch,
+        {"io_full_avg60": 90.0, "memory_full_avg60": 0.0},
+        {"bulk": "Paused"},
+        spool=_spool(tmp_path, event),
+    )
+    assert calls == []
+    assert result["action"] == "hold"
+    assert result["unverified_pauses"] == ["bulk"]
+
+
+def test_same_state_operator_reassertion_loses_native_ownership(monkeypatch, tmp_path):
+    spool = _spool(tmp_path, _ours("bulk"))
+    groups = {"bulk": "Paused"}
+    monkeypatch.setattr(backpressure, "read_pressure", lambda _: {"memory_full_avg60": 0.0})
+    monkeypatch.setattr(backpressure.pueue, "groups_status", lambda: groups)
+
+    def refuse(group, token):
+        assert group == "bulk" and token == "test:bulk"
+        raise backpressure.PueueOwnershipLost("Admission ownership mismatch")
+
+    monkeypatch.setattr(backpressure.pueue, "resume_owned", refuse)
+    monkeypatch.setattr(backpressure.pueue, "resume", lambda _: pytest.fail("unconditional resume"))
+    result = backpressure.tick(spool=spool)
+    assert result["action"] == "ownership-lost"
+    assert groups == {"bulk": "Paused"}
+    assert backpressure.event_state(spool).ours() == set()
+    result = backpressure.tick(spool=spool)
     assert result["action"] == "hold"
 
 
@@ -192,6 +226,7 @@ def test_backpressure_replay_memory_does_not_scale_with_retained_history(tmp_pat
         "action": "closed",
         "group": "bulk",
         "owner": "agentctl",
+        "pause_token": "test:bulk",
         "signal": "io",
         "detail": "x" * 200,
     }
@@ -578,7 +613,7 @@ def test_io_pressure_keeps_focused_tests_admissible(monkeypatch) -> None:
     assert result["action"] == "hold"
 
 
-def test_old_owned_pause_recovers_on_memory(monkeypatch, tmp_path) -> None:
+def test_owned_pause_recovers_on_memory_with_busy_io(monkeypatch, tmp_path) -> None:
     """Retired I/O rules do not keep an owned pause closed."""
     result, calls = _tick(
         monkeypatch,

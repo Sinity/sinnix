@@ -131,7 +131,10 @@ def stub_pueue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "if verb == 'status':\n"
         "    print(status)\n"
         "elif verb == 'group':\n"
-        "    print(json.dumps(json.loads(status)['groups']))\n"
+        "    if len(sys.argv) > 2 and sys.argv[2] in ('pause-owned', 'resume-owned'):\n"
+        "        print('Owned admission transition committed')\n"
+        "    else:\n"
+        "        print(json.dumps(json.loads(status)['groups']))\n"
         "elif verb == 'log':\n"
         "    print(log)\n"
         "elif verb == 'add':\n"
@@ -313,6 +316,38 @@ def test_pause_drains_running_tasks_and_resume_names_the_group(
         ["pause", "--wait", "--group", "agent"],
         ["start", "--group", "agent"],
     ]
+
+
+def test_owned_pause_ack_binds_exact_resume_token(stub_pueue: Path) -> None:
+    token = pueue.pause_owned("agent")
+    pueue.resume_owned("agent", token)
+    assert len(token) == 32
+    assert _calls(stub_pueue) == [
+        ["group", "pause-owned", "agent", token],
+        ["group", "resume-owned", "agent", token],
+    ]
+
+
+def test_owned_pause_conflict_has_no_unconditional_fallback(monkeypatch) -> None:
+    calls = []
+
+    def refuse(args):
+        calls.append(args)
+        raise pueue.PueueError("Admission ownership mismatch")
+
+    monkeypatch.setattr(pueue, "_run", refuse)
+    with pytest.raises(pueue.PueueOwnershipLost):
+        pueue.resume_owned("agent", "known")
+    assert calls == [["group", "resume-owned", "agent", "known"]]
+
+
+@pytest.mark.parametrize("response", ["", "{}", "unexpected success"])
+def test_owned_transition_requires_native_acknowledgement(monkeypatch, response):
+    monkeypatch.setattr(pueue, "_run", lambda _: response)
+    with pytest.raises(pueue.PueueError, match="did not acknowledge"):
+        pueue.pause_owned("agent")
+    with pytest.raises(pueue.PueueError, match="did not acknowledge"):
+        pueue.resume_owned("agent", "known")
 
 
 def test_restart_is_the_only_retry(stub_pueue: Path) -> None:

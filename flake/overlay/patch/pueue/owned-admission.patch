@@ -1,0 +1,305 @@
+--- a/pueue_lib/src/state.rs
++++ b/pueue_lib/src/state.rs
+@@ -24,6 +24,9 @@
+ pub struct Group {
+     pub status: GroupStatus,
+     pub parallel_tasks: usize,
++    /// Admission ownership; ordinary pause/start/reset intent invalidates it.
++    #[serde(default)]
++    pub pause_owner: Option<String>,
+ }
+ 
+ /// This is the full representation of the current state of the Pueue daemon.
+@@ -177,3 +180,18 @@
+         }
+     }
+ }
++
++#[cfg(test)]
++mod ownership_migration_tests {
++    use super::*;
++
++    #[test]
++    fn legacy_paused_group_has_no_ownership() {
++        let group: Group = serde_json::from_str(r#"{"status":"Paused","parallel_tasks":1}"#).unwrap();
++        assert!(group.pause_owner.is_none());
++        let restored: Group = serde_json::from_str(&serde_json::to_string(&Group {
++            status: GroupStatus::Paused, parallel_tasks: 1, pause_owner: Some("durable".into()),
++        }).unwrap()).unwrap();
++        assert_eq!(restored.pause_owner.as_deref(), Some("durable"));
++    }
++}
+--- a/pueue_lib/src/message/request.rs
++++ b/pueue_lib/src/message/request.rs
+@@ -239,6 +239,10 @@
+     },
+     Remove(String),
+     List,
++    /// Atomically pause running admission without changing individual tasks.
++    PauseOwned { name: String, token: String },
++    /// Resume admission only if this exact pause is still owned.
++    ResumeOwned { name: String, token: String },
+ }
+ impl_into_request!(GroupRequest, Request::Group);
+ 
+--- a/pueue/tests/daemon/integration/group.rs
++++ b/pueue/tests/daemon/integration/group.rs
+@@ -79,3 +79,64 @@
+ 
+     Ok(())
+ }
++
++/// Same-state operator intent invalidates automation, including pause-all.
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn test_owned_admission_reassertion() -> Result<()> {
++    let daemon = daemon().await?;
++    let shared = &daemon.settings.shared;
++    add_group_with_slots(shared, "owned", 1).await?;
++    let claim = |token: &str| GroupRequest::PauseOwned { name: "owned".into(), token: token.into() };
++    let release = |token: &str| GroupRequest::ResumeOwned { name: "owned".into(), token: token.into() };
++    assert_success(send_request(shared, claim("first")).await?);
++    assert_failure(send_request(shared, claim("second")).await?);
++    assert_failure(send_request(shared, release("wrong")).await?);
++    assert_eq!(get_state(shared).await?.groups["owned"].pause_owner.as_deref(), Some("first"));
++    assert_success(send_request(shared, PauseRequest { tasks: TaskSelection::Group("owned".into()), wait: true }).await?);
++    assert_failure(send_request(shared, release("first")).await?);
++    assert_eq!(get_state(shared).await?.groups["owned"].status, pueue_lib::GroupStatus::Paused);
++    assert!(get_state(shared).await?.groups["owned"].pause_owner.is_none());
++    assert_success(send_request(shared, StartRequest { tasks: TaskSelection::Group("owned".into()) }).await?);
++    assert_success(send_request(shared, claim("second")).await?);
++    assert_failure(send_request(shared, release("first")).await?);
++    assert_success(send_request(shared, release("second")).await?);
++    assert_eq!(get_state(shared).await?.groups["owned"].status, pueue_lib::GroupStatus::Running);
++    assert_success(send_request(shared, claim("third")).await?);
++    assert_success(send_request(shared, PauseRequest { tasks: TaskSelection::All, wait: true }).await?);
++    assert_failure(send_request(shared, release("third")).await?);
++    Ok(())
++}
++
++/// Reopening admission never sends a start signal to an operator-paused task.
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn test_owned_admission_keeps_paused_task() -> Result<()> {
++    let daemon = daemon().await?;
++    let shared = &daemon.settings.shared;
++    add_group_with_slots(shared, "owned", 1).await?;
++    assert_success(add_task_to_group(shared, "sleep 60", "owned").await?);
++    wait_for_task_condition(shared, 0, Task::is_running).await?;
++    assert_success(send_request(shared, PauseRequest { tasks: TaskSelection::TaskIds(vec![0]), wait: false }).await?);
++    wait_for_task_condition(shared, 0, Task::is_paused).await?;
++    assert_success(send_request(shared, GroupRequest::PauseOwned { name: "owned".into(), token: "task-proof".into() }).await?);
++    assert_success(send_request(shared, GroupRequest::ResumeOwned { name: "owned".into(), token: "task-proof".into() }).await?);
++    assert!(get_state(shared).await?.tasks[&0].is_paused());
++    Ok(())
++}
++
++/// Either mutex ordering leaves the concurrent operator pause effective.
++#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++async fn test_owned_admission_operator_race() -> Result<()> {
++    let daemon = daemon().await?;
++    let shared = &daemon.settings.shared;
++    add_group_with_slots(shared, "owned", 1).await?;
++    assert_success(send_request(shared, GroupRequest::PauseOwned { name: "owned".into(), token: "race".into() }).await?);
++    let (operator, _release) = tokio::join!(
++        send_request(shared, PauseRequest { tasks: TaskSelection::Group("owned".into()), wait: true }),
++        send_request(shared, GroupRequest::ResumeOwned { name: "owned".into(), token: "race".into() }),
++    );
++    assert_success(operator?);
++    let state = get_state(shared).await?;
++    assert_eq!(state.groups["owned"].status, pueue_lib::GroupStatus::Paused);
++    assert!(state.groups["owned"].pause_owner.is_none());
++    Ok(())
++}
+--- a/pueue/tests/daemon/integration/restore.rs
++++ b/pueue/tests/daemon/integration/restore.rs
+@@ -75,3 +75,24 @@
+     child.kill()?;
+     Ok(())
+ }
++
++/// A clean restart preserves a durable admission claim when no recovery hold intervenes.
++#[tokio::test]
++async fn test_owned_admission_survives_clean_restart() -> Result<()> {
++    let (settings, _tempdir) = daemon_base_setup()?;
++    let shared = &settings.shared;
++    let mut child = standalone_daemon(shared).await?;
++    assert_success(send_request(shared, pueue_lib::message::GroupRequest::PauseOwned {
++        name: PUEUE_DEFAULT_GROUP.into(), token: "restart-proof".into(),
++    }).await?);
++    assert_success(shutdown_daemon(shared).await?);
++    wait_for_shutdown(&mut child).await?;
++    let mut child = standalone_daemon(shared).await?;
++    assert_eq!(get_state(shared).await?.groups[PUEUE_DEFAULT_GROUP].pause_owner.as_deref(), Some("restart-proof"));
++    assert_success(send_request(shared, pueue_lib::message::GroupRequest::ResumeOwned {
++        name: PUEUE_DEFAULT_GROUP.into(), token: "restart-proof".into(),
++    }).await?);
++    assert_success(shutdown_daemon(shared).await?);
++    wait_for_shutdown(&mut child).await?;
++    Ok(())
++}
+--- a/pueue/src/client/cli.rs
++++ b/pueue/src/client/cli.rs
+@@ -566,6 +566,12 @@
+     /// Remove a group by name.
+     /// This will move all tasks in this group to the default group!
+     Remove { name: String },
++
++    /// Claim a running admission queue; running tasks keep running.
++    PauseOwned { name: String, token: String },
++
++    /// Release exactly the owned admission pause; paused tasks stay paused.
++    ResumeOwned { name: String, token: String },
+ }
+ 
+ #[derive(Parser, ValueEnum, Debug, Clone, PartialEq, Eq)]
+--- a/pueue/src/daemon/task_handler.rs
++++ b/pueue/src/daemon/task_handler.rs
+@@ -116,6 +116,7 @@
+ 
+         // Restart the group, now that it's devoid of tasks.
+         if let Some(group) = state.groups_mut().get_mut(name) {
++            group.pause_owner = None;
+             group.status = GroupStatus::Running;
+         }
+     }
+--- a/pueue/src/daemon/internal_state/state.rs
++++ b/pueue/src/daemon/internal_state/state.rs
+@@ -134,6 +134,7 @@
+         self.groups_mut().entry(name.into()).or_insert(Group {
+             status: GroupStatus::Running,
+             parallel_tasks: 1,
++            pause_owner: None,
+         })
+     }
+ 
+@@ -155,6 +156,7 @@
+     /// Set the group status (running/paused) for all groups including the default queue.
+     pub fn set_status_for_all_groups(&mut self, status: GroupStatus) {
+         for (_, group) in self.groups_mut().iter_mut() {
++            group.pause_owner = None;
+             group.status = status;
+         }
+     }
+@@ -233,6 +235,7 @@
+     pub fn pause_on_failure(&mut self, settings: &Settings, group: &str) {
+         if settings.daemon.pause_group_on_failure {
+             if let Some(group) = self.groups_mut().get_mut(group) {
++                group.pause_owner = None;
+                 group.status = GroupStatus::Paused;
+             }
+         } else if settings.daemon.pause_all_on_failure {
+@@ -360,6 +363,7 @@
+                         .or_insert(Group {
+                             status: GroupStatus::Running,
+                             parallel_tasks: 1,
++            pause_owner: None,
+                         })
+                 }
+             };
+@@ -371,6 +375,7 @@
+                     "Pausing group {} to prevent unwanted execution of previous tasks",
+                     &task.group
+                 );
++                group.pause_owner = None;
+                 group.status = GroupStatus::Paused;
+             }
+         }
+--- a/pueue/src/daemon/process_handler/kill.rs
++++ b/pueue/src/daemon/process_handler/kill.rs
+@@ -43,6 +43,7 @@
+             // Check whether the group should be paused before killing the tasks.
+             if should_pause_group(state, issued_by_user, &group_name) {
+                 let group = state.groups_mut().get_mut(&group_name).unwrap();
++                group.pause_owner = None;
+                 group.status = GroupStatus::Paused;
+             }
+ 
+--- a/pueue/src/daemon/process_handler/pause.rs
++++ b/pueue/src/daemon/process_handler/pause.rs
+@@ -22,6 +22,7 @@
+             };
+ 
+             // Pause a specific group.
++            group.pause_owner = None;
+             group.status = GroupStatus::Paused;
+             info!("Pausing group {group_name}");
+ 
+--- a/pueue/src/daemon/process_handler/start.rs
++++ b/pueue/src/daemon/process_handler/start.rs
+@@ -41,6 +41,7 @@
+             };
+ 
+             // Set the group to running.
++            group.pause_owner = None;
+             group.status = GroupStatus::Running;
+             info!("Resuming group {}", &group_name);
+ 
+--- a/pueue/src/daemon/network/message_handler/group.rs
++++ b/pueue/src/daemon/network/message_handler/group.rs
+@@ -21,7 +21,38 @@
+ pub fn group(settings: &Settings, state: &SharedState, message: GroupRequest) -> Response {
+     let mut state = state.lock().unwrap();
+ 
++    let resume_owned = matches!(&message, GroupRequest::ResumeOwned { .. });
+     match message {
++        GroupRequest::PauseOwned { name, token } | GroupRequest::ResumeOwned { name, token } => {
++            let resume = resume_owned;
++            if let Err(response) = ensure_group_exists(&mut state, &name) {
++                return response;
++            }
++            if token.is_empty() || token.len() > 128 {
++                return failure_msg!("Invalid admission ownership token");
++            }
++            let previous = state.groups()[&name].clone();
++            let group = state.groups_mut().get_mut(&name).unwrap();
++            if resume {
++                if group.status != pueue_lib::GroupStatus::Paused || group.pause_owner.as_deref() != Some(&token) {
++                    return failure_msg!("Admission ownership mismatch");
++                }
++                group.status = pueue_lib::GroupStatus::Running;
++                group.pause_owner = None;
++            } else {
++                if group.status != pueue_lib::GroupStatus::Running {
++                    return failure_msg!("Admission ownership mismatch");
++                }
++                group.status = pueue_lib::GroupStatus::Paused;
++                group.pause_owner = Some(token);
++            }
++            if let Err(error) = state.save(settings) {
++                state.groups_mut().insert(name, previous);
++                return failure_msg!("Cannot persist admission ownership: {error}");
++            }
++            success_msg!("Owned admission transition committed")
++        }
++
+         GroupRequest::List => {
+             // Return information about all groups to the client.
+             GroupResponse {
+--- a/pueue/src/daemon/network/message_handler/reset.rs
++++ b/pueue/src/daemon/network/message_handler/reset.rs
+@@ -12,6 +12,7 @@
+         ResetTarget::All => {
+             // Mark all groups to be reset and kill all tasks
+             for (_name, group) in state.groups_mut().iter_mut() {
++                group.pause_owner = None;
+                 group.status = GroupStatus::Reset;
+             }
+             process_handler::kill::kill(settings, &mut state, TaskSelection::All, false, None);
+@@ -28,6 +29,7 @@
+             // Mark all groups to be reset and kill their tasks
+             for name in groups.iter() {
+                 let group = state.groups_mut().get_mut(name).unwrap();
++                group.pause_owner = None;
+                 group.status = GroupStatus::Reset;
+ 
+                 process_handler::kill::kill(
+--- a/pueue/src/client/commands/group.rs
++++ b/pueue/src/client/commands/group.rs
+@@ -19,6 +19,8 @@
+             parallel_tasks: parallel.to_owned(),
+         },
+         Some(GroupCommand::Remove { name }) => GroupRequest::Remove(name.to_owned()),
++        Some(GroupCommand::PauseOwned { name, token }) => GroupRequest::PauseOwned { name, token },
++        Some(GroupCommand::ResumeOwned { name, token }) => GroupRequest::ResumeOwned { name, token },
+         None => GroupRequest::List,
+     };
+ 
