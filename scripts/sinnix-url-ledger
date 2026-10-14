@@ -76,7 +76,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.atomic import atomic_publish, atomic_text_writer
 from sinnix_lib.layout import capture_lane_path
 
 SCHEMA = "sinnix-url-ledger-v1"
@@ -202,9 +202,12 @@ def iter_history_records(path: Path, url_field: str, time_field: str, stats: dic
             except json.JSONDecodeError:
                 stats["skipped"] += 1
                 continue
+            if not isinstance(record, dict):
+                stats["skipped"] += 1
+                continue
             url = record.get(url_field)
             ts = record.get(time_field)
-            if not url or not ts:
+            if not isinstance(url, str) or not url or not isinstance(ts, str) or not ts:
                 stats["skipped"] += 1
                 continue
             yield url, ts
@@ -236,8 +239,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     state_dir = Path(args.state_root)
     state_dir.mkdir(parents=True, exist_ok=True)
     urls_path = state_dir / "urls.jsonl"
-    tmp_path = urls_path.with_suffix(".jsonl.tmp")
-    with tmp_path.open("w", encoding="utf-8") as handle:
+    with atomic_text_writer(urls_path, fsync=True) as handle:
         for normalized in sorted(urls):
             visits = sorted(urls[normalized]["visits"])
             record = {
@@ -248,7 +250,6 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 "last_visit": visits[-1],
             }
             handle.write(json.dumps(record, sort_keys=True) + "\n")
-    os.replace(tmp_path, urls_path)
 
     print(
         f"sinnix-url-ledger ingest: {raw_seen} history rows -> {len(urls)} distinct URLs "

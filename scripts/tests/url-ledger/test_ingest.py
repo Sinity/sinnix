@@ -1,0 +1,60 @@
+import argparse
+import json
+import os
+
+import pytest
+
+from test_commoncrawl import ledger
+
+
+def arguments(tmp_path, records):
+    history = tmp_path / 'history.ndjson'
+    history.write_text('\n'.join(json.dumps(row) for row in records) + '\n')
+    return argparse.Namespace(history_path=str(history), state_root=str(tmp_path / 'state'),
+                              url_field='url', time_field='iso_time')
+
+
+def test_malformed_shapes_do_not_discard_valid_history(tmp_path, capsys):
+    valid = {'url': 'https://example.invalid/page', 'iso_time': '2026-01-01T00:00:00Z'}
+    args = arguments(tmp_path, [None, [], 3, 'text', {'url': ['bad'], 'iso_time': 'now'},
+                               {'url': valid['url'], 'iso_time': {}}, valid])
+    assert ledger.cmd_ingest(args) == 0
+    result = json.loads((tmp_path / 'state/urls.jsonl').read_text())
+    assert result['url'] == valid['url']
+    assert result['visits'] == [valid['iso_time']]
+    assert '6 malformed skipped' in capsys.readouterr().out
+
+
+def test_ingest_ignores_preexisting_temporary_symlink_and_publishes_private(tmp_path):
+    args = arguments(tmp_path, [{'url': 'https://example.invalid/', 'iso_time': 'now'}])
+    state = tmp_path / 'state'
+    state.mkdir()
+    unrelated = tmp_path / 'unrelated'
+    unrelated.write_text('preserve')
+    (state / 'urls.jsonl.tmp').symlink_to(unrelated)
+    old_umask = os.umask(0)
+    try:
+        assert ledger.cmd_ingest(args) == 0
+    finally:
+        os.umask(old_umask)
+    assert unrelated.read_text() == 'preserve'
+    assert (state / 'urls.jsonl.tmp').is_symlink()
+    assert (state / 'urls.jsonl').stat().st_mode & 0o777 == 0o600
+    assert not list(state.glob('.urls.jsonl.atomic-tmp-*'))
+
+
+def test_failed_ingest_publication_keeps_previous_output(tmp_path, monkeypatch):
+    args = arguments(tmp_path, [{'url': 'https://example.invalid/', 'iso_time': 'now'}])
+    state = tmp_path / 'state'
+    state.mkdir()
+    output = state / 'urls.jsonl'
+    output.write_text('previous complete output')
+
+    def refuse(*args, **kwargs):
+        raise OSError('synthetic publication failure')
+
+    monkeypatch.setattr(ledger.json, 'dumps', refuse)
+    with pytest.raises(OSError, match='synthetic publication failure'):
+        ledger.cmd_ingest(args)
+    assert output.read_text() == 'previous complete output'
+    assert not list(state.glob('.urls.jsonl.atomic-tmp-*'))
