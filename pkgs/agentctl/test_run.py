@@ -1709,7 +1709,14 @@ def test_real_retained_orphan_is_released_by_the_next_multi_slot_admission(
     )
     fake_pueue.start(task_id)
     first_unit = unit_for(first, "fixture")
-    next_launch = write_launch(tmp_path, name="next.json", argv=["true"])
+    next_launch = write_launch(
+        tmp_path, name="next.json", argv=["true"], job_id="job-next",
+        log_path=str(tmp_path / "next-job.log"),
+    )
+    next_task = fake_pueue.add(
+        group="fixture", label="fixture:check", command=("agentctl-run", str(next_launch)),
+        working_directory=tmp_path,
+    )
     next_unit = unit_for(next_launch, "fixture")
     original = run_module._wait_for_unit
 
@@ -1728,11 +1735,35 @@ def test_real_retained_orphan_is_released_by_the_next_multi_slot_admission(
                 main([str(first)])
         assert run_module.unit_properties(first_unit)["SubState"] == "exited"
         fake_pueue.kill_directly(task_id)
+        fake_pueue.start(next_task)
         assert main([str(next_launch)]) == 0
         assert run_module.unit_properties(first_unit) == {}
         assert run_module.unit_properties(next_unit) == {}
-        assert f"settled_orphan {first_unit}" in log_of(tmp_path)
+        assert f"settled_orphan {first_unit}" in (tmp_path / "next-job.log").read_text()
     finally:
         for unit in (first_unit, next_unit):
             run_module._systemctl("stop", unit)
             run_module._systemctl("reset-failed", unit)
+
+
+
+@pytest.mark.parametrize("parallel", [1, 2])
+def test_same_reference_restart_preserves_its_prior_unit_release(
+    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue, parallel: int
+) -> None:
+    fake_pueue.groups["pytest"] = parallel
+    launch = write_launch(tmp_path, pool="pytest")
+    task_id = fake_pueue.add(
+        group="pytest", label="fixture:check", command=("agentctl-run", str(launch)),
+        working_directory=tmp_path,
+    )
+    fake_pueue.start(task_id)
+    unit = unit_for(launch, "pytest")
+    fake_systemd.active((unit, described("pytest", task_id)))
+
+    assert main([str(launch)]) == 0
+    assert f"settled_orphan {unit}" in log_of(tmp_path)
+    assert [call for call in fake_systemd.systemctl_calls() if "stop" in call] == [
+        ["systemctl", "--user", "stop", unit],
+        ["systemctl", "--user", "stop", unit],
+    ]
