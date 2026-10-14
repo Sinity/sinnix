@@ -3,6 +3,7 @@
 # description: Report gaps between what sinnix declares and what it actually does — confinement, empty lanes, units that never succeed
 # runtimeInputs: bash coreutils findutils gawk gnugrep jq systemd audit
 set -euo pipefail
+umask 077
 
 # Every check here answers one question: does a declaration match reality?
 # That gap is silent by construction -- a denied write logs nothing, an empty
@@ -28,6 +29,10 @@ QUIET=0
   echo "sinnix-sandbox-audit: no runtime inventory at $INVENTORY" >&2
   exit 1
 }
+if ! jq -e '.surfaces | type == "object"' "$INVENTORY" >/dev/null; then
+  echo "sinnix-sandbox-audit: invalid runtime inventory at $INVENTORY" >&2
+  exit 1
+fi
 
 show_prop() {
   # $1=manager $2=unit $3=property -> bare value
@@ -59,7 +64,13 @@ emit() {
 # auditctl -s is the only thing that distinguishes a quiet lane from a deaf
 # one, so ask it before believing any silence downstream.
 if command -v auditctl >/dev/null 2>&1; then
-  audit_enabled="$(auditctl -s 2>/dev/null | awk '$1 == "enabled" { print $2 }')"
+  if audit_status="$(auditctl -s 2>/dev/null)"; then
+    audit_enabled="$(awk '$1 == "enabled" { print $2 }' <<<"$audit_status")"
+  else
+    audit_enabled=""
+    emit system auditd.service audit-unavailable /var/log/audit/audit.log \
+      "kernel audit status could not be read; capture health is unknown"
+  fi
   if [[ "$audit_enabled" == "0" ]]; then
     emit system auditd.service audit-disabled /var/log/audit/audit.log \
       "kernel auditing is disabled (auditctl -s reports enabled 0); every rule is loaded and recording nothing. Re-enable with 'auditctl -e 1'."
@@ -75,9 +86,31 @@ covered_by() {
     entry="${entry#-}"
     entry="${entry#+}"
     [[ -z "$entry" ]] && continue
+    [[ "$entry" == "/" && "$path" == /* ]] && return 0
+    entry="${entry%/}"
     [[ "$path" == "$entry" || "$path" == "$entry"/* ]] && return 0
   done
   return 1
+}
+
+protected_path() {
+  local path="$1" system="$2" home="$3" private_tmp="$4"
+  if [[ "$home" == "yes" || "$home" == "read-only" || "$home" == "tmpfs" ]] \
+    && covered_by "$path" "/home /root /run/user"; then
+    return 0
+  fi
+  case "$system" in
+    strict)
+      covered_by "$path" "/dev /proc /sys" && return 1
+      if [[ "$private_tmp" == "yes" || "$private_tmp" == "disconnected" ]] \
+        && covered_by "$path" "/tmp /var/tmp"; then
+        return 1
+      fi
+      return 0 ;;
+    full) covered_by "$path" "/usr /boot /efi /etc" ;;
+    yes) covered_by "$path" "/usr /boot /efi" ;;
+    *) return 1 ;;
+  esac
 }
 
 while IFS=$'\t' read -r _name unit manager path; do
@@ -87,15 +120,15 @@ while IFS=$'\t' read -r _name unit manager path; do
   protect_home="$(show_prop "$manager" "$unit" ProtectHome)"
   rw_paths="$(show_prop "$manager" "$unit" ReadWritePaths)"
   state_dir="$(show_prop "$manager" "$unit" StateDirectory)"
+  private_tmp="$(show_prop "$manager" "$unit" PrivateTmp)"
 
   # StateDirectory is implicitly writable.
-  [[ -n "$state_dir" ]] && rw_paths="$rw_paths /var/lib/$state_dir"
+  for directory in $state_dir; do
+    rw_paths="$rw_paths /var/lib/$directory"
+  done
 
-  hardened=0
-  [[ "$protect_system" == "strict" || "$protect_system" == "full" ]] && hardened=1
-  [[ "$protect_home" == "yes" || "$protect_home" == "read-only" ]] && hardened=1
-
-  if [[ "$hardened" -eq 1 ]] && ! covered_by "$path" "$rw_paths"; then
+  if protected_path "$path" "$protect_system" "$protect_home" "$private_tmp" \
+    && ! covered_by "$path" "$rw_paths"; then
     emit "$manager" "$unit" "confined-from-own-output" "$path" \
       "ProtectSystem=$protect_system ProtectHome=$protect_home ReadWritePaths='$rw_paths' does not cover this declared capture path"
   fi
@@ -103,15 +136,14 @@ while IFS=$'\t' read -r _name unit manager path; do
   if [[ ! -e "$path" ]]; then
     emit "$manager" "$unit" "lane-missing" "$path" "declared capture path does not exist"
   elif [[ -d "$path" ]] && [[ -z "$(find "$path" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
-    emit "$manager" "$unit" "lane-empty" "$path" "declared capture lane has never held a file"
+    emit "$manager" "$unit" "lane-empty" "$path" "declared capture lane currently has no entries"
   elif [[ -f "$path" ]] && [[ ! -s "$path" ]]; then
     emit "$manager" "$unit" "lane-empty" "$path" "declared capture file is zero bytes"
   fi
 done < <(
   jq -r '.surfaces | to_entries[] | .value as $s | ($s.captures // [])[]
          | select(.path != null)
-         | [$s.unit // "", $s.manager // "system", .path] | @tsv' "$INVENTORY" \
-    | awk -F'\t' '{print "-\t"$1"\t"$2"\t"$3}'
+         | ["-", $s.unit // "", $s.manager // "system", .path] | @tsv' "$INVENTORY"
 )
 
 # Any hardened unit that can exec an agent CLI must be able to persist that
@@ -123,8 +155,8 @@ while IFS=$'\t' read -r unit manager; do
   protect_home="$(show_prop "$manager" "$unit" ProtectHome)"
   protect_system="$(show_prop "$manager" "$unit" ProtectSystem)"
   rw_paths="$(show_prop "$manager" "$unit" ReadWritePaths)"
-  [[ "$protect_system" == "strict" || "$protect_system" == "full" \
-    || "$protect_home" == "yes" || "$protect_home" == "read-only" ]] || continue
+  protected_path "$HOME/.claude" "$protect_system" "$protect_home" \
+    "$(show_prop "$manager" "$unit" PrivateTmp)" || continue
   if ! covered_by "$HOME/.claude" "$rw_paths"; then
     emit "$manager" "$unit" "agent-transcript-loss" "$HOME/.claude" \
       "unit execs an agent CLI under mount-namespace hardening but cannot write the transcript directory"
