@@ -90,6 +90,7 @@ def test_run_grim_never_combines_output_and_geometry(monkeypatch) -> None:
         stdout = b"png"
 
     def fake_run(cmd, **_kwargs):
+        assert _kwargs["timeout"] == 5.0
         seen.append(cmd)
         return _Proc()
 
@@ -97,11 +98,11 @@ def test_run_grim_never_combines_output_and_geometry(monkeypatch) -> None:
 
     png, err = capture_module.run_grim("grim", "DP-3", "23,23 800x600")
     assert (png, err) == (b"png", None)
-    assert seen[-1] == ["grim", "-g", "23,23 800x600", "-"]
+    assert seen[-1] == ["grim", "-l", "0", "-g", "23,23 800x600", "-"]
 
     png, err = capture_module.run_grim("grim", "DP-3", None)
     assert (png, err) == (b"png", None)
-    assert seen[-1] == ["grim", "-o", "DP-3", "-"]
+    assert seen[-1] == ["grim", "-l", "0", "-o", "DP-3", "-"]
 
 
 def test_run_grim_returns_stderr_as_failure_reason(monkeypatch) -> None:

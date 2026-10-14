@@ -41,10 +41,13 @@ def run_grim(
     Returns `(png_bytes, None)` on success and `(None, reason)` on failure,
     where `reason` carries grim's own stderr. Callers MUST log the reason;
     swallowing it degrades this lane silently."""
+    # PNG is only an in-memory bridge to WebP. Avoid spending the capture
+    # deadline compressing pixels that are immediately decoded again.
+    cmd = [grim_bin, "-l", "0"]
     if geometry:
-        cmd = [grim_bin, "-g", geometry, "-"]
+        cmd += ["-g", geometry, "-"]
     else:
-        cmd = [grim_bin, "-o", monitor, "-"]
+        cmd += ["-o", monitor, "-"]
     try:
         proc = subprocess.run(cmd, capture_output=True, timeout=timeout, check=True)
     except subprocess.CalledProcessError as exc:
