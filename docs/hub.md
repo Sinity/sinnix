@@ -364,6 +364,8 @@ Feedback, terminal send, action prepare/execute and failure-notification POSTs
 require exactly one `application/json` Content-Type (parameters are accepted).
 Missing, duplicate or other media types receive 415 before any body read or
 owner call. The phone receiver keeps its separate native upload protocol.
+The proxy applies the same refusal before forwarding incomplete bodies;
+comma-containing media-type parameter lists are rejected as ambiguous.
 
 A `sinnix-elicit-v1` record arriving in the spool starts the drain
 (`sinnix-elicit autoingest`, as a transient `sinnix-elicit-autoingest` unit)

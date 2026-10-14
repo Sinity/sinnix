@@ -112,13 +112,18 @@ with tempfile.TemporaryDirectory() as temporary:
                 before = len(Owner.calls)
                 client = http.client.HTTPConnection("127.0.0.1", request_port, timeout=2)
                 client.putrequest(method, path, skip_host="Host" in headers)
+                headers = {"Content-Type": "application/json", **headers}
                 for name, value in headers.items():
-                    client.putheader(name, value)
-                client.putheader("Content-Length", "2" if send_body else "1000000")
+                    for item in ([value] if isinstance(value, str) else value):
+                        client.putheader(name, item)
+                client.putheader("Content-Length", "2" if send_body else "100")
                 client.endheaders()
                 if send_body:
                     client.send(b"{}")
-                response = client.getresponse()
+                try:
+                    response = client.getresponse()
+                except TimeoutError as error:
+                    raise AssertionError((path, headers, Owner.calls[before:])) from error
                 response.read()
                 client.close()
                 assert response.status == expected, (path, headers, response.status)
@@ -164,6 +169,11 @@ with tempfile.TemporaryDirectory() as temporary:
                 request("/phone/v1/intent", {header: "same-origin"}, 403)
             request("/terminals/not-a-terminal", {"Origin": "https://example.invalid"}, 403, send_body=False)
             request("/terminals/v1/windows/1/2/send", {"Origin": "https://example.invalid", "Content-Type": "text/plain"}, 403, send_body=False)
+            for path in ('/ops/v1/actions', '/ops/v1/actions/prepare', '/v1/health/failure', '/terminals/v1/windows/1/2/send', '/feedback'):
+                for media in ([], 'text/plain', ['application/json', 'application/json']):
+                    request(path, {'Content-Type': media}, 415, send_body=False)
+                request(path, {'Content-Type': 'Application/JSON; charset=utf-8'}, 200)
+            request('/feedback', {'Content-Type': 'text/plain', 'Origin': f'http://127.0.0.1:{report_port}'}, 415, send_body=False, request_port=report_port)
             print("hub browser boundary: native, same-origin and local-report routes preserved; forged requests never reached owner")
         finally:
             process.terminate()

@@ -226,6 +226,7 @@ mkServiceModule {
         @${label}Host {
           not host ${lib.concatStringsSep " " acceptedHosts}
         }
+        header @${label}Host Connection close
         respond @${label}Host "unknown host refused" 403
       '';
 
@@ -236,6 +237,7 @@ mkServiceModule {
           ${lib.optionalString allowOpaque (lib.concatMapStringsSep "\n" (host: "not header Origin http://${host}:${toString cfg.reportsPort}") acceptedHosts)}
           ${lib.optionalString allowOpaque "not header Origin null"}
         }
+        header @${label}Origin Connection close
         respond @${label}Origin "cross-origin request refused" 403
         @${label}Fetch {
           header Sec-Fetch-Site *
@@ -251,7 +253,21 @@ mkServiceModule {
           ${lib.optionalString allowOpaque "not header Origin null"}
           ${lib.optionalString allowOpaque (lib.concatMapStringsSep "\n" (host: "not header Origin http://${host}:${toString cfg.reportsPort}") acceptedHosts)}
         }
+        header @${label}Fetch Connection close
         respond @${label}Fetch "cross-site request refused" 403
+      '';
+
+      # Refuse before the proxy starts forwarding a length-delimited body.
+      # The header placeholder joins duplicates with commas; commas are not
+      # admitted here, including ambiguous parameter lists.
+      jsonGuard = label: paths: ''
+        @${label}MediaType {
+          method POST
+          expression path(${lib.concatMapStringsSep ", " (path: "'${path}'") paths})${lib.optionalString (label == "pages") " || path_regexp('^/terminals/v1/windows/[0-9]+/[0-9]+/send$')"}
+          not expression {http.request.header.Content-Type}.matches('(?i)^[[:blank:]]*application/json[[:blank:]]*(;[^,]*)?$')
+        }
+        header @${label}MediaType Connection close
+        respond @${label}MediaType "application/json Content-Type required" 415
       '';
 
       # Only republish a frontend whose owning service is actually enabled.
@@ -354,6 +370,7 @@ mkServiceModule {
           # boundary to its API and page/terminal routes, before proxying.
           handle_path /ops/* {
             ${browserGuard "ops" false}
+            ${jsonGuard "ops" [ "/v1/actions" "/v1/actions/prepare" "/v1/health/failure" ]}
             reverse_proxy unix/${opsSocket}
           }
 
@@ -362,6 +379,7 @@ mkServiceModule {
           # as file://, Origin null) is deliberately not given to /ops/*.
           handle /feedback* {
             ${browserGuard "feedback" true}
+            ${jsonGuard "feedback" [ "/feedback" ]}
             reverse_proxy unix/${opsSocket}
           }
 
@@ -373,6 +391,7 @@ mkServiceModule {
             ${lib.concatStringsSep "\n" (
               lib.imap0 (index: header: ''
                 @phoneBrowser${toString index} header ${header} *
+                header @phoneBrowser${toString index} Connection close
                 respond @phoneBrowser${toString index} "browser request refused" 403
               '') [
                 "Origin"
@@ -395,6 +414,7 @@ mkServiceModule {
 
           handle {
             ${browserGuard "pages" false}
+            ${jsonGuard "pages" [ "/v1/actions" "/v1/actions/prepare" "/v1/health/failure" ]}
             reverse_proxy unix/${opsSocket}
           }
           }
@@ -422,6 +442,7 @@ mkServiceModule {
             redir /reports /reports/
             handle /feedback* {
               ${browserGuard "reportFeedback" true}
+              ${jsonGuard "reportFeedback" [ "/feedback" ]}
               reverse_proxy unix/${opsSocket}
             }
             handle_path /reports/* {
