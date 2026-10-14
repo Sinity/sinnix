@@ -1643,3 +1643,39 @@ def test_retained_exited_unit_is_a_terminal_observation(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(run_module.time, "sleep", unexpected_wait)
     assert run_module._wait_for_unit("fixture.service", 0) == properties
+
+
+
+def test_real_cancellation_after_startup_keeps_its_outcome_and_releases_unit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_pueue: FakePueue
+) -> None:
+    user_manager()
+    monkeypatch.setenv("PUEUE_GROUP", "fixture")
+    launch = write_launch(tmp_path, argv=["sleep", "60"])
+    unit = unit_for(launch, "fixture")
+    marker = cancel_marker_for(tmp_path / "job-a.log")
+    original = run_module._start_service
+
+    def start_then_cancel(*args: Any, **kwargs: Any) -> Any:
+        client = original(*args, **kwargs)
+        assert client is not None and client.returncode == 0
+        with (tmp_path / "job-a.attempts" / ".allocation.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            marker.write_text(json.dumps({"attempt": 1}))
+            run_module._systemctl("stop", unit)
+            fcntl.flock(lock, fcntl.LOCK_UN)
+        return client
+
+    monkeypatch.setattr(run_module, "_start_service", start_then_cancel)
+    assert main([str(launch)]) == CANCELLED_EXIT_CODE
+    assert outcome_of(tmp_path)["outcome"] == "cancelled"
+    assert run_module.unit_properties(unit) == {}
+    assert not marker.exists()
+
+
+def test_running_unit_cannot_prove_command_success() -> None:
+    properties = {
+        "LoadState": "loaded", "ActiveState": "active", "SubState": "running",
+        "Result": "success", "ExecMainStatus": "0", "ExecMainCode": "0",
+    }
+    assert run_module._classify(False, properties) == (run_module.Outcome.VANISHED, VANISHED_EXIT_CODE)

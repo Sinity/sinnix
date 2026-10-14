@@ -432,6 +432,16 @@ def unit_properties(unit: str) -> dict[str, str]:
     )
 
 
+def _unit_is_terminal(properties: Mapping[str, str]) -> bool:
+    return properties.get("LoadState") == "loaded" and (
+        properties.get("ActiveState") in {"inactive", "failed"}
+        or (
+            properties.get("ActiveState") == "active"
+            and properties.get("SubState") == "exited"
+        )
+    )
+
+
 def _wait_for_unit(unit: str, timeout_seconds: int) -> dict[str, str] | None:
     """Wait outside the allocation lock until completion or its observation deadline.
 
@@ -454,10 +464,7 @@ def _wait_for_unit(unit: str, timeout_seconds: int) -> dict[str, str] | None:
             active_state = properties.get("ActiveState")
             if load_state and load_state != "loaded":
                 return {}
-            if load_state == "loaded" and (
-                active_state in {"inactive", "failed"}
-                or (active_state == "active" and properties.get("SubState") == "exited")
-            ):
+            if _unit_is_terminal(properties):
                 return properties
             if timeout_seconds and properties.get("Type") == "notify":
                 if active_state == "activating":
@@ -609,7 +616,7 @@ def _classify(
         return Outcome.CANCELLED, CANCELLED_EXIT_CODE
     if properties is None:
         return Outcome.VANISHED, VANISHED_EXIT_CODE
-    if not properties:
+    if not properties or not _unit_is_terminal(properties):
         return Outcome.VANISHED, VANISHED_EXIT_CODE
     if properties.get("Result") == "timeout":
         return Outcome.TIMEOUT, TIMEOUT_EXIT_CODE
