@@ -367,3 +367,71 @@ def test_accessible_empty_inventory_is_valid(tmp_path):
     gateway_config.runtime_inventory.write_text('{"captures": []}')
     service = CaptureService(gateway_config, Principal.for_name("operator"))
     assert service.lanes_visible() == {"lanes": [], "total_declared_lanes": 0}
+
+
+
+def scoped_config(tmp_path, selectors):
+    from dataclasses import replace
+    cfg, paths = config(tmp_path)
+    inventory = json.loads(cfg.runtime_inventory.read_text())
+    inventory["capture_scopes"] = {"schema": "sinnix-capture-scope-v1", "subjects": {
+        "activity": ["clipboard", "mpris"], "machine": ["router"], "health": []}}
+    cfg.runtime_inventory.write_text(json.dumps(inventory))
+    return replace(cfg, capture_scope=frozenset(selectors)), paths
+
+
+def test_subject_and_lane_union_has_independent_principal_upper_bound(tmp_path):
+    from dataclasses import replace
+    cfg, _ = scoped_config(tmp_path, ["subject:activity", "lane:router"])
+    service = CaptureService(cfg, Principal.for_name("operator"))
+    assert {row["name"] for row in service.lanes_visible()["lanes"]} == {"clipboard", "mpris", "router"}
+    restricted = replace(Principal.for_name("operator"), allowed_lanes=frozenset({"clipboard"}))
+    service = CaptureService(cfg, restricted)
+    assert [row["name"] for row in service.lanes_visible()["lanes"]] == ["clipboard"]
+    with pytest.raises(PolicyError): service.query(["router"])
+    with pytest.raises(PolicyError): service.lane("mpris")
+
+
+def test_scoped_capture_reads_and_freshness_never_admit_omitted_lanes(tmp_path):
+    from dataclasses import replace
+    cfg, _ = scoped_config(tmp_path, ["lane:clipboard"])
+    collector = tmp_path / "collector"
+    collector.write_text(f"#!{sys.executable}\nimport json,sys\nlanes=[sys.argv[i+1] for i,v in enumerate(sys.argv) if v=='--lane']\nprint(json.dumps({{'records':[{{'lane':lane}} for lane in lanes]}}))\n")
+    collector.chmod(0o700)
+    service = CaptureService(replace(cfg, capture_command=str(collector)), Principal.for_name("operator"))
+    assert [row["name"] for row in service.lanes_visible()["lanes"]] == ["clipboard"]
+    assert service.query()["records"] == [{"lane": "clipboard"}]
+    for operation in [service.query, lambda lanes: service.lane(lanes[0]), lambda lanes: service.freshness(lanes[0])]:
+        with pytest.raises(PolicyError): operation(["router"])
+
+
+@pytest.mark.parametrize("selector", ["subject:unknown", "lane:future", "activity"])
+def test_unknown_or_unqualified_capture_selectors_fail_visibly(tmp_path, selector):
+    from sinnix_agent_gateway.captures import CaptureScopeError
+    cfg, _ = scoped_config(tmp_path, [selector])
+    with pytest.raises(CaptureScopeError): CaptureService(cfg, Principal.for_name("operator")).lanes_visible()
+
+
+def test_known_empty_subject_is_not_unknown_or_unavailable(tmp_path):
+    cfg, _ = scoped_config(tmp_path, ["subject:health"])
+    service = CaptureService(cfg, Principal.for_name("operator"))
+    assert service.lanes_visible() == {"lanes": [], "total_declared_lanes": 0}
+    assert service.query() == {"records": [], "lanes_queried": [], "truncated": False}
+
+
+@pytest.mark.parametrize("schema,members", [("unsupported", ["clipboard"]), ("sinnix-capture-scope-v1", ["absent"])])
+def test_invalid_subject_authority_is_not_guessed(tmp_path, schema, members):
+    from sinnix_agent_gateway.captures import CaptureScopeError
+    cfg, _ = scoped_config(tmp_path, ["subject:activity"])
+    inventory = json.loads(cfg.runtime_inventory.read_text())
+    inventory["capture_scopes"] = {"schema": schema, "subjects": {"activity": members}}
+    cfg.runtime_inventory.write_text(json.dumps(inventory))
+    with pytest.raises(CaptureScopeError): CaptureService(cfg, Principal.for_name("operator")).lanes_visible()
+
+
+def test_config_rejects_retired_ambiguous_selector_syntax(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"endpoint": {"scope": {"captures": ["activity"]}}}))
+    with pytest.raises(ValueError, match="capture-scope-v1"): GatewayConfig.load(path)
+    path.write_text(json.dumps({"endpoint": {"scope": {"captures": ["subject:activity", "lane:clipboard"]}}}))
+    assert GatewayConfig.load(path).capture_scope == frozenset({"subject:activity", "lane:clipboard"})

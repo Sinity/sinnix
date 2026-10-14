@@ -6,13 +6,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .capabilities import Capability, Principal
+from .capabilities import Capability, PolicyError, Principal
 from .config import GatewayConfig
 from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
 
 class CaptureInventoryUnavailableError(RuntimeError):
     """The capture authority could not be read or interpreted."""
+
+
+class CaptureScopeError(PolicyError):
+    """Configured selectors cannot be resolved through the runtime authority."""
 
 
 @dataclass(frozen=True)
@@ -36,7 +40,7 @@ class CaptureLane:
         return None
 
 
-def queryable_capture_lanes(runtime_inventory: Path) -> dict[str, CaptureLane]:
+def queryable_capture_lanes(runtime_inventory: Path, selectors: frozenset[str] = frozenset()) -> dict[str, CaptureLane]:
     """Derive capture query contracts from every declared runtime lane.
 
     The inventory is the capture authority.  Every valid declared path is
@@ -85,7 +89,33 @@ def queryable_capture_lanes(runtime_inventory: Path) -> dict[str, CaptureLane]:
                 path=lane_path,
                 native_contract="runtime-declared-path",
             )
-    return lanes
+    if not selectors:
+        return lanes
+    scope = inventory.get("capture_scopes")
+    subjects = None
+    if any(selector.startswith("subject:") for selector in selectors):
+        if not isinstance(scope, dict) or scope.get("schema") != "sinnix-capture-scope-v1" or not isinstance(scope.get("subjects"), dict):
+            raise CaptureScopeError("subject selectors require the versioned runtime capture subject registry")
+        subjects = scope["subjects"]
+    selected = set()
+    for selector in sorted(selectors):
+        kind, separator, name = selector.partition(":")
+        if not separator or not name:
+            raise CaptureScopeError(f"invalid capture-scope-v1 selector: {selector}")
+        if kind == "lane":
+            if name not in lanes:
+                raise CaptureScopeError(f"unknown runtime capture lane selector: {selector}")
+            selected.add(name)
+        elif kind == "subject":
+            if name not in subjects:
+                raise CaptureScopeError(f"unknown runtime capture subject selector: {selector}")
+            members = subjects[name]
+            if not isinstance(members, list) or any(not isinstance(member, str) or member not in lanes for member in members):
+                raise CaptureScopeError(f"invalid runtime capture subject membership: {name}")
+            selected.update(members)
+        else:
+            raise CaptureScopeError(f"unknown capture selector kind: {kind}")
+    return {name: lane for name, lane in lanes.items() if name in selected}
 
 
 class CaptureService:
@@ -97,7 +127,7 @@ class CaptureService:
         self.execution = OwnerExecution()
 
     def _available_lanes(self) -> dict[str, CaptureLane]:
-        return queryable_capture_lanes(self.config.runtime_inventory)
+        return queryable_capture_lanes(self.config.runtime_inventory, self.config.capture_scope)
 
     def lanes_visible(self) -> dict[str, Any]:
         """List runtime-declared native lane contracts visible to this principal."""
@@ -132,6 +162,8 @@ class CaptureService:
         try:
             lane = self._available_lanes()[name]
         except KeyError as exc:
+            if self.config.capture_scope:
+                raise PolicyError("capture lane is outside endpoint scope") from exc
             raise ValueError(
                 "capture lane is not declared by runtime inventory"
             ) from exc
@@ -153,6 +185,8 @@ class CaptureService:
         try:
             lane = self._available_lanes()[name]
         except KeyError as exc:
+            if self.config.capture_scope:
+                raise PolicyError("capture lane is outside endpoint scope") from exc
             raise ValueError(
                 "capture lane is not declared by runtime inventory"
             ) from exc

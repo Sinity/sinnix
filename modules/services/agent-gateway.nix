@@ -116,7 +116,7 @@ mkServiceModule {
                 captures = lib.mkOption {
                   type = lib.types.listOf lib.types.str;
                   default = [ ];
-                  description = "Capture lane or subject scopes visible to this endpoint.";
+                  description = "Capture-scope-v1 selectors: subject:<id> or lane:<exact runtime ID>. Empty means all principal-authorized lanes.";
                 };
               };
               tunnelId = lib.mkOption {

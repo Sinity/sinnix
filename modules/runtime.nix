@@ -338,6 +338,12 @@ let
       backups = backupInventory;
     }
     // {
+      capture_scopes = {
+        schema = "sinnix-capture-scope-v1";
+        subjects = lib.mapAttrs (_: names:
+          builtins.filter (name: builtins.elem name (map (lane: lane.name) runtimeInventory.captures)) names
+        ) config.sinnix.runtime.captureSubjects;
+      };
       # The archive root is configuration, not a guessed XDG sibling. Keep the
       # six durable tier names beside it so read-only operators inspect the same
       # topology as the daemon, backup jobs, and storage projections.
@@ -657,6 +663,12 @@ in
     '';
   };
 
+  options.sinnix.runtime.captureSubjects = lib.mkOption {
+    type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+    default = { };
+    description = "Explicit capture-scope-v1 subject membership by exact runtime lane ID.";
+  };
+
   options.sinnix.runtime.inventory = lib.mkOption {
     type = lib.types.attrs;
     readOnly = true;
@@ -665,6 +677,19 @@ in
   };
 
   config = lib.mkMerge [
+    {
+      sinnix.runtime.captureSubjects = import ../flake/data/capture-subjects.nix;
+      assertions = lib.mkAfter [
+        {
+          assertion = builtins.all (lane:
+            builtins.length (builtins.filter (names: builtins.elem lane.name names)
+              (builtins.attrValues config.sinnix.runtime.captureSubjects)) == 1
+          ) runtimeInventory.captures;
+          message = "Each declared capture lane must belong to exactly one explicit runtime capture subject.";
+        }
+      ];
+
+    }
     (lib.sinnix.mkScheduledJob
       {
         inherit config;

@@ -47,12 +47,12 @@
           healthPort = 3088;
           scope = {
             captures = [
-              "activity"
-              "ai"
-              "comms"
-              "health"
-              "machine"
-              "self"
+              "subject:activity"
+              "subject:ai"
+              "subject:comms"
+              "subject:health"
+              "subject:machine"
+              "subject:self"
             ];
           };
         };
