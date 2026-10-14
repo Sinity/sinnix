@@ -80,6 +80,8 @@ def test_unavailable_observation_becomes_current_and_can_be_restored(tmp_path):
     assert latest["status"] == "missing"
     assert unavailable["current_location"] == latest
     assert unavailable["location_status"] == "missing"
+    assert unavailable["current_location"]["review_reason"] == "location transition"
+    assert "No such file" in unavailable["current_location"]["reason"]
     assert unavailable["identity"] == original["identity"]
     assert unavailable["inspections"] == original["inspections"]
     assert unavailable["location_observations"][:-1] == available["location_observations"]

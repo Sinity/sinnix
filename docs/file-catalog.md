@@ -66,7 +66,9 @@ byte continuity. Revisions retain the asset UUID, move earlier content evidence
 into revision history, and give the current revision metadata-only coverage.
 Every observation, including an unavailable source, advances the current
 location while retaining the earlier observation history. Missing paths, offline
-mounts, access denial and wrong object types are recorded separately. Device
+mounts, access denial and wrong object types are recorded separately. The
+authored `review_reason` is preserved separately
+from a filesystem diagnostic `reason`, and both appear in the viewer. Device
 numbers are observations; filesystem UUID and Btrfs subvolume identity are
 recorded when available. External locations require a mounted ancestor within
 their declared external root before payload metadata is probed. A mounted child

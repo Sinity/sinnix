@@ -366,6 +366,18 @@ def test_available_and_unobserved_current_addresses_keep_their_links(tmp_path):
         assert MODULE["path_link"](path) in page
 
 
+def test_location_review_and_diagnosis_are_preserved_and_escaped(tmp_path):
+    asset = dict(id="fixture", kind="file", current_path=str(tmp_path / "missing"),
+        title="Fixture", description="Historical evidence", inspections=[], relations=[],
+        location_status="missing", current_location=dict(observed_at="2026-01-01T00:00:00Z",
+        content_continuity="unverified", reason="No such file", review_reason="<img src=x onerror=alert(1)>",
+        basis="retained <input>"))
+    page = MODULE["render_asset"](asset, {"fixture": asset})
+    assert "Location diagnosis: No such file" in page
+    assert "&lt;img" in page and "retained &lt;input&gt;" in page
+    assert "<img src=x" not in page
+
+
 def test_evidence_projection_resolves_history_without_changing_annotations():
     import copy
     asset = {"enrichment": {"extraction": {"path": "/old/catalog/evidence/sample.txt"}}}

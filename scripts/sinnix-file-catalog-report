@@ -211,6 +211,10 @@ def render_asset(asset: dict, by_id: dict, judgments: dict | None = None, catalo
     location = asset.get("current_location")
     if location:
         parts.append(f'<p>Latest location observation: {esc(location["observed_at"])}. Content continuity: {esc(location["content_continuity"])}.</p>')
+        review = location.get("review_reason") or location.get("reason", "")
+        parts.append(f'<p>Review: {esc(review)}. Basis: {esc(location.get("basis", ""))}.</p>')
+        if location.get("reason") and location["reason"] != review:
+            parts.append(f'<p>Location diagnosis: {esc(location["reason"])}</p>')
     for revision in asset.get("revisions", []):
         parts.append(f'<details><summary>Earlier revision {esc(revision["revision_id"])}</summary>')
         parts.append(f'<p>{esc(revision.get("description", ""))}</p>')

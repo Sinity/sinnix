@@ -737,7 +737,7 @@ def recover_copy(asset: dict[str, Any], row: dict[str, Any], assets: dict) -> No
     asset['identity'] = {**diagnosis['identity'], 'sha256': digest}
     record_location(asset, {
         'observed_at': now(), 'actor': row['actor'], 'action': 'recover_copy',
-        'basis': row['basis'], 'reason': row['reason'], 'source': str(old),
+        'basis': row['basis'], 'reason': row['reason'], 'review_reason': row['reason'], 'source': str(old),
         'path': str(destination), **diagnosis, 'prior_catalog_identity': prior,
         'content_continuity': 'verified_full_sha256', 'sha256': digest,
     })
@@ -769,7 +769,7 @@ def cmd_observe(args: argparse.Namespace) -> int:
             diagnosis = location_diagnosis(Path(asset['current_path']), asset['kind'])
             observation = {"observed_at": now(), "actor": row['actor'], "basis": row['basis'], "reason": row['reason'],
                            "action": action, "path": asset['current_path'], **diagnosis,
-                           "content_continuity": "unverified"}
+                           "review_reason": row['reason'], "content_continuity": "unverified"}
             if action == 'unavailable':
                 if diagnosis['status'] == 'available':
                     raise CatalogError("unavailable observation has a live source")
