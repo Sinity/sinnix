@@ -10,7 +10,8 @@ umask 077
 # lane looks like a quiet one, and a unit that never finishes is not "failed".
 #
 #   confined-from-own-output  the unit cannot write the path it declares
-#   lane-missing / lane-empty  the declared path has never held anything
+#   lane-missing / lane-empty  the declared path is absent or currently empty
+#   lane-unavailable           capture contents could not be inspected
 #   agent-transcript-loss      a hardened unit execs an agent CLI it cannot log
 #   never-succeeded            a timer-driven unit with no completion on record
 #   lane-abandoned             capture data belonging to no declared surface
@@ -199,25 +200,36 @@ done < <(jq -r '.surfaces | to_entries[]
 # created it keeps its data out of every freshness and coverage check, and
 # reads as live data while belonging to nothing.
 declared_paths="$(jq -r '.surfaces[] | (.captures // [])[] | .path // empty' "$INVENTORY")"
-while IFS= read -r dir; do
-  [[ -z "$dir" ]] && continue
-  covered=0
-  while IFS= read -r decl; do
-    [[ -z "$decl" ]] && continue
-    if [[ "$decl" == "$dir" || "$decl" == "$dir"/* || "$dir" == "$decl"/* ]]; then
-      covered=1
-      break
+if capture_dirs="$(find "$CAPTURES_ROOT" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)"; then
+  while IFS= read -r dir; do
+    [[ -z "$dir" ]] && continue
+    covered=0
+    while IFS= read -r decl; do
+      [[ -z "$decl" ]] && continue
+      if [[ "$decl" == "$dir" || "$decl" == "$dir"/* || "$dir" == "$decl"/* ]]; then
+        covered=1
+        break
+      fi
+    done <<<"$declared_paths"
+    [[ "$covered" -eq 1 ]] && continue
+    # Undeclared alone is weak evidence -- plenty of lanes are written by
+    # producers outside the runtime inventory. Undeclared AND untouched for a
+    # month is the abandoned-lane shape worth a human look.
+    if recent_entry="$(find "$dir" -mindepth 1 -mtime -30 -print -quit 2>/dev/null)"; then
+      if [[ -z "$recent_entry" ]]; then
+        emit "-" "-" "lane-abandoned" "$dir" \
+          "capture directory with no declaring surface and no entry modified in 30 days"
+      fi
+    else
+      emit "-" "-" "lane-unavailable" "$dir" \
+        "undeclared capture directory could not be inspected; contents are unknown"
     fi
-  done <<<"$declared_paths"
-  [[ "$covered" -eq 1 ]] && continue
-  # Undeclared alone is weak evidence -- plenty of lanes are written by
-  # producers outside the runtime inventory. Undeclared AND untouched for a
-  # month is the abandoned-lane shape worth a human look.
-  if [[ -z "$(find "$dir" -mindepth 1 -mtime -30 -print -quit 2>/dev/null)" ]]; then
-    emit "-" "-" "lane-abandoned" "$dir" \
-      "capture directory with no declaring surface and no write in 30 days"
-  fi
-done < <(find "$CAPTURES_ROOT" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+  done < <(printf '%s\n' "$capture_dirs" | sort)
+
+else
+  emit "-" "-" "lane-unavailable" "$CAPTURES_ROOT" \
+    "capture root could not be listed; undeclared lanes are unknown"
+fi
 
 count="$(wc -l <"$findings" 2>/dev/null || echo 0)"
 mkdir -p "$(dirname "$OUT")"

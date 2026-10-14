@@ -26,14 +26,14 @@ print(json.loads(os.environ['TEST_PROPERTIES']).get(sys.argv[sys.argv.index('-p'
         finder = fake / 'find'
         actual_find = shutil.which('find')
         finder.write_text(f'#!{sys.executable}\n' + f'''import os,sys
-if sys.argv[1] == {path!r}:raise SystemExit(1)
+if sys.argv[1] == {(path if find_failure is True else str(find_failure))!r}:raise SystemExit(1)
 os.execv({actual_find!r},[{actual_find!r},*sys.argv[1:]])
 ''')
         finder.chmod(0o700)
     source = tmp_path / 'inventory.json'
     source.write_text(inventory if inventory is not None else json.dumps({'surfaces': {'fixture': {'unit': 'fixture.service', 'manager': 'system', 'captures': [{'path': path}]}}}))
     captures = tmp_path / 'captures'
-    captures.mkdir()
+    captures.mkdir(exist_ok=True)
     output = tmp_path / 'out.jsonl'
     env = {**os.environ, 'PATH': str(fake)+':'+os.environ['PATH'], 'TEST_PROPERTIES': json.dumps(props), 'SINNIX_RUNTIME_INVENTORY': str(source), 'SINNIX_CAPTURES_ROOT': str(captures), 'SINNIX_SANDBOX_AUDIT_OUT': str(output)}
     result = subprocess.run(['bash', str(SCRIPT), '--quiet'], env=env, capture_output=True, text=True)
@@ -90,3 +90,22 @@ def test_empty_and_unreadable_directories_are_distinct(tmp_path, unreadable):
     assert result.returncode == 0, result.stderr
     assert any(row['kind']=='lane-empty' for row in rows) is not unreadable
     assert any(row['kind']=='lane-unavailable' for row in rows) is unreadable
+
+
+@pytest.mark.parametrize('failed_target', ['lane', 'root', None])
+def test_undeclared_lane_scan_failures_are_not_abandonment(tmp_path, failed_target):
+    captures = tmp_path / 'captures'
+    lane = captures / 'undeclared'
+    lane.mkdir(parents=True)
+    target = lane if failed_target == 'lane' else captures
+    result, rows = run_audit(tmp_path, '/synthetic/missing-capture', {},
+                             find_failure=target if failed_target else False)
+    assert result.returncode == 0, result.stderr
+    abandoned = [row for row in rows if row['kind'] == 'lane-abandoned']
+    unavailable = [row for row in rows if row['kind'] == 'lane-unavailable']
+    if failed_target:
+        assert not abandoned
+        assert [row['path'] for row in unavailable] == [str(target)]
+    else:
+        assert [row['path'] for row in abandoned] == [str(lane)]
+        assert not unavailable
