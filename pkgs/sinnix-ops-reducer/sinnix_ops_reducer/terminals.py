@@ -402,7 +402,7 @@ def history_for(history_dir: Path, pid: int, window_id: int) -> list[dict[str, A
     return rows[:50]
 
 
-INDEX_HTML = """<!doctype html>
+INDEX_HTML = r"""<!doctype html>
 <html><head><meta charset="utf-8"><title>sinnix terminals</title>
 <style>
   body{background:#111;color:#ddd;font-family:monospace;margin:0;display:flex;height:100vh}
@@ -444,11 +444,17 @@ async function load() {
   const res = await fetch('/terminals/v1/windows');
   const wins = await res.json();
   const list = document.getElementById('list');
-  list.innerHTML = '';
+  list.replaceChildren();
   for (const w of wins) {
     const div = document.createElement('div');
     div.className = 'win' + (w.is_focused ? ' focused' : '');
-    div.innerHTML = `<div class="title">${w.live ? '● ' : ''}${w.title || '(untitled)'}</div><div class="cwd">${w.cwd}</div>`;
+    const title = document.createElement('div');
+    title.className = 'title';
+    title.textContent = (w.live ? '● ' : '') + (w.title || '(untitled)');
+    const cwd = document.createElement('div');
+    cwd.className = 'cwd';
+    cwd.textContent = w.cwd;
+    div.append(title, cwd);
     div.onclick = () => (w.live ? showStream(w.kitty_pid, w.window_id) : showLive(w.kitty_pid, w.window_id));
     list.appendChild(div);
     if (w.live) {
@@ -471,7 +477,10 @@ async function load() {
 // did I type into this window before" recall, which is the cheap useful part.
 function histKey(pid, winId) { return `sinnix-terminal-sent:${pid}:${winId}`; }
 function loadHist(pid, winId) {
-  try { return JSON.parse(localStorage.getItem(histKey(pid, winId)) || '[]'); }
+  try {
+    const history = JSON.parse(localStorage.getItem(histKey(pid, winId)) || '[]');
+    return Array.isArray(history) ? history.filter(item => typeof item === 'string') : [];
+  }
   catch { return []; }
 }
 function pushHist(pid, winId, text) {
@@ -481,7 +490,12 @@ function pushHist(pid, winId, text) {
 }
 function renderHistDatalist(pid, winId) {
   const dl = document.getElementById('sendhist');
-  dl.innerHTML = loadHist(pid, winId).map(t => `<option value="${t.replace(/"/g, '&quot;')}">`).join('');
+  dl.replaceChildren();
+  for (const text of loadHist(pid, winId)) {
+    const option = document.createElement('option');
+    option.value = text;
+    dl.appendChild(option);
+  }
 }
 
 // The live stream is the same PTY the desktop window is showing, rendered by
@@ -489,8 +503,9 @@ function renderHistDatalist(pid, winId) {
 // on send (that would drop the WebSocket mid-session).
 function showStream(pid, winId) {
   current = { pid, winId, streaming: true };
-  document.getElementById('view').innerHTML =
-    `<iframe src="/terminals/v1/live/${pid}/${winId}/"></iframe>`;
+  const frame = document.createElement('iframe');
+  frame.src = `/terminals/v1/live/${pid}/${winId}/`;
+  document.getElementById('view').replaceChildren(frame);
   document.getElementById('control').style.display = 'flex';
   renderHistDatalist(pid, winId);
 }
@@ -499,8 +514,9 @@ function showStream(pid, winId) {
 // was wired in, or one not launched through sinnix-captured-shell).
 function showLive(pid, winId) {
   current = { pid, winId, streaming: false };
-  document.getElementById('view').innerHTML =
-    `<iframe src="/terminals/v1/windows/${pid}/${winId}/content"></iframe>`;
+  const frame = document.createElement('iframe');
+  frame.src = `/terminals/v1/windows/${pid}/${winId}/content`;
+  document.getElementById('view').replaceChildren(frame);
   document.getElementById('control').style.display = 'flex';
   renderHistDatalist(pid, winId);
 }
@@ -510,9 +526,25 @@ async function showHistory(pid, winId) {
   const res = await fetch(`/terminals/v1/windows/${pid}/${winId}/history`);
   const entries = await res.json();
   const view = document.getElementById('view');
-  view.innerHTML = '<div style="padding:8px">' + entries.map(e =>
-    `<div><a href="/terminals/v1/windows/${pid}/${winId}/history/${e.ansi_file}" target="_blank" style="color:#88f">${e.captured_at} -- ${e.title}</a></div>`
-  ).join('') + (entries.length ? '' : '<i>no scrollback captures yet for this window</i>') + '</div>';
+  const container = document.createElement('div');
+  container.style.padding = '8px';
+  for (const entry of entries) {
+    const row = document.createElement('div');
+    const link = document.createElement('a');
+    link.href = `/terminals/v1/windows/${pid}/${winId}/history/${encodeURIComponent(entry.ansi_file)}`;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.style.color = '#88f';
+    link.textContent = `${entry.captured_at} -- ${entry.title}`;
+    row.appendChild(link);
+    container.appendChild(row);
+  }
+  if (!entries.length) {
+    const empty = document.createElement('i');
+    empty.textContent = 'no scrollback captures yet for this window';
+    container.appendChild(empty);
+  }
+  view.replaceChildren(container);
 }
 
 async function sendPayload(payload) {

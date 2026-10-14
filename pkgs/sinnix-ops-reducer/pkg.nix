@@ -2,6 +2,7 @@
   lib,
   python3Packages,
   sinnix-lib,
+  nodejs,
   # terminals.py shells out to these by bare name (`kitty @ ...`, `aha ...`);
   # a buildPythonApplication has no writeShellApplication runtimeInputs
   # wrapper of its own to carry them, so they go on the built console_script's
@@ -30,7 +31,7 @@ python3Packages.buildPythonApplication {
       ahaPackage
     ])
   ];
-  nativeCheckInputs = [ python3Packages.pytest ];
+  nativeCheckInputs = [ python3Packages.pytest nodejs ];
   SINNIX_CAPABILITIES_WRAPPER = ../../scripts/sinnix-capabilities;
   SINNIX_CHEATSHEET_SOURCE = ../../scripts/sinnix-cheatsheet;
   checkPhase = ''

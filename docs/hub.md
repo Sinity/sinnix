@@ -382,6 +382,8 @@ follow-up, not this route's.
 
 ## Terminal views
 
+Terminal titles, working directories, send history and capture labels are rendered as text, and history filenames are encoded as URL path components. Captured metadata cannot supply page markup.
+
 `/terminals/` (sinnix-859p) reads and drives the operator's own kitty windows
 over the browser, without a multiplexer. It is a route family on the
 ops-reducer, absorbed from an earlier standalone terminal-viewing daemon —
