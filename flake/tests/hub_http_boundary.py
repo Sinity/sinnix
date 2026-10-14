@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import http.client
+import json
 import os
 import re
 import socket
@@ -40,16 +41,54 @@ thread = threading.Thread(target=owner.serve_forever, daemon=True)
 thread.start()
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
+    # Exercise the rendered startup owner with synthetic interface/status
+    # processes. Rejected identities must not overwrite the last environment.
+    resolver_source = Path(sys.argv[2]).read_text()
+    ip_fixture = root / "ip-fixture"
+    ip_fixture.write_text(f"#!{sys.executable}\nprint('1: tailscale0 inet 127.0.0.2/32 scope global tailscale0')\n")
+    ip_fixture.chmod(0o700)
+    status_fixture = root / "status-fixture"
+    status_fixture.write_text(f"#!{sys.executable}\nimport os,sys\nif os.environ.get('STATUS_FAIL'): sys.exit(7)\nprint(os.environ['STATUS_JSON'])\n")
+    status_fixture.chmod(0o700)
+    resolver_source = re.sub(r"/nix/store/[^\s]+/bin/ip", str(ip_fixture), resolver_source)
+    resolver_source = re.sub(r"/nix/store/[^\s]+/bin/tailscale", str(status_fixture), resolver_source)
+    resolver_script = root / "resolver"
+    resolver_script.write_text(resolver_source)
+    resolver_script.chmod(0o700)
+    bind_environment = root / "bind.env"
+    valid_status = {"Self": {"TailscaleIPs": ["127.0.0.2"], "DNSName": "neutral.tailnet.invalid."}}
+    status_cases = [
+        (valid_status, False, True),
+        ({"Self": {"TailscaleIPs": ["127.0.0.3"], "DNSName": "neutral.tailnet.invalid"}}, False, False),
+        ({"Self": {"TailscaleIPs": ["127.0.0.2"], "DNSName": "bad\nname"}}, False, False),
+        ({"Self": {"TailscaleIPs": ["127.0.0.2"], "DNSName": "bad..name"}}, False, False),
+        ({"Self": {"TailscaleIPs": ["127.0.0.2"]}}, False, False),
+        (valid_status, True, False),
+    ]
+    for status, fail, valid in status_cases:
+        preimage = b"previous verified environment\n"
+        bind_environment.write_bytes(preimage)
+        env = {**os.environ, "STATUS_JSON": json.dumps(status)}
+        env.pop("STATUS_FAIL", None)
+        if fail: env["STATUS_FAIL"] = "1"
+        result = subprocess.run([str(resolver_script), str(bind_environment)], env=env, capture_output=True, timeout=10)
+        assert (result.returncode == 0) == valid, result.stderr
+        if valid:
+            assert bind_environment.read_text() == "SINNIX_HUB_TAILNET_IP=127.0.0.2\nSINNIX_HUB_DNS_NAME=neutral.tailnet.invalid\n"
+        else:
+            assert bind_environment.read_bytes() == preimage
+        assert not list(root.glob(".SINNIX_HUB_TAILNET_IP.tmp.*"))
     port = free_port()
     source = Path(sys.argv[1]).read_text()
+    frontend_ports = [int(value) for value in re.findall(r"http://:(\d+)\s*\{", source) if int(value) != 8880]
     # Only the transport addresses and log destination change. Guards and
     # route ordering remain those rendered for the real host.
     source = source.replace(":8880", f":{port}")
-    source = re.sub(r"reverse_proxy unix/[^\s]+", f"reverse_proxy 127.0.0.1:{owner.server_port}", source)
+    source = re.sub(r"reverse_proxy [^\s]+", f"reverse_proxy 127.0.0.1:{owner.server_port}", source)
     source = re.sub(r"output file [^\s]+", f"output file {root / 'access.log'}", source)
     config = root / "Caddyfile"
     config.write_text(source)
-    environment = {**os.environ, "SINNIX_HUB_TAILNET_IP": "127.0.0.2"}
+    environment = {**os.environ, "SINNIX_HUB_TAILNET_IP": "127.0.0.2", "SINNIX_HUB_DNS_NAME": "neutral.tailnet.invalid"}
     with (root / "caddy.log").open("w") as log:
         process = subprocess.Popen(["caddy", "run", "--config", str(config), "--adapter", "caddyfile"], env=environment, stdout=log, stderr=log)
         try:
@@ -63,10 +102,10 @@ with tempfile.TemporaryDirectory() as temporary:
                     assert time.monotonic() < deadline, (root / "caddy.log").read_text()
                     time.sleep(.05)
 
-            def request(path, headers, expected, *, send_body=True, method="POST"):
+            def request(path, headers, expected, *, send_body=True, method="POST", request_port=port):
                 before = len(Owner.calls)
-                client = http.client.HTTPConnection("127.0.0.1", port, timeout=2)
-                client.putrequest(method, path)
+                client = http.client.HTTPConnection("127.0.0.1", request_port, timeout=2)
+                client.putrequest(method, path, skip_host="Host" in headers)
                 for name, value in headers.items():
                     client.putheader(name, value)
                 client.putheader("Content-Length", "2" if send_body else "1000000")
@@ -79,6 +118,13 @@ with tempfile.TemporaryDirectory() as temporary:
                 assert response.status == expected, (path, headers, response.status)
                 assert len(Owner.calls) - before == (1 if expected == 200 else 0), (path, headers, Owner.calls)
 
+            for path in ("/ops/v1/actions", "/terminals/not-a-terminal", "/v1/actions", "/feedback", "/phone/v1/ping", "/reports/missing"):
+                request(path, {"Host": f"rebound.example.invalid:{port}"}, 403)
+            for name in ("localhost", "127.0.0.1", "127.0.0.2", "neutral.tailnet.invalid"):
+                request("/v1/actions", {"Host": f"{name}:{port}", "Origin": f"http://{name}:{port}"}, 200)
+            for frontend_port in frontend_ports:
+                request("/", {"Host": f"rebound.example.invalid:{frontend_port}"}, 403, request_port=frontend_port)
+                request("/", {"Host": f"neutral.tailnet.invalid:{frontend_port}"}, 200, request_port=frontend_port)
             same_origin = f"http://127.0.0.1:{port}"
             for path in ("/ops/v1/actions", "/terminals/not-a-terminal", "/v1/actions", "/feedback"):
                 request(path, {"Origin": "https://example.invalid"}, 403)

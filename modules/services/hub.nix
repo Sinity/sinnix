@@ -57,8 +57,9 @@
 #     not known at build time and is not a repository-publishable fact, so an
 #     ExecStartPre resolves it from the interface itself (not `tailscale ip`,
 #     which needs the privileged tailscaled socket) and writes it to an
-#     environment file the Caddyfile interpolates. It retries while the
-#     interface comes up and fails the unit if it never does — a hub that
+#     environment file the Caddyfile interpolates. Tailscale status supplies
+#     this machine's DNS name only after verifying the same bind address.
+#     It retries while the interface comes up and fails the unit if it never does — a hub that
 #     cannot bind the tailnet is supposed to be down, not listening wider.
 #
 #  2. Firewall. `sinnix.services.tailscale.useRoutingFeatures = "none"` means
@@ -208,12 +209,24 @@ mkServiceModule {
     let
       tailscaleInterface = config.sinnix.services.tailscale.interfaceName;
 
+      acceptedHosts = [
+        "localhost"
+        "127.0.0.1"
+        config.networking.hostName
+        "{$SINNIX_HUB_TAILNET_IP}"
+        "{$SINNIX_HUB_DNS_NAME}"
+      ];
+      hostGuard = label: ''
+        @${label}Host {
+          not host ${lib.concatStringsSep " " acceptedHosts}
+        }
+        respond @${label}Host "unknown host refused" 403
+      '';
+
       browserGuard = label: allowOpaque: ''
         @${label}Origin {
           header Origin *
-          not header Origin http://{$SINNIX_HUB_TAILNET_IP}:${toString cfg.port}
-          not header Origin http://127.0.0.1:${toString cfg.port}
-          not header Origin http://localhost:${toString cfg.port}
+          ${lib.concatMapStringsSep "\n" (host: "not header Origin http://${host}:${toString cfg.port}") acceptedHosts}
           ${lib.optionalString allowOpaque "not header Origin null"}
         }
         respond @${label}Origin "cross-origin request refused" 403
@@ -279,7 +292,10 @@ mkServiceModule {
         lib.mapAttrsToList (_name: frontend: ''
           http://:${toString frontend.port} {
             bind {$SINNIX_HUB_TAILNET_IP} 127.0.0.1
-            reverse_proxy ${frontend.upstream}
+            route {
+              ${hostGuard "frontend${toString frontend.port}"}
+              reverse_proxy ${frontend.upstream}
+            }
           }
         '') activeFrontends
       );
@@ -319,6 +335,8 @@ mkServiceModule {
             level INFO
           }
 
+          route {
+            ${hostGuard "hub"}
           redir /reports /reports/
           handle_path /reports/* {
             root * ${cfg.reportsDir}
@@ -372,6 +390,7 @@ mkServiceModule {
             ${browserGuard "pages" false}
             reverse_proxy unix/${opsSocket}
           }
+          }
         }
 
         # `bind` is load-bearing, not decoration. Listing two site addresses
@@ -403,9 +422,26 @@ mkServiceModule {
               | ${pkgs.coreutils}/bin/cut -d/ -f1 \
               | ${pkgs.coreutils}/bin/head -n1)"
             if [ -n "''${address:-}" ]; then
+              ${lib.optionalString (key == "SINNIX_HUB_TAILNET_IP") ''
+                if ! dns_name="$(${pkgs.coreutils}/bin/timeout 5 ${pkgs.tailscale}/bin/tailscale status --json --peers=false \
+                  | ${pkgs.jq}/bin/jq -er --arg address "$address" '
+                    .Self
+                    | select((.TailscaleIPs | type) == "array" and (.TailscaleIPs | index($address)) != null)
+                    | .DNSName | select(type == "string") | rtrimstr(".")
+                    | select(length > 0 and length <= 253)
+                    | select(test("[^A-Za-z0-9.-]") | not)
+                    | select(split(".") | all(length > 0 and length <= 63 and test("^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?$")))
+                  ')"; then
+                  echo "${label}: cannot verify tailnet DNS identity for the bind address; refusing to start" >&2
+                  exit 1
+                fi
+              ''}
               temporary="$(${pkgs.coreutils}/bin/mktemp "$target_dir/.${key}.tmp.XXXXXX")"
               trap 'rm -f "$temporary"' EXIT
               ${pkgs.coreutils}/bin/printf '${key}=%s\n' "$address" > "$temporary"
+              ${lib.optionalString (key == "SINNIX_HUB_TAILNET_IP") ''
+                ${pkgs.coreutils}/bin/printf 'SINNIX_HUB_DNS_NAME=%s\n' "$dns_name" >> "$temporary"
+              ''}
               ${pkgs.coreutils}/bin/sync -f "$temporary"
               ${pkgs.coreutils}/bin/mv -f "$temporary" "$target"
               ${pkgs.coreutils}/bin/sync -f "$target_dir"

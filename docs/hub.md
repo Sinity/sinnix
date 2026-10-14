@@ -178,9 +178,11 @@ Two independent layers, either of which would suffice alone.
 **Binding.** Caddy listens on exactly two addresses per port: loopback, and the
 host's `tailscale0` IPv4 address. The tailnet address is not known at build time
 and is not a fact this public repository should carry, so an `ExecStartPre`
-reads it off the interface — not `tailscale ip`, which needs the privileged
-tailscaled socket — retries while the interface comes up, and fails the unit if
-it never appears. A hub that cannot bind the tailnet is supposed to be down, not
+reads it off the interface, retries while the interface comes up, and fails the
+unit if it never appears. Before publishing the bind environment, it verifies
+that Tailscale's own status assigns that address to this machine and supplies a
+valid DNS name. A failed identity query leaves the previous environment intact
+and refuses startup. A hub that cannot bind the tailnet is supposed to be down, not
 listening wider.
 
 The `bind` directive in each site block is load-bearing. Listing two site
@@ -194,6 +196,13 @@ caddy adapt --adapter caddyfile --config <file> | jq '.apps.http.servers | map_v
 ```
 
 Every entry must be an explicit address. A bare `":8880"` is a regression.
+
+**Host admission.** The hub and every republished frontend reject unknown Host
+names before serving files or proxying. Accepted names are localhost, loopback,
+the declared machine name, and this machine's verified tailnet IP/DNS name.
+Origin checks use the same names, so the declared entrances also support their
+own browser actions. An arbitrary domain resolving to loopback or the tailnet
+address cannot inherit a private HTTP entrance.
 
 **Firewall.** Ports are opened on `tailscale0` only, via
 `networking.firewall.interfaces.tailscale0.allowedTCPPorts`. This matters
