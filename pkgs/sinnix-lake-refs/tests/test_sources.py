@@ -105,3 +105,26 @@ def test_source_roles_retain_fixtures_and_documentation_without_live_false_alarm
         "/realm/fixture/package": "fixture",
         "/realm/fixture/vm": "fixture",
     }
+
+
+@pytest.mark.parametrize('filename', ['reader:legacy.py', 'reader\ncurrent.py', 'reader\rcurrent.py'])
+def test_source_filename_separators_do_not_corrupt_rg_records(tmp_path, filename):
+    refs = load_refs()
+    source = tmp_path / filename
+    source.write_text('ROOT = "/realm/synthetic/capture"\n')
+    assert refs.scan_repo('fixture', tmp_path) == [{
+        'repo': 'fixture', 'file': str(source), 'line': 1,
+        'path': '/realm/synthetic/capture', 'kind': 'live',
+    }]
+
+
+def test_malformed_rg_record_refuses_to_publish_an_empty_ledger(tmp_path, monkeypatch):
+    refs = load_refs()
+    monkeypatch.setattr(refs, 'REPOS', {'fixture': tmp_path})
+    monkeypatch.setattr(refs.subprocess, 'run', lambda *a, **kw:
+                        SimpleNamespace(returncode=0, stdout='malformed JSON\n', stderr=''))
+    out = tmp_path / 'ledger.jsonl'
+    out.write_text('retained observations\n')
+    monkeypatch.setattr(sys, 'argv', [str(SCRIPT), 'scan', '--out', str(out)])
+    assert refs.main() == 2
+    assert out.read_text() == 'retained observations\n'

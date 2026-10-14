@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import base64
 import json
 import re
 import subprocess
@@ -86,7 +87,7 @@ def scan_repo(name: str, root: Path) -> list[dict]:
     # roughly 131 the manual survey found; the true population is code, so
     # code is what gets searched.
     proc = subprocess.run(
-        ["rg", "--line-number", "--no-heading",
+        ["rg", "--json", "--line-number",
          "--glob", "scripts/*", "--glob", "!scripts/*.*",
          "--glob", "*.nix", "--glob", "*.py", "--glob", "*.sh",
          "--glob", "!.git/**", "--glob", "!node_modules/**",
@@ -98,20 +99,30 @@ def scan_repo(name: str, root: Path) -> list[dict]:
         raise ScanError(f"rg failed on {name} (exit {proc.returncode}): {proc.stderr}")
     rows = []
     documentation: dict[str, set[int]] = {}
-    # Split strictly on "\n", not str.splitlines(): a matched line containing
-    # a literal \r (a minified/bundled JS blob did, in practice) makes
-    # splitlines() -- which treats \r as a line break too -- fragment one rg
-    # record into several fake ones with no file:line: prefix, and the next
-    # int(lineno) then blows up on a chunk of the file's own content.
-    for line in proc.stdout.split("\n"):
-        if not line:
+    # JSON keeps filenames and matched source lines separate even when they
+    # contain colons, newlines or carriage returns.
+    for record in proc.stdout.split("\n"):
+        if not record:
             continue
         try:
-            file_part, lineno, text = line.split(":", 2)
-        except ValueError:
-            continue
-        if not lineno.isdigit():
-            continue
+            event = json.loads(record)
+            if event["type"] != "match":
+                continue
+            data = event["data"]
+            fields = []
+            for field in (data["path"], data["lines"]):
+                text = field.get("text")
+                if text is None:
+                    text = base64.b64decode(field["bytes"], validate=True).decode("utf-8")
+                if not isinstance(text, str):
+                    raise ValueError("match text must be a string")
+                fields.append(text)
+            file_part, text = fields
+            lineno = data["line_number"]
+            if type(lineno) is not int or lineno < 1:
+                raise ValueError("match line number must be positive")
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            raise ScanError(f"cannot decode rg match from {name}: {exc}") from exc
         path = root / file_part
         if fixture_file(path, root):
             kind = "fixture"
