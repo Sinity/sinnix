@@ -9,7 +9,10 @@ devShell evaluation reads, which the project declares as its cache inputs,
 and on the working directory, which nix embeds as the build outputs' prefix.
 Those, plus the nix version, key the cached script; any change re-evaluates.
 The script ends by running the project's shellHook, so per-run setup that
-reads other files (a dependency sync, for one) still happens every time.
+reads other files (a dependency sync, for one) still happens every time. Each
+command gets private temporary storage, removed after it exits; stop signals
+are forwarded before cleanup. An uncatchable kill still needs the enclosing
+job's declared scratch owner for cleanup.
 """
 
 from __future__ import annotations
@@ -17,10 +20,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import signal
+import tempfile
 import subprocess
 import sys
 import time
 from pathlib import Path
+from types import FrameType
 from typing import Sequence
 
 from sinnix_lib.atomic import atomic_publish
@@ -108,6 +114,47 @@ def _sweep(directory: Path) -> None:
             continue
 
 
+def _run_command(script: Path, command: Sequence[str]) -> int:
+    """Own the temporary build environment until its command has exited."""
+    child: subprocess.Popen[bytes] | None = None
+    interrupted: int | None = None
+
+    def forward(signum: int, _frame: FrameType | None) -> None:
+        nonlocal interrupted
+        interrupted = signum
+        if child is not None:
+            try:
+                child.send_signal(signum)
+            except ProcessLookupError:
+                pass
+
+    previous = {
+        sig: signal.signal(sig, forward)
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+    }
+    try:
+        with tempfile.TemporaryDirectory(prefix="agentctl-devenv-") as temporary:
+            if interrupted is not None:
+                return 128 + interrupted
+            environment = dict(os.environ, TMPDIR=temporary)
+            child = subprocess.Popen(
+                [
+                    "bash", "--noprofile", "--norc", "-c",
+                    'source "$0"; exec "$@"', str(script), *command,
+                ],
+                env=environment,
+                # Preserve explicit descriptor channels, as the former exec did.
+                close_fds=False,
+            )
+            if interrupted is not None:
+                forward(interrupted, None)
+            result = child.wait()
+            return result if result >= 0 else 128 - result
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     words = list(sys.argv[1:] if argv is None else argv)
     if "--" not in words:
@@ -127,21 +174,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except DevenvError as error:
         print(f"agentctl-devenv: {error}", file=sys.stderr)
         return 1
-    os.execvp(
-        "bash",
-        [
-            "bash",
-            "--noprofile",
-            "--norc",
-            "-c",
-            # As under `nix develop --command`, a failing shellHook step does
-            # not stop the command; the hook reports its own incompleteness.
-            'source "$0"; exec "$@"',
-            str(script),
-            *command,
-        ],
-    )
-    return 1  # unreachable
+    return _run_command(script, command)
 
 
 if __name__ == "__main__":

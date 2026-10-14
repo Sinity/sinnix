@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import os
+import json
+import signal
+import subprocess
+import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -80,3 +85,81 @@ def test_the_working_directory_is_part_of_the_key(
 
     assert devenv.realize(tree, INPUTS) != devenv.realize(other, INPUTS)
     assert log.read_text().count("realized") == 2
+
+
+def _temporary_environment_command(workdir, tmp_path, command):
+    tree, _log = workdir
+    script = devenv.realize(tree, INPUTS)
+    script.write_text(
+        'export NIX_BUILD_TOP="$(mktemp -d -t nix-shell.XXXXXX)"\n'
+        'export TMPDIR="$NIX_BUILD_TOP"\n'
+        'export DEVENV_MARK=from-cache\n'
+        'false\n'  # A failed shellHook still permits the command, as nix develop does.
+    )
+    temporary = tmp_path / "command-temp"
+    temporary.mkdir()
+    (temporary / "keep").write_text("caller-owned")
+    environment = dict(os.environ)
+    environment["TMPDIR"] = str(temporary)
+    environment["PYTHONPATH"] = os.pathsep.join([str(Path(devenv.__file__).parent.parent), *sys.path])
+    argv = [sys.executable, "-m", "agentctl.devenv", "--input", "flake.nix",
+            "--input", "flake.lock", "--input", "nix", "--", *command]
+    return argv, environment, temporary, tree
+
+
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_temporary_environment_is_cleaned_after_command(workdir, tmp_path, exit_code):
+    code = (
+        'import os,sys,json;from pathlib import Path;'
+        'p=Path(os.environ["TMPDIR"]);(p/"child-output").write_text("temporary");'
+        'print(json.dumps([os.environ["DEVENV_MARK"],sys.argv[1:],sys.stdin.read()]));'
+        f'sys.exit({exit_code})'
+    )
+    argv, env, temporary, cwd = _temporary_environment_command(
+        workdir, tmp_path, [sys.executable, "-c", code, "argument with spaces"])
+    result = subprocess.run(argv, cwd=cwd, env=env, input="input payload",
+                            text=True, capture_output=True, timeout=10)
+    assert result.returncode == exit_code, result.stderr
+    assert json.loads(result.stdout) == ["from-cache", ["argument with spaces"], "input payload"]
+    assert sorted(p.name for p in temporary.iterdir()) == ["keep"]
+
+
+@pytest.mark.parametrize("stop_signal", [signal.SIGTERM, signal.SIGINT])
+def test_temporary_environment_is_cleaned_after_termination(workdir, tmp_path, stop_signal):
+    ready = tmp_path / "ready"
+    code = 'import os,signal,sys;from pathlib import Path;Path(sys.argv[1]).write_text(str(os.getpid()));signal.pause()'
+    argv, env, temporary, cwd = _temporary_environment_command(
+        workdir, tmp_path, [sys.executable, "-c", code, str(ready)])
+    process = subprocess.Popen(argv, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert ready.exists()
+        child_pid = int(ready.read_text())
+        process.send_signal(stop_signal)
+        process.communicate(timeout=5)
+        assert process.returncode in (-stop_signal, 128 + stop_signal)
+        with pytest.raises(ProcessLookupError):
+            os.kill(child_pid, 0)
+        assert sorted(p.name for p in temporary.iterdir()) == ["keep"]
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate()
+
+
+def test_temporary_environment_preserves_inherited_descriptor(workdir, tmp_path):
+    channel = tmp_path / "inherited-channel"
+    descriptor = os.open(channel, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        code = 'import os,sys;os.write(int(sys.argv[1]), b"inherited payload")'
+        argv, env, temporary, cwd = _temporary_environment_command(
+            workdir, tmp_path, [sys.executable, "-c", code, str(descriptor)])
+        result = subprocess.run(argv, cwd=cwd, env=env, pass_fds=(descriptor,),
+                                text=True, capture_output=True, timeout=10)
+        assert result.returncode == 0, result.stderr
+        assert channel.read_bytes() == b"inherited payload"
+        assert sorted(p.name for p in temporary.iterdir()) == ["keep"]
+    finally:
+        os.close(descriptor)

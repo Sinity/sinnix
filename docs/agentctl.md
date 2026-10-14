@@ -195,9 +195,16 @@ under `scratch` in `jobs/<ref>.outcome` and on the `finished` event, then
 removes the directory. `job get` renders it. The typed result artifact stays
 the command's own stdout. A launch input naming a scratch path outside its
 tier's root is refused (exit 125): the wrapper removes what it created and
-nothing else. `scratch = "none"`, the default, allocates nothing.
+nothing else. `scratch = "none"`, the default, allocates no job scratch root.
 
-Before starting in a pool whose parallelism is 1 (`pytest-heavy`, `bulk`), the
+The cached Nix environment loader gives each command a private temporary
+directory beneath its inherited `TMPDIR`, including the Nix `nix-shell.*`
+build directory. It forwards catchable stop signals to the child and waits
+for the child to exit before removing that directory. Standard input,
+arguments and the command exit status are preserved. Uncatchable kills
+still rely on the enclosing job scratch owner for cleanup.
+
+Before starting in a pool whose parallelism is 1 (for example, `pytest-heavy`), the
 wrapper lists the active units of that pool's slice. A unit whose pueue task
 is terminal is an orphan of a killed wrapper and is stopped (`settled_orphan`
 in the log); a unit whose task is still running, or that no queued task
