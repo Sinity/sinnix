@@ -37,6 +37,25 @@ from agentctl.run import (
 from conftest import FakePueue, read_launch, write_project
 
 
+def test_required_services_share_the_verifiers_single_launch(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    descriptor = project_root / ".agentctl/project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace('exec = ["fixture-verify"]', 'exec = ["fixture-verify"]\nrequires=["database"]')
+        + '\n[operations.database]\ndescription="Fixture database"\nexec=["fixture-db"]\nready_probe=["fixture-ready"]\nready_timeout_seconds=12\n'
+    )
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("verify"))
+    assert len(fake_pueue.added) == 1
+    written = read_launch(config, fake_pueue.task(started["job_id"]))
+    argv = written["argv"]
+    assert argv[0] == "env"
+    assert argv[2].endswith("/service_run.py")
+    assert json.loads(argv[3]) == [{"name": "database", "command": ["fixture-db"], "ready_probe": ["fixture-ready"], "ready_timeout_seconds": 12}]
+    assert argv[4:] == ["--", "fixture-verify"]
+
+
 def test_invalid_launch_input_preserves_existing_private_bytes(tmp_path: Path) -> None:
     path = tmp_path / "launch.json"
     path.write_bytes(b"original")

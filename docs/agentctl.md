@@ -874,6 +874,24 @@ command must include a selector after `--`), `schedule`
 queued before their operation and cannot contain cycles. Any other operation
 field is ignored with a warning on stderr.
 
+`requires` names foreground service operations which run inside this operation's
+existing unit and project environment. Each required service declares a
+`ready_probe` argv and `ready_timeout_seconds` (1 to 7,200, default 60). Its
+startup, including cold builds, counts against that deadline and the parent
+job's runtime budget. Required services cannot declare further requirements,
+queued dependencies or caller-supplied arguments. They are not separate pueue
+jobs. A readiness failure or service exit fails verification; normal completion
+settles the service process groups, and systemd cancellation kills the entire
+unit. Service and probe output goes to the job's stderr, preserving typed
+verification stdout.
+
+Each service and its probe receive `AGENTCTL_SERVICE_READY`, a fresh path below
+a private invocation directory. A service may publish this marker only after
+its own startup checks succeed; the probe can test its existence rather than
+acknowledging an unrelated process on a shared port. Workspace verification
+profiles continue naming operations, so `requires` applies equally to direct
+job starts and profile verification.
+
 `execution_readiness` is `exec` by default. An operation with project-native
 admission may declare `notify`: its managed service remains activating until
 the workload sends systemd `READY=1` after admission. The runtime budget then

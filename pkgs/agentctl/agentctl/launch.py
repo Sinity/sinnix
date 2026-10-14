@@ -18,6 +18,7 @@ import re
 import shlex
 import stat
 import subprocess
+import sys
 import time
 import uuid
 from contextlib import contextmanager
@@ -1085,7 +1086,22 @@ def _start_operation(
             operation=operation.name,
             label=label_for(project.project_id, operation.name),
             group=operation.pool,
-            argv=project.environment.command_for((*operation.command, *extra_argv)),
+            argv=project.environment.command_for(
+                (
+                    sys.executable,
+                    str(Path(__file__).with_name("service_run.py")),
+                    json.dumps([
+                        {"name": name,
+                         "command": project.operation(name).command,
+                         "ready_probe": project.operation(name).ready_probe,
+                         "ready_timeout_seconds": project.operation(name).ready_timeout_seconds}
+                        for name in operation.requires
+                    ]),
+                    "--",
+                    *operation.command,
+                    *extra_argv,
+                ) if operation.requires else (*operation.command, *extra_argv)
+            ),
             working_directory=working_directory,
             queue_directory=project.root if candidate_commit is not None else None,
             timeout_seconds=operation.timeout_seconds,
