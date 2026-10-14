@@ -402,3 +402,58 @@ def test_invalid_index_is_error_not_zero_captures(monkeypatch, tmp_path, entry):
     result = provider.query("https://example.invalid/page")
     assert result.status == "error"
     assert result.error
+
+
+class ClusterResponse(io.BytesIO):
+    def __init__(self, payload, length):
+        super().__init__(payload)
+        self.headers = {} if length is None else {"Content-Length": length}
+
+
+@pytest.mark.parametrize("payload,length", [(b"", "0"), (b"index", "bad"), (b"index", "10")])
+def test_failed_cluster_download_removes_only_owned_staging(tmp_path, monkeypatch, payload, length):
+    provider = ledger.CommonCrawlProvider(cache_dir=tmp_path)
+    unrelated = tmp_path / "unrelated"
+    unrelated.write_bytes(b"preserve")
+    legacy = tmp_path / "CC-TEST-cluster.idx.tmp"
+    legacy.symlink_to(unrelated)
+    monkeypatch.setattr(ledger.urllib.request, "urlopen", lambda *_a, **_kw: ClusterResponse(payload, length))
+    with pytest.raises(ledger.ProviderUnavailable):
+        provider._cluster_index("CC-TEST")
+    assert unrelated.read_bytes() == b"preserve"
+    assert legacy.is_symlink()
+    assert not (tmp_path / "CC-TEST-cluster.idx").exists()
+    assert not list(tmp_path.glob(".CC-TEST-cluster.idx.*.tmp"))
+
+
+def test_interrupted_download_cannot_corrupt_another_published_cluster(tmp_path, monkeypatch):
+    first = ledger.CommonCrawlProvider(cache_dir=tmp_path)
+    second = ledger.CommonCrawlProvider(cache_dir=tmp_path)
+    retained = b"second complete index\n"
+
+    class InterruptedResponse(ClusterResponse):
+        reads = 0
+
+        def read(self, _size):
+            self.reads += 1
+            if self.reads == 1:
+                second._cluster_index("CC-TEST")
+                return b"first unfinished index\n"
+            raise ledger.urllib.error.URLError("synthetic interrupted transfer")
+
+    calls = 0
+
+    def fetch(*_a, **_kw):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return InterruptedResponse(b"", "100")
+        return ClusterResponse(retained, str(len(retained)))
+
+    monkeypatch.setattr(ledger.urllib.request, "urlopen", fetch)
+    with pytest.raises(ledger.ProviderUnavailable):
+        first._cluster_index("CC-TEST")
+    path = tmp_path / "CC-TEST-cluster.idx"
+    assert path.read_bytes() == retained
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert not list(tmp_path.glob(".CC-TEST-cluster.idx.*.tmp"))

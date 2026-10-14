@@ -448,30 +448,35 @@ class CommonCrawlProvider:
         if not path.exists() or path.stat().st_size == 0:
             path.parent.mkdir(parents=True, exist_ok=True)
             url = f"{self.DATA_BASE}/{collection}/indexes/cluster.idx"
-            tmp = path.with_suffix(".idx.tmp")
+            tmp = None
             try:
                 request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-                with urllib.request.urlopen(request, timeout=600) as response:  # noqa: S310
-                    declared = response.headers.get("Content-Length")
-                    with tmp.open("wb") as out:
+                with tempfile.NamedTemporaryFile(
+                    dir=path.parent, prefix=f".{path.name}.", suffix=".tmp", delete=False
+                ) as out:
+                    tmp = Path(out.name)
+                    with urllib.request.urlopen(request, timeout=600) as response:  # noqa: S310
+                        declared = response.headers.get("Content-Length")
                         while True:
                             chunk = response.read(1 << 20)
                             if not chunk:
                                 break
                             out.write(chunk)
-            except (urllib.error.URLError, socket.timeout, TimeoutError, OSError) as error:
-                tmp.unlink(missing_ok=True)
+                    # A truncated sorted index can return plausible wrong blocks.
+                    # Refuse it before publication rather than report false gaps.
+                    written = out.tell()
+                    if written == 0:
+                        raise ProviderUnavailable(f"cluster.idx for {collection} is empty")
+                    if declared is not None and written != int(declared):
+                        raise ProviderUnavailable(
+                            f"cluster.idx for {collection} truncated: got {written} of {declared} bytes"
+                        )
+                tmp.replace(path)
+            except (urllib.error.URLError, socket.timeout, TimeoutError, OSError, ValueError) as error:
                 raise ProviderUnavailable(f"cluster.idx fetch failed for {collection}: {error}") from error
-            # A short read here does not fail, it lies: the file is a sorted
-            # index and a truncated one still binary-searches, just to the
-            # wrong block. Refuse it rather than answer from it.
-            written = tmp.stat().st_size
-            if declared is not None and written != int(declared):
-                tmp.unlink(missing_ok=True)
-                raise ProviderUnavailable(
-                    f"cluster.idx for {collection} truncated: got {written} of {declared} bytes"
-                )
-            tmp.replace(path)
+            finally:
+                if tmp is not None:
+                    tmp.unlink(missing_ok=True)
         self._cluster_paths[collection] = path
         self._prune_stale_clusters()
         return path
