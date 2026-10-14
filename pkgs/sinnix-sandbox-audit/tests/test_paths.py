@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import shutil
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,7 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[3] / 'scripts/sinnix-sandbox-audit'
 
 
-def run_audit(tmp_path, path, props, audit_failure=False, inventory=None):
+def run_audit(tmp_path, path, props, audit_failure=False, inventory=None, find_failure=False):
     fake = tmp_path / 'bin'
     fake.mkdir()
     systemctl = fake / 'systemctl'
@@ -21,6 +22,14 @@ print(json.loads(os.environ['TEST_PROPERTIES']).get(sys.argv[sys.argv.index('-p'
     audit = fake / 'auditctl'
     audit.write_text('#!/bin/sh\n' + ('exit 1\n' if audit_failure else 'echo "enabled 1"\n'))
     audit.chmod(0o700)
+    if find_failure:
+        finder = fake / 'find'
+        actual_find = shutil.which('find')
+        finder.write_text(f'#!{sys.executable}\n' + f'''import os,sys
+if sys.argv[1] == {path!r}:raise SystemExit(1)
+os.execv({actual_find!r},[{actual_find!r},*sys.argv[1:]])
+''')
+        finder.chmod(0o700)
     source = tmp_path / 'inventory.json'
     source.write_text(inventory if inventory is not None else json.dumps({'surfaces': {'fixture': {'unit': 'fixture.service', 'manager': 'system', 'captures': [{'path': path}]}}}))
     captures = tmp_path / 'captures'
@@ -71,3 +80,13 @@ def test_invalid_inventory_fails_without_claiming_clean(tmp_path, inventory):
     assert result.returncode != 0
     assert 'invalid runtime inventory' in result.stderr
     assert not rows
+
+
+@pytest.mark.parametrize('unreadable', [False, True])
+def test_empty_and_unreadable_directories_are_distinct(tmp_path, unreadable):
+    lane = tmp_path / 'lane'
+    lane.mkdir()
+    result, rows = run_audit(tmp_path, str(lane), {}, find_failure=unreadable)
+    assert result.returncode == 0, result.stderr
+    assert any(row['kind']=='lane-empty' for row in rows) is not unreadable
+    assert any(row['kind']=='lane-unavailable' for row in rows) is unreadable

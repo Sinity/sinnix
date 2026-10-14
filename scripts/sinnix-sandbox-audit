@@ -135,8 +135,15 @@ while IFS=$'\t' read -r _name unit manager path; do
 
   if [[ ! -e "$path" ]]; then
     emit "$manager" "$unit" "lane-missing" "$path" "declared capture path does not exist"
-  elif [[ -d "$path" ]] && [[ -z "$(find "$path" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
-    emit "$manager" "$unit" "lane-empty" "$path" "declared capture lane currently has no entries"
+  elif [[ -d "$path" ]]; then
+    if entry="$(find "$path" -mindepth 1 -print -quit 2>/dev/null)"; then
+      if [[ -z "$entry" ]]; then
+        emit "$manager" "$unit" "lane-empty" "$path" "declared capture lane currently has no entries"
+      fi
+    else
+      emit "$manager" "$unit" "lane-unavailable" "$path" \
+        "declared capture directory could not be listed; contents are unknown"
+    fi
   elif [[ -f "$path" ]] && [[ ! -s "$path" ]]; then
     emit "$manager" "$unit" "lane-empty" "$path" "declared capture file is zero bytes"
   fi
