@@ -1139,7 +1139,6 @@ def test_a_multi_slot_pool_is_not_guarded(
             group="agent", label="other:verify",
             command=("agentctl-run", "/inputs/other.json"), working_directory=tmp_path,
         )
-        fake_pueue.start(task_id)
         other = unit_for("/inputs/other.json", "agent")
     else:
         task_id = 5
@@ -1707,7 +1706,6 @@ def test_real_retained_orphan_is_released_by_the_next_multi_slot_admission(
         group="fixture", label="fixture:check", command=("agentctl-run", str(first)),
         working_directory=tmp_path,
     )
-    fake_pueue.start(task_id)
     first_unit = unit_for(first, "fixture")
     next_launch = write_launch(
         tmp_path, name="next.json", argv=["true"], job_id="job-next",
@@ -1717,6 +1715,7 @@ def test_real_retained_orphan_is_released_by_the_next_multi_slot_admission(
         group="fixture", label="fixture:check", command=("agentctl-run", str(next_launch)),
         working_directory=tmp_path,
     )
+    assert set(fake_pueue.running_tasks("fixture")) == {task_id, next_task}
     next_unit = unit_for(next_launch, "fixture")
     original = run_module._wait_for_unit
 
@@ -1735,7 +1734,6 @@ def test_real_retained_orphan_is_released_by_the_next_multi_slot_admission(
                 main([str(first)])
         assert run_module.unit_properties(first_unit)["SubState"] == "exited"
         fake_pueue.kill_directly(task_id)
-        fake_pueue.start(next_task)
         assert main([str(next_launch)]) == 0
         assert run_module.unit_properties(first_unit) == {}
         assert run_module.unit_properties(next_unit) == {}
@@ -1757,7 +1755,6 @@ def test_same_reference_restart_preserves_its_prior_unit_release(
         group="pytest", label="fixture:check", command=("agentctl-run", str(launch)),
         working_directory=tmp_path,
     )
-    fake_pueue.start(task_id)
     unit = unit_for(launch, "pytest")
     fake_systemd.active((unit, described("pytest", task_id)))
 
