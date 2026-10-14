@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 from pathlib import Path
@@ -15,7 +16,7 @@ from ..capabilities import Capability
 from ..content import IMAGE_TYPES, Artifact, attach, is_text
 from ..contracts import VerbFamily
 from ..locators import ARTIFACT_REF_PREFIX, ArtifactLocator
-from ..results import ProtocolError
+from ..results import ProtocolError, ResultError
 from ..schemas import GatewayModel
 from ..text_paging import decode_utf8_page
 
@@ -189,7 +190,7 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
     content = runtime.artifacts.verified_content(raw)
     media = raw.get("content_type") or "application/octet-stream"
     size = content.stat().st_size
-    max_bytes = inp.max_bytes
+    max_bytes = min(inp.max_bytes, runtime.config.max_result_bytes)
     base = {
         "ref": ref,
         "artifact_id": raw["artifact_id"],
@@ -202,41 +203,61 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
     textual = inp.representation == "text" or (
         inp.representation == "auto" and is_text(media) and media not in IMAGE_TYPES
     )
-    if inp.representation == "binary":
-        chunk = runtime.artifacts.read(raw["artifact_id"], inp.offset, max_bytes)
-        return ActionResult(
-            Content(
-                **base,
-                offset=chunk["offset"],
-                returned_bytes=chunk["returned_bytes"],
-                next_offset=chunk["next_offset"],
-                truncated=chunk["next_offset"] is not None,
-                base64=chunk["base64"],
-                sha256=raw["sha256"],
-            )
-        )
-    if textual:
+    if inp.representation == "binary" or textual:
         with content.open("rb") as handle:
             handle.seek(inp.offset)
-            data = handle.read(max_bytes + 1)
-        truncated = len(data) > max_bytes
-        data = data[:max_bytes]
-        text, consumed = decode_utf8_page(data, final=not truncated)
-        if truncated and consumed == 0:
-            raise ProtocolError(
-                "invalid_request",
-                "max_bytes cannot fit the next UTF-8 character; retry with at least 4",
-            )
-        return ActionResult(
-            Content(
+            data = handle.read(max_bytes)
+
+        def page(length: int) -> Content:
+            chunk = data[:length]
+            fields: dict[str, Any]
+            if inp.representation == "binary":
+                consumed = len(chunk)
+                fields = {"base64": base64.b64encode(chunk).decode()}
+            else:
+                text, consumed = decode_utf8_page(
+                    chunk, final=inp.offset + length >= size
+                )
+                fields = {"text": text}
+            truncated = inp.offset + consumed < size
+            return Content(
                 **base,
-                text=text,
+                **fields,
                 offset=inp.offset,
                 returned_bytes=consumed,
                 next_offset=inp.offset + consumed if truncated else None,
                 truncated=truncated,
+                sha256=raw["sha256"],
             )
-        )
+
+        def fits(candidate: Content) -> bool:
+            try:
+                runtime.results.require_payload_bound(candidate.model_dump(mode="json"))
+                return True
+            except ResultError as exc:
+                if exc.failure_class != "response_bound":
+                    raise
+                return False
+
+        candidate = page(len(data))
+        if not fits(candidate):
+            # JSON escaping and base64 expansion count against the transport
+            # budget. Find a source-byte prefix that stays directly readable.
+            low, high = 0, len(data)
+            while low < high:
+                middle = (low + high + 1) // 2
+                if fits(page(middle)):
+                    low = middle
+                else:
+                    high = middle - 1
+            candidate = page(low)
+            runtime.results.require_payload_bound(candidate.model_dump(mode="json"))
+        if candidate.truncated and candidate.returned_bytes == 0:
+            raise ProtocolError(
+                "invalid_request",
+                "read budget cannot fit the next character; retry binary or with at least 4 bytes",
+            )
+        return ActionResult(candidate)
     artifact, blocks = attach(content, ref=ref, media_type=media)
     return ActionResult(
         Content(**base, artifact=artifact, returned_bytes=0),

@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
+
+import pytest
 from pathlib import Path
 
 from mcp.types import ImageContent
@@ -270,3 +273,38 @@ def test_paged_binary_read_hashes_the_snapshot_once(
         )["data"]
         offset = data["next_offset"]
     assert len(hashed) <= 1
+
+
+@pytest.mark.parametrize("representation", ["text", "binary"])
+@pytest.mark.parametrize("bound", [4096, 262144])
+def test_oversized_reads_stay_on_original_artifact_with_lossless_pages(tmp_path, representation, bound):
+    rt = Runtime.create(GatewayConfig(state_dir=tmp_path / "state", projects={}, max_result_bytes=bound), "operator")
+    original = ('🙂\"\\\n\t' * 30000).encode()
+    artifact_id = register(rt, "large.txt", original, "note")
+    ref = f"sinnix://artifacts/{artifact_id}"
+    offset = 0
+    chunks = []
+    while True:
+        request = {"target": {"ref": ref}, "representation": representation, "offset": offset, "max_bytes": 10000000}
+        response = call(rt, "artifacts.read", request, BY_NAME)
+        assert response["result"]["outcome"] == "ok", response
+        assert len(json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode()) <= bound
+        data = response["data"]
+        assert data["ref"] == ref and data["artifact_id"] == artifact_id
+        assert "artifact_refs" not in response["meta"] or not response["meta"]["artifact_refs"]
+        assert data["offset"] == offset
+        chunk = base64.b64decode(data["base64"], validate=True) if representation == "binary" else data["text"].encode()
+        assert data["returned_bytes"] == len(chunk)
+        assert data["sha256"] == hashlib.sha256(original).hexdigest()
+        assert data["bytes"] == len(original)
+        chunks.append(chunk)
+        if offset == 0:
+            replay = call(rt, "artifacts.read", request, BY_NAME)
+            assert replay["data"] == data
+        if data["next_offset"] is None:
+            assert not data["truncated"]
+            break
+        assert data["next_offset"] == offset + len(chunk) > offset
+        offset = data["next_offset"]
+    assert len(chunks) > 1 and b"".join(chunks) == original
+    assert len(list(rt.artifacts.root.glob("*/metadata.json"))) == 1
