@@ -333,7 +333,9 @@ def _within_budget(context: Mapping[str, Any], *, reserve_bytes: int = 0) -> dic
     bounded["components"] = components
     bounded["availability"] = "unavailable"
     if size(bounded) > budget:
-        raise ProtocolError("response_bound", "Context metadata exceeds the result budget")
+        # Even metadata can exceed one frame. Let the common result transport
+        # retain the complete original and return its resumable artifact ref.
+        return dict(context)
     return bounded
 
 

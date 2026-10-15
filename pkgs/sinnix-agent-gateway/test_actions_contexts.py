@@ -235,3 +235,38 @@ def test_project_wrapper_metadata_cannot_hide_orientation_in_an_artifact(tmp_pat
     assert "truncated" not in response["data"]
     assert response["data"]["components"][0]["presentation"] == "compact"
     assert len(canonical_bytes(response["data"])) <= 16384 - 4096
+
+
+@pytest.mark.parametrize("available", [True, False])
+def test_oversized_context_metadata_spills_complete_original_without_refusal(tmp_path, monkeypatch, available):
+    import base64
+    import hashlib
+    import json
+    from functools import partial
+    import test_actions_jobs
+    from sinnix_agent_gateway.config import GatewayConfig
+
+    monkeypatch.setattr(test_actions_jobs, "GatewayConfig", partial(GatewayConfig, max_result_bytes=16384))
+    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch, with_git=True)
+    reason = "complete metadata 界" * 2000
+    observation = {"available": available, "reason": reason, "coverage": {"complete": False}}
+    monkeypatch.setattr(runtime.observe, "machine_query", lambda operation: observation)
+    response = call(server, "context.compose", {"intent": "incident", "project": {"project": "fixture"}})
+    assert response["result"]["outcome"] == "ok", response
+    assert len(json.dumps(response, ensure_ascii=False).encode()) <= 16384
+    artifact = response["data"]["artifact"]
+    chunks = []
+    offset = 0
+    while offset is not None:
+        page = runtime.artifacts.read(artifact["artifact_id"], offset=offset, max_bytes=4096)
+        chunks.append(base64.b64decode(page["base64"]))
+        offset = page["next_offset"]
+    original = b"".join(chunks)
+    assert hashlib.sha256(original).hexdigest() == page["sha256"]
+    assert len(original) == artifact["bytes"]
+    restored = json.loads(original)
+    assert restored["availability"] == ("available" if available else "unavailable")
+    assert restored["components"][0]["reason"] == reason
+    assert restored["components"][0]["data"]["data"] == observation
+    saved = runtime.results.read(restored["snapshot_ref"].rsplit("/", 1)[1])["rows"][0]
+    assert saved["components"][0]["reason"] == reason

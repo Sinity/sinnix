@@ -102,7 +102,7 @@ Campaign provenance points from the new task to its origin and does not expand c
 
 A component's `status` is the owner's own terminal state, not a reachability flag: `available`, `degraded` (the owner answered, but named gaps shaped the answer), `empty` (the scope completed and holds nothing) or `unavailable` (no valid answer, with its reason). The gateway maps the owner's declared outcome and never infers one from the shape of the payload, because reading `empty` off an absent row set makes a broken owner surface indistinguishable from an empty scope. Per-component gap names the owner supplies arrive verbatim in `component_failures`, and a component that names any is at least `degraded`. A composite of several products takes its worst part: one part behind a named gap makes the whole answer `degraded`, and `empty` survives only when every part completed and found nothing.
 
-The returned envelope is held to the `total_budget_bytes` it reports. A component whose inline data does not fit is returned with `data: null` and `inline_omitted: true` rather than truncated into something that reads complete; `snapshot_ref` still reads the complete persisted observation.
+The returned envelope is held to the `total_budget_bytes` it reports. A component whose inline data does not fit is returned with `data: null` and `inline_omitted: true` rather than truncated into something that reads complete; `snapshot_ref` still reads the complete persisted observation. If metadata itself cannot fit, the common result transport returns a resumable artifact containing the complete context, including its original availability and snapshot reference.
 
 ### Shell lanes
 
