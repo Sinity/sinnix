@@ -66,7 +66,9 @@ while (($#)); do
 done
 
 mkdir -p "$output_dir"
-output="$output_dir/Video_$(date +%Y-%m-%d_%H-%M-%S).mkv"
+# Reserve a unique private file before handing it to the recorder; launches
+# within the same second must never truncate one another's capture.
+output="$(mktemp --tmpdir="$output_dir" "Video_$(date +%Y-%m-%d_%H-%M-%S)_XXXXXX.mkv")"
 
 echo "Recording $target at ${resolution}@${fps} HDR -> $output" >&2
 echo "Press Ctrl-C to stop and finalize the file." >&2
