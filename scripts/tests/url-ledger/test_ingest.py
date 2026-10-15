@@ -76,3 +76,29 @@ def test_failed_ingest_publication_keeps_previous_output(tmp_path, monkeypatch):
         ledger.cmd_ingest(args)
     assert output.read_text() == 'previous complete output'
     assert not list(state.glob('.urls.jsonl.atomic-tmp-*'))
+
+
+def test_visit_bounds_follow_instants_and_preserve_timestamp_spelling(tmp_path):
+    # Lexically earlier local date is actually the later instant.
+    earliest = "2026-01-01T01:00:00+02:00"
+    latest = "2025-12-31T23:30:00Z"
+    args = arguments(tmp_path, [
+        {"url": "https://example.invalid/", "iso_time": latest},
+        {"url": "https://example.invalid/", "iso_time": earliest},
+    ])
+    assert ledger.cmd_ingest(args) == 0
+    row = json.loads((tmp_path / "state/urls.jsonl").read_text())
+    assert row["visits"] == [earliest, latest]
+    assert row["visit_count"] == 2
+    assert row["first_visit"] == earliest
+    assert row["last_visit"] == latest
+
+
+def test_unparseable_visits_remain_evidence_without_claimed_time_bounds(tmp_path):
+    stamps = ["2026-01-01T00:00:00Z", "unknown historical timestamp"]
+    args = arguments(tmp_path, [{"url": "https://example.invalid/", "iso_time": stamp} for stamp in stamps])
+    assert ledger.cmd_ingest(args) == 0
+    row = json.loads((tmp_path / "state/urls.jsonl").read_text())
+    assert set(row["visits"]) == set(stamps)
+    assert row["visit_count"] == 2
+    assert row["first_visit"] is None and row["last_visit"] is None

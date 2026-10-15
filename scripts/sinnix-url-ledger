@@ -244,13 +244,19 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     urls_path = state_dir / "urls.jsonl"
     with atomic_text_writer(urls_path, fsync=True) as handle:
         for normalized in sorted(urls):
-            visits = sorted(urls[normalized]["visits"])
+            timed_visits = sorted(
+                ((_iso_to_epoch(value), value) for value in urls[normalized]["visits"]),
+                key=lambda pair: (pair[0] is None, pair[0] if pair[0] is not None else 0, pair[1]),
+            )
+            visits = [value for _, value in timed_visits]
+            # Keep uninterpretable stamps as evidence, without inventing full bounds.
+            known_bounds = all(epoch is not None for epoch, _ in timed_visits)
             record = {
                 "url": normalized,
                 "visit_count": len(visits),
                 "visits": visits,
-                "first_visit": visits[0],
-                "last_visit": visits[-1],
+                "first_visit": visits[0] if known_bounds else None,
+                "last_visit": visits[-1] if known_bounds else None,
             }
             handle.write(json.dumps(record, sort_keys=True) + "\n")
 
