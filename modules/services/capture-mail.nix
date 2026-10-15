@@ -5,8 +5,9 @@
 # aw-rollup lesson on sinnix-olm2's close): a Maildir is already the durable
 # store IMAP clients understand, so this lane does NOT go through the
 # sinnix-capture envelope writer -- mbsync writes the Maildir directly under
-# activityRoot/mail, and that directory tree IS the capture.
+# the configured mail capture path, and that directory tree IS the capture.
 #
+# `Sync Pull` prevents local changes from reaching the remote account.
 # `Expunge None` in the generated mbsync config is deliberate, not an
 # oversight: this lane exists to survive server-side and client-side
 # deletes, so a message that disappears upstream (spam-folder purge, "empty
@@ -65,6 +66,7 @@ let
     Far :capture-mail-remote:
     Near :capture-mail-local:
     Patterns ${lib.concatMapStringsSep " " (p: "\"${p}\"") cfg.patterns}
+    Sync Pull
     Create Near
     Expunge None
     SyncState *

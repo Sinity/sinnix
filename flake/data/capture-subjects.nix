@@ -26,6 +26,7 @@
     "borg-polylogue-state-archive"
   ];
   comms = [
+    "mail"
     "phone-calls"
     "comms-irc"
   ];
