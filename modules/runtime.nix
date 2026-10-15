@@ -722,7 +722,8 @@ in
           "--output ${cfg.paths.machineRoot}/config-drift.jsonl"
           "--user-name ${cfg.user.name}"
           # The user profile's noctalia, so the merged export uses the same
-          # binary and schema the running shell does.
+          # binary and schema the running shell does. The collector runs this
+          # child as cfg.user, independently of its privileged machine probes.
           "--noctalia /etc/profiles/per-user/${cfg.user.name}/bin/noctalia"
           "--noctalia-config-home /home/${cfg.user.name}/.config/noctalia"
           "--noctalia-state-home /home/${cfg.user.name}/.local/state/noctalia"

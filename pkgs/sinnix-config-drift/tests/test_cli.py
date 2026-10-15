@@ -273,3 +273,57 @@ def test_swap_priority_difference_is_still_drift(tmp_path):
         proc_files={"proc/swaps": "Filename Type Size Used Priority\n/fixture/swap file 100 0 -2\n"},
     )
     assert next(row for row in rows if row["check"] == "swap")["match"] is False
+
+
+def test_root_noctalia_probe_runs_as_configured_operator(tmp_path, monkeypatch):
+    import os
+    import pwd
+    import runpy
+    from types import SimpleNamespace
+
+    compare = runpy.run_path(str(SCRIPT))["compare_noctalia"]
+    config_home = tmp_path / "noctalia"
+    config_home.mkdir()
+    (config_home / "config.toml").write_text('[accessibility]\nui_scale = 1.5\n')
+    args = SimpleNamespace(noctalia_config_home=str(config_home),
+                           noctalia_state_home=str(tmp_path / "state/noctalia"),
+                           noctalia="/user/profile/noctalia", user_name="operator")
+    account = SimpleNamespace(pw_name="operator", pw_uid=1234, pw_gid=2345,
+                              pw_dir="/home/operator")
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setattr(pwd, "getpwnam", lambda name: account)
+    monkeypatch.setattr(os, "getgrouplist", lambda name, gid: [gid, 3456])
+    calls = []
+
+    def probe(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return SimpleNamespace(returncode=0, stdout='[accessibility]\nui_scale = 1.5\n')
+
+    monkeypatch.setattr(subprocess, "run", probe)
+    assert compare(args)[0]["status"] == "matched"
+    argv, options = calls.pop()
+    assert argv == [args.noctalia, "config", "export", "merged"]
+    assert options["user"] == 1234
+    assert options["group"] == 2345
+    assert options["extra_groups"] == [2345, 3456]
+    assert options["env"]["HOME"] == "/home/operator"
+    assert options["env"]["USER"] == "operator"
+    assert options["env"]["LOGNAME"] == "operator"
+    assert options["env"]["XDG_RUNTIME_DIR"] == "/run/user/1234"
+    assert options["env"]["NOCTALIA_CONFIG_HOME"] == str(tmp_path)
+    args.user_name = None
+    rows = compare(args)
+    assert rows[0]["status"] == "unavailable"
+    assert not calls
+
+    args.user_name = "operator"
+    account.pw_uid = 0
+    assert compare(args)[0]["status"] == "unavailable"
+    assert not calls
+
+    def absent(name):
+        raise KeyError(name)
+
+    monkeypatch.setattr(pwd, "getpwnam", absent)
+    assert compare(args)[0]["status"] == "unavailable"
+    assert not calls

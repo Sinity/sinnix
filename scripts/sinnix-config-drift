@@ -315,12 +315,29 @@ def compare_noctalia(args: argparse.Namespace) -> list[dict[str, Any]]:
     env = dict(os.environ, NOCTALIA_CONFIG_HOME=str(config_home.parent))
     if args.noctalia_state_home:
         env["NOCTALIA_STATE_HOME"] = str(Path(args.noctalia_state_home).parent)
+    # The profile executable and configuration belong to the operator. Keep
+    # privileged machine probes in the parent, but never run this child as root.
+    credentials = {}
     try:
+        if os.geteuid() == 0:
+            if not args.user_name:
+                return [unavailable("noctalia", None, "operator identity required for privileged probe")]
+            account = pwd.getpwnam(args.user_name)
+            if account.pw_uid == 0:
+                return [unavailable("noctalia", None, "Noctalia probe requires a non-root operator")]
+            credentials = {
+                "user": account.pw_uid,
+                "group": account.pw_gid,
+                "extra_groups": os.getgrouplist(account.pw_name, account.pw_gid),
+            }
+            env.update(HOME=account.pw_dir, USER=account.pw_name,
+                       LOGNAME=account.pw_name, XDG_RUNTIME_DIR=f"/run/user/{account.pw_uid}")
         proc = subprocess.run(
             [args.noctalia, "config", "export", "merged"],
             capture_output=True, text=True, timeout=10, check=False, env=env,
+            **credentials,
         )
-    except (OSError, subprocess.TimeoutExpired) as error:
+    except (KeyError, OSError, subprocess.TimeoutExpired) as error:
         return [unavailable("noctalia", None, f"noctalia config export unavailable: {error}")]
     if proc.returncode != 0:
         return [unavailable("noctalia", None, f"noctalia config export failed: {proc.stderr.strip()[:200]}")]
