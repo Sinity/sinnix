@@ -6,6 +6,7 @@ import hashlib
 import os
 import shutil
 import stat
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -87,26 +88,22 @@ def rename_noreplace(source: Path, destination: Path) -> None:
 
 
 def _copy_exclusive(source: Path, destination: Path) -> None:
-    """Copy a regular file without ever replacing an existing destination."""
+    """Stage privately, then publish without replacing another writer's path."""
+    temporary: Path | None = None
     try:
-        destination_fd = os.open(
-            destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
-        )
-    except FileExistsError as exc:
-        raise FileError("destination already exists") from exc
-    try:
-        with (
-            source.open("rb") as input_handle,
-            os.fdopen(destination_fd, "wb") as output_handle,
-        ):
-            destination_fd = -1
-            shutil.copyfileobj(input_handle, output_handle)
-    except Exception:
-        destination.unlink(missing_ok=True)
-        raise
+        with tempfile.NamedTemporaryFile(
+            prefix=".copy-", dir=destination.parent, delete=False
+        ) as outgoing:
+            temporary = Path(outgoing.name)
+            with source.open("rb") as incoming:
+                shutil.copyfileobj(incoming, outgoing)
+        try:
+            rename_noreplace(temporary, destination)
+        except FileExistsError as exc:
+            raise FileError("destination already exists") from exc
     finally:
-        if destination_fd != -1:
-            os.close(destination_fd)
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 class HostFileService:

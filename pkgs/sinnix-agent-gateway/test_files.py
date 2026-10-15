@@ -178,8 +178,12 @@ def test_cross_filesystem_unlink_failure_reports_both_preserved_objects(
     destination = tmp_path / "destination"
     source.write_text("payload")
 
-    def cross_device(*args, **kwargs):
-        raise OSError(errno.EXDEV, "fixture crossing")
+    original_rename = files.rename_noreplace
+
+    def cross_device(incoming, outgoing):
+        if incoming == source:
+            raise OSError(errno.EXDEV, "fixture crossing")
+        return original_rename(incoming, outgoing)
 
     monkeypatch.setattr(files, "rename_noreplace", cross_device)
     original = Path.unlink
@@ -195,3 +199,36 @@ def test_cross_filesystem_unlink_failure_reports_both_preserved_objects(
             "move", str(source), destination=str(destination)
         )
     assert source.read_text() == destination.read_text() == "payload"
+
+
+@pytest.mark.parametrize("fail_read", [False, True])
+def test_copy_preserves_a_destination_created_during_source_open(tmp_path, monkeypatch, fail_read):
+    import os
+
+    source = tmp_path / "source.txt"
+    destination = tmp_path / "destination.txt"
+    competitor = tmp_path / "competing.txt"
+    source.write_bytes(b"source evidence")
+    competitor.write_bytes(b"concurrent work")
+    expected_inode = competitor.stat().st_ino
+    original_open = Path.open
+    opened = 0
+
+    def race(path, *args, **kwargs):
+        nonlocal opened
+        if path == source and args and args[0] == "rb":
+            opened += 1
+            if opened == 2:  # after source hashing, at the copy's read boundary
+                os.replace(competitor, destination)
+                if fail_read:
+                    raise PermissionError("synthetic source failure")
+        return original_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", race)
+    expected = OSError if fail_read else FileError
+    with pytest.raises(expected):
+        service(tmp_path, "operator").write("copy", str(source), destination=str(destination))
+    assert destination.read_bytes() == b"concurrent work"
+    assert destination.stat().st_ino == expected_inode
+    assert source.read_bytes() == b"source evidence"
+    assert not list(tmp_path.glob(".copy-*"))
