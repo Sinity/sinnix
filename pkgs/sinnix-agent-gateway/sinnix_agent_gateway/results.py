@@ -113,6 +113,14 @@ def _canonical(value: object) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
 
 
+def _canonical_size(value: object) -> int:
+    # Validate the entire value, including an invalid tail after an oversized
+    # prefix, without joining a second complete representation just to count it.
+    # The stdlib encoder can still materialize a complete individual string.
+    encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"))
+    return sum(len(fragment.encode()) for fragment in encoder.iterencode(value))
+
+
 class ResultSnapshotWriter:
     """Incrementally materialize an immutable JSONL snapshot without row buffering."""
 
@@ -571,13 +579,13 @@ class ResultService:
 
     def require_payload_bound(self, payload: Any) -> None:
         try:
-            payload_bytes = _canonical(payload)
+            payload_size = _canonical_size(payload)
         except (TypeError, ValueError) as exc:
             raise ResultError(
                 "owner response is not JSON serializable", "owner_failed"
             ) from exc
         metadata_budget = min(4_096, max(1, self.config.max_result_bytes // 2))
-        if len(payload_bytes) > max(1, self.config.max_result_bytes - metadata_budget):
+        if payload_size > max(1, self.config.max_result_bytes - metadata_budget):
             raise ResultError(
                 "owner response exceeded V2 result bound", "response_bound"
             )
@@ -660,8 +668,8 @@ class ResultService:
             raise ResultError(
                 "V2 result envelope is malformed", "owner_failed"
             ) from exc
-        encoded = _canonical(envelope)
-        if len(encoded) > max(self.config.max_result_bytes, 4_096):
+        encoded_size = _canonical_size(envelope)
+        if encoded_size > max(self.config.max_result_bytes, 4_096):
             metadata_artifact = self.artifacts.register_json(
                 metadata,
                 kind="v2-result-metadata",
@@ -681,8 +689,8 @@ class ResultService:
             }
             envelope["result"]["sha256"] = self._digest(envelope)
             V2ToolEnvelope.model_validate(envelope)
-            encoded = _canonical(envelope)
-        if len(encoded) > max(self.config.max_result_bytes, 4_096):
+            encoded_size = _canonical_size(envelope)
+        if encoded_size > max(self.config.max_result_bytes, 4_096):
             raise ResultError(
                 "V2 result envelope exceeded response bound", "response_bound"
             )

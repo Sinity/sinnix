@@ -764,3 +764,35 @@ def test_second_resource_open_failure_does_not_leak_first_resource_or_stage(tmp_
         results.start_snapshot(query_sha256="query", source_revision="source", page_size=1)
     assert opened and all(handle.closed for handle in opened)
     assert not list(results.snapshots_root.glob("*.writing"))
+
+
+@pytest.mark.parametrize("payload", [
+    None, {"unicode": "界\n😀", "nested": [True, False, None, 1.25]},
+    {2: "two", 10: "ten"}, [float("nan"), float("inf"), -0.0], ("a", "b"),
+])
+def test_frame_size_matches_canonical_json(payload):
+    from sinnix_agent_gateway.results import _canonical, _canonical_size
+    assert _canonical_size(payload) == len(_canonical(payload))
+
+
+def test_oversized_frame_count_avoids_full_serialized_copy(tmp_path):
+    import tracemalloc
+    results = ResultService(config(tmp_path, max_result_bytes=4096), Principal.for_name("operator"))
+    payload = {"rows": ["x" * 64] * 100000}
+    tracemalloc.start()
+    try:
+        with pytest.raises(ResultError) as refusal:
+            results.require_payload_bound(payload)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert refusal.value.failure_class == "response_bound"
+    # The original size-only check allocated two complete 6.7 MB copies.
+    assert peak < 1_000_000
+
+
+def test_oversized_prefix_does_not_hide_invalid_json_tail(tmp_path):
+    results = ResultService(config(tmp_path, max_result_bytes=4096), Principal.for_name("operator"))
+    with pytest.raises(ResultError) as refusal:
+        results.require_payload_bound(["x" * 64] * 10000 + [object()])
+    assert refusal.value.failure_class == "owner_failed"
