@@ -250,6 +250,7 @@
           suiteDir = ../../pkgs/sinnix-ytdlp/tests;
           scripts = [
             "sinnix-ytdlp"
+            "ytdlp-clip-watch"
             "sinnix-video-resolve"
             "sinnix-url-ledger"
           ];

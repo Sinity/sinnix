@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Safe clipboard->yt-dlp watcher (drains the wl-paste pipe; won't freeze kitty)
-# runtimeInputs: wl-clipboard coreutils util-linux @sinnix-ytdlp
+# runtimeInputs: wl-clipboard coreutils util-linux python3 @sinnix-ytdlp
 #
 # Watch the Wayland clipboard for download sessions: every copied http(s) URL is
 # handed to yt-dlp. Run it manually when you want a batch of copies downloaded;
@@ -29,7 +29,34 @@ LOG_DIR=${YTDLP_CLIP_LOG_DIR:-/realm/state/ytdlp-clip-watch}
 
 # Internal handler: invoked by `wl-paste --watch` with the selection on stdin.
 if [ "${1:-}" = "--handle" ]; then
-  url=$(cat) # drain stdin == the new clipboard content; this is the fix
+  # Retain only one argv-safe URL, but drain everything before refusing it.
+  # Stopping after the prefix would block the clipboard owner again.
+  url=$(python3 -c 'import sys
+from urllib.parse import urlsplit
+limit = 65536
+raw = sys.stdin.buffer.read(limit + 1)
+while sys.stdin.buffer.read(65536):
+    pass
+if len(raw) > limit:
+    print("ytdlp-clip-watch: clipboard URL exceeds 65536 bytes", file=sys.stderr)
+    sys.exit(2)
+try:
+    value = raw.decode("utf-8").rstrip("\r\n")
+except UnicodeError:
+    print("ytdlp-clip-watch: clipboard is not UTF-8 text", file=sys.stderr)
+    sys.exit(2)
+if value.startswith(("http://", "https://")):
+    try:
+        valid = bool(urlsplit(value).hostname) and not any(
+            c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value
+        )
+    except ValueError:
+        valid = False
+    if not valid:
+        print("ytdlp-clip-watch: clipboard must contain one HTTP(S) URL", file=sys.stderr)
+        sys.exit(2)
+    sys.stdout.write(value)
+')
   case "$url" in
   http://* | https://*) ;;
   *) exit 0 ;;
