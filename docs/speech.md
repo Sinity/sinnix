@@ -184,25 +184,7 @@ not a strong authenticator and sinnix can synthesise the operator's own
 voice locally, so treating a voiceprint as authorisation would be theatre. The
 question it answers is only _whether an utterance is a command at all_.
 
-`scripts/sinnix-speaker-verify` supports enrollment, raw scoring, and a
-held-out `calibrate` command. Its SpeechBrain ECAPA model is pinned to revision
-`0f99f2d0ebe89ac095bcc5903c4dd8f72b367286`, including configuration and
-checkpoints; existing cache links are resolved against that revision.
-Enrollment rejects zero or non-finite centroids before replacing stored state.
-Calibration requires disjoint enrollment,
-same-speaker, different-speaker, and unrelated cohort directories; it reports
-symmetric AS-norm scores, EER, and Brier calibration error. The report's
-`supports_attribution` field is true only when EER is at most 5% (override with
-`--max-eer`). Version 2 reports bind the exact normalized enrollment centroid,
-pinned model and preprocessing method, and retain trial scores so scoring can
-recompute the reported metrics and support decision. Enrollment and calibration
-use the same centroid calculation. Scoring refuses a mismatched or malformed
-report before loading the model; the display flag cannot enable attribution.
-Old reports must be regenerated, and legacy enrollments must be re-enrolled
-before using calibration. Existing records remain unchanged; raw cosine scoring
-still accepts legacy enrollments. This consistency check does not authenticate
-corpus labels or establish the report's author. A calibrated score remains only
-a friction signal and never authorizes an action.
+`scripts/sinnix-speaker-verify` supports enrollment, raw scoring, and a held-out `calibrate` command. Its SpeechBrain ECAPA model is pinned to revision `0f99f2d0ebe89ac095bcc5903c4dd8f72b367286`, including configuration and checkpoints; existing cache links are resolved against that revision. Enrollment rejects zero or non-finite centroids before replacing stored state. Calibration requires disjoint enrollment, same-speaker, different-speaker, and unrelated cohort directories; it reports symmetric AS-norm scores, EER, and Brier calibration error. The report's `supports_attribution` field is true only when EER is at most 5% (override with `--max-eer`). Version 2 reports bind the exact normalized enrollment centroid, pinned model and preprocessing method, and retain trial scores so scoring can recompute the reported metrics and support decision. Enrollment and calibration use the same centroid calculation. Unreadable corpus subtrees abort calibration before model loading, preserving the previous report. Scoring refuses a mismatched or malformed report before loading the model; the display flag cannot enable attribution. Old reports must be regenerated, and legacy enrollments must be re-enrolled before using calibration. Existing records remain unchanged; raw cosine scoring still accepts legacy enrollments. This consistency check does not authenticate corpus labels or establish the report's author. A calibrated score remains only a friction signal and never authorizes an action.
 
 The available archive does not contain speaker-labelled impostor or cohort
 provenance, so it cannot produce a defensible calibration report. The voice

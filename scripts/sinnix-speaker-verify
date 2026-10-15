@@ -27,10 +27,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import math
 import json
+import math
+import os
 import sys
 from pathlib import Path
+from stat import S_ISREG
 
 from sinnix_lib.atomic import atomic_publish
 
@@ -164,9 +166,17 @@ def _audio_files(directory: str):
     path = Path(directory)
     if not path.is_dir():
         raise ValueError(f"not an audio directory: {path}")
-    files = sorted(
-        p for p in path.rglob("*") if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES
-    )
+
+    def scan_error(error):
+        raise error
+
+    files = []
+    for parent, _subdirectories, names in os.walk(path, onerror=scan_error, followlinks=False):
+        for name in names:
+            candidate = Path(parent) / name
+            if candidate.suffix.lower() in AUDIO_SUFFIXES and S_ISREG(candidate.stat().st_mode):
+                files.append(candidate)
+    files.sort()
     if not files:
         raise ValueError(f"audio directory is empty: {path}")
     return files

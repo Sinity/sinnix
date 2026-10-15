@@ -289,3 +289,40 @@ def test_legacy_enrollment_still_scores_without_calibration(monkeypatch, tmp_pat
     assert result["cosine_similarity"] == 0.8
     assert "attribution_score" not in result
     assert target.read_bytes() == original
+
+
+@pytest.mark.parametrize("unavailable", ["directory", "file-link"])
+def test_corpus_reader_refuses_unavailable_inputs(tmp_path, monkeypatch, unavailable):
+    for name in ["one.wav", "two.wav"]:
+        (tmp_path / name).write_bytes(b"synthetic audio")
+    hidden = tmp_path / "unavailable"
+    hidden.mkdir()
+    (hidden / "third.wav").write_bytes(b"synthetic audio")
+    if unavailable == "directory":
+        hidden.chmod(0)
+        expected = PermissionError
+    else:
+        (tmp_path / "broken.wav").symlink_to(tmp_path / "absent.wav")
+        expected = FileNotFoundError
+    report = tmp_path / "previous-report.json"
+    previous = b'{"previous":"verified report"}'
+    report.write_bytes(previous)
+    inode = report.stat().st_ino
+    monkeypatch.setattr(MODULE, "_load_model", lambda: pytest.fail("model loaded before corpus validation"))
+    try:
+        with pytest.raises(expected):
+            MODULE._audio_files(str(tmp_path))
+        with pytest.raises(expected):
+            MODULE.cmd_calibrate(SimpleNamespace(max_eer=0.05, enrollment=str(tmp_path),
+                genuine="unused", impostor="unused", cohort="unused", output=str(report)))
+        assert report.read_bytes() == previous and report.stat().st_ino == inode
+    finally:
+        hidden.chmod(0o700)
+
+
+def test_corpus_reader_preserves_file_links_without_recursing_directory_links(tmp_path):
+    audio = tmp_path / "source.wav"
+    audio.write_bytes(b"synthetic audio")
+    (tmp_path / "alias.wav").symlink_to(audio)
+    (tmp_path / "loop").symlink_to(tmp_path, target_is_directory=True)
+    assert MODULE._audio_files(str(tmp_path)) == [tmp_path / "alias.wav", audio]
