@@ -43,7 +43,7 @@ from pathlib import Path
 from sinnix_lib.atomic import atomic_publish
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_OUTPUT = Path("/realm/report/cheatsheet.html")
+DEFAULT_OUTPUT = Path("/realm/project/sinnix/analysis/cheatsheet.html")
 
 
 def esc(s: str) -> str:
@@ -387,7 +387,7 @@ def build_html(now_iso: str) -> str:
   Regenerated on demand (SUPER SHIFT+Slash) by <code>scripts/sinnix-cheatsheet</code>. Every section above
   except Beads/Git/Agent-dispatch is queried fresh each run, not cached: binds from the live compositor,
   capabilities from <code>sinnix-ops-reducer capabilities</code> over the eval-time capability index.
-  The same rows, with live unit state, are at <a href="/capabilities/">the hub's capabilities page</a>.
+  The same capability inventory is available with <code>sinnix capabilities</code>.
 </footer>
 <script>{JS}</script>
 </body>

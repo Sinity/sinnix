@@ -168,7 +168,7 @@ sinnix-ops-reducer capabilities --kind script  # one kind
 ```
 
 `sinnix cheatsheet` (SUPER SHIFT+Slash) renders it into the searchable offline
-page next to the live Hyprland binds, so the same answer is one keystroke away
+page at `/realm/project/sinnix/analysis/cheatsheet.html`, published through the explicit `/reports/cheatsheet.html` projection. It includes the live Hyprland binds, so the same answer is one keystroke away
 from the desktop and one tab away from the phone.
 
 The capability page and CLI distinguish a missing declaration index from an
