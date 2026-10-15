@@ -19,6 +19,7 @@ import ast
 import base64
 import json
 import re
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -74,8 +75,17 @@ def docstring_lines(path: Path) -> set[int]:
     return lines
 
 
+def inspect_path(path: Path):
+    """Only a missing path is absent; access and traversal failures propagate."""
+    try:
+        return path.stat()
+    except FileNotFoundError:
+        return None
+
+
 def scan_repo(name: str, root: Path) -> list[dict]:
-    if not root.is_dir():
+    info = inspect_path(root)
+    if info is None or not stat.S_ISDIR(info.st_mode):
         raise ScanError(f"source repository is unavailable or not a directory: {name}: {root}")
     # Source files only, and only source files -- explicitly, not by
     # excluding known-noisy extensions one at a time. First attempt used -uu
@@ -155,7 +165,7 @@ def existing_ancestor(path: str) -> Path | None:
     loudly, since those roots should always exist."""
     p = Path(path)
     while len(p.parts) >= 2:  # include the managed root, but not bare "/"
-        if p.exists():
+        if inspect_path(p) is not None:
             return p
         p = p.parent
     return None
@@ -180,7 +190,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     unique_paths = sorted({r["path"] for r in live})
     missing: list[tuple[str, Path | None]] = []
     for path in unique_paths:
-        if not Path(path).exists():
+        if inspect_path(Path(path)) is None:
             missing.append((path, existing_ancestor(path)))
 
     if not missing:

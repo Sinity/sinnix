@@ -68,8 +68,10 @@ def test_missing_path_reports_nearest_managed_ancestor(monkeypatch, existing, ex
     refs = load_refs()
 
     class SyntheticPath(PurePosixPath):
-        def exists(self):
-            return str(self) in existing
+        def stat(self):
+            if str(self) not in existing:
+                raise FileNotFoundError(str(self))
+            return SimpleNamespace(st_mode=0o40700)
 
     monkeypatch.setattr(refs, "Path", SyntheticPath)
     actual = refs.existing_ancestor("/realm/subject/missing")
@@ -128,3 +130,29 @@ def test_malformed_rg_record_refuses_to_publish_an_empty_ledger(tmp_path, monkey
     monkeypatch.setattr(sys, 'argv', [str(SCRIPT), 'scan', '--out', str(out)])
     assert refs.main() == 2
     assert out.read_text() == 'retained observations\n'
+
+
+@pytest.mark.parametrize("failure", [PermissionError, NotADirectoryError])
+@pytest.mark.parametrize("operation", ["check", "ancestor"])
+def test_uninspectable_reference_is_not_reported_missing(monkeypatch, capsys, failure, operation):
+    refs = load_refs()
+    target = Path("/realm/synthetic/private/record")
+    original_stat = Path.stat
+
+    def inspect(path, *args, **kwargs):
+        if path == target:
+            raise failure(13, "synthetic inspection failure", str(path))
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", inspect)
+    if operation == "ancestor":
+        with pytest.raises(failure):
+            refs.existing_ancestor(str(target))
+    else:
+        monkeypatch.setattr(refs, "scan", lambda: [{"kind": "live", "path": str(target),
+                           "repo": "fixture", "file": "reader.py", "line": 1}])
+        monkeypatch.setattr(sys, "argv", [str(SCRIPT), "check"])
+        assert refs.main() == 2
+        err = capsys.readouterr().err
+        assert "synthetic inspection failure" in err
+        assert "do not exist" not in err
