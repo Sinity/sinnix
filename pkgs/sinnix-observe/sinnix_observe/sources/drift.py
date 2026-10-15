@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import time
 from pathlib import Path
 from typing import Any
@@ -14,27 +16,22 @@ MAX_REPORT_AGE_SECONDS = 15 * 60
 
 
 def collect_config_drift(path: Path = REPORT) -> dict[str, Any]:
-    if not path.is_file():
-        return {
-            "available": False,
-            "status": "unavailable",
-            "reason": "report missing",
-            "rows": [],
-        }
     try:
-        modified_at = path.stat().st_mtime
-        rows = [
-            json.loads(line)
-            for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        # Open first so permission errors keep their cause and a replaced path
+        # cannot supply metadata for different bytes. Never block on a FIFO.
+        with open(path, encoding="utf-8", opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK)) as handle:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError("report is not a regular file")
+            modified_at = info.st_mtime
+            rows = [json.loads(line) for line in handle if line.strip()]
         if any(not isinstance(row, dict) for row in rows):
             raise ValueError("report rows must be JSON objects")
     except (OSError, ValueError) as error:
         return {
             "available": False,
             "status": "unavailable",
-            "reason": str(error),
+            "reason": "report missing" if isinstance(error, FileNotFoundError) else str(error),
             "rows": [],
         }
     age_seconds = max(0, int(time.time() - modified_at))
