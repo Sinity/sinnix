@@ -19,7 +19,28 @@ DAY="$(date -u +%Y-%m-%d)"
 RAW_OUT="$LANE/audit-$DAY.log"
 JSON_OUT="$LANE/audit-$DAY.jsonl"
 
-SINCE="$(cat "$WATERMARK" 2>/dev/null || true)"
+# Only an absent cursor starts a new window. A failed or partial read must
+# never reset capture to today and then advance past an unarchived backlog.
+SINCE="$(python3 - "$WATERMARK" <<'PY_CURSOR'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+try:
+    with path.open(encoding="ascii") as handle:
+        value = handle.read(65)
+except FileNotFoundError:
+    if path.is_symlink():
+        raise SystemExit("sinnix-audit-drain: dangling watermark link; cursor held")
+    sys.exit(0)
+except (OSError, UnicodeError) as error:
+    raise SystemExit(f"sinnix-audit-drain: cannot read watermark; cursor held: {error}")
+if re.fullmatch(r"[0-9]{1,20}\n?", value) is None:
+    raise SystemExit("sinnix-audit-drain: invalid watermark; cursor held")
+print(value.rstrip("\n"))
+PY_CURSOR
+)"
 NOW_EPOCH="$(date +%s)"
 
 if [[ -n "$SINCE" ]]; then
