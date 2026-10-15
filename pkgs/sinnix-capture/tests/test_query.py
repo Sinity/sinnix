@@ -132,3 +132,31 @@ def test_empty_lane_without_index_still_reports_zero(tmp_path, empty_payload_fil
     if empty_payload_file:
         writer._record_path(100).touch()
     assert lane_delta(tmp_path, "lane")["records_since"] == 0
+
+
+@pytest.mark.parametrize("kind", ["file", "broken-link"])
+def test_discovery_refuses_unusable_declared_lane(tmp_path, kind):
+    from sinnix_lib.layout import capture_lane_path
+
+    path = capture_lane_path(tmp_path, "clipboard")
+    path.parent.mkdir(parents=True)
+    if kind == "file":
+        path.touch()
+        error = NotADirectoryError
+    else:
+        path.symlink_to(tmp_path / "missing-target", target_is_directory=True)
+        error = FileNotFoundError
+    with pytest.raises(error):
+        discover_lanes(tmp_path)
+
+
+def test_discovery_keeps_working_declared_directory_link(tmp_path):
+    from sinnix_lib.layout import capture_lane_path
+
+    root = tmp_path / "capture"
+    target = tmp_path / "retained-lane"
+    target.mkdir()
+    path = capture_lane_path(root, "clipboard")
+    path.parent.mkdir(parents=True)
+    path.symlink_to(target, target_is_directory=True)
+    assert "clipboard" in discover_lanes(root)

@@ -17,11 +17,21 @@ from stat import S_ISDIR, S_ISREG
 from sinnix_lib.layout import ACTIVITY_LANES, capture_lane_path
 
 
-def _directory_present(path: Path) -> bool:
+def _directory_present(path: Path, *, declared: bool = False) -> bool:
     try:
-        return S_ISDIR(path.stat().st_mode)
+        mode = path.stat().st_mode
     except FileNotFoundError:
+        if declared:
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return False
+            # A declared entrance exists but its target cannot be resolved.
+            raise
         return False
+    if declared and not S_ISDIR(mode):
+        raise NotADirectoryError(f"declared capture lane is not a directory: {path}")
+    return S_ISDIR(mode)
 
 
 def discover_lanes(capture_root: Path | str) -> list[str]:
@@ -34,7 +44,10 @@ def discover_lanes(capture_root: Path | str) -> list[str]:
         raise NotADirectoryError(f"capture root is not a directory: {root}")
     # Known physical homes may be nested; do not expose medium containers as lanes.
     containers = {relative.split("/")[0] for relative in ACTIVITY_LANES.values()}
-    known = {lane for lane in ACTIVITY_LANES if _directory_present(capture_lane_path(root, lane))}
+    known = {
+        lane for lane in ACTIVITY_LANES
+        if _directory_present(capture_lane_path(root, lane), declared=True)
+    }
     custom = {p.name for p in root.iterdir() if _directory_present(p) and p.name not in containers}
     return sorted(known | custom)
 
