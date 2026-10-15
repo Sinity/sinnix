@@ -109,3 +109,21 @@ grep -Fxq 'retained preexisting record' "${records[0]}"
 test ! -s "$test_root/collision.out"
 staged=("$test_root/collision"/.compaction-*)
 test "${#staged[@]}" -eq 0
+
+# Git's line-oriented presentation quotes unusual names and joins renames.
+# The handoff must retain actual path strings, not that display syntax.
+original='old "file".txt'
+renamed=$'new\tname.txt'
+untracked=$'line\n雪\\name.txt'
+printf 'neutral fixture\n' > "$test_root/repo/$original"
+git -C "$test_root/repo" add -- "$original"
+git -C "$test_root/repo" -c user.name=Fixture -c user.email=fixture@example.invalid \
+  -c commit.gpgsign=false commit -qm 'neutral fixture'
+git -C "$test_root/repo" mv -- "$original" "$renamed"
+printf 'neutral untracked fixture\n' > "$test_root/repo/$untracked"
+path_record="$(payload claude | "$writer")"
+paths="$(grep '^dirty_paths: ' "$path_record")"
+paths="${paths#dirty_paths: }"
+jq -e --arg original "$original" --arg renamed "$renamed" --arg untracked "$untracked" \
+  'index($original) != null and index($renamed) != null and index($untracked) != null' \
+  <<< "$paths" >/dev/null

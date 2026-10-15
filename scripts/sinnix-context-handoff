@@ -24,12 +24,21 @@ fi
 if [[ -n "$repo_root" ]]; then
   target_dir="$repo_root/.agent/scratch"
   branch="$(git -C "$repo_root" branch --show-current 2>/dev/null || true)"
-  dirty_paths="$(git -C "$repo_root" status --porcelain=v1 2>/dev/null | sed -E 's/^.. //')"
+  # NUL framing preserves embedded newlines and Git's paired rename paths.
+  dirty_paths="$(git -C "$repo_root" status --porcelain=v1 -z 2>/dev/null | jq -Rsc '
+    reduce (split("\u0000")[] | select(length > 0)) as $record
+      ({paths: [], source_next: false};
+       if .source_next then
+         .paths += [$record] | .source_next = false
+       else
+         .paths += [$record[3:]] | .source_next = ($record[0:2] | test("[RC]"))
+       end)
+    | .paths')"
   worktree="$repo_root"
 else
   target_dir="${CLAUDE_SCRATCH_ROOT:-${XDG_STATE_HOME:-$HOME/.local/state}/claude/scratch}"
   branch=""
-  dirty_paths=""
+  dirty_paths='[]'
   worktree=""
 fi
 
@@ -64,7 +73,7 @@ created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf 'repo_root: %s\n' "$(yaml_string "$repo_root")"
   printf 'branch: %s\n' "$(yaml_string "$branch")"
   printf 'worktree: %s\n' "$(yaml_string "$worktree")"
-  printf 'dirty_paths: %s\n' "$(printf '%s\n' "$dirty_paths" | jq -Rsc 'split("\n") | map(select(length > 0))')"
+  printf 'dirty_paths: %s\n' "$dirty_paths"
   printf '%s\n' '---' '# Pre-compaction handoff' ''
   if [[ -n "$session_id" ]]; then
     printf 'Session `%s` compacted here (trigger: %s). Full resume state is the\n' "$session_id" "${trigger:-unknown}"
