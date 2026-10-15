@@ -44,6 +44,9 @@ adb_any() {
         bash -c "$command" | python3 -c 'import os,sys; b=sys.stdin.buffer.read(); sys.stdout.buffer.write(b.replace(os.environ["BCR_REMOTE_ROOT"].encode(), os.environ["BCR_REMOTE_PREFIX"].encode()))'
         return
       fi
+      if [ "$BCR_MODE" = "stdin-consuming" ] && [[ "$command" == test* ]]; then
+        cat >/dev/null
+      fi
       bash -c "$command"
       ;;
     *) return 1 ;;
@@ -109,6 +112,29 @@ with tempfile.TemporaryDirectory() as scratch:
             capture_output=True,
             text=True,
         )
+
+    # ADB shell forwards stdin unless it is detached. A metadata existence
+    # check must not consume the remaining NUL-delimited inventory.
+    second_audio = remote_root / "second neutral call.oga"
+    second_sidecar = remote_root / "second neutral call.log.txt"
+    second_audio.write_bytes((remote_root / "neutral call.oga").read_bytes())
+    second_sidecar.write_bytes(sidecar.read_bytes())
+    for path in (second_audio, second_sidecar):
+        os.utime(path, (old, old))
+    multiple = root / "multiple"
+    result = run("stdin-consuming", multiple)
+    assert result.returncode == 0, result.stderr + result.stdout
+    multi_ledger = multiple / "calls" / "levels.jsonl"
+    assert len(multi_ledger.read_text().splitlines()) == 2, result.stdout
+    assert (multiple / "calls" / second_audio.name).read_bytes() == second_audio.read_bytes()
+    assert (multiple / "calls" / "debug" / second_sidecar.name).read_bytes() == second_sidecar.read_bytes()
+    hashes_before = (root / "remote-hashes").stat().st_size
+    result = run("stdin-consuming", multiple)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert len(multi_ledger.read_text().splitlines()) == 2
+    assert (root / "remote-hashes").stat().st_size == hashes_before
+    second_audio.unlink()
+    second_sidecar.unlink()
 
     lake = root / "lake"
     result = run("normal", lake)

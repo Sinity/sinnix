@@ -925,7 +925,9 @@ drain_bcr_calls_adb() {
     revision_needs_row[audio]=${revision_needs_row[audio]:-1}
     [ "${revision_needs_row[audio]}" -eq 1 ] && row_needed=1
 
-    if adb_shell_args test -f "$log_remote" >/dev/null 2>&1; then
+    # ADB otherwise forwards this loop's inventory as remote stdin and can
+    # discard every recording after the first metadata check.
+    if adb_shell_args test -f "$log_remote" >/dev/null 2>&1 </dev/null; then
       if ! bcr_prepare_revision sidecar "$log_remote" "debug/$log_name"; then
         echo "bcr: metadata identity or digest verification failed; archive preserved" >&2
         for stage in "${revision_stage[audio]:-}" "${revision_stage[sidecar]:-}"; do
