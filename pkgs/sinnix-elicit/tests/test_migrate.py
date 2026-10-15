@@ -180,3 +180,93 @@ def test_only_known_stopped_drain_permits_migration(monkeypatch, status, returnc
         lambda *_args, **_kwargs: CompletedProcess([], returncode, stdout=status + "\n"),
     )
     assert migrate_mod.drain_is_active("synthetic.service") is refused
+
+
+@pytest.mark.parametrize("kind", ["file-link", "dangling-link", "directory-link", "fifo"])
+def test_uninventoried_objects_refuse_before_any_domain_moves(roots, tmp_path, kind, capsys):
+    import os
+    old, new = roots
+    external = tmp_path / "external"
+    external.mkdir()
+    (external / "state.json").write_text('{"preserved":true}')
+    entry = old / "wallpaper" / "unaccounted"
+    if kind == "file-link":
+        entry.symlink_to(external / "state.json")
+    elif kind == "dangling-link":
+        entry.symlink_to(external / "missing.json")
+    elif kind == "directory-link":
+        entry.symlink_to(external, target_is_directory=True)
+    else:
+        os.mkfifo(entry)
+    original_inode = (old / "keybinds").stat().st_ino
+    assert migrate_mod.main(["--from", str(old), "--to", str(new)]) == 1
+    assert (old / "keybinds").stat().st_ino == original_inode
+    assert not new.exists()
+    assert "cannot migrate" in capsys.readouterr().err
+
+
+def test_unreadable_subdirectory_is_not_an_empty_inventory(roots, monkeypatch, capsys):
+    old, new = roots
+    blocked = old / "wallpaper" / "blocked"
+    blocked.mkdir()
+    (blocked / "state.json").write_text('{"preserved":true}')
+    original = migrate_mod.os.scandir
+    def denied(path):
+        if Path(path).name == "blocked":
+            raise PermissionError("synthetic denied directory")
+        return original(path)
+    monkeypatch.setattr(migrate_mod.os, "scandir", denied)
+    assert migrate_mod.main(["--from", str(old), "--to", str(new)]) == 1
+    assert (old / "keybinds").is_dir() and not new.exists()
+    assert "denied" in capsys.readouterr().err
+
+
+def test_destination_link_refuses_before_moving_other_domains(roots, tmp_path, capsys):
+    old, new = roots
+    new.mkdir()
+    external = tmp_path / "external"
+    external.mkdir()
+    (new / "wallpaper").symlink_to(external, target_is_directory=True)
+    assert migrate_mod.main(["--from", str(old), "--to", str(new)]) == 1
+    assert (old / "keybinds").is_dir() and (old / "wallpaper").is_dir()
+    assert list(external.iterdir()) == []
+    assert "cannot migrate" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("destination", ["same", "child", "parent"])
+def test_overlapping_roots_refuse_without_moving(roots, destination, capsys):
+    old, _ = roots
+    target = {"same": old, "child": old / "nested", "parent": old.parent}[destination]
+    before = tree(old)
+    assert migrate_mod.main(["--from", str(old), "--to", str(target)]) == 1
+    assert tree(old) == before
+    assert "must not overlap" in capsys.readouterr().err
+
+
+def test_concurrently_created_empty_destination_is_not_replaced(roots, monkeypatch, capsys):
+    old, new = roots
+    original = Path.mkdir
+    created = {}
+    def mkdir(path, *args, **kwargs):
+        result = original(path, *args, **kwargs)
+        if path == new:
+            original(new / "keybinds")
+            created["inode"] = (new / "keybinds").stat().st_ino
+        return result
+    monkeypatch.setattr(Path, "mkdir", mkdir)
+    assert migrate_mod.main(["--from", str(old), "--to", str(new)]) == 1
+    assert (new / "keybinds").stat().st_ino == created["inode"]
+    assert list((new / "keybinds").iterdir()) == []
+    assert (old / "keybinds" / "items.json").is_file()
+    assert (old / "wallpaper").is_dir()
+    assert "cannot migrate" in capsys.readouterr().err
+
+
+def test_dry_run_refuses_a_conflicting_destination(roots, capsys):
+    old, new = roots
+    (new / "keybinds").mkdir(parents=True)
+    (new / "keybinds" / "items.json").write_text('[{"id":"other"}]')
+    before = tree(old)
+    assert migrate_mod.main(["--from", str(old), "--to", str(new), "--dry-run"]) == 1
+    assert tree(old) == before
+    assert "no domains moved" in capsys.readouterr().err

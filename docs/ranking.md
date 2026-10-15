@@ -104,10 +104,13 @@ Its domain format is its own: `items.json` (a JSON array, editable),
 the one cached fit in the estate — the hub serves it back mid-session at
 `GET /feedback/elicit/<domain>`. State lives at `/realm/state/elicit/<domain>` --
 mutable application state, in the state root, not in the prose tree;
-`SINNIX_ELICIT_DIR` moves the root for fixtures. `sinnix-elicit-migrate` moves
-domains there from the retired root: it refuses to run while the drain unit is
-active, moves each domain by rename, and re-checks every file's size and
-sha256 at the destination.
+`SINNIX_ELICIT_DIR` selects an isolated root for fixtures. The retained
+`sinnix elicit-migrate` command moves domains from a legacy root only after a
+known-stopped drain response. It preflights source files and existing
+destinations, refuses unreadable inventories, links and special objects, then
+renames without replacement or copy fallback and verifies every size and
+SHA-256. Dry runs perform the same inventory checks. State already under the
+current root needs no migration replay.
 
 A tap posts to the hub's `/feedback` spool and `sinnix-elicit autoingest`
 drains it into the domain, coalesced per burst. The drain dedups against every
