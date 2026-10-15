@@ -307,6 +307,15 @@ recording fails that timer run instead of masquerading as a success. The same
 scheduled probe still warns when finished ambient chunks pile up on-device,
 which means capture is working and delivery is not.
 
+Each archived call row also records SHA-256 and native file identities for the
+staging audio, its canonical archive copy, and the paired BCR debug sidecar.
+Repeat polls reuse a receipt only while both source and archive identities
+match; changed bytes are staged and verified before publication. Replaced
+archive bytes remain under `calls/history/<sha256>/`, with their paths and
+digests linked from the new call row. If metadata is unavailable, verification
+fails, or either member cannot be published, the poll reports failure and does
+not record a successful revision. Phone originals remain in place.
+
 Capture destinations must be regular files. Event cursors report missing day files as zero bytes, but refuse directories, FIFOs and symlinks as storage errors. Upload reads and writes use nonblocking, no-follow handles; append verification and permissions apply to the same opened object. A replaced destination is not acknowledged. Every successful event append or exact upload retry syncs the retained file and its directory ancestry up to the filesystem boundary; a previous sync failure cannot turn readable bytes into a durable receipt on retry. Closed-day repair also rejects nonregular destinations and recovery copies, preserving their existing objects for investigation.
 
 **Media sync resumes from acknowledged source timestamps and relative paths.** Each bounded batch selects the oldest files across the full source traversal, including files sharing a timestamp. It never seeds from workstation upload times. Upgrading from the old scalar cursor reoffers existing files; the workstation verifies duplicate bytes before acknowledging them. Missing listings, changed files and retryable upload refusals stop cursor advancement. Four relative path segments are supported.

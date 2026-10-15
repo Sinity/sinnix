@@ -618,22 +618,275 @@ drain_ambient_adb() {
 # the vendor VOICE_CALL route fails. Decode every newly observed recording at
 # intake so "BCR produced a file" is never confused with "call audio exists".
 drain_bcr_calls_adb() {
-  local remote_dir export_dir dest debug_dir ledger seen remote name
-  local remote_size local_size bytes export_size duration rate channels
+  local remote_dir export_dir dest debug_dir history_dir ledger seen remote name
+  local remote_size export_size duration rate channels
   local levels mean max dead truncated_export log_remote log_name display
-  local listing staging transfer_ok decode_ok
-  local failed=0
+  local listing checked_at metadata_missing row_needed failed=0
+  local rollback_kind rollback_target rollback_source rollback_stage
   local pulled=0 repaired=0 audited=0 silent=0 broken=0
+  local -A revision_source_path revision_archive_path revision_source_identity
+  local -A revision_archive_identity revision_source_sha revision_archive_sha
+  local -A revision_stage revision_previous_sha revision_previous_path
+  local -A revision_prior revision_target_existed revision_needs_row revision_published
 
   adb_resolve || return 1
   remote_dir="/sdcard/Android/data/com.chiller3.bcr/files"
   export_dir="/sdcard/sinnix-calls"
   dest="$LAKE_ROOT/calls"
   debug_dir="$dest/debug"
+  history_dir="$dest/history"
   ledger="$dest/levels.jsonl"
   mkdir -p "$dest" "$debug_dir" || return 1
   touch "$ledger" || return 1
-  seen=$(jq -c -s 'map({file, bytes: (.bytes // 0)})' "$ledger") || return 1
+  seen=$(jq -c -s 'map(select(type == "object"))' "$ledger") || return 1
+
+  # Android's toybox stat exposes device, inode, size, and nanosecond-formatted
+  # mtime/ctime on the enrolled phone. Keep the timestamps as raw strings so
+  # their precision and timezone survive the receipt round trip. If the
+  # runtime stops exposing this identity, refuse the scan rather than quietly
+  # returning to filename+size deduplication.
+  bcr_remote_identity() {
+    local raw device inode size mtime ctime kind
+    raw=$(adb_shell_args stat -c '%d|%i|%s|%y|%z|%F' "$1" 2>/dev/null </dev/null) || return 1
+    raw=${raw//$'\r'/}
+    IFS='|' read -r device inode size mtime ctime kind <<<"$raw"
+    [[ "$device" =~ ^[0-9]+$ && "$inode" =~ ^[0-9]+$ && "$size" =~ ^[0-9]+$ ]] || return 1
+    [[ "$mtime" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]][0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{9}[[:space:]][+-][0-9]{4}$ ]] || return 1
+    [[ "$ctime" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]][0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{9}[[:space:]][+-][0-9]{4}$ ]] || return 1
+    case "$kind" in "regular file" | "regular empty file") ;; *) return 1 ;; esac
+    BCR_IDENTITY_SIZE=$size
+    BCR_IDENTITY=$(jq -cn --arg device "$device" --arg inode "$inode" \
+      --arg size "$size" --arg mtime "$mtime" --arg ctime "$ctime" \
+      '{device: $device, inode: $inode, size: $size, mtime: $mtime, ctime: $ctime}') || return 1
+  }
+
+  bcr_local_identity() {
+    local raw device inode size mtime ctime kind
+    [ -f "$1" ] && [ ! -L "$1" ] || return 1
+    raw=$(stat -c '%d|%i|%s|%y|%z|%F' "$1") || return 1
+    IFS='|' read -r device inode size mtime ctime kind <<<"$raw"
+    [[ "$device" =~ ^[0-9]+$ && "$inode" =~ ^[0-9]+$ && "$size" =~ ^[0-9]+$ ]] || return 1
+    [[ "$mtime" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]][0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{9}[[:space:]][+-][0-9]{4}$ ]] || return 1
+    [[ "$ctime" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}[[:space:]][0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{9}[[:space:]][+-][0-9]{4}$ ]] || return 1
+    case "$kind" in "regular file" | "regular empty file") ;; *) return 1 ;; esac
+    BCR_IDENTITY_SIZE=$size
+    BCR_IDENTITY=$(jq -cn --arg device "$device" --arg inode "$inode" \
+      --arg size "$size" --arg mtime "$mtime" --arg ctime "$ctime" \
+      '{device: $device, inode: $inode, size: $size, mtime: $mtime, ctime: $ctime}') || return 1
+  }
+
+  bcr_remote_hash() {
+    local raw digest
+    raw=$(adb_shell_args sha256sum "$1" 2>/dev/null </dev/null) || return 1
+    raw=${raw//$'\r'/}
+    IFS=' ' read -r digest _ <<<"$raw"
+    digest=${digest#\\}
+    [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]] || return 1
+    BCR_HASH=${digest,,}
+  }
+
+  bcr_local_hash() {
+    local raw digest
+    raw=$(sha256sum <"$1") || return 1
+    digest=${raw%% *}
+    [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]] || return 1
+    BCR_HASH=${digest,,}
+  }
+
+  # Hash only a new or changed source. Bracket both reads with the same native
+  # identity; an active/replaced source cannot produce a durable receipt.
+  bcr_remote_hash_stable() {
+    local expected="$2" first identity
+    bcr_remote_identity "$1" || return 1
+    [ "$BCR_IDENTITY" = "$expected" ] || return 1
+    identity=$BCR_IDENTITY
+    bcr_remote_hash "$1" || return 1
+    first=$BCR_HASH
+    bcr_remote_identity "$1" || return 1
+    [ "$BCR_IDENTITY" = "$identity" ] || return 1
+    bcr_remote_hash "$1" || return 1
+    [ "$BCR_HASH" = "$first" ] || return 1
+    bcr_remote_identity "$1" || return 1
+    [ "$BCR_IDENTITY" = "$identity" ] || return 1
+  }
+
+  bcr_local_hash_stable() {
+    local first identity
+    bcr_local_identity "$1" || return 1
+    identity=$BCR_IDENTITY
+    bcr_local_hash "$1" || return 1
+    first=$BCR_HASH
+    bcr_local_identity "$1" || return 1
+    [ "$BCR_IDENTITY" = "$identity" ] || return 1
+    bcr_local_hash "$1" || return 1
+    [ "$BCR_HASH" = "$first" ] || return 1
+    bcr_local_identity "$1" || return 1
+    [ "$BCR_IDENTITY" = "$identity" ] || return 1
+  }
+
+  bcr_find_receipt() {
+    local key="$1" source_path="$2" archive_path="$3"
+    local source_identity="$4" archive_identity="$5"
+    BCR_PRIOR=$(printf '%s\n' "$seen" | jq -c \
+      --arg key "$key" --arg source_path "$source_path" \
+      --arg archive_path "$archive_path" \
+      --argjson source_identity "$source_identity" \
+      --argjson archive_identity "$archive_identity" \
+      '[.[] | .[$key]? | select(type == "object") |
+        select(.source_path == $source_path and .archive_path == $archive_path and
+          .source_identity == $source_identity and .archive_identity == $archive_identity and
+          (.source_sha256 | type) == "string" and
+          .source_sha256 == .archive_sha256)] | last // empty') || return 1
+  }
+
+  # Inspect a source/archive pair. A prior receipt is reusable only when both
+  # exact metadata identities still match. Legacy levels rows deliberately do
+  # not match; they receive a fresh, explicitly current hash baseline.
+  bcr_prepare_revision() {
+    local kind="$1" remote_path="$2" archive_path="$3" key target
+    local source_identity archive_identity source_digest archive_digest
+    local stage
+    case "$kind" in audio) key=audio_revision ;; sidecar) key=sidecar_revision ;; *) return 1 ;; esac
+    target="$dest/$archive_path"
+    revision_source_path[$kind]=$remote_path
+    revision_archive_path[$kind]=$archive_path
+    revision_stage[$kind]=""
+    revision_previous_sha[$kind]=""
+    revision_previous_path[$kind]=""
+    revision_target_existed[$kind]=0
+    revision_published[$kind]=0
+    revision_needs_row[$kind]=1
+
+    bcr_remote_identity "$remote_path" || return 1
+    source_identity=$BCR_IDENTITY
+    revision_source_identity[$kind]=$source_identity
+    if [ "$kind" = audio ]; then
+      remote_size=$BCR_IDENTITY_SIZE
+    fi
+
+    if [ -e "$target" ] || [ -L "$target" ]; then
+      bcr_local_identity "$target" || return 1
+      archive_identity=$BCR_IDENTITY
+      revision_target_existed[$kind]=1
+      bcr_find_receipt "$key" "$remote_path" "$archive_path" \
+        "$source_identity" "$archive_identity" || return 1
+      if [ -n "$BCR_PRIOR" ]; then
+        source_digest=$(jq -r '.source_sha256' <<<"$BCR_PRIOR") || return 1
+        archive_digest=$(jq -r '.archive_sha256' <<<"$BCR_PRIOR") || return 1
+        [[ "$source_digest" =~ ^[0-9a-f]{64}$ && "$archive_digest" = "$source_digest" ]] || return 1
+        revision_source_sha[$kind]=$source_digest
+        revision_archive_sha[$kind]=$archive_digest
+        revision_archive_identity[$kind]=$archive_identity
+        revision_prior[$kind]=$BCR_PRIOR
+        revision_needs_row[$kind]=0
+        return 0
+      fi
+    else
+      archive_identity=""
+    fi
+
+    bcr_remote_hash_stable "$remote_path" "$source_identity" || return 1
+    source_digest=$BCR_HASH
+    revision_source_sha[$kind]=$source_digest
+
+    if [ "${revision_target_existed[$kind]}" -eq 1 ]; then
+      bcr_local_hash_stable "$target" || return 1
+      archive_identity=$BCR_IDENTITY
+      archive_digest=$BCR_HASH
+      if [ "$archive_digest" = "$source_digest" ]; then
+        revision_archive_identity[$kind]=$archive_identity
+        revision_archive_sha[$kind]=$archive_digest
+        revision_prior[$kind]=""
+        return 0
+      fi
+      revision_previous_sha[$kind]=$archive_digest
+    fi
+
+    stage=$(mktemp "$dest/.$kind-incoming.XXXXXX") || return 1
+    if ! adb_any pull "$remote_path" "$stage" >/dev/null 2>&1; then
+      rm -- "$stage"
+      return 1
+    fi
+    bcr_local_hash "$stage" || { rm -- "$stage"; return 1; }
+    [ "$BCR_HASH" = "$source_digest" ] || { rm -- "$stage"; return 1; }
+    bcr_remote_hash_stable "$remote_path" "$source_identity" || { rm -- "$stage"; return 1; }
+    [ "$BCR_HASH" = "$source_digest" ] || { rm -- "$stage"; return 1; }
+    revision_stage[$kind]=$stage
+    revision_archive_sha[$kind]=$source_digest
+    revision_archive_identity[$kind]=""
+    revision_prior[$kind]=""
+  }
+
+  # Keep the exact old bytes before replacing the call entrance. The digest
+  # directory is create-only and the original basename remains recognizable.
+  bcr_preserve_revision() {
+    local kind="$1" target digest history_rel history_path
+    target="$dest/${revision_archive_path[$kind]}"
+    [ -n "${revision_stage[$kind]}" ] || return 0
+    digest=${revision_previous_sha[$kind]:-}
+    [ -n "$digest" ] || return 0
+    bcr_local_hash_stable "$target" || return 1
+    [ "$BCR_HASH" = "$digest" ] || return 1
+    history_rel="history/$digest/${target##*/}"
+    history_path="$dest/$history_rel"
+    mkdir -p "$(dirname "$history_path")" || return 1
+    if [ -e "$history_path" ] || [ -L "$history_path" ]; then
+      bcr_local_hash_stable "$history_path" || return 1
+      [ "$BCR_HASH" = "$digest" ] || return 1
+    else
+      ln -T -- "$target" "$history_path" || return 1
+      bcr_local_hash_stable "$history_path" || return 1
+      [ "$BCR_HASH" = "$digest" ] || return 1
+    fi
+    # Adding the hard link changes inode ctime, so compare content after the
+    # link and rely on the digest rather than the pre-link identity tuple.
+    bcr_local_hash_stable "$target" || return 1
+    [ "$BCR_HASH" = "$digest" ] || return 1
+    revision_previous_path[$kind]=$history_rel
+  }
+
+  bcr_publish_revision() {
+    local kind="$1" target stage expected
+    target="$dest/${revision_archive_path[$kind]}"
+    stage=${revision_stage[$kind]:-}
+    [ -n "$stage" ] || return 0
+    expected=${revision_source_sha[$kind]}
+    if [ "${revision_target_existed[$kind]}" -eq 1 ]; then
+      bcr_local_hash_stable "$target" || return 1
+      [ "$BCR_HASH" = "${revision_previous_sha[$kind]}" ] || return 1
+      mv -f -- "$stage" "$target" || return 1
+      revision_published[$kind]=1
+    else
+      if [ -e "$target" ] || [ -L "$target" ]; then
+        return 1
+      fi
+      ln -T -- "$stage" "$target" || return 1
+      revision_published[$kind]=1
+      rm -- "$stage" || return 1
+    fi
+    revision_stage[$kind]=""
+    bcr_local_hash_stable "$target" || return 1
+    [ "$BCR_HASH" = "$expected" ] || return 1
+    revision_archive_identity[$kind]=$BCR_IDENTITY
+    revision_archive_sha[$kind]=$BCR_HASH
+  }
+
+  bcr_revision_json() {
+    local kind="$1"
+    if [ -n "${revision_prior[$kind]:-}" ]; then
+      printf '%s' "${revision_prior[$kind]}"
+      return 0
+    fi
+    jq -cn --arg source_path "${revision_source_path[$kind]}" \
+      --arg archive_path "${revision_archive_path[$kind]}" \
+      --argjson source_identity "${revision_source_identity[$kind]}" \
+      --argjson archive_identity "${revision_archive_identity[$kind]}" \
+      --arg source_sha256 "${revision_source_sha[$kind]}" \
+      --arg archive_sha256 "${revision_archive_sha[$kind]}" \
+      '{source_path: $source_path, source_identity: $source_identity,
+        source_sha256: $source_sha256, archive_path: $archive_path,
+        archive_identity: $archive_identity, archive_sha256: $archive_sha256}'
+  }
 
   # BCR updates the staging file while a call is active. One quiet minute is
   # enough to distinguish a completed file from the current recording.
@@ -646,53 +899,155 @@ drain_bcr_calls_adb() {
   while IFS= read -r -d '' remote; do
     [ -n "$remote" ] || continue
     name=${remote##*/}
-    if ! remote_size=$(adb_shell_args stat -c %s "$remote" 2>/dev/null </dev/null); then
+    log_remote="${remote%.oga}.log.txt"
+    log_name="${name%.oga}.log.txt"
+    revision_source_path=()
+    revision_archive_path=()
+    revision_source_identity=()
+    revision_archive_identity=()
+    revision_source_sha=()
+    revision_archive_sha=()
+    revision_stage=()
+    revision_previous_sha=()
+    revision_previous_path=()
+    revision_prior=()
+    revision_target_existed=()
+    revision_needs_row=()
+    revision_published=()
+    metadata_missing=0
+    row_needed=0
+
+    if ! bcr_prepare_revision audio "$remote" "$name"; then
+      echo "bcr: audio identity or digest verification failed; archive preserved" >&2
       failed=$((failed + 1))
       continue
     fi
-    remote_size=${remote_size//$'\r'/}
-    case "$remote_size" in '' | *[!0-9]*) failed=$((failed + 1)); continue ;; esac
-    local_size=0
-    if [ -f "$dest/$name" ]; then
-      local_size=$(stat -c %s "$dest/$name") || return 1
-    fi
-    if [ "$local_size" -ne "$remote_size" ]; then
-      staging=$(mktemp "$dest/.incoming.XXXXXX") || return 1
-      transfer_ok=false
-      if adb_any pull "$remote" "$staging" >/dev/null 2>&1; then
-        bytes=$(stat -c %s "$staging") || return 1
-        if [ "$bytes" -eq "$remote_size" ]; then
-          mv -f "$staging" "$dest/$name" || { rm -f "$staging"; return 1; }
-          transfer_ok=true
-          if [ "$local_size" -eq 0 ]; then
-            pulled=$((pulled + 1))
-          else
-            repaired=$((repaired + 1))
-          fi
-        fi
-      fi
-      if [ "$transfer_ok" = false ]; then
-        rm -f "$staging"
+    revision_needs_row[audio]=${revision_needs_row[audio]:-1}
+    [ "${revision_needs_row[audio]}" -eq 1 ] && row_needed=1
+
+    if adb_shell_args test -f "$log_remote" >/dev/null 2>&1; then
+      if ! bcr_prepare_revision sidecar "$log_remote" "debug/$log_name"; then
+        echo "bcr: metadata identity or digest verification failed; archive preserved" >&2
+        for stage in "${revision_stage[audio]:-}" "${revision_stage[sidecar]:-}"; do
+          [ -z "$stage" ] || rm -- "$stage"
+        done
         failed=$((failed + 1))
         continue
       fi
-    fi
-    bytes=$(stat -c %s "$dest/$name") || return 1
-
-    # BCR's sidecar names the requested AudioRecord source and format. Keep it
-    # beside the archived call so a future routing regression is diagnosable.
-    log_remote="${remote%.oga}.log.txt"
-    log_name="${name%.oga}.log.txt"
-    if [ ! -e "$debug_dir/$log_name" ] \
-        && adb_shell_args test -f "$log_remote" >/dev/null 2>&1; then
-      adb_any pull "$log_remote" "$debug_dir/$log_name" >/dev/null 2>&1 || true
+      [ "${revision_needs_row[sidecar]}" -eq 1 ] && row_needed=1
+    else
+      metadata_missing=1
+      echo "bcr: completed call has no readable paired metadata sidecar" >&2
+      failed=$((failed + 1))
     fi
 
-    if printf '%s' "$seen" | jq -e --arg file "$name" --argjson bytes "$bytes" \
-        'any(.[]; .file == $file and .bytes == $bytes)' >/dev/null; then
+    # A receipt hit is valid only while both endpoint identities remain the
+    # ones checked above. A no-op poll creates no extra ledger row.
+    if [ "$row_needed" -eq 0 ]; then
+      bcr_remote_identity "$remote" || { failed=$((failed + 1)); continue; }
+      if [ "$BCR_IDENTITY" != "${revision_source_identity[audio]}" ]; then
+        failed=$((failed + 1)); continue
+      fi
+      bcr_local_identity "$dest/$name" || { failed=$((failed + 1)); continue; }
+      if [ "$BCR_IDENTITY" != "${revision_archive_identity[audio]}" ]; then
+        failed=$((failed + 1)); continue
+      fi
+      if [ "$metadata_missing" -eq 0 ]; then
+        bcr_remote_identity "$log_remote" || { failed=$((failed + 1)); continue; }
+        if [ "$BCR_IDENTITY" != "${revision_source_identity[sidecar]}" ]; then
+          failed=$((failed + 1)); continue
+        fi
+        bcr_local_identity "$dest/debug/$log_name" || { failed=$((failed + 1)); continue; }
+        if [ "$BCR_IDENTITY" != "${revision_archive_identity[sidecar]}" ]; then
+          failed=$((failed + 1)); continue
+        fi
+      fi
       continue
     fi
 
+    # Stage every changed member first. No current archive path is changed
+    # until both available source files have passed their digest checks.
+    for kind in audio sidecar; do
+      [ -n "${revision_stage[$kind]:-}" ] || continue
+      if ! bcr_preserve_revision "$kind"; then
+        echo "bcr: could not preserve the previous archive bytes" >&2
+        for stage in "${revision_stage[audio]:-}" "${revision_stage[sidecar]:-}"; do
+          [ -z "$stage" ] || rm -- "$stage"
+        done
+        failed=$((failed + 1))
+        continue 2
+      fi
+    done
+
+    # The successful call row links current revisions to exact preimages. A
+    # publication failure rolls back any member already replaced.
+    local previous_audio=null previous_sidecar=null
+    if [ -n "${revision_previous_path[audio]:-}" ]; then
+      previous_audio=$(jq -cn --arg path "${revision_archive_path[audio]}" \
+        --arg history "${revision_previous_path[audio]}" \
+        --arg sha256 "${revision_previous_sha[audio]}" \
+        '{archive_path: $path, history_path: $history, sha256: $sha256}') || return 1
+    fi
+    if [ -n "${revision_previous_path[sidecar]:-}" ]; then
+      previous_sidecar=$(jq -cn --arg path "${revision_archive_path[sidecar]}" \
+        --arg history "${revision_previous_path[sidecar]}" \
+        --arg sha256 "${revision_previous_sha[sidecar]}" \
+        '{archive_path: $path, history_path: $history, sha256: $sha256}') || return 1
+    fi
+    for kind in audio sidecar; do
+      [ -n "${revision_stage[$kind]:-}" ] || continue
+      if ! bcr_publish_revision "$kind"; then
+        for rollback_kind in sidecar audio; do
+          [ "${revision_published[$rollback_kind]:-0}" -eq 1 ] || continue
+          rollback_target="$dest/${revision_archive_path[$rollback_kind]}"
+          if [ "${revision_target_existed[$rollback_kind]}" -eq 1 ]; then
+            rollback_source="$dest/${revision_previous_path[$rollback_kind]}"
+            rollback_stage=$(mktemp "$(dirname "$rollback_target")/.rollback.XXXXXX") || continue
+            rm -- "$rollback_stage" || continue
+            if ln -T -- "$rollback_source" "$rollback_stage" && mv -f -- "$rollback_stage" "$rollback_target"; then
+              revision_published[$rollback_kind]=0
+            else
+              rm -f -- "$rollback_stage"
+            fi
+          elif bcr_local_hash_stable "$rollback_target" && [ "$BCR_HASH" = "${revision_source_sha[$rollback_kind]}" ]; then
+            rm -- "$rollback_target" && revision_published[$rollback_kind]=0
+          fi
+        done
+        echo "bcr: verified incoming bytes were not published; prior archive restored where possible" >&2
+        for stage in "${revision_stage[audio]:-}" "${revision_stage[sidecar]:-}"; do
+          [ -z "$stage" ] || rm -- "$stage"
+        done
+        failed=$((failed + 1))
+        continue 2
+      fi
+      if [ "${revision_target_existed[$kind]}" -eq 1 ]; then
+        repaired=$((repaired + 1))
+      elif [ "$kind" = audio ]; then
+        pulled=$((pulled + 1))
+      fi
+    done
+
+    # Recheck source identities and archive identities after publication. The
+    # digests in the new row now describe the exact audio and sidecar revisions
+    # reachable at the ordinary call paths.
+    bcr_remote_identity "$remote" || { failed=$((failed + 1)); continue; }
+    if [ "$BCR_IDENTITY" != "${revision_source_identity[audio]}" ]; then
+      failed=$((failed + 1)); continue
+    fi
+    bcr_local_identity "$dest/$name" || { failed=$((failed + 1)); continue; }
+    if [ "$BCR_IDENTITY" != "${revision_archive_identity[audio]}" ]; then
+      failed=$((failed + 1)); continue
+    fi
+    if [ "$metadata_missing" -eq 0 ]; then
+      bcr_remote_identity "$log_remote" || { failed=$((failed + 1)); continue; }
+      if [ "$BCR_IDENTITY" != "${revision_source_identity[sidecar]}" ]; then
+        failed=$((failed + 1)); continue
+      fi
+      bcr_local_identity "$dest/debug/$log_name" || { failed=$((failed + 1)); continue; }
+      if [ "$BCR_IDENTITY" != "${revision_archive_identity[sidecar]}" ]; then
+        failed=$((failed + 1)); continue
+      fi
+    fi
     duration=$(ffprobe -v error -show_entries format=duration \
       -of default=nw=1:nk=1 "$dest/$name" 2>/dev/null </dev/null || true)
     rate=$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate \
@@ -727,13 +1082,22 @@ drain_bcr_calls_adb() {
     fi
     [ "$dead" = false ] || silent=$((silent + 1))
 
+    checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) || return 1
+    local audio_revision sidecar_revision
+    audio_revision=$(bcr_revision_json audio) || return 1
+    sidecar_revision=null
+    if [ "$metadata_missing" -eq 0 ]; then
+      sidecar_revision=$(bcr_revision_json sidecar) || return 1
+    fi
     jq -nc \
-      --arg file "$name" --argjson bytes "${bytes:-0}" \
+      --arg file "$name" --argjson bytes "$(stat -c %s "$dest/$name")" \
       --argjson staging_bytes "${remote_size:-0}" --arg export_bytes "${export_size:-}" \
       --arg duration "${duration:-}" --arg rate "${rate:-}" --arg channels "${channels:-}" \
       --arg mean "${mean:-}" --arg max "${max:-}" --argjson dead "$dead" \
       --argjson truncated_export "$truncated_export" \
-      --arg checked_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      --arg checked_at "$checked_at" --argjson audio_revision "$audio_revision" \
+      --argjson sidecar_revision "$sidecar_revision" --argjson metadata_missing "$metadata_missing" \
+      --argjson previous_audio "$previous_audio" --argjson previous_sidecar "$previous_sidecar" \
       '{file: $file, bytes: $bytes, staging_bytes: $staging_bytes,
         export_bytes: ($export_bytes | tonumber? // null),
         duration_seconds: ($duration | tonumber? // null),
@@ -741,7 +1105,12 @@ drain_bcr_calls_adb() {
         channels: ($channels | tonumber? // null),
         mean_db: ($mean | tonumber? // null), max_db: ($max | tonumber? // null),
         captured_nothing: $dead, export_truncated: $truncated_export,
-        checked_at: $checked_at}' >>"$ledger" || return 1
+        checked_at: $checked_at, audio_revision: $audio_revision,
+        sidecar_revision: $sidecar_revision, metadata_missing: $metadata_missing,
+        previous_audio: $previous_audio, previous_sidecar: $previous_sidecar}' >>"$ledger" || return 1
+    # The in-memory receipt snapshot is intentionally not rewritten. A unique
+    # BCR staging basename is processed once per inventory pass; a later poll
+    # reads the newly appended verified revision.
     audited=$((audited + 1))
 
     # BCR filenames may contain a phone number or contact. Logs and operator

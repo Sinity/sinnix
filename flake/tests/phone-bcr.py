@@ -17,31 +17,30 @@ builder = source[
 mock = r"""
 sinnix-remote-command() { python3 "$BCR_ENCODER" "$@"; }
 adb_resolve() { return 0; }
+mv() {
+  local target="${@: -1}"
+  if [ "$BCR_MODE" = "second-publish-failed" ] && [[ "$target" == */debug/* ]]; then return 1; fi
+  command mv "$@"
+}
 adb_any() {
   case "$1" in
     pull)
-      if [ "$BCR_MODE" = "failed" ]; then
-        printf cut > "$3"
-        return 1
-      fi
-      cp "$BCR_FIXTURE" "$3"
+      source="$BCR_REMOTE_ROOT/${2#"$BCR_REMOTE_PREFIX"/}"
+      if [ "$BCR_MODE" = "failed" ]; then printf cut > "$3"; return 1; fi
+      cp -- "$source" "$3"
       ;;
     shell)
       shift
       [ "$1" = -T ] && shift
-      case "$1" in
-        find*)
-          [ "$BCR_MODE" != "inventory-failed" ] || return 1
-          printf '%s\0' '/sdcard/Android/data/com.chiller3.bcr/files/neutral call.oga'
-          ;;
-        stat*)
-          # Confirm the device shell receives an escaped path with spaces.
-          [[ "$1" == *"'"*'neutral call.oga'*"'"* ]] || return 1
-          stat -c %s "$BCR_FIXTURE"
-          ;;
-        test*) return 1 ;;
-        *) return 1 ;;
-      esac
+      command=${1//"$BCR_REMOTE_PREFIX"/$BCR_REMOTE_ROOT}
+      if [ "$BCR_MODE" = "inventory-failed" ] && [[ "$command" == find* ]]; then return 1; fi
+      if [ "$BCR_MODE" = "bad-stat" ] && [[ "$command" == stat* ]]; then echo malformed; return 0; fi
+      if [[ "$command" == *sha256sum* ]]; then printf x >> "$BCR_HASH_LOG"; fi
+      if [[ "$command" == find* ]]; then
+        bash -c "$command" | python3 -c 'import os,sys; b=sys.stdin.buffer.read(); sys.stdout.buffer.write(b.replace(os.environ["BCR_REMOTE_ROOT"].encode(), os.environ["BCR_REMOTE_PREFIX"].encode()))'
+        return
+      fi
+      bash -c "$command"
       ;;
     *) return 1 ;;
   esac
@@ -49,7 +48,8 @@ adb_any() {
 """
 with tempfile.TemporaryDirectory() as scratch:
     root = Path(scratch)
-    fixture = root / "fixture.oga"
+    remote_root = root / "remote"
+    remote_root.mkdir()
     subprocess.run(
         [
             "ffmpeg",
@@ -62,10 +62,30 @@ with tempfile.TemporaryDirectory() as scratch:
             "sine=frequency=440:duration=0.2",
             "-c:a",
             "libopus",
-            str(fixture),
+            "-b:a",
+            "64k",
+            "-vbr",
+            "off",
+            str(remote_root / "neutral call.oga"),
         ],
         check=True,
     )
+    alternate_audio = root / "alternate.oga"
+    third_audio = root / "third.oga"
+    for frequency, output in ((660, alternate_audio), (880, third_audio)):
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi", "-i",
+             f"sine=frequency={frequency}:duration=0.2", "-c:a", "libopus",
+             "-b:a", "64k", "-vbr", "off", str(output)],
+            check=True,
+        )
+    assert len(alternate_audio.read_bytes()) == (remote_root / "neutral call.oga").stat().st_size
+    assert len(third_audio.read_bytes()) == (remote_root / "neutral call.oga").stat().st_size
+    sidecar = remote_root / "neutral call.log.txt"
+    sidecar.write_bytes(b"neutral synthetic BCR metadata v1\n")
+    old = int(__import__("time").time()) - 180
+    for path in (remote_root / "neutral call.oga", sidecar):
+        os.utime(path, (old, old))
     harness = (
         "set -euo pipefail\n" + mock + builder + function + "\ndrain_bcr_calls_adb\n"
     )
@@ -76,9 +96,11 @@ with tempfile.TemporaryDirectory() as scratch:
             env={
                 **os.environ,
                 "BCR_MODE": mode,
-                "BCR_FIXTURE": str(fixture),
+                "BCR_REMOTE_ROOT": str(remote_root),
+                "BCR_REMOTE_PREFIX": "/sdcard/Android/data/com.chiller3.bcr/files",
                 "LAKE_ROOT": str(lake),
                 "BCR_ENCODER": sys.argv[2],
+                "BCR_HASH_LOG": str(root / "remote-hashes"),
             },
             capture_output=True,
             text=True,
@@ -88,28 +110,90 @@ with tempfile.TemporaryDirectory() as scratch:
     result = run("normal", lake)
     assert result.returncode == 0, result.stderr + result.stdout
     archive = lake / "calls" / "neutral call.oga"
-    assert archive.read_bytes() == fixture.read_bytes()
+    assert archive.read_bytes() == (remote_root / "neutral call.oga").read_bytes()
+    archived_sidecar = lake / "calls" / "debug" / "neutral call.log.txt"
+    assert archived_sidecar.read_bytes() == sidecar.read_bytes()
     ledger = lake / "calls" / "levels.jsonl"
     row = json.loads(ledger.read_text())
     assert row["duration_seconds"] > 0 and row["captured_nothing"] is False
+    assert row["audio_revision"]["source_sha256"] == row["audio_revision"]["archive_sha256"]
+    assert row["sidecar_revision"]["source_sha256"] == row["sidecar_revision"]["archive_sha256"]
+    hashes_before = (root / "remote-hashes").stat().st_size
     result = run("normal", lake)
     assert result.returncode == 0 and len(ledger.read_text().splitlines()) == 1
-    # A cut transfer must preserve the previous archive and never add a receipt.
-    archive.write_bytes(b"previous")
+    assert (root / "remote-hashes").stat().st_size == hashes_before
+
+    # Same-name/same-size in-place updates with restored mtime are caught via
+    # ctime and retained as exact preimages, including independent sidecars.
+    audio = remote_root / "neutral call.oga"
+    audio_stat = audio.stat()
+    old_audio = audio.read_bytes()
+    replacement_audio = alternate_audio.read_bytes()
+    audio.write_bytes(replacement_audio)
+    os.utime(audio, ns=(audio_stat.st_atime_ns, audio_stat.st_mtime_ns))
+    assert audio.stat().st_size == audio_stat.st_size and audio.stat().st_mtime_ns == audio_stat.st_mtime_ns
+    assert audio.stat().st_ctime_ns != audio_stat.st_ctime_ns
+    sidecar_stat = sidecar.stat()
+    old_sidecar = sidecar.read_bytes()
+    sidecar.write_bytes(b"neutral synthetic BCR metadata v2\n")
+    os.utime(sidecar, ns=(sidecar_stat.st_atime_ns, sidecar_stat.st_mtime_ns))
+    result = run("normal", lake)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert archive.read_bytes() == replacement_audio and archived_sidecar.read_bytes() == sidecar.read_bytes()
+    latest = json.loads(ledger.read_text().splitlines()[-1])
+    assert latest["audio_revision"]["source_sha256"] != row["audio_revision"]["source_sha256"]
+    assert latest["sidecar_revision"]["source_sha256"] != row["sidecar_revision"]["source_sha256"]
+    assert latest["previous_audio"] and latest["previous_sidecar"]
+    assert (lake / "calls" / latest["previous_audio"]["history_path"]).read_bytes() == old_audio
+    assert (lake / "calls" / latest["previous_sidecar"]["history_path"]).read_bytes() == old_sidecar
+    stable_count = len(ledger.read_text().splitlines())
+    result = run("normal", lake)
+    assert result.returncode == 0 and len(ledger.read_text().splitlines()) == stable_count
+
+    # Failure publishing the sidecar after publishing audio rolls audio back.
+    before_audio = archive.read_bytes()
+    before_sidecar = archived_sidecar.read_bytes()
     before = ledger.read_bytes()
+    audio.write_bytes(third_audio.read_bytes())
+    os.utime(audio, ns=(audio.stat().st_atime_ns, audio_stat.st_mtime_ns))
+    sidecar.write_bytes(b"neutral synthetic BCR metadata v3\n")
+    result = run("second-publish-failed", lake)
+    assert result.returncode != 0, result.stderr + result.stdout
+    assert archive.read_bytes() == before_audio and archived_sidecar.read_bytes() == before_sidecar, result.stderr + result.stdout
+    assert ledger.read_bytes() == before
+
+    # A cut retry keeps the prior pair intact and creates no successful row.
     result = run("failed", lake)
     assert result.returncode != 0
-    assert archive.read_bytes() == b"previous" and ledger.read_bytes() == before
-    assert not list((lake / "calls").glob(".incoming.*"))
+    assert archive.read_bytes() == before_audio and archived_sidecar.read_bytes() == before_sidecar
+    assert ledger.read_bytes() == before
+    assert not list((lake / "calls").glob(".audio-incoming.*"))
     result = run("normal", lake)
-    assert result.returncode == 0 and archive.read_bytes() == fixture.read_bytes()
+    assert result.returncode == 0 and archive.read_bytes() == audio.read_bytes()
+    assert (lake / "calls" / json.loads(ledger.read_text().splitlines()[-1])["previous_audio"]["history_path"]).read_bytes() == before_audio
+
+    before = ledger.read_bytes()
+    result = run("bad-stat", lake)
+    assert result.returncode != 0 and ledger.read_bytes() == before
     result = run("inventory-failed", lake)
     assert result.returncode != 0
+    # Legacy rows are upgraded by hashing once; exact matching bytes need no pull.
+    legacy = root / "legacy"
+    (legacy / "calls" / "debug").mkdir(parents=True)
+    (legacy / "calls" / "neutral call.oga").write_bytes(audio.read_bytes())
+    (legacy / "calls" / "debug" / "neutral call.log.txt").write_bytes(sidecar.read_bytes())
+    (legacy / "calls" / "levels.jsonl").write_text('{"file":"neutral call.oga","bytes":1933}\n')
+    result = run("normal", legacy)
+    assert result.returncode == 0, result.stderr + result.stdout
+    upgraded = json.loads((legacy / "calls" / "levels.jsonl").read_text().splitlines()[-1])
+    assert upgraded["audio_revision"]["source_sha256"] == upgraded["audio_revision"]["archive_sha256"]
+    assert upgraded["sidecar_revision"]["source_sha256"] == upgraded["sidecar_revision"]["archive_sha256"]
     # Invalid audio must not be cached as successfully audited.
-    fixture.write_bytes(b"invalid audio")
+    (remote_root / "neutral call.oga").write_bytes(b"invalid audio")
+    os.utime(remote_root / "neutral call.oga", (old, old))
     broken = root / "broken"
     result = run("normal", broken)
-    assert result.returncode != 0
+    assert result.returncode != 0, result.stderr + result.stdout
     assert (broken / "calls" / "levels.jsonl").read_text() == ""
 print(
     "BCR intake: real decode, repeat, cut transfer, recovery, inventory and corrupt audio passed"
