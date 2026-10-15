@@ -66,8 +66,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Retain the Python API, service modules and gateway contracts until cutover.
+    # Lynchpin follows this same predecessor source below.
     polylogue = {
-      url = "github:Sinity/polylogue/master";
+      url = "github:Sinity/polylogue/3ee97894b0fed6d614fcb658e823da77c1255639";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
@@ -102,8 +104,8 @@
       flake = false;
     };
 
-    # Sinex is sourced from GitHub so system deployments follow pushed upstream
-    # history instead of implicitly consuming the local checkout state.
+    # Retain the existing package and service interfaces until a separate cutover.
+    # The immutable revision also protects consumers during input updates.
     #
     # nixpkgs is deliberately NOT `follows`. Sinex is a large Rust workspace
     # built from source by crane; following sinnix's nixpkgs would rehash its
@@ -117,7 +119,7 @@
     # glibc/openssl/systemd vs the system's). Bump sinex's nixpkgs deliberately
     # upstream, not implicitly through sinnix.
     sinex = {
-      url = "git+https://github.com/Sinity/sinex?ref=master";
+      url = "git+https://github.com/Sinity/sinex?ref=master&rev=dd21293728a9222d77bf53307844ddef9783c040";
       inputs.agenix.follows = "agenix";
     };
 

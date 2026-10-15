@@ -1302,8 +1302,8 @@
       },
       "original": {
         "owner": "Sinity",
-        "ref": "master",
         "repo": "polylogue",
+        "rev": "3ee97894b0fed6d614fcb658e823da77c1255639",
         "type": "github"
       }
     },
@@ -1497,6 +1497,7 @@
       },
       "original": {
         "ref": "master",
+        "rev": "dd21293728a9222d77bf53307844ddef9783c040",
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       }
