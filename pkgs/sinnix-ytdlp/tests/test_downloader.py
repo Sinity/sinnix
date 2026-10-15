@@ -44,7 +44,11 @@ def load_script():
     ).load_module()
 
 
-def test_canonical_page_alias_does_not_retry(monkeypatch, tmp_path):
+@pytest.mark.parametrize("alias", [
+    "https://catalog.example.test/watch/item?from=list#player",
+    "HTTPS://CATALOG.EXAMPLE.TEST:443/watch/item?from=list#player",
+])
+def test_canonical_page_alias_does_not_retry(monkeypatch, tmp_path, alias):
     downloader = load_script()
     page = "https://catalog.example.test/watch/item?from=list"
     calls = []
@@ -57,7 +61,7 @@ def test_canonical_page_alias_does_not_retry(monkeypatch, tmp_path):
     monkeypatch.setattr(
         downloader,
         "structured_video_url",
-        lambda _page: "https://catalog.example.test/watch/item#player",
+        lambda _page: alias,
     )
     monkeypatch.setattr(
         downloader,
@@ -73,10 +77,16 @@ def test_canonical_page_alias_does_not_retry(monkeypatch, tmp_path):
     assert calls == [["yt-dlp", page]]
 
 
-def test_distinct_media_url_retries_once_with_source_headers(monkeypatch, tmp_path):
+@pytest.mark.parametrize("media", [
+    "https://media.example.test/streams/item.m3u8",
+    "https://catalog.example.test/watch/item?download=123&token=neutral",
+    "https://catalog.example.test/watch/item",
+    "https://catalog.example.test/watch/item/?from=list",
+    "https://alternate:neutral@catalog.example.test/watch/item?from=list",
+])
+def test_distinct_media_url_retries_once_with_source_headers(monkeypatch, tmp_path, media):
     downloader = load_script()
     page = "https://catalog.example.test/watch/item?from=list"
-    media = "https://media.example.test/streams/item.m3u8"
     calls = []
     outcomes = iter([17, 0])
 

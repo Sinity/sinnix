@@ -157,7 +157,11 @@ def same_page_resource(page_url, candidate_url):
             value.scheme.lower(),
             (value.hostname or "").lower(),
             port,
-            value.path.rstrip("/") or "/",
+            value.username,
+            value.password,
+            # Fragments stay local; these fields can change the HTTP resource.
+            value.path or "/",
+            value.query,
         )
 
     return identity(page) is not None and identity(page) == identity(candidate)
