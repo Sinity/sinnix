@@ -15,6 +15,8 @@ is always reproducible.
 from __future__ import annotations
 
 import json
+import os
+import stat
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -51,20 +53,38 @@ class LogReplay:
     tombstoned: set[str] = field(default_factory=set)
 
 
+def _read_records(path: Path):
+    """Read strict JSONL; only an absent ledger denotes no evidence yet."""
+    try:
+        handle = open(
+            path, encoding="utf-8",
+            opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
+        )
+    except FileNotFoundError:
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            return
+        # A retained link with an absent target is unavailable, not empty.
+        raise
+    with handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise ValueError(f"ranking ledger is not a regular file: {path}")
+        for line in handle:
+            if line.strip():
+                yield json.loads(line)
+
+
 def read_log(path: str | Path) -> LogReplay:
     path = Path(path)
     rows: list[dict] = []
     replay = LogReplay()
-    if path.exists():
-        for line in path.read_text().splitlines():
-            if not line.strip():
-                continue
-            rec = json.loads(line)
-            if "delete" in rec:
-                replay.tombstoned.add(rec["delete"])
-            else:
-                rows.append(rec)
-                replay.seen_ids.add(rec.get("id"))
+    for rec in _read_records(path):
+        if "delete" in rec:
+            replay.tombstoned.add(rec["delete"])
+        else:
+            rows.append(rec)
+            replay.seen_ids.add(rec.get("id"))
     replay.live = [r for r in rows if r.get("id") not in replay.tombstoned]
     return replay
 
@@ -142,12 +162,8 @@ class Store:
     # -- items -------------------------------------------------------------
     def load_items(self) -> dict[str, Item]:
         items: dict[str, Item] = {}
-        if self.items_path.exists():
-            for line in self.items_path.read_text().splitlines():
-                if not line.strip():
-                    continue
-                rec = json.loads(line)
-                items[str(rec["id"])] = Item.from_dict(rec)
+        for rec in _read_records(self.items_path):
+            items[str(rec["id"])] = Item.from_dict(rec)
         return items
 
     def add_items(self, items: list[Item]) -> int:

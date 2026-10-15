@@ -36,7 +36,11 @@ the tool that created it.
 
 Raw comparisons live at `/realm/activity/shared/ranking/<domain>/` and are never
 pruned. Fits are always recomputed from them, never cached back into the
-domain directory. `SINNIX_RANK_ROOT` moves the root for fixtures.
+domain directory. `SINNIX_RANK_ROOT` moves the root for fixtures. Missing ledgers represent a
+new domain, while denied access, broken ledger links and wrong object types
+fail explicitly. Readers consume JSONL records one physical line at a time;
+Unicode line separators inside a JSON string remain content. They retain all
+judgments and tombstones in the replay rather than imposing a history cap.
 
 ## `sinnix-rank`
 
