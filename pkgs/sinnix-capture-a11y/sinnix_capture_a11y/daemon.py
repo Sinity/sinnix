@@ -66,20 +66,18 @@ class _AccessibleAdapter:
             return None
         return value or None
 
-    def children(self) -> list["_AccessibleAdapter"]:
+    def child_count(self) -> int:
         try:
-            count = self._acc.getChildCount()
+            return self._acc.getChildCount()
         except Exception:
-            return []
-        out: list[_AccessibleAdapter] = []
-        for i in range(count):
-            try:
-                child = self._acc.getChildAtIndex(i)
-            except Exception:
-                continue
-            if child is not None:
-                out.append(_AccessibleAdapter(child))
-        return out
+            return 0
+
+    def child_at(self, index: int) -> "_AccessibleAdapter | None":
+        try:
+            child = self._acc.getChildAtIndex(index)
+        except Exception:
+            return None
+        return _AccessibleAdapter(child) if child is not None else None
 
 
 def _app_name(acc) -> str:

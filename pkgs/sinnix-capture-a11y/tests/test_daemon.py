@@ -67,7 +67,7 @@ def test_accessible_adapter_reads_role_name_text_and_children():
     assert adapter.role_name() == "frame"
     assert adapter.name() == "Main"
     assert adapter.text() == "ignored-on-frame"
-    kids = adapter.children()
+    kids = [adapter.child_at(i) for i in range(adapter.child_count())]
     assert len(kids) == 1
     assert kids[0].name() == "OK"
 
@@ -159,3 +159,43 @@ def test_periodic_dump_respects_interval_between_focus_events(tmp_path: Path):
     daemon.maybe_dump_subtree()
 
     assert written == []
+
+
+def test_subtree_budget_bounds_native_child_fetches():
+    from sinnix_capture_a11y.subtree import build_subtree
+
+    class WideAccessible(FakeAccessible):
+        fetched = 0
+
+        def getChildCount(self):
+            return 100_000
+
+        def getChildAtIndex(self, i):
+            self.fetched += 1
+            return FakeAccessible("label", f"child-{i}")
+
+    root = WideAccessible("frame", "wide")
+    out = build_subtree(_AccessibleAdapter(root), max_nodes=3)
+    assert root.fetched == 2
+    assert len(out["children"]) == 2
+    assert out["truncated"] == "max_nodes"
+
+
+def test_subtree_budget_also_bounds_failed_child_fetches():
+    from sinnix_capture_a11y.subtree import build_subtree
+
+    class UnavailableChildren(FakeAccessible):
+        fetched = 0
+
+        def getChildCount(self):
+            return 100_000
+
+        def getChildAtIndex(self, i):
+            self.fetched += 1
+            raise RuntimeError("child became unavailable")
+
+    root = UnavailableChildren("frame", "unavailable")
+    out = build_subtree(_AccessibleAdapter(root), max_nodes=3)
+    assert root.fetched == 2
+    assert "children" not in out
+    assert out["truncated"] == "max_nodes"

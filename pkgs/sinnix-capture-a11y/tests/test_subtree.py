@@ -19,8 +19,11 @@ class FakeNode:
     def text(self):
         return self._text
 
-    def children(self):
-        return self._children
+    def child_count(self):
+        return len(self._children)
+
+    def child_at(self, index):
+        return self._children[index]
 
 
 def test_build_subtree_basic_shape():
@@ -70,3 +73,31 @@ def test_build_subtree_omits_empty_text():
     out = build_subtree(node)
 
     assert "text" not in out
+
+
+def test_global_budget_stops_parent_lookups_after_descendants_fill_it():
+    class ObservedNode(FakeNode):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.fetches = []
+
+        def child_at(self, index):
+            self.fetches.append(index)
+            return super().child_at(index)
+
+    branch = ObservedNode("panel", "branch", children=[FakeNode("label", "leaf")])
+    root = ObservedNode("frame", "root", children=[branch, FakeNode("label", "extra")])
+    out = build_subtree(root, max_nodes=3)
+    assert root.fetches == [0]
+    assert branch.fetches == [0]
+    assert out["truncated"] == "max_nodes"
+    assert "truncated" not in out["children"][0]["children"][0]
+
+
+def test_depth_bound_does_not_query_children():
+    class NoChildrenQueries(FakeNode):
+        def child_count(self):
+            raise AssertionError("depth-limited node queried its children")
+
+    out = build_subtree(NoChildrenQueries("frame", "root"), max_depth=0)
+    assert out["truncated"] == "max_depth"

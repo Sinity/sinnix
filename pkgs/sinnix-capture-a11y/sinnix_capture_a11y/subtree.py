@@ -18,7 +18,9 @@ class AccessibleNode(Protocol):
 
     def text(self) -> str | None: ...
 
-    def children(self) -> list["AccessibleNode"]: ...
+    def child_count(self) -> int: ...
+
+    def child_at(self, index: int) -> "AccessibleNode | None": ...
 
 
 def build_subtree(
@@ -33,7 +35,10 @@ def build_subtree(
     Bounded on two axes so a single dump of a pathological subtree (e.g. a
     Chromium tab that renders its full DOM as AT-SPI nodes) cannot grow
     unbounded: ``max_depth`` caps how deep a branch is followed, and
-    ``max_nodes`` caps the total node count across the whole walk. Either
+    ``max_nodes`` caps the total node count across the whole walk. Failed
+    child lookups also consume the budget, so inaccessible children cannot
+    cause an unbounded number of AT-SPI calls. Children are fetched only
+    after checking the remaining budget; no full child list is built. Either
     limit sets a ``truncated`` marker on the node where the walk stopped
     instead of silently dropping data.
     """
@@ -51,10 +56,14 @@ def build_subtree(
             entry["truncated"] = "max_depth"
             return entry
         children_out = []
-        for child in n.children():
+        for index in range(n.child_count()):
             if counter["n"] >= max_nodes:
                 entry["truncated"] = "max_nodes"
                 break
+            child = n.child_at(index)
+            if child is None:
+                counter["n"] += 1
+                continue
             child_entry = walk(child, depth + 1)
             if child_entry is None:
                 entry["truncated"] = "max_nodes"
