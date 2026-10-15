@@ -448,7 +448,7 @@ class Runtime:
             component["snapshot_ref"] = reference
         try:
             writer.append(context)
-            self.results.finish_snapshot(writer)
+            writer.finish()
         except Exception:
             writer.abort()
             raise

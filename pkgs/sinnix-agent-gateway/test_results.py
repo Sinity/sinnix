@@ -841,3 +841,52 @@ def test_digest_keeps_circular_and_ignored_field_validation():
         ResultService._digest({"result": {}, "data": circular})
     with pytest.raises(TypeError):
         ResultService._digest({"result": {"sha256": object()}, "data": {}})
+
+
+def test_snapshot_streams_large_row_without_retaining_first_page_bytes(tmp_path):
+    import tracemalloc
+    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    writer = results.start_snapshot(query_sha256="query", source_revision="source", page_size=1)
+    row = {"rows": ["x" * 64] * 100000}
+    tracemalloc.start()
+    try:
+        writer.append(row)
+        writer.finish()
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1_000_000
+    assert writer.first_page == [row]
+    assert results.read(writer.snapshot_id)["rows"] == [row]
+
+
+def test_invalid_row_tail_rolls_back_before_next_append(tmp_path):
+    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    writer = results.start_snapshot(query_sha256="query", source_revision="source", page_size=3)
+    writer.append({"first": True})
+    with pytest.raises(ResultError, match="not serializable"):
+        writer.append(["x" * 64] * 10000 + [object()])
+    writer.append({"last": True})
+    page = results.finish_snapshot(writer)
+    assert page["rows"] == [{"first": True}, {"last": True}]
+    assert results.read(writer.snapshot_id)["rows"] == page["rows"]
+
+
+def test_snapshot_row_write_failure_aborts_private_staging(tmp_path):
+    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    writer = results.start_snapshot(query_sha256="query", source_revision="source", page_size=1)
+    original = writer.handle
+    class FailedWrite:
+        calls = 0
+        def __getattr__(self, name):
+            return getattr(original, name)
+        def write(self, data):
+            self.calls += 1
+            if self.calls > 1:
+                raise OSError("synthetic row write")
+            return original.write(data)
+    writer.handle = FailedWrite()
+    with pytest.raises(OSError, match="synthetic"):
+        writer.append({"row": "payload"})
+    assert writer.closed and not writer.directory.exists()
+    assert not (results.snapshots_root / writer.snapshot_id).exists()

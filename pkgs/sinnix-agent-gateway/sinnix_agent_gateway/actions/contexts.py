@@ -243,6 +243,7 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
     # coverage and the owner's terminal state remain exactly as the owner
     # returned them; the snapshot holds the complete product whatever its
     # size, and `_within_budget` bounds only the copy returned in band.
+    observed_product = product.model_dump()
     context = await anyio.to_thread.run_sync(
         runtime.persist_context,
         {
@@ -256,9 +257,9 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
                 {
                     "name": product.owner,
                     "status": product.availability,
-                    "source_revision": source_revision(product.model_dump()),
+                    "source_revision": source_revision(observed_product),
                     "source_ref": product.source_ref,
-                    "data": product.model_dump(),
+                    "data": observed_product,
                     "reason": product.reason,
                     "component_failures": dict(product.component_failures),
                 }

@@ -10,6 +10,7 @@ import struct
 import time
 import uuid
 from dataclasses import dataclass
+from itertools import islice
 from pathlib import Path
 from typing import Any, Mapping, get_args
 
@@ -18,7 +19,7 @@ from sinnix_lib.atomic import atomic_publish
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from .payloads import canonical_size, retain_json
+from .payloads import canonical_chunks, canonical_size, retain_json
 from .schemas import StableErrorCode, V2ToolEnvelope
 
 # `StableErrorCode` types `V2Error.code`, so it is the enum the published
@@ -180,7 +181,6 @@ class ResultSnapshotWriter:
         self.handle = None
         self.offsets_path = self.directory / "offsets.bin"
         self.offsets_handle = None
-        self._first_page: list[bytes] = []
         self.row_count = 0
         self.hasher = hashlib.sha256()
         self.closed = False
@@ -194,25 +194,42 @@ class ResultSnapshotWriter:
 
     @property
     def first_page(self) -> list[Any]:
-        # Presentation cannot mutate the canonical retained observation.
-        return [json.loads(encoded) for encoded in self._first_page]
+        # Read the retained bytes on demand; presentation cannot mutate them.
+        if self.handle is not None and not self.handle.closed:
+            self.handle.flush()
+        directory = self.service.snapshots_root / self.snapshot_id if self.published else self.directory
+        with (directory / "rows.jsonl").open("rb") as handle:
+            return [json.loads(line) for line in islice(handle, min(self.page_size, self.row_count))]
 
     def append(self, row: Any) -> None:
         if self.closed:
             raise ResultError("snapshot writer is closed", "unavailable")
+        position = self.handle.tell()
+        offsets_position = self.offsets_handle.tell()
+        digest = self.hasher.copy()
         try:
-            encoded = _canonical(row)
+            for chunk in canonical_chunks(row):
+                self.handle.write(chunk)
+                digest.update(chunk)
+            self.handle.write(b"\n")
+            digest.update(b"\n")
+            self.offsets_handle.write(struct.pack(">Q", position))
         except (TypeError, ValueError) as exc:
-            raise ResultError(
-                "JSONL owner row is not serializable", "owner_failed"
-            ) from exc
-        line = encoded + b"\n"
-        self.offsets_handle.write(struct.pack(">Q", self.handle.tell()))
-        self.handle.write(line)
-        self.hasher.update(line)
+            # An invalid tail must not leave a partial row before a later append.
+            try:
+                self.handle.seek(position)
+                self.handle.truncate()
+                self.offsets_handle.seek(offsets_position)
+                self.offsets_handle.truncate()
+            except BaseException:
+                self.abort()
+                raise
+            raise ResultError("JSONL owner row is not serializable", "owner_failed") from exc
+        except BaseException:
+            self.abort()
+            raise
+        self.hasher = digest
         self.row_count += 1
-        if len(self._first_page) < self.page_size:
-            self._first_page.append(encoded)
 
     def abort(self) -> None:
         self.closed = True

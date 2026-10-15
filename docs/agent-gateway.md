@@ -84,6 +84,8 @@ A configured project path identifies its Git repository store. Discovered checko
 
 Catalog limits apply per category. `matched_counts` records all observed matches, while `returned_counts` records inline rows. When cropped, `matches_artifact` retains the complete filtered observation, readable through `artifacts.read`; upstream coverage gaps remain explicit.
 
+`results.get` reconstructs a complete stored envelope or row snapshot in memory. When a response supplies an artifact reference, `artifacts.read` provides bounded byte retrieval of that retained original.
+
 Text file reads return the actual starting byte `offset` and a `next_offset` when more bytes remain. To continue a line-selected excerpt, pass `next_offset` as `offset` and omit `line_start`; this preserves the remainder of a partially returned line. These are live file reads, so concurrent file edits require a new read or a retained artifact snapshot.
 
 The local CLI reads one complete JSON request from `--input-file` or `--stdin`; action schemas still validate its fields. JSON escaping and UTF-8 encoding do not impose a second request-size limit. Requests are decoded in memory; use a verified artifact source for large file bodies so those bytes stay in the streaming project-write route.
