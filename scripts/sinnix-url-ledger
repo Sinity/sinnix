@@ -73,6 +73,7 @@ import uuid
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -839,16 +840,16 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
 
 def _iso_to_epoch(value: str) -> float | None:
-    # Accept plain ISO-8601 (with or without offset/fractional seconds),
-    # CDX-style compact "%Y%m%d%H%M%S" timestamps (Wayback/Common Crawl),
-    # and RFC 7089 HTTP-date (Memento). All parsed as UTC via
-    # calendar.timegm (never time.mktime, which assumes local time).
+    # Preserve ISO offsets and fractional seconds. Offset-free historical
+    # timestamps, compact CDX timestamps and HTTP dates use UTC explicitly.
     candidate = value.strip()
-    if "T" in candidate:
-        candidate = candidate.split(".")[0].rstrip("Z")
+    if len(candidate) > 10 and candidate[10] == "T":
         try:
-            return float(calendar.timegm(time.strptime(candidate, "%Y-%m-%dT%H:%M:%S")))
-        except ValueError:
+            parsed = datetime.fromisoformat(candidate)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
+        except (ValueError, OverflowError, OSError):
             return None
     for fmt in ("%Y%m%d%H%M%S", "%a, %d %b %Y %H:%M:%S %Z"):
         try:
