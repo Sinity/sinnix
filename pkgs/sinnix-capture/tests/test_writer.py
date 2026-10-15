@@ -351,3 +351,28 @@ def test_recovery_tail_honors_exact_byte_window(tmp_path: Path) -> None:
     window = b'bad json\n{"ts":true}\n[]\n{"ts":40}\n{"ts":20}'
     path.write_bytes(prefix + window + b'\n{"ts":99999}\n')
     assert _max_ts(path, len(prefix), len(prefix) + len(window)) == 40
+
+
+@pytest.mark.parametrize("counter_missing", [False, True])
+def test_recovery_refuses_unreadable_lane_without_modifying_payloads(tmp_path, counter_missing):
+    writer = CaptureWriter(tmp_path, "lane", host="fixture")
+    writer.write({"original": True}, ts=1_700_000_000)
+    daily = writer._record_path(1_700_000_000)
+    before = daily.read_bytes()
+    writer._index_path.unlink()
+    if counter_missing:
+        writer._seq_path.unlink()
+    writer.lane_dir.chmod(0o300)  # Known paths work; directory enumeration does not.
+    try:
+        with pytest.raises(PermissionError):
+            writer.write({"new": True}, ts=1_700_000_001)
+    finally:
+        writer.lane_dir.chmod(0o700)
+    assert daily.read_bytes() == before
+    assert not writer._index_path.exists()
+    if counter_missing:
+        assert not writer._seq_path.exists()
+    else:
+        assert writer._read_seq() == 1
+    writer.write({"after_access_restored": True}, ts=1_700_000_002)
+    assert [json.loads(line)["seq"] for line in writer._index_path.read_text().splitlines()] == [1, 2]

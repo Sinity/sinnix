@@ -150,9 +150,17 @@ class CaptureWriter:
         except ValueError:
             return self._highest_retained_seq()
 
+    def _daily_paths(self) -> list[Path]:
+        # Path.glob can suppress directory access errors. Recovery must not
+        # interpret an unreadable retained archive as an empty one.
+        return sorted(
+            path for path in self.lane_dir.iterdir()
+            if path.match(f"{self.lane}-[0-9]*.jsonl")
+        )
+
     def _highest_retained_seq(self) -> int:
         highest = self._highest_indexed_seq()
-        for path in self.lane_dir.glob(f"{self.lane}-[0-9]*.jsonl"):
+        for path in self._daily_paths():
             for record in self._payload_records(path):
                 highest = max(highest, int(record["seq"]))
         return highest
@@ -222,7 +230,7 @@ class CaptureWriter:
         if last >= counter:
             return
         missing = []
-        for path in sorted(self.lane_dir.glob(f"{self.lane}-[0-9]*.jsonl")):
+        for path in self._daily_paths():
             for record in self._payload_records(path):
                 seq = record["seq"]
                 if last < seq <= counter:
