@@ -159,8 +159,21 @@ def prose_mask(text: str, header_end: int = 0) -> str:
             blank(offset, end)
         offset = end
     masked = "".join(chars)
-    for match in re.finditer(r"(`+)([\s\S]*?)\1(?!`)", masked):
-        blank(*match.span())
+    # A delimiter is a complete backtick run and closes only an equal run.
+    # Count future runs first so an unmatched opener stays literal without
+    # repeatedly searching the remaining text or backtracking within a run.
+    delimiters = re.compile(r"`+")
+    remaining = Counter(match.end() - match.start() for match in delimiters.finditer(masked))
+    opener = None
+    for match in delimiters.finditer(masked):
+        length = match.end() - match.start()
+        remaining[length] -= 1
+        if opener is None:
+            if remaining[length]:
+                opener = (match.start(), length)
+        elif length == opener[1]:
+            blank(opener[0], match.end())
+            opener = None
     return "".join(chars)
 
 
