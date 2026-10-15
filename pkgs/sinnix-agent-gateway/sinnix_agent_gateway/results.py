@@ -121,6 +121,47 @@ def _canonical_size(value: object) -> int:
     return sum(len(fragment.encode()) for fragment in encoder.iterencode(value))
 
 
+def _normalized_json_keys(value: Any, active: set[int] | None = None) -> Any:
+    """Match a JSON round-trip's keys without copying unchanged containers."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if not isinstance(value, (dict, list, tuple)):
+        raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+    active = set() if active is None else active
+    identity = id(value)
+    if identity in active:
+        raise ValueError("Circular reference detected")
+    active.add(identity)
+    try:
+        if isinstance(value, dict):
+            changed = None
+            if any(not isinstance(key, str) for key in value):
+                changed = {}
+                # The predecessor sorts before decoding keys. Mixed key types
+                # must still refuse, and colliding normalized keys keep the last.
+                for key, child in sorted(value.items()):
+                    normalized_key = next(iter(json.loads(json.dumps({key: None}))))
+                    changed[normalized_key] = _normalized_json_keys(child, active)
+            else:
+                for key, child in value.items():
+                    normalized = _normalized_json_keys(child, active)
+                    if normalized is not child:
+                        if changed is None:
+                            changed = dict(value)
+                        changed[key] = normalized
+        else:
+            changed = None
+            for index, child in enumerate(value):
+                normalized = _normalized_json_keys(child, active)
+                if normalized is not child:
+                    if changed is None:
+                        changed = list(value)
+                    changed[index] = normalized
+        return value if changed is None else changed
+    finally:
+        active.remove(identity)
+
+
 class ResultSnapshotWriter:
     """Incrementally materialize an immutable JSONL snapshot without row buffering."""
 
@@ -339,9 +380,15 @@ class ResultService:
 
     @staticmethod
     def _digest(envelope: Mapping[str, Any]) -> str:
-        material = json.loads(_canonical(envelope))
+        normalized = _normalized_json_keys(envelope)
+        material = dict(normalized)
+        material["result"] = dict(normalized["result"])
         material["result"].pop("sha256", None)
-        return hashlib.sha256(_canonical(material)).hexdigest()
+        digest = hashlib.sha256()
+        encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"))
+        for fragment in encoder.iterencode(material):
+            digest.update(fragment.encode())
+        return digest.hexdigest()
 
     @staticmethod
     def _normalized_id(result_id: str) -> str:

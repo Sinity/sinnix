@@ -796,3 +796,47 @@ def test_oversized_prefix_does_not_hide_invalid_json_tail(tmp_path):
     with pytest.raises(ResultError) as refusal:
         results.require_payload_bound(["x" * 64] * 10000 + [object()])
     assert refusal.value.failure_class == "owner_failed"
+
+
+@pytest.mark.parametrize("payload", [
+    {"rows": ["界\n😀", True, None, {"x": 1.25}]},
+    {"nested": [{2: "two", 10: "ten"}, ("a", {False: "no", True: "yes"})]},
+    {float("inf"): "infinite", float("nan"): "not a number"},
+])
+def test_digest_preserves_json_roundtrip_semantics_without_mutating_input(payload):
+    from sinnix_agent_gateway.results import _canonical
+    envelope = {"result": {"sha256": "old", "id": "fixture"}, "data": payload}
+    before = _canonical(envelope)
+    predecessor = json.loads(before)
+    predecessor["result"].pop("sha256", None)
+    expected = hashlib.sha256(_canonical(predecessor)).hexdigest()
+    assert ResultService._digest(envelope) == expected
+    assert _canonical(envelope) == before
+
+
+def test_digest_avoids_copying_complete_row_payload():
+    import tracemalloc
+    envelope = {"result": {"sha256": "old"}, "data": {"rows": ["x" * 64] * 100000}}
+    tracemalloc.start()
+    try:
+        digest = ResultService._digest(envelope)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert len(digest) == 64
+    assert peak < 1_000_000
+
+
+@pytest.mark.parametrize("payload", [{1: "integer", "1": "string"}, object()])
+def test_digest_keeps_invalid_value_refusals(payload):
+    with pytest.raises(TypeError):
+        ResultService._digest({"result": {}, "data": payload})
+
+
+def test_digest_keeps_circular_and_ignored_field_validation():
+    circular = []
+    circular.append(circular)
+    with pytest.raises(ValueError, match="Circular"):
+        ResultService._digest({"result": {}, "data": circular})
+    with pytest.raises(TypeError):
+        ResultService._digest({"result": {"sha256": object()}, "data": {}})
