@@ -14,20 +14,9 @@ from .action import Action
 from .app import create_server
 from .config import GatewayConfig
 
-MAX_INPUT_BYTES = 262_144
-
 
 class CliInputError(ValueError):
     pass
-
-
-def _read_bounded(stream: Any, limit: int, source: str) -> bytes:
-    data = stream.read(limit + 1)
-    if isinstance(data, str):
-        data = data.encode()
-    if len(data) > limit:
-        raise CliInputError(f"{source} exceeds the {limit}-byte JSON input bound")
-    return data
 
 
 def load_json_input(
@@ -37,22 +26,21 @@ def load_json_input(
     use_stdin: bool = False,
     stdin: Any | None = None,
 ) -> dict[str, Any]:
-    sources = [value for value in (inline, input_file, use_stdin or None) if value]
-    if len(sources) > 1:
+    sources = (inline is not None, input_file is not None, use_stdin)
+    if sum(sources) > 1:
         raise CliInputError("give at most one of --input, --input-file, --stdin")
-    if inline is not None:
-        raw = inline.encode()
-        if len(raw) > MAX_INPUT_BYTES:
-            raise CliInputError(f"--input exceeds the {MAX_INPUT_BYTES}-byte bound")
-    elif input_file is not None:
-        with input_file.open("rb") as handle:
-            raw = _read_bounded(handle, MAX_INPUT_BYTES, "--input-file")
-    elif use_stdin:
-        raw = _read_bounded(stdin or sys.stdin.buffer, MAX_INPUT_BYTES, "--stdin")
-    else:
-        return {}
     try:
-        payload = json.loads(raw)
+        if inline is not None:
+            payload = json.loads(inline)
+        elif input_file is not None:
+            with input_file.open("rb") as handle:
+                payload = json.load(handle)
+        elif use_stdin:
+            payload = json.load(stdin if stdin is not None else sys.stdin.buffer)
+        else:
+            return {}
+    except OSError as exc:
+        raise CliInputError(f"request input is unavailable: {exc}") from exc
     except ValueError as exc:
         raise CliInputError("request input is not valid JSON") from exc
     if not isinstance(payload, dict):
@@ -102,9 +90,6 @@ def build_request(
     _set_value(payload, "reason", reason)
     _set_value(payload, "idempotency_key", idempotency_key)
     _set_value(payload, "deadline_at", deadline_at)
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    if len(encoded) > MAX_INPUT_BYTES:
-        raise CliInputError(f"request exceeds the {MAX_INPUT_BYTES}-byte input bound")
     return payload
 
 

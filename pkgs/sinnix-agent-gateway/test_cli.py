@@ -8,6 +8,7 @@ import socket
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from http.client import HTTPConnection
 from pathlib import Path
@@ -56,8 +57,16 @@ def test_cli_config_environment_overrides_the_deployed_default(
     assert cli.parser().parse_args(["info"]).config == configured
 
 
+@pytest.fixture
+def private_socket_path():
+    # Nested managed job scratch can exceed the kernel's socket-path limit.
+    # The socket is small volatile state; request data stays in managed TMPDIR.
+    with tempfile.TemporaryDirectory(prefix="gw-uds-", dir="/tmp") as directory:
+        yield Path(directory) / "mcp.sock"
+
+
 def test_private_http_transport_serves_operator_tools(
-    tmp_path: Path, tmp_path_factory
+    tmp_path: Path, private_socket_path: Path
 ) -> None:
     class UnixHTTP(HTTPConnection):
         def __init__(self, path: Path) -> None:
@@ -72,7 +81,7 @@ def test_private_http_transport_serves_operator_tools(
     config_path.write_text(
         json.dumps({"stateDir": str(tmp_path / "state"), "projects": {}})
     )
-    socket_path = tmp_path_factory.mktemp("uds") / "mcp.sock"
+    socket_path = private_socket_path
     command = [
         sys.executable,
         "-c",
@@ -89,7 +98,7 @@ def test_private_http_transport_serves_operator_tools(
         try:
             deadline = time.monotonic() + 10
             while not socket_path.exists():
-                assert process.poll() is None
+                assert process.poll() is None, process.stderr.read().decode()
                 assert time.monotonic() < deadline, "MCP socket did not appear"
                 time.sleep(0.05)
 
@@ -437,21 +446,50 @@ def test_stdio_mcp_client_consumes_complete_binary_artifact(tmp_path: Path) -> N
     assert consume(pages) == original
 
 
-def test_input_sources_are_bounded_and_require_a_json_object(tmp_path: Path) -> None:
+def test_input_sources_require_one_complete_json_object(tmp_path: Path) -> None:
+    import io
     with pytest.raises(CliInputError, match="valid JSON"):
         load_json_input(inline="not-json")
     with pytest.raises(CliInputError, match="JSON object"):
         load_json_input(inline="[]")
-    with pytest.raises(CliInputError, match="bound"):
-        load_json_input(inline=json.dumps({"value": "x" * cli_support.MAX_INPUT_BYTES}))
-    oversized = tmp_path / "oversized.json"
-    oversized.write_bytes(b"{" + b"x" * cli_support.MAX_INPUT_BYTES)
-    with pytest.raises(CliInputError, match="bound"):
-        load_json_input(input_file=oversized)
-    with pytest.raises(CliInputError, match="bound"):
-        load_json_input(
-            use_stdin=True, stdin=SimpleNamespace(read=lambda limit: "x" * limit)
-        )
+    with pytest.raises(CliInputError, match="at most one"):
+        load_json_input(inline="", input_file=tmp_path / "unused")
+    with pytest.raises(CliInputError, match="unavailable"):
+        load_json_input(input_file=tmp_path / "missing.json")
+    with pytest.raises(CliInputError, match="valid JSON"):
+        load_json_input(use_stdin=True, stdin=io.BytesIO(b'{} trailing'))
+
+
+@pytest.mark.parametrize("source", ["inline", "file", "stdin"])
+@pytest.mark.parametrize("characters", [50_000, 90_000])
+def test_complete_unicode_cli_request_survives_former_byte_cliffs(tmp_path, source, characters):
+    import io
+    from test_actions_projects import fixture
+    config, project, _ = fixture(tmp_path)
+    content = "界" * characters
+    head = subprocess.check_output(["git", "-C", str(project), "rev-parse", "HEAD"], text=True).strip()
+    payload = {"target": {"project": "fixture"},
+               "change": {"operation": "write", "path": "unicode.txt", "content": content},
+               "expected_head": head, "idempotency_key": "unicode-request"}
+    raw = json.dumps(payload, ensure_ascii=False).encode()
+    assert len(json.dumps(payload).encode()) > 262_144
+    if characters == 50_000:
+        assert len(raw) < 262_144
+    else:
+        assert len(raw) > 262_144
+    if source == "inline":
+        arguments = {"inline": raw.decode()}
+    elif source == "file":
+        path = tmp_path / "request.json"
+        path.write_bytes(raw)
+        arguments = {"input_file": path}
+    else:
+        arguments = {"use_stdin": True, "stdin": io.BytesIO(raw)}
+    request = build_request(**arguments)
+    assert request == payload
+    response = cli_support.invoke(config, "operator", "projects.change", request)
+    assert response["result"]["outcome"] == "ok", response
+    assert (project / "unicode.txt").read_bytes() == content.encode()
 
 
 def test_set_flags_merge_json_values_without_conflicts() -> None:
