@@ -24,9 +24,7 @@
         ];
         assertions = config: [
           {
-            assertion = builtins.elem
-              "d ${config.sinnix.paths.activityRoot}/shared/ranking 0700 ${config.sinnix.user.name} ${config.users.users.${config.sinnix.user.name}.group} -"
-              config.systemd.tmpfiles.rules;
+            assertion = builtins.elem "d ${config.sinnix.paths.activityRoot}/shared/ranking 0700 ${config.sinnix.user.name} ${config.users.users.${config.sinnix.user.name}.group} -" config.systemd.tmpfiles.rules;
             message = "Raw ranking evidence must have an owner-only entrance.";
           }
           {
@@ -90,7 +88,10 @@
         ];
       };
       sinnix-lib = pkgs.callPackage ../../pkgs/sinnix-lib/pkg.nix { };
-      python = pkgs.python3.withPackages (_: [ sinnix-lib ]);
+      python = pkgs.python3.withPackages (ps: [
+        sinnix-lib
+        ps.dbus-next
+      ]);
     in
     {
       # Exercise both factory routes through their real unit renderers.
@@ -98,21 +99,37 @@
       checks.capture-lane-privacy =
         assert builtins.seq privacy true;
         pkgs.runCommand "capture-lane-privacy-check" { } ''touch "$out"'';
-      checks.capture-router = pkgs.runCommand "capture-router-check"
-        {
-          nativeBuildInputs = [ pkgs.python3 pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnused pkgs.gnugrep pkgs.jq ];
-          ROUTER_PERIODS_SCRIPT = ../../pkgs/capture-router/remote-periods.sh;
-          ROUTER_POLL_SCRIPT = ../../pkgs/capture-router/poll.sh;
-          ROUTER_REMOTE_POLL_SCRIPT = ../../pkgs/capture-router/remote-poll.sh;
-        }
-        ''
-          python3 ${../../pkgs/capture-router/tests/test_periods.py}
-          touch "$out"
-        '';
+      checks.capture-router =
+        pkgs.runCommand "capture-router-check"
+          {
+            nativeBuildInputs = [
+              pkgs.python3
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.gawk
+              pkgs.gnused
+              pkgs.gnugrep
+              pkgs.jq
+            ];
+            ROUTER_PERIODS_SCRIPT = ../../pkgs/capture-router/remote-periods.sh;
+            ROUTER_POLL_SCRIPT = ../../pkgs/capture-router/poll.sh;
+            ROUTER_REMOTE_POLL_SCRIPT = ../../pkgs/capture-router/remote-poll.sh;
+          }
+          ''
+            python3 ${../../pkgs/capture-router/tests/test_periods.py}
+            touch "$out"
+          '';
       checks.kitty-scrollback =
         pkgs.runCommand "kitty-scrollback-capture-check"
           {
-            nativeBuildInputs = [ pkgs.python3 pkgs.bash pkgs.coreutils pkgs.hostname pkgs.jq pkgs.gnused ];
+            nativeBuildInputs = [
+              pkgs.python3
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.hostname
+              pkgs.jq
+              pkgs.gnused
+            ];
             KITTY_CAPTURE_SCRIPT = ../../scripts/kitty-scrollback-capture;
           }
           ''
@@ -122,10 +139,14 @@
       checks.capture-mpris =
         pkgs.runCommand "capture-mpris-check"
           {
-            nativeBuildInputs = [ python ];
+            nativeBuildInputs = [
+              python
+              pkgs.dbus
+            ];
+            PLAYERCTL_BIN = "${pkgs.playerctl}/bin/playerctl";
           }
           ''
-            python3 -m unittest discover -v \
+            dbus-run-session --config-file=${pkgs.dbus}/share/dbus-1/session.conf -- python3 -m unittest discover -v \
               -s ${../../pkgs/capture-mpris} -p 'test_monitor.py'
             touch "$out"
           '';
