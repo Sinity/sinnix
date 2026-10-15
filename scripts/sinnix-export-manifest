@@ -40,19 +40,30 @@ for directory, _subdirectories, filenames in os.walk(root, onerror=scan_error, f
         if S_ISREG(path.stat().st_mode):
             paths.append(path)
 
+def file_identity(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
 entries = []
 for path in sorted(paths):
     rel = path.relative_to(root).as_posix()
-    stat = path.stat()
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
+    # A path can change after enumeration. Observe metadata and bytes through
+    # one open file, and refuse a changed source before replacing the manifest.
+    with open(path, "rb", opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK)) as handle:
+        info = os.fstat(handle.fileno())
+        if not S_ISREG(info.st_mode):
+            raise RuntimeError(f"not a regular export file: {path}")
+        digest = hashlib.sha256()
         for block in iter(lambda: handle.read(1 << 20), b""):
             digest.update(block)
+        if (file_identity(os.fstat(handle.fileno())) != file_identity(info)
+                or file_identity(path.stat()) != file_identity(info)):
+            raise RuntimeError(f"export file changed while hashing: {path}")
     entries.append(
         {
             "path": rel,
-            "size": stat.st_size,
-            "mtime": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            "size": info.st_size,
+            "mtime": datetime.fromtimestamp(info.st_mtime, tz=timezone.utc).isoformat(),
             "sha256": digest.hexdigest(),
         }
     )
