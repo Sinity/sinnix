@@ -270,3 +270,43 @@ def test_oversized_context_metadata_spills_complete_original_without_refusal(tmp
     assert restored["components"][0]["data"]["data"] == observation
     saved = runtime.results.read(restored["snapshot_ref"].rsplit("/", 1)[1])["rows"][0]
     assert saved["components"][0]["reason"] == reason
+
+
+@pytest.mark.parametrize("kind", ["native", "model", "dataclass", "date"])
+def test_presentation_size_preserves_typed_defaults_and_any_serialization(kind):
+    from dataclasses import dataclass
+    from datetime import date
+    from pydantic import BaseModel
+    from sinnix_agent_gateway.actions.contexts import ComposedContext, _presentation_size
+    from sinnix_agent_gateway.contexts import canonical_bytes
+    class Model(BaseModel):
+        label: str
+    @dataclass
+    class Record:
+        label: str
+    data = {"native": {"rows": ["界", (True, None)]}, "model": Model(label="界"),
+            "dataclass": Record(label="界"), "date": date(2026, 1, 1)}[kind]
+    context = {"ref": "fixture", "intent": "project.orientation", "target_ref": "fixture",
+               "snapshot_ref": "snapshot", "total_budget_bytes": 4096,
+               "components": [{"name": "fixture", "status": "available", "snapshot_ref": "snapshot", "data": data}]}
+    expected = len(canonical_bytes(ComposedContext.model_validate(context).model_dump()))
+    assert _presentation_size(context) == expected
+
+
+def test_context_budget_does_not_copy_complete_native_owner_tree():
+    import tracemalloc
+    from sinnix_agent_gateway.actions.contexts import _within_budget
+    data = {"rows": ["x" * 64] * 100000}
+    context = {"ref": "fixture", "intent": "project.orientation", "target_ref": "fixture",
+               "snapshot_ref": "snapshot", "total_budget_bytes": 4096,
+               "components": [{"name": "fixture", "status": "available", "snapshot_ref": "snapshot", "data": data}]}
+    tracemalloc.start()
+    try:
+        result = _within_budget(context)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1_000_000
+    assert result["components"][0]["inline_omitted"]
+    assert context["components"][0]["data"] is data
+    assert len(data["rows"]) == 100000

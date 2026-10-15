@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal, Mapping
 
 import anyio
-from pydantic import Field, model_validator
+from pydantic import Field, TypeAdapter, model_validator
 
 from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
-from ..contexts import canonical_bytes
 from ..contracts import VerbFamily
 from ..locators import JobLocator, ProjectLocator, project_ref
+from ..payloads import canonical_size
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 from .products import Availability, HistoricalSelector, combine_availability
@@ -280,6 +280,43 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
     )
 
 
+def _native_json(value: Any, active: set[int] | None = None) -> bool:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return True
+    if not isinstance(value, (dict, list, tuple)):
+        return False
+    active = set() if active is None else active
+    identity = id(value)
+    if identity in active:
+        return False
+    active.add(identity)
+    try:
+        if isinstance(value, dict):
+            return all(
+                (key is None or isinstance(key, (str, int, float, bool)))
+                and _native_json(child, active)
+                for key, child in value.items()
+            )
+        return all(_native_json(child, active) for child in value)
+    finally:
+        active.remove(identity)
+
+
+_COMPONENT_DATA = TypeAdapter(Any)
+
+
+def _presentation_size(context: Mapping[str, Any]) -> int:
+    fields = {key: item for key, item in context.items() if key in ComposedContext.model_fields}
+    model = ComposedContext.model_validate(fields)
+    # Include typed defaults while keeping native owner data shared. Non-JSON
+    # values still follow Pydantic's Any serialization, as in the full dump.
+    serialized = model.model_dump(exclude={"components": {"__all__": {"data"}}})
+    for row, component in zip(serialized["components"], model.components):
+        data = component.data
+        row["data"] = data if _native_json(data) else _COMPONENT_DATA.dump_python(data)
+    return canonical_size(serialized, default=str)
+
+
 def _within_budget(context: Mapping[str, Any], *, reserve_bytes: int = 0) -> dict[str, Any]:
     """Use the owner's compact view when full data exceeds the payload bound.
 
@@ -289,9 +326,7 @@ def _within_budget(context: Mapping[str, Any], *, reserve_bytes: int = 0) -> dic
     budget = int(context["total_budget_bytes"])
     budget -= min(4096, max(1, budget // 2)) + reserve_bytes
 
-    def size(value: Mapping[str, Any]) -> int:
-        fields = {key: item for key, item in value.items() if key in ComposedContext.model_fields}
-        return len(canonical_bytes(ComposedContext.model_validate(fields).model_dump()))
+    size = _presentation_size
 
     if size(context) <= budget:
         return dict(context)

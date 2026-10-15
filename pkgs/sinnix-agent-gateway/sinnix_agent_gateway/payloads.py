@@ -12,17 +12,17 @@ from typing import Any, Iterator
 from sinnix_lib.atomic import atomic_publish_at
 
 
-def canonical_chunks(payload: Any) -> Iterator[bytes]:
-    encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"))
+def canonical_chunks(payload: Any, *, default=None) -> Iterator[bytes]:
+    encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"), default=default)
     for fragment in encoder.iterencode(payload):
         # The encoder may materialize one string; avoid another complete byte copy.
         for start in range(0, len(fragment), 65_536):
             yield fragment[start:start + 65_536].encode()
 
 
-def canonical_size(payload: Any) -> int:
+def canonical_size(payload: Any, *, default=None) -> int:
     # Validate the whole input, including invalid tails after oversized prefixes.
-    return sum(map(len, canonical_chunks(payload)))
+    return sum(map(len, canonical_chunks(payload, default=default)))
 
 
 def retain_json(root: Path, payload: Any, *, link: Path | None = None) -> Path:
