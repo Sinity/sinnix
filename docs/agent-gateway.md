@@ -235,7 +235,7 @@ changing the gateway action family cannot suppress a client-side approval policy
 
 ## Generated reference
 
-This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `653141d7f1c0169e833b584aa281515dde90a0f52f9062e4a539f0f4e58a398b`.
+This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `aee0ddaa31ea46711cb020509d30bd7603ab3b9c2036b9a021fda73ecda0c5fe`.
 
 The full schemas and examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 

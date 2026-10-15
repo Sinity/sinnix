@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 653141d7f1c0169e833b584aa281515dde90a0f52f9062e4a539f0f4e58a398b -->
+<!-- gateway-catalog-sha256: aee0ddaa31ea46711cb020509d30bd7603ab3b9c2036b9a021fda73ecda0c5fe -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `653141d7f1c0169e833b584aa281515dde90a0f52f9062e4a539f0f4e58a398b`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `aee0ddaa31ea46711cb020509d30bd7603ab3b9c2036b9a021fda73ecda0c5fe`.
 
 ## Invocation
 
@@ -18983,7 +18983,7 @@ Input schema:
     },
     "placement": {
       "default": "os_window",
-      "description": "New agent OS window, or a split or tab in the newest agent OS window. Agent terminals open on the hidden agent workspace, never in the operator's windows; reuse one through terminals.run.",
+      "description": "New agent OS window, or a split or tab in the newest agent OS window. Agent terminals open on the hidden agent workspace, never in the operator's windows. Use shell.run for ordinary commands; open or reuse graphical terminals only for interactive terminal tasks.",
       "enum": [
         "os_window",
         "window",

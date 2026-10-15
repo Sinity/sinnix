@@ -96,19 +96,37 @@ restore_hyprland_focus() {
 # static rule in the Hyprland config applies only after a config reload, and
 # activation deliberately does not reload, so the same rule is installed at
 # runtime before every agent OS window (once per compositor Lua state).
+agent_terminal_rule_command() {
+  local response
+  if ! response="$(hyprctl "$@" 2>&1)" || [[ $response != ok ]]; then
+    printf 'cannot protect agent terminal workspace: %s\n' "$response" >&2
+    return 1
+  fi
+}
+
 ensure_agent_terminal_rule() {
   local provider
-  command -v hyprctl >/dev/null 2>&1 || return 0
-  command -v jq >/dev/null 2>&1 || return 0
-  provider="$(hyprctl -j status 2>/dev/null | jq -r '.configProvider // empty' || true)"
-  if [[ $provider == "lua" ]]; then
-    hyprctl eval 'if sinnix_agent_terminal_guard == nil then sinnix_agent_terminal_guard = hl.window_rule({name = "sinnix-agent-terminal-guard", match = {initial_class = "^(sinnix-agent-terminal)$"}, workspace = "name:agentbrowser silent", tile = true, no_initial_focus = true, focus_on_activate = false, suppress_event = "activate activatefocus"}) end' >/dev/null 2>&1 || true
-  elif [[ $provider == "hyprlang" ]]; then
-    hyprctl keyword 'windowrule[sinnix-agent-terminal-guard]:match:initial_class' '^(sinnix-agent-terminal)$' >/dev/null 2>&1 || true
-    hyprctl keyword 'windowrule[sinnix-agent-terminal-guard]:workspace' 'name:agentbrowser silent' >/dev/null 2>&1 || true
-    hyprctl keyword 'windowrule[sinnix-agent-terminal-guard]:no_initial_focus' true >/dev/null 2>&1 || true
-    hyprctl keyword 'windowrule[sinnix-agent-terminal-guard]:enable' true >/dev/null 2>&1 || true
+  need_cmd hyprctl
+  need_cmd jq
+  if ! provider="$(hyprctl -j status | jq -er '.configProvider')"; then
+    echo "cannot determine compositor configuration provider" >&2
+    return 1
   fi
+  case "$provider" in
+  lua)
+    agent_terminal_rule_command eval 'if sinnix_agent_terminal_guard == nil then sinnix_agent_terminal_guard = hl.window_rule({name = "sinnix-agent-terminal-guard", match = {initial_class = "^(sinnix-agent-terminal)$"}, workspace = "name:agentbrowser silent", tile = true, no_initial_focus = true, focus_on_activate = false, suppress_event = "activate activatefocus"}) end'
+    ;;
+  hyprlang)
+    agent_terminal_rule_command keyword 'windowrule[sinnix-agent-terminal-guard]:match:initial_class' '^(sinnix-agent-terminal)$' || return 1
+    agent_terminal_rule_command keyword 'windowrule[sinnix-agent-terminal-guard]:workspace' 'name:agentbrowser silent' || return 1
+    agent_terminal_rule_command keyword 'windowrule[sinnix-agent-terminal-guard]:no_initial_focus' true || return 1
+    agent_terminal_rule_command keyword 'windowrule[sinnix-agent-terminal-guard]:enable' true
+    ;;
+  *)
+    printf 'unsupported compositor configuration provider: %s\n' "$provider" >&2
+    return 1
+    ;;
+  esac
 }
 
 restore_operator_focus() {

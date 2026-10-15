@@ -624,7 +624,8 @@ class OpenInput(MutationControls):
         description=(
             "New agent OS window, or a split or tab in the newest agent OS "
             "window. Agent terminals open on the hidden agent workspace, never "
-            "in the operator's windows; reuse one through terminals.run."
+            "in the operator's windows. Use shell.run for ordinary commands; "
+            "open or reuse graphical terminals only for interactive terminal tasks."
         ),
     )
 
