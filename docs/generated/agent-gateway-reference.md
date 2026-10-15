@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: d294a8f96cc8f15845ae4dc8a49088fe59e27e960d490b541885bc5cb60c5479 -->
+<!-- gateway-catalog-sha256: 166d9b8443f3c3a4eee847d1ef17d418e4c2240cf9f0c434b3430991edb8c0dc -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `d294a8f96cc8f15845ae4dc8a49088fe59e27e960d490b541885bc5cb60c5479`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `166d9b8443f3c3a4eee847d1ef17d418e4c2240cf9f0c434b3430991edb8c0dc`.
 
 ## Invocation
 
@@ -63,7 +63,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `projects.export`            | `query`   | `projects`         | `operator` | Exports tracked and nonignored untracked files, excluding sensitive and local-only paths. Symlink entries retain their link targets; symlinked parent directories are refused. Optional file and byte bounds return next_start_after; pass it with checkout_revision as expected_revision to continue. Fetch the ZIP through its artifact ref; its manifest_path holds the complete per-file manifest.                                                                                                                                                                                                                                                                      |
 | `projects.diff`              | `query`   | `projects`         | `operator` | Show uncommitted changes in a checkout, optionally against a git ref.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `projects.search`            | `query`   | `projects`         | `operator` | max_matches selects retained matches; page_size sizes responses. next_cursor pages the immutable observation after checkout edits. checkout_revision identifies its captured source; truncated reports additional matches beyond max_matches. Cursors bind the principal, checkout and query.                                                                                                                                                                                                                                                                                                                                                                               |
-| `projects.change`            | `change`  | `projects`         | `operator` | Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `projects.change`            | `change`  | `projects`         | `operator` | Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read. Supply inline content/patch or a source artifact locator; artifact bytes are verified and streamed without a file-size ceiling from the response budget.                                                                                                                                                                                                                                                                                              |
 | `projects.context`           | `context` | `projects`         | `operator` | Project-scoped view of context.compose with the same owner coverage, compact presentation and snapshot retrieval, plus project navigation affordances.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `beads.closure`              | `query`   | `beads`            | `operator` | Read native dependency closure, cycles, readiness and incomplete frontier at one revision.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `beads.query`                | `query`   | `beads`            | `operator` | The owner filters, projects and counts before serialization. limit sizes immutable observation pages; cursors never reread live rows. Owner coverage reports any bounded prefix; beads.read exposes native offset paging. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.                                                                                                                                                                                                                                                                                                                            |
@@ -4102,7 +4102,7 @@ Find a symbol:
 
 ### `projects.change`
 
-Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.
+Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read. Supply inline content/patch or a source artifact locator; artifact bytes are verified and streamed without a file-size ceiling from the response budget.
 
 Family: `change`. Owner: `projects`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
@@ -4124,15 +4124,64 @@ Input schema:
           "type": "string"
         },
         "patch": {
-          "description": "git-apply compatible patch.",
-          "maxLength": 262144,
-          "minLength": 1,
-          "type": "string"
+          "anyOf": [
+            {
+              "maxLength": 262144,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "git-apply compatible patch."
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactLocator"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Verified immutable artifact containing the complete patch."
         }
       },
-      "required": [
-        "patch"
-      ],
+      "type": "object"
+    },
+    "ArtifactLocator": {
+      "additionalProperties": false,
+      "description": "A gateway artifact by canonical ref or bare artifact id.",
+      "properties": {
+        "artifact_id": {
+          "anyOf": [
+            {
+              "maxLength": 36,
+              "minLength": 36,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ref": {
+          "anyOf": [
+            {
+              "pattern": "^sinnix://artifacts/[0-9a-fA-F-]{36}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
       "type": "object"
     },
     "CheckoutLocator": {
@@ -4200,8 +4249,16 @@ Input schema:
       "additionalProperties": false,
       "properties": {
         "content": {
-          "maxLength": 262144,
-          "type": "string"
+          "anyOf": [
+            {
+              "maxLength": 262144,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "operation": {
           "const": "write",
@@ -4213,11 +4270,22 @@ Input schema:
           "maxLength": 4096,
           "minLength": 1,
           "type": "string"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ArtifactLocator"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Verified immutable artifact bytes, for content larger than one inline frame."
         }
       },
       "required": [
-        "path",
-        "content"
+        "path"
       ],
       "type": "object"
     }

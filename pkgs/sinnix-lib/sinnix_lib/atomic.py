@@ -22,7 +22,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TextIO
+from typing import BinaryIO, TextIO
 
 PRIVATE_MODE = 0o600
 
@@ -39,7 +39,7 @@ def _validate_name(name: str) -> None:
 def atomic_publish_at(
     directory: int,
     target_name: str,
-    payload: bytes,
+    payload: bytes | BinaryIO,
     *,
     fsync: bool,
     mode: int = PRIVATE_MODE,
@@ -51,7 +51,8 @@ def atomic_publish_at(
     link, rename, and cleanup operations use *directory*, so a caller can
     pin an untrusted checkout before changing it and cannot be redirected by
     a concurrent replacement of a path component.  The descriptor remains
-    owned by the caller.
+    owned by the caller. Binary input streams are copied in bounded chunks;
+    a failed read leaves the prior destination unchanged.
     """
     _validate_name(target_name)
     temporary_name: str | None = None
@@ -80,7 +81,11 @@ def atomic_publish_at(
         with os.fdopen(descriptor, "wb") as handle:
             descriptor = -1
             os.fchmod(handle.fileno(), mode & 0o777)
-            handle.write(payload)
+            if isinstance(payload, bytes):
+                handle.write(payload)
+            else:
+                for chunk in iter(lambda: payload.read(65_536), b""):
+                    handle.write(chunk)
             handle.flush()
             if fsync:
                 os.fsync(handle.fileno())

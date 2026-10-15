@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: d294a8f96cc8f15845ae4dc8a49088fe59e27e960d490b541885bc5cb60c5479 -->
+<!-- gateway-catalog-sha256: 166d9b8443f3c3a4eee847d1ef17d418e4c2240cf9f0c434b3430991edb8c0dc -->
 
 # Agent Gateway
 
@@ -139,7 +139,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 - `files.patch` — Pass expected_sha256 from the prior read so a concurrent change is refused instead of overwritten. Unified hunks are applied individually; rejected hunks are reported.
 - `files.change` — Copy and move never overwrite an existing destination. Remove supports regular files only.
 - `files.changeset` — All planned sources, destinations and parents are revalidated before the first mutation. Transfers never overwrite. Results are honest about partial completion and no global atomicity is claimed.
-- `projects.change` — Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.
+- `projects.change` — Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read. Supply inline content/patch or a source artifact locator; artifact bytes are verified and streamed without a file-size ceiling from the response budget.
 - `beads.comment` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 - `beads.dependencies.add` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 - `beads.changeset` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
@@ -185,4 +185,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `d294a8f96cc8f15845ae4dc8a49088fe59e27e960d490b541885bc5cb60c5479`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `166d9b8443f3c3a4eee847d1ef17d418e4c2240cf9f0c434b3430991edb8c0dc`.

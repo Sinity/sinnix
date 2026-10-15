@@ -1049,3 +1049,109 @@ def test_search_checkout_race_does_not_publish_partial_snapshot(
         )
     assert refused.value.code == "precondition_failed"
     assert set(snapshots.iterdir()) == before
+
+
+@pytest.mark.parametrize("operation", ["write", "apply_patch"])
+def test_large_project_change_consumes_verified_artifact_and_replays(
+    tmp_path, operation
+):
+    config, project, _ = fixture(tmp_path)
+    server = create_server(config, "operator")
+    runtime = server._sinnix_revision_publisher.runtime
+    expected = ("large multibyte λ input\n" * 140_000).encode()
+    if operation == "write":
+        payload = expected
+    else:
+        lines = expected.decode().splitlines(keepends=True)
+        payload = (
+            "diff --git a/large.txt b/large.txt\nnew file mode 100644\n--- /dev/null\n+++ b/large.txt\n"
+            + f"@@ -0,0 +1,{len(lines)} @@\n"
+            + "".join("+" + line for line in lines)
+        ).encode()
+    assert len(payload) > 262_144
+    directory = config.state_dir / "captures" / "input-fixture"
+    directory.mkdir(parents=True)
+    source = directory / "input"
+    source.write_bytes(payload)
+    runtime.artifacts.attest_capture(
+        directory, source="fixture", target={}, files=[source]
+    )
+    artifact_id = runtime.artifacts.register(
+        source, kind="project-input", owner_id="fixture"
+    )
+    before = ok(server, "projects.get", {"target": {"project": "fixture"}})["checkout"]
+    change = {"operation": operation, "source": {"artifact_id": artifact_id}}
+    if operation == "write":
+        change["path"] = "large.txt"
+    request = {
+        "target": {"project": "fixture"},
+        "change": change,
+        "expected_head": before["head"],
+        "expected_dirty_sha256": before["dirty_sha256"],
+        "idempotency_key": "large-artifact-change",
+    }
+    first = ok(server, "projects.change", request)
+    assert (project / "large.txt").read_bytes() == expected
+    # A lost response must replay the completed mutation, even if its old
+    # checkout precondition no longer matches the now-written tree.
+    second = ok(server, "projects.change", request)
+    assert first == second
+    assert (project / "large.txt").read_bytes() == expected
+
+
+def test_tampered_project_input_artifact_refuses_without_mutation(tmp_path):
+    config, project, _ = fixture(tmp_path)
+    server = create_server(config, "operator")
+    runtime = server._sinnix_revision_publisher.runtime
+    directory = config.state_dir / "captures" / "input-fixture"
+    directory.mkdir(parents=True)
+    source = directory / "input"
+    source.write_bytes(b"registered")
+    runtime.artifacts.attest_capture(
+        directory, source="fixture", target={}, files=[source]
+    )
+    artifact_id = runtime.artifacts.register(
+        source, kind="project-input", owner_id="fixture"
+    )
+    (runtime.artifacts.root / artifact_id / "content").write_bytes(b"tampered snapshot")
+    before = ok(server, "projects.get", {"target": {"project": "fixture"}})["checkout"]
+    result = call(
+        server,
+        "projects.change",
+        {
+            "target": {"project": "fixture"},
+            "change": {
+                "operation": "write",
+                "path": "refused.txt",
+                "source": {"artifact_id": artifact_id},
+            },
+            "expected_head": before["head"],
+            "idempotency_key": "tampered-input",
+        },
+    )
+    assert result["error"]["code"] == "policy_denied"
+    assert not (project / "refused.txt").exists()
+
+
+@pytest.mark.parametrize("operation", ["write", "apply_patch"])
+def test_project_change_rejects_missing_or_ambiguous_content_source(operation):
+    model = projects.WriteOp if operation == "write" else projects.ApplyPatchOp
+    values = {"path": "test.txt"} if operation == "write" else {}
+    field = "content" if operation == "write" else "patch"
+    with pytest.raises(ValueError, match="exactly one"):
+        model(**values)
+    with pytest.raises(ValueError, match="exactly one"):
+        model(**values, **{field: "inline"}, source={"artifact_id": "a" * 36})
+
+
+@pytest.mark.parametrize("size", [262_143, 262_144, 262_145])
+def test_project_inline_frame_boundary_retains_artifact_alternative(size):
+    if size <= 262_144:
+        assert len(projects.WriteOp(path="test", content="x" * size).content) == size
+    else:
+        with pytest.raises(ValueError):
+            projects.WriteOp(path="test", content="x" * size)
+    assert (
+        projects.WriteOp(path="test", source={"artifact_id": "a" * 36}).source
+        is not None
+    )

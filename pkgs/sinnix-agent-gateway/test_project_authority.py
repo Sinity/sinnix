@@ -452,3 +452,50 @@ def test_registered_checkout_replaced_by_symlink_is_not_authorized(
         projects.code_checkout(
             "fixture", checkout_id, write=False, require_explicit=False
         )
+
+
+@pytest.mark.parametrize("rename", [False, True])
+def test_small_patch_of_large_dirty_file_does_not_use_response_budget(tmp_path, rename):
+    operator, project, _linked = project_service(tmp_path)
+    source = project / "large.txt"
+    payload = ("multibyte λ evidence\n" * 180_000).encode()
+    source.write_bytes(b"before\n" + payload)
+    source.chmod(0o755)
+    git(project, "add", "large.txt")
+    git(project, "commit", "--quiet", "-m", "large fixture")
+    dirty = source.read_bytes() + b"uncommitted tail\n"
+    source.write_bytes(dirty)
+    assert len(dirty) > operator.config.max_result_bytes
+    original_index = git_stdout(project, "write-tree")
+    if rename:
+        patch = "diff --git a/large.txt b/renamed.txt\nsimilarity index 100%\nrename from large.txt\nrename to renamed.txt\n"
+        expected = dirty
+        target = project / "renamed.txt"
+    else:
+        patch = "diff --git a/large.txt b/large.txt\n--- a/large.txt\n+++ b/large.txt\n@@ -1,4 +1,4 @@\n-before\n+after\n multibyte λ evidence\n multibyte λ evidence\n multibyte λ evidence\n"
+        expected = b"after\n" + dirty[len(b"before\n") :]
+        target = source
+    operator.apply_patch("fixture", patch, "default")
+    assert target.read_bytes() == expected
+    assert target.stat().st_mode & 0o777 == 0o755
+    assert git_stdout(project, "write-tree") == original_index
+    if rename:
+        assert not source.exists()
+
+
+def test_blob_spooling_failure_preserves_working_file(tmp_path, monkeypatch):
+    operator, project, _linked = project_service(tmp_path)
+    source = project / "README.md"
+    before = source.read_bytes()
+
+    def fail_spool(*args, **kwargs):
+        raise OSError("synthetic disk full")
+
+    monkeypatch.setattr(operator, "_index_blob", fail_spool)
+    with pytest.raises(OSError, match="disk full"):
+        operator.apply_patch(
+            "fixture",
+            "diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-fixture\n+changed\n",
+            "default",
+        )
+    assert source.read_bytes() == before

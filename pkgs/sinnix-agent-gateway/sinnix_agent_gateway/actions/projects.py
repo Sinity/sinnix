@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 import anyio
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from ..action import (
     ALL_PRINCIPALS,
@@ -16,9 +17,16 @@ from ..action import (
     MutationControls,
     RequestControls,
 )
+from ..artifacts import ArtifactError
 from ..content import Artifact, attach
 from ..contracts import VerbFamily
-from ..locators import CheckoutLocator, ProjectLocator, ResolvedCheckout, project_ref
+from ..locators import (
+    ArtifactLocator,
+    CheckoutLocator,
+    ProjectLocator,
+    ResolvedCheckout,
+    project_ref,
+)
 from ..projects import ProjectError, ProjectPreconditionError
 from ..results import ProtocolError, ResultError
 from ..schemas import GatewayModel
@@ -474,14 +482,37 @@ class WriteOp(GatewayModel):
     path: str = Field(
         min_length=1, max_length=4_096, description="Project-relative file path."
     )
-    content: str = Field(max_length=262_144)
+    content: str | None = Field(default=None, max_length=262_144)
+    source: ArtifactLocator | None = Field(
+        default=None,
+        description="Verified immutable artifact bytes, for content larger than one inline frame.",
+    )
+
+    @model_validator(mode="after")
+    def exactly_one_source(self) -> WriteOp:
+        if (self.content is None) == (self.source is None):
+            raise ValueError("give exactly one of content or source")
+        return self
 
 
 class ApplyPatchOp(GatewayModel):
     operation: Literal["apply_patch"] = "apply_patch"
-    patch: str = Field(
-        min_length=1, max_length=262_144, description="git-apply compatible patch."
+    patch: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=262_144,
+        description="git-apply compatible patch.",
     )
+    source: ArtifactLocator | None = Field(
+        default=None,
+        description="Verified immutable artifact containing the complete patch.",
+    )
+
+    @model_validator(mode="after")
+    def exactly_one_source(self) -> ApplyPatchOp:
+        if (self.patch is None) == (self.source is None):
+            raise ValueError("give exactly one of patch or source")
+        return self
 
 
 class ChangeInput(MutationControls):
@@ -551,12 +582,35 @@ def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
                 details={"expected": expected, "current": checkout.get(name)},
             )
     op = inp.change
+    body: str | Path
+    if op.source is not None:
+        artifact_id, _ref = op.source.resolve()
+        try:
+            body = runtime.artifacts.registered_content(artifact_id)
+        except ArtifactError as exc:
+            code = (
+                "not_found"
+                if "unknown" in str(exc) or "invalid" in str(exc)
+                else "policy_denied"
+            )
+            raise ProtocolError(code, str(exc)) from exc
+        except FileNotFoundError as exc:
+            raise ProtocolError(
+                "not_found", "artifact snapshot is unavailable"
+            ) from exc
+        except PermissionError as exc:
+            raise ProtocolError(
+                "policy_denied", "artifact snapshot is inaccessible"
+            ) from exc
+    else:
+        body = op.content if isinstance(op, WriteOp) else op.patch
+        assert body is not None
     if isinstance(op, WriteOp):
         result = owner(
             runtime.projects.write,
             resolved.project_id,
             op.path,
-            op.content,
+            body,
             checkout_id,
             preconditions,
         )
@@ -564,7 +618,7 @@ def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
         result = owner(
             runtime.projects.apply_patch,
             resolved.project_id,
-            op.patch,
+            body,
             checkout_id,
             preconditions,
         )
@@ -611,14 +665,18 @@ async def _context(runtime: Runtime, inp: ContextInput) -> ProjectContext:
         ),
     )
     fields = context.model_dump()
-    fields["affordances"] = ["projects.get", "beads.query", "projects.diff", "projects.tree"]
+    fields["affordances"] = [
+        "projects.get",
+        "beads.query",
+        "projects.diff",
+        "projects.tree",
+    ]
     project_fields = {"project_ref": ref, "project_id": project_id}
     # Inserting these keys replaces no composer fields. Account for their
     # encoded bytes and the joining comma before selecting the inline view.
     reserve = len(canonical_bytes(project_fields)) - 1
     bounded = _within_budget(fields, reserve_bytes=reserve)
     return ProjectContext(**bounded, **project_fields)
-
 
 
 _KINDS = ("project", "checkout")
@@ -807,7 +865,7 @@ ACTIONS: tuple[Action, ...] = (
         affordances=("projects.diff", "projects.read", "projects.get"),
         aliases=("write file", "edit", "apply patch", "save"),
         supports_precondition=True,
-        documentation="Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read.",
+        documentation="Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read. Supply inline content/patch or a source artifact locator; artifact bytes are verified and streamed without a file-size ceiling from the response budget.",
         examples=(
             Example(
                 title="Write a file",

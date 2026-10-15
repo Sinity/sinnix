@@ -266,9 +266,13 @@ def _unlink_at(parent: int, name: str) -> None:
 
 
 def _atomic_publish(
-    parent: int, target_name: str, content: bytes, mode: int = 0o600
+    parent: int, target_name: str, content: bytes | Path, mode: int = 0o600
 ) -> None:
-    atomic_publish_at(parent, target_name, content, fsync=True, mode=mode)
+    if isinstance(content, Path):
+        with content.open("rb") as handle:
+            atomic_publish_at(parent, target_name, handle, fsync=True, mode=mode)
+    else:
+        atomic_publish_at(parent, target_name, content, fsync=True, mode=mode)
 
 
 def _atomic_publish_symlink(parent: int, target_name: str, target: str) -> None:
@@ -1400,7 +1404,7 @@ class ProjectService:
         self,
         project_id: str,
         path: str,
-        content: str,
+        content: str | Path,
         checkout_id: str | None = None,
         preconditions: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -1416,10 +1420,21 @@ class ProjectService:
                     if not stat.S_ISREG(current.st_mode):
                         raise ProjectError("path must identify a regular project file")
                     mode = stat.S_IMODE(current.st_mode)
-                _atomic_publish(parent, parts[-1], content.encode(), mode)
+                _atomic_publish(
+                    parent,
+                    parts[-1],
+                    content if isinstance(content, Path) else content.encode(),
+                    mode,
+                )
             finally:
                 os.close(parent)
-        return {"project_id": project_id, "path": path, "bytes": len(content.encode())}
+        return {
+            "project_id": project_id,
+            "path": path,
+            "bytes": content.stat().st_size
+            if isinstance(content, Path)
+            else len(content.encode()),
+        }
 
     @staticmethod
     def _owner_result(
@@ -1430,6 +1445,7 @@ class ProjectService:
         environment: Mapping[str, str] | None = None,
         timeout: int = 20,
         max_output_bytes: int = 64_000,
+        stdout_file: BinaryIO | None = None,
     ) -> bytes:
         safe_env = {
             "HOME": str(Path.home()),
@@ -1439,6 +1455,11 @@ class ProjectService:
         }
         if environment:
             safe_env.update(environment)
+
+        def stream_output(chunk: bytes) -> None:
+            assert stdout_file is not None
+            stdout_file.write(chunk)
+
         result = OwnerExecution(safe_env).run(
             command,
             ExecutionProfile(
@@ -1450,6 +1471,7 @@ class ProjectService:
                 stdin_bytes=stdin_bytes,
                 environment=environment,
             ),
+            stdout_chunk_callback=stream_output if stdout_file is not None else None,
         )
         if result.timed_out:
             raise ProjectError("project operation timed out")
@@ -1461,11 +1483,18 @@ class ProjectService:
             raise ProjectError(diagnostic or output or "project operation failed")
         return result.stdout
 
-    def _patch_paths(self, root: Path, patch: bytes) -> tuple[str, ...]:
+    def _patch_paths(self, root: Path, patch: bytes | Path) -> tuple[str, ...]:
         output = self._owner_result(
-            ["git", "apply", "--numstat", "-z", "--whitespace=nowarn", "-"],
+            [
+                "git",
+                "apply",
+                "--numstat",
+                "-z",
+                "--whitespace=nowarn",
+                str(patch) if isinstance(patch, Path) else "-",
+            ],
             root,
-            stdin_bytes=patch,
+            stdin_bytes=None if isinstance(patch, Path) else patch,
         )
         paths: list[str] = []
         for row in output.split(b"\0"):
@@ -1494,13 +1523,18 @@ class ProjectService:
             raise ProjectError("git apply returned an unsupported index entry")
         return int(mode, 8), os.fsdecode(object_id)
 
-    def _index_blob(self, root: Path, index: Path, object_id: str) -> bytes:
-        return self._owner_result(
-            ["git", "cat-file", "blob", object_id],
-            root,
-            environment={"GIT_INDEX_FILE": str(index)},
-            max_output_bytes=self.config.max_result_bytes,
-        )
+    def _index_blob(self, root: Path, index: Path, object_id: str) -> Path:
+        # Blobs are project content, not response frames. Stage every result
+        # before publication without retaining file bodies in gateway memory.
+        output = index.parent / f"blob-{object_id}"
+        with output.open("wb") as handle:
+            self._owner_result(
+                ["git", "cat-file", "blob", object_id],
+                root,
+                environment={"GIT_INDEX_FILE": str(index)},
+                stdout_file=handle,
+            )
+        return output
 
     def _seed_index_entry(
         self,
@@ -1525,25 +1559,42 @@ class ProjectService:
                 os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
                 dir_fd=parent,
             )
-            try:
-                with os.fdopen(descriptor, "rb") as handle:
-                    content = handle.read(self.config.max_result_bytes + 1)
-            except BaseException:
-                raise
-            if len(content) > self.config.max_result_bytes:
-                raise ProjectError("patched project file exceeds configured bound")
+            with (
+                os.fdopen(descriptor, "rb") as handle,
+                tempfile.NamedTemporaryFile(
+                    dir=index.parent, prefix="seed-"
+                ) as snapshot,
+            ):
+                shutil.copyfileobj(handle, snapshot, length=65_536)
+                snapshot.flush()
+                object_id = (
+                    self._owner_result(
+                        [
+                            "git",
+                            "hash-object",
+                            "--no-filters",
+                            "-w",
+                            "--",
+                            snapshot.name,
+                        ],
+                        root,
+                    )
+                    .decode()
+                    .strip()
+                )
             mode = 0o100755 if metadata.st_mode & 0o111 else 0o100644
         else:
             raise ProjectError("git patch target has an unsupported file type")
-        object_id = (
-            self._owner_result(
-                ["git", "hash-object", "-w", "--stdin"],
-                root,
-                stdin_bytes=content,
+        if stat.S_ISLNK(metadata.st_mode):
+            object_id = (
+                self._owner_result(
+                    ["git", "hash-object", "-w", "--stdin"],
+                    root,
+                    stdin_bytes=content,
+                )
+                .decode()
+                .strip()
             )
-            .decode()
-            .strip()
-        )
         if not re.fullmatch(r"[0-9a-f]{40,64}", object_id):
             raise ProjectError("git returned a malformed patch seed object")
         self._owner_result(
@@ -1597,7 +1648,7 @@ class ProjectService:
         self,
         project: ProjectConfig,
         relative: str,
-        entry: tuple[int, bytes] | None,
+        entry: tuple[int, bytes | Path] | None,
         *,
         pinned_parent: int | None = None,
     ) -> None:
@@ -1615,10 +1666,13 @@ class ProjectService:
             if stat.S_ISREG(mode):
                 _atomic_publish(parent, parts[-1], content, mode)
             elif stat.S_ISLNK(mode):
+                if isinstance(content, Path):
+                    with content.open("rb") as handle:
+                        content = handle.read(4097)
+                if len(content) > 4096:
+                    raise ProjectError("git apply produced an oversized symlink target")
                 _atomic_publish_symlink(
-                    parent,
-                    parts[-1],
-                    content.decode("utf-8", errors="surrogateescape"),
+                    parent, parts[-1], content.decode("utf-8", errors="surrogateescape")
                 )
             else:
                 raise ProjectError("git apply produced an unsupported file type")
@@ -1629,14 +1683,12 @@ class ProjectService:
     def apply_patch(
         self,
         project_id: str,
-        patch: str,
+        patch: str | Path,
         checkout_id: str | None = None,
         preconditions: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if len(patch.encode()) > self.config.max_result_bytes:
-            raise ProjectError("patch exceeds configured bound")
         with self._locked_mutation(project_id, checkout_id, preconditions) as project:
-            patch_bytes = patch.encode()
+            patch_bytes = patch if isinstance(patch, Path) else patch.encode()
             root = _open_pinned_directory(project, (), create=False)
             root_path = Path(f"/proc/self/fd/{root}")
             pinned_parents: dict[tuple[str, ...], int] = {}
@@ -1691,9 +1743,17 @@ class ProjectService:
                             )
                     before_tree = self._index_tree(root_path, index)
                     self._owner_result(
-                        ["git", "apply", "--cached", "--whitespace=nowarn", "-"],
+                        [
+                            "git",
+                            "apply",
+                            "--cached",
+                            "--whitespace=nowarn",
+                            str(patch_bytes) if isinstance(patch_bytes, Path) else "-",
+                        ],
                         root_path,
-                        stdin_bytes=patch_bytes,
+                        stdin_bytes=None
+                        if isinstance(patch_bytes, Path)
+                        else patch_bytes,
                         environment=environment,
                     )
                     after_tree = self._index_tree(root_path, index)
@@ -1723,9 +1783,19 @@ class ProjectService:
                                 )
                         before_tree = self._index_tree(root_path, index)
                         self._owner_result(
-                            ["git", "apply", "--cached", "--whitespace=nowarn", "-"],
+                            [
+                                "git",
+                                "apply",
+                                "--cached",
+                                "--whitespace=nowarn",
+                                str(patch_bytes)
+                                if isinstance(patch_bytes, Path)
+                                else "-",
+                            ],
                             root_path,
-                            stdin_bytes=patch_bytes,
+                            stdin_bytes=None
+                            if isinstance(patch_bytes, Path)
+                            else patch_bytes,
                             environment=environment,
                         )
                         after_tree = self._index_tree(root_path, index)
@@ -1736,7 +1806,7 @@ class ProjectService:
                         relative: self._index_entry(root_path, index, relative)
                         for relative in paths
                     }
-                    changes: list[tuple[str, tuple[int, bytes] | None]] = []
+                    changes: list[tuple[str, tuple[int, bytes | Path] | None]] = []
                     for relative in paths:
                         entry = after[relative]
                         changes.append(

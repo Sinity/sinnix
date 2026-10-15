@@ -250,3 +250,36 @@ def test_text_writer_retries_a_temporary_name_collision(tmp_path, monkeypatch):
 
     assert collision.read_text() == "untouched"
     assert destination.read_text() == "published"
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_publish_streams_bounded_chunks_and_retains_old_file_on_read_failure(
+    tmp_path, fail
+):
+    import io
+
+    payload = b"streamed" * 200_000
+
+    class BoundedInput(io.BytesIO):
+        calls = 0
+
+        def read(self, size=-1):
+            assert 0 < size <= 65_536
+            self.calls += 1
+            if fail and self.calls == 2:
+                raise OSError("synthetic source failure")
+            return super().read(size)
+
+    target = tmp_path / "state"
+    target.write_bytes(b"previous")
+    directory = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        if fail:
+            with pytest.raises(OSError, match="source failure"):
+                atomic_publish_at(directory, "state", BoundedInput(payload), fsync=True)
+        else:
+            atomic_publish_at(directory, "state", BoundedInput(payload), fsync=True)
+    finally:
+        os.close(directory)
+    assert target.read_bytes() == (b"previous" if fail else payload)
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["state"]
