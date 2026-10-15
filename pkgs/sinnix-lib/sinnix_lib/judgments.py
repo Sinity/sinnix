@@ -37,8 +37,9 @@ def validate_role_decisions(ledger: dict) -> list[dict]:
 
 def effective_role_audit(ledger: dict, targets: list[str]) -> dict:
     counts, noncanonical = Counter(), []
+    resolved = resolve_judgments_many(ledger, targets, fields=("role",))
     for path in targets:
-        result = resolve_judgments(ledger, path).get("role", {})
+        result = resolved[path].get("role", {})
         status, value = result.get("status", "not-recorded"), result.get("value")
         if status != "known":
             counts["[" + status + "]"] += 1
@@ -191,4 +192,31 @@ def resolve_judgments(ledger: dict, path: str) -> dict:
             role["details"] = list(dict.fromkeys([original, *role.get("details", [])]))
     if role:
         role["vocabulary"] = ROLE_VOCABULARY_VERSION
+    return output
+
+
+def resolve_judgments_many(ledger: dict, paths: list[str], fields=JUDGMENT_FACETS) -> dict:
+    """Resolve selected fields in one prefix sweep, sharing read-only results.
+
+    Each prefix uses the direct resolver's ranking/evidence semantics once.
+    Restricting fields keeps inherited maps bounded by the requested facets;
+    unrelated historical fields never expand every report row.
+    """
+    requested = {judgment_target("prefix:" + path)[1] for path in paths}
+    selected_fields = frozenset(fields)
+    by_prefix = {}
+    for entry in ledger["valid"]:
+        if entry["kind"] == "prefix" and entry["record"]["field"] in selected_fields:
+            by_prefix.setdefault(entry["address"], []).append(entry)
+    active, output = [], {}
+    # Component order keeps /a descendants together before /a-sibling.
+    for path in sorted(requested | by_prefix.keys(), key=lambda path: path.split("/")):
+        while active and not (path == active[-1][0] or path.startswith(active[-1][0].rstrip("/") + "/")):
+            active.pop()
+        if path in by_prefix:
+            effective = dict(active[-1][1]) if active else {}
+            effective.update(resolve_judgments({"valid": by_prefix[path]}, path))
+            active.append((path, effective))
+        if path in requested:
+            output[path] = dict(active[-1][1]) if active else {}
     return output

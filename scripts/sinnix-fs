@@ -1333,7 +1333,7 @@ def cmd_query(args: argparse.Namespace) -> int:
 from sinnix_lib.judgments import (
     JUDGMENT_FACETS, JUDGMENT_LIMIT_BYTES, ROLE_VOCABULARY,
     ROLE_VOCABULARY_VERSION, validate_role_decisions, effective_role_audit,
-    judgment_target, read_judgments, resolve_judgments,
+    judgment_target, read_judgments, resolve_judgments, resolve_judgments_many,
 )
 
 
@@ -1414,19 +1414,46 @@ def cmd_judgments(args: argparse.Namespace) -> int:
     grouped = getattr(args, "group_by", "path") == "role"
     role_filter = getattr(args, "role", None)
     if getattr(args, "current_only", False):
-        targets = [path for path in targets if Path(path).exists()]
-    fields_by_path = {path: resolve_judgments(ledger, path) for path in targets}
+        current = []
+        for path in targets:
+            try:
+                Path(path).stat()
+            except FileNotFoundError:
+                continue
+            current.append(path)
+        targets = current
+    fields_by_path = resolve_judgments_many(ledger, targets)
+    missing_result = {"status": "not-recorded"}
+    role_groups = {}
     if role_filter is not None:
         targets = [path for path in targets
                    if fields_by_path[path].get("role", {}).get("status") == "known"
                    and fields_by_path[path]["role"].get("value") == role_filter]
     if grouped:
         def group_key(path):
-            role = fields_by_path[path].get("role", {})
-            return str(role.get("value")) if role.get("status") == "known" else "unclassified"
+            role = fields_by_path[path].get("role", missing_result)
+            key = id(role)
+            if key not in role_groups:
+                role_groups[key] = str(role.get("value")) if role.get("status") == "known" else "unclassified"
+            return role_groups[key]
         targets.sort(key=lambda path: (group_key(path), path))
     def cell(value):
         return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ").replace("\r", " ").replace("<", "&lt;").replace(">", "&gt;")
+    shared_values, rendered_fields = {}, {}
+    def value_cell(value):
+        text = str(value)
+        if len(text) <= 256:
+            return cell(text)
+        number = shared_values.setdefault(text, len(shared_values) + 1)
+        return f"[value {number}](#facet-value-{number})"
+    def field_cell(result, details=False):
+        key = (id(result), details)
+        if key not in rendered_fields:
+            value = "; ".join(result.get("details", [])) if details else (
+                result.get("value", result["status"]) if result["status"] == "known" else result["status"]
+            )
+            rendered_fields[key] = value_cell(value)
+        return rendered_fields[key]
     print("# Current collection facets\n")
     print("Generated from the existing authored judgment ledger, not a second registry. Each value is an inherited, dated classification of the collection's role—not inspection of every member or proof of backup coverage. Unknown values block broader assumptions.\n")
     print(f"Ledger: `{cell(ledger['path'])}`. Source SHA-256: `{ledger['sha256']}`. {len(targets)} explicitly described locations. {len(ledger['issues'])} invalid historical definitions excluded from resolution.\n")
@@ -1440,16 +1467,20 @@ def cmd_judgments(args: argparse.Namespace) -> int:
     for path in targets:
         if grouped and group_key(path) != last_group:
             last_group = group_key(path)
-            print("\n## " + cell(last_group) + "\n")
+            print("\n## " + value_cell(last_group) + "\n")
             print(cell(ROLE_VOCABULARY.get(last_group, "Noncanonical or unknown historical classification.")) + "\n")
             table_header()
         fields=fields_by_path[path]
         values=[]
         for field in JUDGMENT_FACETS:
-            result=fields.get(field,{"status":"not-recorded"})
-            values.append(cell(result.get("value",result["status"])) if result["status"]=="known" else cell(result["status"]))
-        details = fields.get("role", {}).get("details", [])
-        print("| "+cell(path)+" | "+" | ".join(values)+" | "+cell("; ".join(details))+" |")
+            values.append(field_cell(fields.get(field, missing_result)))
+        details = field_cell(fields.get("role", missing_result), details=True)
+        print("| "+cell(path)+" | "+" | ".join(values)+" | "+details+" |")
+    if shared_values:
+        print("\n## Shared long values\n")
+        print("Long facet values and role details are retained once here; table references carry the full text without repeating it for every descendant.\n")
+        for text, number in shared_values.items():
+            print(f'<a id="facet-value-{number}"></a>\n\n### Value {number}\n\n{cell(text)}\n')
     print("\nUse `sinnix-fs judgments explain /absolute/path` for winning rule targets, dates, methods and evidence. A `preservation` classification never authorizes deletion. Native application state, workflow dependencies and independent backup evidence still control actual maintenance.")
     return 0
 

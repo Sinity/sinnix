@@ -87,7 +87,7 @@ Applying a chosen proposal remains a separate operation: revalidate every identi
 
 ## Controlled role categories and retained detail
 
-The role facet uses `collection-role-v1`, declared in `ROLE_VOCABULARY` by the filesystem owner. `judgments vocabulary` returns the codes and definitions without opening a ledger or a classified path. Topics remain open-ended; maintenance ownership and preservation constraints retain their own semantics. A role code is never a deletion policy, freshness claim, backup certificate or validation of source assertions.
+The role facet uses `collection-role-v2`, declared in `ROLE_VOCABULARY` by the filesystem owner. `judgments vocabulary` returns the codes and definitions without opening a ledger or a classified path. Topics remain open-ended; maintenance ownership and preservation constraints retain their own semantics. A role code is never a deletion policy, freshness claim, backup certificate or validation of source assertions.
 
 A category describes the broad function; `detail` retains the original descriptive wording. Normalizing a role is a new attributed rule observation referencing its source decisions, not a claim that all original descriptions are synonymous or freshly inspected. Preserve all prior records, actor attribution and source dates. The direct resolver exposes retained details and full winning evidence. Unknown child classifications continue to mask inherited values; operator precedence and ambiguous equal-ranked decisions are unchanged.
 
@@ -105,3 +105,13 @@ Path and role reports are projections of the same ledger, including source detai
 Literal-reference checks retain test-suite observations as `kind: fixture` and Python documentation strings as `kind: cosmetic`. Assigned multiline command strings remain live. Unparsed Python source remains eligible for live checks. A missing fixture or documentation example does not establish a broken current consumer.
 
 This is a literal-candidate audit. Missing live literals still need caller review for optional outputs, examples stored in metadata and deliberate retirement guards. The repository-relative scan includes extensionless scripts and reports absolute source locations.
+
+
+Judgment reports resolve selected facets in one prefix sweep using the same
+winning-rule semantics as direct explanations. Long facet values and role
+details appear once in a shared section linked from their table cells. This
+keeps inherited prose from multiplying the report size; the full text remains
+available, and the authored ledger is unchanged. Direct `judgments explain`
+continues to include winning evidence for an individual path. With
+`--current-only`, inaccessible locations fail explicitly instead of silently
+disappearing from the report.
