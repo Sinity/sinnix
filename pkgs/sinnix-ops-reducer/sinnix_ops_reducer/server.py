@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.http import RequestBodyError, read_json_object
+from sinnix_lib.lock import flock
 from sinnix_lib.systemd import sd_notify, watchdog_period
 
 from . import capabilities, health, pages, terminals
@@ -40,24 +41,31 @@ BODY_LENGTH_ERRORS = frozenset(
 
 
 def ensure_token(path: Path) -> str:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        token = path.read_text(encoding="utf-8").strip()
-    except OSError:
-        token = ""
-    if token:
-        path.chmod(0o600)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+
+    def existing_token() -> str:
+        try:
+            token = path.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            return ""
+        if token:
+            path.chmod(0o600)
         return token
-    candidate = secrets.token_urlsafe(32)
-    if atomic_publish(
-        path, (candidate + "\n").encode(), fsync=True, mode=0o600, exclusive=True
-    ):
+
+    if token := existing_token():
+        return token
+    # Keep the lock inode: concurrent starters must agree on an empty-file repair.
+    with flock(path.with_name(path.name + ".lock")):
+        if token := existing_token():
+            return token
+        candidate = secrets.token_urlsafe(32)
+        payload = (candidate + "\n").encode()
+        if atomic_publish(path, payload, fsync=True, mode=0o600, exclusive=True):
+            return candidate
+        if token := existing_token():
+            return token
+        atomic_publish(path, payload, fsync=True, mode=0o600)
         return candidate
-    winner = path.read_text(encoding="utf-8").strip()
-    if not winner:
-        raise RuntimeError("token creation race left no usable token")
-    path.chmod(0o600)
-    return winner
 
 
 class Handler(BaseHTTPRequestHandler):
