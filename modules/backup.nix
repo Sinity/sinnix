@@ -955,7 +955,7 @@ let
     # btrbk creates point-in-time local snapshots; Borg is responsible for
     # durable retention. The systemd btrbk service runs with
     # --preserve-snapshots, so only Borg drain jobs delete snapshots, after
-    # the newest selected snapshot has a verified archive.
+    # each candidate snapshot has its own verified archive.
 
     volume ${realmRoot}
       snapshot_dir   .btrfs/snapshot
