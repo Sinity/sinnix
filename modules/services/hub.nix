@@ -566,6 +566,7 @@ mkServiceModule {
         # mkdir(parents=True) these lazily on first write, but declaring them
         # keeps ownership/mode explicit rather than inherited from whatever
         # umask the dispatcher happens to run under.
+        "d ${phoneLaneRoot}/phone 0700 ${userName} users -"
         "d ${phoneLaneRoot}/phone-speech 0700 ${userName} users -"
         # Raw utterance audio, kept whether or not transcription succeeded:
         # audio can be re-transcribed by a better engine later, a transcript
@@ -623,7 +624,7 @@ mkServiceModule {
           captures = [
             {
               name = "phone-ambient";
-              path = "/realm/device/shared/phone/ambient";
+              path = "${phoneLaneRoot}/phone/ambient";
               cadenceSeconds = 300;
               staleAfterSeconds = 7200;
               producerProgressPath = phoneAmbientProgressPath;
@@ -659,7 +660,7 @@ mkServiceModule {
               # was concerned. That directory keeps its files as history;
               # nothing writes it any more, so it is no longer declared.
               name = "phone-events";
-              path = "/realm/device/shared/phone/events";
+              path = "${phoneLaneRoot}/phone/events";
               cadenceSeconds = 20;
               staleAfterSeconds = 1800;
             }
@@ -721,6 +722,7 @@ mkServiceModule {
             # to inherits.
             Environment = [
               "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
+              "SINNIX_PHONE_LAKE=${phoneLaneRoot}/phone"
               "SINNIX_PHONE_AMBIENT_PROGRESS_MARKER=${phoneAmbientProgressPath}"
               "SINNIX_PHONE_CAMERA_DIR=${config.sinnix.paths.photosRoot}/phone-dispatcher/DCIM"
             ];

@@ -57,7 +57,7 @@ def _regular_file(target: Path, flags: int):
     # reject a replacement FIFO or symlink between lookup and open.
     safe_flags = os.O_NOFOLLOW | os.O_NONBLOCK
     try:
-        fd = os.open(target, flags | safe_flags, 0o660)
+        fd = os.open(target, flags | safe_flags, 0o600)
     except PermissionError:
         if not flags & os.O_RDWR:
             raise
@@ -127,7 +127,7 @@ def _retain(target: Path, body: bytes, digest: str) -> tuple[HTTPStatus, dict] |
     from what was sent is a storage fault, answered 500 so the phone keeps its
     copy.
     """
-    atomic_publish(target, body, fsync=True, mode=0o660)
+    atomic_publish(target, body, fsync=True, mode=0o600)
     if _retained_digest(target) != (len(body), digest):
         return HTTPStatus.INTERNAL_SERVER_ERROR, {
             "ok": False,
@@ -429,7 +429,7 @@ def append_events(
                         written += count
                     # Apply the capture mode to the same opened object, not
                     # a path that may have been replaced after verification.
-                    os.fchmod(fd, 0o660)
+                    os.fchmod(fd, 0o600)
                     observed = os.fstat(fd)
                     if _read_range(fd, offset, len(body)) != body:
                         return HTTPStatus.INTERNAL_SERVER_ERROR, {
@@ -539,7 +539,7 @@ def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
                 os.fsync(out.fileno())
             if _read_capture_bytes(target) != previous:
                 raise ValueError("destination changed during repair")
-            os.chmod(pending, 0o660)
+            os.chmod(pending, 0o600)
             os.replace(pending, target)
             pending = None
             if _retained_digest(target) != (len(body), new_sha):

@@ -95,7 +95,7 @@ def test_correct_sha_lands_the_file(monkeypatch, tmp_path) -> None:
     assert payload["duplicate"] is False
     target = tmp_path / "ambient" / "clip.m4a"
     assert target.read_bytes() == body
-    assert target.stat().st_mode & 0o777 == 0o660
+    assert target.stat().st_mode & 0o777 == 0o600
     assert not list(target.parent.glob(".*.atomic-tmp-*"))
     assert progress.is_file()
 
@@ -200,6 +200,7 @@ def test_repair_closed_day_preserves_original(monkeypatch, tmp_path):
     from pathlib import Path
 
     assert target.read_bytes() == source.read_bytes()
+    assert target.stat().st_mode & 0o777 == 0o600
     assert Path(result["backup"]).read_bytes() == original
     assert (
         uploads_mod.repair_event_day("20200101", source, result["sha256"])["changed"]

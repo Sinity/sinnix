@@ -467,3 +467,21 @@ def test_cursor_sync_failure_does_not_acknowledge_bytes(isolated_state_dirs, mon
     assert status == HTTPStatus.INTERNAL_SERVER_ERROR
     assert payload["ok"] is False and "bytes" not in payload
     assert target.read_bytes() == body
+
+
+
+def test_new_event_bytes_do_not_restore_group_write_access(tmp_path, monkeypatch):
+    import os
+    from sinnix_phone_dispatcher import uploads
+    monkeypatch.setattr(uploads, "EVENTS_DIR", tmp_path)
+    target = tmp_path / "events-20200101.jsonl"
+    target.write_bytes(b"first\n")
+    target.chmod(0o600)
+    previous = os.umask(0o022)
+    try:
+        status, payload = uploads.append_events("20200101", 6, b"second\n", None)
+    finally:
+        os.umask(previous)
+    assert int(status) == 200
+    assert target.read_bytes() == b"first\nsecond\n"
+    assert target.stat().st_mode & 0o777 == 0o600
