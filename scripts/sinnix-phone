@@ -1230,8 +1230,8 @@ sinnix-phone <command>
                 start it (needs adb: USB or tailnet)
   app-start     launch the app so its capture service comes back up
   app-grants    re-assert the shell-uid grants the app needs
-  app-soak [s]  acceptance test: sample screen/foreground/mute state over a
-                window, then measure every chunk closed in it (default 1200s)
+  app-soak [s]  observe screen/foreground/mute and available chunk measurements
+                over a window (default 1200s); review required, no automatic pass
   nix-switch [flake]
                 switch the Nix-on-Droid userland and repair Android 16 MCS
                 labels; defaults to the exact published Sinnix master revision
@@ -1380,7 +1380,8 @@ app-status)
 
   latest_chunk=$(adb_any shell "ls -1t /sdcard/sinnix-ambient/*.m4a 2>/dev/null | head -1" | tr -d '\r')
   if [ -n "${latest_chunk:-}" ]; then
-    tmp_chunk="$(mktemp --suffix=.m4a)"
+    tmp_chunk="$(mktemp --tmpdir="${TMPDIR:-/realm/tmp/work}" --suffix=.m4a sinnix-phone-status.XXXXXX)"
+    trap 'rm -f -- "$tmp_chunk"' EXIT
     if adb_any pull "$latest_chunk" "$tmp_chunk" >/dev/null 2>&1; then
       dur=$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$tmp_chunk" 2>/dev/null || true)
       # volumedetect reports at info level, so -v error (the right choice for
@@ -1391,7 +1392,8 @@ app-status)
     else
       echo "last chunk: $(basename "$latest_chunk") (couldn't pull to measure)"
     fi
-    rm -f "$tmp_chunk"
+    rm -f -- "$tmp_chunk"
+    trap - EXIT
   else
     # No closed chunk on the phone is the NORMAL state after a successful
     # drain, not a sign of trouble -- rotation removes each chunk once the
@@ -1661,7 +1663,8 @@ app-soak)
 
   echo
   echo "== chunks closed during the window =="
-  workdir=$(mktemp -d)
+  workdir=$(mktemp -d --tmpdir="${TMPDIR:-/realm/tmp/work}" sinnix-phone-soak.XXXXXX)
+  trap 'rm -rf -- "$workdir"' EXIT
   printf '%-40s %10s %12s %s\n' CHUNK SECONDS BYTES MEAN_dB
   adb_any shell ls -1 /sdcard/sinnix-ambient/ 2>/dev/null | tr -d '\r' | grep -E '^ambient-.*\.m4a$' | while read -r f; do
     stamp="${f#ambient-}"; stamp="${stamp%.m4a}"
@@ -1672,7 +1675,8 @@ app-soak)
     vol=$(ffmpeg -nostdin -hide_banner -nostats -v info -i "$workdir/$f" -af volumedetect -f null - 2>&1 | awk -F': ' '/mean_volume/{print $2}')
     printf '%-40s %10s %12s %s\n' "$f" "${dur:-?}" "$(stat -c%s "$workdir/$f")" "${vol:-?}"
   done
-  rm -rf "$workdir"
+  rm -rf -- "$workdir"
+  trap - EXIT
   echo
   echo "Review required: these observations are not an automatic capture acceptance result."
   echo "Check for chunks at/near ${AMBIENT_CHUNK_SECONDS:-300}s with audible signal, fresh recording=true"
