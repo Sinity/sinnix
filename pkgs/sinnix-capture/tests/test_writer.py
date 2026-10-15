@@ -1,12 +1,13 @@
 import json
 import os
 import time
+import tracemalloc
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 from sinnix_capture.envelope import SCHEMA, SCHEMA_VERSION, build_envelope
-from sinnix_capture.writer import HW_WIDTH, CaptureWriter
+from sinnix_capture.writer import HW_WIDTH, CaptureWriter, _max_ts
 from sinnix_lib import ledger
 from sinnix_lib.atomic import atomic_publish
 
@@ -327,3 +328,26 @@ def test_bounded_writer_cost_fixture_reports_old_and_new_protocol(
     assert before[0] == 50  # Four prior syncs plus the high-water checkpoint.
     assert after[0] == 41  # First counter publication costs two, then one.
     assert after[4] == before[4]
+
+
+def test_recovery_tail_memory_does_not_grow_with_record_count(tmp_path: Path) -> None:
+    path = tmp_path / "tail.jsonl"
+    record = json.dumps({"ts": 123, "payload": "x" * 1000}).encode() + b"\n"
+    with path.open("wb") as handle:
+        for _ in range(8192):
+            handle.write(record)
+    tracemalloc.start()
+    try:
+        assert _max_ts(path, 0, path.stat().st_size) == 123
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1024 * 1024, f"recovery allocated {peak} bytes"
+
+
+def test_recovery_tail_honors_exact_byte_window(tmp_path: Path) -> None:
+    path = tmp_path / "tail.jsonl"
+    prefix = b'{"ts":9999}\n'
+    window = b'bad json\n{"ts":true}\n[]\n{"ts":40}\n{"ts":20}'
+    path.write_bytes(prefix + window + b'\n{"ts":99999}\n')
+    assert _max_ts(path, len(prefix), len(prefix) + len(window)) == 40

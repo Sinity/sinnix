@@ -60,7 +60,10 @@ def _max_ts(path: Path, start: int, end: int) -> float:
     high = float("-inf")
     with path.open("rb") as handle:
         handle.seek(start)
-        for raw in handle.read(end - start).splitlines():
+        while handle.tell() < end:
+            raw = handle.readline(end - handle.tell())
+            if not raw:
+                break
             try:
                 ts = json.loads(raw).get("ts")
             except (ValueError, AttributeError):
