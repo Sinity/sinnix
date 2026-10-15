@@ -59,7 +59,7 @@ if mode=='rows': print(os.environ['CSV_ROW'])
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.months(), [])
         self.assertEqual(self.marker.read_text(), "")
-        self.assertEqual(self.watermark.read_text(), "0\nretained\n")
+        self.assertEqual(self.watermark.read_text(), "12\nfixture\n")
 
     def test_valid_empty_month_has_a_header(self):
         result = self.remote("header")
@@ -93,6 +93,8 @@ print('WATERMARK 12|fixture',file=sys.stderr)
         self.writer = self.executable("capture", r"""import json,os,sys
 from pathlib import Path
 lane=sys.argv[sys.argv.index('--lane')+1]
+if os.environ.get('CAPTURE_FAIL_LANE')==lane:
+ sys.exit(19)
 with (Path(os.environ['FIXTURE_ROOT'])/'captured.jsonl').open('a') as out:
  out.write(json.dumps({'lane':lane,'payload':json.load(sys.stdin)})+'\n')
 """)
@@ -107,13 +109,15 @@ with (Path(os.environ['FIXTURE_ROOT'])/'captured.jsonl').open('a') as out:
         rows=[json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
         return [r['payload'] for r in rows if r['lane']=='nlbw' and r['payload']['period']==PERIOD]
 
-    def test_failed_export_does_not_advance_receiver_then_retry_recovers(self):
+    def test_failed_export_leaves_month_retryable_without_stranding_syslog(self):
         self.prepare_receiver()
         result=self.poll('failed')
         self.assertNotEqual(result.returncode,0)
         self.assertEqual(self.months(),[])
         self.assertEqual(self.marker.read_text(),'')
-        self.assertEqual(self.watermark.read_text(),'0\nretained\n')
+        self.assertEqual(self.watermark.read_text(),'12\nfixture\n')
+        captures=[json.loads(line) for line in (self.root/'captured.jsonl').read_text().splitlines()]
+        self.assertTrue(any(r['lane']=='syslog' and r['payload']=={'lines':['fixture syslog']} for r in captures))
         result=self.poll('rows')
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertEqual(len(self.months()),1)
@@ -129,7 +133,19 @@ with (Path(os.environ['FIXTURE_ROOT'])/'captured.jsonl').open('a') as out:
         self.assertNotEqual(result.returncode,0)
         self.assertEqual(self.months(),[])
         self.assertEqual(self.marker.read_text(),'')
+        self.assertEqual(self.watermark.read_text(),'12\nfixture\n')
+
+    def test_failed_syslog_write_cannot_advance_its_watermark(self):
+        self.prepare_receiver()
+        self.env['CAPTURE_FAIL_LANE']='syslog'
+        result=self.poll('rows')
+        self.assertNotEqual(result.returncode,0)
         self.assertEqual(self.watermark.read_text(),'0\nretained\n')
+        self.assertEqual(len(self.months()),1)
+        self.env.pop('CAPTURE_FAIL_LANE')
+        self.assertEqual(self.poll('rows').returncode,0)
+        self.assertEqual(self.watermark.read_text(),'12\nfixture\n')
+        self.assertEqual(len(self.months()),1)
 
     def test_valid_zero_month_is_acknowledged(self):
         self.prepare_receiver()

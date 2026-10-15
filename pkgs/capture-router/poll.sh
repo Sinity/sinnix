@@ -80,6 +80,27 @@ section() {
     'index($0,start)==1{f=1;next} index($0,stop)==1{f=0} f' "$out_file"
 }
 
+# Monthly backfill failures must not strand the independent syslog delta.
+# A quiet router produces no new syslog lines most polls -- that is normal,
+# not an outage, so no envelope is written for an empty delta (unlike the
+# other three sub-lanes, which always write a record even when empty).
+syslog_failed=0
+syslog_lines="$(section SYSLOG END)"
+if [ -n "$syslog_lines" ]; then
+  syslog_json="$(printf '%s' "$syslog_lines" | jq -R -s 'split("\n") | map(select(length>0))')"
+  if ! printf '{"lines":%s}' "$syslog_json" |
+    "$capture_bin" write --capture-root "$capture_root" --lane syslog; then
+    echo "capture-router-poll: syslog capture failed; retaining its watermark" >&2
+    syslog_failed=1
+  fi
+fi
+
+if [ "$syslog_failed" -eq 0 ]; then
+  if ! printf '%s\n%s\n' "$new_offset" "$new_first_line" >"$watermark_file"; then
+    syslog_failed=1
+  fi
+fi
+
 leases_json="$(section LEASES ASSOC | jq -R -s '
 	split("\n") | map(select(length>0)) | map(split(" ")) |
 	map({expires:(.[0]|tonumber), mac:.[1], ip:.[2], hostname:.[3], client_id:(.[4] // null)})
@@ -144,14 +165,5 @@ if [ -n "$new_periods" ]; then
   done
 fi
 
-# A quiet router produces no new syslog lines most polls -- that is normal,
-# not an outage, so no envelope is written for an empty delta (unlike the
-# other three sub-lanes, which always write a record even when empty).
-syslog_lines="$(section SYSLOG END)"
-if [ -n "$syslog_lines" ]; then
-  syslog_json="$(printf '%s' "$syslog_lines" | jq -R -s 'split("\n") | map(select(length>0))')"
-  printf '{"lines":%s}' "$syslog_json" |
-    "$capture_bin" write --capture-root "$capture_root" --lane syslog
-fi
-
-printf '%s\n%s\n' "$new_offset" "$new_first_line" >"$watermark_file"
+# A syslog failure stays visible even when the independent lanes succeeded.
+exit "$syslog_failed"
