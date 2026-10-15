@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: d00fe48e453da5e52bb33d3698a3b915ca6e6d46b8cfbb436b03e040e3552044 -->
+<!-- gateway-catalog-sha256: 653141d7f1c0169e833b584aa281515dde90a0f52f9062e4a539f0f4e58a398b -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `d00fe48e453da5e52bb33d3698a3b915ca6e6d46b8cfbb436b03e040e3552044`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `653141d7f1c0169e833b584aa281515dde90a0f52f9062e4a539f0f4e58a398b`.
 
 ## Invocation
 
@@ -125,7 +125,7 @@ MCP: call the tool named after the action. CLI: `sinnix-agent-gateway call <acti
 | `terminals.run`              | `run`     | `terminals`        | `operator` | wait=true appends a visible completion sentinel and waits for it (or for at_prompt when kitty reports it). Captured shells disable prompt marks, so the sentinel is the reliable completion signal. exit_status is parsed from that sentinel.                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `terminals.wait`             | `wait`    | `terminals`        | `operator` | Wait until a terminal is at its prompt, shows a regex, finishes a process, or changes title.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `terminals.focus`            | `operate` | `terminals`        | `operator` | Focus one kitty window.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `terminals.open`             | `operate` | `terminals`        | `operator` | Open a new kitty window (OS window, split or tab) with an optional cwd and command; returns its ref.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `terminals.open`             | `operate` | `terminals`        | `operator` | Open a graphical Kitty window, split or tab for an interactive terminal task. For ordinary command execution use shell.run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `browser.pages`              | `catalog` | `browser`          | `operator` | List every open Chrome page with its ref; flags the gateway-owned pages that can be read, captured or operated.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `browser.page`               | `get`     | `browser`          | `operator` | Element refs (g<generation>e<n>) are attached to the DOM for this snapshot; a later snapshot or reload replaces them, and a stale ref fails not_found.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `browser.screenshot`         | `query`   | `browser`          | `operator` | Screenshot a gateway-owned page through CDP; the image rides in an image block and is retained as an artifact.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -18160,7 +18160,7 @@ wait=true appends a visible completion sentinel and waits for it (or for at_prom
 
 Family: `run`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
-Aliases: execute in terminal, run command, shell command in kitty.
+Aliases: execute in terminal, shell command in kitty.
 
 Follow-up actions: `terminals.scrollback`, `terminals.wait`, `terminals.send`.
 
@@ -18905,11 +18905,11 @@ Focus by title:
 
 ### `terminals.open`
 
-Open a new kitty window (OS window, split or tab) with an optional cwd and command; returns its ref.
+Open a graphical Kitty window, split or tab for an interactive terminal task. For ordinary command execution use shell.run.
 
 Family: `operate`. Owner: `terminals`. Principals: `operator`. Typed failures: `conflict, deadline, idempotency_conflict, indeterminate, invalid_request, not_found, owner_failed, partial_completion, policy_denied, precondition_failed, response_bound, source_changed, stale_cursor, unavailable, unsupported_capability`.
 
-Aliases: new terminal, open kitty, spawn shell.
+Aliases: new terminal, open kitty.
 
 Follow-up actions: `terminals.send`, `terminals.run`, `terminals.screen`, `terminals.focus`.
 

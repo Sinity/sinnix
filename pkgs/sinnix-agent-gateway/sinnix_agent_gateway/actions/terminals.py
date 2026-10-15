@@ -792,12 +792,12 @@ ACTIONS: tuple[Action, ...] = (
     Action(
         name="terminals.run",
         family=VerbFamily.RUN,
-        summary="Run a command line in one terminal and, by default, wait for the prompt to return; reports last-command output, cwd and duration.",
+        summary="Run in an existing graphical Kitty terminal. Use shell.run for background commands and operations.run for declared jobs.",
         Input=RunInput,
         Output=RunResult,
         handler=_run,
         affordances=("terminals.scrollback", "terminals.wait", "terminals.send"),
-        aliases=("execute in terminal", "run command", "shell command in kitty"),
+        aliases=("execute in terminal", "shell command in kitty"),
         documentation="wait=true appends a visible completion sentinel and waits for it (or for at_prompt when kitty reports it). Captured shells disable prompt marks, so the sentinel is the reliable completion signal. exit_status is parsed from that sentinel.",
         examples=(
             Example(
@@ -866,7 +866,7 @@ ACTIONS: tuple[Action, ...] = (
     Action(
         name="terminals.open",
         family=VerbFamily.OPERATE,
-        summary="Open a new kitty window (OS window, split or tab) with an optional cwd and command; returns its ref.",
+        summary="Open a graphical Kitty window, split or tab for an interactive terminal task. For ordinary command execution use shell.run.",
         Input=OpenInput,
         Output=OpenResult,
         handler=_open,
@@ -876,7 +876,7 @@ ACTIONS: tuple[Action, ...] = (
             "terminals.screen",
             "terminals.focus",
         ),
-        aliases=("new terminal", "open kitty", "spawn shell"),
+        aliases=("new terminal", "open kitty"),
         examples=(
             Example(
                 title="New window in a project",

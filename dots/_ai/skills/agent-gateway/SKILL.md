@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: d00fe48e453da5e52bb33d3698a3b915ca6e6d46b8cfbb436b03e040e3552044 -->
+<!-- gateway-catalog-sha256: 653141d7f1c0169e833b584aa281515dde90a0f52f9062e4a539f0f4e58a398b -->
 
 # Agent Gateway
 
@@ -18,6 +18,8 @@ Every gateway action is one MCP tool named after the action; its input schema in
 - Discovery: `gateway.catalog` with a plain-words `query` finds actions, resources and brokered MCP tools; `gateway.status` reports contract hashes and route availability.
 
 Effectful actions (families change, operate, run) require `idempotency_key`. Confirmed responses replay unchanged. Pending calls refuse concurrent execution; interrupted calls become indeterminate and never retry their effects automatically. `operations.run` and `shell.run` reconcile through durable agentctl launch identities; reducer-backed machine actions and process stop reconcile only exact confirmed owner receipts. Other interrupted mutations remain indeterminate. Preconditions are owner-specific checks, best effort unless the owner explicitly guarantees atomic comparison and mutation.
+
+Run ordinary commands through `shell.run` and declared jobs through `operations.run`. `terminals.open` and `terminals.run` operate graphical Kitty windows; use them when the task needs an interactive terminal. If a checkout is unregistered, register its project and environment before running its jobs.
 
 ## Actions
 
@@ -167,7 +169,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 - `desktop.operate` — Pointer clicks, drags and scrolls need a virtual pointer tool (ydotool) on the host and fail unavailable without one; cursor moves always work. Window targets are natural locators; ambiguity returns candidates.
 - `terminals.send` — Send text (optionally with Enter or bracketed paste) or key presses to one terminal.
 - `terminals.focus` — Focus one kitty window.
-- `terminals.open` — Open a new kitty window (OS window, split or tab) with an optional cwd and command; returns its ref.
+- `terminals.open` — Open a graphical Kitty window, split or tab for an interactive terminal task. For ordinary command execution use shell.run.
 - `browser.operate` — Operator tabs are never accepted as targets, even when a locator matches one. Element targets take a snapshot ref or a CSS selector.
 - `machine.operate` — expected_target must match the target identity returned by machine.prepare; the reducer receipt is verified against the submitted action and target.
 - `machine.units.operate` — Start, stop or restart one unit through the ops reducer (reload and wait are not reducer actions).
@@ -185,4 +187,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `d00fe48e453da5e52bb33d3698a3b915ca6e6d46b8cfbb436b03e040e3552044`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `653141d7f1c0169e833b584aa281515dde90a0f52f9062e4a539f0f4e58a398b`.

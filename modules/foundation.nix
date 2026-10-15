@@ -253,6 +253,10 @@ in
                     publicationPolicy = "dolt-sync";
                   };
                 };
+                yt_polisher = {
+                  path = "${config.root}/yt-polisher/repo";
+                  remote = "https://github.com/Sinity/yt-polisher.git";
+                };
                 lynchpin = {
                   path = "${config.root}/sinity-lynchpin/repo";
                   remote = "https://github.com/Sinity/sinity-lynchpin.git";

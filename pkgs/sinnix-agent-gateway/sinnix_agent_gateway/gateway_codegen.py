@@ -203,6 +203,8 @@ Every gateway action is one MCP tool named after the action; its input schema in
 
 Effectful actions (families change, operate, run) require `idempotency_key`. Confirmed responses replay unchanged. Pending calls refuse concurrent execution; interrupted calls become indeterminate and never retry their effects automatically. `operations.run` and `shell.run` reconcile through durable agentctl launch identities; reducer-backed machine actions and process stop reconcile only exact confirmed owner receipts. Other interrupted mutations remain indeterminate. Preconditions are owner-specific checks, best effort unless the owner explicitly guarantees atomic comparison and mutation.
 
+Run ordinary commands through `shell.run` and declared jobs through `operations.run`. `terminals.open` and `terminals.run` operate graphical Kitty windows; use them when the task needs an interactive terminal. If a checkout is unregistered, register its project and environment before running its jobs.
+
 ## Actions
 
 {body}
