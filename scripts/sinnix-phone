@@ -259,8 +259,15 @@ else
   exit 1
 fi
 birth=$(awk '{print $22}' "/proc/$$/stat")
-printf '%s %s\n' "$$" "$birth" > "$home/owner"
-trap 'rm -f "$home/owner"' EXIT
+published_phase=""
+publish_owner() {
+  [ "$1" != "$published_phase" ] || return 0
+  printf '%s %s %s\n' "$$" "$birth" "$1" > "$home/owner.new"
+  mv "$home/owner.new" "$home/owner"
+  published_phase="$1"
+}
+publish_owner starting
+trap 'rm -f "$home/owner" "$home/owner.new"' EXIT
 trap 'exit 0' TERM INT
 pause() {
   # Let TERM interrupt the owner promptly; the sleeper must not retain its lock.
@@ -272,33 +279,42 @@ pause() {
 last_association=""
 while [ -f "$0" ]; do
   if [ "$(getprop sys.boot_completed)" != 1 ]; then
+    publish_owner waiting_boot
     pause
     continue
   fi
   if ! status=$(cmd wifi status 2>/dev/null); then
     # An unreadable status is not evidence of a network transition.
+    publish_owner status_unavailable
     pause
     continue
   fi
+  phase=status_unavailable
   if printf '%s\n' "$status" | grep -Eq '^Wifi is (not connected|disabled)$'; then
     last_association=""
+    phase=waiting_wifi
   elif printf '%s\n' "$status" | grep -q '^Wifi is connected to '; then
     association=$(printf '%s\n' "$status" | sed -n 's/^WifiInfo: .* BSSID: \([^, ]*\).*$/\1/p')
     if printf '%s\n' "$association" | grep -Eq '^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$'; then
       case "$association" in
         00:00:00:00:00:00|02:00:00:00:00:00) ;;
         *)
+          phase=request_succeeded
           if [ "$association" != "$last_association" ]; then
             # Repeated ticks do not undo a same-association manual disable.
             # This does not add trusted networks or alter paired host keys.
-            if settings put global adb_wifi_enabled 1; then
+            # Binder cannot accept a root-private log file as its stdio FD.
+            if settings put global adb_wifi_enabled 1 >/dev/null 2>&1; then
               last_association="$association"
+            else
+              phase=request_failed
             fi
           fi
           ;;
       esac
     fi
   fi
+  publish_owner "$phase"
   pause
 done
 BOOT
@@ -330,19 +346,24 @@ PREPARE
   restart=$(cat <<'RESTART'
 chmod 700 /data/adb/service.d/.sinnix-wireless-adb.sh.new
 mv /data/adb/service.d/.sinnix-wireless-adb.sh.new "$hook"
-is_owner() {
+same_process() {
   case "$1" in ''|*[!0-9]*) return 1 ;; esac
   case "$2" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$(awk '{print $22}' "/proc/$1/stat" 2>/dev/null)" = "$2" ] || return 1
+  current=$(awk '{print $3 " " $22}' "/proc/$1/stat" 2>/dev/null) || return 1
+  [ "${current#* }" = "$2" ] && [ "${current%% *}" != Z ] && [ "${current%% *}" != X ]
+}
+is_owner() {
+  same_process "$1" "$2" || return 1
   tr '\000' '\n' < "/proc/$1/cmdline" | grep -Fxq "$hook"
 }
-if [ -f "$home/owner" ]; then
-  read -r owner_pid owner_birth < "$home/owner"
+if [ -f "$home/owner" ] && read -r owner_pid owner_birth owner_phase < "$home/owner"; then
   cp -p "$home/owner" "$home/previous-owner"
   if is_owner "$owner_pid" "$owner_birth"; then
     kill -TERM "$owner_pid"
     i=0
-    while is_owner "$owner_pid" "$owner_birth"; do
+    # A dying process's cmdline is not a safe read on Android. Once identity
+    # authorized TERM, wait only on its birth identity and non-zombie state.
+    while same_process "$owner_pid" "$owner_birth"; do
       [ "$i" -lt 50 ] || { echo "wireless ADB owner did not stop" >&2; exit 1; }
       sleep 0.1
       i=$((i + 1))
@@ -353,11 +374,18 @@ nohup /system/bin/sh "$hook" </dev/null >"$home/last-start.log" 2>&1 &
 started_pid=$!
 i=0
 while [ "$i" -lt 50 ]; do
-  if [ -f "$home/owner" ]; then
-    read -r owner_pid owner_birth < "$home/owner"
+  if [ -f "$home/owner" ] && read -r owner_pid owner_birth owner_phase < "$home/owner"; then
     if [ "$owner_pid" = "$started_pid" ] && is_owner "$owner_pid" "$owner_birth"; then
-      echo "WIRELESS_ADB_OWNER_ACTIVE"
-      exit 0
+      case "$owner_phase" in
+        waiting_boot|waiting_wifi|request_succeeded)
+          echo "WIRELESS_ADB_OWNER_ACTIVE $owner_phase"
+          exit 0
+          ;;
+        request_failed|status_unavailable)
+          echo "wireless ADB owner active but $owner_phase" >&2
+          exit 1
+          ;;
+      esac
     fi
   fi
   kill -0 "$started_pid" 2>/dev/null || break

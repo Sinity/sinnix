@@ -129,7 +129,7 @@ with tempfile.TemporaryDirectory() as temporary:
 
     def stop_owner():
         if owner_file.exists():
-            pid, birth = owner_file.read_text().split()
+            pid, birth, *_ = owner_file.read_text().split()
             cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
             assert str(target).encode() in cmdline
             assert Path(f"/proc/{pid}/stat").read_text().split()[21] == birth
@@ -156,7 +156,7 @@ with tempfile.TemporaryDirectory() as temporary:
             assert owner_file.read_bytes() == owner_before
         # A stale/reused PID record must never grant authority to stop it.
         saved = owner_file.read_bytes()
-        pid, birth = saved.decode().split()
+        pid, birth, *_ = saved.decode().split()
         owner_file.write_text(f"{pid} 0\n")
         try:
             refused = subprocess.run(["bash", "-c", command], env=environment, capture_output=True, text=True, timeout=8)
