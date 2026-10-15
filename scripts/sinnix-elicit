@@ -85,6 +85,21 @@ FEEDBACK_DIR = Path(os.environ.get("SINNIX_HUB_FEEDBACK_DIR", "/realm/state/hub-
 # ──────────────────────────────────────────────────────────────────────────
 # Domain store
 # ──────────────────────────────────────────────────────────────────────────
+def index_items(items, source):
+    """Apply the same roster identity checks before reading or publishing."""
+    if not isinstance(items, list):
+        raise SystemExit(f"items in {source} must be a JSON list")
+    by_id = {}
+    for position, item in enumerate(items, start=1):
+        if not isinstance(item, dict) or "id" not in item:
+            raise SystemExit(f"item {position} in {source} must be an object with an id")
+        iid = str(item["id"])
+        if iid in by_id:
+            raise SystemExit(f"duplicate item id in {source}: {iid}")
+        by_id[iid] = item
+    return by_id
+
+
 class Domain:
     def __init__(self, name):
         self.name = name
@@ -98,13 +113,7 @@ class Domain:
 
     def load_items(self):
         items = json.loads(self.items_path.read_text())
-        by_id = {}
-        for it in items:
-            iid = str(it["id"])
-            if iid in by_id:
-                raise SystemExit(f"duplicate item id in {self.items_path}: {iid}")
-            by_id[iid] = it
-        return items, by_id
+        return items, index_items(items, self.items_path)
 
     def load_comparisons(self):
         return read_log(self.comparisons_path).live
@@ -492,9 +501,7 @@ def cmd_init(domain, args):
     items = json.loads(Path(args.items).read_text())
     if not isinstance(items, list) or len(items) < 2:
         raise SystemExit("items file must be a JSON list of >= 2 items")
-    for it in items:
-        if "id" not in it:
-            raise SystemExit(f"item missing id: {it}")
+    index_items(items, args.items)
     if args.image_features:
         # `explain` is inert on items that carry no feature vectors, so
         # populate them here from sinnix-image-features rather than leaving

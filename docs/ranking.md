@@ -101,6 +101,12 @@ next` would. Two things it does that the engine does not:
 - `explain` regresses standardised feature deltas on the operator's choices,
   which is a question about the items rather than about the ranking.
 
+`init` validates roster objects and unique IDs before extracting features or
+publishing. Numeric and string IDs that stringify identically are the same
+identity. An invalid `init --force` leaves the previous roster, judgments and
+model untouched. Labels may still change or repeat, and deleted roster items
+remain excluded from fitting.
+
 Its domain format is its own: `items.json` (a JSON array, editable),
 `comparisons.jsonl` with `{a, b, outcome}` pairwise records, and `model.json`,
 the one cached fit in the estate — the hub serves it back mid-session at
