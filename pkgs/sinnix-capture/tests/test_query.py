@@ -110,3 +110,25 @@ def test_discovery_refuses_regular_file_root(tmp_path):
 
 def test_accessible_empty_root_has_no_lanes(tmp_path):
     assert discover_lanes(tmp_path) == []
+
+
+@pytest.mark.parametrize("index_state", ["missing", "empty", "torn-first-record"])
+def test_retained_payload_without_complete_index_is_not_measured_zero(tmp_path, index_state):
+    writer = CaptureWriter(tmp_path, "lane")
+    writer.write({"retained": True}, ts=100)
+    if index_state == "missing":
+        writer._index_path.unlink()
+    else:
+        writer._index_path.write_bytes(b"" if index_state == "empty" else b'{"ts":')
+    with pytest.raises(ValueError, match="no complete records"):
+        lane_delta(tmp_path, "lane")
+    writer.write({"next": True}, ts=200)
+    assert lane_delta(tmp_path, "lane")["records_since"] == 2
+
+
+@pytest.mark.parametrize("empty_payload_file", [False, True])
+def test_empty_lane_without_index_still_reports_zero(tmp_path, empty_payload_file):
+    writer = CaptureWriter(tmp_path, "lane")
+    if empty_payload_file:
+        writer._record_path(100).touch()
+    assert lane_delta(tmp_path, "lane")["records_since"] == 0

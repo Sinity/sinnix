@@ -2,14 +2,17 @@
 
 Reads only the small ``{lane}-index.jsonl`` sidecar (never the payload
 files), so enrichment consumers can poll every lane cheaply without
-per-lane glue.
+per-lane glue. With no complete index rows, nonempty retained payload files
+make the query fail rather than report a measured zero. This check reads only
+file metadata; payload contents remain untouched.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
-from stat import S_ISDIR
+from stat import S_ISDIR, S_ISREG
 
 from sinnix_lib.layout import ACTIVITY_LANES, capture_lane_path
 
@@ -34,6 +37,24 @@ def discover_lanes(capture_root: Path | str) -> list[str]:
     known = {lane for lane in ACTIVITY_LANES if _directory_present(capture_lane_path(root, lane))}
     custom = {p.name for p in root.iterdir() if _directory_present(p) and p.name not in containers}
     return sorted(known | custom)
+
+
+def _has_retained_payload(lane_dir: Path, lane: str) -> bool:
+    try:
+        entries = os.scandir(lane_dir)
+    except FileNotFoundError:
+        return False
+    with entries:
+        for entry in entries:
+            path = Path(entry.path)
+            if not path.match(f"{lane}-[0-9]*.jsonl"):
+                continue
+            metadata = entry.stat()
+            if not S_ISREG(metadata.st_mode):
+                raise ValueError(f"capture payload is not a regular file: {path}")
+            if metadata.st_size:
+                return True
+    return False
 
 
 def lane_delta(capture_root: Path | str, lane: str, since_ts: float = 0.0) -> dict:
@@ -64,6 +85,9 @@ def lane_delta(capture_root: Path | str, lane: str, since_ts: float = 0.0) -> di
                 if prev_seq is not None and seq - prev_seq > 1:
                     gap_records += seq - prev_seq - 1
                 prev_seq = seq
+
+    if newest_ts is None and _has_retained_payload(index_path.parent, lane):
+        raise ValueError(f"capture index has no complete records for retained payloads: {index_path}")
 
     return {
         "lane": lane,
