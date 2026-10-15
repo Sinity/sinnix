@@ -55,6 +55,21 @@ def test_disjoint_check_rejects_reused_audio(tmp_path: Path) -> None:
         MODULE._assert_disjoint({"enrollment": [sample], "genuine": [sample]})
 
 
+@pytest.mark.parametrize("same_group", [False, True])
+def test_disjoint_check_rejects_hardlinked_audio(tmp_path: Path, same_group: bool) -> None:
+    sample = tmp_path / "clip.wav"
+    sample.touch()
+    alias = tmp_path / "other-name.wav"
+    alias.hardlink_to(sample)
+    groups = (
+        {"enrollment": [sample, alias]}
+        if same_group
+        else {"enrollment": [sample], "genuine": [alias]}
+    )
+    with pytest.raises(ValueError, match="reused"):
+        MODULE._assert_disjoint(groups)
+
+
 def test_enrollment_name_rejects_path_components(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(MODULE, "STORE_DIR", tmp_path / "store")
     for name in ("../escape", "/tmp/escape", ".", ""):

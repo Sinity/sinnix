@@ -186,11 +186,12 @@ def _assert_disjoint(groups):
     seen = {}
     for label, paths in groups.items():
         for path in paths:
-            resolved = path.resolve()
-            previous = seen.get(resolved)
+            metadata = path.stat()
+            identity = (metadata.st_dev, metadata.st_ino)
+            previous = seen.get(identity)
             if previous:
-                raise ValueError(f"audio file is reused by {previous} and {label}: {resolved}")
-            seen[resolved] = label
+                raise ValueError(f"audio file is reused by {previous} and {label}: {path}")
+            seen[identity] = label
 
 
 def _as_norm(target, probe, cohort):
