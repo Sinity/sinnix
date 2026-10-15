@@ -33,6 +33,22 @@ assert_denied 'bd update sinnix-test --notes "new note"'
 assert_denied 'bd update sinnix-test --design "new design"'
 assert_denied 'bd update sinnix-test -d "new description"'
 assert_denied 'bd update sinnix-test --description="new description"'
+assert_denied 'bd update sinnix-test --append-notes ok; bd update sinnix-test --notes clobber'
+assert_denied 'bd update sinnix-test --append-notes ok && bd update sinnix-test --design clobber'
+
+# A project Python environment must not execute startup code in the guard.
+poison="$test_root/python-env"
+mkdir -p "$poison"
+cat > "$poison/sitecustomize.py" <<'PYTHON'
+import os
+with open(os.environ["SINNIX_HOOK_IMPORT_MARKER"], "w") as handle:
+    handle.write("unexpected fixture startup")
+PYTHON
+for python_home in "" "$test_root/absent-python-home"; do
+  PYTHONPATH="$poison" PYTHONHOME="$python_home" SINNIX_HOOK_IMPORT_MARKER="$test_root/imported" \
+    run_hook 'bd update sinnix-test --notes clobber' | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+  test ! -e "$test_root/imported"
+done
 
 assert_allowed 'bd update sinnix-test --append-notes "new note"'
 assert_allowed 'bd update sinnix-test --design-file design.md --body-file body.md'

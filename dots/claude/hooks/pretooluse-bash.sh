@@ -80,7 +80,7 @@ for index, token in enumerate(tokens):
     command_start = False
 PY
 )
-bd_guard_reason="$(SINNIX_HOOK_COMMAND="$CMD" SINNIX_HOOK_CWD="$HOOK_CWD" python3 -c "$bd_guard_script")"
+bd_guard_reason="$(SINNIX_HOOK_COMMAND="$CMD" SINNIX_HOOK_CWD="$HOOK_CWD" python3 -I -c "$bd_guard_script")"
 if [[ -n $bd_guard_reason ]]; then
   printf '%s\n' "$bd_guard_reason"
   exit 0

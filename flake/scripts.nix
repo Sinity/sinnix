@@ -385,11 +385,8 @@ let
       };
     };
 
-    # polylogue's own postFixup wraps polylogue/polylogued/polylogue-mcp with
-    # PYTHONPATH/PYTHONHOME/… unset, but does NOT cover polylogue-hook, which
-    # ships as an unwrapped console_scripts entry point and runs from
-    # arbitrary agent-devshell environments. Use symlink trees to expose only
-    # the intended commands per package.
+    # Upstream sanitizes its Python entry points, including polylogue-hook.
+    # Expose those wrappers directly and keep each package's command set narrow.
     polylogue-cli = pkgs.runCommand "polylogue-cli" { } ''
       mkdir -p "$out/bin"
       ln -s "${polylogueSrc}/bin/polylogue" "$out/bin/polylogue"

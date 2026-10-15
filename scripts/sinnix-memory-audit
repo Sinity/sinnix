@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Produce a read-only proposal report for stale agent memory entries
-# runtimeInputs: bash coreutils findutils gawk gnugrep jq
+# runtimeInputs: bash coreutils findutils gawk gnugrep jq python3
 set -euo pipefail
 umask 077
 
@@ -34,6 +34,7 @@ mkdir -p "$(dirname "$output")"
 scratch="$(mktemp -d "$(dirname "$output")/.memory-audit.XXXXXX")"
 trap 'rm -rf -- "$scratch"' EXIT
 tmp="$scratch/report.jsonl"
+observations="$scratch/observations.jsonl"
 listing="$scratch/inputs"
 : > "$listing"
 if [[ "$default_output" -eq 1 ]]; then
@@ -90,15 +91,42 @@ sort -zu "$listing" | while IFS= read -r -d '' file; do
       original_line = $0
       while (match($0, /\/[A-Za-z0-9_.+@%~-]+(\/[A-Za-z0-9_.+@%~-]+)+/)) {
         path = substr($0, RSTART, RLENGTH)
-        if (filesystem_path(path) && system("test -e " path) != 0)
-          emit("dead_path", NR, "absolute path does not exist", path)
+        if (filesystem_path(path))
+          emit("path_probe", NR, "absolute path reference", path)
         $0 = substr($0, RSTART + RLENGTH)
       }
       if (original_line ~ /(contradict|no longer|instead|obsolete|supersed)/)
         emit("review_required", NR, "possible semantic contradiction requires human review", "")
     }
   ' "$file"
-done > "$tmp"
+done > "$observations"
+
+# Classify references in one isolated process. A failed stat is not proof of
+# absence; keep lookup errors explicit without reading referenced payloads.
+python3 -I - "$observations" > "$tmp" <<'PYTHON'
+import json
+import os
+import sys
+
+with open(sys.argv[1], encoding="utf-8", errors="surrogateescape") as observations:
+    for line in observations:
+        row = json.loads(line)
+        if row["kind"] == "path_probe":
+            try:
+                os.stat(row["value"])
+            except FileNotFoundError:
+                row.update(kind="dead_path", detail="absolute path does not exist")
+            except OSError as error:
+                row.update(
+                    kind="unavailable_path",
+                    detail="cannot establish absolute path availability",
+                    reason=str(error),
+                    errno=error.errno,
+                )
+            else:
+                continue
+        print(json.dumps(row, ensure_ascii=True))
+PYTHON
 
 if [[ "$default_output" -eq 1 ]]; then
   mv -T --update=none-fail -- "$tmp" "$output"

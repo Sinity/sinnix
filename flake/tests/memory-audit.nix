@@ -22,6 +22,7 @@
               pkgs.findutils
               pkgs.gawk
               pkgs.jq
+              pkgs.python3
             ];
           }
           ''
