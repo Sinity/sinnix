@@ -1,7 +1,6 @@
-#!/usr/bin/env bash
+#!/usr/bin/env python3
 # @sinnix-package
 # description: Regenerate a MANIFEST.json file inventory (path/size/mtime/sha256) for an export tree
-# runtimeInputs: bash coreutils python3
 # pythonPackages: @sinnix-lib
 
 # The lake's export trees carry MANIFEST.json inventories so a snapshot's
@@ -12,21 +11,16 @@
 # itself: a file cannot carry its own digest, and the manifest is derived
 # state, not export content.
 
-set -euo pipefail
-
-root="${1:-}"
-if [ -z "$root" ] || [ ! -d "$root" ]; then
-  echo "usage: sinnix-export-manifest <export-tree-root>" >&2
-  exit 64
-fi
-
-python3 - "$root" <<'PY'
 import hashlib
 import json
 from sinnix_lib.atomic import atomic_publish
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+if len(sys.argv) < 2 or not Path(sys.argv[1]).is_dir():
+    print("usage: sinnix-export-manifest <export-tree-root>", file=sys.stderr)
+    sys.exit(64)
 
 root = Path(sys.argv[1]).resolve()
 entries = []
@@ -64,4 +58,3 @@ atomic_publish(
     mode=0o644,
 )
 print(f"{target}: {len(entries)} entries, {manifest['total_bytes']} bytes inventoried")
-PY
