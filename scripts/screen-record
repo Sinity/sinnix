@@ -13,7 +13,7 @@ output_dir="/realm/inbox/capture"
 
 usage() {
   cat >&2 <<'EOF'
-Usage: sinnix-screen-record [options]
+Usage: screen-record [options]
 
 Record the native HDR desktop to a timestamped Matroska file. Stop recording
 with Ctrl-C; GPU Screen Recorder finalizes the file on exit.
@@ -58,7 +58,7 @@ while (($#)); do
       exit 0
       ;;
     *)
-      echo "sinnix-screen-record: unknown option: $1" >&2
+      echo "screen-record: unknown option: $1" >&2
       usage
       exit 2
       ;;
