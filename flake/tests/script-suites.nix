@@ -77,6 +77,12 @@
     in
     {
       checks = {
+        media-preview-cache-suite = mkScriptSuite {
+          name = "media-preview-cache";
+          suiteDir = ../../pkgs/media-preview-cache/tests;
+          scripts = [ "media-preview-cache" ];
+          nativeBuildInputs = [ pkgs.bash pkgs.fd pkgs.findutils pkgs.util-linux ];
+        };
         sandbox-audit-suite = mkScriptSuite {
           name = "sinnix-sandbox-audit";
           suiteDir = ../../pkgs/sinnix-sandbox-audit/tests;

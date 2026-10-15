@@ -39,10 +39,10 @@ thumb_path() {
   printf '%s/%s/%s.jpg\n' "$video_cache_root" "$shard" "$key"
 }
 
-ensure_thumb() {
+ensure_thumb() (
   local file="$1"
   local percent="${2:-$default_percent}"
-  local resolved output lock_dir lock_file tmp_file
+  local resolved output lock_dir lock_file tmp_file status
 
   resolved="$(canonical_file "$file")"
   output="$(thumb_path "$resolved" "$percent")"
@@ -65,7 +65,7 @@ ensure_thumb() {
   fi
 
   tmp_file="$(mktemp "${output}.tmp.XXXXXX")"
-  trap 'rm -f "$tmp_file"' RETURN
+  trap 'rm -f -- "$tmp_file"' EXIT
 
   ffmpegthumbnailer \
     -i "$resolved" \
@@ -73,13 +73,21 @@ ensure_thumb() {
     -c jpeg \
     -s 0 \
     -t "$percent" \
-    -m >/dev/null 2>&1
+    -m >/dev/null 2>&1 || {
+      status=$?
+      printf 'media-preview-cache: thumbnail generation failed: %q\n' "$resolved" >&2
+      return "$status"
+    }
 
+  if [[ ! -s "$tmp_file" ]]; then
+    printf 'media-preview-cache: thumbnail generator produced no image: %q\n' "$resolved" >&2
+    return 1
+  fi
   mv "$tmp_file" "$output"
-  trap - RETURN
+  trap - EXIT
 
   printf '%s\n' "$output"
-}
+)
 
 warm_tree() {
   local dir="$1"
@@ -109,7 +117,7 @@ warm_tree() {
     . \
     "$resolved_dir" \
     -0 \
-    | xargs -0 -r -P "$jobs" -I{} bash -c 'bash "$1" ensure "$2" "$3" >/dev/null || true' _ "$0" "{}" "$percent"
+    | xargs -0 -r -P "$jobs" -I{} bash -c 'bash "$1" ensure "$2" "$3" >/dev/null' _ "$0" "{}" "$percent"
 }
 
 main() {
