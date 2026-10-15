@@ -773,11 +773,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1792045194,
-        "narHash": "sha256-7TtWcQPPp82kbV4pq0yTvCCkn0tMvu6SbsFec+gwHRI=",
+        "lastModified": 1792052420,
+        "narHash": "sha256-qAm9zBEIO4ck6MlPtlWHyDK4Nz3ePM5i2ZT17BOCahA=",
         "ref": "master",
-        "rev": "102f07649cbe04ec3aeae6ccda2d6d9213524b52",
-        "revCount": 760,
+        "rev": "6995d2cf02b32c95ad08f381b76bd7eac380f170",
+        "revCount": 773,
         "type": "git",
         "url": "https://github.com/Sinity/sinity-lynchpin.git"
       },
@@ -1272,17 +1272,17 @@
     "phone-app": {
       "flake": false,
       "locked": {
-        "lastModified": 1791933619,
-        "narHash": "sha256-H6LL2AZkbJRntPi+7lMiMhXLggtO/Gsg8TQtzgdScYo=",
+        "lastModified": 1792046636,
+        "narHash": "sha256-8av9ab9eqU35Pbu6fu4WAQbLLR+cRmPQHV4i+a+R+WU=",
         "owner": "Sinity",
         "repo": "sinnix-phone-app",
-        "rev": "7d4187412c0d0506fc89ab563d8d2311a2845570",
+        "rev": "22e418d482a20938ab8c88beca80539a3ed16d32",
         "type": "github"
       },
       "original": {
         "owner": "Sinity",
         "repo": "sinnix-phone-app",
-        "rev": "7d4187412c0d0506fc89ab563d8d2311a2845570",
+        "rev": "22e418d482a20938ab8c88beca80539a3ed16d32",
         "type": "github"
       }
     },
