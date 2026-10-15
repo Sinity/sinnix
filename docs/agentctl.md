@@ -338,11 +338,13 @@ memory closure signal remains active.
 Every pause event carries `"owner": "agentctl"`. The spool projection uses an
 inode/offset checkpoint, rebuilding from current history after checkpoint
 loss and retaining ownership across rotation or truncation. An operator pause
-observed before automation is preserved. Reasserting an operator pause on an
-already automation-paused group has no distinguishable native state change;
-ownership tracking cannot infer that intent.
+observed before automation is preserved. Automation records the native pause
+ownership token and resumes only that exact pause. Reasserting an operator
+pause invalidates the old token, so recovery cannot release the operator hold.
 
 ## Worktrees
+
+Removal uses the packaged Worktrunk with `--no-internal-sweep`. It removes only the selected worktree and leaves unrelated recovery trash and orphan fsmonitor state untouched. Direct operator Worktrunk commands keep their default cleanup behavior.
 
 Worktree creation and removal hold one lock per repository, keyed by the
 common `.git` so every worktree of a repository takes the same one, and each
