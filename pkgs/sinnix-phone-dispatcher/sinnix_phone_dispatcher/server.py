@@ -158,6 +158,18 @@ class Handler(BaseHTTPRequestHandler):
         if not self._native_request():
             return
         route = self._route()
+        if route in {"/intent", "/job-answer"}:
+            content_types = self.headers.get_all("Content-Type", [])
+            if len(content_types) != 1 or (
+                content_types[0].split(";", 1)[0].strip().casefold()
+                != "application/json"
+            ):
+                self.close_connection = True
+                self._send(
+                    HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
+                    {"ok": False, "detail": "one application/json Content-Type is required"},
+                )
+                return
 
         # An acknowledgement carries no body -- everything it says is in the
         # query -- so it branches before the JSON parse below, which would

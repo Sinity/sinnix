@@ -263,7 +263,7 @@ mkServiceModule {
       jsonGuard = label: paths: ''
         @${label}MediaType {
           method POST
-          expression path(${lib.concatMapStringsSep ", " (path: "'${path}'") paths})${lib.optionalString (label == "pages") " || path_regexp('^/terminals/v1/windows/[0-9]+/[0-9]+/send$')"}
+          expression path(${lib.concatMapStringsSep ", " (path: "'${path}'") paths})${lib.optionalString (label == "pages") " || path_regexp('^/terminals/v1/windows/[0-9]+/[0-9]+/send$')"}${lib.optionalString (label == "phone") " || path_regexp('^/(phone/)?(v1/)?(intent|job-answer)/*$')"}
           not expression {http.request.header.Content-Type}.matches('(?i)^[[:blank:]]*application/json[[:blank:]]*(;[^,]*)?$')
         }
         header @${label}MediaType Connection close
@@ -401,6 +401,7 @@ mkServiceModule {
                 "Sec-Fetch-User"
               ]
             )}
+            ${jsonGuard "phone" [ "/v1/intent" "/v1/job-answer" ]}
             reverse_proxy unix/${phoneSocket}
           }
 

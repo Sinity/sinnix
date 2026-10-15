@@ -169,7 +169,7 @@ with tempfile.TemporaryDirectory() as temporary:
                 request("/phone/v1/intent", {header: "same-origin"}, 403)
             request("/terminals/not-a-terminal", {"Origin": "https://example.invalid"}, 403, send_body=False)
             request("/terminals/v1/windows/1/2/send", {"Origin": "https://example.invalid", "Content-Type": "text/plain"}, 403, send_body=False)
-            for path in ('/ops/v1/actions', '/ops/v1/actions/prepare', '/v1/health/failure', '/terminals/v1/windows/1/2/send', '/feedback'):
+            for path in ('/ops/v1/actions', '/ops/v1/actions/prepare', '/v1/health/failure', '/terminals/v1/windows/1/2/send', '/feedback', '/phone/v1/intent', '/phone/v1/job-answer/', '/phone/intent///'):
                 for media in ([], 'text/plain', ['application/json', 'application/json']):
                     request(path, {'Content-Type': media}, 415, send_body=False)
                 request(path, {'Content-Type': 'Application/JSON; charset=utf-8'}, 200)

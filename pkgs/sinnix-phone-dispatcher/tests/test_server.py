@@ -23,6 +23,8 @@ def _handler(path: str, body: bytes, content_length: str | None):
     headers = Message()
     if content_length is not None:
         headers["Content-Length"] = content_length
+    if path.split("?", 1)[0].rstrip("/").endswith(("/intent", "/job-answer")):
+        headers["Content-Type"] = "application/json; charset=utf-8"
     handler.headers = headers
     sent: list[tuple[HTTPStatus, object]] = []
     handler._send = MethodType(
@@ -313,3 +315,22 @@ def test_http_browser_refusal_does_not_wait_for_body_and_native_client_works(mon
         assert received == [{"kind": "ping"}]
     finally:
         server.shutdown(); server.server_close(); thread.join(timeout=2)
+
+
+@pytest.mark.parametrize("path", ["/v1/intent", "/phone/v1/job-answer/", "/intent///"])
+@pytest.mark.parametrize("types", [[], ["text/plain"], ["application/json", "application/json"]])
+def test_action_media_type_refused_before_body_and_owner(path, types, monkeypatch):
+    handler, sent = _handler(path, b"", "1000000")
+    del handler.headers["Content-Type"]
+    for value in types:
+        handler.headers["Content-Type"] = value
+
+    class Unreadable:
+        def read(self, *_):
+            raise AssertionError("media refusal read the body")
+
+    handler.rfile = Unreadable()
+    monkeypatch.setattr(server_mod, "execute", lambda *_: pytest.fail("owner called"))
+    handler.do_POST()
+    assert sent[0][0] == HTTPStatus.UNSUPPORTED_MEDIA_TYPE
+    assert handler.close_connection

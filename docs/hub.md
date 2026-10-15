@@ -343,7 +343,7 @@ The html-report skill generates annotation widgets that autosave to
 With a server in front of the reports, that paste step can be one `fetch()`:
 
 ```js
-fetch("/feedback", { method: "POST", body: JSON.stringify(collectState()) });
+fetch("/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(collectState()) });
 ```
 
 `collectState()` is the skill's own function. Deliberately a _simple_ request —
@@ -368,7 +368,7 @@ the personal analysis those annotations describe. That refusal stands.
 Feedback, terminal send, action prepare/execute and failure-notification POSTs
 require exactly one `application/json` Content-Type (parameters are accepted).
 Missing, duplicate or other media types receive 415 before any body read or
-owner call. The phone receiver keeps its separate native upload protocol.
+owner call. The phone action routes (`intent` and `job-answer`) also require exactly one JSON Content-Type, both at the proxy and directly. The phone receiver keeps its separate binary upload and bodyless acknowledgement protocols.
 The proxy applies the same refusal before forwarding incomplete bodies;
 comma-containing media-type parameter lists are rejected as ambiguous.
 
