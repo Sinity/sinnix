@@ -42,3 +42,70 @@ global_record="$(printf '%s\n' "$global_input" | CLAUDE_SCRATCH_ROOT="$test_root
 test "$(dirname "$global_record")" = "$test_root/global"
 grep -Fq 'repo_root: ""' "$global_record"
 grep -Fq 'dirty_paths: []' "$global_record"
+
+# Hold both writers immediately before publication, after each chose its name.
+mkdir -p "$test_root/bin" "$test_root/barrier" "$test_root/concurrent" "$test_root/collision"
+real_mv=$(command -v mv)
+real_date=$(command -v date)
+printf '#!%s\n' "$BASH" > "$test_root/bin/mv"
+cat >> "$test_root/bin/mv" <<'WRAPPER'
+set -euo pipefail
+if [ "$HANDOFF_TEST_MODE" = collision ]; then
+  printf 'retained preexisting record\n' > "${@: -1}"
+else
+  touch "$HANDOFF_BARRIER/$$"
+  for ((attempt=0; attempt<500; attempt++)); do
+    markers=("$HANDOFF_BARRIER"/*)
+    [ "${#markers[@]}" -ge 2 ] && break
+    sleep 0.01
+  done
+  [ "${#markers[@]}" -ge 2 ] || exit 99
+fi
+exec "$REAL_MV" "$@"
+WRAPPER
+printf '#!%s\n' "$BASH" > "$test_root/bin/date"
+cat >> "$test_root/bin/date" <<'WRAPPER'
+if [ "${2:-}" = +%Y%m%dT%H%M%SZ ]; then
+  echo 20260101T000000Z
+else
+  exec "$REAL_DATE" "$@"
+fi
+WRAPPER
+chmod +x "$test_root/bin/mv" "$test_root/bin/date"
+for session in one two; do
+  jq -nc --arg session "$session" '{session_id:$session,cwd:"/nowhere",trigger:"auto"}' > "$test_root/$session.json"
+done
+for session in one two; do
+  env PATH="$test_root/bin:$PATH" REAL_MV="$real_mv" REAL_DATE="$real_date" \
+    HANDOFF_TEST_MODE=concurrent HANDOFF_BARRIER="$test_root/barrier" \
+    CLAUDE_SCRATCH_ROOT="$test_root/concurrent" \
+    "$writer" < "$test_root/$session.json" > "$test_root/$session.out" &
+  if [ "$session" = one ]; then first_pid=$!; else second_pid=$!; fi
+done
+wait "$first_pid"
+wait "$second_pid"
+one_record=$(cat "$test_root/one.out")
+two_record=$(cat "$test_root/two.out")
+if [ "$one_record" = "$two_record" ]; then
+  echo "concurrent handoffs published the same record path" >&2
+  exit 1
+fi
+grep -Fq 'session_id: "one"' "$one_record"
+grep -Fq 'session_id: "two"' "$two_record"
+test "$(stat -c '%a' "$one_record")" = 600
+test "$(stat -c '%a' "$two_record")" = 600
+
+# Even a competing final name introduced after staging cannot be overwritten.
+if env PATH="$test_root/bin:$PATH" REAL_MV="$real_mv" REAL_DATE="$real_date" \
+  HANDOFF_TEST_MODE=collision CLAUDE_SCRATCH_ROOT="$test_root/collision" \
+  "$writer" < "$test_root/one.json" > "$test_root/collision.out" 2> "$test_root/collision.err"; then
+  echo "handoff replaced a competing record" >&2
+  exit 1
+fi
+shopt -s nullglob
+records=("$test_root/collision"/compaction-*.md)
+test "${#records[@]}" -eq 1
+grep -Fxq 'retained preexisting record' "${records[0]}"
+test ! -s "$test_root/collision.out"
+staged=("$test_root/collision"/.compaction-*)
+test "${#staged[@]}" -eq 0

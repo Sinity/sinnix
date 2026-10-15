@@ -36,11 +36,9 @@ fi
 mkdir -p "$target_dir"
 chmod 700 "$target_dir"
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-final="$target_dir/compaction-$timestamp.md"
-if [[ -e "$final" ]]; then
-  final="$target_dir/compaction-$timestamp-$$.md"
-fi
 tmp="$(mktemp "$target_dir/.compaction-$timestamp.XXXXXX")"
+# Reserve a unique name before writing; simultaneous hooks can share a second.
+final="$target_dir/compaction-$timestamp-${tmp##*.}.md"
 trap 'rm -f "$tmp"' EXIT
 
 yaml_string() {
@@ -77,6 +75,6 @@ created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } >"$tmp"
 
 chmod 600 "$tmp"
-mv -f "$tmp" "$final"
+mv -T --update=none-fail -- "$tmp" "$final"
 trap - EXIT
 printf '%s\n' "$final"
