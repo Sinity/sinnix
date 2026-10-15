@@ -31,7 +31,7 @@ from pathlib import Path
 
 from rank_core import Item, Store, build_selector, draw, fit, top_k_stability
 from rank_core.draw import POLICIES
-from rank_core.store import VALID_KINDS
+from rank_core.store import VALID_KINDS, domain_path
 
 CAPTURE_ROOT = Path(
     os.environ.get("SINNIX_RANK_ROOT", "/realm/activity/shared/ranking")
@@ -45,7 +45,7 @@ DEFAULT_STOP_AT = 0.9
 
 
 def domain_dir(domain: str) -> Path:
-    return CAPTURE_ROOT / domain
+    return domain_path(CAPTURE_ROOT, domain)
 
 
 def load_items_input(raw: str) -> list[Item]:
@@ -542,6 +542,10 @@ def main(argv: list[str] | None = None) -> int:
     os.umask(0o077)
     parser = build_parser()
     args = parser.parse_args(argv)
+    try:
+        domain_dir(args.domain)
+    except (OSError, ValueError, RuntimeError) as error:
+        parser.error(f"invalid domain: {error}")
     if args.command == "spin":
         if getattr(args, "softmax_temperature", None) is not None:
             args.policy = "softmax"

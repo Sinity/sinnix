@@ -25,16 +25,16 @@ evidence.
 ## The four commands
 
 ```bash
-sinnix-rank add <domain> --items options.jsonl   # register, once per option
-sinnix-rank next <domain> --json                 # which pair to ask about
-sinnix-rank record <domain> --set A,B --winner A # one operator judgment
-sinnix-rank status <domain> --json               # fitted order + evidence
+sinnix rank add <domain> --items options.jsonl   # register, once per option
+sinnix rank next <domain> --json                 # which pair to ask about
+sinnix rank record <domain> --set A,B --winner A # one operator judgment
+sinnix rank status <domain> --json               # fitted order + evidence
 ```
 
 State lives in `/realm/activity/shared/ranking/<domain>/` (override the root
 with `SINNIX_RANK_ROOT`). `items.jsonl` and `comparisons.jsonl` are
 append-only; comparisons are never pruned, only tombstoned by
-`sinnix-rank retract`.
+`sinnix rank retract`.
 
 ## Registering options
 
@@ -70,9 +70,9 @@ chose. Ten comparisons over six options is a normal pass; stop when `status`
 reports `evidence.settled`, or when the operator is done.
 
 ```bash
-sinnix-rank next design-directions --json
+sinnix rank next design-directions --json
 # ask: "Which do you want more: the hub page, or the phone deck?"
-sinnix-rank record design-directions --set opt-hub-page,opt-phone-deck \
+sinnix rank record design-directions --set opt-hub-page,opt-phone-deck \
     --winner opt-phone-deck --context "2026-09-05 shortlist pass"
 ```
 
@@ -136,5 +136,5 @@ The domain name, the fitted order with theta and se, `stability.p_stable`,
 `evidence.settled` with its reasons, and the exact command to resume:
 
 ```bash
-sinnix-rank status <domain> --json
+sinnix rank status <domain> --json
 ```

@@ -449,3 +449,22 @@ def test_git_reports_no_change_to_the_declarative_source(adapter: Adapter):
     if result.returncode != 0:
         return  # not a checkout (packaged fixture); the digest check above stands
     assert result.stdout.strip() == ""
+
+
+@pytest.mark.parametrize("domain", ["../outside", "/outside", ".", ""])
+def test_keybind_domain_refuses_escape_before_writing(adapter: Adapter, domain: str):
+    result = adapter.run("--domain", domain, "sync")
+    assert result.returncode == 2
+    assert "invalid domain" in result.stderr
+    assert not adapter.rank_root.exists()
+
+
+def test_keybind_sync_creates_private_raw_state(adapter: Adapter):
+    original = os.umask(0)
+    try:
+        adapter.adapter("sync")
+    finally:
+        os.umask(original)
+    domain = adapter.rank_root / "keybinds"
+    assert domain.stat().st_mode & 0o777 == 0o700
+    assert (domain / "items.jsonl").stat().st_mode & 0o777 == 0o600

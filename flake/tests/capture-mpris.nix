@@ -24,6 +24,12 @@
         ];
         assertions = config: [
           {
+            assertion = builtins.elem
+              "d ${config.sinnix.paths.activityRoot}/shared/ranking 0700 ${config.sinnix.user.name} ${config.users.users.${config.sinnix.user.name}.group} -"
+              config.systemd.tmpfiles.rules;
+            message = "Raw ranking evidence must have an owner-only entrance.";
+          }
+          {
             assertion = config.systemd.services.sinnix-stt-lake.serviceConfig.UMask == "0077";
             message = "Transcript writers must create owner-only output.";
           }

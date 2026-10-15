@@ -24,6 +24,18 @@ from sinnix_lib.ledger import append_jsonl, utc_ts
 VALID_KINDS = {"pair", "choice-set", "skip", "incomparable"}
 
 
+def domain_path(root: str | Path, domain: str) -> Path:
+    """Resolve a named domain without escaping its configured capture root."""
+    relative = Path(domain)
+    if not domain or relative.is_absolute() or ".." in relative.parts:
+        raise ValueError("domain must be a relative path inside the ranking capture root")
+    root = Path(root).resolve()
+    target = (root / relative).resolve()
+    if target == root or not target.is_relative_to(root):
+        raise ValueError("domain must resolve inside the ranking capture root")
+    return target
+
+
 @dataclass
 class LogReplay:
     """An append-only judgment log, replayed.

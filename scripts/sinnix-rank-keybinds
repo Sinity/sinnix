@@ -20,7 +20,7 @@ Three inputs, kept apart on purpose:
     intent. Bindings that no longer exist are gone from the next manifest
     whatever ranking state survives them;
   * operator comparisons -- recorded through the shared ranking store by
-    `sinnix-rank compare keybinds`, exactly like every other domain. This
+    `sinnix rank compare keybinds`, exactly like every other domain. This
     tool does not prompt and does not write comparisons;
   * a usage prior -- shell-history or census counts, bounded and labelled
     with where they came from. Usage is evidence about what gets typed, not
@@ -46,6 +46,7 @@ import sys
 from pathlib import Path
 
 from rank_core import Item, Store, fit
+from rank_core.store import domain_path
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.ledger import utc_ts
 
@@ -312,7 +313,7 @@ def prior_theta(record: dict, max_count: int, cap: float) -> float:
 
 
 def domain_dir(domain: str) -> Path:
-    return CAPTURE_ROOT / domain
+    return domain_path(CAPTURE_ROOT, domain)
 
 
 def usage_path(domain: str) -> Path:
@@ -457,7 +458,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
         f"{len(bindings) - len(new_items)} already registered, "
         f"{len(retired)} registered item(s) no longer in the inventory"
     )
-    print(f"compare them with: sinnix-rank compare {args.domain}")
+    print(f"compare them with: sinnix rank compare {args.domain}")
     return 0
 
 
@@ -567,7 +568,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    os.umask(0o077)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        domain_dir(args.domain)
+    except (OSError, ValueError, RuntimeError) as error:
+        parser.error(f"invalid domain: {error}")
     return args.func(args)
 
 

@@ -110,6 +110,7 @@ in
         "d ${paths.devicesRoot} 0755 ${username} users -"
         "d ${config.sinnix.projects.root} 0755 ${username} users -"
         "d ${paths.activityRoot} 0755 ${username} users -"
+        "d ${paths.activityRoot}/shared/ranking 0700 ${username} ${config.users.users.${username}.group} -"
         "d ${paths.machineRoot} 0775 ${username} users -"
         "d ${paths.healthRoot} 0755 ${username} users -"
         "d ${paths.capturePaths.irc} 0755 ${username} users -"

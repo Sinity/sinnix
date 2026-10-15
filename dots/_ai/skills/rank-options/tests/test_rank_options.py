@@ -472,3 +472,31 @@ def test_private_option_text_stays_out_of_the_diff(rank: Rank):
     ):
         out = subprocess.run(argv, capture_output=True, text=True, timeout=120).stdout
         assert canary not in out, f"{argv} leaked the canary"
+
+
+@pytest.mark.parametrize("kind", ["parent", "absolute", "root", "empty", "symlink"])
+def test_domain_cannot_escape_capture_root(tmp_path: Path, kind: str):
+    root = tmp_path / "capture"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "items.jsonl"
+    sentinel.write_text('{"id":"retained","label":"Retained fixture"}\n')
+    items = tmp_path / "input.jsonl"
+    items.write_text('{"id":"new","label":"New fixture"}\n')
+    if kind == "symlink":
+        (root / "link").symlink_to(outside, target_is_directory=True)
+    domain = {"parent": "../outside", "absolute": str(outside), "root": ".", "empty": "", "symlink": "link"}[kind]
+    before = sentinel.read_bytes()
+    result = Rank(root).run("add", domain, "--items", str(items))
+    assert result.returncode == 2, result.stderr
+    assert "domain" in result.stderr and "Traceback" not in result.stderr
+    assert sentinel.read_bytes() == before
+    assert not (root / "items.jsonl").exists()
+
+
+def test_nested_domain_stays_inside_custom_capture_root(tmp_path: Path):
+    rank = Rank(tmp_path / "capture")
+    result = rank.add("group/options", FOUR_OPTIONS)
+    assert result.returncode == 0, result.stderr
+    assert (rank.root / "group/options/items.jsonl").is_file()

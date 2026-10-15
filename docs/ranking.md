@@ -40,16 +40,18 @@ domain directory. `SINNIX_RANK_ROOT` moves the root for fixtures.
 
 ## `sinnix-rank`
 
-The text frontend for any domain.
+Invoke the text frontend through `sinnix rank`. Domain paths must stay inside
+the configured capture root; absolute paths, parent traversal and links outside
+that root are refused. Nested domains inside the root remain supported.
 
 ```bash
-sinnix-rank add <domain> --items items.jsonl   # register options
-sinnix-rank compare <domain> --rounds 20       # the operator's own loop
-sinnix-rank next <domain> --json               # one set, no TTY
-sinnix-rank record <domain> --set A,B --winner A
-sinnix-rank retract <domain> --comparison <id>
-sinnix-rank status <domain> --json             # order + evidence
-sinnix-rank spin <domain> --commit             # draw one, into steering
+sinnix rank add <domain> --items items.jsonl   # register options
+sinnix rank compare <domain> --rounds 20       # the operator's own loop
+sinnix rank next <domain> --json               # one set, no TTY
+sinnix rank record <domain> --set A,B --winner A
+sinnix rank retract <domain> --comparison <id>
+sinnix rank status <domain> --json             # order + evidence
+sinnix rank spin <domain> --commit             # draw one, into steering
 ```
 
 `next`/`record` exist for agents, which hold the conversation instead of a
@@ -158,11 +160,11 @@ comparisons.
 Ranks the currently bound Hyprland chords for practice.
 
 ```bash
-sinnix-rank-keybinds inventory                 # what is bound right now
-sinnix-rank-keybinds sync                      # register them as items
-sinnix-rank compare keybinds                   # operator comparisons
-sinnix-rank-keybinds usage --source atuin      # bounded, labelled prior
-sinnix-rank-keybinds manifest --output /realm/activity/desktop/keyboard/keybinds/manifest.json
+sinnix rank-keybinds inventory                 # what is bound right now
+sinnix rank-keybinds sync                      # register them as items
+sinnix rank compare keybinds                   # operator comparisons
+sinnix rank-keybinds usage --source atuin      # bounded, labelled prior
+sinnix rank-keybinds manifest --output /realm/activity/desktop/keyboard/keybinds/manifest.json
 sinnix-deck-forge keybinds                     # a phone recall deck
 ```
 
