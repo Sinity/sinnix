@@ -242,19 +242,133 @@ install_wireless_adb_boot() {
   boot_script=$(cat <<'BOOT'
 #!/system/bin/sh
 # Sinnix-owned authenticated wireless ADB startup hook.
-i=0
-while [ "$(getprop sys.boot_completed)" != 1 ]; do
-  [ "$i" -lt 180 ] || exit 1
-  sleep 2
-  i=$((i + 1))
+umask 077
+home=/data/adb/sinnix-wireless-adb
+[ ! -L "$home" ] || exit 1
+mkdir -p "$home"
+chmod 700 "$home"
+exec 9>"$home/lock"
+if command -v flock >/dev/null 2>&1; then
+  flock -n 9 || exit 0
+elif [ -x /data/adb/magisk/busybox ]; then
+  /data/adb/magisk/busybox flock -n 9 || exit 0
+else
+  echo "wireless ADB owner requires kernel file locking" >&2
+  exit 1
+fi
+birth=$(awk '{print $22}' "/proc/$$/stat")
+printf '%s %s\n' "$$" "$birth" > "$home/owner"
+trap 'rm -f "$home/owner"' EXIT
+trap 'exit 0' TERM INT
+pause() {
+  # Let TERM interrupt the owner promptly; the sleeper must not retain its lock.
+  sleep 10 9>&- &
+  wait "$!"
+}
+# Android disables wireless ADB on Wi-Fi loss or BSSID change. Restore only
+# on an observed association, through Android's normal trusted-network gate.
+last_association=""
+while [ -f "$0" ]; do
+  if [ "$(getprop sys.boot_completed)" != 1 ]; then
+    pause
+    continue
+  fi
+  if ! status=$(cmd wifi status 2>/dev/null); then
+    # An unreadable status is not evidence of a network transition.
+    pause
+    continue
+  fi
+  if printf '%s\n' "$status" | grep -Eq '^Wifi is (not connected|disabled)$'; then
+    last_association=""
+  elif printf '%s\n' "$status" | grep -q '^Wifi is connected to '; then
+    association=$(printf '%s\n' "$status" | sed -n 's/^WifiInfo: .* BSSID: \([^, ]*\).*$/\1/p')
+    if printf '%s\n' "$association" | grep -Eq '^([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}$'; then
+      case "$association" in
+        00:00:00:00:00:00|02:00:00:00:00:00) ;;
+        *)
+          if [ "$association" != "$last_association" ]; then
+            # Repeated ticks do not undo a same-association manual disable.
+            # This does not add trusted networks or alter paired host keys.
+            if settings put global adb_wifi_enabled 1; then
+              last_association="$association"
+            fi
+          fi
+          ;;
+      esac
+    fi
+  fi
+  pause
 done
-settings put global adb_wifi_enabled 1
 BOOT
 )
   write_command=$(sinnix-remote-command printf '%s\n' "$boot_script") || return
   # Only replace this owner's hook. Root authority comes from the phone's
   # existing su grant; no authentication or listening-port policy is bypassed.
-  adb_shell_args su -c "set -e; umask 077; test -d /data/adb/service.d; if [ -e /data/adb/service.d/sinnix-wireless-adb.sh ]; then grep -q '^# Sinnix-owned authenticated wireless ADB startup hook.$' /data/adb/service.d/sinnix-wireless-adb.sh; fi; $write_command > /data/adb/service.d/.sinnix-wireless-adb.sh.new; chmod 700 /data/adb/service.d/.sinnix-wireless-adb.sh.new; mv /data/adb/service.d/.sinnix-wireless-adb.sh.new /data/adb/service.d/sinnix-wireless-adb.sh"
+  local prepare restart root_command
+  prepare=$(cat <<'PREPARE'
+set -e
+umask 077
+home=/data/adb/sinnix-wireless-adb
+hook=/data/adb/service.d/sinnix-wireless-adb.sh
+test -d /data/adb/service.d
+test ! -L "$home"
+mkdir -p "$home"
+chmod 700 "$home"
+if [ -e "$hook" ]; then
+  test ! -L "$hook"
+  grep -q '^# Sinnix-owned authenticated wireless ADB startup hook.$' "$hook"
+  test ! -L "$home/original.sh"
+  if [ ! -e "$home/original.sh" ]; then
+    cp -p "$hook" "$home/original.sh"
+    chmod 400 "$home/original.sh"
+  fi
+fi
+PREPARE
+)
+  restart=$(cat <<'RESTART'
+chmod 700 /data/adb/service.d/.sinnix-wireless-adb.sh.new
+mv /data/adb/service.d/.sinnix-wireless-adb.sh.new "$hook"
+is_owner() {
+  case "$1" in ''|*[!0-9]*) return 1 ;; esac
+  case "$2" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$(awk '{print $22}' "/proc/$1/stat" 2>/dev/null)" = "$2" ] || return 1
+  tr '\000' '\n' < "/proc/$1/cmdline" | grep -Fxq "$hook"
+}
+if [ -f "$home/owner" ]; then
+  read -r owner_pid owner_birth < "$home/owner"
+  cp -p "$home/owner" "$home/previous-owner"
+  if is_owner "$owner_pid" "$owner_birth"; then
+    kill -TERM "$owner_pid"
+    i=0
+    while is_owner "$owner_pid" "$owner_birth"; do
+      [ "$i" -lt 50 ] || { echo "wireless ADB owner did not stop" >&2; exit 1; }
+      sleep 0.1
+      i=$((i + 1))
+    done
+  fi
+fi
+nohup /system/bin/sh "$hook" </dev/null >"$home/last-start.log" 2>&1 &
+started_pid=$!
+i=0
+while [ "$i" -lt 50 ]; do
+  if [ -f "$home/owner" ]; then
+    read -r owner_pid owner_birth < "$home/owner"
+    if [ "$owner_pid" = "$started_pid" ] && is_owner "$owner_pid" "$owner_birth"; then
+      echo "WIRELESS_ADB_OWNER_ACTIVE"
+      exit 0
+    fi
+  fi
+  kill -0 "$started_pid" 2>/dev/null || break
+  sleep 0.1
+  i=$((i + 1))
+done
+echo "wireless ADB owner did not start" >&2
+exit 1
+RESTART
+)
+  root_command=$(printf '%s\n%s\n%s' "$prepare" \
+    "$write_command > /data/adb/service.d/.sinnix-wireless-adb.sh.new" "$restart")
+  adb_shell_args su -c "$root_command"
 }
 
 # The grants the app needs that only shell-uid can make. RECORD_AUDIO is
@@ -1370,17 +1484,19 @@ adb-connect)
   echo "Connected to $ADB_TARGET"
   ;;
 adb-restore)
+  if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != --persistent ]; }; then
+    echo "adb-restore: expected --persistent or no argument" >&2
+    exit 2
+  fi
   usb_serial="${SINNIX_PHONE_ADB_SERIAL:-$(cat "$PHONE_STATE/adb-serial" 2>/dev/null || true)}"
   [ -n "$usb_serial" ] || { echo "phone ADB serial not enrolled" >&2; exit 1; }
   adb -s "$usb_serial" get-state >/dev/null
   adb -s "$usb_serial" shell settings put global adb_wifi_enabled 1
   ADB_RESOLVED="$usb_serial"
-  case "${1:-}" in
-    "") ;;
-    --persistent) install_wireless_adb_boot ;;
-    *) echo "adb-restore: expected --persistent or no argument" >&2; exit 2 ;;
-  esac
-  echo "Wireless debugging enabled; endpoint discovery follows port changes."
+  if [ "${1:-}" = --persistent ]; then
+    install_wireless_adb_boot
+  fi
+  echo "Wireless debugging requested; endpoint discovery follows port changes."
   ;;
 clip-push)
   # text/* only -- termux-clipboard-set takes a string argument; pushing raw

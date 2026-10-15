@@ -48,7 +48,23 @@ The explicit `shell` commands continue to accept operator-authored command text.
 Phone SSH uses one pinned `sinnix-phone` host identity across tailnet, mDNS and
 LAN addresses. Enroll its public host key through an authenticated device
 connection in the owner-managed `known_hosts` file under the phone state home;
-`SINNIX_PHONE_KNOWN_HOSTS` may select another enrolled file. SSH discovery runs only when an operation actually needs SSH. ADB-only operations reuse an authenticated connection or discover Android wireless debugging through Avahi, checking the enrolled serial before selection. The phone state home’s private `adb-serial` file records the serial enrolled through authenticated USB; `SINNIX_PHONE_ADB_SERIAL` may override it and `SINNIX_PHONE_ADB_ENDPOINT` supplies an explicit endpoint. No SSH or LAN scan is needed. `adb-connect` follows changing TLS ports; `adb-restore` enables wireless debugging over authorized USB. It does not enable legacy port 5555. Android must keep Wireless debugging enabled on a trusted Wi-Fi network; host discovery cannot enable it after a phone reboot without another authenticated route. On a phone with an existing authorized Magisk root route, `adb-restore --persistent` installs the Sinnix-owned boot hook to restore this setting once Android finishes booting. It does not run a continuous watchdog or change pairing keys; removing `/data/adb/service.d/sinnix-wireless-adb.sh` retires the hook. Reboot persistence requires native verification at a normal phone restart. Discovery verifies
+`SINNIX_PHONE_KNOWN_HOSTS` may select another enrolled file. SSH discovery runs only when an operation actually needs SSH. ADB-only operations reuse an authenticated connection or discover Android wireless debugging through Avahi, checking the enrolled serial before selection. The phone state home’s private `adb-serial` file records the serial enrolled through authenticated USB; `SINNIX_PHONE_ADB_SERIAL` may override it and `SINNIX_PHONE_ADB_ENDPOINT` supplies an explicit endpoint. No SSH or LAN scan is needed. `adb-connect` follows changing TLS ports; `adb-restore` enables wireless debugging over authorized USB. It does not enable legacy port 5555. Android must keep Wireless debugging enabled on a trusted Wi-Fi network; host discovery cannot enable it after a phone reboot without another authenticated route. On a phone with an existing authorized Magisk root route,
+`adb-restore --persistent` installs the Sinnix-owned Magisk boot hook. After
+boot, that owner checks Wi-Fi association every ten seconds and requests
+wireless debugging on first association, observed reconnect, or BSSID change.
+It uses Android's normal trusted-network gate; pairing keys and network trust
+are unchanged. It neither opens legacy port 5555 nor holds a wakelock.
+
+The hook does not rewrite a manual disable during the same observed
+association. A later association enables debugging again; an unobserved brief
+disconnect cannot be distinguished from manual disable, so that case may need
+`adb-restore`. Remove `/data/adb/service.d/sinnix-wireless-adb.sh` to retire
+persistence; the running owner then exits. Updating the hook preserves its
+first preimage at `/data/adb/sinnix-wireless-adb/original.sh` with mode `0400`.
+Installation starts the owner immediately and restarts only an existing
+recorded owner whose PID, process start time and command match this hook.
+A kernel file lock prevents duplicate owners. Boot and reconnect behavior
+still require native verification. Discovery verifies
 both the host key and login before remembering an address. An open port is
 insufficient, and no scan automatically learns a key. An explicit address
 changes routing but retains strict SSH identity checks.
@@ -617,8 +633,10 @@ and MIUI background autostart for Tailscale.
 force-stopped app, so the case that matters — a reboot, or MIUI reclaiming the
 process — is not what force-stop reproduces.
 
-adbd's TCP mode does not survive a reboot; `sinnix phone adb-restore` re-enables
-it over USB. Everything the app does is designed around that: `status.json` is
+`sinnix phone adb-restore` requests authenticated wireless debugging through
+USB; its optional persistent hook handles later observed Wi-Fi associations
+as described above. Everything the app does is designed around transport
+failures: `status.json` is
 read over whichever adb transport is up, USB included, so liveness never
 depends on Termux, sshd, or the tailnet — precisely the layers that kept
 failing.

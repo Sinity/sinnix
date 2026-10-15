@@ -17,10 +17,12 @@
               pkgs.jq
               pkgs.ffmpeg
               pkgs.python3
+              pkgs.util-linux
             ];
           }
           ''
             python ${./phone-bcr.py} ${../../scripts/sinnix-phone} ${../../scripts/sinnix-remote-command}
+            python ${./phone-wireless.py} ${../../scripts/sinnix-phone} ${../../scripts/sinnix-remote-command}
             touch "$out"
           '';
     };
