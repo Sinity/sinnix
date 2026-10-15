@@ -32,7 +32,7 @@ def write_json(path, value):
     )
 
 
-def request_transcript(path, key, parameters):
+def request_transcript(path, audio, key, parameters):
     boundary = uuid.uuid4().hex
     parts = []
     for name, value in parameters.items():
@@ -42,7 +42,7 @@ def request_transcript(path, key, parameters):
     parts.extend(
         [
             f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="audio{path.suffix}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode(),
-            path.read_bytes(),
+            audio,
             f"\r\n--{boundary}--\r\n".encode(),
         ]
     )
@@ -194,8 +194,9 @@ def main():
     }
     records = []
     for index, path in enumerate(paths, 1):
-        with path.open("rb") as source:
-            digest = hashlib.file_digest(source, "sha256").hexdigest()
+        # Hash and submit one captured byte sequence, even if the path changes.
+        audio = path.read_bytes()
+        digest = hashlib.sha256(audio).hexdigest()
         raw_name = path.name + ".scribe.json"
         raw_path = args.output_dir / raw_name
         meta_path = args.output_dir / (path.name + ".source.json")
@@ -213,7 +214,7 @@ def main():
         if not raw_path.exists():
             write_json(meta_path, identity)
             try:
-                raw = request_transcript(path, key, parameters)
+                raw = request_transcript(path, audio, key, parameters)
             except urllib.error.HTTPError as error:
                 print(
                     f"Scribe request failed: HTTP {error.code}; {path.name}. Completed responses remain resumable.",
@@ -233,6 +234,7 @@ def main():
             ):
                 raise ValueError("Unexpected Scribe response; expected text and words")
             write_json(raw_path, raw)
+        del audio
         records.append(identity)
         write_json(args.output_dir / "manifest.json", records)
         render(records, args.output_dir)

@@ -42,7 +42,7 @@ def test_resume_preserves_evidence_and_rejects_changed_audio(
     }
     calls = []
 
-    def transcribe(path, key, parameters):
+    def transcribe(path, audio, key, parameters):
         calls.append(parameters)
         return response
 
@@ -113,7 +113,7 @@ def test_network_failure_can_resume_without_reuploading_completed_files(
     )
     calls = []
 
-    def transcribe(path, key, parameters):
+    def transcribe(path, audio, key, parameters):
         calls.append(path.name)
         if len(calls) == 2:
             raise subject.urllib.error.URLError("synthetic-secret")
@@ -145,3 +145,54 @@ def test_changed_settings_refuse_cached_response(subject, tmp_path, monkeypatch)
     with pytest.raises(SystemExit):
         subject.main()
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("replace_inode", [False, True])
+def test_uploaded_bytes_match_identity_after_source_changes(
+    subject, tmp_path, monkeypatch, replace_inode
+):
+    import hashlib
+    import io
+    from email.parser import BytesParser
+    from email.policy import default
+
+    original = b"original synthetic recording"
+    changed = b"different synthetic recording"
+    audio = tmp_path / "clip.wav"
+    audio.write_bytes(original)
+    output = tmp_path / "output"
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "synthetic-key")
+    monkeypatch.setattr(sys, "argv", ["review", "--output-dir", str(output), str(audio)])
+    write_json = subject.write_json
+
+    def change_after_identity(path, value):
+        write_json(path, value)
+        if path.name.endswith(".source.json"):
+            if replace_inode:
+                replacement = tmp_path / "replacement.wav"
+                replacement.write_bytes(changed)
+                replacement.replace(audio)
+            else:
+                audio.write_bytes(changed)
+
+    monkeypatch.setattr(subject, "write_json", change_after_identity)
+    uploads = []
+
+    def fake_api(request, timeout):
+        message = BytesParser(policy=default).parsebytes(
+            b"Content-Type: " + request.get_header("Content-type").encode()
+            + b"\r\nMIME-Version: 1.0\r\n\r\n" + request.data
+        )
+        uploads.append(next(part.get_payload(decode=True) for part in message.iter_parts()
+                            if part.get_param("name", header="content-disposition") == "file"))
+        return io.BytesIO(b'{"text":"synthetic transcript","words":[]}')
+
+    monkeypatch.setattr(subject.urllib.request, "urlopen", fake_api)
+    assert subject.main() == 0
+    identity = json.loads((output / "clip.wav.source.json").read_text())
+    assert uploads == [original]
+    assert identity["sha256"] == hashlib.sha256(uploads[0]).hexdigest()
+    assert json.loads((output / "manifest.json").read_text()) == [identity]
+    with pytest.raises(SystemExit):
+        subject.main()
+    assert len(uploads) == 1
