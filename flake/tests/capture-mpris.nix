@@ -98,6 +98,17 @@
       checks.capture-lane-privacy =
         assert builtins.seq privacy true;
         pkgs.runCommand "capture-lane-privacy-check" { } ''touch "$out"'';
+      checks.capture-router = pkgs.runCommand "capture-router-check"
+        {
+          nativeBuildInputs = [ pkgs.python3 pkgs.bash pkgs.coreutils pkgs.gawk pkgs.gnused pkgs.gnugrep pkgs.jq ];
+          ROUTER_PERIODS_SCRIPT = ../../pkgs/capture-router/remote-periods.sh;
+          ROUTER_POLL_SCRIPT = ../../pkgs/capture-router/poll.sh;
+          ROUTER_REMOTE_POLL_SCRIPT = ../../pkgs/capture-router/remote-poll.sh;
+        }
+        ''
+          python3 ${../../pkgs/capture-router/tests/test_periods.py}
+          touch "$out"
+        '';
       checks.kitty-scrollback =
         pkgs.runCommand "kitty-scrollback-capture-check"
           {

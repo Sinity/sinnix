@@ -98,13 +98,16 @@ nlbw_csv_to_json() {
   jq -R -s '
 		split("\n") | map(select(length>0)) |
 		map(split("\t") | map(gsub("^\"|\"$";""))) |
-		(.[0]) as $hdr | .[1:] | map(
+		(.[0] // []) as $hdr |
+		if (["family", "port", "conns", "rx_bytes", "rx_pkts", "tx_bytes", "tx_pkts"] - $hdr | length) > 0
+		then error("invalid nlbw export header")
+		else .[1:] | map(
 			([$hdr, .] | transpose | map({(.[0]): .[1]}) | add) as $row
 			| $row
 			| .family |= tonumber | .port |= tonumber | .conns |= tonumber
 			| .rx_bytes |= tonumber | .rx_pkts |= tonumber
 			| .tx_bytes |= tonumber | .tx_pkts |= tonumber
-		)
+		) end
 	'
 }
 
