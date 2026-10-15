@@ -159,6 +159,19 @@ else:
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(len(list(self.capture.glob("*.ansi"))), 1)
 
+    def test_socket_inventory_uses_declared_writable_capture_home(self):
+        blocked = self.root / "unwritable-scratch"
+        blocked.mkdir()
+        blocked.chmod(0)
+        self.env["TMPDIR"] = str(blocked)
+        try:
+            result = self.run_capture("success", current=False)
+        finally:
+            blocked.chmod(0o700)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(list(self.capture.glob("*.ansi"))), 1)
+        self.assertFalse(list(self.capture.glob(".socket-listing.*")))
+
     def test_second_allocation_failure_leaves_no_empty_error_file(self):
         wrapper = self.root / "bin" / "mktemp"
         wrapper.write_text(f"#!{sys.executable}\n" + """

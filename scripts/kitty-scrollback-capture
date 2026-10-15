@@ -168,7 +168,8 @@ if [[ ! -d "$RUNTIME_DIR" ]]; then
   echo "Error: runtime directory unavailable or not a directory: $RUNTIME_DIR" >&2
   exit 1
 fi
-socket_listing=$(mktemp --tmpdir="${TMPDIR:-/realm/tmp/work}" kitty-scrollback-sockets.XXXXXX)
+# The owning capture unit makes only its declared output homes writable.
+socket_listing=$(mktemp "$CAPTURE_DIR/.socket-listing.XXXXXX")
 trap 'rm -f -- "$socket_listing"' EXIT
 find -H "$RUNTIME_DIR" -maxdepth 1 -name 'kitty-*' -type s -print0 > "$socket_listing"
 while IFS= read -r -d '' socket; do
