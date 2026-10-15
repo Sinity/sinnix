@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: aee0ddaa31ea46711cb020509d30bd7603ab3b9c2036b9a021fda73ecda0c5fe -->
+<!-- gateway-catalog-sha256: 00859495e03ea04323acc855a75a5b0b7b2d802ad825d4cc2db5d1c8178acca1 -->
 
 # Agent Gateway
 
@@ -45,7 +45,7 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 - `files.stat` — Describe one host path: kind, size, mode, owner, timestamps, MIME, hash.
 - `files.list` — List a directory with a canonical ref for every child.
 - `files.read` — Read a file: text inline, images as image blocks, other binary as read-only links.
-- `files.search` — Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Results are bounded by limit and timeout.
+- `files.search` — Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Content search retains complete records within 16 MiB per record, 64 MiB of ripgrep output, and 64 MiB of overflow. Reaching a bound stops the search and returns truncated=true with a warning. File count and timeout limits also apply.
 - `files.plan` — The caller supplies every mapping. The plan hashes each regular source file and records collision, parent and filesystem facts without changing host files.
 - `files.references` — Runs the existing bounded files.search text primitive once for each supplied old path. It only reports provenance and never rewrites references.
 - `projects.list` — List configured repository stores, their explicit default ref, and live checkout ids.
@@ -187,4 +187,4 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `aee0ddaa31ea46711cb020509d30bd7603ab3b9c2036b9a021fda73ecda0c5fe`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `00859495e03ea04323acc855a75a5b0b7b2d802ad825d4cc2db5d1c8178acca1`.

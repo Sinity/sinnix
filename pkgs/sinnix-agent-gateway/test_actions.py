@@ -1542,3 +1542,52 @@ def test_file_read_beyond_observed_eof_returns_an_empty_page(tmp_path, offset):
     assert page.offset == offset
     assert page.text == "" and page.returned_bytes == 0
     assert page.next_offset is None and page.truncated is False
+
+
+@pytest.mark.parametrize("bound", ["record", "output", "overflow"])
+def test_files_search_stops_at_resource_bound_with_explicit_partial_result(tmp_path, monkeypatch, bound):
+    cfg = replace(config(tmp_path), max_result_bytes=1_024)
+    runtime = create_server(cfg, "operator")._sinnix_revision_publisher.runtime
+    root = tmp_path / "bounded-corpus"
+    root.mkdir()
+    if bound == "record":
+        (root / "input.txt").write_text("needle " + "x" * 2048 + "\n")
+        monkeypatch.setattr(files, "MAX_SEARCH_RECORD_BYTES", 512, raising=False)
+    else:
+        (root / "input.txt").write_text(("needle " + "x" * 200 + "\n") * 100)
+        setting = "MAX_SEARCH_OUTPUT_BYTES" if bound == "output" else "MAX_SEARCH_OVERFLOW_BYTES"
+        monkeypatch.setattr(files, setting, 2048, raising=False)
+    result = files._search(runtime, files.SearchInput(roots=[{"path": str(root)}], content_regex="needle", limit=1))
+    assert result.truncated is True
+    assert result.timed_out is False
+    assert any(bound + " limit" in warning for warning in result.warnings)
+    if bound == "record":
+        assert result.matches == [] and result.overflow is None
+    else:
+        assert sum(match.match_count for match in result.matches) < 100
+        for match in result.matches:
+            assert match.match_count == len(match.lines) + match.overflow_lines
+    if bound == "overflow":
+        assert result.overflow is not None
+        assert result.overflow.bytes <= 2048
+        snapshot = runtime.artifacts.registered_content(result.overflow.artifact_id)
+        rows = [json.loads(line) for line in snapshot.read_text().splitlines()]
+        assert len(rows) == result.overflow.lines
+        assert all(row["text"].startswith("needle ") for row in rows)
+
+
+def test_files_search_overflow_preserves_non_utf8_filename(tmp_path, monkeypatch):
+    runtime = create_server(config(tmp_path), "operator")._sinnix_revision_publisher.runtime
+    root = tmp_path / "raw-name-corpus"
+    root.mkdir()
+    raw_path = os.fsencode(root) + b"/raw-\xff.txt"
+    with open(raw_path, "wb") as handle:
+        handle.write(b"needle\n")
+    monkeypatch.setattr(files, "INBAND_LINES_PER_FILE", 0)
+    result = files._search(runtime, files.SearchInput(roots=[{"path": str(root)}], content_regex="needle"))
+    assert not result.truncated
+    assert result.overflow is not None
+    snapshot = runtime.artifacts.registered_content(result.overflow.artifact_id)
+    row = json.loads(snapshot.read_text())
+    assert os.fsencode(row["path"]) == raw_path
+    assert row["text"] == "needle"

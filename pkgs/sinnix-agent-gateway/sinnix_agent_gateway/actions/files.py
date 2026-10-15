@@ -568,6 +568,11 @@ class MatchLine(GatewayModel):
 # the search's overflow artifact as they arrive, so a file with ten thousand
 # matching lines costs this many in memory, not ten thousand.
 INBAND_LINES_PER_FILE = 200
+# Bounds apply before JSON decoding and before persisting overflow. They allow
+# ordinary multi-megabyte lines without tying resource use to corpus size.
+MAX_SEARCH_RECORD_BYTES = 16 * 1024 * 1024
+MAX_SEARCH_OUTPUT_BYTES = 64 * 1024 * 1024
+MAX_SEARCH_OVERFLOW_BYTES = 64 * 1024 * 1024
 
 
 class FileMatch(FileEntry):
@@ -600,7 +605,7 @@ class SearchResult(GatewayModel):
     warnings: list[str] = Field(default_factory=list)
     overflow: SearchOverflow | None = Field(
         default=None,
-        description="Every matching or context line not returned in band.",
+        description="Complete matching or context lines retained outside the inline result; truncation is explicit.",
     )
 
 
@@ -609,7 +614,7 @@ def _run(
     timeout: int,
     *,
     max_stderr_bytes: int,
-    on_stdout: Callable[[bytes], None],
+    on_stdout: Callable[[bytes], bool | None],
 ) -> ExecutionResult:
     """Stream a declared search owner without retaining aggregate stdout.
 
@@ -631,6 +636,8 @@ def _run(
 
 def _raise_search_failure(argv: list[str], result: ExecutionResult) -> None:
     if result.timed_out:
+        return
+    if result.stopped_early and result.failure_class is None and not result.output_exceeded:
         return
     if result.failure_class and result.failure_class.startswith("command_unavailable"):
         raise ProtocolError("unavailable", f"{argv[0]} is not installed")
@@ -699,27 +706,40 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
         spill: Any = None
         spilled = 0
         inband_bytes = 0
+        output_bytes = 0
+        overflow_bytes = 0
+        resource_bound: str | None = None
 
-        def overflow(path_text: str, line: MatchLine) -> None:
-            nonlocal spill_path, spill, spilled
+        def overflow(path_text: str, line: MatchLine) -> bool:
+            nonlocal spill_path, spill, spilled, overflow_bytes
+            serialized = json_module.dumps(
+                {"path": path_text, **line.model_dump()},
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ) + "\n"
+            size = len(serialized.encode("utf-8"))
+            if overflow_bytes + size > MAX_SEARCH_OVERFLOW_BYTES:
+                return False
             if spill is None:
                 directory = runtime.config.state_dir / "captures" / uuid.uuid4().hex
                 directory.mkdir(mode=0o700, parents=True)
                 spill_path = directory / "search-overflow.txt"
                 spill = spill_path.open("w", encoding="utf-8")
-            spill.write(
-                json_module.dumps(
-                    {"path": path_text, **line.model_dump()},
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                )
-                + "\n"
-            )
+            spill.write(serialized)
+            overflow_bytes += size
             spilled += 1
+            return True
 
         def warn_once(message: str) -> None:
             if message not in warnings:
                 warnings.append(message)
+
+        def stop_at_bound(kind: str, limit: int) -> bool:
+            nonlocal resource_bound
+            resource_bound = kind
+            warn_once(f"Search stopped at the {kind} limit ({limit} bytes); results contain only complete retained records")
+            pending.clear()
+            return False
 
         def rg_text(value: object, *, field: str, path: bool = False) -> str | None:
             if not isinstance(value, dict):
@@ -749,7 +769,7 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
                 )
             return decoded
 
-        def consume_record(raw: bytes) -> None:
+        def consume_record(raw: bytes) -> bool | None:
             nonlocal limit_reached, inband_bytes
             if not raw:
                 return
@@ -821,17 +841,37 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
                 entry.lines.append(row)
                 inband_bytes += row_bytes
             else:
-                overflow(path_text, row)
+                if not overflow(path_text, row):
+                    if not entry.lines and not entry.overflow_lines:
+                        by_path.pop(path_text, None)
+                    return stop_at_bound("overflow", MAX_SEARCH_OVERFLOW_BYTES)
                 entry.overflow_lines += 1
             if kind == "match":
                 entry.match_count = (entry.match_count or 0) + 1
 
-        def consume(chunk: bytes) -> None:
-            pending.extend(chunk)
-            while (newline := pending.find(b"\n")) >= 0:
-                raw = bytes(pending[:newline])
-                del pending[: newline + 1]
-                consume_record(raw)
+        def consume(chunk: bytes) -> bool | None:
+            nonlocal output_bytes
+            if resource_bound is not None:
+                return False
+            available = MAX_SEARCH_OUTPUT_BYTES - output_bytes
+            clipped = len(chunk) > available
+            chunk = chunk[:available]
+            output_bytes += len(chunk)
+            offset = 0
+            while offset < len(chunk):
+                newline = chunk.find(b"\n", offset)
+                end = newline + 1 if newline >= 0 else len(chunk)
+                if len(pending) + end - offset > MAX_SEARCH_RECORD_BYTES:
+                    return stop_at_bound("record", MAX_SEARCH_RECORD_BYTES)
+                pending.extend(chunk[offset:end])
+                offset = end
+                if newline >= 0:
+                    raw = bytes(pending)
+                    pending.clear()
+                    if consume_record(raw) is False:
+                        return False
+            if clipped:
+                return stop_at_bound("output", MAX_SEARCH_OUTPUT_BYTES)
 
         try:
             result = _run(
@@ -843,7 +883,7 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
             # A killed command can leave one partial JSON record.  It does not
             # describe a complete match, so only consume a final unterminated
             # row after normal completion.
-            if pending and not result.timed_out:
+            if pending and not result.timed_out and not result.stopped_early:
                 consume_record(bytes(pending))
         finally:
             if spill is not None:
@@ -876,7 +916,7 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
             roots=root_refs,
             matches=matches,
             returned=len(matches),
-            truncated=limit_reached or result.timed_out,
+            truncated=limit_reached or result.timed_out or resource_bound is not None,
             engine="rg",
             timed_out=result.timed_out,
             warnings=warnings,
@@ -1417,7 +1457,7 @@ ACTIONS = ACTIONS + (
         resource_kinds=("host_file",),
         affordances=("files.read", "files.stat", "files.list"),
         aliases=("find", "grep", "locate", "rg", "fd", "search files", "recent files"),
-        documentation="Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Results are bounded by limit and timeout.",
+        documentation="Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Content search retains complete records within 16 MiB per record, 64 MiB of ripgrep output, and 64 MiB of overflow. Reaching a bound stops the search and returns truncated=true with a warning. File count and timeout limits also apply.",
         examples=(
             Example(
                 title="PNGs under /realm/tmp/work",
