@@ -119,6 +119,7 @@ class MonitorTest(unittest.TestCase):
         title = "title\x1f\r\n&#x1f;&amp;"
         artist = "artist\u0085"
         album = "album\n</mpris>\nforged\x1fPaused\x1ffake\x1fartist\x1falbum"
+        metadata = {"xesam:title": Variant('s', title), "xesam:artist": Variant('as', [artist]), "xesam:album": Variant('s', album)}
 
         class Player(ServiceInterface):
             def __init__(self):
@@ -126,7 +127,7 @@ class MonitorTest(unittest.TestCase):
 
             @dbus_property(access=PropertyAccess.READ)
             def Metadata(self) -> 'a{sv}':
-                return {"xesam:title": Variant('s', title), "xesam:artist": Variant('as', [artist]), "xesam:album": Variant('s', album)}
+                return metadata
 
             @dbus_property(access=PropertyAccess.READ)
             def PlaybackStatus(self) -> 's':
@@ -146,19 +147,23 @@ class MonitorTest(unittest.TestCase):
             try:
                 bus.export("/org/mpris/MediaPlayer2", Player())
                 await bus.request_name("org.mpris.MediaPlayer2.fixture")
-                process = await asyncio.create_subprocess_exec(
-                    os.environ["PLAYERCTL_BIN"], "--player=fixture", "metadata", "--format", MONITOR.FOLLOW_FORMAT,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                output, error = await asyncio.wait_for(process.communicate(), timeout=5)
-                self.assertEqual(process.returncode, 0, error.decode())
-                records = list(MONITOR.follow_records(io.BytesIO(output)))
-                self.assertEqual(len(records), 1)
-                captured = []
-                with patch.object(MONITOR, "fetch_position_and_duration", return_value=(None, None)):
-                    MONITOR.handle_follow_record(records[0].decode(), MONITOR.PlayerState(), "unused", SimpleNamespace(enqueue=lambda payload, ts: captured.append(payload)))
-                self.assertEqual(len(captured), 1)
-                self.assertEqual(tuple(captured[0][key] for key in MONITOR.FOLLOW_FIELDS), ("fixture", "Playing", title, artist, album))
+                for expected in [(title, artist, album), ("title only", None, None)]:
+                    if expected[1] is None:
+                        metadata.clear()
+                        metadata["xesam:title"] = Variant('s', expected[0])
+                    process = await asyncio.create_subprocess_exec(
+                        os.environ["PLAYERCTL_BIN"], "--player=fixture", "metadata", "--format", MONITOR.FOLLOW_FORMAT,
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    )
+                    output, error = await asyncio.wait_for(process.communicate(), timeout=5)
+                    self.assertEqual(process.returncode, 0, error.decode())
+                    records = list(MONITOR.follow_records(io.BytesIO(output)))
+                    self.assertEqual(len(records), 1)
+                    captured = []
+                    with patch.object(MONITOR, "fetch_position_and_duration", return_value=(None, None)):
+                        MONITOR.handle_follow_record(records[0].decode(), MONITOR.PlayerState(), "unused", SimpleNamespace(enqueue=lambda payload, ts: captured.append(payload)))
+                    self.assertEqual(len(captured), 1)
+                    self.assertEqual(tuple(captured[0][key] for key in MONITOR.FOLLOW_FIELDS), ("fixture", "Playing", *expected))
             finally:
                 if process is not None and process.returncode is None:
                     process.kill()
