@@ -9,6 +9,7 @@ report_dir="${SINNIX_MEMORY_AUDIT_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/sin
 days="${SINNIX_MEMORY_STALE_DAYS:-90}"
 roots_string="${SINNIX_MEMORY_ROOTS:-$HOME/.config/claude/projects:$HOME/.codex:$HOME/.config/claude}"
 output=""
+default_output=0
 roots=()
 
 while [ "$#" -gt 0 ]; do
@@ -27,22 +28,31 @@ fi
 if [ -z "$output" ]; then
   mkdir -p "$report_dir"
   output="$report_dir/$(date -u +%Y%m%dT%H%M%SZ).jsonl"
+  default_output=1
 fi
 mkdir -p "$(dirname "$output")"
-tmp="$(mktemp "$(dirname "$output")/.memory-audit.XXXXXX")"
-trap 'rm -f "$tmp"' EXIT
+scratch="$(mktemp -d "$(dirname "$output")/.memory-audit.XXXXXX")"
+trap 'rm -rf -- "$scratch"' EXIT
+tmp="$scratch/report.jsonl"
+listing="$scratch/inputs"
+: > "$listing"
+if [[ "$default_output" -eq 1 ]]; then
+  output="${output%.jsonl}-${scratch##*.}.jsonl"
+fi
 
 now="$(date +%s)"
 stale_seconds=$((days * 86400))
-files=()
+# Every requested root must be readable; a partial scan cannot replace the
+# last report. Stage discovery directly so find's exit status is observed.
 for root in "${roots[@]}"; do
-  [ -d "$root" ] || continue
-  while IFS= read -r -d '' file; do
-    files+=("$file")
-  done < <(find "$root" -type f \( -name MEMORY.md -o -name '*memory*.md' \) -print0)
+  if [[ ! -d "$root" ]]; then
+    printf 'sinnix-memory-audit: input root unavailable or not a directory: %s\n' "$root" >&2
+    exit 1
+  fi
+  find -H "$root" -type f \( -name MEMORY.md -o -name '*memory*.md' \) -print0 >> "$listing"
 done
 
-printf '%s\0' "${files[@]}" | sort -zu | while IFS= read -r -d '' file; do
+sort -zu "$listing" | while IFS= read -r -d '' file; do
   [ -n "$file" ] || continue
   SINNIX_MEMORY_AUDIT_FILE="$file" awk -v now="$now" -v stale_seconds="$stale_seconds" '
     BEGIN {
@@ -90,5 +100,9 @@ printf '%s\0' "${files[@]}" | sort -zu | while IFS= read -r -d '' file; do
   ' "$file"
 done > "$tmp"
 
-mv "$tmp" "$output"
+if [[ "$default_output" -eq 1 ]]; then
+  mv -T --update=none-fail -- "$tmp" "$output"
+else
+  mv -T -- "$tmp" "$output"
+fi
 printf '%s\n' "$output"
