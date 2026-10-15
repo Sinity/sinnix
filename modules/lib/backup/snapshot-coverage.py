@@ -39,6 +39,7 @@ import tempfile
 import time
 from datetime import datetime
 from fnmatch import fnmatchcase
+from glob import escape as glob_escape
 from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
@@ -243,7 +244,7 @@ def identity(source):
 
 
 def archive_identity(archive, snapshot_uuid):
-    archives = json.loads(run("borg", "list", "--json", "--format", "{comment}"))[
+    archives = json.loads(run("borg", "list", "--json", "--format", "{comment}", "--glob-archives", glob_escape(archive)))[
         "archives"
     ]
     matches = [

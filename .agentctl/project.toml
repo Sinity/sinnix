@@ -68,6 +68,17 @@ pool = "bulk"
 result = "exit"
 timeout_seconds = 1800
 
+[operations.verify_snapshot_restore]
+description = "Restore one small file from an exact Realm archive and verify its complete digest"
+exec = ["python3", "flake/tests/backup_native_restore.py"]
+arguments = "required"
+pool = "bulk"
+result = "json"
+cache = "none"
+scratch = "nvme"
+timeout_seconds = 600
+admission = { memory_mib = 2048 }
+
 [operations.reverse_engineering_verify]
 description = "Verify firmware extraction and Ghidra decompilation on synthetic inputs"
 exec = ["nix", "develop", ".#reverse-engineering", "--command", "python3", "flake/tests/reverse-engineering.py"]

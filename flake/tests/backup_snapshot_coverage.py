@@ -167,6 +167,14 @@ class CoverageFixture(unittest.TestCase):
             str(self.source) + "/./",
         )
 
+    def test_archive_identity_filters_literal_names_without_prefix_substitution(self):
+        self.archive("literal[1]")
+        self.archive("literal1")
+        self.assertNotEqual(
+            COVERAGE.archive_identity("literal[1]", self.snapshot_uuid),
+            COVERAGE.archive_identity("literal1", self.snapshot_uuid),
+        )
+
     def test_newest_archive_cannot_release_an_unarchived_historical_version(self):
         queue = self.root / "unacknowledged-queue"
         queue.mkdir()
@@ -540,7 +548,7 @@ class CoverageFixture(unittest.TestCase):
                 COVERAGE.archive_identity("snapshot", self.snapshot_uuid), "b" * 64
             )
             command.assert_called_once_with(
-                "borg", "list", "--json", "--format", "{comment}"
+                "borg", "list", "--json", "--format", "{comment}", "--glob-archives", "snapshot"
             )
             with self.assertRaisesRegex(ValueError, "UUID"):
                 COVERAGE.archive_identity("absent", self.snapshot_uuid)
