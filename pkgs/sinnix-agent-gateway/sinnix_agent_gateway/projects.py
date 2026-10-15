@@ -409,7 +409,9 @@ class ProjectService:
     def _worktree_records(output: str) -> list[dict[str, str]]:
         records: list[dict[str, str]] = []
         current: dict[str, str] = {}
-        for line in output.splitlines():
+        if output and not output.endswith("\0\0"):
+            raise ProjectError("git worktree returned incomplete NUL porcelain")
+        for line in output.split("\0"):
             if not line:
                 if current:
                     records.append(current)
@@ -440,7 +442,7 @@ class ProjectService:
             ).removesuffix("\n")
         ).resolve()
         output = self._run_spooled(
-            ["git", "worktree", "list", "--porcelain"], project.path
+            ["git", "worktree", "list", "--porcelain", "-z"], project.path
         )
         candidates: list[dict[str, Any]] = []
         for record in self._worktree_records(output):
@@ -1024,8 +1026,13 @@ class ProjectService:
             if result.exit_status not in (0, 1):
                 diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
                 raise ProjectError(diagnostic or "project operation failed")
-            with spool.open(encoding="utf-8", errors="replace") as output:
-                yield output
+            with spool.open(
+                encoding="utf-8", errors="strict" if "-z" in command else "replace", newline=""
+            ) as output:
+                try:
+                    yield output
+                except UnicodeError as error:
+                    raise ProjectError("project owner output is not valid UTF-8; no partial inventory") from error
 
     @contextmanager
     def _locked_mutation(

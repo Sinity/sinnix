@@ -477,7 +477,7 @@ def test_bare_checkout_discovery_omits_missing_and_prunable_records(
         output = original(command, cwd, timeout)
         if command[1:4] == ["worktree", "list", "--porcelain"]:
             output += (
-                f"\nworktree {missing}\nHEAD {git(store, 'rev-parse', 'HEAD')}\n\n"
+                f"worktree {missing}\0HEAD {git(store, 'rev-parse', 'HEAD')}\0\0"
             )
         return output
 

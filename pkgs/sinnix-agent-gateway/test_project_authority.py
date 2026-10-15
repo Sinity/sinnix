@@ -87,14 +87,7 @@ def test_read_only_project_views_do_not_run_repository_fsmonitor(
 
 def test_worktree_porcelain_accepts_valueless_git_markers() -> None:
     records = ProjectService._worktree_records(
-        """worktree /fixture
-HEAD 0123456789abcdef
-bare
-detached
-locked
-prunable
-
-"""
+        "worktree /fixture\0HEAD 0123456789abcdef\0bare\0detached\0locked\0prunable\0\0"
     )
 
     assert records == [
@@ -527,3 +520,35 @@ def test_patch_path_metadata_streams_across_frames_without_losing_names(
     assert sorted(path.name for path in project.glob("f*.txt")) == names
     assert all((project / name).read_bytes() == b"" for name in names)
     assert git_stdout(project, "write-tree") == original_index
+
+
+@pytest.mark.parametrize("name", ['literal"quote', "literal\ttab", "literal\nline", "literal\rcarriage", "literal-żółć"])
+def test_checkout_discovery_preserves_literal_worktree_paths(tmp_path, name):
+    projects, project, _linked = project_service(tmp_path)
+    special = tmp_path / name
+    git(project, "worktree", "add", "--quiet", "-b", "fixture-special", str(special))
+    rows = projects.checkouts("fixture")["checkouts"]
+    matching = [row for row in rows if row["path"] == str(special)]
+    assert len(matching) == 1
+    assert matching[0]["branch"] == "fixture-special"
+    assert projects.checkout("fixture", matching[0]["checkout_id"])["checkout"]["path"] == str(special)
+
+
+@pytest.mark.parametrize("output", [
+    "worktree /fixture\nHEAD abc\n\n",
+    "worktree /fixture\0HEAD abc\0",
+    "worktree /fixture\0HEAD abc\0HEAD duplicate\0\0",
+    "worktree /fixture\0unknown-marker\0\0",
+])
+def test_worktree_inventory_refuses_malformed_or_incomplete_nul_records(output):
+    with pytest.raises(ProjectError, match="porcelain"):
+        ProjectService._worktree_records(output)
+
+
+def test_non_utf8_worktree_inventory_is_unavailable_not_substituted(tmp_path):
+    import os
+    projects, project, _linked = project_service(tmp_path)
+    special = tmp_path / os.fsdecode(b"invalid-\xff")
+    git(project, "worktree", "add", "--quiet", "-b", "fixture-special", str(special))
+    with pytest.raises(ProjectError, match="not valid UTF-8"):
+        projects.checkouts("fixture")
