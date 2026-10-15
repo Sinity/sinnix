@@ -764,11 +764,17 @@ class ProjectService:
             with io.TextIOWrapper(
                 _open_source_file(source_path), encoding="utf-8", errors="replace"
             ) as handle:
-                for line_number, line in enumerate(handle, 1):
-                    if line_number < start_line:
-                        continue
-                    if end_line is not None and line_number > end_line:
+                line_number = 1
+                while end_line is None or line_number <= end_line:
+                    # A physical line can exceed the response budget by gigabytes.
+                    # Bound decoding even when skipping lines before start_line.
+                    line = handle.readline(65_536)
+                    if not line:
                         break
+                    selected = line_number >= start_line
+                    line_number += line.endswith("\n")
+                    if not selected:
+                        continue
                     encoded = line.encode("utf-8")
                     if used + len(encoded) > max_bytes:
                         remaining = max_bytes - used

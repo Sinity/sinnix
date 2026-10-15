@@ -1155,3 +1155,46 @@ def test_project_inline_frame_boundary_retains_artifact_alternative(size):
         projects.WriteOp(path="test", source={"artifact_id": "a" * 36}).source
         is not None
     )
+
+
+@pytest.mark.parametrize("start_line,max_bytes,expected,truncated", [
+    (1, 7, "雪雪", True),
+    (2, 32, "selected\n", False),
+])
+def test_project_read_bounds_giant_lines_before_slicing(
+    tmp_path, monkeypatch, start_line, max_bytes, expected, truncated
+):
+    from types import SimpleNamespace
+
+    config, project, _ = fixture(tmp_path)
+    (project / "giant.txt").write_text("雪" * 800_000 + "\nselected\n")
+    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    text_wrapper = projects_module.io.TextIOWrapper
+    calls = []
+
+    class BoundedText:
+        def __init__(self, *args, **kwargs):
+            self.handle = text_wrapper(*args, **kwargs)
+
+        def __enter__(self):
+            self.handle.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.handle.__exit__(*args)
+
+        def __iter__(self):
+            raise AssertionError("project reads must not allocate unbounded lines")
+
+        def readline(self, size=-1):
+            assert 0 < size <= 65_536
+            calls.append(size)
+            return self.handle.readline(size)
+
+    monkeypatch.setattr(projects_module, "io", SimpleNamespace(TextIOWrapper=BoundedText))
+    result = runtime.projects.read("fixture", "giant.txt", start_line=start_line,
+                                   end_line=start_line, max_bytes=max_bytes)
+    assert result["content"] == expected
+    assert result["bytes"] == len(expected.encode("utf-8"))
+    assert result["truncated"] is truncated
+    assert calls
