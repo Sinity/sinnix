@@ -483,7 +483,7 @@ queue task identity, outcome and exit code. `outcome_ref.path` names the canonic
 per-attempt outcome file and `outcome_ref.sha256` binds its exact bytes. Full
 execution receipts, inventories, scratch measurements and cancellation details
 remain in that authoritative outcome, available through `job get` and its
-artifact references; a retry does not replace an earlier event's target. These
+artifact references. For outcomes above the inline metadata limit, `job get` streams the source and returns manifest `files_ref` and `omissions_ref` fields with its path, full-byte digest, byte count, JSON pointer and entry count. The full inventory stays in the original outcome; completion and endpoint binding remain inline. Malformed or changing sources do not produce a partial verdict. A retry does not replace an earlier event's target. These
 references bind the published bytes, not retention after normal owner cleanup.
 The spool is advisory notification, not another result ledger; notification
 paths are not a substitute for the job owner's result lookup.

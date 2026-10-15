@@ -42,7 +42,10 @@ python3Packages.buildPythonApplication {
   src = ./.;
 
   build-system = [ python3Packages.setuptools ];
-  dependencies = [ sinnix-lib ];
+  dependencies = [
+    sinnix-lib
+    python3Packages.ijson
+  ];
   makeWrapperArgs = [
     "--prefix PATH : ${lib.makeBinPath runtimeDependencies}"
   ];

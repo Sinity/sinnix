@@ -29,6 +29,7 @@ from typing import Any, Callable, Iterator, Mapping, Sequence
 from sinnix_lib.secrets import mask_secret_values, masked_window, secret_values
 
 from . import artifacts, gitcmd, manifest, pools, pueue
+from .outcome import read_outcome
 from .checkout import (
     CheckoutError,
     base_commit,
@@ -66,6 +67,7 @@ QUEUE_RUN_EXECUTABLE = "agentctl-run"
 # workstation has queued is 21 KB. The bound is what keeps a task from naming
 # an arbitrarily large file and having agentctl read it.
 MAX_LAUNCH_INPUT_BYTES = 1_048_576
+# Bound transported metadata; large manifest inventories remain referenced.
 MAX_OUTCOME_BYTES = 2 * MAX_LAUNCH_INPUT_BYTES
 # The label kinds under which a batch queues agents rather than declared operations.
 AGENT_OPERATIONS = frozenset({"worker", "resume", "integrate", "review"})
@@ -272,11 +274,7 @@ def successful_cached_attempt(
             or metadata.get("launch_input") != str(launch_path)
         ):
             continue
-        raw = read_bounded(outcome_path, MAX_OUTCOME_BYTES)
-        try:
-            outcome = json.loads(raw.decode("utf-8")) if raw else None
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            outcome = None
+        outcome = read_outcome(outcome_path, MAX_OUTCOME_BYTES)
         if not isinstance(outcome, Mapping) or outcome.get("attempt") != number:
             continue
         execution = outcome.get("execution_receipt")
@@ -1791,15 +1789,8 @@ def _outcome(config: Config, task: Task, attempt: int | None = None) -> dict[str
 
 
 def _outcome_from_path(path: Path | None) -> dict[str, Any]:
-    # The execution receipt includes the exact declared argv. It may exceed
-    # 4 KiB even when the result itself is small, so use a bounded limit that
-    # covers the admitted launch input plus receipt metadata.
-    raw = read_bounded(path, MAX_OUTCOME_BYTES) if path is not None else None
-    try:
-        record = json.loads(raw.decode("utf-8")) if raw else None
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        record = None
-    return {"outcome": record} if isinstance(record, dict) else {}
+    record = read_outcome(path, MAX_OUTCOME_BYTES)
+    return {"outcome": record} if record is not None else {}
 
 
 # A not-started cancellation is a launch-input disposition, never an attempt
