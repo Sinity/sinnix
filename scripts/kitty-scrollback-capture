@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Capture full-ANSI-fidelity kitty terminal scrollback across all instances
-# runtimeInputs: bash coreutils hostname kitty jq
+# runtimeInputs: bash coreutils findutils gnused hostname kitty jq
 set -euo pipefail
 umask 077
 
@@ -26,6 +26,17 @@ slugify() {
   printf '%s' "$1" | tr '\n\r' '  ' | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-50
 }
 
+window_rows() {
+  jq -cs '
+    if length != 1 then error("expected one inventory document") else .[0] end
+    | if type != "array" then error("expected instance array") else .[] end
+    | if (.tabs | type) != "array" then error("expected tabs array") else .tabs[] end
+    | if (.windows | type) != "array" then error("expected windows array") else .windows[] end
+    | if (.id | type) != "number" then error("expected numeric window id")
+      elif .id < 0 or (.id | floor) != .id then error("expected nonnegative integer window id")
+      else {id, title, cwd} end'
+}
+
 capture_window() {
   local socket="$1"
   local pid="$2"
@@ -43,7 +54,10 @@ capture_window() {
 
   local capture_error capture_output
   capture_error=$(mktemp "$CAPTURE_DIR/.capture-error.XXXXXX") || return 1
-  capture_output=$(mktemp "$CAPTURE_DIR/.capture-output.XXXXXX") || return 1
+  if ! capture_output=$(mktemp "$CAPTURE_DIR/.capture-output.XXXXXX"); then
+    rm -f -- "$capture_error"
+    return 1
+  fi
   if kitty @ --to "unix:$socket" get-text --match="id:$win_id" --extent=all --ansi --add-wrap-markers > "$capture_output" 2>"$capture_error"; then
     # Publish only complete bytes, and never replace an earlier capture.
     if ! ln -T -- "$capture_output" "$filepath"; then
@@ -134,7 +148,9 @@ if [ "$CURRENT_ONLY" = true ]; then
   fi
 
   windows_json=$(kitty @ ls 2>/dev/null)
+  window_lines=$(printf '%s\n' "$windows_json" | window_rows)
   while IFS= read -r window_json; do
+    [ -n "$window_json" ] || continue
     win_id=$(jq -r '.id' <<< "$window_json")
     title_json=$(jq -c '.title' <<< "$window_json")
     cwd_json=$(jq -c '.cwd' <<< "$window_json")
@@ -142,17 +158,24 @@ if [ "$CURRENT_ONLY" = true ]; then
       capture_window "$socket" "$pid" "$win_id" "$title_json" "$cwd_json"
       exit $?
     fi
-  done < <(echo "$windows_json" | jq -c '
-    .[] | .tabs[] | .windows[] | {id, title, cwd}
-  ')
+  done <<< "$window_lines"
   echo "Error: Window $KITTY_WINDOW_ID not found" >&2
   exit 1
 fi
 
 sockets=()
+if [[ ! -d "$RUNTIME_DIR" ]]; then
+  echo "Error: runtime directory unavailable or not a directory: $RUNTIME_DIR" >&2
+  exit 1
+fi
+socket_listing=$(mktemp --tmpdir="${TMPDIR:-/realm/tmp/work}" kitty-scrollback-sockets.XXXXXX)
+trap 'rm -f -- "$socket_listing"' EXIT
+find -H "$RUNTIME_DIR" -maxdepth 1 -name 'kitty-*' -type s -print0 > "$socket_listing"
 while IFS= read -r -d '' socket; do
   sockets+=("$socket")
-done < <(find "$RUNTIME_DIR" -maxdepth 1 -name 'kitty-*' -type s -print0 2>/dev/null)
+done < "$socket_listing"
+rm -f -- "$socket_listing"
+trap - EXIT
 
 if [ ${#sockets[@]} -eq 0 ]; then
   exit 0
@@ -179,7 +202,13 @@ for socket in "${sockets[@]}"; do
     continue
   }
 
+  if ! window_lines=$(printf '%s\n' "$windows_json" | window_rows); then
+    echo "  ✗ invalid window inventory for pid:$pid" >&2
+    total_failed=$((total_failed + 1))
+    continue
+  fi
   while IFS= read -r window_json; do
+    [ -n "$window_json" ] || continue
     win_id=$(jq -r '.id' <<< "$window_json")
     title_json=$(jq -c '.title' <<< "$window_json")
     cwd_json=$(jq -c '.cwd' <<< "$window_json")
@@ -194,9 +223,7 @@ for socket in "${sockets[@]}"; do
         ((total_failed++)) || true
       fi
     fi
-  done < <(echo "$windows_json" | jq -c '
-    .[] | .tabs[] | .windows[] | {id, title, cwd}
-  ')
+  done <<< "$window_lines"
 done
 
 echo ""

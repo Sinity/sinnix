@@ -126,6 +126,7 @@
               pkgs.python3
               pkgs.bash
               pkgs.coreutils
+              pkgs.findutils
               pkgs.hostname
               pkgs.jq
               pkgs.gnused

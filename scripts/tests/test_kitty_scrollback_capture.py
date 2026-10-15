@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -20,7 +21,7 @@ class ScrollbackCapture(unittest.TestCase):
         kitty = tools / "kitty"
         kitty.write_text(f"#!{sys.executable}\n" + '''import json,os,sys
 if "ls" in sys.argv:
-    print(json.dumps([{"tabs":[{"windows":[{"id":7,"title":"fixture","cwd":"/synthetic"}]}]}]))
+    print(os.environ.get("KITTY_TEST_INVENTORY", json.dumps([{"tabs":[{"windows":[{"id":7,"title":"fixture","cwd":"/synthetic"}]}]}])))
 else:
     mode=os.environ["CAPTURE_TEST_MODE"]
     sys.stdout.write("complete scrollback" if mode=="success" else "partial bytes" if mode=="partial" else "")
@@ -32,7 +33,10 @@ else:
         date = tools / "date"
         date.write_text(f"#!{sys.executable}\nprint('20260101T010203Z')\n")
         date.chmod(0o700)
-        self.env = dict(os.environ, PATH=str(tools)+os.pathsep+os.environ["PATH"],
+        self.scratch = self.root / "scratch"
+        self.scratch.mkdir()
+        self.env = dict(PATH=str(tools)+os.pathsep+os.environ["PATH"], HOME=str(self.root),
+                        TMPDIR=str(self.scratch),
                         KITTY_SCROLLBACK_DIR=str(self.capture),
                         KITTY_SCROLLBACK_PROGRESS_MARKER=str(self.root/"progress"),
                         KITTY_LISTEN_ON="unix:/synthetic/kitty-host-123", KITTY_WINDOW_ID="7",
@@ -112,6 +116,61 @@ else:
         self.assertEqual(output.read_text(), "previous capture")
         staged, = self.capture.glob(".capture-output.*")
         self.assertEqual(staged.read_text(), "complete scrollback")
+
+
+    def test_batch_refuses_malformed_inventory_without_capture(self):
+        for payload in ("", "[]\n[]", "not json", "{}", '[{"tabs":[{"windows":[{"title":"missing id"}]}]}]'):
+            with self.subTest(payload=payload):
+                self.env["KITTY_TEST_INVENTORY"] = payload
+                result = self.run_capture("success", current=False)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertFalse(list(self.capture.glob("*.ansi")))
+                self.assertFalse((self.root / "progress").exists())
+
+    def test_empty_batch_inventory_is_valid(self):
+        self.env["KITTY_TEST_INVENTORY"] = "[]"
+        self.assertEqual(self.run_capture("success", current=False).returncode, 0)
+        self.assertFalse(list(self.capture.glob("*.ansi")))
+
+    def test_unavailable_runtime_directory_refuses_and_cleans_staging(self):
+        for kind in ("missing", "denied", "file"):
+            with self.subTest(kind=kind):
+                runtime = self.root / kind
+                if kind == "denied":
+                    runtime.mkdir()
+                    runtime.chmod(0)
+                elif kind == "file":
+                    runtime.touch()
+                self.env["XDG_RUNTIME_DIR"] = str(runtime)
+                try:
+                    result = self.run_capture("success", current=False)
+                finally:
+                    if kind == "denied":
+                        runtime.chmod(0o700)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(list(self.scratch.iterdir()), [])
+                self.assertFalse((self.root / "progress").exists())
+
+    def test_explicit_runtime_directory_link_is_scanned(self):
+        alias = self.root / "runtime-link"
+        alias.symlink_to(self.root, target_is_directory=True)
+        self.env["XDG_RUNTIME_DIR"] = str(alias)
+        result = self.run_capture("success", current=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(list(self.capture.glob("*.ansi"))), 1)
+
+    def test_second_allocation_failure_leaves_no_empty_error_file(self):
+        wrapper = self.root / "bin" / "mktemp"
+        wrapper.write_text(f"#!{sys.executable}\n" + """
+import os,sys
+if any('.capture-output.' in arg for arg in sys.argv[1:]):
+    sys.exit(1)
+os.execv(os.environ['REAL_MKTEMP'], [os.environ['REAL_MKTEMP'], *sys.argv[1:]])
+""")
+        wrapper.chmod(0o700)
+        self.env["REAL_MKTEMP"] = shutil.which("mktemp")
+        self.assertEqual(self.run_capture("success").returncode, 1)
+        self.assertFalse(list(self.capture.glob(".capture-*")))
 
 
 if __name__ == "__main__":
