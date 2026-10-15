@@ -270,3 +270,12 @@ def test_adaptive_resize_keeps_live_mixed_jobs_and_operator_pause(live_pueue, tm
 def test_invalid_adaptive_declaration_is_rejected(adaptive):
     from agentctl.config import _pools, ConfigError
     with pytest.raises(ConfigError): _pools({"quick": {"parallel": 8, "adaptive": adaptive}})
+
+
+def test_project_landing_pool_with_underscore(live_pueue: str, tmp_path: Path) -> None:
+    configuration = tmp_path / "agentctl.json"
+    configuration.write_text(json.dumps({"pools": {"yt_polisher-land": 1}}))
+    policy = load_config(configuration).pools
+    applied = pools.apply(policy)
+    assert applied["created"] == [{"group": "yt_polisher-land", "parallel": 1}]
+    assert _groups(live_pueue)["yt_polisher-land"]["parallel_tasks"] == 1

@@ -29,8 +29,8 @@ REQUIRED_FIELDS = (
     "result_kind",
     "log_path",
 )
-# pueue's group name grammar.
-POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}\Z")
+# Safe group names include underscores used by project identifiers and landing pools.
+POOL_NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
 # The unit settings agentctl passes through to `systemd-run -p`. Each one only
 # bounds what the workload may consume or reach, so a launch input can limit
 # its own task and nothing else: no capability, no credential, no execution
