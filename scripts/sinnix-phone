@@ -248,10 +248,12 @@ home=/data/adb/sinnix-wireless-adb
 mkdir -p "$home"
 chmod 700 "$home"
 exec 9>"$home/lock"
+# Android's shell otherwise marks this persistent descriptor close-on-exec.
+# Export it explicitly to the lock command while retaining our shared FD.
 if command -v flock >/dev/null 2>&1; then
-  flock -n 9 || exit 0
+  flock -n 9 9>&9 || exit 0
 elif [ -x /data/adb/magisk/busybox ]; then
-  /data/adb/magisk/busybox flock -n 9 || exit 0
+  /data/adb/magisk/busybox flock -n 9 9>&9 || exit 0
 else
   echo "wireless ADB owner requires kernel file locking" >&2
   exit 1
