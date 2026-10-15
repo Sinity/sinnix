@@ -9,12 +9,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shlex
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from stat import S_ISDIR, S_ISREG
 from typing import Any
 
 import tomllib
@@ -64,11 +66,31 @@ def digest(path: Path) -> tuple[str, int]:
 
 
 def files_under(path: Path) -> list[Path]:
-    if not path.is_dir():
+    try:
+        metadata = path.stat()
+    except FileNotFoundError:
+        if path.is_symlink():
+            raise
         return []
-    return sorted(
-        item for item in path.rglob("*") if item.is_file() and not item.is_symlink()
-    )
+    if not S_ISDIR(metadata.st_mode):
+        return []
+    files: list[Path] = []
+
+    def visit(directory: Path, ancestors: set[tuple[int, int]]) -> None:
+        with os.scandir(directory) as entries:
+            children = sorted(entries, key=lambda entry: entry.name)
+        for entry in children:
+            metadata = entry.stat()
+            child = Path(entry.path)
+            if S_ISREG(metadata.st_mode):
+                files.append(child)
+            elif S_ISDIR(metadata.st_mode):
+                identity = (metadata.st_dev, metadata.st_ino)
+                if identity not in ancestors:
+                    visit(child, ancestors | {identity})
+
+    visit(path, {(metadata.st_dev, metadata.st_ino)})
+    return sorted(files)
 
 
 def contract(args: argparse.Namespace, profile: str) -> dict[str, Any]:

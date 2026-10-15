@@ -41,4 +41,37 @@ jq -e '
   and (all(.profiles[]; has("wall_ns") and (has("cold_wall_ns") | not) and (has("warm_wall_ns") | not)))
 ' "$root/out/summary.json" >/dev/null
 jq -e '(.schema == "sinnix-agent-profile-benchmark-v1") and ((.records | length) == 9) and all(.records[]; .provider_usage.status == "unavailable" and (has("phase") | not))' "$root/out/raw.json" >/dev/null
+
+python3 - "$benchmark" "$root" <<'PYTEST'
+import runpy
+import sys
+from pathlib import Path
+
+module = runpy.run_path(sys.argv[1])
+root = Path(sys.argv[2])
+skills = root / "linked-skills"
+skills.mkdir()
+source = root / "source-skill"
+source.mkdir()
+(source / "SKILL.md").write_text("description: linked skill\n")
+(skills / "directory-link").symlink_to(source, target_is_directory=True)
+(skills / "file-link.md").symlink_to(source / "SKILL.md")
+(source / "cycle").symlink_to(skills, target_is_directory=True)
+assert module["files_under"](skills) == [
+    skills / "directory-link" / "SKILL.md",
+    skills / "file-link.md",
+]
+blocked = skills / "blocked"
+blocked.mkdir()
+blocked.chmod(0)
+try:
+    try:
+        module["files_under"](skills)
+    except PermissionError:
+        pass
+    else:
+        raise AssertionError("unreadable skill subtree was silently omitted")
+finally:
+    blocked.chmod(0o700)
+PYTEST
 echo 'agent-profile-benchmark fixture passed'
