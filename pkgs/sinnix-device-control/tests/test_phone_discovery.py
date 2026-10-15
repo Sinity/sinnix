@@ -205,3 +205,45 @@ def test_other_usb_devices_cannot_replace_enrolled_phone(tmp_path):
     assert result.returncode == 0
     assert 'capture and upload state unavailable' in result.stdout
     assert 'shell pm list' not in (tmp_path / 'adb-calls').read_text()
+
+
+@pytest.mark.parametrize("duration", ["0", "-1", "invalid", "9999999999999999999"])
+def test_soak_rejects_invalid_observation_windows(tmp_path, duration):
+    result = run_command(tmp_path, ["app-soak", duration])
+    assert result.returncode != 0
+    assert "positive integer" in result.stderr
+
+
+def test_soak_preserves_false_mute_state_and_does_not_certify_observations(tmp_path):
+    body = SCRIPT.read_text().split("\napp-soak)\n", 1)[1].split("\n  ;;\napp-grants)", 1)[0]
+    # One synthetic sample; no phone, audio, real wait or host state mutation.
+    body = body.replace("date -u +%s", "clock_now")
+    shell = r'''
+set -euo pipefail
+clock_now() {
+  count=$(cat "$CLOCK")
+  echo $((count + 1)) > "$CLOCK"
+  if [ "$count" -lt 3 ]; then echo 1000; else echo 1001; fi
+}
+sleep() { :; }
+adb_any() {
+  case "$*" in
+    get-state) return 0 ;;
+    "shell cat "*) echo '{"updated_at":"1970-01-01T00:16:40Z","recording":true,"muted":false,"last_amplitude":5}' ;;
+    "shell dumpsys power") echo 'mWakefulness=Awake' ;;
+    "shell dumpsys activity activities") echo 'topResumedActivity: u0 example/.Main' ;;
+    "shell ls "*) echo 'ambient-19700101T000000.m4a' ;;
+    *) return 1 ;;
+  esac
+}
+run_soak() {
+''' + body + "\n}\nrun_soak 1\n"
+    clock = tmp_path / "clock"
+    clock.write_text("0")
+    result = subprocess.run(["bash", "-c", shell], env={**os.environ, "CLOCK": str(clock)},
+                            text=True, capture_output=True, timeout=5)
+    assert result.returncode == 0, result.stderr
+    assert "PASS:" not in result.stdout
+    sample = next(line for line in result.stdout.splitlines() if "example/.Main" in line)
+    assert sample.split()[3:5] == ["true", "false"]
+    assert "Review required" in result.stdout

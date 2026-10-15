@@ -143,7 +143,7 @@ sinnix phone app-install    # build, sign, sideload, grant, start
 sinnix phone app-status     # is capture alive AND producing?
 sinnix phone app-start      # relaunch after the app was stopped
 sinnix phone app-grants     # re-assert shell-uid grants
-sinnix phone app-soak [s]   # acceptance test: screen/foreground/mute + chunk measurement
+sinnix phone app-soak [s]   # observe screen/foreground/mute and measure available chunks
 sinnix phone logcat         # pull the system log (adb; what the timer runs)
 sinnix phone pull-ambient   # rescue chunks the app's uploader could not ship
 sinnix phone health-sync    # drive Mi Fitness's Sync button on demand (UI automation)

@@ -353,10 +353,13 @@ def test_bcr_literal_filename_is_audited_only_once(device) -> None:
         check=True,
     )
     os.utime(source, (time.time() - 120,) * 2)
+    metadata = source.with_suffix(".log.txt")
+    metadata.write_text("synthetic call metadata\n")
     for _ in range(2):
         result = run(device, "sinnix-phone", "bcr-sync")
         assert result.returncode == 0, result.stderr
     assert (root / "lake" / "calls" / name).read_bytes() == source.read_bytes()
+    assert (root / "lake" / "calls" / "debug" / metadata.name).read_bytes() == metadata.read_bytes()
     ledger = root / "lake" / "calls" / "levels.jsonl"
     rows = [json.loads(line) for line in ledger.read_text().splitlines()]
     assert len(rows) == 1 and rows[0]["file"] == name

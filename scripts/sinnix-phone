@@ -1603,7 +1603,7 @@ chroot-verify)
   printf 'Debian %s, %s, %s\n' "$debian" "$architecture" "$python"
   ;;
 app-soak)
-  # Acceptance test for both hard cases at once: capture must survive the
+  # Observation window for both hard cases: capture must survive the
   # screen being off AND the phone being actively used. The second is the
   # operator's flat requirement -- "capture not working when telephone is
   # handled is not acceptable" -- and it is a genuinely different test, since
@@ -1615,6 +1615,10 @@ app-soak)
   # every chunk closed inside it. Duration catches truncation; mean volume
   # catches a stream that encoded at full bitrate out of a muted microphone.
   seconds="${1:-1200}"
+  if [[ ! "$seconds" =~ ^[1-9][0-9]{0,17}$ ]]; then
+    echo "app-soak: duration must be a positive integer (at most 18 digits)" >&2
+    exit 2
+  fi
   if ! adb_any get-state >/dev/null 2>&1; then
     echo "app-soak: no adb transport" >&2
     exit 1
@@ -1645,7 +1649,7 @@ app-soak)
         printf '%-10s %-9s %-6s %-7s %-7s %-10s %s\n' \
           "$(date -u +%H:%M:%SZ)" "${wake:-?}" "${age}s" \
           "$(echo "$soak_status" | jq -r '.recording')" \
-          "$(echo "$soak_status" | jq -r '.muted // "n/a"')" \
+          "$(echo "$soak_status" | jq -r 'if .muted == null then "n/a" else .muted end')" \
           "$(echo "$soak_status" | jq -r '.last_amplitude // "n/a"')" \
           "${top:-?}"
       fi
@@ -1670,9 +1674,10 @@ app-soak)
   done
   rm -rf "$workdir"
   echo
-  echo "PASS: every chunk at/near ${AMBIENT_CHUNK_SECONDS:-300}s, mean volume well above"
-  echo "digital silence, muted=false throughout, and a FOREGROUND column showing"
-  echo "apps other than dev.sinnix.phone."
+  echo "Review required: these observations are not an automatic capture acceptance result."
+  echo "Check for chunks at/near ${AMBIENT_CHUNK_SECONDS:-300}s with audible signal, fresh recording=true"
+  echo "and muted=false samples, and evidence of screen-off and other-app use."
+  echo "Missing samples or chunks leave those conditions unverified."
   ;;
 app-grants)
   ensure_app_grants
