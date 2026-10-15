@@ -37,7 +37,8 @@ def _snapshot(source: Path, destination: Path) -> tuple[int, str]:
     size = 0
     fd, temporary = tempfile.mkstemp(prefix=".content-", dir=destination.parent)
     try:
-        with source.open("rb") as incoming, os.fdopen(fd, "wb") as outgoing:
+        # Own the allocated descriptor before opening the fallible source.
+        with os.fdopen(fd, "wb") as outgoing, source.open("rb") as incoming:
             for chunk in iter(lambda: incoming.read(1_048_576), b""):
                 outgoing.write(chunk)
                 digest.update(chunk)
@@ -189,7 +190,16 @@ class ArtifactService:
         directory = self.root / artifact_id
         directory.mkdir(mode=0o700)
         content = directory / "content"
-        size, digest = _snapshot(source, content)
+        try:
+            size, digest = _snapshot(source, content)
+        except BaseException:
+            # Only an empty directory from this failed publication is disposable.
+            # Preserve any payload another failure or writer has left here.
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+            raise
         metadata = {
             "artifact_id": artifact_id,
             "kind": kind,
