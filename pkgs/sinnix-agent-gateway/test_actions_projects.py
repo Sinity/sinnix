@@ -1099,7 +1099,8 @@ def test_large_project_change_consumes_verified_artifact_and_replays(
     assert (project / "large.txt").read_bytes() == expected
 
 
-def test_tampered_project_input_artifact_refuses_without_mutation(tmp_path):
+@pytest.mark.parametrize("warm_cache", [False, True])
+def test_tampered_project_input_artifact_refuses_without_mutation(tmp_path, warm_cache):
     config, project, _ = fixture(tmp_path)
     server = create_server(config, "operator")
     runtime = server._sinnix_revision_publisher.runtime
@@ -1113,7 +1114,14 @@ def test_tampered_project_input_artifact_refuses_without_mutation(tmp_path):
     artifact_id = runtime.artifacts.register(
         source, kind="project-input", owner_id="fixture"
     )
-    (runtime.artifacts.root / artifact_id / "content").write_bytes(b"tampered snapshot")
+    content = runtime.artifacts.root / artifact_id / "content"
+    if warm_cache:
+        runtime.artifacts.registered_content(artifact_id)
+        original = content.stat()
+        content.write_bytes(b"corrupted!")
+        os.utime(content, ns=(original.st_atime_ns, original.st_mtime_ns))
+    else:
+        content.write_bytes(b"tampered snapshot")
     before = ok(server, "projects.get", {"target": {"project": "fixture"}})["checkout"]
     result = call(
         server,

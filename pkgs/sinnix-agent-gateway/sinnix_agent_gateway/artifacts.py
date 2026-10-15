@@ -52,10 +52,10 @@ def _snapshot(source: Path, destination: Path) -> tuple[int, str]:
             os.unlink(temporary)
 
 
-# Snapshots this process has hashed, by (path, inode, size, mtime_ns): a
-# paged read of a large artifact hashes it once, not once per page, and any
-# rewrite of the snapshot changes the key and forces a fresh hash.
-_VERIFIED: dict[tuple[str, int, int, int], str] = {}
+# Cache verification by filesystem identity and change metadata. Include ctime
+# so restoring a rewritten file's mtime cannot reuse its previous digest.
+# Unchanged snapshots still need only one hash across paged reads.
+_VERIFIED: dict[tuple[str, int, int, int, int, int], str] = {}
 
 
 class ArtifactService:
@@ -285,7 +285,10 @@ class ArtifactService:
         """
         content: Path = metadata["_content"]
         info = content.stat()
-        key = (str(content), info.st_ino, info.st_size, info.st_mtime_ns)
+        key = (
+            str(content), info.st_dev, info.st_ino, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns,
+        )
         if (
             info.st_size == metadata["bytes"]
             and _VERIFIED.get(key) == metadata["sha256"]

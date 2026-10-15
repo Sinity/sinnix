@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 
 import pytest
 from pathlib import Path
@@ -308,3 +309,23 @@ def test_oversized_reads_stay_on_original_artifact_with_lossless_pages(tmp_path,
         offset = data["next_offset"]
     assert len(chunks) > 1 and b"".join(chunks) == original
     assert len(list(rt.artifacts.root.glob("*/metadata.json"))) == 1
+
+
+@pytest.mark.parametrize("representation", ["text", "binary"])
+def test_cached_snapshot_rewrite_with_restored_mtime_is_refused(tmp_path, representation):
+    rt = runtime(tmp_path)
+    artifact_id = register(rt, "warm-cache.txt", b"registered", "note")
+    first = call(rt, "artifacts.read", {
+        "target": {"artifact_id": artifact_id}, "representation": representation, "max_bytes": 4,
+    }, BY_NAME)
+    assert first["error"] is None
+    content = rt.artifacts.root / artifact_id / "content"
+    before = content.stat()
+    content.write_bytes(b"corrupted!")
+    os.utime(content, ns=(before.st_atime_ns, before.st_mtime_ns))
+    assert content.stat().st_size == before.st_size
+    assert content.stat().st_mtime_ns == before.st_mtime_ns
+    result = call(rt, "artifacts.read", {
+        "target": {"artifact_id": artifact_id}, "representation": representation, "offset": 4,
+    }, BY_NAME)
+    assert result["error"]["code"] == "invalid_request"
