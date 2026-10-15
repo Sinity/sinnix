@@ -335,6 +335,7 @@ let
     }
 
     publish_backup_marker() {
+      local marker marker_dir marker_base temporary
       marker="$1"
       marker_dir="$(dirname "$marker")"
       marker_base="$(basename "$marker")"
@@ -430,8 +431,34 @@ let
       fi
 
       marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.last-success"}
-      snapshot="$(${snapshotCoverage} select ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker")"
-      if [ -n "$snapshot" ]; then
+      acknowledgement_root="$latest_marker.by-snapshot"
+      install -d -m 0700 -o root -g root "$acknowledgement_root"
+      # Adopt only the same named, still-identified current-policy proof. This
+      # does not repeat a large comparison or transfer custody to another state.
+      if [ -f "$latest_marker" ] && previous="$(${snapshotCoverage} acknowledged --policy ${coveragePolicy} -- ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${lib.escapeShellArg archivePrefix} ${lib.escapeShellArg replacementSuffix})"; then
+        previous_acknowledgement="$acknowledgement_root/$previous"
+        if [ ! -e "$previous_acknowledgement" ] && [ ! -L "$previous_acknowledgement" ]; then
+          publish_backup_marker "$previous_acknowledgement" < "$latest_marker"
+        fi
+      fi
+      publish_acknowledgement() {
+        advance="$(${snapshotCoverage} advance-marker ${lib.escapeShellArg snapshotDir} "$latest_marker" "$snapshot")"
+        if [ "$advance" = yes ]; then
+          publish_backup_marker "$latest_marker" < "$acknowledgement"
+        fi
+        publish_backup_marker "$marker" < "$acknowledgement"
+      }
+      # Admit one finite queue. Later acquisitions wait for the next wake.
+      snapshots="$(${snapshotCoverage} queue -- ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${lib.escapeShellArg archivePrefix} ${lib.escapeShellArg replacementSuffix})"
+      while IFS= read -r snapshot; do
+        [ -n "$snapshot" ] || continue
+        acknowledgement="$acknowledgement_root/$snapshot"
+        if [ -f "$acknowledgement" ]; then
+          acknowledged="$(${snapshotCoverage} acknowledged -- ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$acknowledgement" ${lib.escapeShellArg archivePrefix} ${lib.escapeShellArg replacementSuffix})"
+          [ "$acknowledged" = "$snapshot" ] || exit 1
+          publish_acknowledgement
+          continue
+        fi
         snapshot_path=${lib.escapeShellArg snapshotDir}/"$snapshot"
         archive_name=${lib.escapeShellArg archivePrefix}-"$snapshot"
         original_archive_name="$archive_name"
@@ -597,11 +624,11 @@ let
           printf 'subvolume_id=%s\n' "$snapshot_id"
           printf 'coverage=%s\n' "$proof"
           printf 'epoch=%s\n' "$(date +%s)"
-        } | publish_backup_marker "$latest_marker"
-        publish_backup_marker "$marker" < "$latest_marker"
-      fi
-      # A crash during deletion leaves the verified marker in place. Every
-      # later wake resumes the remaining local prune, even with no new archive.
+        } | publish_backup_marker "$acknowledgement"
+        publish_acknowledgement
+      done <<< "$snapshots"
+      # Each candidate needs its own durable proof. Keep the newest admitted
+      # source for independent auditing; interrupted release resumes next wake.
       if [ -f "$latest_marker" ]; then
         prune_plan="$(${snapshotCoverage} prune-plan -- ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${lib.escapeShellArg archivePrefix} ${lib.escapeShellArg replacementSuffix})"
         while IFS=$'\t' read -r old expected_uuid expected_generation expected_id; do

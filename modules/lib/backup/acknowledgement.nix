@@ -28,14 +28,14 @@
   # ─── Borg Snapshot Drainers ───
   #
   # btrbk is the producer. Borg is the durability gate. Local snapshots are
-  # never deleted by btrbk rotation. The drain removes snapshots at or before
-  # a proven newest archive cutoff; older local-only versions are discarded.
+  # never deleted by btrbk rotation. Each released snapshot needs its own
+  # accepted archive; the newest acknowledged local source stays for audits.
   #
   # Backups are scheduled bulk I/O and must stay below interactive work;
   # unthrottled they saturate /realm enough to visibly stall the desktop.
   #
-  # Each run archives the newest local snapshot. Older local restore points
-  # leave disk only after that archive has passed coverage verification.
+  # Each wake captures a finite queue, newest first, then historical states.
+  # A snapshot leaves disk only under its own durable acknowledgement.
   (mkBackupJob "borgbackup-job-persist" {
     description = "Drain /persist btrbk snapshots into Borg";
     unit = {
@@ -49,8 +49,8 @@
       ];
     };
     serviceConfig = {
-      # One wake archives at most one snapshot, then prunes only after proof.
-      # A timeout before proof retains the queue; a later wake resumes prune.
+      # A timeout preserves unacknowledged history; later wakes reuse durable
+      # per-snapshot proofs and finish the remaining finite queue.
       TimeoutStartSec = "4h";
       TimeoutStopSec = "15s";
     };
@@ -90,7 +90,7 @@
     };
     serviceConfig = {
       # A multi-terabyte backfill runs under idle I/O and bandwidth caps.
-      # One wake archives one snapshot; only accepted proof permits pruning.
+      # Each snapshot in the admitted queue requires its own accepted proof.
       TimeoutStartSec = "24h";
       TimeoutStopSec = "15s";
     };

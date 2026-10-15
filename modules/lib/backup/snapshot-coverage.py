@@ -75,9 +75,9 @@ def marker_order(fields):
     try:
         order = int(fields["generation"]), int(fields["subvolume_id"])
     except (KeyError, ValueError) as error:
-        raise ValueError("invalid verified cutoff creation generation") from error
+        raise ValueError("invalid snapshot acknowledgement creation generation") from error
     if min(order) <= 0:
-        raise ValueError("invalid verified cutoff creation generation")
+        raise ValueError("invalid snapshot acknowledgement creation generation")
     return order
 
 
@@ -94,28 +94,84 @@ def snapshot_names(directory, glob):
     )
 
 
-def choose_snapshot(directory, glob, latest_marker):
-    names = snapshot_names(directory, glob)
-    if not names:
+def acknowledgement_directory(marker):
+    return Path(str(marker) + ".by-snapshot")
+
+
+def verified_acknowledgement(directory, glob, marker, prefix, replacement_suffix):
+    """Qualify only the snapshot actually named by this archive receipt."""
+    fields = read_marker_fields(marker)
+    if fields is None:
+        raise ValueError("no verified archive acknowledgement")
+    snapshot = fields["snapshot"]
+    archive = fields["archive"]
+    proof = json.loads(fields["coverage"])
+    if not fnmatchcase(snapshot, glob):
+        raise ValueError("verified acknowledgement names another snapshot volume")
+    snapshot_epoch(snapshot)
+    order = marker_order(fields)
+    if order is None or "filesystem_uuid" not in fields:
         return None
-    records = [(name, snapshot_details(Path(directory) / name)) for name in names]
-    newest, details = max(records, key=lambda row: row[1][1:])
-    fields = read_marker_fields(latest_marker)
-    cutoff = marker_order(fields)
-    # A missing cutoff cannot establish ordering on the current filesystem.
-    # Archive a current snapshot before relying on a new verified cutoff.
-    if cutoff is None or not any(name == fields["snapshot"] for name, _ in records):
-        return newest
-    if fields.get("filesystem_uuid") != filesystem_identity(directory):
-        return newest
-    if details[1:] > cutoff:
-        return newest
-    if (
-        details[1] == cutoff[0]
-        and details[0] != json.loads(fields["coverage"])["snapshot_uuid"]
+    if fields["filesystem_uuid"] != filesystem_identity(directory):
+        raise ValueError("verified acknowledgement filesystem identity changed")
+    expected_archive = f"{prefix}-{snapshot}"
+    replacement = re.escape(expected_archive) + r"-coverage-v(?:[2-9]|[1-9][0-9]+)"
+    producer = re.escape(expected_archive) + r"-producer-v[1-9][0-9]*"
+    if archive not in (expected_archive, expected_archive + replacement_suffix) and not (
+        re.fullmatch(replacement, archive) or re.fullmatch(producer, archive)
     ):
-        raise ValueError("another snapshot shares the verified creation generation")
-    return None
+        raise ValueError("verified acknowledgement names another archive")
+    uuid = proof["snapshot_uuid"]
+    if proof["archive"] != archive or archive_identity(archive, uuid) != proof["archive_id"]:
+        raise ValueError("verified acknowledgement archive identity changed")
+    if snapshot not in snapshot_names(directory, glob):
+        raise ValueError("verified acknowledgement snapshot is unavailable")
+    selected = snapshot_details(Path(directory) / snapshot)
+    if selected != (uuid, *order):
+        raise ValueError("verified acknowledgement snapshot identity changed")
+    return snapshot, *selected
+
+
+def should_advance_marker(directory, marker, snapshot):
+    """Keep data freshness ordered by native creation identity, not the clock."""
+    fields = read_marker_fields(marker)
+    order = marker_order(fields)
+    if order is None or fields.get("filesystem_uuid") != filesystem_identity(directory):
+        return True
+    previous = Path(directory) / fields["snapshot"]
+    if not previous.exists():
+        return True
+    details = snapshot_details(previous)
+    if details != (json.loads(fields["coverage"])["snapshot_uuid"], *order):
+        raise ValueError("latest acknowledged snapshot identity changed")
+    return snapshot_details(Path(directory) / snapshot)[1:] >= order
+
+
+def queued_snapshots(directory, glob, marker, prefix, replacement_suffix):
+    """Freeze one finite queue: newest pending state, then historical states."""
+    receipts = acknowledgement_directory(marker)
+    if receipts.is_symlink():
+        raise ValueError("snapshot acknowledgement directory is a symlink")
+    latest = read_marker_fields(marker)
+    pending = []
+    for name in snapshot_names(directory, glob):
+        details = snapshot_details(Path(directory) / name)
+        receipt = receipts / name
+        if receipt.is_symlink():
+            raise ValueError("snapshot acknowledgement is a symlink")
+        if receipt.exists():
+            acknowledged = verified_acknowledgement(directory, glob, receipt, prefix, replacement_suffix)
+            if acknowledged != (name, *details):
+                raise ValueError("unqualified snapshot acknowledgement")
+            # Recover an interruption between durable receipt publication and
+            # advancement of the latest marker without recreating the archive.
+            if read_marker_fields(receipt) == latest or not should_advance_marker(directory, marker, name):
+                continue
+        pending.append((name, details))
+    if not pending:
+        return []
+    newest = max(pending, key=lambda row: row[1][1:])
+    return [newest[0], *[name for name, _ in sorted(pending, key=lambda row: row[1][1:]) if name != newest[0]]]
 
 
 def within_fresh_window(now):
@@ -123,50 +179,28 @@ def within_fresh_window(now):
 
 
 def verified_prune_plan(directory, glob, marker, prefix, replacement_suffix):
-    fields = read_marker_fields(marker)
-    if fields is None:
-        raise ValueError("no verified archive cutoff")
-    snapshot = fields["snapshot"]
-    archive = fields["archive"]
-    proof = json.loads(fields["coverage"])
-    if not fnmatchcase(snapshot, glob):
-        raise ValueError("verified cutoff names another snapshot volume")
-    snapshot_epoch(snapshot)
-    cutoff = marker_order(fields)
-    # Markers lacking ordering identity cannot authorize backlog deletion.
-    # Archive a fresh filesystem-bound cutoff before deleting any backlog.
-    if cutoff is None or "filesystem_uuid" not in fields:
+    latest = verified_acknowledgement(directory, glob, marker, prefix, replacement_suffix)
+    if latest is None:
         return []
-    if fields["filesystem_uuid"] != filesystem_identity(directory):
-        raise ValueError("verified cutoff filesystem identity changed")
-    expected_archive = f"{prefix}-{snapshot}"
-    replacement = re.escape(expected_archive) + r"-coverage-v(?:[2-9]|[1-9][0-9]+)"
-    producer = re.escape(expected_archive) + r"-producer-v[1-9][0-9]*"
-    if archive not in (
-        expected_archive,
-        expected_archive + replacement_suffix,
-    ) and not (re.fullmatch(replacement, archive) or re.fullmatch(producer, archive)):
-        raise ValueError("verified cutoff names another archive")
-    uuid = proof["snapshot_uuid"]
-    if (
-        proof["archive"] != archive
-        or archive_identity(archive, uuid) != proof["archive_id"]
-    ):
-        raise ValueError("verified cutoff archive identity changed")
-    records = [
-        (name, snapshot_details(Path(directory) / name))
-        for name in snapshot_names(directory, glob)
-    ]
-    selected = next((details for name, details in records if name == snapshot), None)
-    if selected is None:
-        raise ValueError("verified cutoff snapshot is unavailable")
-    if selected != (uuid, *cutoff):
-        raise ValueError("verified cutoff snapshot identity changed")
-    return [
-        (name, *details)
-        for name, details in sorted(records, key=lambda row: row[1][1:])
-        if details[1] < cutoff[0]
-    ]
+    receipts = acknowledgement_directory(marker)
+    if receipts.is_symlink():
+        raise ValueError("snapshot acknowledgement directory is a symlink")
+    releasable = []
+    for name in snapshot_names(directory, glob):
+        if name == latest[0]:
+            continue  # The independent full audit needs this immutable source.
+        receipt = receipts / name
+        if receipt.is_symlink():
+            raise ValueError("snapshot acknowledgement is a symlink")
+        if not receipt.exists():
+            continue  # A different snapshot's proof never establishes custody.
+        acknowledged = verified_acknowledgement(directory, glob, receipt, prefix, replacement_suffix)
+        if acknowledged is None or acknowledged[0] != name:
+            raise ValueError("unqualified snapshot acknowledgement")
+        if acknowledged[2:] > latest[2:]:
+            raise ValueError("latest marker lags a newer acknowledged snapshot")
+        releasable.append(acknowledged)
+    return sorted(releasable, key=lambda row: row[2:])
 
 
 def run(*args):
@@ -1071,10 +1105,12 @@ def main():
     ready = sub.add_parser("audit-ready")
     ready.add_argument("latest_marker")
     ready.add_argument("policy")
-    select = sub.add_parser("select")
-    select.add_argument("directory")
-    select.add_argument("glob")
-    select.add_argument("latest_marker")
+    queue = sub.add_parser("queue")
+    queue.add_argument("directory")
+    queue.add_argument("glob")
+    queue.add_argument("latest_marker")
+    queue.add_argument("prefix")
+    queue.add_argument("replacement_suffix")
     prune = sub.add_parser("prune-plan")
     prune.add_argument("directory")
     prune.add_argument("glob")
@@ -1085,9 +1121,17 @@ def main():
     freshness = sub.add_parser("freshness")
     freshness.add_argument("latest_marker")
     freshness.add_argument("freshness_budget", type=int)
-    newer = sub.add_parser("newer")
-    newer.add_argument("latest_marker")
-    newer.add_argument("snapshot")
+    advance = sub.add_parser("advance-marker")
+    advance.add_argument("directory")
+    advance.add_argument("latest_marker")
+    advance.add_argument("snapshot")
+    acknowledged = sub.add_parser("acknowledged")
+    acknowledged.add_argument("directory")
+    acknowledged.add_argument("glob")
+    acknowledged.add_argument("marker")
+    acknowledged.add_argument("prefix")
+    acknowledged.add_argument("replacement_suffix")
+    acknowledged.add_argument("--policy", help="require the active policy when adopting a prior acknowledgement")
     args = parser.parse_args()
     if args.command == "identity":
         print(identity(args.source))
@@ -1095,14 +1139,20 @@ def main():
         print(filesystem_identity(args.source))
     elif args.command == "details":
         print("\t".join(map(str, snapshot_details(args.source))))
-    elif args.command == "select":
-        selected = choose_snapshot(
-            args.directory,
-            args.glob,
-            args.latest_marker,
-        )
-        if selected:
-            print(selected)
+    elif args.command == "queue":
+        for snapshot in queued_snapshots(args.directory, args.glob, args.latest_marker, args.prefix, args.replacement_suffix):
+            print(snapshot)
+    elif args.command == "advance-marker":
+        print("yes" if should_advance_marker(args.directory, args.latest_marker, args.snapshot) else "no")
+    elif args.command == "acknowledged":
+        record = verified_acknowledgement(args.directory, args.glob, args.marker, args.prefix, args.replacement_suffix)
+        if record is None:
+            raise ValueError("unqualified snapshot acknowledgement")
+        if args.policy:
+            proof = json.loads(read_marker_fields(args.marker)["coverage"])
+            if proof.get("proof_mode") not in {"full", "created"} or proof.get("policy_sha256") != policy_identity(args.policy, require_borg_excludes=True):
+                raise ValueError("prior acknowledgement does not establish the active policy")
+        print(record[0])
     elif args.command == "prune-plan":
         for name, uuid, generation, subvolume_id in verified_prune_plan(
             args.directory,
@@ -1123,10 +1173,6 @@ def main():
         print(f"latest_archived_epoch={epoch} age_seconds={age}")
         if age > args.freshness_budget:
             raise ValueError(f"latest archived snapshot is {age}s old")
-    elif args.command == "newer":
-        latest = read_latest_epoch(args.latest_marker)
-        if latest is not None and snapshot_epoch(args.snapshot) <= latest:
-            return 1
     elif args.command == "proof-mode":
         print(
             "created"

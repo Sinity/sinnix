@@ -167,14 +167,70 @@ class CoverageFixture(unittest.TestCase):
             str(self.source) + "/./",
         )
 
-    def test_verified_newest_cutoff_prunes_only_older_snapshots(self):
+    def test_newest_archive_cannot_release_an_unarchived_historical_version(self):
+        queue = self.root / "unacknowledged-queue"
+        queue.mkdir()
+        old = "realm.20260401T010000+0000"
+        new = "realm.20260402T010000+0000"
+        (queue / old).mkdir()
+        (queue / old / "unique-history").write_text("only in the older snapshot")
+        (queue / new).mkdir()
+        (self.source / "old-only").unlink()
+        (self.source / "same-name").write_text("new version")
+        archive = "realm-" + new
+        self.archive(archive)
+        proof = COVERAGE.verify(self.source, archive, []) | {
+            "snapshot_uuid": self.snapshot_uuid,
+            "archive_id": COVERAGE.archive_identity(archive, self.snapshot_uuid),
+            "archive": archive,
+        }
+        marker = self.root / "unacknowledged-latest"
+        marker.write_text(
+            f"archive={archive}\nsnapshot={new}\nfilesystem_uuid={FS_UUID}\n"
+            f"generation=20\nsubvolume_id=102\ncoverage={json.dumps(proof)}\n"
+        )
+        details = {old: (str(uuid.uuid4()), 10, 101), new: (self.snapshot_uuid, 20, 102)}
+        with patch.object(COVERAGE, "snapshot_details", side_effect=lambda path: details[path.name]):
+            self.assertEqual(
+                COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3"),
+                [],
+            )
+            policy = self.root / "adoption-policy.json"
+            policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": []}))
+            proof.update(proof_mode="full", policy_sha256=COVERAGE.policy_identity(policy, True))
+            fields = COVERAGE.read_marker_fields(marker)
+            fields["coverage"] = json.dumps(proof)
+            marker.write_text("".join(f"{key}={value}\n" for key, value in fields.items()))
+            argv = [
+                "coverage", "acknowledged", "--policy", str(policy), "--",
+                str(queue), "realm.*", str(marker), "realm", "-coverage-v3",
+            ]
+            output = io.StringIO()
+            with patch.object(COVERAGE.sys, "argv", argv), redirect_stdout(output):
+                COVERAGE.main()
+            self.assertEqual(output.getvalue().strip(), new)
+            policy.write_text(json.dumps({"noncanonical": ["changed-policy"], "borg_excludes": []}))
+            with patch.object(COVERAGE.sys, "argv", argv), self.assertRaisesRegex(ValueError, "active policy"):
+                COVERAGE.main()
+
+    def test_each_released_snapshot_has_its_own_archive_and_receipt(self):
         queue = self.root / "queue"
         queue.mkdir()
         old = "realm.20260402T010000+0000"
         new = "realm.20260402T070000+0000"
-        later = "realm.20260402T073000+0000"
         (queue / old).mkdir()
         (queue / new).mkdir()
+        old_uuid = self.snapshot_uuid
+        old_archive = "realm-" + old
+        self.archive(old_archive)
+        old_proof = COVERAGE.verify(self.source, old_archive, []) | {
+            "snapshot_uuid": old_uuid,
+            "archive_id": COVERAGE.archive_identity(old_archive, old_uuid),
+            "archive": old_archive,
+        }
+        self.snapshot_uuid = str(uuid.uuid4())
+        (self.source / "old-only").unlink()
+        (self.source / "same-name").write_text("new version")
         archive = "realm-" + new
         self.archive(archive)
         proof = COVERAGE.verify(self.source, archive, []) | {
@@ -183,82 +239,40 @@ class CoverageFixture(unittest.TestCase):
             "archive": archive,
         }
         marker = self.root / "latest"
-        marker.write_text(
-            f"archive={archive}\nsnapshot={new}\nfilesystem_uuid={FS_UUID}\ngeneration=20\nsubvolume_id=102\n"
-            f"coverage={json.dumps(proof)}\n"
-        )
-        # A later acquisition can have an older wall-clock name after a clock
-        # rollback. Its Btrfs generation must keep it out of the prune plan.
-        rolled_back = "realm.20260401T233000+0000"
-        details = {
-            old: (str(uuid.uuid4()), 10, 101),
-            new: (self.snapshot_uuid, 20, 102),
-            rolled_back: (str(uuid.uuid4()), 30, 103),
-            later: (str(uuid.uuid4()), 40, 104),
-        }
-        with patch.object(
-            COVERAGE, "snapshot_details", side_effect=lambda path: details[path.name]
-        ):
-            legacy_marker = self.root / "legacy-latest"
-            legacy_marker.write_text(
-                f"archive={archive}\nsnapshot={new}\ncoverage={json.dumps(proof)}\n"
+        def receipt(name, native, coverage):
+            return (
+                f"archive={coverage['archive']}\nsnapshot={name}\nfilesystem_uuid={FS_UUID}\n"
+                f"generation={native[1]}\nsubvolume_id={native[2]}\ncoverage={json.dumps(coverage)}\n"
             )
-            self.assertEqual(
-                COVERAGE.choose_snapshot(queue, "realm.*", legacy_marker), new
-            )
-            self.assertEqual(
-                COVERAGE.verified_prune_plan(
-                    queue, "realm.*", legacy_marker, "realm", "-coverage-v3"
-                ),
-                [],
-            )
-            self.assertIsNone(COVERAGE.choose_snapshot(queue, "realm.*", marker))
-            self.assertEqual(
-                COVERAGE.verified_prune_plan(
-                    queue, "realm.*", marker, "realm", "-coverage-v3"
-                ),
-                [(old, *details[old])],
-            )
-            details[new] = (str(uuid.uuid4()), 20, 102)
-            with self.assertRaisesRegex(ValueError, "snapshot identity changed"):
-                COVERAGE.verified_prune_plan(
-                    queue, "realm.*", marker, "realm", "-coverage-v3"
-                )
-            details[new] = (self.snapshot_uuid, 20, 102)
+        details = {old: (old_uuid, 10, 101), new: (self.snapshot_uuid, 20, 102)}
+        marker.write_text(receipt(new, details[new], proof))
+        acknowledgements = COVERAGE.acknowledgement_directory(marker)
+        acknowledgements.mkdir()
+        with patch.object(COVERAGE, "snapshot_details", side_effect=lambda path: details[path.name]):
+            self.assertEqual(COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3"), [new, old])
+            self.assertEqual(COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3"), [])
+            (acknowledgements / old).write_text(receipt(old, details[old], old_proof))
+            self.assertEqual(COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3"), [new])
+            self.assertEqual(COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3"), [(old, *details[old])])
+            (acknowledgements / new).write_bytes(marker.read_bytes())
+            self.assertEqual(COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3"), [])
+            self.assertFalse(COVERAGE.should_advance_marker(queue, marker, old))
+            rolled_back = "realm.20260401T233000+0000"
             (queue / rolled_back).mkdir()
-            details[rolled_back] = (details[rolled_back][0], 20, 103)
-            self.assertEqual(
-                COVERAGE.choose_snapshot(queue, "realm.*", marker), rolled_back
-            )
-            self.assertEqual(
-                [
-                    name
-                    for name, *_ in COVERAGE.verified_prune_plan(
-                        queue, "realm.*", marker, "realm", "-coverage-v3"
-                    )
-                ],
-                [old],
-            )
-            details[rolled_back] = (details[rolled_back][0], 30, 103)
-            self.assertEqual(
-                COVERAGE.choose_snapshot(queue, "realm.*", marker), rolled_back
-            )
-            self.assertEqual(
-                [
-                    name
-                    for name, *_ in COVERAGE.verified_prune_plan(
-                        queue, "realm.*", marker, "realm", "-coverage-v3"
-                    )
-                ],
-                [old],
-            )
-            (queue / later).mkdir()
-            self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", marker), later)
-            marker.write_text(marker.read_text().replace(proof["archive_id"], "a" * 64))
+            details[rolled_back] = (str(uuid.uuid4()), 30, 103)
+            self.assertEqual(COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3"), [rolled_back])
+            self.assertTrue(COVERAGE.should_advance_marker(queue, marker, rolled_back))
+            (acknowledgements / old).write_text(receipt(old, details[old], old_proof).replace(old_proof["archive_id"], "a" * 64))
             with self.assertRaisesRegex(ValueError, "archive identity changed"):
-                COVERAGE.verified_prune_plan(
-                    queue, "realm.*", marker, "realm", "-coverage-v3"
-                )
+                COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3")
+            with self.assertRaisesRegex(ValueError, "archive identity changed"):
+                COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3")
+            (acknowledgements / old).write_text(receipt(old, details[old], old_proof))
+            details[old] = (str(uuid.uuid4()), 10, 101)
+            with self.assertRaisesRegex(ValueError, "snapshot identity changed"):
+                COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3")
+
+    def test_archive_admission_window_is_bounded(self):
         self.assertTrue(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 6, 5)))
         self.assertTrue(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 6, 25)))
         self.assertFalse(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 6, 26)))
@@ -280,9 +294,9 @@ class CoverageFixture(unittest.TestCase):
         # the old marker nor an existing Borg archive orders its snapshots.
         with patch.object(COVERAGE, "snapshot_details", return_value=(str(uuid.uuid4()), 10, 101)), \
              patch.object(COVERAGE, "archive_identity", return_value="a" * 64):
-            with self.assertRaisesRegex(ValueError, "cutoff snapshot is unavailable"):
+            with self.assertRaisesRegex(ValueError, "snapshot is unavailable"):
                 COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3")
-            self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", marker), current)
+            self.assertEqual(COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3"), [current])
 
     def test_cutoff_on_another_filesystem_never_authorizes_pruning(self):
         queue = self.root / "replacement-filesystem"
@@ -297,14 +311,14 @@ class CoverageFixture(unittest.TestCase):
             f"coverage={json.dumps({'snapshot_uuid': self.snapshot_uuid, 'archive': archive, 'archive_id': 'a' * 64})}\n"
         )
         with patch.object(COVERAGE, "snapshot_details", return_value=(self.snapshot_uuid, 20, 102)):
-            self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", marker), current)
+            self.assertEqual(COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3"), [current])
             with self.assertRaisesRegex(ValueError, "filesystem identity changed"):
                 COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3")
         # An older marker is history, not authority over current generations.
         marker.write_text(marker.read_text().replace(next(line for line in marker.read_text().splitlines(True) if line.startswith("filesystem_uuid=")), ""))
         self.assertEqual(COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3"), [])
         with patch.object(COVERAGE, "snapshot_details", return_value=(self.snapshot_uuid, 20, 102)):
-            self.assertEqual(COVERAGE.choose_snapshot(queue, "realm.*", marker), current)
+            self.assertEqual(COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3"), [current])
 
     def test_inventory_failure_cleans_private_scratch(self):
         real_temp = tempfile.TemporaryDirectory
@@ -1350,13 +1364,17 @@ else: sys.exit(1)
             self.assertTrue(new.exists())
             latest_marker = root / "state/borg-drain/realm.latest-archived"
             self.assertIn("snapshot=" + new.name, latest_marker.read_text())
+            # Publishing the latest pointer must not clobber the caller's
+            # separate completion-marker destination during historical backfill.
+            completion = root / "state/borg-drain/realm.last-success"
+            self.assertIn("snapshot=" + old.name, completion.read_text())
             first_proof = json.loads(
                 COVERAGE.read_marker_fields(latest_marker)["coverage"]
             )
             self.assertEqual(first_proof["proof_mode"], "created")
             self.assertEqual(first_proof["source_hashed_bytes"], 0)
             self.assertTrue(first_proof["create_receipt_sha256"])
-            self.assertNotIn(
+            self.assertIn(
                 "realm-" + old.name,
                 subprocess.check_output(
                     ["borg", "list", "--short", str(root / "repos/borg-realm-v2")],
@@ -1365,6 +1383,8 @@ else: sys.exit(1)
                 ).splitlines(),
             )
             self.assertEqual(extract(new.name, "same-name"), "new")
+            self.assertEqual(extract(old.name, "old-only"), "historical")
+            self.assertEqual(extract(old.name, "same-name"), "old")
             realm_members = subprocess.check_output(
                 [
                     "borg",
@@ -1475,10 +1495,10 @@ else: sys.exit(1)
             self.assertEqual(
                 json.loads(resumed_fields["coverage"])["proof_mode"], "created"
             )
-            # The failed identity read happened before a receipt was written.
-            # Realm's policy-repair suffix takes precedence on that collision.
+            # Existing acknowledgements are validated before archive creation,
+            # so the failed identity read leaves no new archive to collide with.
             self.assertEqual(
-                resumed_fields["archive"], "realm-" + interrupted.name + "-coverage-v3"
+                resumed_fields["archive"], "realm-" + interrupted.name
             )
             # A receipt can survive a crash before the acknowledgement. Reuse
             # that exact archive on restart instead of creating another one.
@@ -1704,12 +1724,14 @@ else: sys.exit(1)
                 text=True,
             ).splitlines()
             self.assertIn("realm-" + fresh.name, archives)
-            self.assertNotIn("realm-" + older.name, archives)
-            self.assertNotIn("realm-" + middle.name, archives)
+            self.assertIn("realm-" + older.name, archives)
+            self.assertIn("realm-" + middle.name, archives)
+            self.assertEqual(extract(older.name, "old-only"), "older bytes")
+            self.assertEqual(extract(middle.name, "same-name"), "middle")
 
-            # A marker is a durable prune cutoff. This new snapshot has an
-            # older timestamp but a newer creation generation, so it becomes
-            # the cutoff; a later wake resumes deletion of its predecessor.
+            # A newer creation generation advances freshness despite an older
+            # clock name. Release resumes only from each predecessor's own
+            # durable acknowledgement, without creating another archive.
             leftover = snapshot("realm.20260403T013000+0000", {"old-only": "leftover"})
             (root / "fail-delete").touch()
             run(ok=False)
@@ -1995,7 +2017,7 @@ else: sys.exit(1)
             marker_before = marker_path.read_bytes()
             snapshots_before = sorted((root / "realm-snapshots").iterdir())
             refused = run("missing", ok=False)
-            self.assertIn("verified cutoff snapshot is unavailable", refused.stderr)
+            self.assertIn("verified acknowledgement snapshot is unavailable", refused.stderr)
             self.assertEqual(marker_path.read_bytes(), marker_before)
             self.assertEqual(sorted((root / "realm-snapshots").iterdir()), snapshots_before)
             for directory in (

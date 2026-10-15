@@ -651,7 +651,7 @@ assert lib.assertMsg (
                 lib.splitString "\n" realmBorgDrainScript
               )
             ) == 1
-        ) "Six-hour acquisition and bounded newest-only archival must have separate schedules";
+        ) "Six-hour acquisition and bounded lossless archival must have separate schedules";
         mkRuntimeCheck system {
           name = "backup-borg-hook-runtime-check";
           nativeBuildInputs = [
