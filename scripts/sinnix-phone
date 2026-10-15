@@ -620,7 +620,7 @@ drain_ambient_adb() {
 drain_bcr_calls_adb() {
   local remote_dir export_dir dest debug_dir history_dir ledger seen remote name
   local remote_size export_size duration rate channels
-  local levels mean max dead truncated_export log_remote log_name display
+  local levels mean max dead truncated_export log_remote log_name display audio_candidate decode_ok
   local listing checked_at metadata_missing row_needed failed=0
   local rollback_kind rollback_target rollback_source rollback_stage
   local pulled=0 repaired=0 audited=0 silent=0 broken=0
@@ -967,6 +967,35 @@ drain_bcr_calls_adb() {
 
     # Stage every changed member first. No current archive path is changed
     # until both available source files have passed their digest checks.
+    audio_candidate=${revision_stage[audio]:-$dest/$name}
+    duration=$(ffprobe -v error -show_entries format=duration \
+      -of default=nw=1:nk=1 "$audio_candidate" 2>/dev/null </dev/null || true)
+    rate=$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate \
+      -of default=nw=1:nk=1 "$audio_candidate" 2>/dev/null </dev/null || true)
+    channels=$(ffprobe -v error -select_streams a:0 -show_entries stream=channels \
+      -of default=nw=1:nk=1 "$audio_candidate" 2>/dev/null </dev/null || true)
+    decode_ok=true
+    levels=$(ffmpeg -nostdin -hide_banner -nostats -i "$audio_candidate" \
+      -af volumedetect -f null - 2>&1 \
+      | awk '/mean_volume:/ {mean=$(NF-1)} /max_volume:/ {max=$(NF-1)} END {print mean, max}' \
+      ) || decode_ok=false
+    mean=${levels% *}
+    max=${levels#* }
+    if [ "$decode_ok" = false ] || [ -z "$duration" ] || [ -z "$max" ]; then
+      echo "bcr: candidate audio did not decode; archive preserved" >&2
+      for stage in "${revision_stage[audio]:-}" "${revision_stage[sidecar]:-}"; do
+        [ -z "$stage" ] || rm -- "$stage"
+      done
+      broken=$((broken + 1))
+      continue
+    fi
+    dead=false
+    if [ "$max" = "-inf" ]; then
+      dead=true
+    elif [ -n "$max" ] && awk -v v="$max" 'BEGIN { exit !(v <= -90.0) }'; then
+      dead=true
+    fi
+
     for kind in audio sidecar; do
       [ -n "${revision_stage[$kind]:-}" ] || continue
       if ! bcr_preserve_revision "$kind"; then
@@ -1002,6 +1031,11 @@ drain_bcr_calls_adb() {
           rollback_target="$dest/${revision_archive_path[$rollback_kind]}"
           if [ "${revision_target_existed[$rollback_kind]}" -eq 1 ]; then
             rollback_source="$dest/${revision_previous_path[$rollback_kind]}"
+            if ! bcr_local_hash_stable "$rollback_target" || \
+              [ "$BCR_HASH" != "${revision_source_sha[$rollback_kind]}" ] || \
+              [ "$BCR_IDENTITY" != "${revision_archive_identity[$rollback_kind]}" ]; then
+              continue
+            fi
             rollback_stage=$(mktemp "$(dirname "$rollback_target")/.rollback.XXXXXX") || continue
             rm -- "$rollback_stage" || continue
             if ln -T -- "$rollback_source" "$rollback_stage" && mv -f -- "$rollback_stage" "$rollback_target"; then
@@ -1048,27 +1082,6 @@ drain_bcr_calls_adb() {
         failed=$((failed + 1)); continue
       fi
     fi
-    duration=$(ffprobe -v error -show_entries format=duration \
-      -of default=nw=1:nk=1 "$dest/$name" 2>/dev/null </dev/null || true)
-    rate=$(ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate \
-      -of default=nw=1:nk=1 "$dest/$name" 2>/dev/null </dev/null || true)
-    channels=$(ffprobe -v error -select_streams a:0 -show_entries stream=channels \
-      -of default=nw=1:nk=1 "$dest/$name" 2>/dev/null </dev/null || true)
-    decode_ok=true
-    levels=$(ffmpeg -nostdin -hide_banner -nostats -i "$dest/$name" \
-      -af volumedetect -f null - 2>&1 \
-      | awk '/mean_volume:/ {mean=$(NF-1)} /max_volume:/ {max=$(NF-1)} END {print mean, max}' \
-      ) || decode_ok=false
-    mean=${levels% *}
-    max=${levels#* }
-
-    dead=false
-    if [ "$max" = "-inf" ]; then
-      dead=true
-    elif [ -n "$max" ] && awk -v v="$max" 'BEGIN { exit !(v <= -90.0) }'; then
-      dead=true
-    fi
-
     export_size=$(adb_shell_args stat -c %s "$export_dir/$name" 2>/dev/null </dev/null | tr -d '\r' || true)
     case "$export_size" in *[!0-9]*) export_size= ;; esac
     truncated_export=false
@@ -1076,10 +1089,6 @@ drain_bcr_calls_adb() {
       truncated_export=true
     fi
 
-    if [ "$decode_ok" = false ] || [ -z "$duration" ] || [ -z "$max" ]; then
-      broken=$((broken + 1))
-      continue
-    fi
     [ "$dead" = false ] || silent=$((silent + 1))
 
     checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) || return 1

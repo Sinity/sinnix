@@ -1,5 +1,6 @@
 """Exercise BCR intake with real decoding and a controlled ADB transport."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -19,7 +20,10 @@ sinnix-remote-command() { python3 "$BCR_ENCODER" "$@"; }
 adb_resolve() { return 0; }
 mv() {
   local target="${@: -1}"
-  if [ "$BCR_MODE" = "second-publish-failed" ] && [[ "$target" == */debug/* ]]; then return 1; fi
+  if [ "$BCR_MODE" = "second-publish-failed" ] && [[ "$target" == */debug/* ]]; then
+    printf 'concurrent archive writer' > "$LAKE_ROOT/calls/neutral call.oga"
+    return 1
+  fi
   command mv "$@"
 }
 adb_any() {
@@ -159,18 +163,24 @@ with tempfile.TemporaryDirectory() as scratch:
     sidecar.write_bytes(b"neutral synthetic BCR metadata v3\n")
     result = run("second-publish-failed", lake)
     assert result.returncode != 0, result.stderr + result.stdout
-    assert archive.read_bytes() == before_audio and archived_sidecar.read_bytes() == before_sidecar, result.stderr + result.stdout
+    concurrent_audio = b"concurrent archive writer"
+    assert archive.read_bytes() == concurrent_audio, result.stderr + result.stdout
+    prior_path = lake / "calls" / "history" / hashlib.sha256(before_audio).hexdigest() / archive.name
+    assert prior_path.read_bytes() == before_audio
+    assert archived_sidecar.read_bytes() == before_sidecar
     assert ledger.read_bytes() == before
 
     # A cut retry keeps the prior pair intact and creates no successful row.
     result = run("failed", lake)
     assert result.returncode != 0
-    assert archive.read_bytes() == before_audio and archived_sidecar.read_bytes() == before_sidecar
+    assert archive.read_bytes() == concurrent_audio and archived_sidecar.read_bytes() == before_sidecar
     assert ledger.read_bytes() == before
     assert not list((lake / "calls").glob(".audio-incoming.*"))
     result = run("normal", lake)
     assert result.returncode == 0 and archive.read_bytes() == audio.read_bytes()
-    assert (lake / "calls" / json.loads(ledger.read_text().splitlines()[-1])["previous_audio"]["history_path"]).read_bytes() == before_audio
+    latest_after_retry = json.loads(ledger.read_text().splitlines()[-1])
+    assert (lake / "calls" / latest_after_retry["previous_audio"]["history_path"]).read_bytes() == concurrent_audio
+    assert prior_path.read_bytes() == before_audio
 
     before = ledger.read_bytes()
     result = run("bad-stat", lake)
@@ -191,6 +201,13 @@ with tempfile.TemporaryDirectory() as scratch:
     # Invalid audio must not be cached as successfully audited.
     (remote_root / "neutral call.oga").write_bytes(b"invalid audio")
     os.utime(remote_root / "neutral call.oga", (old, old))
+    good_audio_before = archive.read_bytes()
+    good_sidecar_before = archived_sidecar.read_bytes()
+    good_ledger_before = ledger.read_bytes()
+    result = run("normal", lake)
+    assert result.returncode != 0
+    assert archive.read_bytes() == good_audio_before and archived_sidecar.read_bytes() == good_sidecar_before
+    assert ledger.read_bytes() == good_ledger_before
     broken = root / "broken"
     result = run("normal", broken)
     assert result.returncode != 0, result.stderr + result.stdout
