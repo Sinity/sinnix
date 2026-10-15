@@ -83,3 +83,30 @@ def test_query_refuses_a_terminated_malformed_index_line(tmp_path: Path) -> None
         handle.write(b"not json\n")
     with pytest.raises(ValueError):
         lane_delta(tmp_path, "lane-x")
+
+
+@pytest.mark.parametrize("operation", ["lane_delta", "discover"])
+def test_query_refuses_inaccessible_source_instead_of_reporting_zero(tmp_path, operation):
+    writer = CaptureWriter(tmp_path, "clipboard")
+    writer.write({"fixture": True}, ts=100)
+    blocked = writer.lane_dir if operation == "lane_delta" else writer.lane_dir.parent
+    blocked.chmod(0)
+    try:
+        with pytest.raises(PermissionError):
+            if operation == "lane_delta":
+                lane_delta(tmp_path, "clipboard")
+            else:
+                discover_lanes(tmp_path)
+    finally:
+        blocked.chmod(0o700)
+
+
+def test_discovery_refuses_regular_file_root(tmp_path):
+    root = tmp_path / "not-a-directory"
+    root.touch()
+    with pytest.raises(NotADirectoryError):
+        discover_lanes(root)
+
+
+def test_accessible_empty_root_has_no_lanes(tmp_path):
+    assert discover_lanes(tmp_path) == []

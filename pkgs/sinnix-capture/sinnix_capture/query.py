@@ -9,18 +9,30 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from stat import S_ISDIR
 
 from sinnix_lib.layout import ACTIVITY_LANES, capture_lane_path
 
 
+def _directory_present(path: Path) -> bool:
+    try:
+        return S_ISDIR(path.stat().st_mode)
+    except FileNotFoundError:
+        return False
+
+
 def discover_lanes(capture_root: Path | str) -> list[str]:
     root = Path(capture_root)
-    if not root.is_dir():
+    try:
+        mode = root.stat().st_mode
+    except FileNotFoundError:
         return []
+    if not S_ISDIR(mode):
+        raise NotADirectoryError(f"capture root is not a directory: {root}")
     # Known physical homes may be nested; do not expose medium containers as lanes.
     containers = {relative.split("/")[0] for relative in ACTIVITY_LANES.values()}
-    known = {lane for lane in ACTIVITY_LANES if capture_lane_path(root, lane).is_dir()}
-    custom = {p.name for p in root.iterdir() if p.is_dir() and p.name not in containers}
+    known = {lane for lane in ACTIVITY_LANES if _directory_present(capture_lane_path(root, lane))}
+    custom = {p.name for p in root.iterdir() if _directory_present(p) and p.name not in containers}
     return sorted(known | custom)
 
 
@@ -31,8 +43,12 @@ def lane_delta(capture_root: Path | str, lane: str, since_ts: float = 0.0) -> di
     gap_records = 0
     prev_seq: int | None = None
 
-    if index_path.exists():
-        with index_path.open("rb") as handle:
+    try:
+        handle = index_path.open("rb")
+    except FileNotFoundError:
+        handle = None
+    if handle is not None:
+        with handle:
             for line in handle:
                 if not line.endswith(b"\n"):
                     # An interrupted append can leave only the last line
