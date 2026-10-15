@@ -13,21 +13,36 @@
 
 import hashlib
 import json
+import os
 from sinnix_lib.atomic import atomic_publish
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from stat import S_ISREG
 
 if len(sys.argv) < 2 or not Path(sys.argv[1]).is_dir():
     print("usage: sinnix-export-manifest <export-tree-root>", file=sys.stderr)
     sys.exit(64)
 
 root = Path(sys.argv[1]).resolve()
+def scan_error(error):
+    raise error
+
+
+# Path.rglob suppresses traversal errors. An omitted subtree cannot support
+# a new complete inventory, so preserve the prior manifest on every failure.
+paths = []
+for directory, _subdirectories, filenames in os.walk(root, onerror=scan_error, followlinks=False):
+    for name in filenames:
+        path = Path(directory) / name
+        if path == root / "MANIFEST.json":
+            continue
+        if S_ISREG(path.stat().st_mode):
+            paths.append(path)
+
 entries = []
-for path in sorted(p for p in root.rglob("*") if p.is_file()):
+for path in sorted(paths):
     rel = path.relative_to(root).as_posix()
-    if rel == "MANIFEST.json":
-        continue
     stat = path.stat()
     digest = hashlib.sha256()
     with path.open("rb") as handle:
