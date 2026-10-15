@@ -2255,6 +2255,15 @@ def _cleanup_obstacle(
     return None
 
 
+def _path_entry_exists(path: Path) -> bool:
+    """Only a confirmed missing entry proves absence; preserve lookup errors."""
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    return True
+
+
 def _drop_branch(
     config: Config,
     project: ProjectAdapter,
@@ -2304,8 +2313,11 @@ def _drop_branch(
             removal_target = str(path)
             detached = True
     if path is None:
-        if recorded_path is not None and recorded_path.exists():
-            return f"worktree kept; checkout path is unregistered: {recorded_path}"
+        try:
+            if recorded_path is not None and _path_entry_exists(recorded_path):
+                return f"worktree kept; checkout path is unregistered: {recorded_path}"
+        except OSError as error:
+            return f"worktree kept; cannot inspect recorded checkout: {error}"
         if delete_branch:
             try:
                 retire_branch()
@@ -2424,8 +2436,11 @@ def _drop_branch(
         )
     except WorktrunkError as error:
         return str(error)
-    if path.exists():
-        return f"worktree kept; checkout path remains after removal: {path}"
+    try:
+        if _path_entry_exists(path):
+            return f"worktree kept; checkout path remains after removal: {path}"
+    except OSError as error:
+        return f"worktree kept; cannot verify checkout removal: {error}"
     if delete_branch:
         # The checkout is gone (or was already absent), so this ref can now be
         # removed without invalidating a registered worktree.
@@ -2663,11 +2678,21 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
                     ),
                     None,
                 )
-            checkout_absent = (registered is None or registered.path is None) and (
-                recorded_path is None or not recorded_path.exists()
-            )
+            try:
+                recorded_present = (
+                    recorded_path is not None and _path_entry_exists(recorded_path)
+                )
+            except OSError as error:
+                kept.append({
+                    "branch": branch,
+                    "reason": f"worktree kept; cannot inspect recorded checkout: {error}",
+                })
+                continue
+            checkout_absent = (
+                registered is None or registered.path is None
+            ) and not recorded_present
             if registered is None or registered.path is None:
-                if recorded_path is None or not recorded_path.exists():
+                if not recorded_present:
                     # A terminal manifest still owns the branch when its
                     # checkout has already disappeared.
                     may_delete = owner is not None and (

@@ -1,8 +1,7 @@
 """Retirement must not discard bytes Git status omits."""
 
-import os
-import subprocess
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -124,3 +123,65 @@ def test_cleanup_keeps_inaccessible_detached_checkout(checkout, monkeypatch):
     monkeypatch.setattr(worktrunk, "worktrunk_remove", no_remove)
     reason = landing._drop_branch(config, project, "candidate", base=git(project.root, "rev-parse", "HEAD"), recorded_path=path)
     assert reason and "synthetic checkout denial" in reason
+
+
+@pytest.fixture
+def unregistered_branch(checkout, monkeypatch):
+    config, project, path = checkout
+    head = git(project.root, "rev-parse", "candidate")
+    git(project.root, "worktree", "remove", str(path))
+    monkeypatch.setattr(worktrunk, "worktrunk_list", lambda root: (Worktree(branch="master", path=project.root, main=True),))
+    monkeypatch.setattr(worktrunk, "worktrunk_find", lambda root, branch: Worktree(branch=branch, path=None))
+    return config, project, path, head
+
+
+def test_absent_checkout_retirement_really_removes_branch_and_retains_head(unregistered_branch):
+    config, project, path, head = unregistered_branch
+    assert landing._drop_branch(config, project, "candidate", base=head, recorded_path=path, delete_branch=True) is None
+    missing = subprocess.run(["git", "-C", str(project.root), "show-ref", "--verify", "--quiet", "refs/heads/candidate"], capture_output=True)
+    assert missing.returncode == 1
+    assert head in git(project.root, "for-each-ref", "--format=%(objectname)", "refs/agentctl/recovery").splitlines()
+
+
+@pytest.mark.parametrize("kind", ["denied", "broken_link", "wrong_parent"])
+def test_unregistered_checkout_uncertainty_keeps_branch(unregistered_branch, tmp_path, kind):
+    config, project, path, head = unregistered_branch
+    blocked = tmp_path / "blocked"
+    payload = None
+    if kind == "denied":
+        blocked.mkdir()
+        path = blocked / "residue"
+        path.mkdir()
+        payload = path / "unpublished.txt"
+        payload.write_bytes(b"unpublished fixture bytes")
+        blocked.chmod(0)
+    elif kind == "broken_link":
+        path.symlink_to(tmp_path / "missing")
+    else:
+        blocked.write_bytes(b"unexpected parent object")
+        path = blocked / "residue"
+    try:
+        reason = landing._drop_branch(config, project, "candidate", base=head, recorded_path=path, delete_branch=True)
+        assert reason and "kept" in reason, "unknown checkout presence authorized branch retirement"
+        assert git(project.root, "rev-parse", "candidate") == head
+        assert not git(project.root, "for-each-ref", "--format=%(refname)", "refs/agentctl/recovery")
+    finally:
+        if kind == "denied":
+            blocked.chmod(0o700)
+    if payload is not None:
+        assert payload.read_bytes() == b"unpublished fixture bytes"
+    if kind == "broken_link":
+        assert path.is_symlink()
+
+
+def test_post_removal_broken_link_is_retained_as_residue(checkout, monkeypatch):
+    config, project, path = checkout
+    head = git(project.root, "rev-parse", "candidate")
+    def remove(root, branch, **kwargs):
+        git(root, "worktree", "remove", str(path))
+        path.symlink_to(path.parent / "absent")
+    monkeypatch.setattr(worktrunk, "worktrunk_remove", remove)
+    reason = landing._drop_branch(config, project, "candidate", base=head, recorded_path=path, delete_branch=True)
+    assert reason and "remains after removal" in reason
+    assert path.is_symlink()
+    assert git(project.root, "rev-parse", "candidate") == head

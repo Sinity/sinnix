@@ -4750,3 +4750,26 @@ def test_abandon_and_prepare_serialize_and_reload(
         assert manifest.load(harness.config, run.run_id).abandoned
         assert not harness.pueue.added and not harness.wt.trees
         assert harness.beads.beads["fx-solo"]["assignee"] is None
+
+
+def test_clean_keeps_denied_recorded_checkout_instead_of_reporting_absent(harness: Harness) -> None:
+    run = prepared_run(harness, "fx-solo")
+    harness.land(run["run_id"])
+    worker = run["workers"][0]
+    branch = worker["branch"]
+    harness.git.branches[branch] = OTHER
+    harness.wt.trees[branch] = Worktree(branch=branch, path=None)
+    path = Path(worker["worktree"])
+    path.mkdir(parents=True, exist_ok=True)
+    payload = path / "unpublished.txt"
+    payload.write_bytes(b"unpublished fixture bytes")
+    parent = path.parent
+    parent.chmod(0)
+    try:
+        cleaned = batch.clean(harness.config, harness.project)
+        assert branch not in cleaned["absent"] and branch not in cleaned["removed"]
+        assert branch in {row["branch"] for row in cleaned["kept"]}
+        assert harness.git.branches[branch] == OTHER
+    finally:
+        parent.chmod(0o700)
+    assert payload.read_bytes() == b"unpublished fixture bytes"
