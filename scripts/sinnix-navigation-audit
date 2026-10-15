@@ -54,11 +54,12 @@ def audit(manifest: dict) -> dict:
         if not document.is_absolute():
             rows.append({"document": str(document), "status": "invalid-document"})
             continue
-        document = Path(os.path.abspath(document))
-        if mount_error is not None and any(document.is_relative_to(root) for root in external):
+        # Mount policy uses a lexical path; stat/read keep filesystem traversal.
+        mount_document = Path(os.path.abspath(document))
+        if mount_error is not None and any(mount_document.is_relative_to(root) for root in external):
             rows.append({"document": str(document), "status": "inaccessible-document", "reason": mount_error})
             continue
-        if any(document.is_relative_to(root) and not has_mounted_ancestor(document, root, mounted) for root in external):
+        if any(mount_document.is_relative_to(root) and not has_mounted_ancestor(mount_document, root, mounted) for root in external):
             rows.append({"document": str(document), "status": "external-unprobed"})
             continue
         try:
@@ -96,11 +97,11 @@ def audit(manifest: dict) -> dict:
             destination = Path(decoded)
             if not destination.is_absolute():
                 destination = document.parent / destination
-            destination = Path(os.path.abspath(destination))
-            offline = any(destination.is_relative_to(root) and not has_mounted_ancestor(destination, root, mounted) for root in external)
+            mount_destination = Path(os.path.abspath(destination))
+            offline = any(mount_destination.is_relative_to(root) and not has_mounted_ancestor(mount_destination, root, mounted) for root in external)
             row = {"document": str(document), "target": target,
                    "destination": str(destination), "status": "external-unprobed"}
-            if mount_error is not None and any(destination.is_relative_to(root) for root in external):
+            if mount_error is not None and any(mount_destination.is_relative_to(root) for root in external):
                 row.update(status="inaccessible", reason=mount_error)
             elif not offline:
                 try:

@@ -273,3 +273,76 @@ def test_unknown_mount_state_fails_external_checks_without_probing_payload(tmp_p
         assert [row['status'] for row in result['links']] == ['inaccessible-document', 'ok', 'inaccessible']
         assert all('cannot observe external mounts' in row['reason']
                    for row in result['links'] if row['status'] != 'ok')
+
+
+def test_symlink_parent_target_uses_filesystem_traversal(tmp_path):
+    import runpy
+
+    real = tmp_path / "real"
+    (real / "child").mkdir(parents=True)
+    (tmp_path / "alias").symlink_to(real / "child", target_is_directory=True)
+    (real / "present.md").write_text("actual destination")
+    (tmp_path / "absent.md").write_text("lexical decoy")
+    document = tmp_path / "README.md"
+    document.write_text(
+        "[present](alias/../present.md)\n[absent](alias/../absent.md)\n"
+    )
+    report = runpy.run_path(str(SCRIPT))["audit"]({
+        "schema_version": 1, "documents": [str(document)],
+    })
+    assert [row["status"] for row in report["links"]] == ["ok", "missing"]
+    assert report["failures"] == 1
+
+
+def test_symlink_parent_document_reads_actual_entrance(tmp_path):
+    import runpy
+
+    real = tmp_path / "real"
+    (real / "child").mkdir(parents=True)
+    (tmp_path / "alias").symlink_to(real / "child", target_is_directory=True)
+    (real / "README.md").write_text("[present](present.md)")
+    (real / "present.md").write_text("actual destination")
+    (tmp_path / "README.md").write_text("[decoy](missing.md)")
+    document = tmp_path / "alias" / ".." / "README.md"
+    report = runpy.run_path(str(SCRIPT))["audit"]({
+        "schema_version": 1, "documents": [str(document)],
+    })
+    assert report["failures"] == 0
+    assert [row["target"] for row in report["links"]] == ["present.md"]
+
+
+def test_missing_symlink_parent_document_cannot_use_lexical_decoy(tmp_path):
+    import runpy
+
+    real = tmp_path / "real"
+    (real / "child").mkdir(parents=True)
+    (tmp_path / "alias").symlink_to(real / "child", target_is_directory=True)
+    (tmp_path / "README.md").write_text("lexical decoy")
+    document = tmp_path / "alias" / ".." / "README.md"
+    report = runpy.run_path(str(SCRIPT))["audit"]({
+        "schema_version": 1, "documents": [str(document)],
+    })
+    assert report["failures"] == 1
+    assert [row["status"] for row in report["links"]] == ["missing-document"]
+
+
+def test_parent_components_keep_offline_mount_policy(tmp_path, monkeypatch):
+    import runpy
+
+    external = tmp_path / "external"
+    document = tmp_path / "README.md"
+    document.write_text("[offline](middle/../external/payload.md)")
+    remote_document = tmp_path / "middle" / ".." / "external" / "README.md"
+    original_stat = Path.stat
+
+    def no_external_probe(path, *args, **kwargs):
+        assert path not in (remote_document, document.parent / "middle/../external/payload.md")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", no_external_probe)
+    result = runpy.run_path(str(SCRIPT))["audit"]({
+        "schema_version": 1, "documents": [str(remote_document), str(document)],
+        "external_roots": [str(external)],
+    })
+    assert result["failures"] == 0
+    assert [row["status"] for row in result["links"]] == ["external-unprobed"] * 2
