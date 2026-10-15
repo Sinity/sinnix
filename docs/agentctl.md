@@ -124,7 +124,7 @@ provenance is cleared. Unknown Git head or an older launch without a recorded
 project root leaves the corresponding field absent; execution receipts retain
 the unavailable observation rather than inventing an identity.
 
-`job cancel --reference <ref> --expected-attempt <n>` compares the selected execution while holding the attempt allocation lock. A changed attempt refuses cancellation. This lets an operator act on the reference and attempt shown by `job snapshot` without cancelling a newer retry.
+`job cancel --reference <ref> --expected-attempt <n>` compares the selected execution while holding the attempt allocation lock. The lock covers selection and publication of the stop request, then is released so the wrapper can finalize. Escalation rechecks the attempt and queue start identity under the lock; a changed execution refuses escalation, and a published outcome is retained while the wrapper exits. A changed attempt refuses cancellation. This lets an operator act on the reference and attempt shown by `job snapshot` without cancelling a newer retry.
 
 A vanished working directory or an unresolvable command is refused before anything starts
 (exit 125).

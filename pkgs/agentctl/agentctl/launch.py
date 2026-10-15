@@ -24,12 +24,11 @@ import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence, TextIO
 
 from sinnix_lib.secrets import mask_secret_values, masked_window, secret_values
 
 from . import artifacts, gitcmd, manifest, pools, pueue
-from .outcome import read_outcome
 from .checkout import (
     CheckoutError,
     base_commit,
@@ -42,6 +41,7 @@ from .config import Config, PoolPolicy
 from .launch_input import scratch_path, secret_environment, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
 from .manifest import BatchRefusal
+from .outcome import read_outcome
 from .projects import AdmissionEnvelope, ProjectAdapter, ProjectOperation
 from .pueue import PueueError, PueueGroupError, PueueTimeout, Task
 from .run import (
@@ -1965,7 +1965,8 @@ def cancel(
             reference=reference,
             settle_seconds=settle_seconds,
             sleep=sleep,
-            allocation_locked=True,
+            allocation_lock=lock,
+            expected_attempt=expected_attempt,
             cancellation=request,
         )
 
@@ -2160,7 +2161,8 @@ def _cancel(
     reference: str | None = None,
     settle_seconds: float | None = None,
     sleep: Callable[[float], None] = time.sleep,
-    allocation_locked: bool = False,
+    allocation_lock: TextIO | None = None,
+    expected_attempt: int | None = None,
     cancellation: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Make the task not run: drop it while queued, stop its unit while running.
@@ -2185,7 +2187,7 @@ def _cancel(
             config,
             task,
             view,
-            allocation_locked=allocation_locked,
+            allocation_locked=allocation_lock is not None,
             cancellation=cancellation,
         )
         if stopped is not None:
@@ -2210,13 +2212,14 @@ def _cancel(
         root = artifacts.root_for(log)
         root.mkdir(parents=True, exist_ok=True)
         allocation = (root / ".allocation.lock").open("a")
-        if not allocation_locked:
+        if allocation_lock is None:
             fcntl.flock(allocation, fcntl.LOCK_EX)
         try:
             records = artifacts.attempts(_launch_input(config, task) or {})
             latest = records[-1]["attempt"] if records else 0
             active_attempt = (
-                latest if latest and _unfinished_attempt(config, task) else latest + 1
+                expected_attempt if allocation_lock is not None
+                else latest if latest and _unfinished_attempt(config, task) else latest + 1
             )
             request = _record_cancellation(
                 _launch_input(config, task) or {}, active_attempt, cancellation
@@ -2231,7 +2234,7 @@ def _cancel(
                     env=systemd_environment(),
                 )
         finally:
-            if not allocation_locked:
+            if allocation_lock is None:
                 fcntl.flock(allocation, fcntl.LOCK_UN)
             allocation.close()
     elif unit is not None:
@@ -2242,12 +2245,36 @@ def _cancel(
             timeout=CALL_TIMEOUT_SECONDS,
             env=systemd_environment(),
         )
+    # The guard pins selection through publication of the stop request. The
+    # wrapper needs the same lock to consume its marker and publish completion.
+    if allocation_lock is not None:
+        fcntl.flock(allocation_lock, fcntl.LOCK_UN)
     deadline = time.monotonic() + settle_seconds
     current = pueue.task(task_id)
     while current is not None and not current.terminal:
         if time.monotonic() >= deadline:
             try:
-                pueue.kill(task_id)
+                if allocation_lock is None:
+                    pueue.kill(task_id)
+                else:
+                    # A restart may allocate after the request lock is released.
+                    # Never escalate an old guarded request onto a newer wrapper.
+                    fcntl.flock(allocation_lock, fcntl.LOCK_EX)
+                    try:
+                        observed = pueue.task(task_id)
+                        if _artifact_view(config, task)["attempt"] != expected_attempt or (
+                            observed is not None and (
+                                launch_reference(observed) != launch_reference(task)
+                                or observed.started_at != task.started_at
+                            )
+                        ):
+                            raise JobError("execution attempt changed while waiting for cancellation")
+                        # A published receipt means finalization has passed the
+                        # lock and may exit/restart while pueue acknowledges it.
+                        if observed is not None and not observed.terminal and _unfinished_attempt(config, task):
+                            pueue.kill(task_id)
+                    finally:
+                        fcntl.flock(allocation_lock, fcntl.LOCK_UN)
             except PueueError:
                 pass
             current = pueue.task(task_id)
@@ -2260,7 +2287,7 @@ def _cancel(
         "state": state,
         **({"unresolved": True} if state == "unresolved" else {}),
         "unit": unit,
-        **_outcome(config, current if current is not None else task),
+        **_outcome(config, current if current is not None else task, attempt=expected_attempt),
         "already_terminal": False,
         **({"cancellation": request} if log is not None else {}),
     }

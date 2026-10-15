@@ -399,3 +399,130 @@ def test_legacy_queue_entry_without_input_keeps_conventional_artifact_reads(
     assert page["text"] + remainder["text"] == log.read_text()
     result = launch.result(config, task_id, reference, attempt=page["attempt"])
     assert result["value"] == {"legacy": True}
+
+
+
+def test_guarded_cancel_allows_real_wrapper_to_finalize(config, fake_pueue, project_root, monkeypatch):
+    import subprocess
+    import threading
+
+    job, document = execute(config, fake_pueue, project_root)
+    task = fake_pueue.task(job["job_id"])
+    input_path = launch.launch_input_path(task)
+    running = threading.Event()
+    stopped = threading.Event()
+    failures = []
+
+    def workload(*args):
+        running.set()
+        assert stopped.wait(5)
+        return run.Outcome.CANCELLED, run.CANCELLED_EXIT_CODE
+
+    real_run = subprocess.run
+
+    def systemctl(command, **kwargs):
+        if command[0] != "systemctl":
+            return real_run(command, **kwargs)
+        assert command[:3] == ["systemctl", "--user", "stop"]
+        assert run.cancel_marker_for(document["log_path"]).exists()
+        stopped.set()
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(run, "_run_bare", workload)
+    monkeypatch.setattr(run, "git_observation", lambda *_a: {"status": "unavailable"})
+    monkeypatch.setattr(run, "stranded_index_locks", lambda *_a, **_kw: [])
+    monkeypatch.setattr(launch.subprocess, "run", systemctl)
+    monkeypatch.setattr(launch, "_unit_state", lambda _unit: "stopped")
+
+    def wrapper():
+        try:
+            status = run.run(document, launch_input=str(input_path))
+            assert status == run.CANCELLED_EXIT_CODE
+            fake_pueue.fail(job["job_id"], exit_code=status)
+        except BaseException as error:
+            failures.append(error)
+
+    thread = threading.Thread(target=wrapper)
+    thread.start()
+    try:
+        assert running.wait(5), repr(failures)
+        result = launch.cancel(config, job["job_id"], reference=job["reference"], expected_attempt=1, settle_seconds=0.5)
+    finally:
+        stopped.set()
+        thread.join(2)
+    assert not thread.is_alive() and not failures
+    assert not fake_pueue.killed, "guarded canceller forced a kill while holding the finalizer's lock"
+    assert result["outcome"]["outcome"] == "cancelled"
+    assert result["outcome"]["cancellation"]["attempt"] == 1
+    assert not run.cancel_marker_for(document["log_path"]).exists()
+    events = [json.loads(line) for line in config.event_spool.read_text().splitlines()]
+    assert events[-1]["phase"] == "finished" and events[-1]["outcome"] == "cancelled"
+
+
+
+@pytest.mark.parametrize("retry", ["allocated", "starting"])
+def test_guarded_cancel_never_escalates_onto_a_new_wrapper(config, fake_pueue, project_root, monkeypatch, retry):
+    import subprocess
+    from dataclasses import replace
+
+    from agentctl import artifacts
+
+    job, document = execute(config, fake_pueue, project_root)
+    task = fake_pueue.task(job["job_id"])
+    input_path = str(launch.launch_input_path(task))
+    first = artifacts.begin(document, input_path)
+    path = run.outcome_path_for(first["log_path"])
+    clock = [0.0]
+    monkeypatch.setattr(launch.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(launch.subprocess, "run", lambda command, **_kw: subprocess.CompletedProcess(command, 0, stdout="", stderr=""))
+    monkeypatch.setattr(launch, "_unit_state", lambda _unit: "stopped")
+
+    def restart(_seconds):
+        path.write_text('{"attempt":1,"outcome":"cancelled","exit_code":130}')
+        if retry == "allocated":
+            artifacts.begin(document, input_path)
+        else:
+            fake_pueue._tasks[task.task_id] = replace(task, started_at="2026-09-03T08:00:02+00:00")
+        clock[0] = 1.0
+
+    with pytest.raises(launch.JobError, match="attempt changed while waiting"):
+        launch.cancel(config, task.task_id, reference=job["reference"], expected_attempt=1, settle_seconds=0.5, sleep=restart)
+    assert not fake_pueue.killed
+    assert json.loads(path.read_text())["attempt"] == 1
+    assert artifacts.cancellation(Path(document["log_path"]), 1)["attempt"] == 1
+
+
+def test_guarded_cancel_can_kill_only_the_same_unsettled_wrapper(config, fake_pueue, project_root, monkeypatch):
+    import subprocess
+
+    from agentctl import artifacts
+
+    job, document = execute(config, fake_pueue, project_root)
+    task = fake_pueue.task(job["job_id"])
+    artifacts.begin(document, str(launch.launch_input_path(task)))
+    monkeypatch.setattr(launch.subprocess, "run", lambda command, **_kw: subprocess.CompletedProcess(command, 0, stdout="", stderr=""))
+    monkeypatch.setattr(launch, "_unit_state", lambda _unit: "stopped")
+    launch.cancel(config, task.task_id, reference=job["reference"], expected_attempt=1, settle_seconds=0)
+    assert fake_pueue.killed == [task.task_id]
+    assert artifacts.cancellation(Path(document["log_path"]), 1)["attempt"] == 1
+
+
+
+def test_guarded_cancel_keeps_a_published_attempt_while_wrapper_exits(config, fake_pueue, project_root, monkeypatch):
+    import subprocess
+
+    from agentctl import artifacts
+
+    job, document = execute(config, fake_pueue, project_root)
+    task = fake_pueue.task(job["job_id"])
+    allocated = artifacts.begin(document, str(launch.launch_input_path(task)))
+    path = run.outcome_path_for(allocated["log_path"])
+    previous = b'{"attempt":1,"outcome":"cancelled","exit_code":130}'
+    path.write_bytes(previous)
+    monkeypatch.setattr(launch.subprocess, "run", lambda command, **_kw: subprocess.CompletedProcess(command, 0, stdout="", stderr=""))
+    monkeypatch.setattr(launch, "_unit_state", lambda _unit: "stopped")
+    result = launch.cancel(config, task.task_id, reference=job["reference"], expected_attempt=1, settle_seconds=0)
+    assert not fake_pueue.killed
+    assert result["outcome"]["attempt"] == 1
+    assert path.read_bytes() == previous
+    assert json.loads(run.cancel_marker_for(document["log_path"]).read_text())["attempt"] == 1
