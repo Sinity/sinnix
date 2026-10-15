@@ -114,6 +114,7 @@
           nativeBuildInputs = [
             pkgs.bash
             pkgs.dash
+            pkgs.util-linux
             pkgs.findutils
             pkgs.gawk
             pkgs.ffmpeg

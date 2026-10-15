@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Append and browse the operator raw-log stream
-# runtimeInputs: coreutils less gnused tofi libnotify
+# runtimeInputs: coreutils less gnused tofi libnotify util-linux
 set -euo pipefail
 umask 077
 
@@ -23,6 +23,9 @@ RECENT_COUNT=${RECENT_COUNT:-5}
 die() { echo "rawlog: $*" >&2; exit 1; }
 
 [ -d "$LOG_DIR" ] || die "Log directory not found: $LOG_DIR"
+if [[ -e "$LOG_FILE" || -L "$LOG_FILE" ]]; then
+  [ -f "$LOG_FILE" ] || die "Log target is not a regular file: $LOG_FILE"
+fi
 
 prompt_text() {
   local prompt="$1"
@@ -54,7 +57,7 @@ show_context() {
   if command -v hyprctl >/dev/null 2>&1; then
     hyprctl notify 0 6000 "rgb(33ccff)" "Recent raw log entries:\n$history" >/dev/null 2>&1 || true
   elif command -v notify-send >/dev/null 2>&1; then
-    notify-send -t 6000 "Raw log — recent entries" "$history"
+    notify-send -t 6000 "Raw log — recent entries" "$history" || true
   fi
 }
 
@@ -76,34 +79,28 @@ if [ -z "$msg" ]; then
   msg=$(pick_message)
 fi
 
-msg=$(echo -n "$msg" | sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//')
+msg=$(printf '%s' "$msg" | sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//')
 [ -n "$msg" ] || exit 0
 
 ts=$(date +"%Y-%m-%d %H:%M:%S")
 line="- **$ts** $msg"
 
-# Ensure file exists with a Dendron-style frontmatter if missing
-# (preserves the existing raw-log schema).
-if [ ! -f "$LOG_FILE" ]; then
-  {
-    echo "---"
-    echo "id: logs.raw-log"
-    echo "aliases: []"
-    echo "tags:"
-    echo "  - log"
-    echo "  - self"
-    echo "dr-contextualization: Append-only raw thought log."
-    echo "---"
-    echo
-    echo "# Raw log"
-    echo
-  } >>"$LOG_FILE"
+# Serialize initialization and append through the same open journal inode.
+# A fresh descriptor preserves any inherited caller channels.
+exec {journal_fd}>>"$LOG_FILE"
+flock "$journal_fd"
+if [ ! -s "$LOG_FILE" ]; then
+  printf '%s\n' \
+    '---' 'id: logs.raw-log' 'aliases: []' 'tags:' '  - log' '  - self' \
+    'dr-contextualization: Append-only raw thought log.' '---' '' '# Raw log' '' >&"$journal_fd"
 fi
-
-echo "$line" >>"$LOG_FILE"
+printf '%s\n' "$line" >&"$journal_fd"
+exec {journal_fd}>&-
 
 if command -v notify-send >/dev/null 2>&1; then
-  notify-send -t 1200 "📝 Logged" "$msg"
+  notify-send -t 1200 "📝 Logged" "$msg" || {
+    printf '%s\n' 'rawlog: entry written; notification failed' >&2
+  }
 fi
 
-echo "$line"
+printf '%s\n' "$line"
