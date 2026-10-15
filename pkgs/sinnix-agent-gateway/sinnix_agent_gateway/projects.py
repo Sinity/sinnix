@@ -1483,8 +1483,26 @@ class ProjectService:
             raise ProjectError(diagnostic or output or "project operation failed")
         return result.stdout
 
+    def _owner_nul_rows(
+        self, command: list[str], root: Path, *, stdin_bytes: bytes | None = None
+    ) -> Iterator[bytes]:
+        # Native Git metadata is a record stream, not a response frame. Spool
+        # it before interpreting records so owner failure cannot look complete.
+        with tempfile.TemporaryFile() as spool:
+            self._owner_result(
+                command, root, stdin_bytes=stdin_bytes, stdout_file=spool
+            )
+            spool.seek(0)
+            pending = b""
+            while chunk := spool.read(65_536):
+                rows = (pending + chunk).split(b"\0")
+                pending = rows.pop()
+                yield from rows
+            if pending:
+                raise ProjectError("git returned unterminated path metadata")
+
     def _patch_paths(self, root: Path, patch: bytes | Path) -> tuple[str, ...]:
-        output = self._owner_result(
+        rows = self._owner_nul_rows(
             [
                 "git",
                 "apply",
@@ -1497,7 +1515,7 @@ class ProjectService:
             stdin_bytes=None if isinstance(patch, Path) else patch,
         )
         paths: list[str] = []
-        for row in output.split(b"\0"):
+        for row in rows:
             if not row:
                 continue
             fields = row.split(b"\t", 2)
@@ -1527,6 +1545,8 @@ class ProjectService:
         # Blobs are project content, not response frames. Stage every result
         # before publication without retaining file bodies in gateway memory.
         output = index.parent / f"blob-{object_id}"
+        if output.is_file():
+            return output
         with output.open("wb") as handle:
             self._owner_result(
                 ["git", "cat-file", "blob", object_id],
@@ -1628,7 +1648,7 @@ class ProjectService:
     def _changed_tree_paths(
         self, root: Path, before_tree: str, after_tree: str
     ) -> tuple[str, ...]:
-        output = self._owner_result(
+        rows = self._owner_nul_rows(
             [
                 "git",
                 "diff",
@@ -1640,9 +1660,8 @@ class ProjectService:
                 "--",
             ],
             root,
-            max_output_bytes=self.config.max_result_bytes,
         )
-        return tuple(os.fsdecode(path) for path in output.split(b"\0") if path)
+        return tuple(os.fsdecode(path) for path in rows if path)
 
     def _publish_index_entry(
         self,

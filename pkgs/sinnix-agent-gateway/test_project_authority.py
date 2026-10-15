@@ -499,3 +499,31 @@ def test_blob_spooling_failure_preserves_working_file(tmp_path, monkeypatch):
             "default",
         )
     assert source.read_bytes() == before
+
+
+def test_patch_path_metadata_streams_across_frames_without_losing_names(
+    tmp_path, monkeypatch
+):
+    operator, project, _linked = project_service(tmp_path)
+    names = [f"f{i:04d}-" + "λ" * 45 + ".txt" for i in range(700)]
+    patch = "".join(
+        f"diff --git a/{name} b/{name}\nnew file mode 100644\nindex 0000000..e69de29\n"
+        for name in names
+    )
+    assert len(patch.encode()) < operator.config.max_result_bytes
+    assert sum(len(name.encode()) + 5 for name in names) > 64_000
+    original_index = git_stdout(project, "write-tree")
+    read_blobs = []
+    original_result = operator._owner_result
+
+    def record_blob(command, *args, **kwargs):
+        if command[:3] == ["git", "cat-file", "blob"]:
+            read_blobs.append(command[3])
+        return original_result(command, *args, **kwargs)
+
+    monkeypatch.setattr(operator, "_owner_result", record_blob)
+    operator.apply_patch("fixture", patch, "default")
+    assert len(read_blobs) == 1
+    assert sorted(path.name for path in project.glob("f*.txt")) == names
+    assert all((project / name).read_bytes() == b"" for name in names)
+    assert git_stdout(project, "write-tree") == original_index
