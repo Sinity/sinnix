@@ -63,6 +63,8 @@ class _SessionRequest:
     operation: str
     payload: Any
     reply: Any
+    abandoned: bool = False
+    cancel_scope: anyio.CancelScope | None = None
 
 
 class _PersistentSession:
@@ -88,10 +90,12 @@ class _PersistentSession:
         send, receive = anyio.create_memory_object_stream[Any](1)
         request = _SessionRequest(operation, payload, send)
         self.pending[id(request)] = request
+        received = False
         try:
             async with send, receive:
                 await self.sender.send(request)
                 ok, value = await receive.receive()
+                received = True
             if not ok:
                 await self.service._discard_session(self.name, expected=self)
                 raise value
@@ -106,6 +110,10 @@ class _PersistentSession:
                 f"MCP upstream {self.name} session closed"
             ) from exc
         finally:
+            if not received:
+                request.abandoned = True
+                if request.cancel_scope is not None:
+                    request.cancel_scope.cancel()
             self.pending.pop(id(request), None)
 
 
@@ -202,37 +210,42 @@ class McpBrokerService:
                         async def dispatch(request: _SessionRequest) -> None:
                             nonlocal current_tool
                             try:
-                                # Admission must recheck the reply endpoint after
-                                # waiting: a queued caller may have disconnected.
-                                if request.reply.statistics().open_receive_streams == 0:
-                                    return
-                                tool = (
-                                    request.payload[0]
-                                    if request.operation == "call_tool"
-                                    else "tools/list"
-                                )
-                                try:
-                                    if request.operation == "list_tools":
-                                        result = await client.list_tools(
-                                            params=request.payload
-                                        )
-                                    else:
-                                        tool_name, arguments = request.payload
-                                        result = await client.call_tool(
-                                            tool_name, arguments
-                                        )
-                                except Exception:
-                                    current_tool = tool
-                                    raise
-                                try:
-                                    await request.reply.send((True, result))
-                                except (
-                                    anyio.BrokenResourceError,
-                                    anyio.ClosedResourceError,
-                                ):
-                                    # A completed upstream effect is never replayed.
-                                    pass
+                                # A timed-out waiter owns only this request,
+                                # not its shared session or independent peers.
+                                with anyio.CancelScope() as scope:
+                                    request.cancel_scope = scope
+                                    # Admission must recheck the reply endpoint after
+                                    # waiting: a queued caller may have disconnected.
+                                    if request.abandoned or request.reply.statistics().open_receive_streams == 0:
+                                        return
+                                    tool = (
+                                        request.payload[0]
+                                        if request.operation == "call_tool"
+                                        else "tools/list"
+                                    )
+                                    try:
+                                        if request.operation == "list_tools":
+                                            result = await client.list_tools(
+                                                params=request.payload
+                                            )
+                                        else:
+                                            tool_name, arguments = request.payload
+                                            result = await client.call_tool(
+                                                tool_name, arguments
+                                            )
+                                    except Exception:
+                                        current_tool = tool
+                                        raise
+                                    try:
+                                        await request.reply.send((True, result))
+                                    except (
+                                        anyio.BrokenResourceError,
+                                        anyio.ClosedResourceError,
+                                    ):
+                                        # A completed upstream effect is never replayed.
+                                        pass
                             finally:
+                                request.cancel_scope = None
                                 limiter.release()
 
                         async with receiver, anyio.create_task_group() as calls:

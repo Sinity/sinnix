@@ -219,7 +219,7 @@ their owner unavailable. A configured contract change invalidates that snapshot.
 Cached schemas never authorize invocation: calls still inspect the live owner
 and enforce the current read or change policy.
 
-Warm upstream sessions admit up to four calls concurrently, with a bounded request stream. A queued request whose caller has disconnected is skipped before upstream dispatch. Session failure returns a typed broker error to pending callers and discards that session; completed effects are never replayed.
+Warm upstream sessions admit up to four calls concurrently, with a bounded request stream. A queued request whose caller has disconnected is skipped before upstream dispatch. A timeout or cancelled waiter cancels its active dispatch; the SDK requests upstream cancellation and the dispatch releases its slot without closing independent calls or the shared session. Cancellation does not establish that an upstream mutation was rolled back. Session failure returns a typed broker error to pending callers and discards that session; completed effects are never replayed.
 
 For a personal ChatGPT connector, select the Sinnix app's app-specific **Allow all
 actions** permission in ChatGPT settings. That setting is what removes eligible
