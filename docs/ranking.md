@@ -106,7 +106,9 @@ Its domain format is its own: `items.json` (a JSON array, editable),
 the one cached fit in the estate — the hub serves it back mid-session at
 `GET /feedback/elicit/<domain>`. State lives at `/realm/state/elicit/<domain>` --
 mutable application state, in the state root, not in the prose tree;
-`SINNIX_ELICIT_DIR` selects an isolated root for fixtures. The retained
+`SINNIX_ELICIT_DIR` selects an isolated root for fixtures. Domain paths use the
+same confinement as `sinnix-rank`: absolute paths, parent traversal and links
+outside the selected state root are refused. The retained
 `sinnix elicit-migrate` command moves domains from a legacy root only after a
 known-stopped drain response. It preflights source files and existing
 destinations, refuses unreadable inventories, links and special objects, then
@@ -117,7 +119,11 @@ current root needs no migration replay.
 A tap posts to the hub's `/feedback` spool and `sinnix-elicit autoingest`
 drains it into the domain, coalesced per burst. The drain dedups against every
 comparison id the log has ever carried, tombstones included: a record the
-operator undid is still one this domain has seen.
+operator undid is still one this domain has seen. The cached fit records a
+digest of its roster and replayed comparisons. The drain refits when that
+digest changes, including an undo plus a replacement answer with the same
+comparison count. Missing, malformed and older caches are rebuilt; a failed
+refit is retried on the next drain. Unchanged inputs keep the existing cache.
 
 ### `serve`
 

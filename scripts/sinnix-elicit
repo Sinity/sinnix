@@ -51,6 +51,7 @@ import argparse
 import random
 import datetime as dt
 import html
+import hashlib
 import json
 import math
 import mimetypes
@@ -65,7 +66,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from rank_core import Comparison, build_selector, fit, top_k_stability
-from rank_core.store import append_log, read_log
+from rank_core.store import append_log, domain_path, read_log
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.http import read_body
 from sinnix_lib.ledger import utc_ts
@@ -87,7 +88,7 @@ FEEDBACK_DIR = Path(os.environ.get("SINNIX_HUB_FEEDBACK_DIR", "/realm/state/hub-
 class Domain:
     def __init__(self, name):
         self.name = name
-        self.dir = BASE_DIR / name
+        self.dir = domain_path(BASE_DIR, name)
         self.items_path = self.dir / "items.json"
         self.comparisons_path = self.dir / "comparisons.jsonl"
         self.model_path = self.dir / "model.json"
@@ -562,6 +563,15 @@ def cmd_ask(domain, args):
     print(f"recorded {asked} comparisons")
 
 
+def model_inputs_digest(items, comparisons):
+    """Bind the cached fit to its roster and replayed authored judgments."""
+    encoded = json.dumps(
+        {"items": items, "comparisons": comparisons},
+        sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def fit_and_save_model(domain, items, comparisons):
     by_id = {str(i["id"]): i for i in items}
     records = fit_bradley_terry(items, comparisons)
@@ -571,6 +581,7 @@ def fit_and_save_model(domain, items, comparisons):
         "domain": domain.name,
         "fitted_at": utc_ts(),
         "n_comparisons": len(comparisons),
+        "inputs_sha256": model_inputs_digest(items, comparisons),
         "ranking": [
             {**r, "label": by_id[r["id"]].get("label", r["id"]), "theta": round(r["theta"], 4), "se": round(r["se"], 4)}
             for r in ordered
@@ -637,13 +648,19 @@ def cmd_autoingest(_domain, args):
         dom = Domain(d.name)
         if not dom.exists():
             continue
-        before = len(dom.load_comparisons())
         cmd_ingest(dom, args)
         after_items, _ = dom.load_items()
         after_comparisons = dom.load_comparisons()
-        if len(after_comparisons) != before:
+        try:
+            cached = json.loads(dom.model_path.read_text())
+        except (FileNotFoundError, UnicodeError, json.JSONDecodeError):
+            cached = {}
+        # Counts miss balanced undo/additions and cannot retry a failed fit.
+        if (not isinstance(cached, dict)
+                or cached.get("schema") != "sinnix-elicit-model-v1"
+                or cached.get("inputs_sha256") != model_inputs_digest(after_items, after_comparisons)):
             fit_and_save_model(dom, after_items, after_comparisons)
-            print(f"{dom.name}: +{len(after_comparisons) - before} comparisons, model refit")
+            print(f"{dom.name}: model refit from {len(after_comparisons)} comparisons")
 
 
 def cmd_domains(_domain, _args):
@@ -1161,7 +1178,10 @@ def main():
     add("domains", cmd_domains, needs_domain=False)
 
     args = p.parse_args()
-    domain = Domain(args.domain) if hasattr(args, "domain") else None
+    try:
+        domain = Domain(args.domain) if hasattr(args, "domain") else None
+    except ValueError as exc:
+        p.error(str(exc))
     if domain and args.cmd not in ("init",) and not domain.exists():
         raise SystemExit(f"no such domain '{domain.name}' (run: sinnix elicit init {domain.name} --items ...)")
     args.fn(domain, args)
