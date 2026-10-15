@@ -1462,3 +1462,49 @@ def test_line_excerpt_refuses_nonprogressing_utf8_budget(tmp_path):
     })
     assert result.is_error
     assert "UTF-8" in str(structured(result))
+
+
+def test_catalog_retains_complete_filtered_matches(tmp_path, monkeypatch):
+    from sinnix_agent_gateway.actions import gateway
+    server = create_server(config(tmp_path), "operator")
+    runtime = server._sinnix_revision_publisher.runtime
+    rows = [{"name": f"fixture.{i}", "family": "query", "domain": "fixture",
+             "owner": "fixture", "summary": "界" * 50, "documentation": "",
+             "aliases": [], "affordances": [], "resource_kinds": [],
+             "principals": ["operator"], "effect": "read"} for i in range(120)]
+    monkeypatch.setattr(gateway, "_action_matches", lambda *_: (rows, [], "fixture-hash"))
+    result = anyio.run(gateway._catalog, runtime, gateway.CatalogInput(limit=2))
+    assert result.matched_counts == {"actions": 120, "resources": 0, "mcp_tools": 0}
+    assert result.returned_counts == {"actions": 2, "resources": 0, "mcp_tools": 0}
+    assert result.truncated and len(result.actions) == 2
+    artifact = result.matches_artifact
+    assert artifact is not None
+    rows.clear()  # The observation remains immutable after its owner changes.
+    content = bytearray()
+    offset = 0
+    while True:
+        page = runtime.artifacts.read(artifact["artifact_id"], offset=offset, max_bytes=257)
+        content.extend(base64.b64decode(page["base64"]))
+        if page["next_offset"] is None:
+            break
+        offset = page["next_offset"]
+    retained = json.loads(content)
+    assert len(content) == artifact["bytes"]
+    assert [row["name"] for row in retained["actions"]] == [f"fixture.{i}" for i in range(120)]
+    assert retained["actions"][-1]["summary"] == "界" * 50
+    assert retained["matched_counts"] == result.matched_counts
+
+
+def test_catalog_combined_count_does_not_imply_cropping(tmp_path, monkeypatch):
+    from sinnix_agent_gateway.actions import gateway
+    server = create_server(config(tmp_path), "operator")
+    runtime = server._sinnix_revision_publisher.runtime
+    resource = {"kind": "fixture", "owner": "fixture", "ref_template": "fixture://x", "actions": []}
+    monkeypatch.setattr(gateway, "_action_matches", lambda *_: ([], [resource], "fixture-hash"))
+    async def inventory(**_):
+        return {"servers": [{"name": "fixture", "availability": "available", "tools": [{"name": "fixture", "effect": "read"}]}]}
+    monkeypatch.setattr(runtime.mcp_broker, "catalog", inventory)
+    result = anyio.run(gateway._catalog, runtime, gateway.CatalogInput(query="fixture", limit=1))
+    assert len(result.resources) == len(result.mcp_tools) == 1
+    assert result.truncated is False and result.matches_artifact is None
+    assert result.matched_counts == result.returned_counts

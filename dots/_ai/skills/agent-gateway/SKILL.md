@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 9c2397cc0dcbff33e56a5c56dfa19d0e17ad3c5f398bc7fa933016b38b5ab7f3 -->
+<!-- gateway-catalog-sha256: 280e2a971dad5fb3e1363e5403541ed7cd26c8b9067a361caa0886ad18e7d49b -->
 
 # Agent Gateway
 
@@ -31,7 +31,7 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 ### catalog
 
-- `gateway.catalog` — Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).
+- `gateway.catalog` — limit bounds inline rows per category. matched_counts and returned_counts distinguish observed matches from this response. matches_artifact retains every filtered match when cropped; artifacts.read retrieves its immutable bytes. Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).
 - `terminals.list` — Every kitty window with its ref, title, cwd, shell pid, focus and foreground processes.
 - `browser.pages` — List every open Chrome page with its ref; flags the gateway-owned pages that can be read, captured or operated.
 - `mcp.tools` — Catalog of every admitted upstream tool with its namespaced ref, input schema and read/change effect.
@@ -185,4 +185,4 @@ Effectful actions (families change, operate, run) require `idempotency_key`. Con
 
 The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `9c2397cc0dcbff33e56a5c56dfa19d0e17ad3c5f398bc7fa933016b38b5ab7f3`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `280e2a971dad5fb3e1363e5403541ed7cd26c8b9067a361caa0886ad18e7d49b`.

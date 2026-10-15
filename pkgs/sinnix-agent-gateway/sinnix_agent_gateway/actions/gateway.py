@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 import anyio
@@ -79,7 +80,7 @@ class CatalogInput(RequestControls):
     include_mcp_tools: bool = Field(
         default=True, description="Also search brokered MCP server tools."
     )
-    limit: int = Field(default=50, ge=1, le=500)
+    limit: int = Field(default=50, ge=1, le=500, description="Inline rows per category; cropped matches remain in matches_artifact.")
 
 
 class CatalogAction(GatewayModel):
@@ -126,6 +127,9 @@ class Catalog(GatewayModel):
     mcp_coverage_incomplete: dict[str, str] = Field(default_factory=dict)
     mcp_catalog_truncated: bool = False
     mcp_catalog_artifact: dict[str, Any] | None = None
+    matched_counts: dict[str, int] = Field(default_factory=dict)
+    returned_counts: dict[str, int] = Field(default_factory=dict)
+    matches_artifact: dict[str, Any] | None = None
     truncated: bool = False
 
 
@@ -272,13 +276,34 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
                     }
                 )
         mcp_tools = search_rows(mcp_tools, inp.query, ("server", "name", "description"))
-    total = len(selected) + len(resources) + len(mcp_tools)
+    actions = [{k: v for k, v in row.items() if k != "documentation"} for row in selected]
+    matches = {"actions": actions, "resources": resources, "mcp_tools": mcp_tools}
+    counts = {name: len(rows) for name, rows in matches.items()}
+    cropped = any(count > inp.limit for count in counts.values())
+    matches_artifact = None
+    if cropped:
+        # Retain the filtered observation, not just the broker's unfiltered inventory.
+        payload = {
+            "revision": action_set.REVISION,
+            "catalog_sha256": catalog_sha256,
+            **matches,
+            "matched_counts": counts,
+            "mcp_unavailable": unavailable,
+            "mcp_coverage_incomplete": incomplete,
+            "mcp_catalog_truncated": mcp_catalog_truncated,
+            "mcp_catalog_artifact": catalog_artifact,
+        }
+        matches_artifact = await anyio.to_thread.run_sync(partial(
+            runtime.artifacts.register_json, payload,
+            kind="catalog-matches", owner_id="gateway", source="gateway.catalog",
+            target={"principal": runtime.principal_name, "query": inp.query},
+        ))
     return Catalog(
         revision=action_set.REVISION,
         catalog_sha256=catalog_sha256,
         actions=[
             CatalogAction(**{k: v for k, v in row.items() if k != "documentation"})
-            for row in selected[: inp.limit]
+            for row in actions[: inp.limit]
         ],
         resources=[CatalogResource(**row) for row in resources[: inp.limit]],
         mcp_tools=[CatalogMcpTool(**row) for row in mcp_tools[: inp.limit]],
@@ -286,7 +311,10 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
         mcp_coverage_incomplete=incomplete,
         mcp_catalog_truncated=mcp_catalog_truncated,
         mcp_catalog_artifact=catalog_artifact,
-        truncated=total > inp.limit or bool(incomplete),
+        matched_counts=counts,
+        returned_counts={name: min(count, inp.limit) for name, count in counts.items()},
+        matches_artifact=matches_artifact,
+        truncated=cropped or bool(incomplete),
     )
 
 
@@ -382,7 +410,7 @@ ACTIONS: tuple[Action, ...] = (
         principals=ALL_PRINCIPALS,
         affordances=("gateway.status",),
         aliases=("search tools", "discover", "help", "list actions", "which tool"),
-        documentation="Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).",
+        documentation="limit bounds inline rows per category. matched_counts and returned_counts distinguish observed matches from this response. matches_artifact retains every filtered match when cropped; artifacts.read retrieves its immutable bytes. Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).",
         examples=(
             Example(title="Screenshot capability", input={"query": "screenshot"}),
             Example(title="Lynchpin tools", input={"query": "lynchpin"}),
