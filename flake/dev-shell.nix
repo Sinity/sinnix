@@ -185,13 +185,16 @@
           export SINNIX_DEV_SHELL_SOURCE SINNIX_DEV_SHELL_REV
           export SINNIX_DEV_SHELL_FLAKE="$_sinnix_shell_root"
           unset _sinnix_source_metadata
-          echo ""
-          echo "NixOS Configuration Development Environment"
-          echo ""
-          ${motdLines}
-          echo ""
-          echo "  Run 'help' for descriptions."
-          echo ""
+          # Keep command stdout usable for typed AgentCTL results.
+          {
+            echo ""
+            echo "NixOS Configuration Development Environment"
+            echo ""
+            ${motdLines}
+            echo ""
+            echo "  Run 'help' for descriptions."
+            echo ""
+          } >&2
         '';
       };
 
