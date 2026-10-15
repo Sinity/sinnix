@@ -57,6 +57,7 @@ from __future__ import annotations
 
 import argparse
 import calendar
+import errno
 import gzip
 import hashlib
 import fcntl
@@ -65,6 +66,7 @@ import os
 import re
 import socket
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -268,15 +270,25 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
 
 def discover_history_paths(path: Path) -> list[Path]:
-    if path.is_file():
+    def inspect(candidate: Path) -> int:
+        try:
+            return candidate.stat().st_mode
+        except OSError as error:
+            raise OSError(error.errno, f"cannot inspect history input: {error}", str(candidate)) from error
+
+    mode = inspect(path)
+    if stat.S_ISREG(mode):
         return [path]
-    if path.is_dir():
-        return sorted(
-            p
-            for p in path.iterdir()
-            if p.is_file() and p.suffix in (".ndjson", ".jsonl")
-        )
-    return []
+    if not stat.S_ISDIR(mode):
+        raise OSError(errno.ENOTDIR, "history source must be a regular file or directory", str(path))
+    found = []
+    for candidate in path.iterdir():
+        if candidate.suffix not in (".ndjson", ".jsonl"):
+            continue
+        if not stat.S_ISREG(inspect(candidate)):
+            raise OSError(errno.EINVAL, "history input is not a regular file", str(candidate))
+        found.append(candidate)
+    return sorted(found)
 
 
 # ---------------------------------------------------------------------------
@@ -1252,16 +1264,20 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
     args.rate_limit_seconds = parse_rate_limits(getattr(args, "rate_limit_seconds", []) or [])
 
-    if args.command == "run":
-        rc = cmd_ingest(args)
-        if rc != 0:
-            return rc
-        rc = cmd_resolve(args)
-        if rc != 0:
-            return rc
-        return cmd_build(args)
+    try:
+        if args.command == "run":
+            rc = cmd_ingest(args)
+            if rc != 0:
+                return rc
+            rc = cmd_resolve(args)
+            if rc != 0:
+                return rc
+            return cmd_build(args)
 
-    return args.func(args)
+        return args.func(args)
+    except OSError as error:
+        print(f"sinnix-url-ledger: {error}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

@@ -102,3 +102,45 @@ def test_unparseable_visits_remain_evidence_without_claimed_time_bounds(tmp_path
     assert set(row["visits"]) == set(stamps)
     assert row["visit_count"] == 2
     assert row["first_visit"] is None and row["last_visit"] is None
+
+
+@pytest.mark.parametrize("failure", ["denied", "disappeared", "fifo", "directory"])
+def test_unavailable_history_member_cannot_publish_partial_ingest(tmp_path, monkeypatch, capsys, failure):
+    from pathlib import Path
+    history = tmp_path / "history"
+    history.mkdir()
+    record = json.dumps({"url": "https://example.invalid/valid", "iso_time": "2026-01-01T00:00:00Z"}) + "\n"
+    (history / "good.jsonl").write_text(record)
+    blocked = history / "blocked.jsonl"
+    if failure == "fifo":
+        os.mkfifo(blocked)
+    elif failure == "directory":
+        blocked.mkdir()
+    else:
+        blocked.write_text(record)
+        original = Path.stat
+        def unavailable(path, *args, **kwargs):
+            if path == blocked:
+                if failure == "denied":
+                    raise PermissionError("fixture permission denied")
+                raise FileNotFoundError("fixture disappeared during discovery")
+            return original(path, *args, **kwargs)
+        monkeypatch.setattr(Path, "stat", unavailable)
+    state = tmp_path / "state"
+    state.mkdir()
+    output = state / "urls.jsonl"
+    output.write_bytes(b"previous complete state\n")
+    result = ledger.main(["ingest", "--history-path", str(history), "--state-root", str(state)])
+    assert result == 1
+    assert output.read_bytes() == b"previous complete state\n"
+    assert "blocked.jsonl" in capsys.readouterr().err
+
+
+def test_history_discovery_keeps_valid_file_links_and_ignores_other_extensions(tmp_path):
+    history = tmp_path / "history"
+    history.mkdir()
+    target = tmp_path / "retained.jsonl"
+    target.write_text('{"url":"https://example.invalid/","iso_time":"2026-01-01T00:00:00Z"}\n')
+    (history / "linked.jsonl").symlink_to(target)
+    os.mkfifo(history / "unrelated.pipe")
+    assert ledger.discover_history_paths(history) == [history / "linked.jsonl"]
