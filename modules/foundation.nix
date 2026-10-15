@@ -253,6 +253,11 @@ in
                     publicationPolicy = "dolt-sync";
                   };
                 };
+                turing_studio = {
+                  path = "/turing-studio/repo";
+                  defaultRef = "main";
+                  devtoolsEntrypoint = "nix develop";
+                };
                 yt_polisher = {
                   path = "${config.root}/yt-polisher/repo";
                   remote = "https://github.com/Sinity/yt-polisher.git";
