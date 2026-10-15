@@ -193,15 +193,30 @@ for socket in "${sockets[@]}"; do
   pid=$(basename "$socket" | sed 's/kitty-[^-]*-//')
   echo "● Instance pid:$pid"
 
-  # A socket file on disk does not mean its kitty process is alive: a
-  # crashed/closed instance leaves the socket behind. "cannot connect" is
-  # that ordinary case, not a capture failure -- most scanned sockets are
-  # routinely stale, so counting them as failures would fail every run.
-  windows_json=$(kitty @ --to "unix:$socket" ls 2>/dev/null) || {
-    echo "  ⚠ stale instance (no longer running), skipping"
-    ((total_stale++)) || true
+  # Only native missing/refused endpoint errors establish a stale socket.
+  # Permission, authorization and other inventory failures must fail the run.
+  inventory_error=$(mktemp "$CAPTURE_DIR/.inventory-error.XXXXXX")
+  trap 'rm -f -- "$inventory_error"' EXIT
+  if windows_json=$(kitty @ --to "unix:$socket" ls 2>"$inventory_error"); then
+    rm -f -- "$inventory_error"
+    trap - EXIT
+  else
+    inventory_message=$(cat "$inventory_error")
+    rm -f -- "$inventory_error"
+    trap - EXIT
+    connection_error_prefix="Error: Failed to connect to unix:$socket with error: dial unix $socket: connect: "
+    case "$inventory_message" in
+      "${connection_error_prefix}connection refused"|"${connection_error_prefix}no such file or directory")
+        echo "  ⚠ stale socket (missing or not accepting connections), skipping"
+        total_stale=$((total_stale + 1))
+        ;;
+      *)
+        printf '  ✗ inventory request failed for pid:%s: %s\n' "$pid" "$inventory_message" >&2
+        total_failed=$((total_failed + 1))
+        ;;
+    esac
     continue
-  }
+  fi
 
   if ! window_lines=$(printf '%s\n' "$windows_json" | window_rows); then
     echo "  ✗ invalid window inventory for pid:$pid" >&2
@@ -228,9 +243,9 @@ for socket in "${sockets[@]}"; do
 done
 
 echo ""
-echo "Total: $total_captured window(s) captured, $total_failed failed, $total_stale stale instance(s) skipped"
+echo "Total: $total_captured window(s) captured, $total_failed failed, $total_stale stale source(s) skipped"
 echo "Output: $CAPTURE_DIR"
 
-# Only a real capture failure (live, reachable instance whose window
-# capture failed) fails the unit; stale sockets must never do so.
+# Proven stale sources are benign; inventory and publication failures
+# remain visible to the owning unit.
 [ "$total_failed" -eq 0 ] || exit 1

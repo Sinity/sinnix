@@ -21,6 +21,18 @@ class ScrollbackCapture(unittest.TestCase):
         kitty = tools / "kitty"
         kitty.write_text(f"#!{sys.executable}\n" + '''import json,os,sys
 if "ls" in sys.argv:
+    failure=os.environ.get("KITTY_TEST_LS_FAILURE")
+    if failure:
+        target=sys.argv[sys.argv.index("--to")+1]
+        path=target.removeprefix("unix:")
+        reasons={"refused":"connection refused", "missing":"no such file or directory",
+                 "permission denied":"permission denied"}
+        if failure in reasons:
+            reason=reasons[failure]
+            sys.stderr.write(f"Error: Failed to connect to {target} with error: dial unix {path}: connect: {reason}\\n")
+        else:
+            sys.stderr.write(f"Error: {failure}\\n")
+        sys.exit(1)
     print(os.environ.get("KITTY_TEST_INVENTORY", json.dumps([{"tabs":[{"windows":[{"id":7,"title":"fixture","cwd":"/synthetic"}]}]}])))
 else:
     mode=os.environ["CAPTURE_TEST_MODE"]
@@ -125,6 +137,18 @@ else:
                 result = self.run_capture("success", current=False)
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertFalse(list(self.capture.glob("*.ansi")))
+                self.assertFalse((self.root / "progress").exists())
+
+    def test_only_proven_stale_transport_errors_are_benign(self):
+        for failure, expected in (("refused", 0), ("missing", 0),
+                                  ("permission denied", 1), ("remote control disabled", 1),
+                                  ("unknown transport failure", 1)):
+            with self.subTest(failure=failure):
+                self.env["KITTY_TEST_LS_FAILURE"] = failure
+                result = self.run_capture("success", current=False)
+                self.assertEqual(result.returncode, expected, result.stderr)
+                self.assertFalse(list(self.capture.glob("*.ansi")))
+                self.assertFalse(list(self.capture.glob(".inventory-error.*")))
                 self.assertFalse((self.root / "progress").exists())
 
     def test_empty_batch_inventory_is_valid(self):
