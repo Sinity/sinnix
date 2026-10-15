@@ -459,6 +459,9 @@ def test_line_read_bounds_skipping_a_giant_physical_line(
             read_sizes.append(size)
             return self.handle.read(size)
 
+        def tell(self):
+            return self.handle.tell()
+
         def readline(self, size=-1):
             assert 0 <= size <= files._LINE_SCAN_BYTES
             read_sizes.append(size)
@@ -1349,10 +1352,11 @@ def test_files_search_keeps_a_bounded_page_of_one_huge_file_and_spills_the_rest(
     assert match.overflow_lines == 10_000 - files.INBAND_LINES_PER_FILE
     assert result.overflow is not None
     assert result.overflow.lines == match.overflow_lines
-    page = runtime.artifacts.read(
-        result.overflow.artifact_id, offset=result.overflow.bytes - 200, max_bytes=200
-    )
-    tail = base64.b64decode(page["base64"]).decode().splitlines()[-1]
+    # A record includes its full path, so no fixed suffix size fits every TMPDIR.
+    snapshot = runtime.artifacts.registered_content(result.overflow.artifact_id)
+    with snapshot.open("rb") as handle:
+        for tail in handle:
+            pass
     assert json.loads(tail)["text"] == "needle 10000"
     assert json.loads(tail)["line_number"] == 10_000
 
@@ -1423,3 +1427,38 @@ def test_files_search_no_match_is_an_empty_result(tmp_path: Path) -> None:
         files.SearchInput(roots=[{"path": str(root)}], content_regex="absent-needle"),
     )
     assert result.matches == [] and result.warnings == [] and result.overflow is None
+
+
+@pytest.mark.parametrize("budget", [4, 7, 64])
+def test_line_excerpt_continues_at_exact_byte_offset(tmp_path, budget):
+    server = create_server(config(tmp_path), "operator")
+    target = tmp_path / "continuation.txt"
+    prefix = "ignored界\n".encode()
+    suffix = ("界" * 20 + "\nlast\n").encode()
+    target.write_bytes(prefix + suffix)
+    first = structured(call(server, "files.read", {
+        "target": {"path": str(target)}, "line_start": 2,
+        "line_count": 1, "max_bytes": budget,
+    }))["data"]
+    assert first["offset"] == len(prefix)
+    recovered = first["text"].encode()
+    page = first
+    while page["next_offset"] is not None:
+        assert page["next_offset"] == len(prefix) + len(recovered)
+        page = structured(call(server, "files.read", {
+            "target": {"path": str(target)}, "offset": page["next_offset"],
+            "max_bytes": budget,
+        }))["data"]
+        recovered += page["text"].encode()
+    assert recovered == suffix
+
+
+def test_line_excerpt_refuses_nonprogressing_utf8_budget(tmp_path):
+    server = create_server(config(tmp_path), "operator")
+    target = tmp_path / "utf8.txt"
+    target.write_text("skip\n界界\n")
+    result = call(server, "files.read", {
+        "target": {"path": str(target)}, "line_start": 2, "max_bytes": 1,
+    })
+    assert result.is_error
+    assert "UTF-8" in str(structured(result))

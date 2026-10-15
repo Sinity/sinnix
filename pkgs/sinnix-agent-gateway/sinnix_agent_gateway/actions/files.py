@@ -328,6 +328,10 @@ class FileContent(GatewayModel):
     )
     offset: int = 0
     returned_bytes: int = 0
+    next_offset: int | None = Field(
+        default=None,
+        description="Resume with this byte offset and omit line_start; live file reads are not snapshots.",
+    )
     truncated: bool = False
     line_start: int | None = None
     line_end: int | None = None
@@ -370,6 +374,7 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
                 start = inp.line_start
                 count = inp.line_count or 200
                 found_before = _skip_physical_lines(handle, start - 1)
+                offset = handle.tell()
                 selected: list[bytes] = []
                 returned = 0
                 truncated = False
@@ -400,11 +405,18 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
             truncated = truncated or byte_truncated
             data = data[:max_bytes]
             text, consumed = decode_utf8_page(data, final=not byte_truncated)
+            if byte_truncated and consumed == 0:
+                raise ProtocolError(
+                    "invalid_request",
+                    "max_bytes cannot fit the next UTF-8 character; retry with at least 4",
+                )
             return ActionResult(
                 FileContent(
                     **base,
                     text=text,
+                    offset=offset,
                     returned_bytes=consumed,
+                    next_offset=offset + consumed if truncated else None,
                     truncated=truncated,
                     line_start=start,
                     line_end=start + len(selected) - 1 if selected else None,
@@ -428,6 +440,7 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
                 text=text,
                 offset=inp.offset,
                 returned_bytes=consumed,
+                next_offset=inp.offset + consumed if truncated else None,
                 truncated=truncated,
             )
         )

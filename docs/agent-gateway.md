@@ -82,6 +82,8 @@ A configured project path identifies its Git repository store. Discovered checko
 
 `projects.search` streams ripgrep records until the requested match count or its execution deadline. A valid source line may exceed the inline response budget; that budget does not impose a per-line cutoff. Other command routes retain their JSONL row bounds. Search currently holds the requested matches in memory.
 
+Text file reads return the actual starting byte `offset` and a `next_offset` when more bytes remain. To continue a line-selected excerpt, pass `next_offset` as `offset` and omit `line_start`; this preserves the remainder of a partially returned line. These are live file reads, so concurrent file edits require a new read or a retained artifact snapshot.
+
 The local CLI reads one complete JSON request from `--input-file` or `--stdin`; action schemas still validate its fields. JSON escaping and UTF-8 encoding do not impose a second request-size limit. Requests are decoded in memory; use a verified artifact source for large file bodies so those bytes stay in the streaming project-write route.
 
 ## Jobs and artifacts
@@ -229,7 +231,7 @@ changing the gateway action family cannot suppress a client-side approval policy
 
 ## Generated reference
 
-This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `166d9b8443f3c3a4eee847d1ef17d418e4c2240cf9f0c434b3430991edb8c0dc`.
+This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `9c2397cc0dcbff33e56a5c56dfa19d0e17ad3c5f398bc7fa933016b38b5ab7f3`.
 
 The full schemas and examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 
