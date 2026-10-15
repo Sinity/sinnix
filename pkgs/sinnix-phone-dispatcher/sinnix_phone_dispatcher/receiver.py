@@ -113,7 +113,8 @@ class _PhoneSpeechLane:
 
     def __init__(self, capture_root: Path) -> None:
         self.blob_dir = capture_root / "phone" / "speech"
-        self.blob_dir.mkdir(parents=True, exist_ok=True)
+        self.blob_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.blob_dir.chmod(0o700)
 
     def ingest(self, obj: dict) -> dict:
         payload = obj.pop("audio_b64", None)
@@ -145,7 +146,7 @@ class _PhoneSpeechLane:
             self.blob_dir / name,
             wav,
             fsync=True,
-            mode=0o660,
+            mode=0o600,
         )
         obj["audio_file"] = name
         obj["bytes"] = len(wav)

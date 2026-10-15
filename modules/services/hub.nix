@@ -566,11 +566,11 @@ mkServiceModule {
         # mkdir(parents=True) these lazily on first write, but declaring them
         # keeps ownership/mode explicit rather than inherited from whatever
         # umask the dispatcher happens to run under.
-        "d ${phoneLaneRoot}/phone-speech 0755 ${userName} users -"
+        "d ${phoneLaneRoot}/phone-speech 0700 ${userName} users -"
         # Raw utterance audio, kept whether or not transcription succeeded:
         # audio can be re-transcribed by a better engine later, a transcript
         # cannot be un-lost.
-        "d ${phoneLaneRoot}/phone/speech 0755 ${userName} users -"
+        "d ${phoneLaneRoot}/phone/speech 0700 ${userName} users -"
         # What prime holds for the phone, moved here from the retired
         # phone-drain module: what the app FETCHES (glance and steering are
         # generated on request; receipts, notifications and decks are files)

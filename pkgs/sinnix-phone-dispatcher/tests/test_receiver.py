@@ -135,7 +135,7 @@ def test_speech_recording_is_durably_published_before_transcription(
 
     recording = lane.blob_dir / result["audio_file"]
     assert recording.read_bytes().startswith(b"RIFF")
-    assert recording.stat().st_mode & 0o777 == 0o660
+    assert recording.stat().st_mode & 0o777 == 0o600
     assert not list(lane.blob_dir.glob("*.part"))
     assert not list(lane.blob_dir.glob(".*.atomic-tmp-*"))
 
@@ -152,3 +152,21 @@ def test_speech_publish_failure_leaves_no_claimed_recording(
     with pytest.raises(OSError, match="disk full"):
         lane.ingest({"audio_b64": base64.b64encode(b"\x00\x00").decode()})
     assert list(lane.blob_dir.iterdir()) == []
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_speech_directory_is_private_under_permissive_umask(tmp_path, existing):
+    import os
+    target = tmp_path / "phone" / "speech"
+    if existing:
+        target.mkdir(parents=True)
+        target.chmod(0o755)
+        (target / "retained.wav").write_bytes(b"neutral retained fixture")
+    previous = os.umask(0o022)
+    try:
+        lane = receiver._PhoneSpeechLane(tmp_path)
+    finally:
+        os.umask(previous)
+    assert lane.blob_dir.stat().st_mode & 0o777 == 0o700
+    if existing:
+        assert (target / "retained.wav").read_bytes() == b"neutral retained fixture"
