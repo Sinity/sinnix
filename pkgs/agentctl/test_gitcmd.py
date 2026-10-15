@@ -196,3 +196,11 @@ def test_clearing_releases_only_an_old_unheld_lock_in_a_linked_worktree(
     assert main.exists()
     assert gitcmd.clear_stranded_lock(linked) == own
     assert not own.exists()
+
+
+@pytest.mark.parametrize("name", [" leading.txt", "carriage\rreturn.txt", os.fsdecode(b"bad-\xff")])
+def test_nul_path_output_preserves_literal_filename(tmp_path, name):
+    root = _repository(tmp_path / "repo")
+    (root / name).write_bytes(b"neutral fixture")
+    result = gitcmd.git(root, "ls-files", "--others", "--exclude-standard", "-z", error=RuntimeError)
+    assert result == name + "\0"

@@ -1,0 +1,126 @@
+"""Retirement must not discard bytes Git status omits."""
+
+import os
+import subprocess
+import shutil
+from pathlib import Path
+
+import pytest
+
+from agentctl import landing, worktrunk
+from agentctl.worktrunk import Worktree
+
+
+def git(root, *args):
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True).stdout.strip()
+
+
+@pytest.fixture
+def checkout(config, project_root, tmp_path, monkeypatch):
+    from agentctl.projects import load_project_adapter
+    git(project_root, "init", "-q", "-b", "master")
+    (project_root / "tracked.txt").write_text("committed")
+    (project_root / ".gitignore").write_text("ignored*\n.agentctl/receipt*\n")
+    git(project_root, "add", ".")
+    git(project_root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "fixture")
+    path = tmp_path / "checkout"
+    git(project_root, "worktree", "add", "-qb", "candidate", str(path))
+    tree = Worktree(branch="candidate", path=path)
+    monkeypatch.setattr(worktrunk, "worktrunk_list", lambda root: (Worktree(branch="master", path=project_root, main=True), tree))
+    monkeypatch.setattr(worktrunk, "worktrunk_find", lambda root, branch: tree)
+    monkeypatch.setattr(landing, "_task_users", lambda path: [])
+    monkeypatch.setattr(landing, "_process_users", lambda path: [])
+    def remove(root, branch, **kwargs):
+        git(root, "worktree", "remove", str(path))
+    monkeypatch.setattr(worktrunk, "worktrunk_remove", remove)
+    return config, load_project_adapter(project_root), path
+
+
+def drop(checkout):
+    config, project, path = checkout
+    return landing._drop_branch(config, project, "candidate", base=git(project.root, "rev-parse", "HEAD"))
+
+
+@pytest.mark.parametrize("kind", ["ignored", "--assume-unchanged", "--skip-worktree"])
+def test_cleanup_preserves_hidden_working_bytes(checkout, kind):
+    _, _, path = checkout
+    if kind == "ignored":
+        target = path / "ignored-private.txt"
+    else:
+        target = path / "tracked.txt"
+        git(path, "update-index", kind, "tracked.txt")
+    target.write_bytes(b"unpublished fixture bytes")
+    assert git(path, "status", "--porcelain") == ""
+    before = target.read_bytes(), target.stat().st_ino, target.stat().st_mtime_ns
+    reason = drop(checkout)
+    assert reason and "kept" in reason
+    assert (target.read_bytes(), target.stat().st_ino, target.stat().st_mtime_ns) == before
+
+
+def test_cleanup_removes_clean_checkout_after_retaining_owned_artifacts(checkout):
+    config, project, path = checkout
+    receipt = path / ".agentctl/receipt-private.txt"
+    receipt.write_bytes(b"retained fixture result")
+    assert drop(checkout) is None
+    assert not path.exists()
+    retained = list((config.state_dir / "artifacts").rglob("receipt-private.txt.*"))
+    assert len(retained) == 1 and retained[0].read_bytes() == b"retained fixture result"
+    assert git(project.root, "rev-parse", "candidate") == git(project.root, "rev-parse", "master")
+
+
+def test_cleanup_refuses_reused_foreign_checkout_path(checkout, tmp_path, monkeypatch):
+    config, project, path = checkout
+    shutil.rmtree(path)
+    git(tmp_path, "clone", "-q", str(project.root), str(path))
+    retained = path / "ignored-private.txt"
+    retained.write_bytes(b"foreign repository content")
+    assert git(path, "status", "--porcelain") == ""
+    assert git(path, "rev-parse", "HEAD") == git(project.root, "rev-parse", "candidate")
+    def no_remove(*args, **kwargs):
+        raise AssertionError("foreign checkout must refuse before removal")
+    monkeypatch.setattr(worktrunk, "worktrunk_remove", no_remove)
+    reason = drop(checkout)
+    assert reason and "another Git repository" in reason
+    assert retained.read_bytes() == b"foreign repository content"
+
+
+def test_cleanup_keeps_artifact_changed_after_preservation(checkout, monkeypatch):
+    _, _, path = checkout
+    receipt = path / ".agentctl/receipt-private.txt"
+    receipt.write_bytes(b"first result")
+    original = landing._preserve_artifacts
+    def changed(*args, **kwargs):
+        copied = original(*args, **kwargs)
+        receipt.write_bytes(b"later unpublished result")
+        return copied
+    monkeypatch.setattr(landing, "_preserve_artifacts", changed)
+    reason = drop(checkout)
+    assert reason and "changed after preservation" in reason
+    assert receipt.read_bytes() == b"later unpublished result"
+
+
+def test_cleanup_keeps_unknown_ignored_directory(checkout):
+    _, _, path = checkout
+    directory = path / "ignored-native-store"
+    directory.mkdir()
+    (directory / "private.bin").write_bytes(b"unknown retained evidence")
+    reason = drop(checkout)
+    assert reason and "ignored directory" in reason
+    assert (directory / "private.bin").read_bytes() == b"unknown retained evidence"
+
+
+def test_cleanup_keeps_inaccessible_detached_checkout(checkout, monkeypatch):
+    config, project, path = checkout
+    monkeypatch.setattr(worktrunk, "worktrunk_list", lambda root: (Worktree(branch=None, path=path),))
+    monkeypatch.setattr(worktrunk, "worktrunk_find", lambda root, branch: None)
+    original = Path.stat
+    def denied(candidate, *args, **kwargs):
+        if candidate == path:
+            raise PermissionError("synthetic checkout denial")
+        return original(candidate, *args, **kwargs)
+    monkeypatch.setattr(Path, "stat", denied)
+    def no_remove(*args, **kwargs):
+        raise AssertionError("unavailable checkout must not reach removal")
+    monkeypatch.setattr(worktrunk, "worktrunk_remove", no_remove)
+    reason = landing._drop_branch(config, project, "candidate", base=git(project.root, "rev-parse", "HEAD"), recorded_path=path)
+    assert reason and "synthetic checkout denial" in reason

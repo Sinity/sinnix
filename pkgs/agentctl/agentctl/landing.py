@@ -2203,6 +2203,58 @@ def _recovery_ref(root: Path, run_id: str | None, path: Path, head: str) -> str:
     return ref
 
 
+def _cleanup_obstacle(
+    project: ProjectAdapter, path: Path, preserved: Mapping[str, str] | None = None
+) -> str | None:
+    """Git status alone cannot prove that checkout-only bytes are retained."""
+    common = ("rev-parse", "--path-format=absolute", "--git-common-dir")
+    if Path(_git(path, *common)).resolve() != Path(_git(project.root, *common)).resolve():
+        return "worktree kept; checkout belongs to another Git repository"
+    for record in _git(path, "ls-files", "-v", "-z").split("\0"):
+        if not record:
+            continue
+        if len(record) < 3 or record[1] != " ":
+            raise BatchError("cannot inspect checkout index flags")
+        if record[0].islower() or record[0] == "S":
+            return f"worktree kept; index flags hide tracked state: {record[2:]!r}"
+    if preserved is None:
+        return None
+    sources = {Path(source) for source in preserved}
+    covered_dirs = set()
+    for source, destination in preserved.items():
+        src, dst = Path(source), Path(destination)
+        if not all(stat.S_ISREG(item.lstat().st_mode) for item in (src, dst)):
+            return f"worktree kept; retained artifact is no longer a regular file: {source!r}"
+        if _digest(src) != _digest(dst):
+            return f"worktree kept; artifact changed after preservation: {source!r}"
+        parent = src.parent
+        while parent.is_relative_to(path):
+            covered_dirs.add(parent)
+            if parent == path:
+                break
+            parent = parent.parent
+    ignored = _git(path, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z")
+    pending = [path / name for name in ignored.split("\0") if name]
+    while pending:
+        candidate = pending.pop()
+        mode = candidate.lstat().st_mode
+        if stat.S_ISDIR(mode):
+            if candidate not in covered_dirs:
+                return f"worktree kept; ignored directory is not preserved: {str(candidate)!r}"
+            with os.scandir(candidate) as children:
+                for child in children:
+                    child_path = Path(child.path)
+                    if child.is_dir(follow_symlinks=False):
+                        if child_path not in covered_dirs:
+                            return f"worktree kept; ignored directory is not preserved: {str(child_path)!r}"
+                        pending.append(child_path)
+                    elif child_path not in sources:
+                        return f"worktree kept; ignored path is not preserved: {str(child_path)!r}"
+        elif candidate not in sources:
+            return f"worktree kept; ignored path is not preserved: {str(candidate)!r}"
+    return None
+
+
 def _drop_branch(
     config: Config,
     project: ProjectAdapter,
@@ -2260,14 +2312,32 @@ def _drop_branch(
             except BatchError as error:
                 return f"branch kept; {error}"
         return None
-    if not path.is_dir():
+    try:
+        mode = path.stat().st_mode
+    except FileNotFoundError:
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            mode = None
+        except OSError as error:
+            return f"worktree kept; cannot inspect checkout: {error}"
+        else:
+            return "worktree kept; checkout path is a broken link"
+    except OSError as error:
+        return f"worktree kept; cannot inspect checkout: {error}"
+    if mode is None:
         if removal_target == branch:
             return "worktree kept; checkout path is unavailable"
+    elif not stat.S_ISDIR(mode):
+        return "worktree kept; checkout path is not a directory"
     else:
         try:
+            obstacle = _cleanup_obstacle(project, path)
+            if obstacle:
+                return obstacle
             dirty = _dirty_paths(path)
             users = [*_task_users(path), *_process_users(path)]
-        except BatchError as error:
+        except (BatchError, OSError) as error:
             return f"worktree kept; {error}"
         if dirty:
             return "worktree kept; uncommitted changes"
@@ -2324,6 +2394,9 @@ def _drop_branch(
                     ]
 
                 update(config, run_id, retain)
+            obstacle = _cleanup_obstacle(project, path, copied)
+            if obstacle:
+                return obstacle
             if _dirty_paths(path):
                 return "worktree kept; uncommitted changes"
             if detached and _git(path, "rev-parse", "HEAD") != head:

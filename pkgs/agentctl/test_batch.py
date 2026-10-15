@@ -246,6 +246,10 @@ class FakeGit:
         if verb in self.strand_on:
             stranded = gitcmd.StrandedIndexLock(self.strand_on.pop(verb), removed=owned)
             raise error(f"git {verb}: killed; {stranded}") from stranded
+        if verb == "ls-files":
+            return ""
+        if verb == "rev-parse" and "--git-common-dir" in arguments:
+            return "/fixture/common.git"
         if verb == "fetch":
             return ""
         if verb == "rev-parse":

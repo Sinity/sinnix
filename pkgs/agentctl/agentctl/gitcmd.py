@@ -186,7 +186,6 @@ def _run(
         list(argv),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
         env=environment,
     )
     try:
@@ -199,7 +198,7 @@ def _run(
             process.kill()
             process.communicate()
         raise
-    return process.returncode, stdout, stderr
+    return process.returncode, os.fsdecode(stdout), os.fsdecode(stderr)
 
 
 def _raise_failure(
@@ -284,7 +283,7 @@ def git(
             owned=owned,
             cause=None,
         )
-    return stdout.strip()
+    return stdout if "-z" in arguments or "--null" in arguments else stdout.strip()
 
 
 def stranded_index_lock(failure: BaseException) -> StrandedIndexLock | None:
