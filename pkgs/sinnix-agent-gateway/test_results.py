@@ -771,8 +771,9 @@ def test_second_resource_open_failure_does_not_leak_first_resource_or_stage(tmp_
     {2: "two", 10: "ten"}, [float("nan"), float("inf"), -0.0], ("a", "b"),
 ])
 def test_frame_size_matches_canonical_json(payload):
-    from sinnix_agent_gateway.results import _canonical, _canonical_size
-    assert _canonical_size(payload) == len(_canonical(payload))
+    from sinnix_agent_gateway.results import _canonical
+    from sinnix_agent_gateway.payloads import canonical_size
+    assert canonical_size(payload) == len(_canonical(payload))
 
 
 def test_oversized_frame_count_avoids_full_serialized_copy(tmp_path):

@@ -18,7 +18,7 @@ from sinnix_lib.atomic import atomic_publish
 from .artifacts import ArtifactService
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
-from .payloads import retain
+from .payloads import canonical_size, retain_json
 from .schemas import StableErrorCode, V2ToolEnvelope
 
 # `StableErrorCode` types `V2Error.code`, so it is the enum the published
@@ -111,14 +111,6 @@ class RequestContext:
 
 def _canonical(value: object) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
-
-
-def _canonical_size(value: object) -> int:
-    # Validate the entire value, including an invalid tail after an oversized
-    # prefix, without joining a second complete representation just to count it.
-    # The stdlib encoder can still materialize a complete individual string.
-    encoder = json.JSONEncoder(sort_keys=True, separators=(",", ":"))
-    return sum(len(fragment.encode()) for fragment in encoder.iterencode(value))
 
 
 def _normalized_json_keys(value: Any, active: set[int] | None = None) -> Any:
@@ -626,7 +618,7 @@ class ResultService:
 
     def require_payload_bound(self, payload: Any) -> None:
         try:
-            payload_size = _canonical_size(payload)
+            payload_size = canonical_size(payload)
         except (TypeError, ValueError) as exc:
             raise ResultError(
                 "owner response is not JSON serializable", "owner_failed"
@@ -715,7 +707,7 @@ class ResultService:
             raise ResultError(
                 "V2 result envelope is malformed", "owner_failed"
             ) from exc
-        encoded_size = _canonical_size(envelope)
+        encoded_size = canonical_size(envelope)
         if encoded_size > max(self.config.max_result_bytes, 4_096):
             metadata_artifact = self.artifacts.register_json(
                 metadata,
@@ -736,7 +728,7 @@ class ResultService:
             }
             envelope["result"]["sha256"] = self._digest(envelope)
             V2ToolEnvelope.model_validate(envelope)
-            encoded_size = _canonical_size(envelope)
+            encoded_size = canonical_size(envelope)
         if encoded_size > max(self.config.max_result_bytes, 4_096):
             raise ResultError(
                 "V2 result envelope exceeded response bound", "response_bound"
@@ -756,9 +748,8 @@ class ResultService:
             **full_meta,
         }
         full_envelope["result"]["sha256"] = self._digest(full_envelope)
-        payload_bytes = _canonical(full_payload)
-        payload_sha256 = hashlib.sha256(payload_bytes).hexdigest()
-        retain(self.payloads_root, payload_bytes)
+        payload_path = retain_json(self.payloads_root, full_payload)
+        payload_sha256 = payload_path.name
         observation = {
             "schema": "sinnix.gateway-observation.v1",
             "payload_sha256": payload_sha256,

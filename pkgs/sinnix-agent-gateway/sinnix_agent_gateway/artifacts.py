@@ -15,7 +15,7 @@ from sinnix_lib.atomic import atomic_publish
 from .capabilities import Capability, Principal
 from .config import GatewayConfig
 from .owner_execution import ExecutionResult
-from .payloads import retain
+from .payloads import retain_json
 from .redaction import redact
 
 
@@ -218,12 +218,11 @@ class ArtifactService:
         source: str,
         target: dict[str, Any],
     ) -> dict[str, Any]:
-        """Persist bounded metadata about an oversized JSON response as an artifact."""
-        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+        """Persist a complete JSON observation through private streaming staging."""
         directory = self.config.state_dir / "captures" / uuid.uuid4().hex
         directory.mkdir(mode=0o700, parents=True)
         source_path = directory / f"{kind}.json"
-        retain(self.config.state_dir / "payloads", encoded, link=source_path)
+        retained = retain_json(self.config.state_dir / "payloads", payload, link=source_path)
         receipt = self.attest_capture(
             directory, source=source, target=target, files=[source_path], durable=True
         )
@@ -231,7 +230,7 @@ class ArtifactService:
         return {
             "artifact_id": artifact_id,
             "ref": f"sinnix://artifacts/{artifact_id}",
-            "bytes": len(encoded),
+            "bytes": retained.stat().st_size,
             "content_type": "application/json",
             "receipt": {
                 "capture_id": receipt["capture_id"],

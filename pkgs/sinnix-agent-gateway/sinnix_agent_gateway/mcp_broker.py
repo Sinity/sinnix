@@ -34,7 +34,7 @@ from .owner_execution import (
     OwnerExecution,
     OwnerRoute,
 )
-from .payloads import retain
+from .payloads import canonical_size
 
 
 class McpBrokerError(ValueError):
@@ -934,34 +934,12 @@ class McpBrokerService:
             raise McpBrokerError(str(exc)) from exc
 
     def _store_large_response(
-        self, server_name: str, tool_name: str, encoded: bytes
+        self, server_name: str, tool_name: str, payload: Any
     ) -> dict[str, Any]:
-        directory = self.config.state_dir / "captures" / uuid.uuid4().hex
-        directory.mkdir(mode=0o700, parents=True)
-        source = directory / "mcp-response.json"
-        retain(self.config.state_dir / "payloads", encoded, link=source)
-        receipt = self.artifacts.attest_capture(
-            directory,
-            source="mcp-upstream",
-            target={"server": server_name, "tool": tool_name},
-            files=[source],
-            durable=True,
+        return self.artifacts.register_json(
+            payload, kind="mcp-response", owner_id=server_name,
+            source="mcp-upstream", target={"server": server_name, "tool": tool_name},
         )
-        artifact_id = self.artifacts.register(
-            source,
-            kind="mcp-response",
-            owner_id=server_name,
-        )
-        return {
-            "artifact_id": artifact_id,
-            "bytes": len(encoded),
-            "content_type": "application/json",
-            "receipt": {
-                "capture_id": receipt["capture_id"],
-                "source": receipt["source"],
-                "target": receipt["target"],
-            },
-        }
 
     def _store_json_artifact(
         self,
@@ -1124,15 +1102,15 @@ class McpBrokerService:
         response = await self.owner_result(
             server_name, tool_name, arguments, write=write, deadline_at=deadline_at
         )
-        encoded = json.dumps(response, sort_keys=True, separators=(",", ":")).encode()
+        response_size = canonical_size(response)
         result = {
             "server": server_name,
             "tool": tool_name,
             "mode": "write" if write else "read",
         }
-        if len(encoded) > self.config.max_result_bytes:
+        if response_size > self.config.max_result_bytes:
             result["artifact"] = self._store_large_response(
-                server_name, tool_name, encoded
+                server_name, tool_name, response
             )
             result["artifact_id"] = result["artifact"]["artifact_id"]
             result["truncated"] = True
