@@ -51,13 +51,15 @@ if mode=='rows': print(os.environ['CSV_ROW'])
         result = self.remote("failed")
         self.assertEqual(result.returncode, 17)
         self.assertIn("fixture export unavailable", result.stderr)
-        self.assertNotIn("NLBW_PERIOD", result.stdout)
+        self.assertIn("partial", result.stdout)
 
     def test_empty_export_is_unavailable(self):
-        result = self.remote("empty")
+        self.prepare_receiver()
+        result = self.poll("empty")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("empty", result.stderr)
-        self.assertNotIn("NLBW_PERIOD", result.stdout)
+        self.assertEqual(self.months(), [])
+        self.assertEqual(self.marker.read_text(), "")
+        self.assertEqual(self.watermark.read_text(), "0\nretained\n")
 
     def test_valid_empty_month_has_a_header(self):
         result = self.remote("header")
