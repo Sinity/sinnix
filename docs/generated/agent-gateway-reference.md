@@ -1,11 +1,11 @@
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 280e2a971dad5fb3e1363e5403541ed7cd26c8b9067a361caa0886ad18e7d49b -->
+<!-- gateway-catalog-sha256: d00fe48e453da5e52bb33d3698a3b915ca6e6d46b8cfbb436b03e040e3552044 -->
 # Sinnix Agent Gateway reference
 
 Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool whose `tools/list` input schema is the one below; the catalog hash changes when any principal-visible action catalog row changes, including its schema, principal set, example or affordance.
 
-Revision: `v3-typed-actions`. Catalog SHA-256: `280e2a971dad5fb3e1363e5403541ed7cd26c8b9067a361caa0886ad18e7d49b`.
+Revision: `v3-typed-actions`. Catalog SHA-256: `d00fe48e453da5e52bb33d3698a3b915ca6e6d46b8cfbb436b03e040e3552044`.
 
 ## Invocation
 
@@ -1235,7 +1235,7 @@ Input schema:
     },
     "max_bytes": {
       "default": 64000,
-      "description": "Maximum inline text bytes.",
+      "description": "Maximum text bytes; each source read is capped by the gateway frame budget.",
       "minimum": 1,
       "type": "integer"
     },

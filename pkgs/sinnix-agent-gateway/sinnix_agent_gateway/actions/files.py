@@ -301,7 +301,7 @@ class ReadInput(RequestControls):
     target: FileLocator
     offset: int = Field(default=0, ge=0, description="Byte offset for raw reads.")
     max_bytes: int = Field(
-        default=64_000, ge=1, description="Maximum inline text bytes."
+        default=64_000, ge=1, description="Maximum text bytes; each source read is capped by the gateway frame budget."
     )
     with_sha256: bool = Field(
         default=False,
@@ -355,7 +355,7 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
     textual = inp.representation == "text" or (
         inp.representation == "auto" and is_text(media)
     )
-    max_bytes = inp.max_bytes
+    max_bytes = min(inp.max_bytes, runtime.config.max_result_bytes)
     base = {
         "ref": ref,
         "path": str(target),
@@ -424,8 +424,11 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
                 )
             )
         with target.open("rb") as handle:
-            handle.seek(inp.offset)
-            data = handle.read(max_bytes + 1)
+            if inp.offset > size:
+                data = b""
+            else:
+                handle.seek(inp.offset)
+                data = handle.read(max_bytes + 1)
         truncated = len(data) > max_bytes
         data = data[:max_bytes]
         text, consumed = decode_utf8_page(data, final=not truncated)

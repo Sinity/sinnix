@@ -86,7 +86,7 @@ Catalog limits apply per category. `matched_counts` records all observed matches
 
 `results.get` reconstructs a complete stored envelope or row snapshot in memory. When a response supplies an artifact reference, `artifacts.read` provides bounded byte retrieval of that retained original.
 
-Text file reads return the actual starting byte `offset` and a `next_offset` when more bytes remain. To continue a line-selected excerpt, pass `next_offset` as `offset` and omit `line_start`; this preserves the remainder of a partially returned line. These are live file reads, so concurrent file edits require a new read or a retained artifact snapshot.
+Text source reads are capped by the configured frame budget even when a larger `max_bytes` is requested. Offsets beyond the observed end return an empty page. Text file reads return the actual starting byte `offset` and a `next_offset` when more bytes remain. To continue a line-selected excerpt, pass `next_offset` as `offset` and omit `line_start`; this preserves the remainder of a partially returned line. These are live file reads, so concurrent file edits require a new read or a retained artifact snapshot.
 
 The local CLI reads one complete JSON request from `--input-file` or `--stdin`; action schemas still validate its fields. JSON escaping and UTF-8 encoding do not impose a second request-size limit. Requests are decoded in memory; use a verified artifact source for large file bodies so those bytes stay in the streaming project-write route.
 
@@ -235,7 +235,7 @@ changing the gateway action family cannot suppress a client-side approval policy
 
 ## Generated reference
 
-This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `280e2a971dad5fb3e1363e5403541ed7cd26c8b9067a361caa0886ad18e7d49b`.
+This section is generated from the action set. Revision `v3-typed-actions`, catalog SHA-256 `d00fe48e453da5e52bb33d3698a3b915ca6e6d46b8cfbb436b03e040e3552044`.
 
 The full schemas and examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).
 

@@ -1508,3 +1508,37 @@ def test_catalog_combined_count_does_not_imply_cropping(tmp_path, monkeypatch):
     assert len(result.resources) == len(result.mcp_tools) == 1
     assert result.truncated is False and result.matches_artifact is None
     assert result.matched_counts == result.returned_counts
+
+
+@pytest.mark.parametrize("budget", [1_000_000, 10**100])
+@pytest.mark.parametrize("lane", ["bytes", "lines"])
+def test_large_file_read_budgets_use_bounded_lossless_pages(tmp_path, budget, lane):
+    server = create_server(replace(config(tmp_path), max_result_bytes=4096), "operator")
+    runtime = server._sinnix_revision_publisher.runtime
+    target = tmp_path / "bounded.txt"
+    raw = ("head\n" + "界" * 5000 + "\nlast\n").encode()
+    target.write_bytes(raw)
+    extra = {"line_start": 2, "line_count": 1} if lane == "lines" else {}
+    page = files._read(runtime, files.ReadInput(target={"path": str(target)}, max_bytes=budget, **extra)).data
+    start = page.offset
+    recovered = bytearray()
+    while True:
+        assert page.returned_bytes == len(page.text.encode()) <= 4096
+        recovered.extend(page.text.encode())
+        if page.next_offset is None:
+            break
+        assert page.next_offset == start + len(recovered)
+        page = files._read(runtime, files.ReadInput(target={"path": str(target)}, offset=page.next_offset, max_bytes=budget)).data
+    assert bytes(recovered) == raw[start:]
+
+
+@pytest.mark.parametrize("offset", [1000000, 10**100])
+def test_file_read_beyond_observed_eof_returns_an_empty_page(tmp_path, offset):
+    server = create_server(config(tmp_path), "operator")
+    target = tmp_path / "small.txt"
+    target.write_text("fixture")
+    runtime = server._sinnix_revision_publisher.runtime
+    page = files._read(runtime, files.ReadInput(target={"path": str(target)}, offset=offset)).data
+    assert page.offset == offset
+    assert page.text == "" and page.returned_bytes == 0
+    assert page.next_offset is None and page.truncated is False
