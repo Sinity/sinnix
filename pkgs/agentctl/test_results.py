@@ -569,3 +569,19 @@ def test_loading_malformed_v2_results_reports_errors_before_semantic_traversal(
     )
     assert errors
     assert any(error.startswith("$.beads") for error in errors)
+
+
+@pytest.mark.parametrize("kind", ["worker", "judge"])
+@pytest.mark.parametrize("raw", [b"\xff", b'{"summary":"\xe2\x82', b"\xff\xfe{\x00}\x00"])
+def test_invalid_text_encoding_is_a_result_refusal(tmp_path: Path, kind: str, raw: bytes) -> None:
+    path = tmp_path / "result.json"
+    path.write_bytes(raw)
+    before = path.stat()
+    loaded, errors = results.load_result(path, kind=kind)
+    assert loaded is None and errors
+    assert str(path) in errors[0]
+    assert path.read_bytes() == raw
+    after = path.stat()
+    assert (before.st_ino, before.st_mtime_ns, before.st_mode) == (
+        after.st_ino, after.st_mtime_ns, after.st_mode
+    )

@@ -500,7 +500,7 @@ def load_result(
     """
     try:
         raw = path.read_text(encoding="utf-8")
-    except OSError as error:
+    except (OSError, UnicodeError) as error:
         return None, [f"{path}: {error}"]
     try:
         value = json.loads(raw)
