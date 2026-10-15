@@ -145,12 +145,13 @@ def record_relocated_location(asset: dict[str, Any], source: str, actual: dict[s
 
 def check_path_kind(path: Path, kind: str) -> None:
     try:
-        if kind == "collection" and not path.is_dir():
+        mode = path.stat().st_mode
+        if kind == "collection" and not stat.S_ISDIR(mode):
             raise CatalogError(f"collection current_path is not a directory: {path}")
-        if kind == "file" and not path.is_file():
+        if kind == "file" and not stat.S_ISREG(mode):
             raise CatalogError(f"file current_path is not a regular file: {path}")
     except OSError as e:
-        raise CatalogError(f"cannot inspect current_path {path}: {e}")
+        raise CatalogError(f"cannot inspect current_path {path}: {e}") from e
 
 
 def check_inspection(item: Any) -> None:

@@ -462,3 +462,32 @@ def test_invalid_utf8_catalog_is_rejected_without_rewriting_input(tmp_path):
     assert "cannot read JSON" in result.stderr
     assert "Traceback" not in result.stderr
     assert catalog.read_bytes() == b"\xff"
+
+
+
+def test_denied_import_keeps_the_access_error_and_catalog(tmp_path, monkeypatch, capsys):
+    import runpy
+
+    catalog = tmp_path / "catalog.json"
+    present = tmp_path / "present.txt"
+    present.write_text("neutral fixture")
+    assert import_rows(catalog, [observation(present)]).returncode == 0
+    before = catalog.read_bytes()
+    denied = tmp_path / "denied"
+    original_stat = Path.stat
+
+    def inspect(path, *args, **kwargs):
+        if path == denied:
+            raise PermissionError(13, "synthetic access denied", str(path))
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", inspect)
+    main = runpy.run_path(str(SCRIPT))["main"]
+    for kind in ("file", "collection"):
+        source = tmp_path / "input.json"
+        source.write_text(json.dumps([observation(denied, kind=kind)]))
+        assert main(["--catalog", str(catalog), "import", str(source)]) == 2
+        error = capsys.readouterr().err
+        assert "cannot inspect current_path" in error
+        assert "synthetic access denied" in error
+        assert catalog.read_bytes() == before
