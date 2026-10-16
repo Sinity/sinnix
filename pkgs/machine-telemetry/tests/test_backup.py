@@ -869,3 +869,58 @@ def test_structural_walk_disables_mmap_read_amplification(tmp_path, monkeypatch)
 
         monkeypatch.setitem(helper["check_immutable_snapshot"].__globals__, "run_check", check_without_mapping)
         assert helper["check_immutable_snapshot"](connection, None, mode="structural") == ("integrity_check", "ok")
+
+
+@pytest.mark.parametrize("route", ["backup", "verify"])
+@pytest.mark.parametrize("kind", ["fifo", "dangling_link", "empty_link"])
+def test_immutable_source_rejects_nonregular_wal(tmp_path, route, kind):
+    import runpy
+
+    helper = runpy.run_path(str(SCRIPT))
+    source = tmp_path / "source.sqlite"
+    with sqlite3.connect(source) as connection:
+        connection.execute("CREATE TABLE sample(value INTEGER)")
+    sidecar = Path(f"{source}-wal")
+    if kind == "fifo":
+        os.mkfifo(sidecar)
+    else:
+        target = tmp_path / "sidecar-target"
+        if kind == "empty_link":
+            target.touch()
+        sidecar.symlink_to(target)
+    output = tmp_path / "backup.zst"
+    before = source.read_bytes()
+    with pytest.raises(RuntimeError, match="must not have a WAL"):
+        if route == "backup":
+            helper["backup_database"](source, output, immutable_source=True)
+        else:
+            helper["verify_immutable_source"](source, 1)
+    assert not output.exists()
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("route", ["backup", "verify"])
+def test_immutable_source_reports_unavailable_wal(tmp_path, monkeypatch, route):
+    import runpy
+
+    helper = runpy.run_path(str(SCRIPT))
+    source = tmp_path / "source.sqlite"
+    with sqlite3.connect(source) as connection:
+        connection.execute("CREATE TABLE sample(value INTEGER)")
+    sidecar = Path(f"{source}-wal")
+    output = tmp_path / "backup.zst"
+    for name in ("stat", "lstat"):
+        original = getattr(os, name)
+
+        def guarded(path, *args, _original=original, **kwargs):
+            if not isinstance(path, int) and Path(path) == sidecar:
+                raise PermissionError(13, "sidecar unavailable", str(sidecar))
+            return _original(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, name, guarded)
+    with pytest.raises(PermissionError, match="sidecar unavailable"):
+        if route == "backup":
+            helper["backup_database"](source, output, immutable_source=True)
+        else:
+            helper["verify_immutable_source"](source, 1)
+    assert not output.exists()

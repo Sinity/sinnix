@@ -40,7 +40,7 @@ original archives remain unchanged. A failed restore publishes no success receip
 If a complete decoded image was retained for diagnosis, use
 `agentctl job start sinnix verify_telemetry_structure -- <exact-immutable.sqlite>`
 to repeat only its structural check. This requires a closed, WAL-free image;
-passing a live database as immutable is invalid. Its receipt describes that
+passing a live database as immutable is invalid. A WAL lookup failure or nonregular sidecar refuses the operation; an empty regular sidecar is allowed. Its receipt describes that
 image, and does not replace frame validation of its compressed source.
 
 

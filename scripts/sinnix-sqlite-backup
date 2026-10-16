@@ -194,6 +194,18 @@ def compress(source_path: Path, compressed_path: Path) -> None:
     run_command(["zstd", "-t", "-q", str(compressed_path)])
 
 
+def check_immutable_wal(source_path: Path) -> None:
+    wal_path = Path(f"{source_path}-wal")
+    try:
+        sidecar = wal_path.lstat()
+    except FileNotFoundError:
+        return
+    # Only an empty regular sidecar is harmless. Do not follow links or
+    # classify an inaccessible path as absent.
+    if not stat.S_ISREG(sidecar.st_mode) or sidecar.st_size > 0:
+        raise RuntimeError("immutable SQLite source must not have a WAL")
+
+
 def backup_database(
     source_path: Path,
     output_path: Path,
@@ -220,9 +232,7 @@ def backup_database(
     target: sqlite3.Connection | None = None
     try:
         if immutable_source:
-            wal_path = Path(f"{source_path}-wal")
-            if wal_path.exists() and wal_path.stat().st_size > 0:
-                raise RuntimeError("immutable SQLite source must not have a WAL")
+            check_immutable_wal(source_path)
             source_bytes = source_path.stat().st_size
             source = sqlite3.connect(
                 source_path.resolve(strict=True).as_uri() + "?mode=ro&immutable=1", uri=True, timeout=5.0
@@ -318,9 +328,7 @@ def backup_database(
 
 def verify_immutable_source(source_path: Path, check_budget_seconds: float) -> None:
     source_path = source_path.resolve(strict=True)
-    wal_path = Path(f"{source_path}-wal")
-    if wal_path.exists() and wal_path.stat().st_size > 0:
-        raise RuntimeError("immutable SQLite source must not have a WAL")
+    check_immutable_wal(source_path)
     source_bytes = source_path.stat().st_size
     source = sqlite3.connect(
         source_path.resolve(strict=True).as_uri() + "?mode=ro&immutable=1", uri=True, timeout=5.0
