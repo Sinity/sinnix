@@ -24,17 +24,20 @@ def read_event_status(path: Path | None) -> dict:
         # Nonblocking open must precede the descriptor check: a FIFO can hang
         # before a pathname-only type check is able to reject it.
         fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
-        with os.fdopen(fd, 'rb') as handle:
-            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-                raise OSError('event status source is not a regular file')
-            size = handle.seek(0, 2)
-            start = max(0, size - MAX_TAIL_BYTES)
-            partial_head = False
-            if start:
-                handle.seek(start - 1)
-                partial_head = handle.read(1) != b'\n'
-            handle.seek(start)
-            payload = handle.read(size - start)
+        try:
+            with os.fdopen(fd, 'rb', closefd=False) as handle:
+                if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                    raise OSError('event status source is not a regular file')
+                size = handle.seek(0, 2)
+                start = max(0, size - MAX_TAIL_BYTES)
+                partial_head = False
+                if start:
+                    handle.seek(start - 1)
+                    partial_head = handle.read(1) != b'\n'
+                handle.seek(start)
+                payload = handle.read(size - start)
+        finally:
+            os.close(fd)
     except FileNotFoundError:
         return {"state": "missing"}
     except OSError as error:

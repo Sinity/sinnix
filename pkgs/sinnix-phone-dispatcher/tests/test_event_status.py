@@ -115,3 +115,10 @@ def test_regular_file_symlink_keeps_status_readable(tmp_path):
     path = tmp_path / 'events.jsonl'
     path.symlink_to(target)
     assert event_status.read_event_status(path)['upload'] == 'chunk_upload_ok'
+
+
+def test_rejected_directories_do_not_leak_descriptors(tmp_path):
+    before = set(os.listdir('/proc/self/fd'))
+    for _ in range(8):
+        assert event_status.read_event_status(tmp_path)['state'] == 'unavailable'
+    assert set(os.listdir('/proc/self/fd')) == before
