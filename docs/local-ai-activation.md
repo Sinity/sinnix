@@ -21,6 +21,17 @@ OpenedAI Speech and ComfyUI are part of the optional
 `sinnix.profiles.ai-media` aggregate and are absent by default. Model weights
 and application state remain on `/realm` while the profile is disabled.
 
+OpenedAI Speech uses the shared Host/Origin admission policy before its vendor
+middleware reads request bodies. Native API clients and same-origin browser
+requests remain supported; wildcard CORS is removed. Its launcher retains the
+vendor environment, voice acquisition and preload arguments. Alternate images
+must retain the `speech.py` startup interface; select their vendor launcher with
+`sinnix.services.tts.startupScript` (for example `/app/startup.min.sh`). An
+incompatible launcher fails explicitly. The declared `verify_tts_boundary`
+operation accepts `--image DIGEST_PINNED_IMAGE --ports PUBLIC BACKEND` and checks
+an already retained image offline, without GPU access, models or production-state
+mounts. This check does not start the TTS service or qualify speech generation.
+
 The canonical model roster is `flake/data/local-models.nix`. The canonical port and front-door map is `flake/data/ports.nix`. Edit those sources when changing the platform. Do not add a model only to LiteLLM or only to an agent wrapper.
 
 ## The operator control plane

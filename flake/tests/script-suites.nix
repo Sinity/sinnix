@@ -378,7 +378,11 @@
           name = "sinnix-litellm-boundary";
           suiteDir = ../../pkgs/sinnix-litellm-boundary/tests;
           scripts = [ ];
-          packageFiles = [ "boundary.py" ];
+          packageFiles = [
+            "boundary.py"
+            "tts.py"
+          ];
+          pythonPackages = [ "fastapi" ];
         };
         cheatsheet-suite = mkScriptSuite {
           name = "sinnix-cheatsheet";

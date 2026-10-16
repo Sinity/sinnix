@@ -499,6 +499,23 @@ in
               message = "The AI factory must leave the native and containerized launch commands visible in their units";
             }
             {
+              assertion =
+                let
+                  tts = config.virtualisation.oci-containers.containers.openedai-speech;
+                in
+                tts.cmd == [
+                  "python"
+                  "/run/sinnix-tts/tts.py"
+                  "start"
+                ]
+                && tts.environment.SINNIX_TTS_PORTS == "8000,8001"
+                && lib.any (volume: lib.hasSuffix ":/run/sinnix-tts/tts.py:ro" volume) tts.volumes
+                && lib.any (
+                  volume: lib.hasSuffix ":/run/sinnix-tts/sinnix_ai_browser_boundary.py:ro" volume
+                ) tts.volumes;
+              message = "TTS must launch through the shared browser boundary with both declared ports and read-only code";
+            }
+            {
               # LiteLLM routes to several independently activated backends.
               # Requiring Ollama here starts its GPU occupant for every
               # gateway request and evicts direct GPU backends such as Glimmer.

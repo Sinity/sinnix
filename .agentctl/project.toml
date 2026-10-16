@@ -79,6 +79,16 @@ scratch = "nvme"
 timeout_seconds = 600
 admission = { memory_mib = 2048 }
 
+[operations.verify_tts_boundary]
+description = "Check an already retained TTS image offline without models or production state"
+exec = ["python3", "flake/tests/tts_native_boundary.py"]
+arguments = "required"
+pool = "bulk"
+result = "exit"
+scratch = "nvme"
+timeout_seconds = 180
+admission = { memory_mib = 1024 }
+
 [operations.reverse_engineering_verify]
 description = "Verify firmware extraction and Ghidra decompilation on synthetic inputs"
 exec = ["nix", "develop", ".#reverse-engineering", "--command", "python3", "flake/tests/reverse-engineering.py"]
