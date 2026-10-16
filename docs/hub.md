@@ -209,6 +209,13 @@ Origin checks use the same names, so the declared entrances also support their
 own browser actions. An arbitrary domain resolving to loopback or the tailnet
 address cannot inherit a private HTTP entrance.
 
+Republished frontends also reject foreign browser Origins and cross-site API
+requests before proxying. Each frontend accepts its own port on those verified
+host names; the report origin cannot act as a frontend client. Native clients,
+same-origin browser requests and WebSocket upgrades remain supported, as does
+a user-activated top-level GET/HEAD navigation. A backend's direct listener
+retains its own admission contract; the hub guard protects the published route.
+
 **Firewall.** Ports are opened on `tailscale0` only, via
 `networking.firewall.interfaces.tailscale0.allowedTCPPorts`. This matters
 because `useRoutingFeatures = "none"` means upstream does not put `tailscale0`

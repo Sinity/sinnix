@@ -231,10 +231,10 @@ mkServiceModule {
         respond @${label}Host "unknown host refused" 403
       '';
 
-      browserGuard = label: allowOpaque: ''
+      browserGuard = label: allowOpaque: listenerPort: ''
         @${label}Origin {
           header Origin *
-          ${lib.concatMapStringsSep "\n" (host: "not header Origin http://${host}:${toString cfg.port}") acceptedHosts}
+          ${lib.concatMapStringsSep "\n" (host: "not header Origin http://${host}:${toString listenerPort}") acceptedHosts}
           ${lib.optionalString allowOpaque (lib.concatMapStringsSep "\n" (host: "not header Origin http://${host}:${toString cfg.reportsPort}") acceptedHosts)}
           ${lib.optionalString allowOpaque "not header Origin null"}
         }
@@ -329,6 +329,7 @@ mkServiceModule {
             bind {$SINNIX_HUB_TAILNET_IP} 127.0.0.1
             route {
               ${hostGuard "frontend${toString frontend.port}"}
+              ${browserGuard "frontend${toString frontend.port}" false frontend.port}
               reverse_proxy ${frontend.upstream}
             }
           }
@@ -370,7 +371,7 @@ mkServiceModule {
           # The reducer trusts this Unix socket. Apply the same browser
           # boundary to its API and page/terminal routes, before proxying.
           handle_path /ops/* {
-            ${browserGuard "ops" false}
+            ${browserGuard "ops" false cfg.port}
             ${jsonGuard "ops" [ "/v1/actions" "/v1/actions/prepare" "/v1/health/failure" ]}
             reverse_proxy unix/${opsSocket}
           }
@@ -379,7 +380,7 @@ mkServiceModule {
           # the CORS answer it gives this route (reports are opened off disk
           # as file://, Origin null) is deliberately not given to /ops/*.
           handle /feedback* {
-            ${browserGuard "feedback" true}
+            ${browserGuard "feedback" true cfg.port}
             ${jsonGuard "feedback" [ "/feedback" ]}
             reverse_proxy unix/${opsSocket}
           }
@@ -415,7 +416,7 @@ mkServiceModule {
           redir /shaders /shaders/
 
           handle {
-            ${browserGuard "pages" false}
+            ${browserGuard "pages" false cfg.port}
             ${jsonGuard "pages" [ "/v1/actions" "/v1/actions/prepare" "/v1/health/failure" ]}
             reverse_proxy unix/${opsSocket}
           }
@@ -443,7 +444,7 @@ mkServiceModule {
             redir / /reports/
             redir /reports /reports/
             handle /feedback* {
-              ${browserGuard "reportFeedback" true}
+              ${browserGuard "reportFeedback" true cfg.port}
               ${jsonGuard "reportFeedback" [ "/feedback" ]}
               reverse_proxy unix/${opsSocket}
             }

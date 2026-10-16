@@ -22,9 +22,18 @@ def free_port():
 
 
 class Owner(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
     calls = []
     def handle_request(self):
         self.calls.append(self.path)
+        self.rfile.read(int(self.headers.get("Content-Length", "0")))
+        if self.headers.get("Upgrade", "").lower() == "websocket":
+            self.send_response(101)
+            self.send_header("Connection", "Upgrade")
+            self.send_header("Upgrade", "websocket")
+            self.end_headers()
+            self.close_connection = True
+            return
         body = b"neutral owner"
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
@@ -127,7 +136,7 @@ with tempfile.TemporaryDirectory() as temporary:
                 response.read()
                 client.close()
                 assert response.status == expected, (path, headers, response.status)
-                assert len(Owner.calls) - before == (1 if expected == 200 else 0), (path, headers, Owner.calls)
+                assert len(Owner.calls) - before == (1 if expected in (200, 101) else 0), (path, headers, Owner.calls)
 
             for path in ("/ops/v1/actions", "/terminals/not-a-terminal", "/v1/actions", "/feedback", "/phone/v1/ping", "/reports/missing"):
                 request(path, {"Host": f"rebound.example.invalid:{port}"}, 403)
@@ -136,6 +145,14 @@ with tempfile.TemporaryDirectory() as temporary:
             for frontend_port in frontend_ports:
                 request("/", {"Host": f"rebound.example.invalid:{frontend_port}"}, 403, request_port=frontend_port)
                 request("/", {"Host": f"neutral.tailnet.invalid:{frontend_port}"}, 200, request_port=frontend_port)
+                for host in ("127.0.0.1", "neutral.tailnet.invalid"):
+                    request("/", {"Host": f"{host}:{frontend_port}", "Origin": f"http://{host}:{frontend_port}", "Sec-Fetch-Site": "same-origin"}, 200, request_port=frontend_port)
+                request("/", {"Origin": "https://foreign.example.invalid"}, 403, request_port=frontend_port)
+                request("/", {"Origin": f"http://127.0.0.1:{report_port}"}, 403, request_port=frontend_port)
+                request("/", {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "empty"}, 403, request_port=frontend_port)
+                request("/", {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document", "Sec-Fetch-User": "?1"}, 200, method="GET", request_port=frontend_port)
+                request("/", {"Host": f"neutral.tailnet.invalid:{frontend_port}", "Origin": f"http://neutral.tailnet.invalid:{frontend_port}", "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "websocket", "Connection": "Upgrade", "Upgrade": "websocket"}, 101, method="GET", request_port=frontend_port)
+                request("/", {"Origin": "https://foreign.example.invalid"}, 403, send_body=False, request_port=frontend_port)
             before = len(Owner.calls)
             for path in ('/ops/v1/actions', '/v1/actions', '/terminals/', '/phone/v1/ping', '/private/file-catalog'):
                 request(path, {}, 404, request_port=report_port)
