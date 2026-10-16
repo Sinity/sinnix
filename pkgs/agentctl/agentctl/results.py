@@ -504,7 +504,8 @@ def load_result(
         return None, [f"{path}: {error}"]
     try:
         value = json.loads(raw)
-    except json.JSONDecodeError as error:
+    except ValueError as error:
+        # Integer conversion limits also raise ValueError from the decoder.
         return None, [f"{path}: not JSON ({error})"]
     if isinstance(value, dict) and "structured_output" in value:
         value = value["structured_output"]

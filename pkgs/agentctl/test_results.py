@@ -585,3 +585,35 @@ def test_invalid_text_encoding_is_a_result_refusal(tmp_path: Path, kind: str, ra
     assert (before.st_ino, before.st_mtime_ns, before.st_mode) == (
         after.st_ino, after.st_mtime_ns, after.st_mode
     )
+
+
+@pytest.mark.parametrize("kind", ["worker", "judge"])
+def test_decoder_integer_refusal_is_a_result_error(tmp_path: Path, kind: str) -> None:
+    import sys
+
+    raw = "7" * 5000
+    path = tmp_path / "result.json"
+    path.write_text(raw)
+    before = path.stat()
+    previous_limit = sys.get_int_max_str_digits()
+    try:
+        sys.set_int_max_str_digits(4300)
+        loaded, errors = results.load_result(path, kind=kind)
+    finally:
+        sys.set_int_max_str_digits(previous_limit)
+    assert loaded is None and errors and "not JSON" in errors[0]
+    assert path.read_text() == raw
+    after = path.stat()
+    assert (before.st_ino, before.st_mtime_ns, before.st_mode) == (
+        after.st_ino, after.st_mtime_ns, after.st_mode
+    )
+
+
+@pytest.mark.parametrize("kind", ["worker", "judge"])
+def test_decoded_nested_nonobject_retains_schema_refusal(tmp_path: Path, kind: str) -> None:
+    raw = "[" * 20000 + "0" + "]" * 20000
+    path = tmp_path / "nested.json"
+    path.write_text(raw)
+    loaded, errors = results.load_result(path, kind=kind)
+    assert isinstance(loaded, list) and errors
+    assert path.read_text() == raw
