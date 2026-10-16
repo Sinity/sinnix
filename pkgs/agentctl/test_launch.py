@@ -37,6 +37,21 @@ from agentctl.run import (
 from conftest import FakePueue, read_launch, write_project
 
 
+def test_declared_operation_limits_reach_its_queued_launch(
+    fake_pueue: FakePueue, config: Config, project_root: Path
+) -> None:
+    descriptor = project_root / ".agentctl/project.toml"
+    limits = ["MemoryMax=3G", "IOReadBandwidthMax=/realm 20M"]
+    descriptor.write_text(descriptor.read_text().replace(
+        'exec = ["fixture-verify"]',
+        'exec = ["fixture-verify"]\nunit_properties=' + json.dumps(limits),
+    ))
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("verify"))
+    written = read_launch(config, fake_pueue.task(started["job_id"]))
+    assert written["unit_properties"] == limits
+
+
 def test_required_services_share_the_verifiers_single_launch(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:

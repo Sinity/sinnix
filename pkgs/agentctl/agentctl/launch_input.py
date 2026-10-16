@@ -54,6 +54,8 @@ UNIT_PATH_PROPERTIES = frozenset(
     {"InaccessiblePaths", "ReadOnlyPaths", "ReadWritePaths"}
 )
 UNIT_PATH_VALUE = re.compile(r"-?/[^\x00-\x20:]+\Z")
+UNIT_BANDWIDTH_PROPERTIES = frozenset({"IOReadBandwidthMax", "IOWriteBandwidthMax"})
+UNIT_BANDWIDTH_VALUE = re.compile(r"/[^\x00-\x20:]+ [1-9][0-9]*[KMGTPE]?\Z")
 
 # A job-owned scratch directory: created before the command, exported as
 # `AGENTCTL_SCRATCH` and `TMPDIR`, measured at unit exit and removed. `tmpfs` is RAM,
@@ -131,6 +133,8 @@ def supported_unit_property(value: object) -> bool:
         return UNIT_PROPERTY_VALUE.fullmatch(size) is not None
     if name in UNIT_PATH_PROPERTIES:
         return UNIT_PATH_VALUE.fullmatch(size) is not None
+    if name in UNIT_BANDWIDTH_PROPERTIES:
+        return UNIT_BANDWIDTH_VALUE.fullmatch(size) is not None
     return False
 
 
@@ -275,7 +279,7 @@ def read_input(path: Path) -> dict[str, Any]:
     ):
         raise QueueInputError(
             "launch input unit_properties must be "
-            f"{'/'.join(sorted(UNIT_PROPERTIES | UNIT_PATH_PROPERTIES))} settings"
+            f"{'/'.join(sorted(UNIT_PROPERTIES | UNIT_PATH_PROPERTIES | UNIT_BANDWIDTH_PROPERTIES))} settings"
         )
     scratch = value.get("scratch")
     if scratch is not None:

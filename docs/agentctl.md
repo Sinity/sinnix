@@ -274,7 +274,8 @@ from `PUEUE_GROUP`, so a repository that queues `agentctl-run` with its own
 launch input is contained and cancelled identically. `unit_properties` in
 a launch input are `systemd-run -p` settings on that unit, restricted to
 the ones that bound what the task may consume (`MemoryMax`, `MemoryHigh`,
-`MemorySwapMax`, `MemoryZSwapMax`, `TasksMax`, `CPUWeight`, `IOWeight`) or
+`MemorySwapMax`, `MemoryZSwapMax`, `TasksMax`, `CPUWeight`, `IOWeight`,
+`IOReadBandwidthMax`, `IOWriteBandwidthMax`) or
 reach (`ReadOnlyPaths`, `ReadWritePaths`, `InaccessiblePaths`, one absolute
 path each), and a launch must not start a unit of its own: it would land
 outside the task's cgroup, where a cancel cannot reach it. `agentctl.slice` and
@@ -898,10 +899,17 @@ pueue group), `result` (`exit`, `json`, `pytest`), `timeout_seconds` (1 to
 selector; a focused profile may name a `required` operation, whose worker
 command must include a selector after `--`), `schedule`
 (an `OnCalendar` expression), `cache` (`none` or `tree+environment`),
-`scratch` (`none`, `tmpfs` or `nvme`), `admission` (see below) and
+`scratch` (`none`, `tmpfs` or `nvme`), `admission` (see below), `unit_properties` and
 `dependencies` (declared operation names). Dependencies are
 queued before their operation and cannot contain cycles. Any other operation
 field is ignored with a warning on stderr.
+
+`unit_properties` is a list of the task-limit settings accepted by the launch
+input, for example `["MemoryMax=3G", "IOReadBandwidthMax=/realm 20M"]`.
+AgentCTL applies them to the operation's existing unit before its command starts.
+Bandwidth settings take one absolute path and a positive byte rate, optionally
+with a `K`, `M`, `G`, `T`, `P` or `E` suffix. Unsupported settings fail descriptor
+loading. Admission memory is an estimate; these unit properties enforce limits.
 
 `requires` names foreground service operations which run inside this operation's
 existing unit and project environment. Each required service declares a
@@ -909,7 +917,8 @@ existing unit and project environment. Each required service declares a
 startup, including cold builds, counts against that deadline and the parent
 job's runtime budget. Required services cannot declare further requirements,
 queued dependencies or caller-supplied arguments. They are not separate pueue
-jobs. A readiness failure or service exit fails verification; normal completion
+jobs. Required services cannot declare their own `unit_properties`; put shared
+limits on the parent operation instead. A readiness failure or service exit fails verification; normal completion
 settles the service process groups, and systemd cancellation kills the entire
 unit. These units use `ExitType=main`: when the verifier exits, systemd also
 stops service descendants which created a new session. Ordinary jobs retain

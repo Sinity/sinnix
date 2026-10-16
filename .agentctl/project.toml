@@ -139,6 +139,7 @@ cache = "none"
 scratch = "nvme"
 timeout_seconds = 13200
 admission = { memory_mib = 4096 }
+unit_properties = ["MemoryHigh=4G", "MemoryMax=5G", "IOWeight=10", "IOReadBandwidthMax=/realm 20M", "IOWriteBandwidthMax=/realm 40M"]
 
 [operations.verify_telemetry_structure]
 description = "Structurally verify one retained immutable telemetry SQLite image"
@@ -149,6 +150,17 @@ result = "exit"
 cache = "none"
 timeout_seconds = 9600
 admission = { memory_mib = 2048 }
+unit_properties = ["MemoryHigh=2G", "MemoryMax=3G", "IOWeight=10", "IOReadBandwidthMax=/realm 20M"]
+
+[operations.verify_job_limits]
+description = "Verify declared operation limits in its actual kernel cgroup"
+exec = ["python3", "flake/tests/job_limits_native.py"]
+pool = "bulk"
+result = "json"
+cache = "none"
+timeout_seconds = 120
+admission = { memory_mib = 128 }
+unit_properties = ["MemoryHigh=1G", "MemoryMax=1536M", "MemorySwapMax=0", "IOWeight=10", "IOReadBandwidthMax=/realm 20M", "IOWriteBandwidthMax=/realm 20M"]
 
 [operations.verify_agent_recovery]
 description = "Verify pinned CLI recovery and native versions in an isolated HOME"

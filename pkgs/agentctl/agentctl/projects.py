@@ -19,6 +19,7 @@ from typing import Any, Iterable, Mapping, Sequence
 import tomllib
 
 from .environment import build_environment
+from .launch_input import supported_unit_property
 from .limits import (
     AGENT_MEMORY_MAX,
     DECLARABLE_RESULT_KINDS,
@@ -128,6 +129,7 @@ _OPERATION_FIELDS = frozenset(
         "ready_timeout_seconds",
         "arguments",
         "admission",
+        "unit_properties",
     }
 )
 
@@ -300,6 +302,7 @@ class ProjectOperation:
     ready_timeout_seconds: int = 60
     arguments: str = "none"
     admission: AdmissionEnvelope | None = None
+    unit_properties: tuple[str, ...] = ()
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -320,6 +323,7 @@ class ProjectOperation:
             "ready_timeout_seconds": self.ready_timeout_seconds,
             "arguments": self.arguments,
             "admission": self.admission.catalog_row() if self.admission else None,
+            "unit_properties": list(self.unit_properties),
         }
 
 
@@ -622,6 +626,14 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
         fields["checkout"] = definition["checkout"]
     if "admission" in definition:
         fields["admission"] = _admission(name, definition["admission"], descriptor)
+    properties = _optional_string_list(
+        definition.get("unit_properties"), f"operations.{name}.unit_properties"
+    )
+    if not all(supported_unit_property(value) for value in properties):
+        raise ProjectConfigError(
+            f"operations.{name}.unit_properties must contain supported task resource or path limits"
+        )
+    fields["unit_properties"] = properties
     schedule = definition.get("schedule")
     if schedule is not None and (
         not isinstance(schedule, str)
@@ -731,7 +743,8 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
             if service is None or not service.ready_probe:
                 raise ProjectConfigError(f"{descriptor} operation {operation.name} requires service {name} with a ready_probe")
             if (service.requires or service.dependencies or service.arguments != "none"
-                    or service.checkout != "any" or service.execution_readiness != "exec"):
+                    or service.checkout != "any" or service.execution_readiness != "exec"
+                    or service.unit_properties):
                 raise ProjectConfigError(f"{descriptor} required service {name} must be a self-contained foreground operation")
     workspace = _workspace(raw, descriptor)
     if workspace is not None:

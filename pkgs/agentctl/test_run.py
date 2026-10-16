@@ -520,13 +520,13 @@ def test_unit_properties_bound_the_task_unit_itself(
     launch = write_launch(
         tmp_path,
         pool="agent",
-        unit_properties=["MemoryMax=10G", "CPUWeight=50"],
+        unit_properties=["MemoryMax=10G", "CPUWeight=50", "IOReadBandwidthMax=/realm 20M"],
     )
 
     assert main([str(launch)]) == 0
 
     argv = fake_systemd.run_argv()
-    for setting in ("MemoryMax=10G", "CPUWeight=50"):
+    for setting in ("MemoryMax=10G", "CPUWeight=50", "IOReadBandwidthMax=/realm 20M"):
         assert argv[argv.index(setting) - 1] == "-p"
         assert argv.index(setting) < argv.index("--")
 
@@ -566,6 +566,9 @@ def test_path_properties_bound_what_the_unit_can_reach(
         "ReadOnlyPaths=relative/path",
         "InaccessiblePaths=/a /b",
         "BindPaths=/realm/project/x",
+        "IOReadBandwidthMax=/realm 0",
+        "IOWriteBandwidthMax=/realm infinity",
+        "IOReadBandwidthMax=/realm 20M\nUser=root",
     ],
 )
 def test_a_property_that_does_not_bound_the_task_is_refused(

@@ -16,6 +16,33 @@ from agentctl.projects import (
 from conftest import write_project
 
 
+@pytest.mark.parametrize("setting", [
+    "Delegate=yes", "IOReadBandwidthMax=relative 20M",
+    "IOWriteBandwidthMax=/realm 0", "IOReadBandwidthMax=/realm 20M\nUser=root",
+])
+def test_operation_refuses_nonlimiting_or_malformed_unit_properties(
+    project_root: Path, setting: str
+) -> None:
+    descriptor = project_root / ".agentctl/project.toml"
+    descriptor.write_text(descriptor.read_text().replace(
+        'exec = ["fixture-verify"]',
+        'exec = ["fixture-verify"]\nunit_properties=' + json.dumps([setting]),
+    ))
+    with pytest.raises(ProjectConfigError, match="unit_properties"):
+        load_project_adapter(project_root)
+
+
+def test_required_service_cannot_silently_lose_its_unit_limits(project_root: Path) -> None:
+    descriptor = project_root / ".agentctl/project.toml"
+    descriptor.write_text(descriptor.read_text().replace(
+        'exec = ["fixture-verify"]',
+        'exec = ["fixture-verify"]\nrequires=["bounded-service"]',
+    ) + '\n[operations.bounded-service]\ndescription="test"\nexec=["true"]\n'
+      'ready_probe=["true"]\nunit_properties=["MemoryMax=1G"]\n')
+    with pytest.raises(ProjectConfigError, match="self-contained foreground"):
+        load_project_adapter(project_root)
+
+
 @pytest.mark.parametrize("readiness", ['"unknown"', "true", "3"])
 def test_descriptor_rejects_invalid_execution_readiness(
     tmp_path: Path, readiness: str

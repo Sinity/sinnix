@@ -1111,6 +1111,7 @@ def _start_operation(
             environment=environment,
             scratch=operation.scratch,
             admission=operation.admission,
+            unit_properties=operation.unit_properties,
             checkout={
                 "kind": operation.checkout,
                 "commit": candidate_commit,
