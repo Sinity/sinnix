@@ -13,6 +13,7 @@
   perSystem =
     {
       system,
+      pkgs,
       sinnixScriptRegistry,
       ...
     }:
@@ -31,6 +32,16 @@
       scriptRegistryUnfree = import ../scripts.nix {
         inherit inputs;
         pkgs = unfreePkgs;
+      };
+      # Exercise the real registry entries and renderer without realizing
+      # unrelated commands (including their unfree runtime dependencies).
+      xiaomiDispatcher = import ../cli-dispatcher.nix {
+        inherit pkgs;
+        lib = pkgs.lib;
+        registry = pkgs.lib.getAttrs [
+          "sinnix-xiaomi-witness"
+          "sinnix-xiaomi-witness-login"
+        ] sinnixScriptRegistry.registry;
       };
     in
     {
@@ -117,6 +128,26 @@
         # confirming red.
         sinnix-lib-suite = sinnixScriptRegistry.packageSet.sinnix-lib;
         xiaomi-witness-cli = sinnixScriptRegistry.packageSet.sinnix-xiaomi-witness;
+        xiaomi-witness-dispatch =
+          pkgs.runCommand "xiaomi-witness-dispatch-check"
+            {
+              nativeBuildInputs = [ pkgs.gnugrep ];
+              SINNIX_CLI = "${xiaomiDispatcher}/bin/sinnix";
+              LOGIN_APP = pkgs.lib.getExe sinnixScriptRegistry.packageSet.sinnix-xiaomi-witness-login;
+            }
+            ''
+                export XIAOMI_WITNESS_STATE="$TMPDIR/uncreated-state"
+                export XIAOMI_WITNESS_LANE="$TMPDIR/uncreated-lane"
+                for command in xiaomi-witness xiaomi-witness-login; do
+                  "$SINNIX_CLI" "$command" --help > help.txt
+                  grep -q '^Usage:' help.txt
+                done
+                "$LOGIN_APP" --help > login-app-help.txt
+              grep -q '^Usage: sinnix xiaomi-witness-login' login-app-help.txt
+              test ! -e "$XIAOMI_WITNESS_STATE"
+                test ! -e "$XIAOMI_WITNESS_LANE"
+                touch "$out"
+            '';
 
         # The selection capture both Wayland lanes run. Provably fails when:
         # the MIME preference order is permuted (an adjacent swap fails

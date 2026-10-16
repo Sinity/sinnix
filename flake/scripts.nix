@@ -60,6 +60,28 @@ let
       inherit pkgs;
       entry = discovered.registry.sinnix-sqlite-backup;
     };
+    # The witness and its login helper are packaged entry points, so script
+    # discovery cannot expose their existing operator commands by itself.
+    sinnix-xiaomi-witness = {
+      description = "Sync Xiaomi cloud band data";
+      package = externalPackages.sinnix-xiaomi-witness;
+      runtimeInputs = [ ];
+      tier = "default";
+      owner = "flake/scripts.nix";
+      docs = "docs/phone.md";
+    };
+    sinnix-xiaomi-witness-login = {
+      description = "Authenticate the Xiaomi cloud band witness";
+      package = externalPackages.sinnix-xiaomi-witness.overrideAttrs (old: {
+        meta = old.meta // {
+          mainProgram = "sinnix-xiaomi-witness-login";
+        };
+      });
+      runtimeInputs = [ ];
+      tier = "default";
+      owner = "flake/scripts.nix";
+      docs = "docs/phone.md";
+    };
     # Same shape for the steering CLI: its source moved into the steering
     # workspace, but it remains an operator verb — keep it in the registry so
     # `sinnix help` lists it and `sinnix steer ...` dispatches.

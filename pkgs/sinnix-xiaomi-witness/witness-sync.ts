@@ -297,6 +297,6 @@ if (failures >= 5 && credentialFailures === failures) {
     EXPIRED_MARKER,
     JSON.stringify({ fetched_at: fetchedAt, failures, reason: "token refresh refused" }) + "\n",
   );
-  console.error(`xiaomi-witness: credential expired; run sinnix-xiaomi-witness-login to resume`);
+  console.error(`xiaomi-witness: credential expired; run sinnix xiaomi-witness-login to resume`);
 }
 process.exit(failures >= 5 ? 1 : 0);

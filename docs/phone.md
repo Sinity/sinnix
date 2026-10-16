@@ -540,6 +540,13 @@ Beyond ambient audio and the passive light/motion sampler:
 - **Sleep inference** from motion, light, screen and charging — an estimate
   independent of any band.
 
+The separate Xiaomi cloud witness reads band data independently of Health
+Connect. `sinnix xiaomi-witness` runs one sync; `sinnix xiaomi-witness-login`
+requests a login ticket. For login, open the printed `LOGIN_URL` in an
+authenticated Xiaomi browser session and confirm it. A successful login clears
+the `credential-expired` marker that otherwise makes the timer skip its runs.
+Both commands accept `--help` without contacting Xiaomi or changing captures.
+
 **Direct Boot**: a `directBootAware` service buffers into device-protected
 storage and migrates on unlock, so a phone rebooted and left locked captures
 instead of waiting for a human. This completed the acceptance test on
