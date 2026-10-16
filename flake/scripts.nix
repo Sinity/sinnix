@@ -299,7 +299,10 @@ let
             buildGoModule = pkgs.buildGo126Module;
           }).overrideAttrs
             (old: {
-              patches = (old.patches or [ ]) ++ [ ../pkgs/beads/owner-contracts.patch ];
+              patches = (old.patches or [ ]) ++ [
+                ../pkgs/beads/owner-contracts.patch
+                ../pkgs/beads/standalone-context.patch
+              ];
             });
         # bd's upstream --directory flag chooses the requested checkout only
         # while finding its configuration, then a redirect can send the
@@ -356,7 +359,7 @@ let
             doCheck = true;
             checkPhase = ''
               runHook preCheck
-              BEADS_TEST_EMBEDDED_DOLT=1 go test -tags=gms_pure_go ./cmd/bd ./internal/storage/issueops ./internal/storage/embeddeddolt -run 'OwnerContract|WrapWithSchemaVersion|OutputJSONWithPagination' -count=1 -timeout=2m
+              BEADS_TEST_EMBEDDED_DOLT=1 go test -tags=gms_pure_go ./cmd/bd ./internal/beads ./internal/storage/issueops ./internal/storage/embeddeddolt -run 'OwnerContract|WrapWithSchemaVersion|OutputJSONWithPagination' -count=1 -timeout=2m
               go test -tags=gms_pure_go ./internal/httpapi ./issueops ./internal/storage/externaldeps -count=1 -timeout=2m
               runHook postCheck
             '';

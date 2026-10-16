@@ -112,8 +112,6 @@ class BeadsService:
             project = self.config.projects[self._string(project_id, "project_id", 128)]
         except KeyError as exc:
             raise BeadsError(f"unknown project: {project_id}") from exc
-        if not project.path.is_dir():
-            raise BeadsError(f"project checkout is unavailable: {project_id}")
         return project
 
     def _authority(
@@ -135,10 +133,13 @@ class BeadsService:
         text: bool = False,
         payload: Mapping[str, Any] | None = None,
     ) -> Any:
+        _, authority = self._authority(project.project_id, write)
         command = [
             self.config.beads_command,
             "--directory",
-            str(project.path),
+            str(authority.workspace),
+            "--db",
+            str(authority.database),
             "--json",
         ]
         if not write:
@@ -148,10 +149,11 @@ class BeadsService:
             route=OwnerRoute("beads"),
             stdin_bytes=json.dumps(payload).encode() if payload is not None else None,
             timeout_seconds=30,
-            cwd=project.path,
+            cwd=authority.workspace,
             max_stdout_bytes=self.config.max_result_bytes,
             max_stderr_bytes=self.config.max_result_bytes,
             environment={
+                "BEADS_DIR": str(authority.workspace),
                 "HOME": str(Path.home()),
                 "LANG": os.environ.get("LANG", "C.UTF-8"),
                 "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),

@@ -1,0 +1,57 @@
+--- a/internal/beads/context.go
++++ b/internal/beads/context.go
+@@ -133,7 +133,12 @@
+ 		var err error
+ 		repoRoot, err = git.GetMainRepoRoot()
+ 		if err != nil {
+-			return nil, fmt.Errorf("cannot determine repository root: %w", err)
++			if os.Getenv("BEADS_DIR") == "" {
++				return nil, fmt.Errorf("cannot determine repository root: %w", err)
++			}
++			// An explicitly selected task store can live outside source Git.
++			// Its validated .beads directory remains the storage authority.
++			repoRoot = filepath.Dir(beadsDir)
+ 		}
+ 	}
+ 
+--- /dev/null
++++ b/internal/beads/owner_standalone_context_test.go
+@@ -0,0 +1,38 @@
++package beads
++
++import (
++	"os"
++	"path/filepath"
++	"testing"
++
++	"github.com/steveyegge/beads/internal/git"
++)
++
++func TestOwnerContractExplicitStandaloneContext(t *testing.T) {
++	root := t.TempDir()
++	t.Chdir(root)
++	dir := filepath.Join(root, ".beads")
++	if err := os.Mkdir(dir, 0700); err != nil {
++		t.Fatal(err)
++	}
++	if err := os.WriteFile(filepath.Join(dir, "beads.db"), nil, 0600); err != nil {
++		t.Fatal(err)
++	}
++	t.Setenv("BEADS_DIR", dir)
++	ResetCaches()
++	git.ResetCaches()
++	t.Cleanup(func() { ResetCaches(); git.ResetCaches() })
++	info, err := buildRepoContext()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if info.BeadsDir != dir || info.RepoRoot != root || info.CWDRepoRoot != "" || info.IsWorktree {
++		t.Fatalf("unexpected standalone identity: %+v", info)
++	}
++	t.Setenv("BEADS_DIR", "")
++	ResetCaches()
++	git.ResetCaches()
++	if _, err := buildRepoContext(); err == nil {
++		t.Fatal("implicit Gitless context unexpectedly accepted")
++	}
++}
