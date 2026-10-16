@@ -537,6 +537,11 @@ rec {
         IOAccounting = true;
         CPUWeight = 20;
         IOWeight = 10;
+        # IOWeight arbitrates contention through io.cost but does not cap
+        # throughput. Share a device ceiling across concurrent bulk jobs,
+        # matching the backup class; stricter operation budgets still apply.
+        IOReadBandwidthMax = [ "/realm 80M" "/nix 80M" ];
+        IOWriteBandwidthMax = [ "/realm 40M" "/nix 40M" ];
         MemoryHigh = "10G";
         MemoryMax = "10G";
         MemorySwapMax = "0";
