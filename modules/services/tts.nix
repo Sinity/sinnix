@@ -91,6 +91,7 @@ mkAiService {
           "${ttsDir}/config:/app/config"
           "${../../pkgs/sinnix-litellm-boundary/tts.py}:/run/sinnix-tts/tts.py:ro"
           "${../../pkgs/sinnix-litellm-boundary/boundary.py}:/run/sinnix-tts/sinnix_ai_browser_boundary.py:ro"
+          "${../../pkgs/sinnix-litellm-boundary/fastapi_admission.py}:/run/sinnix-tts/sinnix_fastapi_admission.py:ro"
         ];
         extraOptions = [ "--device=nvidia.com/gpu=all" ];
       };

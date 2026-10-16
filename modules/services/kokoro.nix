@@ -66,6 +66,7 @@ mkAiService {
         volumes = [
           "${../../pkgs/sinnix-litellm-boundary/kokoro.py}:/run/sinnix-kokoro/sinnix_kokoro.py:ro"
           "${../../pkgs/sinnix-litellm-boundary/boundary.py}:/run/sinnix-kokoro/sinnix_ai_browser_boundary.py:ro"
+          "${../../pkgs/sinnix-litellm-boundary/fastapi_admission.py}:/run/sinnix-kokoro/sinnix_fastapi_admission.py:ro"
         ];
         # Container listens on 8880 internally (not a host allocation, so not
         # in the port registry); mapped to the private backend port the

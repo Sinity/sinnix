@@ -24,7 +24,8 @@ def startup_script(source, launcher):
 
 
 def install(openedai, ports):
-    from sinnix_ai_browser_boundary import BrowserBoundary, admit_fastapi
+    from sinnix_ai_browser_boundary import BrowserBoundary
+    from sinnix_fastapi_admission import admit_fastapi
 
     original = openedai.OpenAIStub
     # Validate configuration before constructing any vendor/model state.

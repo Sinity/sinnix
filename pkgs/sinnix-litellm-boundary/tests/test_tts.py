@@ -22,6 +22,9 @@ def load(name, path):
 
 tts = load("tts", ROOT / "tts.py")
 sys.modules["sinnix_ai_browser_boundary"] = load("tts_boundary", ROOT / "boundary.py")
+sys.modules["sinnix_fastapi_admission"] = load(
+    "tts_admission", ROOT / "fastapi_admission.py"
+)
 
 
 async def request(headers, method="POST"):

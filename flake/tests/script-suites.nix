@@ -382,6 +382,7 @@
             "boundary.py"
             "tts.py"
             "kokoro.py"
+            "fastapi_admission.py"
           ];
           pythonPackages = [ "fastapi" ];
         };

@@ -19,6 +19,13 @@ spec = importlib.util.spec_from_file_location(
 )
 boundary = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(boundary)
+sys.modules["sinnix_ai_browser_boundary"] = boundary
+spec = importlib.util.spec_from_file_location(
+    "sinnix_fastapi_admission", ROOT / "fastapi_admission.py"
+)
+admission = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(admission)
+sys.modules["sinnix_fastapi_admission"] = admission
 
 
 async def request(monkeypatch, headers):

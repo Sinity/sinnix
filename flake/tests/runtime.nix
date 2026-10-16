@@ -266,8 +266,11 @@ in
               && lib.any (volume: lib.hasSuffix ":/run/sinnix-kokoro/sinnix_kokoro.py:ro" volume) kokoro.volumes
               && lib.any (
                 volume: lib.hasSuffix ":/run/sinnix-kokoro/sinnix_ai_browser_boundary.py:ro" volume
+              ) kokoro.volumes
+              && lib.any (
+                volume: lib.hasSuffix ":/run/sinnix-kokoro/sinnix_fastapi_admission.py:ro" volume
               ) kokoro.volumes;
-            message = "Kokoro must retain guarded startup, registered host ports and its native internal interface";
+              message = "Kokoro must retain guarded startup, registered host ports and its native internal interface";
           }
         ];
       };
@@ -534,6 +537,9 @@ in
                 && lib.any (volume: lib.hasSuffix ":/run/sinnix-tts/tts.py:ro" volume) tts.volumes
                 && lib.any (
                   volume: lib.hasSuffix ":/run/sinnix-tts/sinnix_ai_browser_boundary.py:ro" volume
+                ) tts.volumes
+                && lib.any (
+                  volume: lib.hasSuffix ":/run/sinnix-tts/sinnix_fastapi_admission.py:ro" volume
                 ) tts.volumes;
               message = "TTS must launch through the shared browser boundary with both declared ports and read-only code";
             }

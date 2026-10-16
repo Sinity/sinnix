@@ -23,7 +23,7 @@ def startup_script(source):
 def create_app():
     ports = listener_ports()
     from api.src.main import app
-    from sinnix_ai_browser_boundary import admit_fastapi
+    from sinnix_fastapi_admission import admit_fastapi
 
     return admit_fastapi(app, allowed_ports=ports)
 

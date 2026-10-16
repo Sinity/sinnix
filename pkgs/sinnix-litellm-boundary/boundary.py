@@ -13,7 +13,7 @@ class BrowserBoundary:
             int(port) for port in os.environ["SINNIX_LITELLM_PORTS"].split(",")
         }
         if not self.ports or any(not 1 <= port <= 65535 for port in self.ports):
-            raise ValueError("invalid AI listener ports")
+            raise ValueError("invalid LiteLLM listener ports")
 
     def authority(self, value, *, origin=False):
         if not value or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value):
@@ -65,29 +65,3 @@ class BrowserBoundary:
                 await send({"type": "http.response.body", "body": body})
             return
         return await self.app(scope, receive, send)
-
-
-def admit_fastapi(app, *, allowed_ports, allow_credentials=False):
-    """Surround existing vendor middleware, including any request-body readers."""
-    from fastapi.middleware.cors import CORSMiddleware
-
-    policy = BrowserBoundary(None, allowed_ports=allowed_ports)
-    origins = [
-        f"http://{('[' + host + ']') if ':' in host else host}:{port}"
-        for host in sorted(policy.hosts)
-        for port in sorted(policy.ports)
-    ]
-    app.user_middleware = [
-        middleware
-        for middleware in app.user_middleware
-        if middleware.cls is not CORSMiddleware
-    ]
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=allow_credentials,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    app.add_middleware(BrowserBoundary, allowed_ports=policy.ports)
-    return app

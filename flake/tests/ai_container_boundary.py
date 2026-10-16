@@ -48,6 +48,7 @@ def main():
     for source, target in [
         (root / f"{provider}.py", launcher),
         (root / "boundary.py", "sinnix_ai_browser_boundary.py"),
+        (root / "fastapi_admission.py", "sinnix_fastapi_admission.py"),
         (root / f"tests/verify_{provider}_image.py", "verify.py"),
     ]:
         command += ["--volume", f"{source}:{directory}/{target}:ro"]
