@@ -18,9 +18,7 @@ import sys
 import tempfile
 
 import pytest
-
 import sinnix_phone_dispatcher.notifications as notifications_mod
-
 
 _files = {}
 

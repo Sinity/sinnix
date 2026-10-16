@@ -20,10 +20,9 @@ from __future__ import annotations
 import hashlib
 import os
 import stat
-
-import pytest
 from http import HTTPStatus
 
+import pytest
 import sinnix_phone_dispatcher.uploads as uploads_mod
 
 
@@ -472,6 +471,7 @@ def test_cursor_sync_failure_does_not_acknowledge_bytes(isolated_state_dirs, mon
 
 def test_new_event_bytes_do_not_restore_group_write_access(tmp_path, monkeypatch):
     import os
+
     from sinnix_phone_dispatcher import uploads
     monkeypatch.setattr(uploads, "EVENTS_DIR", tmp_path)
     target = tmp_path / "events-20200101.jsonl"
@@ -489,6 +489,7 @@ def test_new_event_bytes_do_not_restore_group_write_access(tmp_path, monkeypatch
 
 def test_partial_notification_survives_dispatcher_restart(isolated_state_dirs, monkeypatch):
     import importlib
+
     from sinnix_phone_dispatcher import notifications
 
     calls = []
@@ -498,3 +499,13 @@ def test_partial_notification_survives_dispatcher_restart(isolated_state_dirs, m
     monkeypatch.setattr(notifications, "notify_desktop", lambda *a, **kw: calls.append(a))
     assert uploads_mod.append_events("20260101", 30, line[30:], None)[0] == HTTPStatus.OK
     assert calls == [("fixture", "preserved")]
+
+
+def test_notification_descriptor_failure_keeps_upload_acknowledged(isolated_state_dirs, monkeypatch):
+    def exhausted(fd):
+        raise OSError("descriptor exhaustion")
+    monkeypatch.setattr(uploads_mod.os, "dup", exhausted)
+    line = b'{"kind":"mark"}\n'
+    status, result = uploads_mod.append_events("20260101", 0, line, None)
+    assert status == HTTPStatus.OK
+    assert result["cursor"] == len(line)

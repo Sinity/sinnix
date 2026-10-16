@@ -18,12 +18,12 @@ an inode that repair is replacing.
 
 from __future__ import annotations
 
-import hashlib
 import errno
-import stat
-from contextlib import ExitStack, contextmanager
+import hashlib
 import os
+import stat
 import sys
+from contextlib import ExitStack, contextmanager
 from http import HTTPStatus
 from pathlib import Path
 from threading import Lock
@@ -388,6 +388,7 @@ def append_events(
         }
 
     target = _day_file(day)
+    mirror_fd = None
     try:
         EVENTS_DIR.mkdir(parents=True, exist_ok=True)
         with flock(EVENTS_DIR / ".write.lock"):
@@ -438,7 +439,12 @@ def append_events(
                             "day": day,
                         }
                     _sync_capture_path(target, fd, observed)
-                    mirror_fd = os.dup(fd)
+                    try:
+                        mirror_fd = os.dup(fd)
+                    except OSError as exc:
+                        # Capture is durable; advisory mirroring cannot turn
+                        # descriptor exhaustion into a failed upload.
+                        print(f"phone-dispatcher: notification descriptor: {exc}", file=sys.stderr)
             except FileNotFoundError:
                 if offset == 0:
                     raise
@@ -449,6 +455,8 @@ def append_events(
                     "day": day,
                 }
     except OSError as exc:
+        if mirror_fd is not None:
+            os.close(mirror_fd)
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
 
     # Only the bytes this write actually added, not the whole batch -- an
@@ -457,14 +465,16 @@ def append_events(
     # notification for every retry. Advisory: a mirroring failure must never
     # turn a landed upload into one the phone believes it has to resend.
     try:
-        mirror_new_events(mirror_fd, size, offset + len(body))
+        if mirror_fd is not None:
+            mirror_new_events(mirror_fd, size, offset + len(body))
     except Exception as exc:  # noqa: BLE001 - the upload above already landed
         print(
             f"phone-dispatcher: notifications: mirror_new_events failed: {exc}",
             file=sys.stderr,
         )
     finally:
-        os.close(mirror_fd)
+        if mirror_fd is not None:
+            os.close(mirror_fd)
 
     return HTTPStatus.OK, {
         "ok": True,

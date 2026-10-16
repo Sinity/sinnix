@@ -32,8 +32,8 @@ notifications sampled from the same day (Gmail, Twitter, SMS) carried
 from __future__ import annotations
 
 import json
-import sys
 import os
+import sys
 
 from sinnix_lib.notify import notify_desktop
 
