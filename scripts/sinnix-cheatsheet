@@ -11,7 +11,7 @@ Every section is queried fresh at generation time -- Hyprland binds via
 actually bound right now, not what bindings.nix said at the last switch),
 every declared capability via `sinnix-ops-reducer capabilities --json` (the
 eval-time capability index at /etc/sinnix/capability-index.json, joined with
-the weekly usage census), and qutebrowser's custom binds via a regex over its
+the weekly usage census), and qutebrowser's custom binds from its managed installed
 config.py. Only the beads/git-protocol essentials and the agent-dispatch
 idioms are curated by hand -- that content isn't queryable, it's judgment
 about what's worth surfacing.
@@ -33,16 +33,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import ast
 import html
 import json
-import re
+import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
 from sinnix_lib.atomic import atomic_publish
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT = Path("/realm/project/sinnix/analysis/cheatsheet.html")
 
 
@@ -137,13 +137,26 @@ def collect_capabilities() -> dict:
 
 
 def collect_qutebrowser_binds() -> list[dict]:
-    cfg = REPO_ROOT / "dots" / "qutebrowser" / "config.py"
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    cfg = config_home / "qutebrowser" / "config.py"
+    try:
+        tree = ast.parse(cfg.read_text(encoding="utf-8"), filename=str(cfg))
+    except (OSError, UnicodeError, SyntaxError) as exc:
+        return [{"error": f"Cannot read qutebrowser bindings from {cfg}: {exc}"}]
     rows = []
-    if not cfg.is_file():
-        return rows
-    text = cfg.read_text(errors="replace")
-    for m in re.finditer(r'config\.bind\("([^"]+)",\s*"([^"]+)"\)', text):
-        rows.append({"key": m.group(1), "action": m.group(2)})
+    for node in sorted(ast.walk(tree), key=lambda node: getattr(node, "lineno", 0)):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "config"
+            and node.func.attr == "bind"
+            and len(node.args) >= 2
+            and all(isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+                    for arg in node.args[:2])
+        ):
+            continue
+        rows.append({"key": node.args[0].value, "action": node.args[1].value})
     return rows
 
 
@@ -334,8 +347,12 @@ def build_html(now_iso: str) -> str:
     capability_html, capability_count = render_capability_sections(capabilities)
     total_rows += capability_count
 
-    qb_rows = [[q["key"], q["action"]] for q in qb]
-    qb_html = render_table(["Key", "Action"], qb_rows)
+    qb_rows = []
+    if qb and "error" in qb[0]:
+        qb_html = f"<p><em>{esc(qb[0]['error'])}</em></p>"
+    else:
+        qb_rows = [[q["key"], q["action"]] for q in qb]
+        qb_html = render_table(["Key", "Action"], qb_rows)
     total_rows += len(qb_rows)
 
     beads_html = render_table(["Command", "What"], [[c, d] for c, d in BEADS_ESSENTIALS])
@@ -367,7 +384,7 @@ def build_html(now_iso: str) -> str:
 </section>
 {capability_html}
 <section id="qutebrowser">
-  <h2>qutebrowser custom binds <span class="count">({len(qb_rows)}, live from dots/qutebrowser/config.py)</span></h2>
+  <h2>qutebrowser custom binds <span class="count">({len(qb_rows)}, from installed qutebrowser/config.py)</span></h2>
   {qb_html}
 </section>
 <section id="beads">

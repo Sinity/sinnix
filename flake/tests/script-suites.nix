@@ -308,6 +308,12 @@
         # comparisons stop displacing that prior at the documented evidence
         # threshold, a retired binding survives into the next manifest, or
         # deck-forge stops taking its drill order from the manifest.
+        cheatsheet-suite = mkScriptSuite {
+          name = "sinnix-cheatsheet";
+          suiteDir = ../../pkgs/sinnix-cheatsheet/tests;
+          scripts = [ "sinnix-cheatsheet" ];
+          extraPythonPackages = [ sinnix-lib ];
+        };
         rank-keybinds-suite = mkScriptSuite {
           name = "sinnix-rank-keybinds";
           suiteDir = ../../pkgs/sinnix-rank-keybinds/tests;
