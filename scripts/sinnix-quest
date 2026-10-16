@@ -334,7 +334,7 @@ media() {
         echo "archived: $archive_path"
       done
       ;;
-    prune)
+    prune) (
       shift
       local apply=0
       case "${1:-}" in
@@ -350,9 +350,12 @@ media() {
       fi
       now="$(date +%s)"
       local listing
-      listing=$(mktemp) || return 1
+      listing=$(mktemp --tmpdir="${TMPDIR:-/realm/tmp/work}" sinnix-quest-prune.XXXXXX) || return 1
+      trap 'rm -f -- "$listing"' EXIT
+      trap 'exit 129' HUP
+      trap 'exit 130' INT
+      trap 'exit 143' TERM
       if ! adb_shell_args "$target" find /sdcard/Oculus/Videoshots -maxdepth 1 -type f -print0 >"$listing"; then
-        rm -f "$listing"
         echo "headset media inventory failed" >&2
         return 1
       fi
@@ -377,8 +380,7 @@ media() {
           echo "eligible: $remote"
         fi
       done <"$listing"
-      rm -f "$listing"
-      ;;
+    ) ;;
     serve)
       target="$(usb_serial)"
       systemctl --user start sinnix-quest-media.service
