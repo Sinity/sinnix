@@ -610,8 +610,10 @@ class Runtime:
             raise ProtocolError("invalid_request", "project_id is malformed")
         if not isinstance(operation, str) or not 1 <= len(operation) <= 128:
             raise ProtocolError("invalid_request", "operation is malformed")
+        # The resolved workspace is an absolute checkout path, not a short ID.
+        # Checkout resolution and the native operation policy remain authoritative.
         if workspace_id is not None and (
-            not isinstance(workspace_id, str) or not 1 <= len(workspace_id) <= 128
+            not isinstance(workspace_id, str) or not workspace_id
         ):
             raise ProtocolError("invalid_request", "workspace_id is malformed")
         if parameters is not None and not isinstance(parameters, Mapping):

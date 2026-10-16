@@ -483,7 +483,9 @@ def test_operations_run_targets_the_root_or_a_linked_worktree(
         "owner_request_key": runtime.owner_request_key("operations.run", "op-1"),
     }
 
-    worktree = tmp_path / "wt"
+    worktree = tmp_path / ("w" * 130) / "wt"
+    worktree.parent.mkdir()
+    assert len(str(worktree)) > 128
     git(
         runtime.config.projects["fixture"].path,
         "worktree",
@@ -502,7 +504,7 @@ def test_operations_run_targets_the_root_or_a_linked_worktree(
             "idempotency_key": "op-2",
         },
     )
-    assert on_worktree["result"]["outcome"] == "ok", on_worktree
+    assert on_worktree["result"]["outcome"] == "ok", on_worktree.get("error")
     assert fake.calls[-1].arguments["workspace_id"] == str(worktree.resolve())
 
     fake.errors["job.start"] = (ErrorCode.INVALID_ARGUMENT, "unknown operation: nope")

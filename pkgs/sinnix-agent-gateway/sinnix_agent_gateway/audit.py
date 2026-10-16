@@ -7,6 +7,8 @@ import os
 import sqlite3
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -30,12 +32,18 @@ class AuditService:
         self._claims: dict[tuple[str, str], int] = {}
         self._initialize()
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
-        connection.execute("pragma busy_timeout=30000")
-        connection.execute("pragma journal_mode=wal")
-        connection.execute("pragma synchronous=full")
-        return connection
+        try:
+            connection.execute("pragma busy_timeout=30000")
+            connection.execute("pragma journal_mode=wal")
+            connection.execute("pragma synchronous=full")
+            # sqlite3's context manager commits/rolls back; it does not close.
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def _initialize(self) -> None:
         with self._connect() as connection:

@@ -348,11 +348,11 @@ class _UnixHTTP(HTTPConnection):
 
 
 def test_disconnected_unix_request_cannot_steal_another_calls_response(
-    tmp_path, tmp_path_factory
+    tmp_path, unix_socket_path
 ):
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"stateDir": str(tmp_path / "state"), "projects": {}}))
-    socket_path = tmp_path_factory.mktemp("uds") / "mcp.sock"
+    socket_path = unix_socket_path
     entered, release, completed = (
         tmp_path / name for name in ("entered", "release", "completed")
     )
@@ -516,7 +516,7 @@ main()
 
 def test_serve_http_logs_the_tunnel_request_id_and_drains_on_sigterm(
     tmp_path: Path,
-    tmp_path_factory,
+    unix_socket_path,
 ) -> None:
     """Fails if SIGTERM waits on an in-flight call, or calls lose correlation.
 
@@ -527,7 +527,7 @@ def test_serve_http_logs_the_tunnel_request_id_and_drains_on_sigterm(
     config_path.write_text(
         json.dumps({"stateDir": str(tmp_path / "state"), "projects": {}})
     )
-    socket_path = tmp_path_factory.mktemp("uds") / "mcp.sock"
+    socket_path = unix_socket_path
     stderr_path = tmp_path / "stderr.log"
     command = [
         sys.executable,
