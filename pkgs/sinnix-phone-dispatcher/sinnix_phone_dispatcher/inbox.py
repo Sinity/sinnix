@@ -37,6 +37,7 @@ import os
 import re
 import stat
 import tempfile
+from contextlib import ExitStack
 from http import HTTPStatus
 from pathlib import Path
 
@@ -119,7 +120,7 @@ def list_inbox() -> tuple[HTTPStatus, dict]:
             if not path.is_file() or path.name.endswith(".part"):
                 continue
             try:
-                body = path.read_bytes()
+                body = _read_entry(path)
             except OSError:
                 continue
             files.append(
@@ -144,20 +145,35 @@ def read_inbox(name: str) -> tuple[HTTPStatus, bytes | dict]:
             "ok": False,
             "detail": "unacceptable inbox name",
         }
-    if not path.is_file():
-        return HTTPStatus.NOT_FOUND, {"ok": False, "detail": f"no inbox entry {name!r}"}
     try:
-        return HTTPStatus.OK, path.read_bytes()
+        return HTTPStatus.OK, _read_entry(path)
+    except FileNotFoundError:
+        return HTTPStatus.NOT_FOUND, {"ok": False, "detail": f"no inbox entry {name!r}"}
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
 
 
-def _read_claim(claim: Path) -> bytes:
-    fd = os.open(claim, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    with os.fdopen(fd, "rb") as stream:
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-            raise OSError("claimed inbox entry is not a regular file")
-        return stream.read()
+def _read_regular(path: str | Path, *, dir_fd: int | None = None) -> bytes:
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError("inbox entry is not a regular file")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            return stream.read()
+    finally:
+        os.close(fd)
+
+
+def _read_entry(path: Path) -> bytes:
+    # Anchor each directory before opening its child. O_NOFOLLOW on only the
+    # final entry would still allow a replaced subdirectory to escape the inbox.
+    with ExitStack() as stack:
+        root_fd = os.open(INBOX_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        stack.callback(os.close, root_fd)
+        sub_fd = os.open(path.parent.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                         dir_fd=root_fd)
+        stack.callback(os.close, sub_fd)
+        return _read_regular(path.name, dir_fd=sub_fd)
 
 
 def _preserve_claim(claim: Path, original: Path) -> dict:
@@ -202,18 +218,13 @@ def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict
     sub = name.split("/", 1)[0]
     if not SUBDIRS.get(sub, False):
         return HTTPStatus.OK, {"ok": True, "name": name, "retained": True}
-    if not path.is_file():
-        # Already gone: a re-confirmed one-shot is a success, for the same
-        # reason a re-uploaded chunk is. The phone retries a confirmation
-        # whose answer it never saw.
-        return HTTPStatus.OK, {
-            "ok": True,
-            "name": name,
-            "deleted": False,
-            "already_gone": True,
-        }
     try:
-        body = path.read_bytes()
+        body = _read_entry(path)
+    except FileNotFoundError:
+        # A repeated confirmation of a consumed one-shot is idempotent.
+        return HTTPStatus.OK, {
+            "ok": True, "name": name, "deleted": False, "already_gone": True,
+        }
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
     digest = _sha(body)
@@ -255,7 +266,7 @@ def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict
             "ok": False, "detail": str(exc), **preserved,
         }
     try:
-        claimed_digest = _sha(_read_claim(claim))
+        claimed_digest = _sha(_read_regular(claim))
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {
             "ok": False, "detail": str(exc), **_preserve_claim(claim, path),

@@ -279,3 +279,57 @@ def test_a_missing_entry_is_a_404(isolated_state_dirs) -> None:
     status, payload = inbox_mod.read_inbox("notify/nothing.json")
     assert status == HTTPStatus.NOT_FOUND
     assert payload["ok"] is False
+
+
+@pytest.mark.parametrize("subdirectory_link", [False, True])
+def test_symlinks_cannot_expose_outside_inbox(isolated_state_dirs, tmp_path, subdirectory_link):
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    target = outside / 'entry.json'
+    target.write_bytes(b'synthetic outside inbox')
+    root = isolated_state_dirs['inbox_dir']
+    root.mkdir(parents=True)
+    if subdirectory_link:
+        (root / 'receipts').symlink_to(outside, target_is_directory=True)
+    else:
+        (root / 'receipts').mkdir()
+        (root / 'receipts' / 'entry.json').symlink_to(target)
+    before = target.stat()
+    status, body = inbox_mod.read_inbox('receipts/entry.json')
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert isinstance(body, dict) and not body['ok']
+    _, listing = inbox_mod.list_inbox()
+    assert not any(f['name'] == 'receipts/entry.json' for f in listing['files'])
+    status, body = inbox_mod.confirm_inbox('receipts/entry.json', hashlib.sha256(target.read_bytes()).hexdigest())
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR
+    after = target.stat()
+    assert (after.st_ino, after.st_size, after.st_mtime_ns) == (before.st_ino, before.st_size, before.st_mtime_ns)
+    assert target.read_bytes() == b'synthetic outside inbox'
+    assert (root / 'receipts' / 'entry.json').exists()
+
+
+@pytest.mark.parametrize("kind", ["directory", "fifo"])
+def test_wrong_type_is_unavailable_not_already_consumed(isolated_state_dirs, kind):
+    root = isolated_state_dirs['receipts_dir']
+    root.mkdir(parents=True)
+    path = root / 'entry.json'
+    if kind == 'directory':
+        path.mkdir()
+    else:
+        os.mkfifo(path)
+    for status, body in [inbox_mod.read_inbox('receipts/entry.json'),
+                         inbox_mod.confirm_inbox('receipts/entry.json', '0' * 64)]:
+        assert status == HTTPStatus.INTERNAL_SERVER_ERROR
+        assert not body['ok'] and not body.get('already_gone')
+    assert path.is_dir() if kind == 'directory' else path.is_fifo()
+
+
+def test_refused_entry_reads_do_not_leak_descriptors(isolated_state_dirs):
+    root = isolated_state_dirs['receipts_dir']
+    root.mkdir(parents=True)
+    path = root / 'entry.json'
+    path.mkdir()
+    before = set(os.listdir('/proc/self/fd'))
+    for _ in range(8):
+        assert inbox_mod.read_inbox('receipts/entry.json')[0] == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert set(os.listdir('/proc/self/fd')) == before
