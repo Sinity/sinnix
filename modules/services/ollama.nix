@@ -231,6 +231,14 @@ mkServiceModule {
           ollama-model-loader.wantedBy = lib.mkForce [ ];
         })
         {
+          # Pulls and model reads run in the daemon, outside the requesting
+          # client's cgroup. Bound them here so downloads cannot saturate the
+          # filesystem shared with the desktop and capture services.
+          ollama.serviceConfig = {
+            IOWeight = 10;
+            IOReadBandwidthMax = [ "${modelsDir} 40M" ];
+            IOWriteBandwidthMax = [ "${modelsDir} 20M" ];
+          };
           # Conflicts= against every other GPU-inference backend is computed
           # centrally in ai-control.nix's gpuInferenceConflicts.
           # Full override (mkForce): the upstream `script` is a plain
