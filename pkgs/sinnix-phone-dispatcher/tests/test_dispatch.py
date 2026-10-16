@@ -162,3 +162,24 @@ def test_unusable_intent_keeps_evidence_and_continues(monkeypatch, tmp_path, pay
     assert bad.read_bytes() == payload
     assert not good.exists()
     assert calls == [{"kind": "mark"}]
+
+
+def test_wrong_type_outbox_fails_visibly(tmp_path, capsys):
+    outbox = tmp_path / "outbox"
+    outbox.write_text("retained object")
+    assert dispatch_mod.cmd_dispatch(_args(outbox)) == 1
+    assert "outbox unavailable" in capsys.readouterr().err
+    assert outbox.read_text() == "retained object"
+
+
+def test_unreadable_outbox_fails_visibly(monkeypatch, tmp_path, capsys):
+    outbox = tmp_path / "outbox"
+    outbox.mkdir()
+
+    def denied(path):
+        assert Path(path) == outbox
+        raise PermissionError("synthetic access denied")
+
+    monkeypatch.setattr(dispatch_mod.os, "scandir", denied)
+    assert dispatch_mod.cmd_dispatch(_args(outbox)) == 1
+    assert "outbox unavailable" in capsys.readouterr().err

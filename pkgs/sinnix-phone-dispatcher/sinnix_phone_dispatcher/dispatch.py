@@ -9,7 +9,9 @@ the lake's outbox -- the app posts them to /intent itself."""
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -29,12 +31,24 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
     """
     ensure_dirs()
     outbox = Path(args.outbox)
-    if not outbox.is_dir():
+    try:
+        # scandir reports access/type failures; Path.glob can hide them as an
+        # empty sweep, which would incorrectly claim the retained work ran.
+        with os.scandir(outbox) as entries:
+            paths = sorted(
+                outbox / entry.name
+                for entry in entries
+                if fnmatch.fnmatchcase(entry.name, "intent-*.json")
+            )
+    except FileNotFoundError:
         print(f"dispatch: no outbox at {outbox}")
         return 0
+    except OSError as exc:
+        print(f"dispatch: outbox unavailable at {outbox} ({exc})", file=sys.stderr)
+        return 1
     executed = 0
     failed = 0
-    for path in sorted(outbox.glob("intent-*.json")):
+    for path in paths:
         try:
             intent = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(intent, dict):
