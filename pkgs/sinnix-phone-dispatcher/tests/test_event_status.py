@@ -1,6 +1,8 @@
 import hashlib
 import json
-from pathlib import Path
+import os
+import subprocess
+import sys
 
 from sinnix_phone_dispatcher import event_status
 from sinnix_phone_dispatcher.cli import main
@@ -14,18 +16,19 @@ def test_large_tail_reads_only_bounded_payload_and_preserves_source(tmp_path, mo
     path = tmp_path / 'events.jsonl'
     path.write_bytes(_line(body='x' * (5 * 1024 * 1024)) + _line(kind='chunk_closed', chunk='fixture.m4a'))
     original_digest = hashlib.sha256(path.read_bytes()).hexdigest()
-    original_open = Path.open
+    original_open = os.fdopen
     reads = []
     class Reader:
         def __init__(self, handle): self.handle = handle
         def __enter__(self): return self
         def __exit__(self, *args): self.handle.close()
+        def fileno(self): return self.handle.fileno()
         def seek(self, *args): return self.handle.seek(*args)
         def read(self, size):
             reads.append(size)
             return self.handle.read(size)
     with monkeypatch.context() as patch:
-        patch.setattr(Path, 'open', lambda self, *args, **kwargs: Reader(original_open(self, *args, **kwargs)))
+        patch.setattr(os, 'fdopen', lambda *args, **kwargs: Reader(original_open(*args, **kwargs)))
         result = event_status.read_event_status(path)
     assert max(reads) <= event_status.MAX_TAIL_BYTES
     assert sum(reads) <= event_status.MAX_TAIL_BYTES + 1
@@ -82,5 +85,33 @@ def test_source_states_are_explicit(tmp_path, monkeypatch, capsys):
     assert main(['event-status', '--file', str(path)]) == 0
     assert json.loads(capsys.readouterr().out)['upload'] == 'chunk_upload_ok'
     def denied(*args, **kwargs): raise PermissionError('synthetic denied source')
-    monkeypatch.setattr(Path, 'open', denied)
+    monkeypatch.setattr(os, 'open', denied)
     assert event_status.read_event_status(path)['state'] == 'unavailable'
+
+
+def test_fifo_status_returns_without_a_writer(tmp_path):
+    path = tmp_path / 'events.jsonl'
+    os.mkfifo(path)
+    result = subprocess.run(
+        [sys.executable, '-c',
+         'import json,sys; from pathlib import Path; '
+         'from sinnix_phone_dispatcher.event_status import read_event_status; '
+         'print(json.dumps(read_event_status(Path(sys.argv[1]))))', str(path)],
+        capture_output=True, text=True, timeout=5, check=True,
+    )
+    payload = json.loads(result.stdout)
+    assert payload['state'] == 'unavailable'
+    assert 'not a regular file' in payload['reason']
+    assert path.is_fifo()
+
+
+def test_directory_status_is_unavailable(tmp_path):
+    assert event_status.read_event_status(tmp_path)['state'] == 'unavailable'
+
+
+def test_regular_file_symlink_keeps_status_readable(tmp_path):
+    target = tmp_path / 'retained.jsonl'
+    target.write_bytes(_line(kind='chunk_upload_ok'))
+    path = tmp_path / 'events.jsonl'
+    path.symlink_to(target)
+    assert event_status.read_event_status(path)['upload'] == 'chunk_upload_ok'
