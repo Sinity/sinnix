@@ -109,3 +109,28 @@ def test_undeclared_lane_scan_failures_are_not_abandonment(tmp_path, failed_targ
     else:
         assert [row['path'] for row in abandoned] == [str(lane)]
         assert not unavailable
+
+
+@pytest.mark.parametrize("case", ["denied-parent", "wrong-parent", "missing", "empty-file"])
+def test_capture_lookup_errors_are_not_missing(tmp_path, case):
+    parent = tmp_path / "parent"
+    if case == "wrong-parent":
+        parent.write_text("fixture")
+    else:
+        parent.mkdir()
+    lane = parent / "lane"
+    if case == "denied-parent":
+        lane.write_text("retained")
+        parent.chmod(0)
+    elif case == "empty-file":
+        lane.touch()
+    try:
+        result, rows = run_audit(tmp_path, str(lane), {})
+        assert result.returncode == 0, result.stderr
+        actual = [row["kind"] for row in rows if row["path"] == str(lane)]
+        expected = {"denied-parent": "lane-unavailable", "wrong-parent": "lane-unavailable",
+                    "missing": "lane-missing", "empty-file": "lane-empty"}[case]
+        assert actual == [expected]
+    finally:
+        if case == "denied-parent":
+            parent.chmod(0o700)

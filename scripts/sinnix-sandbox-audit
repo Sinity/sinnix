@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Report gaps between what sinnix declares and what it actually does — confinement, empty lanes, units that never succeed
-# runtimeInputs: bash coreutils findutils gawk gnugrep jq systemd audit
+# runtimeInputs: bash python3 coreutils findutils gawk gnugrep jq systemd audit
 set -euo pipefail
 umask 077
 
@@ -134,20 +134,47 @@ while IFS=$'\t' read -r _name unit manager path; do
       "ProtectSystem=$protect_system ProtectHome=$protect_home ReadWritePaths='$rw_paths' does not cover this declared capture path"
   fi
 
-  if [[ ! -e "$path" ]]; then
-    emit "$manager" "$unit" "lane-missing" "$path" "declared capture path does not exist"
-  elif [[ -d "$path" ]]; then
-    if entry="$(find "$path" -mindepth 1 -print -quit 2>/dev/null)"; then
-      if [[ -z "$entry" ]]; then
-        emit "$manager" "$unit" "lane-empty" "$path" "declared capture lane currently has no entries"
+  inspection="$(python3 - "$path" <<'PYTHON'
+import os
+import stat
+import sys
+try:
+    metadata = os.stat(sys.argv[1])
+except FileNotFoundError:
+    print("missing")
+except OSError as exc:
+    print(f"unavailable: {exc}")
+else:
+    if stat.S_ISDIR(metadata.st_mode):
+        print("directory")
+    elif stat.S_ISREG(metadata.st_mode):
+        print("empty" if metadata.st_size == 0 else "present")
+    else:
+        print("unavailable: expected a regular capture file or directory")
+PYTHON
+  )"
+  case "$inspection" in
+    missing)
+      emit "$manager" "$unit" "lane-missing" "$path" "declared capture path does not exist"
+      ;;
+    directory)
+      if entry="$(find "$path" -mindepth 1 -print -quit 2>/dev/null)"; then
+        if [[ -z "$entry" ]]; then
+          emit "$manager" "$unit" "lane-empty" "$path" "declared capture lane currently has no entries"
+        fi
+      else
+        emit "$manager" "$unit" "lane-unavailable" "$path" \
+          "declared capture directory could not be listed; contents are unknown"
       fi
-    else
-      emit "$manager" "$unit" "lane-unavailable" "$path" \
-        "declared capture directory could not be listed; contents are unknown"
-    fi
-  elif [[ -f "$path" ]] && [[ ! -s "$path" ]]; then
-    emit "$manager" "$unit" "lane-empty" "$path" "declared capture file is zero bytes"
-  fi
+      ;;
+    empty)
+      emit "$manager" "$unit" "lane-empty" "$path" "declared capture file is zero bytes"
+      ;;
+    present) ;;
+    *)
+      emit "$manager" "$unit" "lane-unavailable" "$path" "$inspection"
+      ;;
+  esac
 done < <(
   jq -r '.surfaces | to_entries[] | .value as $s | ($s.captures // [])[]
          | select(.path != null)
