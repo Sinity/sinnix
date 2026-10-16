@@ -1,11 +1,14 @@
-"""Admit local LiteLLM clients before reading bodies or dispatching requests."""
+"""Admit configured local AI clients before reading bodies or dispatching requests."""
 import os
 from urllib.parse import urlsplit
 
 
 class BrowserBoundary:
-    def __init__(self, app, *, allowed_ports=None):
+    def __init__(self, app, *, allowed_ports=None, allowed_hosts=None):
         self.app = app
+        self.hosts = {host.lower() for host in allowed_hosts} if allowed_hosts is not None else {"127.0.0.1", "localhost", "::1"}
+        if not self.hosts:
+            raise ValueError("empty AI listener host set")
         self.ports = set(allowed_ports) if allowed_ports is not None else {
             int(port) for port in os.environ["SINNIX_LITELLM_PORTS"].split(",")
         }
@@ -18,7 +21,7 @@ class BrowserBoundary:
         try:
             parsed = urlsplit(value if origin else "http://" + value)
             port = parsed.port if parsed.port is not None else 80
-            if (parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+            if (parsed.scheme != "http" or parsed.hostname not in self.hosts
                     or port not in self.ports or parsed.username is not None or parsed.password is not None
                     or parsed.path or parsed.query or parsed.fragment):
                 return None

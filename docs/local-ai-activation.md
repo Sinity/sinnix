@@ -163,6 +163,8 @@ The same wrappers can select `local-coder`, `local-reasoner`, `local-thinker`, o
 
 Start it with `sinnix ai start open-webui`, then open `http://127.0.0.1:8080` or its hub frontend on port 8881. When the backend is stopped, the hub proxy returns 502; visiting the URL does not activate it. `sinnix ai stop open-webui` stops it explicitly, and pinning is unavailable because there is no idle proxy.
 
+Both the direct listener and hub frontend check browser provenance before request bodies or actions. Open WebUI accepts loopback and the machine's verified hostname/tailnet identities on its direct and frontend ports. Foreign and report-origin requests are refused; native clients, same-origin browser traffic and WebSockets remain supported. Startup resolves the same verified tailnet identity used by the hub and refuses unverifiable identity. The service stays manually started.
+
 The configuration provides Ollama models and LiteLLM lanes, including the direct llama.cpp profiles, through `OPENAI_API_BASE_URLS`. Document embeddings use the roster's Ollama embedding model. The actual model list still depends on those owners being reachable.
 
 ## Speech, reranking, and media generation

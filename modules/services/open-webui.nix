@@ -40,6 +40,34 @@ mkAiService {
       helpers,
       ...
     }:
+    let
+      resolveIdentity =
+        (import ../lib/tailnet-bind.nix {
+          inherit pkgs lib;
+          interface = config.sinnix.services.tailscale.interfaceName;
+        })
+          "open-webui-resolve-identity"
+          "SINNIX_HUB_TAILNET_IP"
+          "open-webui";
+      guardedPackage = pkgs.open-webui.overridePythonAttrs (old: {
+        postPatch = (old.postPatch or "") + ''
+          test -f backend/open_webui/main.py
+          cp ${../../pkgs/sinnix-litellm-boundary/boundary.py} backend/open_webui/sinnix_browser_boundary.py
+          cat >> backend/open_webui/main.py <<'PYTHON'
+
+          from .sinnix_browser_boundary import BrowserBoundary
+          app.add_middleware(
+              BrowserBoundary,
+              allowed_ports={int(port) for port in os.environ["SINNIX_WEBUI_PORTS"].split(",")},
+              allowed_hosts={
+                  "localhost", "127.0.0.1", "::1", os.environ["SINNIX_WEBUI_HOSTNAME"],
+                  os.environ["SINNIX_HUB_TAILNET_IP"], os.environ["SINNIX_HUB_DNS_NAME"],
+              },
+          )
+          PYTHON
+        '';
+      });
+    in
     {
       sinnix.runtime.dataStores.open-webui-state = {
         path = "/var/lib/open-webui";
@@ -48,10 +76,18 @@ mkAiService {
 
       services.open-webui = {
         enable = true;
+        package = guardedPackage;
         host = "127.0.0.1";
         port = helpers.data.ports.openWebui;
         openFirewall = false;
         environment = {
+          SINNIX_WEBUI_HOSTNAME = config.networking.hostName;
+          SINNIX_WEBUI_PORTS = lib.concatStringsSep "," (
+            map toString [
+              helpers.data.ports.openWebui
+              config.sinnix.services.hub.frontends.open-webui.port
+            ]
+          );
           OLLAMA_BASE_URL = "http://127.0.0.1:${toString helpers.data.ports.ollama.public}";
           WEBUI_AUTH = "False"; # single-user localhost
           ANONYMIZED_TELEMETRY = "False";
@@ -89,6 +125,10 @@ mkAiService {
       };
       users.groups.open-webui = { };
       systemd.services.open-webui.serviceConfig = {
+        RuntimeDirectory = "open-webui-boundary";
+        RuntimeDirectoryMode = "0700";
+        ExecStartPre = [ "${resolveIdentity} /run/open-webui-boundary/bind.env" ];
+        EnvironmentFile = [ "-/run/open-webui-boundary/bind.env" ];
         DynamicUser = lib.mkForce false;
         User = "open-webui";
         Group = "open-webui";

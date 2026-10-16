@@ -9,7 +9,7 @@ boundary = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(boundary)
 
 
-def request(headers, *, method="POST", kind="http", ports=None):
+def request(headers, *, method="POST", kind="http", ports=None, hosts=None):
     messages, calls, reads = [], [], []
     scope = {"type": kind, "method": method, "headers": headers}
     async def receive():
@@ -24,7 +24,7 @@ def request(headers, *, method="POST", kind="http", ports=None):
         await outgoing({"type": "http.response.start", "status": 200, "headers": []})
         await outgoing({"type": "http.response.body", "body": b"chunk", "more_body": True})
         await outgoing({"type": "http.response.body", "body": b"end", "more_body": False})
-    middleware = boundary.BrowserBoundary(owner, allowed_ports=ports or {8123, 8124})
+    middleware = boundary.BrowserBoundary(owner, allowed_ports=ports or {8123, 8124}, allowed_hosts=hosts)
     asyncio.run(middleware(scope, receive, send))
     return messages, calls, reads
 
@@ -79,3 +79,27 @@ def test_ports_come_from_owner_configuration(monkeypatch):
     monkeypatch.delenv("SINNIX_LITELLM_PORTS")
     with pytest.raises(KeyError):
         boundary.BrowserBoundary(None)
+
+
+@pytest.mark.parametrize("host", ["neutral", "neutral.tailnet.invalid", "100.64.0.9"])
+@pytest.mark.parametrize("kind", ["http", "websocket"])
+def test_configured_peer_same_origin_is_preserved(host, kind):
+    messages, calls, reads = request([
+        (b"host", f"{host}:8123".encode()),
+        (b"origin", f"http://{host}:8123".encode()),
+        (b"sec-fetch-site", b"same-origin"),
+    ], hosts={host}, kind=kind)
+    assert calls and reads
+
+
+@pytest.mark.parametrize("origin", ["https://foreign.example", "http://neutral.tailnet.invalid:8883", "http://other.tailnet.invalid:8123"])
+def test_peer_rejects_foreign_or_report_origin(origin):
+    messages, calls, reads = request([
+        (b"host", b"neutral.tailnet.invalid:8123"), (b"origin", origin.encode()),
+    ], hosts={"neutral.tailnet.invalid", "other.tailnet.invalid"})
+    assert messages[0]["status"] == 403 and not calls and not reads
+
+
+def test_peer_host_is_not_implicitly_allowed_for_local_service():
+    messages, calls, reads = request([(b"host", b"neutral.tailnet.invalid:8123")])
+    assert messages[0]["status"] == 403 and not calls and not reads

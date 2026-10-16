@@ -350,6 +350,27 @@
               python3 ${../../pkgs/sinnix-litellm-boundary/tests/verify_package.py}
               touch "$out"
             '';
+        open-webui-package-boundary =
+          pkgs.runCommand "open-webui-package-boundary-check"
+            {
+              nativeBuildInputs = [ pkgs.python3 ];
+              OPEN_WEBUI_PACKAGE =
+                inputs.self.nixosConfigurations.sinnix-prime.config.services.open-webui.package;
+              SINNIX_WEBUI_PORTS =
+                inputs.self.nixosConfigurations.sinnix-prime.config.services.open-webui.environment.SINNIX_WEBUI_PORTS;
+              OFFLINE_MODE = "true";
+              HF_HUB_OFFLINE = "1";
+              WEBUI_SECRET_KEY = "synthetic-package-verification";
+              SINNIX_WEBUI_HOSTNAME = "neutral";
+              SINNIX_HUB_TAILNET_IP = "100.64.0.9";
+              SINNIX_HUB_DNS_NAME = "neutral.tailnet.invalid";
+            }
+            ''
+              export HOME="$TMPDIR/home" DATA_DIR="$TMPDIR/data"
+              mkdir -p "$HOME" "$DATA_DIR"
+              python3 ${../../pkgs/sinnix-litellm-boundary/tests/verify_webui_package.py}
+              touch "$out"
+            '';
         litellm-boundary-suite = mkScriptSuite {
           name = "sinnix-litellm-boundary";
           suiteDir = ../../pkgs/sinnix-litellm-boundary/tests;
