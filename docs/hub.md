@@ -327,11 +327,9 @@ already unit-only) belong on a page:
   button prompts for the deadline rather than guessing one, because the
   action refuses to run without it. `set_policy`/`reset_policy` tune whichever
   `MemoryHigh`/`MemoryMax`/`MemoryLow`/`CPUWeight`/`IOWeight`/`Nice` properties
-  a surface's own `effectiveResources` already declares, with one button that
-  restores every one of them from the inventory's value — reversible by
-  construction, which is the design goal the operator named ("auditability
-  and reversibility, not restraint"), not a smaller or safer verb set than
-  the one that already exists.
+  a surface's own `effectiveResources` already declares. Reset restores all
+  those properties from the inventory. Both policy actions use runtime-only
+  systemd properties. They do not write or remove persistent overrides.
 - **Bare `freeze`/`thaw` stay backend-only.** They are `park`'s own building
   blocks (`sinnix-pressure-park freeze`/`thaw`), and the difference that
   matters is the missing deadline: a bare freeze has no scheduled thaw, so a

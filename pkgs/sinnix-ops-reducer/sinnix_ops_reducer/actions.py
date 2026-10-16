@@ -902,6 +902,7 @@ class ActionService:
             command = [
                 "systemctl",
                 "--user" if manager == "user" else "--system",
+                "--runtime",
                 "set-property",
                 surface["unit"],
                 f"{property_name}={value}",
@@ -933,6 +934,7 @@ class ActionService:
             command = [
                 "systemctl",
                 "--user" if manager == "user" else "--system",
+                "--runtime",
                 "set-property",
                 surface["unit"],
                 *assignments,

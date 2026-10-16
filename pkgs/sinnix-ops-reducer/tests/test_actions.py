@@ -1212,3 +1212,36 @@ def test_pressure_actions_refuse_user_scope_before_dispatch(tmp_path):
                 }
             )
     assert calls == []
+
+
+@pytest.mark.parametrize("manager", ["user", "system"])
+@pytest.mark.parametrize("action", ["set_policy", "reset_policy"])
+def test_policy_adapter_changes_are_runtime_only(tmp_path, monkeypatch, manager, action):
+    inventory_path = tmp_path / "inventory.json"
+    inventory(inventory_path)
+    data = json.loads(inventory_path.read_text())
+    data["surfaces"]["safe"]["manager"] = manager
+    inventory_path.write_text(json.dumps(data))
+    reducer = Reducer(tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []})
+    reducer.refresh()
+    commands = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    actions = ActionService(
+        reducer.snapshot, inventory_path, tmp_path / "receipts.json",
+        unit_state_prober=fake_unit_state_prober,
+    )
+    payload = request(action, {"unit": "safe"}, key=f"runtime-{action}-{manager}")
+    payload["expected_target"]["manager"] = manager
+    if action == "set_policy":
+        payload["parameters"] = {"property": "CPUWeight", "value": "10"}
+    assert actions.execute(payload)["status"] == "confirmed"
+    value = "10" if action == "set_policy" else "5"
+    assert commands == [[
+        "systemctl", f"--{manager}", "--runtime", "set-property",
+        "safe.service", f"CPUWeight={value}",
+    ]]
