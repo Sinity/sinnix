@@ -13,6 +13,7 @@ import json
 import threading
 from pathlib import Path
 
+import pytest
 import sinnix_phone_dispatcher.dispatch as dispatch_mod
 import sinnix_phone_dispatcher.execute as execute_mod
 from test_server import _handler
@@ -141,3 +142,23 @@ def test_file_route_keeps_conflicting_and_failed_intents(monkeypatch, tmp_path):
     # the conflict stays refused.
     assert dispatch_mod.cmd_dispatch(_args(outbox)) == 1
     assert conflicting.is_file() and not failing.exists()
+
+
+@pytest.mark.parametrize(
+    "payload", [b"\xff", b"[]", b"null", b"1", b'{"value":' + b"9" * 5000 + b"}"]
+)
+def test_unusable_intent_keeps_evidence_and_continues(monkeypatch, tmp_path, payload):
+    outbox = tmp_path / "outbox"
+    outbox.mkdir()
+    bad = outbox / "intent-1.json"
+    bad.write_bytes(payload)
+    good = outbox / "intent-2.json"
+    good.write_text('{"kind":"mark"}')
+    calls = []
+    monkeypatch.setattr(
+        dispatch_mod, "execute", lambda intent: calls.append(intent) or {"ok": True}
+    )
+    assert dispatch_mod.cmd_dispatch(_args(outbox)) == 1
+    assert bad.read_bytes() == payload
+    assert not good.exists()
+    assert calls == [{"kind": "mark"}]

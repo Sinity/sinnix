@@ -37,7 +37,9 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
     for path in sorted(outbox.glob("intent-*.json")):
         try:
             intent = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+            if not isinstance(intent, dict):
+                raise ValueError("intent must be a JSON object")
+        except (OSError, ValueError) as exc:
             # Left in place, loudly. A malformed intent is a bug worth seeing,
             # and deleting the evidence would make it a bug nobody can see.
             print(
