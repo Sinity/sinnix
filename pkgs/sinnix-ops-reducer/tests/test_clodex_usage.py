@@ -57,6 +57,14 @@ def test_invalid_counts_do_not_crash_or_manufacture_usage(
     assert value["requests"] == 1 and value["input_tokens"] == 91
 
 
+@pytest.mark.parametrize("invalid", [b"9" * 5000, b'{"invalid":'])
+def test_decoder_errors_do_not_hide_valid_records(tmp_path: Path, invalid: bytes) -> None:
+    path = tmp_path / "usage.jsonl"
+    path.write_bytes(usage_row(7) + invalid + b"\n" + usage_row(91))
+    value, _health = clodex_usage(path)
+    assert value["requests"] == 2 and value["input_tokens"] == 98
+
+
 def test_routed_usage_is_aggregated_without_request_data(tmp_path: Path) -> None:
     path = tmp_path / "inference-requests.jsonl"
     path.write_text(

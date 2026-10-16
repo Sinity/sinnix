@@ -39,7 +39,9 @@ def clodex_usage(path: Path | None) -> tuple[dict[str, Any], dict[str, Any]]:
     for line in data.decode("utf-8", errors="replace").splitlines()[-MAX_LINES:]:
         try:
             row = json.loads(line)
-        except json.JSONDecodeError:
+        except ValueError:
+            # Includes JSON syntax errors and the integer conversion limit.
+            # One unusable record must not hide later valid usage.
             continue
         if (
             not isinstance(row, dict)
