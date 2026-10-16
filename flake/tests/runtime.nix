@@ -275,6 +275,32 @@ in
         ];
       };
       cpuContainerEvaluated = evalTestSpec system cpuContainerSpec;
+      webuiSpeechSpec = mkFeatureTest {
+        name = "open-webui-tts-provider";
+        feature = "sinnix.features.cli.polylogue.enable";
+        extraModules = [
+          {
+            sinnix.services.open-webui.enable = true;
+            sinnix.services.kokoro.enable = true;
+            sinnix.services.tts.enable = false;
+          }
+        ];
+        assertions = config: [
+          {
+            assertion =
+              let
+                env = config.services.open-webui.environment;
+                endpoint = config.sinnix.runtime.inventory.surfaces.kokoro.activation.publicEndpoint;
+              in
+              env.AUDIO_TTS_OPENAI_API_BASE_URL == "http://${endpoint}/v1"
+              && env.AUDIO_TTS_ENGINE == "openai"
+              && env.AUDIO_TTS_MODEL == "kokoro"
+              && env.AUDIO_TTS_VOICE == "af_heart";
+            message = "Open WebUI must use the enabled CPU speech provider when optional TTS is absent";
+          }
+        ];
+      };
+      webuiSpeechEvaluated = evalTestSpec system webuiSpeechSpec;
       aiActivationSpec = mkFeatureTest {
         name = "ai-activation";
         feature = "sinnix.features.cli.polylogue.enable";
@@ -371,6 +397,17 @@ in
             conflictsOf = unit: config.systemd.services.${lib.removeSuffix ".service" unit}.conflicts or [ ];
           in
           [
+            {
+              assertion =
+                let
+                  env = config.services.open-webui.environment;
+                  endpoint = config.sinnix.runtime.inventory.surfaces.tts.activation.publicEndpoint;
+                in
+                env.AUDIO_TTS_OPENAI_API_BASE_URL == "http://${endpoint}/v1"
+                && env.AUDIO_TTS_MODEL == "tts-1"
+                && env.AUDIO_TTS_VOICE == "alloy";
+              message = "Open WebUI must preserve the optional speech provider when it is enabled";
+            }
             {
               assertion = config.virtualisation.podman.enable && config.hardware.nvidia-container-toolkit.enable;
               message = "CUDA container backends require both Podman and NVIDIA CDI";
@@ -653,6 +690,15 @@ in
         cat > "$out" <<'EOF_INVENTORY'
         ${inventoryJson}
         EOF_INVENTORY
+      '';
+      checks.open-webui-tts-provider = pkgs.runCommand "open-webui-tts-provider-check" { } ''
+        cat > "$out" <<'EOF_TTS'
+        ${builtins.toJSON {
+          baseUrl = webuiSpeechEvaluated.config.services.open-webui.environment.AUDIO_TTS_OPENAI_API_BASE_URL;
+          model = webuiSpeechEvaluated.config.services.open-webui.environment.AUDIO_TTS_MODEL;
+          voice = webuiSpeechEvaluated.config.services.open-webui.environment.AUDIO_TTS_VOICE;
+        }}
+        EOF_TTS
       '';
       checks.runtime-mount-capacity =
         pkgs.runCommand "runtime-mount-capacity-check"

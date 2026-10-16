@@ -2,7 +2,7 @@
 #
 # Localhost-only (127.0.0.1:8080), single-user → auth disabled. RAG/document
 # chat uses the Ollama embedding model; TTS read-aloud / voice-call points at the
-# OpenedAI-Speech bridge (sinnix.services.tts). STT is left at Open WebUI's
+# enabled local speech provider. STT is left at Open WebUI's
 # built-in local engine.
 #
 # State (chat history, RAG vector DB — small, not model weights) stays in
@@ -41,6 +41,21 @@ mkAiService {
       ...
     }:
     let
+      ttsProvider =
+        if config.sinnix.services.tts.enable then
+          {
+            port = helpers.data.ports.tts.public;
+            model = "tts-1";
+            voice = "alloy";
+          }
+        else if config.sinnix.services.kokoro.enable then
+          {
+            port = helpers.data.ports.kokoro.public;
+            model = "kokoro";
+            voice = "af_heart";
+          }
+        else
+          null;
       resolveIdentity =
         (import ../lib/tailnet-bind.nix {
           inherit pkgs lib;
@@ -106,13 +121,15 @@ mkAiService {
           RAG_EMBEDDING_ENGINE = "ollama";
           RAG_EMBEDDING_MODEL = helpers.data.localModels.ragEmbeddingOllamaTag;
           RAG_OLLAMA_BASE_URL = "http://127.0.0.1:${toString helpers.data.ports.ollama.public}";
-
-          # Read-aloud / voice-call via the OpenedAI-Speech bridge (TTS service).
+        }
+        // lib.optionalAttrs (ttsProvider != null) {
+          # Defaults seed new stores; existing operator settings remain owned
+          # by Open WebUI's configuration API.
           AUDIO_TTS_ENGINE = "openai";
-          AUDIO_TTS_OPENAI_API_BASE_URL = "http://127.0.0.1:${toString helpers.data.ports.tts.public}/v1";
+          AUDIO_TTS_OPENAI_API_BASE_URL = "http://127.0.0.1:${toString ttsProvider.port}/v1";
           AUDIO_TTS_OPENAI_API_KEY = "sk-local";
-          AUDIO_TTS_MODEL = "tts-1";
-          AUDIO_TTS_VOICE = "alloy";
+          AUDIO_TTS_MODEL = ttsProvider.model;
+          AUDIO_TTS_VOICE = ttsProvider.voice;
         };
       };
 

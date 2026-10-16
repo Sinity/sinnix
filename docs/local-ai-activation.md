@@ -21,6 +21,12 @@ OpenedAI Speech and ComfyUI are part of the optional
 `sinnix.profiles.ai-media` aggregate and are absent by default. Model weights
 and application state remain on `/realm` while the profile is disabled.
 
+Open WebUI seeds its speech settings from an enabled provider: OpenedAI Speech
+when enabled, otherwise Kokoro. With neither enabled it leaves the upstream
+speech defaults alone. Existing persisted audio settings take precedence over
+these defaults; switch those through Open WebUI's configuration API when changing
+providers, preserving unrelated settings.
+
 OpenedAI Speech uses the shared Host/Origin admission policy before its vendor
 middleware reads request bodies. Native API clients and same-origin browser
 requests remain supported; wildcard CORS is removed. Its launcher retains the
