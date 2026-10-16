@@ -170,3 +170,134 @@ def test_speech_directory_is_private_under_permissive_umask(tmp_path, existing):
     assert lane.blob_dir.stat().st_mode & 0o777 == 0o700
     if existing:
         assert (target / "retained.wav").read_bytes() == b"neutral retained fixture"
+
+
+def test_phone_stream_bounds_handlers_without_dropping_queued_bytes(running_server, monkeypatch):
+    import threading
+
+    lock = threading.Lock()
+    four_started = threading.Event()
+    overflow = threading.Event()
+    release = threading.Event()
+    complete = threading.Event()
+    active = 0
+    peak = 0
+    received = []
+
+    def handle(self):
+        nonlocal active, peak
+        with lock:
+            active += 1
+            peak = max(peak, active)
+            if active == 4:
+                four_started.set()
+            if active > 4:
+                overflow.set()
+        try:
+            assert release.wait(5)
+            line = self.rfile.readline()
+            with lock:
+                received.append(line)
+                if len(received) == 5:
+                    complete.set()
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(receiver._PhoneStreamHandler, "handle", handle)
+    clients = []
+    try:
+        for i in range(4):
+            client = _connect(running_server)
+            clients.append(client)
+            client.sendall(f"synthetic-{i}\n".encode())
+        assert four_started.wait(3)
+        client = _connect(running_server)
+        clients.append(client)
+        client.sendall(b"synthetic-4\n")
+        assert not overflow.wait(1), "excess connection spawned another handler"
+        release.set()
+        assert complete.wait(3)
+        assert peak <= 4
+        assert sorted(received) == [f"synthetic-{i}\n".encode() for i in range(5)]
+    finally:
+        release.set()
+        for client in clients:
+            client.close()
+
+
+def test_phone_stream_shutdown_does_not_wait_for_a_handler_slot(running_server, monkeypatch):
+    import threading
+
+    lock = threading.Lock()
+    four_started = threading.Event()
+    release = threading.Event()
+    entered = 0
+
+    def handle(self):
+        nonlocal entered
+        with lock:
+            entered += 1
+            if entered == 4:
+                four_started.set()
+        release.wait(5)
+
+    monkeypatch.setattr(receiver._PhoneStreamHandler, "handle", handle)
+    pending = threading.Event()
+    original_process = running_server.process_request
+    requests = 0
+
+    def process(request, address):
+        nonlocal requests
+        requests += 1
+        if requests == 5:
+            pending.set()
+        original_process(request, address)
+
+    monkeypatch.setattr(running_server, "process_request", process)
+    clients = []
+    stopper = None
+    try:
+        for _ in range(4):
+            clients.append(_connect(running_server))
+        assert four_started.wait(3)
+        clients.append(_connect(running_server))
+        assert pending.wait(3)
+        stopped = threading.Event()
+
+        def stop():
+            running_server.shutdown()
+            stopped.set()
+
+        stopper = threading.Thread(target=stop, daemon=True)
+        stopper.start()
+        assert stopped.wait(2), "shutdown blocked behind active connections"
+    finally:
+        release.set()
+        for client in clients:
+            client.close()
+        if stopper is not None:
+            stopper.join(3)
+            assert not stopper.is_alive()
+
+
+def test_phone_stream_probes_unreachable_peers_without_an_idle_read_deadline(running_server, monkeypatch):
+    import threading
+
+    checked = threading.Event()
+    observed = {}
+
+    def handle(self):
+        observed["keepalive"] = self.request.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE)
+        for option in (socket.TCP_KEEPIDLE, socket.TCP_KEEPINTVL, socket.TCP_KEEPCNT):
+            observed[option] = self.request.getsockopt(socket.IPPROTO_TCP, option)
+        observed["timeout"] = self.request.gettimeout()
+        checked.set()
+
+    monkeypatch.setattr(receiver._PhoneStreamHandler, "handle", handle)
+    with _connect(running_server):
+        assert checked.wait(3)
+    assert observed == {
+        "keepalive": 1, socket.TCP_KEEPIDLE: 60,
+        socket.TCP_KEEPINTVL: 10, socket.TCP_KEEPCNT: 3, "timeout": None,
+    }

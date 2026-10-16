@@ -3,8 +3,10 @@ the retired `sinnix-phone-receiver` unit (sinnix-tjqi). Protocol: newline-
 delimited JSON, one line in -> one envelope written, demuxed by `kind` into
 a per-kind capture lane (`phone-<kind>`) under `--capture-root`
 (sinnix.paths.machineRoot, NOT this package's own LAKE_ROOT -- the two roots
-are deliberately different subjects). Deliberately dumb: no backpressure,
-no batching, no reconnect logic -- that lives entirely on the phone-side
+are deliberately different subjects). Four active handlers share connection
+admission; excess connections wait without discarding their buffered bytes.
+TCP keepalive releases slots left by unreachable peers without timing out a
+healthy, quiet phone. Batching and reconnect policy belong to the phone-side
 client, which owns retry policy for a link that sleeps and roams. A
 malformed or oversized line is logged and dropped, not fatal: a single bad
 line must never take down a connection carrying everything else the phone
@@ -25,6 +27,7 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import json
+import socket
 import socketserver
 import struct
 import sys
@@ -263,7 +266,50 @@ class _PhoneStreamServer(socketserver.ThreadingTCPServer):
 
     def __init__(self, host: str, port: int, capture_root: Path) -> None:
         self.demux = _PhoneStreamDemuxer(capture_root)
+        # One normal stream plus reconnect overlap fits without one thread
+        # and multi-megabyte line buffer per arbitrary incoming connection.
+        self._request_slots = threading.BoundedSemaphore(4)
+        self._stopping = threading.Event()
         super().__init__((host, port), _PhoneStreamHandler)
+
+    def get_request(self):
+        request, address = super().get_request()
+        try:
+            request.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            request.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 60)
+            request.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 10)
+            request.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 3)
+        except OSError:
+            request.close()
+            raise
+        return request, address
+
+    def process_request(self, request, client_address):
+        # Wait before spawning. A semaphore inside the handler would still
+        # allocate an unbounded collection of waiting threads.
+        while not self._stopping.is_set():
+            if self._request_slots.acquire(timeout=0.1):
+                break
+        else:
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._request_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._request_slots.release()
+
+    def shutdown(self):
+        # Wake admission before BaseServer waits for its serving loop. Active
+        # daemon handlers keep their existing service-shutdown semantics.
+        self._stopping.set()
+        super().shutdown()
 
 
 def start_phone_stream_server(
