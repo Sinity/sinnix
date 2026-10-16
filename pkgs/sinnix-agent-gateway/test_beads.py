@@ -157,6 +157,46 @@ def test_native_mutation_preserves_body_and_owner_preconditions(tmp_path):
     assert raised.value.details["owner_error"]["detail"] == "row revision changed"
 
 
+@pytest.mark.parametrize("field", ["created", "updated", "closed"])
+@pytest.mark.parametrize("old,new", [
+    ("2026-10-16T01:30:00+02:00", "2026-10-16T00:00:00Z"),
+    ("2026-10-16T00:00:00Z", "2026-10-16T00:00:00.000000001Z"),
+    ("2026-10-15T23:00:00Z", "2026-10-15T22:00:00-02:00"),
+])
+def test_date_order_preserves_instants_and_nanoseconds(tmp_path, field, old, new):
+    from sinnix_agent_gateway.actions.beads import Order
+
+    beads, _ = beads_service(tmp_path, "operator")
+    state = tmp_path / "owner-state.json"
+    value = json.loads(state.read_text())
+    value["items"][0][field + "_at"] = old
+    value["items"][1][field + "_at"] = new
+    state.write_text(json.dumps(value))
+    for direction, expected in (
+        ("newest_first", ["fixture-2", "fixture-1"]),
+        ("oldest_first", ["fixture-1", "fixture-2"]),
+    ):
+        rows = beads.query(project_ids=["fixture"], order=Order(field=field, direction=direction).owner_order())
+        assert [row["id"] for row in rows["items"]] == expected
+        # Canonical sorting must not rewrite the owner's timestamp evidence.
+        assert {row["id"]: row["fields"][field + "_at"] for row in rows["items"]} == {
+            "fixture-1": old, "fixture-2": new,
+        }
+
+
+@pytest.mark.parametrize("invalid", [123, "not-a-date", "2026-10-16T00:00:00"])
+def test_invalid_owner_date_is_explicit_partial_coverage(tmp_path, invalid):
+    beads, _ = beads_service(tmp_path, "operator")
+    state = tmp_path / "owner-state.json"
+    value = json.loads(state.read_text())
+    value["items"][0]["created_at"] = invalid
+    state.write_text(json.dumps(value))
+    rows = beads.query(project_ids=["fixture"], order={"field": "created"})
+    assert rows["items"] == []
+    assert rows["coverage"]["fixture"]["state"] == "partial"
+    assert rows["coverage"]["fixture"]["code"] == "owner_failed"
+
+
 def test_date_order_is_named_newest_or_oldest_first(tmp_path):
     """Fails if a created order can list the oldest tasks without asking.
 

@@ -8,6 +8,7 @@ import sqlite3
 import tempfile
 import time
 from dataclasses import replace
+from datetime import datetime, timezone
 from difflib import unified_diff
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -33,6 +34,23 @@ class BeadsError(ProtocolError):
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _MAX_PAGE = 200
+_DATE_FIELDS = frozenset({"created", "updated", "closed"})
+
+
+def _date_sort_key(value: Any) -> str:
+    """Order RFC3339 instants without losing the owner's nanoseconds."""
+    try:
+        match = re.fullmatch(
+            r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})",
+            value,
+        ) if isinstance(value, str) else None
+        if match is None:
+            raise ValueError("not a zoned RFC3339 timestamp")
+        instant = datetime.fromisoformat(match[1] + match[3]).astimezone(timezone.utc)
+        seconds = instant.isoformat(timespec="seconds")[:-6]
+        return seconds + "." + (match[2] or "").ljust(9, "0") + "Z"
+    except (ValueError, OverflowError) as error:
+        raise BeadsError("Beads returned an invalid task timestamp", "owner_failed") from error
 
 
 class BeadsService:
@@ -592,6 +610,8 @@ class BeadsService:
                             {**self._normalize(project_id, row, revision), "includes": row.get("includes", {})}
                         )
                         value = normalized["id"] if field == "id" and aggregate is None else normalized["fields"].get(column)
+                        if aggregate is None and field in _DATE_FIELDS and value is not None:
+                            value = _date_sort_key(value)
                         database.execute(
                             "INSERT INTO rows (project, bead_id, present, sort_value, body) VALUES (?, ?, ?, ?, ?)",
                             (project_id, normalized.get("id", ""), int(value is not None),
@@ -630,7 +650,7 @@ class BeadsService:
                     "total_exact": False,
                 }
         if aggregate is None:
-            reverse = (field in {"created", "updated", "closed"}) != bool(
+            reverse = (field in _DATE_FIELDS) != bool(
                 (order or {}).get("reverse", False)
             )
             direction = "DESC" if reverse else "ASC"
