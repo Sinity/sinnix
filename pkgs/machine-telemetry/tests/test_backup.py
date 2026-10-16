@@ -800,14 +800,16 @@ def test_compressed_restore_checks_real_frame_and_sqlite(tmp_path, failure):
 
 @pytest.mark.parametrize("stop", ["cancel", "deadline"])
 @pytest.mark.parametrize("close_stdout", [False, True])
-def test_compressed_restore_stops_its_decoder(tmp_path, stop, close_stdout):
+@pytest.mark.parametrize("ignore_term", [False, True])
+def test_compressed_restore_stops_its_decoder(tmp_path, stop, close_stdout, ignore_term):
     archive = tmp_path / "retained.zst"
     archive.write_bytes(b"unchanged archive")
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     pidfile = tmp_path / "decoder.pid"
     decoder = tmp_path / "zstd"
-    decoder.write_text("#!/usr/bin/env python3\nimport os, time\nfrom pathlib import Path\n"
+    decoder.write_text("#!/usr/bin/env python3\nimport os, signal, time\nfrom pathlib import Path\n"
+        + ("signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignore_term else "")
         + "os.write(1, b'x')\n"
         + ("os.close(1)\n" if close_stdout else "")
         + f"Path({str(pidfile)!r}).write_text(str(os.getpid()))\n"
@@ -838,7 +840,7 @@ def test_compressed_restore_stops_its_decoder(tmp_path, stop, close_stdout):
     finally:
         if pidfile.exists():
             try:
-                os.kill(int(pidfile.read_text()), signal.SIGTERM)
+                os.kill(int(pidfile.read_text()), signal.SIGKILL)
             except ProcessLookupError:
                 pass
         if process.poll() is None:

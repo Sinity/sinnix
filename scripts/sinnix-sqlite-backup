@@ -57,14 +57,28 @@ def cancellation_wakeup() -> Iterator[int]:
         os.close(write_fd)
 
 
+def stop_command(process: subprocess.Popen) -> None:
+    """Bound cleanup even when a child ignores graceful termination."""
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=1)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("subprocess did not exit after forced termination") from None
+
+
 def run_command(command: list[str]) -> None:
     if cancel_requested:
         raise BackupCancelled
     process = subprocess.Popen(command)
     while process.poll() is None:
         if cancel_requested:
-            process.terminate()
-            process.wait()
+            stop_command(process)
             raise BackupCancelled
         time.sleep(0.05)
     if process.returncode != 0:
@@ -381,9 +395,7 @@ def verify_compressed_source(source_path: Path, max_bytes: int, acquire_budget: 
                 if process.returncode != 0:
                     raise RuntimeError("compressed restore failed frame validation")
             finally:
-                if process.poll() is None:
-                    process.terminate()
-                    process.wait()
+                stop_command(process)
                 process.stdout.close()
             verify_immutable_source(restored, check_budget)
             after = os.fstat(archive.fileno())
