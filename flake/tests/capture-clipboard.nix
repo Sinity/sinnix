@@ -199,17 +199,32 @@ in
             # actually allowed to write must be the same place: a lane
             # advertised at a path no unit writes is a silent capture gap.
             # Neither side is restated as a literal here.
-            jq -e --slurpfile captures captures.json --arg lane "clipboard" '
-              (.Service.Environment
-                | map(select(startswith("SINNIX_CAPTURE_ROOT=")))
-                | first
-                | ltrimstr("SINNIX_CAPTURE_ROOT=")) as $root |
-              ($captures[0] | map(select(.name == $lane)) | first) as $capture |
-              $root != null and
-              $capture != null and
-              ($capture.path | startswith($root + "/")) and
-              (.Service.ReadWritePaths | any($capture.path | startswith(.)))
-            ' unit.json >/dev/null
+            jq -e --slurpfile captures captures.json --arg lane "clipboard" \
+              -f ${./capture-write-paths.jq} unit.json >/dev/null
+            # Exercise the actual predicate against mutated evaluated units.
+            # False is jq exit1; a parse/runtime error must fail the check too.
+            capture_path=$(jq -er --arg lane "clipboard" '.[] | select(.name == $lane) | .path' captures.json)
+            for mode in exact parent trailing empty unrelated prefix empty-string; do
+              jq --arg path "$capture_path" --arg mode "$mode" '
+                .Service.ReadWritePaths = (
+                  if $mode == "exact" then [$path]
+                  elif $mode == "parent" then [($path | split("/") | .[:-1] | join("/"))]
+                  elif $mode == "trailing" then [$path + "/"]
+                  elif $mode == "empty" then []
+                  elif $mode == "unrelated" then ["/synthetic-unrelated"]
+                  elif $mode == "prefix" then [($path | .[:-1])]
+                  else [""] end)
+              ' unit.json > mutated-unit.json
+              set +e
+              jq -e --slurpfile captures captures.json --arg lane "clipboard" \
+                -f ${./capture-write-paths.jq} mutated-unit.json >/dev/null
+              result=$?
+              set -e
+              case "$mode" in
+                exact|parent|trailing) test "$result" -eq 0 ;;
+                *) test "$result" -eq 1 ;;
+              esac
+            done
             touch "$out"
           '';
 
