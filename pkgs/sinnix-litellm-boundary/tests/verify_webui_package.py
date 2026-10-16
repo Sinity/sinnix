@@ -8,6 +8,10 @@ import shlex
 from pathlib import Path
 
 package = Path(os.environ["OPEN_WEBUI_PACKAGE"])
+unit = Path(os.environ["OPEN_WEBUI_UNIT"]).read_text()
+assert "RuntimeDirectory=open-webui" in unit
+assert "EnvironmentFile=-/run/open-webui/bind.env" in unit
+assert "open-webui-resolve-identity" in unit
 source = next(package.glob("lib/python*/site-packages/open_webui/main.py"))
 module = source.with_name("sinnix_browser_boundary.py")
 spec = importlib.util.spec_from_file_location("webui_boundary", module)

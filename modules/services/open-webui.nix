@@ -125,10 +125,8 @@ mkAiService {
       };
       users.groups.open-webui = { };
       systemd.services.open-webui.serviceConfig = {
-        RuntimeDirectory = "open-webui-boundary";
-        RuntimeDirectoryMode = "0700";
-        ExecStartPre = [ "${resolveIdentity} /run/open-webui-boundary/bind.env" ];
-        EnvironmentFile = [ "-/run/open-webui-boundary/bind.env" ];
+        ExecStartPre = [ "${resolveIdentity} /run/open-webui/bind.env" ];
+        EnvironmentFile = [ "-/run/open-webui/bind.env" ];
         DynamicUser = lib.mkForce false;
         User = "open-webui";
         Group = "open-webui";

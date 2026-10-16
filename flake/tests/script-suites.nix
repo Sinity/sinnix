@@ -354,6 +354,9 @@
           pkgs.runCommand "open-webui-package-boundary-check"
             {
               nativeBuildInputs = [ pkgs.python3 ];
+              OPEN_WEBUI_UNIT =
+                pkgs.writeText "open-webui-boundary.service"
+                  inputs.self.nixosConfigurations.sinnix-prime.config.systemd.units."open-webui.service".text;
               OPEN_WEBUI_PACKAGE =
                 inputs.self.nixosConfigurations.sinnix-prime.config.services.open-webui.package;
               SINNIX_WEBUI_PORTS =
