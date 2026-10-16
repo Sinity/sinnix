@@ -12,6 +12,7 @@ import argparse
 import fnmatch
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 
@@ -50,7 +51,16 @@ def cmd_dispatch(args: argparse.Namespace) -> int:
     failed = 0
     for path in paths:
         try:
-            intent = json.loads(path.read_text(encoding="utf-8"))
+            with open(
+                path,
+                encoding="utf-8",
+                opener=lambda name, flags: os.open(
+                    name, flags | os.O_NONBLOCK | os.O_NOFOLLOW
+                ),
+            ) as source:
+                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                    raise ValueError("intent must be a regular file")
+                intent = json.load(source)
             if not isinstance(intent, dict):
                 raise ValueError("intent must be a JSON object")
         except (OSError, ValueError) as exc:

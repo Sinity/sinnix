@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
 import threading
 from pathlib import Path
 
@@ -183,3 +185,39 @@ def test_unreadable_outbox_fails_visibly(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(dispatch_mod.os, "scandir", denied)
     assert dispatch_mod.cmd_dispatch(_args(outbox)) == 1
     assert "outbox unavailable" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("kind", ["fifo", "directory", "symlink"])
+def test_nonregular_intent_is_refused_without_blocking(monkeypatch, tmp_path, kind):
+    outbox = tmp_path / "outbox"
+    outbox.mkdir()
+    bad = outbox / "intent-1.json"
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"kind":"outside"}')
+    if kind == "fifo":
+        os.mkfifo(bad)
+    elif kind == "directory":
+        bad.mkdir()
+    else:
+        bad.symlink_to(outside)
+    good = outbox / "intent-2.json"
+    good.write_text('{"kind":"mark"}')
+    calls = []
+    monkeypatch.setattr(
+        dispatch_mod, "execute", lambda intent: calls.append(intent) or {"ok": True}
+    )
+
+    def timeout(*_):
+        raise RuntimeError("dispatch blocked opening a nonregular intent")
+
+    previous = signal.signal(signal.SIGALRM, timeout)
+    signal.alarm(2)
+    try:
+        assert dispatch_mod.cmd_dispatch(_args(outbox)) == 1
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)
+    assert bad.lstat()
+    assert outside.read_text() == '{"kind":"outside"}'
+    assert not good.exists()
+    assert calls == [{"kind": "mark"}]
