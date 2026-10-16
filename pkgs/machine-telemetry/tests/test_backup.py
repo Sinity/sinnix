@@ -799,7 +799,8 @@ def test_compressed_restore_checks_real_frame_and_sqlite(tmp_path, failure):
 
 
 @pytest.mark.parametrize("stop", ["cancel", "deadline"])
-def test_compressed_restore_stops_its_decoder(tmp_path, stop):
+@pytest.mark.parametrize("close_stdout", [False, True])
+def test_compressed_restore_stops_its_decoder(tmp_path, stop, close_stdout):
     archive = tmp_path / "retained.zst"
     archive.write_bytes(b"unchanged archive")
     scratch = tmp_path / "scratch"
@@ -807,8 +808,10 @@ def test_compressed_restore_stops_its_decoder(tmp_path, stop):
     pidfile = tmp_path / "decoder.pid"
     decoder = tmp_path / "zstd"
     decoder.write_text("#!/usr/bin/env python3\nimport os, time\nfrom pathlib import Path\n"
+        + "os.write(1, b'x')\n"
+        + ("os.close(1)\n" if close_stdout else "")
         + f"Path({str(pidfile)!r}).write_text(str(os.getpid()))\n"
-        + "os.write(1, b'x')\ntime.sleep(30)\n")
+        + "time.sleep(30)\n")
     decoder.chmod(0o700)
     process = subprocess.Popen(["python3", str(SCRIPT), str(archive), "--immutable-source",
         "--verify-only", "--compressed-source", "--max-restore-bytes", "1048576",
@@ -822,6 +825,8 @@ def test_compressed_restore_stops_its_decoder(tmp_path, stop):
             time.sleep(0.01)
         assert pidfile.exists()
         if stop == "cancel":
+            if close_stdout:
+                time.sleep(0.1)
             process.send_signal(signal.SIGTERM)
         stdout, stderr = process.communicate(timeout=5)
         assert process.returncode == (143 if stop == "cancel" else 1), stderr
@@ -831,6 +836,14 @@ def test_compressed_restore_stops_its_decoder(tmp_path, stop):
         assert archive.read_bytes() == b"unchanged archive"
         assert "sqlite-backup restore receipt:" not in stdout
     finally:
+        if pidfile.exists():
+            try:
+                os.kill(int(pidfile.read_text()), signal.SIGTERM)
+            except ProcessLookupError:
+                pass
         if process.poll() is None:
-            process.kill()
-            process.communicate(timeout=5)
+            try:
+                process.communicate(timeout=1)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate(timeout=5)
