@@ -194,6 +194,12 @@ def compress(source_path: Path, compressed_path: Path) -> None:
     run_command(["zstd", "-t", "-q", str(compressed_path)])
 
 
+def check_regular_source(source_path: Path) -> None:
+    # Opening a FIFO can block before SQLite's query guard is installed.
+    if not stat.S_ISREG(source_path.stat().st_mode):
+        raise RuntimeError("SQLite source must be a regular file")
+
+
 def check_immutable_wal(source_path: Path) -> None:
     wal_path = Path(f"{source_path}-wal")
     try:
@@ -224,6 +230,7 @@ def backup_database(
     if not math.isfinite(acquire_budget_seconds) or acquire_budget_seconds <= 0:
         raise ValueError("acquisition budget must be finite and positive")
     source_path = source_path.resolve(strict=True)
+    check_regular_source(source_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     scratch = tempfile.TemporaryDirectory(prefix=".sqlite-backup-", dir=output_path.parent)
     raw_path = Path(scratch.name) / "snapshot.sqlite"
@@ -328,6 +335,7 @@ def backup_database(
 
 def verify_immutable_source(source_path: Path, check_budget_seconds: float) -> None:
     source_path = source_path.resolve(strict=True)
+    check_regular_source(source_path)
     check_immutable_wal(source_path)
     source_bytes = source_path.stat().st_size
     source = sqlite3.connect(

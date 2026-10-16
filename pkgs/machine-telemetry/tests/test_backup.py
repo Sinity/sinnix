@@ -924,3 +924,31 @@ def test_immutable_source_reports_unavailable_wal(tmp_path, monkeypatch, route):
         else:
             helper["verify_immutable_source"](source, 1)
     assert not output.exists()
+
+
+@pytest.mark.parametrize("route", ["verify", "immutable_backup", "live_backup"])
+@pytest.mark.parametrize("kind", ["fifo", "directory"])
+def test_backup_rejects_nonregular_source_before_open(tmp_path, route, kind):
+    source = tmp_path / "source.sqlite"
+    if kind == "fifo":
+        os.mkfifo(source)
+    else:
+        source.mkdir()
+    before = source.stat()
+    output = tmp_path / "output.zst"
+    args = [str(SCRIPT), "--check-budget-seconds", "0.1"]
+    if route != "live_backup":
+        args.append("--immutable-source")
+    if route == "verify":
+        args.extend(["--verify-only", str(source)])
+    else:
+        args.extend([str(source), str(output)])
+    result = subprocess.run(args, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 1, result.stderr
+    assert "source must be a regular file" in result.stderr
+    assert "receipt:" not in result.stdout
+    assert not output.exists()
+    after = source.stat()
+    assert (before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns) == (
+        after.st_ino, after.st_mode, after.st_size, after.st_mtime_ns
+    )

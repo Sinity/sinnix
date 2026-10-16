@@ -37,11 +37,7 @@ one-hour acquisition budget; the restored database receives the existing
 150-minute structural check. Its receipt applies to that exact compressed
 artifact. Temporary restored bytes are removed with the job's private scratch;
 original archives remain unchanged. A failed restore publishes no success receipt.
-If a complete decoded image was retained for diagnosis, use
-`agentctl job start sinnix verify_telemetry_structure -- <exact-immutable.sqlite>`
-to repeat only its structural check. This requires a closed, WAL-free image;
-passing a live database as immutable is invalid. A WAL lookup failure or nonregular sidecar refuses the operation; an empty regular sidecar is allowed. Its receipt describes that
-image, and does not replace frame validation of its compressed source.
+If a complete decoded image was retained for diagnosis, use `agentctl job start sinnix verify_telemetry_structure -- <exact-immutable.sqlite>` to repeat only its structural check. The source must be a closed regular file; passing a live database as immutable is invalid. A WAL lookup failure or nonregular sidecar refuses the operation; an empty regular sidecar is allowed. Its receipt describes that image, and does not replace frame validation of its compressed source.
 
 
 The weekly Btrfs metadata-image job captures persist, then realm, with a separate 40-minute window and at most three attempts per label. The unit has an 85-minute deadline, a 4 GiB memory pressure threshold, a 5 GiB hard memory limit, and no swap allowance. It inherits idle I/O scheduling and device bandwidth limits from the backup resource class. An image is published only after `btrfs-image` exits successfully and its temporary output passes the minimum-size check. A failed or timed-out attempt leaves earlier completed images in place and logs the affected label. This check does not establish that a metadata image can be restored; a controlled restore and a busy-desktop run remain operational verification.
