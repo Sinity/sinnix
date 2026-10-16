@@ -62,10 +62,13 @@
               pkgs.gawk
               pkgs.jq
               pkgs.ripgrep
+              pkgs.python3
             ];
           }
           ''
-            ${pkgs.bash}/bin/bash ${script} --data ${data} --skills-root ${skills} --agents-root ${agents} --output $out
+            python3 ${../../scripts/tests/test_agent_environment_publication.py} ${script}
+            ${pkgs.bash}/bin/bash ${script} --data ${data} --skills-root ${skills} --agents-root ${agents} --output "$TMPDIR/document.md"
+            cp "$TMPDIR/document.md" "$out"
             grep -F 'Fixture skill description' $out
             grep -F '`fixture-agent`' $out
             grep -F 'https://mcp.context7.com/mcp' $out
