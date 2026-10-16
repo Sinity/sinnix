@@ -68,6 +68,7 @@ python3Packages.buildPythonApplication {
   '';
   nativeCheckInputs = [
     python3Packages.pytest
+    python3Packages.pytest-timeout
     git
     beads
     scopedWorktrunk

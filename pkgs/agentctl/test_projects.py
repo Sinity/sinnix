@@ -36,8 +36,8 @@ def test_required_service_cannot_silently_lose_its_unit_limits(project_root: Pat
     descriptor = project_root / ".agentctl/project.toml"
     descriptor.write_text(descriptor.read_text().replace(
         'exec = ["fixture-verify"]',
-        'exec = ["fixture-verify"]\nrequires=["bounded-service"]',
-    ) + '\n[operations.bounded-service]\ndescription="test"\nexec=["true"]\n'
+        'exec = ["fixture-verify"]\nrequires=["bounded_service"]',
+    ) + '\n[operations.bounded_service]\ndescription="test"\nexec=["true"]\n'
       'ready_probe=["true"]\nunit_properties=["MemoryMax=1G"]\n')
     with pytest.raises(ProjectConfigError, match="self-contained foreground"):
         load_project_adapter(project_root)
