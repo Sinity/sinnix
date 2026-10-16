@@ -56,10 +56,6 @@ let
   discovered = discovery.discover (inputs.self + "/scripts");
 
   registry = discovered.registry // {
-    sinnix-sqlite-backup = import ./sqlite-backup.nix {
-      inherit pkgs;
-      entry = discovered.registry.sinnix-sqlite-backup;
-    };
     # The witness and its login helper are packaged entry points, so script
     # discovery cannot expose their existing operator commands by itself.
     sinnix-xiaomi-witness = {

@@ -120,6 +120,16 @@ scratch = "nvme"
 timeout_seconds = 9600
 admission = { memory_mib = 4096 }
 
+[operations.verify_telemetry_structure]
+description = "Structurally verify one retained immutable telemetry SQLite image"
+exec = ["sinnix", "sqlite-backup", "--immutable-source", "--verify-only", "--check-budget-seconds", "5400"]
+arguments = "required"
+pool = "bulk"
+result = "exit"
+cache = "none"
+timeout_seconds = 6000
+admission = { memory_mib = 2048 }
+
 [operations.verify_agent_recovery]
 description = "Verify pinned CLI recovery and native versions in an isolated HOME"
 exec = ["python3", "scripts/tests/verify_agent_recovery.py"]

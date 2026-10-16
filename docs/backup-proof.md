@@ -26,7 +26,7 @@ The acknowledgement records `proof_mode`, `policy_sha256`, snapshot and archive 
 
 The machine telemetry SQLite dump is a separate producer for the realm drain. Its daily job freezes a checkpointed database in a read-only subvolume, checks that the SQLite header and schema open, compresses it, and tests the compressed frame before publishing. Its receipt reports `restore_check=zstd-t:ok`, `source_open=schema_header:limited`, and `structural_check=not_run`. The frame test validates decompression and its checksum; the schema check was made on the source before compression. Neither is a page-by-page integrity check. The direct-path Borg job restores an archived compressed dump to a stream and tests its frame before publishing its own freshness marker.
 
-The weekly `machine-telemetry-sqlite-verify` job freezes a fresh WAL-free snapshot and runs a bounded SQLite structural walk without blocking the daily producer. Its journal receipt states the check and result. `structural-verification.status` in the dump directory records the latest attempt as running, failed, or ok, so the Borg dump archive carries the independent result alongside the artifacts. The capture lane requires `state=ok` and flags the result stale after eight days. The check has a 90-minute query budget, a 100-minute unit limit, and a 100 MB/s read limit on `/realm`. This result applies to the independently frozen database state, not retroactively to every daily compressed artifact. A failed or overdue check leaves daily snapshots publishable and must be treated separately from their freshness.
+The weekly `machine-telemetry-sqlite-verify` job freezes a fresh WAL-free snapshot and runs a bounded SQLite structural walk without blocking the daily producer. Its journal receipt states the check and result. `structural-verification.status` in the dump directory records the latest attempt as running, failed, or ok, so the Borg dump archive carries the independent result alongside the artifacts. The capture lane requires `state=ok` and flags the result stale after eight days. Structural walks disable SQLite file mapping to avoid read-ahead amplification across interleaved B-trees. The check has a 90-minute query budget, a 100-minute unit limit, and a 100 MB/s read limit on `/realm`. This result applies to the independently frozen database state, not retroactively to every daily compressed artifact. A failed or overdue check leaves daily snapshots publishable and must be treated separately from their freshness.
 
 A full-size retained telemetry dump can be restored and structurally checked with
 `agentctl job start sinnix verify_telemetry_restore -- <exact-archive.sqlite.zst>`.
@@ -37,6 +37,12 @@ one-hour acquisition budget; the restored database receives the existing
 90-minute structural check. Its receipt applies to that exact compressed
 artifact. Temporary restored bytes are removed with the job's private scratch;
 original archives remain unchanged. A failed restore publishes no success receipt.
+If a complete decoded image was retained for diagnosis, use
+`agentctl job start sinnix verify_telemetry_structure -- <exact-immutable.sqlite>`
+to repeat only its structural check. This requires a closed, WAL-free image;
+passing a live database as immutable is invalid. Its receipt describes that
+image, and does not replace frame validation of its compressed source.
+
 
 The weekly Btrfs metadata-image job captures persist, then realm, with a separate 40-minute window and at most three attempts per label. The unit has an 85-minute deadline, a 4 GiB memory pressure threshold, a 5 GiB hard memory limit, and no swap allowance. It inherits idle I/O scheduling and device bandwidth limits from the backup resource class. An image is published only after `btrfs-image` exits successfully and its temporary output passes the minimum-size check. A failed or timed-out attempt leaves earlier completed images in place and logs the affected label. This check does not establish that a metadata image can be restored; a controlled restore and a busy-desktop run remain operational verification.
 

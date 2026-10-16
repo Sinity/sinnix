@@ -157,6 +157,10 @@ def check_immutable_snapshot(
     check = (
         "integrity_check" if page_count <= FULL_INTEGRITY_PAGE_LIMIT else "quick_check(1)"
     )
+    # B-tree pages from different tables are interleaved. Whole-file mmap
+    # faults trigger read-ahead of unrelated pages, amplifying bounded-cache
+    # walks. Use SQLite's page reads even if the caller enabled mapping.
+    connection.execute("PRAGMA mmap_size=0")
     # The walk is the longest silent stretch of the run, so say what started.
     print(f"sqlite-backup: {check} over {page_count} pages", flush=True)
     verdict = run_check(connection, f"PRAGMA {check}", deadline)
@@ -210,10 +214,6 @@ def backup_database(
                 source_path.resolve(strict=True).as_uri() + "?mode=ro&immutable=1", uri=True, timeout=5.0
             )
             source.execute("PRAGMA busy_timeout=5000")
-            # Map the immutable database so integrity walks use kernel
-            # readahead. The packaged SQLite permits mappings up to 1 TiB;
-            # clean mapped pages remain reclaimable under memory pressure.
-            source.execute(f"PRAGMA mmap_size={source_bytes}")
             started = time.monotonic()
             check, verdict = check_immutable_snapshot(
                 source, started + check_budget_seconds if check_budget_seconds else None,
@@ -264,7 +264,6 @@ def backup_database(
         source.close()
         source = None
         target.execute("PRAGMA busy_timeout=5000")
-        target.execute(f"PRAGMA mmap_size={raw_path.stat().st_size}")
         started = time.monotonic()
         check, verdict = check_immutable_snapshot(
             target, started + check_budget_seconds if check_budget_seconds else None,
@@ -313,7 +312,6 @@ def verify_immutable_source(source_path: Path, check_budget_seconds: float) -> N
         source_path.resolve(strict=True).as_uri() + "?mode=ro&immutable=1", uri=True, timeout=5.0
     )
     try:
-        source.execute(f"PRAGMA mmap_size={source_bytes}")
         started = time.monotonic()
         check, verdict = check_immutable_snapshot(
             source, started + check_budget_seconds, mode="structural"

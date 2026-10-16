@@ -847,3 +847,23 @@ def test_compressed_restore_stops_its_decoder(tmp_path, stop, close_stdout):
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.communicate(timeout=5)
+
+
+def test_structural_walk_disables_mmap_read_amplification(tmp_path, monkeypatch):
+    import runpy
+
+    helper = runpy.run_path(str(SCRIPT))
+    path = tmp_path / "scattered.sqlite"
+    with sqlite3.connect(path) as connection:
+        connection.execute("CREATE TABLE sample(value INTEGER)")
+        connection.execute("INSERT INTO sample VALUES (1)")
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA mmap_size=1048576").fetchone()[0] > 0
+        original = helper["run_check"]
+
+        def check_without_mapping(connection, statement, deadline):
+            assert connection.execute("PRAGMA mmap_size").fetchone()[0] == 0
+            return original(connection, statement, deadline)
+
+        monkeypatch.setitem(helper["check_immutable_snapshot"].__globals__, "run_check", check_without_mapping)
+        assert helper["check_immutable_snapshot"](connection, None, mode="structural") == ("integrity_check", "ok")
