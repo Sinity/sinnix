@@ -424,7 +424,8 @@ mkServiceModule {
             Group = "users";
             TimeoutStartSec = "100min";
             IOReadBandwidthMax = map (
-              limit: if lib.hasPrefix "${realmRoot} " limit then "${realmRoot} 25M" else limit
+              # Leave room for a repeated page walk inside the 90-minute check budget.
+              limit: if lib.hasPrefix "${realmRoot} " limit then "${realmRoot} 50M" else limit
             ) config.sinnix.runtime.inventory.classes.backup.serviceConfig.IOReadBandwidthMax;
           };
           unit = {
