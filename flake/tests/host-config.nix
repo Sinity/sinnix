@@ -15,6 +15,27 @@
       journalSource = host.systemd.services.ensure-journal-source;
     in
     {
+      checks.transmission-sparsify =
+        let
+          unit = host.systemd.services.transmission-sparsify;
+        in
+        assert unit.serviceConfig.RuntimeDirectory == "transmission-sparsify";
+        assert unit.serviceConfig.RuntimeDirectoryMode == "0700";
+        pkgs.runCommand "transmission-sparsify-state-check"
+          {
+            nativeBuildInputs = [
+              pkgs.python3
+              pkgs.bash
+              pkgs.coreutils
+            ];
+            startScript = pkgs.writeText "transmission-sparsify-start" unit.script;
+            stopScript = pkgs.writeText "transmission-sparsify-stop" unit.postStop;
+          }
+          ''
+            python ${./transmission_sparsify.py} "$startScript" "$stopScript"
+            touch "$out"
+          '';
+
       checks.journal-source =
         assert builtins.elem "realm.mount" journalSource.requires;
         assert builtins.elem "realm.mount" journalSource.after;
@@ -27,7 +48,10 @@
         assert host.services.journald.settings.Journal.MaxRetentionSec == "365day";
         pkgs.runCommand "journal-source-check"
           {
-            nativeBuildInputs = [ pkgs.python3 pkgs.bash ];
+            nativeBuildInputs = [
+              pkgs.python3
+              pkgs.bash
+            ];
             sourceScript = pkgs.writeText "journal-source-script" journalSource.script;
           }
           ''
@@ -35,30 +59,42 @@
             touch "$out"
           '';
 
-      checks.ai-control-cli = pkgs.runCommand "ai-control-cli"
-        {
-          nativeBuildInputs = [ pkgs.python3 pkgs.bash pkgs.jq pkgs.gnugrep pkgs.gawk pkgs.gnused pkgs.coreutils ];
-        }
-        ''
-          python ${./ai_control_cli.py} ${../../scripts/sinnix-ai}
-          touch "$out"
-        '';
+      checks.ai-control-cli =
+        pkgs.runCommand "ai-control-cli"
+          {
+            nativeBuildInputs = [
+              pkgs.python3
+              pkgs.bash
+              pkgs.jq
+              pkgs.gnugrep
+              pkgs.gawk
+              pkgs.gnused
+              pkgs.coreutils
+            ];
+          }
+          ''
+            python ${./ai_control_cli.py} ${../../scripts/sinnix-ai}
+            touch "$out"
+          '';
 
       checks.hub-http-boundary =
         let
           service = host.home-manager.users.${host.sinnix.user.name}.systemd.user.services.sinnix-hub;
           command = builtins.head service.Service.ExecStart;
           resolverCommand = service.Service.ExecStartPre;
-          resolver = builtins.appendContext
-            (builtins.head (inputs.nixpkgs.lib.splitString " " resolverCommand))
-            (builtins.getContext resolverCommand);
-          caddyfile = builtins.appendContext
-            (builtins.elemAt (builtins.match ".*--config ([^ ]+) .*" command) 0)
-            (builtins.getContext command);
+          resolver = builtins.appendContext (builtins.head (inputs.nixpkgs.lib.splitString " " resolverCommand)) (
+            builtins.getContext resolverCommand
+          );
+          caddyfile = builtins.appendContext (builtins.elemAt (builtins.match ".*--config ([^ ]+) .*" command) 0) (
+            builtins.getContext command
+          );
         in
         pkgs.runCommand "hub-http-boundary"
           {
-            nativeBuildInputs = [ pkgs.python3 pkgs.caddy ];
+            nativeBuildInputs = [
+              pkgs.python3
+              pkgs.caddy
+            ];
             inherit caddyfile resolver;
             reportPort = toString host.sinnix.services.hub.reportsPort;
           }

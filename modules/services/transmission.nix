@@ -197,6 +197,8 @@ mkServiceModule {
 
           max_gib="''${TRANSMISSION_SPARSIFY_MAX_LOGICAL_GIB:-256}"
           force="''${TRANSMISSION_SPARSIFY_FORCE:-0}"
+          restore_marker="$RUNTIME_DIRECTORY/was-active"
+          rm -f "$restore_marker"
           plan="$(mktemp)"
           cleanup() {
             rm -f "$plan"
@@ -221,17 +223,24 @@ mkServiceModule {
             exit 78
           fi
 
-          systemctl stop transmission.service || true
+          if systemctl is-active --quiet transmission.service; then
+            touch "$restore_marker"
+          fi
+          systemctl stop transmission.service
           while IFS= read -r -d "" path; do
             echo "transmission-sparsify: punching holes in $path"
             fallocate -d -- "$path"
           done < "$plan"
         '';
         postStop = ''
-          systemctl start transmission.service || true
+          if [ -f "''${RUNTIME_DIRECTORY:?}/was-active" ]; then
+            systemctl start transmission.service
+          fi
         '';
         serviceConfig = {
           Type = "oneshot";
+          RuntimeDirectory = "transmission-sparsify";
+          RuntimeDirectoryMode = "0700";
         };
       };
     };
