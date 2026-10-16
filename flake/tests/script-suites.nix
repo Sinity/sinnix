@@ -81,19 +81,33 @@
           name = "media-preview-cache";
           suiteDir = ../../pkgs/media-preview-cache/tests;
           scripts = [ "media-preview-cache" ];
-          nativeBuildInputs = [ pkgs.bash pkgs.fd pkgs.findutils pkgs.util-linux ];
+          nativeBuildInputs = [
+            pkgs.bash
+            pkgs.fd
+            pkgs.findutils
+            pkgs.util-linux
+          ];
         };
         sandbox-audit-suite = mkScriptSuite {
           name = "sinnix-sandbox-audit";
           suiteDir = ../../pkgs/sinnix-sandbox-audit/tests;
           scripts = [ "sinnix-sandbox-audit" ];
-          nativeBuildInputs = [ pkgs.bash pkgs.findutils pkgs.gawk pkgs.jq ];
+          nativeBuildInputs = [
+            pkgs.bash
+            pkgs.findutils
+            pkgs.gawk
+            pkgs.jq
+          ];
         };
         memory-audit-suite = mkScriptSuite {
           name = "sinnix-memory-audit";
           suiteDir = ../../pkgs/sinnix-memory-audit/tests;
           scripts = [ "sinnix-memory-audit" ];
-          nativeBuildInputs = [ pkgs.bash pkgs.findutils pkgs.gawk ];
+          nativeBuildInputs = [
+            pkgs.bash
+            pkgs.findutils
+            pkgs.gawk
+          ];
         };
         audit-drain-suite = mkScriptSuite {
           name = "sinnix-audit-drain";
@@ -284,7 +298,11 @@
           name = "sinnix-borg-drill";
           suiteDir = ../../pkgs/sinnix-borg-drill/tests;
           scripts = [ "sinnix-borg-drill" ];
-          nativeBuildInputs = [ pkgs.bash pkgs.jq pkgs.util-linux ];
+          nativeBuildInputs = [
+            pkgs.bash
+            pkgs.jq
+            pkgs.util-linux
+          ];
         };
         fs-materialization-suite = mkScriptSuite {
           name = "sinnix-fs";
@@ -308,6 +326,29 @@
         # comparisons stop displacing that prior at the documented evidence
         # threshold, a retired binding survives into the next manifest, or
         # deck-forge stops taking its drill order from the manifest.
+        litellm-package-boundary =
+          pkgs.runCommand "litellm-package-boundary-check"
+            {
+              nativeBuildInputs = [ pkgs.python3 ];
+              LITELLM_PACKAGE = inputs.self.nixosConfigurations.sinnix-prime.config.services.litellm.package;
+              SINNIX_LITELLM_PORTS = "8123,8124";
+              LITELLM_CORS_ORIGINS = "http://127.0.0.1:8123,http://127.0.0.1:8124";
+              LITELLM_CORS_ALLOW_CREDENTIALS = "false";
+              LITELLM_LOCAL_MODEL_COST_MAP = "True";
+              SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+            }
+            ''
+              export HOME="$TMPDIR/home"
+              mkdir -p "$HOME"
+              python3 ${../../pkgs/sinnix-litellm-boundary/tests/verify_package.py}
+              touch "$out"
+            '';
+        litellm-boundary-suite = mkScriptSuite {
+          name = "sinnix-litellm-boundary";
+          suiteDir = ../../pkgs/sinnix-litellm-boundary/tests;
+          scripts = [ ];
+          packageFiles = [ "boundary.py" ];
+        };
         cheatsheet-suite = mkScriptSuite {
           name = "sinnix-cheatsheet";
           suiteDir = ../../pkgs/sinnix-cheatsheet/tests;

@@ -11,9 +11,10 @@
 # Stateless gateway: the only on-disk state is the UI scratch dir and the
 # tiktoken cache (seeded from the Nix store, no outbound fetch at boot), both
 # under /var/lib/litellm via the upstream module's StateDirectory. No secrets,
-# no master key — it binds 127.0.0.1 only, so requests on the loopback are
-# trusted (the wrappers still send a dummy bearer token because Claude Code
-# requires a non-empty ANTHROPIC_AUTH_TOKEN).
+# no master key. Native loopback clients remain trusted; the HTTP application
+# checks Host and browser provenance before body reads or dispatch. The wrappers
+# still send a dummy bearer token because Claude Code
+# requires a non-empty ANTHROPIC_AUTH_TOKEN.
 {
   mkServiceModule,
   lib,
@@ -62,8 +63,31 @@ mkServiceModule {
       helpers,
       ...
     }:
+    let
+      listenerPorts = [
+        helpers.data.ports.litellm.public
+        helpers.data.ports.litellm.backend
+      ];
+      corsOrigins = lib.concatMap (host: map (port: "http://${host}:${toString port}") listenerPorts) [
+        "127.0.0.1"
+        "localhost"
+        "[::1]"
+      ];
+      guardedPackage = pkgs.litellm.overridePythonAttrs (old: {
+        postPatch = (old.postPatch or "") + ''
+          grep -F 'app.add_middleware(SecurityHeadersMiddleware)' litellm/proxy/proxy_server.py >/dev/null
+          cp ${../../pkgs/sinnix-litellm-boundary/boundary.py} litellm/proxy/sinnix_browser_boundary.py
+          cat >> litellm/proxy/proxy_server.py <<'PYTHON'
+
+          from .sinnix_browser_boundary import BrowserBoundary
+          app.add_middleware(BrowserBoundary)
+          PYTHON
+        '';
+      });
+    in
     {
       services.litellm = {
+        package = guardedPackage;
         enable = true;
         host = "127.0.0.1";
         # The public port is reserved for the socket-activated front door.
@@ -89,6 +113,11 @@ mkServiceModule {
       # endpoints. Requiring Ollama here would start its GPU occupant whenever
       # LiteLLM starts and evict direct backends such as Muse Glimmer.
       systemd.services.litellm = {
+        environment = {
+          SINNIX_LITELLM_PORTS = lib.concatMapStringsSep "," toString listenerPorts;
+          LITELLM_CORS_ORIGINS = lib.concatStringsSep "," corsOrigins;
+          LITELLM_CORS_ALLOW_CREDENTIALS = "false";
+        };
         wantedBy = lib.mkIf (!cfg.autoStart) (lib.mkForce [ ]);
       };
     };

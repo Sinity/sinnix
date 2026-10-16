@@ -192,3 +192,9 @@ The reranker is the llama.cpp endpoint at `127.0.0.1:8081` and answers `/v1/rera
 Container-backed AI services enable the shared Podman runtime through the AI service factory. NVIDIA CDI is enabled only when an enabled container backend declares `requiresCuda`; CPU-only Kokoro does not require an NVIDIA driver. OCI layers stay under the managed service-state root.
 
 The runtime inventory at `/etc/sinnix/runtime-inventory.json` records the declared endpoints, activation modes, resource class, idle windows, and GPU admission relationships for these services.
+
+### LiteLLM browser admission
+
+The direct LiteLLM HTTP application checks the loopback Host authority and browser Origin/Fetch Metadata before reading request bodies or dispatching work. Native API clients and same-origin UI requests remain supported. Foreign browser requests receive 403 without wildcard CORS; deliberate document navigation remains available. Public and backend listener ports come from the shared port registry.
+
+This HTTP boundary does not prevent the systemd TCP socket proxy from starting the lightweight gateway before headers arrive. Other AI backends retain their own acceptance requirements.
