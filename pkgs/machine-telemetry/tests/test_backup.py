@@ -762,7 +762,14 @@ def test_compressed_restore_checks_real_frame_and_sqlite(tmp_path, failure):
         connection.execute("CREATE TABLE sample(value TEXT)")
         connection.execute("INSERT INTO sample VALUES ('retained payload')")
     if failure == "sqlite":
-        source.write_bytes(b"not a SQLite database" * 100)
+        data = bytearray(source.read_bytes())
+        with sqlite3.connect(source) as connection:
+            page_size = connection.execute("PRAGMA page_size").fetchone()[0]
+            rootpage = connection.execute("SELECT rootpage FROM sqlite_master WHERE name='sample'").fetchone()[0]
+        # Damage the real table b-tree while retaining the valid SQLite header.
+        data[(rootpage - 1) * page_size] = 0xFF
+        assert data[:16] == b"SQLite format 3\x00"
+        source.write_bytes(data)
     before = source.read_bytes()
     archive = tmp_path / "source.zst"
     subprocess.run(["zstd", "-q", str(source), "-o", str(archive)], check=True)
