@@ -10,13 +10,13 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[3] / 'scripts/sinnix-sandbox-audit'
 
 
-def run_audit(tmp_path, path, props, audit_failure=False, inventory=None, find_failure=False, systemctl_failure=False):
+def run_audit(tmp_path, path, props, audit_failure=False, inventory=None, find_failure=False, systemctl_failure=False, journal=None):
     fake = tmp_path / 'bin'
     fake.mkdir()
     systemctl = fake / 'systemctl'
     systemctl.write_text(f'#!{sys.executable}\n' + ('raise SystemExit(5)\n' if systemctl_failure else '') + '''import json,os,sys
-if 'show' not in sys.argv:raise SystemExit(1)
-print(json.loads(os.environ['TEST_PROPERTIES']).get(sys.argv[sys.argv.index('-p')+1],''))
+if 'show' not in sys.argv:raise SystemExit(0 if os.environ.get('TEST_TIMER') == 'yes' else 1)
+print(json.loads(os.environ['TEST_PROPERTIES']).get(sys.argv[sys.argv.index('-p')+1], 'not-found' if sys.argv[sys.argv.index('-p')+1] == 'LoadState' else ''))
 ''')
     systemctl.chmod(0o700)
     audit = fake / 'auditctl'
@@ -30,12 +30,17 @@ if sys.argv[1] == {(path if find_failure is True else str(find_failure))!r}:rais
 os.execv({actual_find!r},[{actual_find!r},*sys.argv[1:]])
 ''')
         finder.chmod(0o700)
+    if journal is not None:
+        journalctl = fake / 'journalctl'
+        journalctl.write_text(f'#!{sys.executable}\n' +
+                              f'import sys\nprint({journal[0]!r})\nsys.exit({journal[1]})\n')
+        journalctl.chmod(0o700)
     source = tmp_path / 'inventory.json'
     source.write_text(inventory if inventory is not None else json.dumps({'surfaces': {'fixture': {'unit': 'fixture.service', 'manager': 'system', 'captures': [{'path': path}]}}}))
     captures = tmp_path / 'captures'
     captures.mkdir(exist_ok=True)
     output = tmp_path / 'out.jsonl'
-    env = {**os.environ, 'PATH': str(fake)+':'+os.environ['PATH'], 'TEST_PROPERTIES': json.dumps(props), 'SINNIX_RUNTIME_INVENTORY': str(source), 'SINNIX_CAPTURES_ROOT': str(captures), 'SINNIX_SANDBOX_AUDIT_OUT': str(output)}
+    env = {**os.environ, 'PATH': str(fake)+':'+os.environ['PATH'], 'TEST_PROPERTIES': json.dumps(props), 'TEST_TIMER': 'yes' if journal is not None else 'no', 'SINNIX_RUNTIME_INVENTORY': str(source), 'SINNIX_CAPTURES_ROOT': str(captures), 'SINNIX_SANDBOX_AUDIT_OUT': str(output)}
     result = subprocess.run(['bash', str(SCRIPT), '--quiet'], env=env, capture_output=True, text=True)
     rows = [json.loads(line) for line in output.read_text().splitlines()] if output.exists() else []
     return result, rows
@@ -145,3 +150,14 @@ def test_unavailable_systemd_refuses_publication(tmp_path):
     assert 'cannot inspect system unit fixture.service property ProtectSystem' in result.stderr
     assert output.read_text() == previous
     assert 'no findings' not in result.stdout
+
+
+@pytest.mark.parametrize("journal,expected", [(('', 0), 'never-succeeded'),
+                                             (('Finished fixture service', 0), None),
+                                             (('partial journal output', 5), 'journal-unavailable')])
+def test_unreadable_journal_is_not_failed_execution(tmp_path, journal, expected):
+    result, rows = run_audit(tmp_path, '/synthetic/missing-capture',
+                             {'LoadState': 'loaded'}, journal=journal)
+    assert result.returncode == 0, result.stderr
+    diagnoses = [r['kind'] for r in rows if r['kind'] in ('never-succeeded', 'journal-unavailable')]
+    assert diagnoses == ([expected] if expected else [])

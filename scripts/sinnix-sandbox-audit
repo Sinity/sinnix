@@ -46,8 +46,11 @@ show_prop() {
   }
 }
 
-findings="$(mktemp)"
-trap 'rm -f "$findings"' EXIT
+scratch="$(mktemp -d)"
+trap 'rm -rf -- "$scratch"' EXIT
+findings="$scratch/findings.jsonl"
+journal_output="$scratch/journal.txt"
+: > "$findings"
 
 emit() {
   jq -nc \
@@ -213,15 +216,22 @@ while IFS=$'\t' read -r unit manager acknowledged; do
   timer="${unit%.service}.timer"
   scope=()
   [[ "$manager" == "user" ]] && scope=(--user)
-  systemctl "${scope[@]}" list-unit-files "$timer" &>/dev/null || continue
-  systemctl "${scope[@]}" cat "$timer" &>/dev/null || continue
-  # NOT `grep -q`: it exits on the first match, journalctl dies on SIGPIPE, and
-  # under `set -o pipefail` the pipeline then reports failure -- which reads as
-  # "never succeeded" for every healthy unit. Consume the whole stream.
-  if ! journalctl "${scope[@]}" -u "$unit" --since "$SINCE_WINDOW" --no-pager 2>/dev/null \
-    | grep -E "Deactivated successfully|Finished " >/dev/null; then
-    emit "$manager" "$unit" "never-succeeded" "$timer" \
-      "timer-driven unit with no successful completion in the journal since $SINCE_WINDOW"
+  timer_load="$(show_prop "$manager" "$timer" LoadState)"
+  [[ "$timer_load" == "not-found" ]] && continue
+  if [[ -z "$timer_load" ]]; then
+    printf 'sinnix-sandbox-audit: timer load state unavailable for %s\n' "$timer" >&2
+    exit 1
+  fi
+  # Keep the journal reader's status separate from the match result. An
+  # unavailable journal says nothing about whether the unit succeeded.
+  if journalctl "${scope[@]}" -u "$unit" --since "$SINCE_WINDOW" --no-pager >"$journal_output"; then
+    if ! grep -E "Deactivated successfully|Finished " "$journal_output" >/dev/null; then
+      emit "$manager" "$unit" "never-succeeded" "$timer" \
+        "timer-driven unit with no successful completion in the journal since $SINCE_WINDOW"
+    fi
+  else
+    emit "$manager" "$unit" "journal-unavailable" "$timer" \
+      "journal could not be read since $SINCE_WINDOW; completion history is unknown"
   fi
 done < <(jq -r '.surfaces | to_entries[]
          | [.value.unit // "", .value.manager // "system",
