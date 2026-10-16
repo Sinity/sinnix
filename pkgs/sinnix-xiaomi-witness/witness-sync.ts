@@ -227,30 +227,40 @@ await lane("vendor_stress_day", () =>
 // not JSON rides through untouched.
 
 const bandSids = new Set<string>();
-const rawStart = Math.trunc(Date.now() / 1000) - WINDOW_DAYS * 86_400;
 const rawEnd = Math.trunc(Date.now() / 1000);
+// Each revision describes a UTC day. Never let a rolling first-day suffix
+// supersede a complete day merely because it was fetched more recently.
+const rawStart = Math.floor((rawEnd - WINDOW_DAYS * 86_400) / 86_400) * 86_400;
 
 for (const key of RAW_KEYS) {
   try {
-    const items = await client.getFitnessData(uid, key, rawStart, rawEnd, 100_000);
-    if (items.length >= 100_000) {
-      throw new Error("raw response reached its record limit; refusing an incomplete day revision");
-    }
     const byDay = new Map<string, unknown[]>();
-    for (const item of items as Array<{ sid?: string; time?: number; value?: unknown }>) {
-      if (typeof item.sid === "string" && item.sid && !item.sid.startsWith("hlth.gen_")) bandSids.add(item.sid);
-      const day = isoDay(item.time) ?? "unknown";
-      let value = item.value;
-      if (typeof value === "string") {
-        try {
-          value = JSON.parse(value);
-        } catch {
-          // Not JSON; keep the raw string.
-        }
+    const batchSeconds = WINDOW_DAYS > 7 ? 7 * 86_400 : rawEnd - rawStart + 1;
+    for (let start = rawStart; start <= rawEnd;) {
+      const end = Math.min(start + batchSeconds - 1, rawEnd);
+      const items = await client.getFitnessData(uid, key, start, end, 100_000);
+      if (items.length >= 100_000) {
+        throw new Error("raw response reached its record limit; refusing an incomplete day revision");
       }
-      const bucket = byDay.get(day) ?? [];
-      bucket.push({ ...item, value });
-      byDay.set(day, bucket);
+      if (WINDOW_DAYS > 7) {
+        console.log(`xiaomi-witness raw-window: key=${key} start=${start} end=${end} count=${items.length}`);
+      }
+      for (const item of items as Array<{ sid?: string; time?: number; value?: unknown }>) {
+        if (typeof item.sid === "string" && item.sid && !item.sid.startsWith("hlth.gen_")) bandSids.add(item.sid);
+        const day = isoDay(item.time) ?? "unknown";
+        let value = item.value;
+        if (typeof value === "string") {
+          try {
+            value = JSON.parse(value);
+          } catch {
+            // Not JSON; keep the raw string.
+          }
+        }
+        const bucket = byDay.get(day) ?? [];
+        bucket.push({ ...item, value });
+        byDay.set(day, bucket);
+      }
+      start = end + 1;
     }
     for (const [day, records] of byDay) {
       records.sort((a, b) => ((a as { time?: number }).time ?? 0) - ((b as { time?: number }).time ?? 0));
