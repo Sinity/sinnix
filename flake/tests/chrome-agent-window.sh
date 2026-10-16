@@ -62,6 +62,10 @@ printf '%s\t%s\n' "$id" "$method" >>"$state/request-ids"
 printf '%s\n' "$request" >>"$state/requests.jsonl"
 
 respond() {
+  if [[ $method == Runtime.evaluate && -n ${FAKE_CLICK_CASE:-} ]]; then
+    node "$FAKE_CLICK_FIXTURE" "$request" "$state"
+    return
+  fi
   jq -nc --argjson id "$id" --arg method "$method" '
     if $method == "Target.createTarget" then {id: $id, result: {targetId: "agent-target"}}
     elif $method == "Page.navigate" then {id: $id, result: {frameId: "frame-agent"}}
@@ -98,6 +102,12 @@ Target.closeTarget)
   ;;
 Page.navigate)
   jq -r '.params.url' <<<"$request" >"$state/navigated-url"
+  ;;
+Input.dispatchMouseEvent)
+  if [[ ${FAKE_CLICK_CASE:-} == protocol ]]; then
+    jq -nc --argjson id "$id" '{id:$id,error:{code:-32000,message:"fixture mouse rejected"}}'
+    exit 0
+  fi
   ;;
 Input.insertText)
   if [[ ${FAKE_INSERT_ERROR:-false} == true ]]; then
@@ -389,8 +399,46 @@ assert_bulk_text() {
   printf 'bulk text: exact Unicode/newlines, single insertion, focus guard, visible CDP errors, invalid inputs passed\n'
 }
 
+assert_click_geometry() {
+  local mode state status
+  for mode in normal scrolled offscreen hidden disabled covered missing protocol; do
+    state="$fixture_root/click-$mode"
+    mkdir -p "$state"
+    touch "$state/agent-target"
+    printf '%s\n' '<title>agent-target</title>' >"$state/marker-url"
+    status=0
+    env PATH="$fixture_root/bin:$PATH" FAKE_STATE="$state" FAKE_CDP_SCENARIO=match \
+      FAKE_CLICK_CASE="$mode" FAKE_CLICK_FIXTURE="${CLICK_FIXTURE:?}" \
+      "$helper" click agent-target --selector '#target' >"$state/stdout" 2>"$state/stderr" || status=$?
+    case "$mode" in
+    normal|scrolled|offscreen)
+      test "$status" = 0
+      jq -se '[.[] | select(.method == "Input.dispatchMouseEvent")] as $mouse |
+        ($mouse | length == 2) and
+        all($mouse[]; .params.x == 20 and .params.y == 25 and .params.button == "left") and
+        $mouse[0].params.type == "mousePressed" and $mouse[1].params.type == "mouseReleased"' "$state/requests.jsonl" >/dev/null
+      [[ $mode != offscreen ]] || test -e "$state/scrolled"
+      ;;
+    protocol)
+      test "$status" = 1
+      grep -q 'fixture mouse rejected' "$state/stderr"
+      ! grep -q 'clicked:' "$state/stdout"
+      jq -se '[.[] | select(.method == "Input.dispatchMouseEvent")] | length == 1' "$state/requests.jsonl" >/dev/null
+      ;;
+    *)
+      test "$status" = 1
+      jq -se 'all(.[]; .method != "Input.dispatchMouseEvent")' "$state/requests.jsonl" >/dev/null
+      ;;
+    esac
+  done
+  printf 'click geometry: eight viewport, visibility and protocol cases passed\n'
+}
+
 mode="${1:-final}"
 case "$mode" in
+click)
+  assert_click_geometry
+  ;;
 input-text)
   assert_bulk_text
   ;;
@@ -398,6 +446,7 @@ reproduce)
   assert_activation_before_park_reproduced
   ;;
 final)
+  assert_click_geometry
   assert_bulk_text
   assert_fake_wire_rejects_out_of_range_id
   assert_activation_before_park_reproduced

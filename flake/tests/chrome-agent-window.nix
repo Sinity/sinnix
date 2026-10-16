@@ -14,6 +14,8 @@
           {
             nativeBuildInputs = [
               pkgs.bash
+              pkgs.bc
+              pkgs.nodejs
               pkgs.coreutils
               pkgs.gnugrep
               pkgs.gnused
@@ -29,7 +31,7 @@
             patchShebangs "$helper"
             shellcheck -S warning "$helper" ${./chrome-agent-window.sh}
             bash -n "$helper" ${./chrome-agent-window.sh}
-            ${pkgs.bash}/bin/bash ${./chrome-agent-window.sh} "$helper"
+            CLICK_FIXTURE=${./chrome-click-fixture.cjs} ${pkgs.bash}/bin/bash ${./chrome-agent-window.sh} "$helper"
             touch "$out"
           '';
     };

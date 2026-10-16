@@ -1366,12 +1366,33 @@ click)
     exit 1
   }
 
-  # Get element bounding box
+  # CDP mouse coordinates are viewport-relative, not document-relative.
+  # Scroll first, and refuse an obscured point rather than clicking another control.
+  click_js=$(cat <<'JS_CLICK'
+(selector => {
+  const e = document.querySelector(selector);
+  if (!e) return null;
+  if (e.matches(":disabled") || e.getAttribute("aria-disabled") === "true")
+    return {error: "element is disabled"};
+  e.scrollIntoView({block: "center", inline: "center", behavior: "instant"});
+  const r = e.getBoundingClientRect();
+  if (!(r.width > 0 && r.height > 0)) return {error: "element has no visible box"};
+  const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+  if (!hit || (hit !== e && !e.contains(hit))) return {error: "click point is obscured"};
+  return {x: r.x, y: r.y, w: r.width, h: r.height};
+})
+JS_CLICK
+)
   box_json=$(cdp_send_with_result "$ws_url" "Runtime.evaluate" \
-    "$(jq -nc --arg sel "$selector" '{expression: "(()=>{const e=document.querySelector(\($sel|tojson));if(!e)return null;const r=e.getBoundingClientRect();return{x:r.x+window.scrollX,y:r.y+window.scrollY,w:r.width,h:r.height}})()", returnByValue: true}')")
+    "$(jq -nc --arg sel "$selector" --arg js "$click_js" '{expression: ($js + "(" + ($sel|tojson) + ")"), returnByValue: true}')")
 
-  if echo "$box_json" | jq -e '.result.value == null' >/dev/null 2>&1; then
+  if jq -e '.result.value == null' >/dev/null 2>&1 <<<"$box_json"; then
     echo "element not found: $selector" >&2
+    exit 1
+  fi
+  click_error=$(jq -r '.result.value.error // empty' <<<"$box_json")
+  if [[ -n $click_error ]]; then
+    printf 'cannot click %s: %s\n' "$selector" "$click_error" >&2
     exit 1
   fi
 
@@ -1384,9 +1405,9 @@ click)
 
   # Mouse events
   mouse_params=$(jq -nc --argjson x "$cx" --argjson y "$cy" '{type: "mousePressed", x: $x, y: $y, button: "left", clickCount: 1}')
-  cdp_send "$ws_url" "Input.dispatchMouseEvent" "$mouse_params"
+  cdp_send_with_result "$ws_url" "Input.dispatchMouseEvent" "$mouse_params" >/dev/null
   mouse_params=$(jq -nc --argjson x "$cx" --argjson y "$cy" '{type: "mouseReleased", x: $x, y: $y, button: "left", clickCount: 1}')
-  cdp_send "$ws_url" "Input.dispatchMouseEvent" "$mouse_params"
+  cdp_send_with_result "$ws_url" "Input.dispatchMouseEvent" "$mouse_params" >/dev/null
   echo "clicked: $selector at ($cx, $cy)"
   ;;
 
