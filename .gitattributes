@@ -23,3 +23,4 @@
 
 # Unified patch context prefixes precede Go tabs and empty context lines.
 pkgs/beads/*.patch -whitespace
+modules/services/ollama-browser-boundary.patch -whitespace

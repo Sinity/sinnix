@@ -198,3 +198,9 @@ The runtime inventory at `/etc/sinnix/runtime-inventory.json` records the declar
 The direct LiteLLM HTTP application checks the loopback Host authority and browser Origin/Fetch Metadata before reading request bodies or dispatching work. Native API clients and same-origin UI requests remain supported. Foreign browser requests receive 403 without wildcard CORS; deliberate document navigation remains available. Public and backend listener ports come from the shared port registry.
 
 This HTTP boundary does not prevent the systemd TCP socket proxy from starting the lightweight gateway before headers arrive. Other AI backends retain their own acceptance requirements.
+
+### Ollama browser admission
+
+Ollama accepts HTTP browser origins only at its registry-declared public and backend loopback ports. Its configured origin list replaces upstream's unrestricted localhost defaults. Native app protocols remain supported. Fetch Metadata without an Origin must identify a same-origin context or deliberate document navigation; passive cross-site requests are refused before handlers read their bodies. Host checks also precede CORS preflight handling. Native API clients and model loading retain their existing routes.
+
+The `ollama-package-boundary` check builds the configured CUDA package, including its origin and browser-admission tests. This boundary does not prevent the TCP proxy from starting the daemon before HTTP headers arrive.

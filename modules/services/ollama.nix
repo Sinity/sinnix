@@ -1,7 +1,7 @@
 # Ollama — local LLM/VLM inference hub (OpenAI-compatible API on 127.0.0.1:11434).
 #
 # This is the Tier-1 daily driver: Open WebUI and aichat both target it. Weights
-# live on durable /realm (NOT the wear-limited root SSD); CUDA via the prebuilt
+# live on durable /realm (NOT the wear-limited root SSD); CUDA via the native
 # `ollama-cuda`. Automatic VRAM<->RAM offload handles models that don't fully fit
 # the 3080's 10 GB.
 {
@@ -77,7 +77,28 @@ mkServiceModule {
     let
       user = config.sinnix.user.name;
       modelsDir = "${config.sinnix.paths.modelsRoot}/ollama";
+      # Keep the pull client's identity stable; only the HTTP server changes.
       ollamaBin = lib.getExe pkgs.ollama-cuda;
+      guardedOllama = pkgs.ollama-cuda.overrideAttrs (old: {
+        patches = (old.patches or [ ]) ++ [ ./ollama-browser-boundary.patch ];
+        postCheck = (old.postCheck or "") + ''
+          go test ./envconfig ./server -run '^(TestOrigins|TestSinnixBrowserContext)$'
+        '';
+      });
+      browserOrigins =
+        lib.concatMap
+          (
+            port:
+            map (host: "http://${host}:${toString port}") [
+              "127.0.0.1"
+              "localhost"
+              "[::1]"
+            ]
+          )
+          [
+            helpers.data.ports.ollama.public
+            helpers.data.ports.ollama.backend
+          ];
       awkBin = lib.getExe pkgs.gawk;
       # Upstream's ollama-model-loader pulls every tag in one `parallel`
       # invocation with no per-model retry, so a single transient transfer
@@ -149,7 +170,7 @@ mkServiceModule {
     {
       services.ollama = {
         enable = true;
-        package = pkgs.ollama-cuda;
+        package = guardedOllama;
         # Dedicated static system user (created by the module). systemd uses the
         # static account over DynamicUser, so it can own/write the /realm models
         # dir. Reusing the human user would rewrite their home dir → HM conflict.
@@ -164,6 +185,16 @@ mkServiceModule {
         inherit modelsDir;
         inherit (cfg) loadModels;
         environmentVariables = {
+          OLLAMA_ORIGINS = lib.concatStringsSep "," (
+            browserOrigins
+            ++ [
+              "app://*"
+              "file://*"
+              "tauri://*"
+              "vscode-webview://*"
+              "vscode-file://*"
+            ]
+          );
           OLLAMA_FLASH_ATTENTION = "1";
           OLLAMA_KEEP_ALIVE = "30m";
           # 10 GB VRAM: keep one model resident at a time to avoid thrashing.

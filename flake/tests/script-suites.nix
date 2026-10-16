@@ -326,6 +326,13 @@
         # comparisons stop displacing that prior at the documented evidence
         # threshold, a retired binding survives into the next manifest, or
         # deck-forge stops taking its drill order from the manifest.
+        ollama-package-boundary =
+          pkgs.runCommand "ollama-package-boundary-check"
+            { serverPackage = inputs.self.nixosConfigurations.sinnix-prime.config.services.ollama.package; }
+            ''
+              test -x "$serverPackage/bin/ollama"
+              touch "$out"
+            '';
         litellm-package-boundary =
           pkgs.runCommand "litellm-package-boundary-check"
             {
