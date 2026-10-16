@@ -45,9 +45,12 @@ manager_exec() {
       echo "sinnix-sandbox-audit: SINNIX_AUDIT_USER is required for root to inspect user units" >&2
       return 1
     fi
-    local uid
+    local uid gid
     uid="$(id -u "$SINNIX_AUDIT_USER")" || return
-    runuser -u "$SINNIX_AUDIT_USER" -- env "XDG_RUNTIME_DIR=/run/user/$uid" "$@"
+    gid="$(id -g "$SINNIX_AUDIT_USER")" || return
+    setpriv --reuid="$uid" --regid="$gid" --init-groups \
+      env "XDG_RUNTIME_DIR=/run/user/$uid" \
+      "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$uid/bus" "$@"
   else
     "$@"
   fi
