@@ -1432,7 +1432,8 @@ app-install)
   # the Termux recorder as though a new APK were running.
   serial="$ADB_RESOLVED"
   echo "installing to ${serial:-unknown device} ($(adb_any shell getprop ro.serialno 2>/dev/null | tr -d '\r'))"
-  install_log="$(mktemp)"
+  install_log="$(mktemp --tmpdir="${TMPDIR:-/realm/tmp/work}" sinnix-phone-install.XXXXXX)"
+  trap 'rm -f -- "$install_log"' EXIT
   install_ok=1
   if ! ANDROID_SERIAL="$serial" nix run "${SINNIX_FLAKE_DIR:-/realm/project/sinnix/repo}#sinnix-phone-app-install" 2>&1 | tee "$install_log"; then
     install_ok=0
@@ -1444,7 +1445,6 @@ app-install)
   if grep -q '^Success' "$install_log"; then
     install_ok=1
   elif grep -q INSTALL_FAILED_USER_RESTRICTED "$install_log"; then
-    rm -f "$install_log"
     echo >&2
     echo "app-install: MIUI refused the install (INSTALL_FAILED_USER_RESTRICTED)." >&2
     echo "  Unlock the phone screen and run this again. MIUI shows its own adb" >&2
@@ -1452,11 +1452,11 @@ app-install)
     exit 1
   fi
   if [ "$install_ok" -eq 0 ]; then
-    rm -f "$install_log"
     echo "app-install: adb install failed; see the output above" >&2
     exit 1
   fi
-  rm -f "$install_log"
+  rm -f -- "$install_log"
+  trap - EXIT
   ensure_app_grants
   ensure_device_capture_settings
   "$0" app-start
