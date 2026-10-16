@@ -10,11 +10,11 @@ import pytest
 SCRIPT = Path(__file__).resolve().parents[3] / 'scripts/sinnix-sandbox-audit'
 
 
-def run_audit(tmp_path, path, props, audit_failure=False, inventory=None, find_failure=False):
+def run_audit(tmp_path, path, props, audit_failure=False, inventory=None, find_failure=False, systemctl_failure=False):
     fake = tmp_path / 'bin'
     fake.mkdir()
     systemctl = fake / 'systemctl'
-    systemctl.write_text(f'#!{sys.executable}\n' + '''import json,os,sys
+    systemctl.write_text(f'#!{sys.executable}\n' + ('raise SystemExit(5)\n' if systemctl_failure else '') + '''import json,os,sys
 if 'show' not in sys.argv:raise SystemExit(1)
 print(json.loads(os.environ['TEST_PROPERTIES']).get(sys.argv[sys.argv.index('-p')+1],''))
 ''')
@@ -134,3 +134,14 @@ def test_capture_lookup_errors_are_not_missing(tmp_path, case):
     finally:
         if case == "denied-parent":
             parent.chmod(0o700)
+
+
+def test_unavailable_systemd_refuses_publication(tmp_path):
+    output = tmp_path / "out.jsonl"
+    previous = '{"kind":"previous-verified-finding"}\n'
+    output.write_text(previous)
+    result, rows = run_audit(tmp_path, '/synthetic/capture', {}, systemctl_failure=True)
+    assert result.returncode != 0
+    assert 'cannot inspect system unit fixture.service property ProtectSystem' in result.stderr
+    assert output.read_text() == previous
+    assert 'no findings' not in result.stdout

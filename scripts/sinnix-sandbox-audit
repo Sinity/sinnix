@@ -39,7 +39,11 @@ show_prop() {
   # $1=manager $2=unit $3=property -> bare value
   local scope=()
   [[ "$1" == "user" ]] && scope=(--user)
-  systemctl "${scope[@]}" show "$2" -p "$3" --value 2>/dev/null || true
+  systemctl "${scope[@]}" show "$2" -p "$3" --value || {
+    local status=$?
+    printf 'sinnix-sandbox-audit: cannot inspect %s unit %s property %s\n' "$1" "$2" "$3" >&2
+    return "$status"
+  }
 }
 
 findings="$(mktemp)"
@@ -190,8 +194,8 @@ while IFS=$'\t' read -r unit manager; do
   protect_home="$(show_prop "$manager" "$unit" ProtectHome)"
   protect_system="$(show_prop "$manager" "$unit" ProtectSystem)"
   rw_paths="$(show_prop "$manager" "$unit" ReadWritePaths)"
-  protected_path "$HOME/.claude" "$protect_system" "$protect_home" \
-    "$(show_prop "$manager" "$unit" PrivateTmp)" || continue
+  private_tmp="$(show_prop "$manager" "$unit" PrivateTmp)"
+  protected_path "$HOME/.claude" "$protect_system" "$protect_home" "$private_tmp" || continue
   if ! covered_by "$HOME/.claude" "$rw_paths"; then
     emit "$manager" "$unit" "agent-transcript-loss" "$HOME/.claude" \
       "unit execs an agent CLI under mount-namespace hardening but cannot write the transcript directory"
