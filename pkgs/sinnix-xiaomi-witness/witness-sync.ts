@@ -61,6 +61,13 @@ if (args.length > 0) {
   process.exit(help ? 0 : 2);
 }
 
+// Overlap delayed uploads normally; recovery may explicitly widen to 35 days.
+const WINDOW_DAYS = Number(process.env.XIAOMI_WITNESS_WINDOW_DAYS ?? "7");
+if (!Number.isInteger(WINDOW_DAYS) || WINDOW_DAYS < 1 || WINDOW_DAYS > 35) {
+  console.error("XIAOMI_WITNESS_WINDOW_DAYS must be an integer from 1 to 35");
+  process.exit(64);
+}
+
 const { MiHealthClient, XiaomiAuth } = await import("./upstream/src/xiaomi/client.ts");
 
 process.umask(0o077);
@@ -70,13 +77,6 @@ const STATE_DIR = process.env.XIAOMI_WITNESS_STATE ?? "/realm/state/xiaomi-witne
 // hand and deliberately name the same places the module does.
 const LANE_DIR = process.env.XIAOMI_WITNESS_LANE ?? "/realm/health/xiaomi-cloud";
 const BASE = process.env.MI_HEALTH_BASE ?? "https://de.hlth.io.mi.com";
-// Seven days, not three. The cloud is the SLOW plane, measured 2026-08-17:
-// Health Connect held band data from an hour ago while Xiaomi's servers had
-// nothing newer than the previous afternoon, and forcing Mi Fitness's own
-// sync job moved neither. A window has to outlast however long the app
-// takes to upload, because a day that ages past its edge is never fetched
-// at all -- the fetch is windowed, so a gap here is permanent, not late.
-const WINDOW_DAYS = Number(process.env.XIAOMI_WITNESS_WINDOW_DAYS ?? "7");
 const PARSER_VERSION = 2;
 
 // Keys the raw plane actually serves for this band (probed 2026-08-17;
@@ -233,6 +233,9 @@ const rawEnd = Math.trunc(Date.now() / 1000);
 for (const key of RAW_KEYS) {
   try {
     const items = await client.getFitnessData(uid, key, rawStart, rawEnd, 100_000);
+    if (items.length >= 100_000) {
+      throw new Error("raw response reached its record limit; refusing an incomplete day revision");
+    }
     const byDay = new Map<string, unknown[]>();
     for (const item of items as Array<{ sid?: string; time?: number; value?: unknown }>) {
       if (typeof item.sid === "string" && item.sid && !item.sid.startsWith("hlth.gen_")) bandSids.add(item.sid);

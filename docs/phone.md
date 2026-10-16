@@ -547,6 +547,14 @@ authenticated Xiaomi browser session and confirm it. A successful login clears
 the `credential-expired` marker that otherwise makes the timer skip its runs.
 Both commands accept `--help` without contacting Xiaomi or changing captures.
 
+Scheduled collection overlaps seven days. After a credential outage,
+`agentctl job start sinnix xiaomi_witness_backfill` runs the same collector
+across the last 35 days. Both managed routes hold the same exclusive state lock.
+The recovery pass preserves existing raw revisions and uses the normal
+write-on-change ledger; a response reaching the raw endpoint's record limit
+is reported as incomplete instead of replacing a day with a truncated array.
+A successful recent pass does not establish older vendor coverage.
+
 **Direct Boot**: a `directBootAware` service buffers into device-protected
 storage and migrates on unlock, so a phone rebooted and left locked captures
 instead of waiting for a human. This completed the acceptance test on

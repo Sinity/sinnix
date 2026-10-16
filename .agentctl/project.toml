@@ -317,3 +317,12 @@ pool = "normal"
 result = "exit"
 cache = "none"
 timeout_seconds = 420
+
+[operations.xiaomi_witness_backfill]
+description = "Recover the last 35 days of Xiaomi vendor history through the normal collector"
+exec = ["flock", "--exclusive", "/realm/state/xiaomi-witness/sync.lock", "env", "XIAOMI_WITNESS_WINDOW_DAYS=35", "sinnix", "xiaomi-witness"]
+pool = "normal"
+result = "exit"
+cache = "none"
+timeout_seconds = 1800
+admission = { memory_mib = 1024 }

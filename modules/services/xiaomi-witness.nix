@@ -71,7 +71,8 @@ mkServiceModule {
       description = "Xiaomi cloud health witness sync pass";
       manager = "user";
       serviceConfig.UMask = "0077";
-      execStart = lib.getExe scriptPkgs.sinnix-xiaomi-witness;
+      # Scheduled and recovery passes share the write-on-change state.
+      execStart = "${pkgs.util-linux}/bin/flock --exclusive ${stateDir}/sync.lock ${lib.getExe scriptPkgs.sinnix-xiaomi-witness}";
       # The module declares this lane to the runtime inventory and creates
       # its directory, so it must also be what the writer uses. It was
       # not: both sides carried the same literal independently, and when

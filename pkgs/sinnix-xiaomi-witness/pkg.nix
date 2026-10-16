@@ -37,6 +37,7 @@ stdenvNoCC.mkDerivation {
   checkPhase = ''
     runHook preCheck
     BUN=${lib.getExe bun} ${lib.getExe python3} test_cli.py
+    BUN=${lib.getExe bun} ${lib.getExe python3} test_sync.py
     runHook postCheck
   '';
 
