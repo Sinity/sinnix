@@ -214,13 +214,13 @@ def test_interrupted_confirmation_retains_claimed_bytes(isolated_state_dirs, mon
 def test_ambiguous_rename_failure_never_removes_claimed_receipt(isolated_state_dirs, monkeypatch):
     text = '{"title":"retained"}\n'
     _write(isolated_state_dirs, "receipts", "r1.json", text)
-    replace = Path.replace
+    rename = os.rename
 
-    def committed_then_failed(path, target):
-        replace(path, target)
+    def committed_then_failed(path, target, **kwargs):
+        rename(path, target, **kwargs)
         raise OSError("synthetic ambiguous rename failure")
 
-    monkeypatch.setattr(Path, "replace", committed_then_failed)
+    monkeypatch.setattr(os, "rename", committed_then_failed)
     status, payload = inbox_mod.confirm_inbox(
         "receipts/r1.json", hashlib.sha256(text.encode()).hexdigest(),
     )
@@ -384,3 +384,65 @@ def test_listing_handles_concurrently_consumed_receipt(isolated_state_dirs, monk
     status, payload = inbox_mod.list_inbox()
     assert status == HTTPStatus.OK and payload['ok']
     assert not any(f['name'] == 'receipts/entry.json' for f in payload['files'])
+
+
+@pytest.mark.parametrize("replace_root", [False, True])
+@pytest.mark.parametrize("after_claim", [False, True])
+def test_confirmation_stays_with_opened_directories(isolated_state_dirs, tmp_path, monkeypatch,
+                                                     replace_root, after_claim):
+    content = b'synthetic same bytes'
+    _write(isolated_state_dirs, 'receipts', 'entry.json', content.decode())
+    root = isolated_state_dirs['inbox_dir']
+    original = root if replace_root else root / 'receipts'
+    retained = tmp_path / 'retained-original'
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    external_parent = outside / 'receipts' if replace_root else outside
+    external_parent.mkdir(exist_ok=True)
+    external_file = external_parent / 'entry.json'
+    external_file.write_bytes(content)
+    before = external_file.stat()
+    sha = inbox_mod._sha
+    calls = 0
+    def digest(body):
+        nonlocal calls
+        calls += 1
+        if calls == (2 if after_claim else 1):
+            original.rename(retained)
+            original.symlink_to(outside, target_is_directory=True)
+        return sha(body)
+    monkeypatch.setattr(inbox_mod, '_sha', digest)
+    status, payload = inbox_mod.confirm_inbox('receipts/entry.json', sha(content))
+    assert status == HTTPStatus.OK and payload['deleted']
+    after = external_file.stat()
+    assert (after.st_ino, after.st_size, after.st_mtime_ns) == (before.st_ino, before.st_size, before.st_mtime_ns)
+    assert external_file.read_bytes() == content
+    retained_entry = retained / 'receipts' / 'entry.json' if replace_root else retained / 'entry.json'
+    assert not retained_entry.exists()
+    assert not list(retained.rglob('.confirmation-*.json'))
+
+
+def test_claim_recovery_reports_relocated_root(isolated_state_dirs, tmp_path, monkeypatch):
+    _write(isolated_state_dirs, 'receipts', 'entry.json', 'original')
+    root = isolated_state_dirs['inbox_dir']
+    retained = tmp_path / 'retained-inbox'
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    sha = inbox_mod._sha
+    calls = 0
+    def digest(body):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            (root / 'receipts' / 'entry.json').write_text('replacement')
+            root.rename(retained)
+            root.symlink_to(outside, target_is_directory=True)
+        return sha(body)
+    monkeypatch.setattr(inbox_mod, '_sha', digest)
+    status, payload = inbox_mod.confirm_inbox('receipts/entry.json', sha(b'original'))
+    assert status == HTTPStatus.UNPROCESSABLE_ENTITY
+    claim = Path(payload['retained_at'])
+    assert claim.parent == retained and claim.read_bytes() == b'replacement'
+    assert (retained / 'receipts' / 'entry.json').read_bytes() == b'replacement'
+    assert payload['current_path_restored']
+    assert list(outside.iterdir()) == []

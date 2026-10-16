@@ -36,7 +36,7 @@ import json
 import os
 import re
 import stat
-import tempfile
+import secrets
 from contextlib import ExitStack, contextmanager
 from http import HTTPStatus
 from pathlib import Path
@@ -111,7 +111,7 @@ def list_inbox() -> tuple[HTTPStatus, dict]:
         )
     for sub, one_shot in SUBDIRS.items():
         try:
-            with _entry_directory(sub) as directory_fd:
+            with _entry_directory(sub) as (_, directory_fd):
                 for name in sorted(os.listdir(directory_fd)):
                     # Writers publish .part files by rename; never offer a
                     # still-incomplete publication to the phone.
@@ -177,27 +177,30 @@ def _entry_directory(sub: str):
         sub_fd = os.open(sub, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                          dir_fd=root_fd)
         stack.callback(os.close, sub_fd)
-        yield sub_fd
+        yield root_fd, sub_fd
 
 
 def _read_entry(path: Path) -> bytes:
-    with _entry_directory(path.parent.name) as directory_fd:
+    with _entry_directory(path.parent.name) as (_, directory_fd):
         return _read_regular(path.name, dir_fd=directory_fd)
 
 
-def _preserve_claim(claim: Path, original: Path) -> dict:
-    """Restore visibility without overwriting another publication.
+def _claim_path(root_fd: int, claim: str) -> str:
+    # Directory handles survive renames. Resolve the retained root's actual
+    # location so a recovery receipt does not point into its replacement.
+    return str(Path(os.readlink(f"/proc/self/fd/{root_fd}")) / claim)
 
-    Retain the claim even after linking it back: a writer can replace that
-    restored pathname immediately. Recovery bytes must not depend on it.
-    """
+
+def _preserve_claim(root_fd: int, sub_fd: int, claim: str, original: str) -> dict:
+    """Restore visibility in the opened directory without overwriting a publisher."""
     restored = False
     try:
-        os.link(claim, original, follow_symlinks=False)
+        os.link(claim, original, src_dir_fd=root_fd, dst_dir_fd=sub_fd,
+                follow_symlinks=False)
         restored = True
     except OSError:
         pass
-    return {"retained_at": str(claim), "current_path_restored": restored}
+    return {"retained_at": _claim_path(root_fd, claim), "current_path_restored": restored}
 
 
 def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict]:
@@ -228,7 +231,8 @@ def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict
     if not SUBDIRS.get(sub, False):
         return HTTPStatus.OK, {"ok": True, "name": name, "retained": True}
     try:
-        body = _read_entry(path)
+        with _entry_directory(sub) as (root_fd, sub_fd):
+            return _confirm_entry(name, path.name, declared_sha, root_fd, sub_fd)
     except FileNotFoundError:
         # A repeated confirmation of a consumed one-shot is idempotent.
         return HTTPStatus.OK, {
@@ -236,6 +240,13 @@ def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict
         }
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
+
+
+def _confirm_entry(name: str, entry: str, declared_sha: str | None,
+                   root_fd: int, sub_fd: int) -> tuple[HTTPStatus, dict]:
+    # Hold the same directory handles from the initial read through the last
+    # mutation. Content checks alone cannot identify a replaced parent path.
+    body = _read_regular(entry, dir_fd=sub_fd)
     digest = _sha(body)
     if not declared_sha or declared_sha.lower() != digest:
         return HTTPStatus.UNPROCESSABLE_ENTITY, {
@@ -248,37 +259,38 @@ def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict
     # the final digest check, so a concurrent publication cannot be unlinked
     # merely because an earlier file at that name matched the acknowledgement.
     try:
-        fd, temporary = tempfile.mkstemp(prefix=".confirmation-", suffix=".json", dir=INBOX_DIR)
+        claim = f".confirmation-{secrets.token_hex(16)}.json"
+        fd = os.open(claim, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=root_fd)
         try:
             reserved = os.fstat(fd)
             reservation_identity = (reserved.st_dev, reserved.st_ino)
         finally:
             os.close(fd)
-        claim = Path(temporary)
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
     try:
-        path.replace(claim)
+        os.rename(entry, claim, src_dir_fd=sub_fd, dst_dir_fd=root_fd)
     except OSError as exc:
         preserved = {}
         try:
-            current = claim.lstat()
+            current = os.stat(claim, dir_fd=root_fd, follow_symlinks=False)
             if (current.st_dev, current.st_ino) == reservation_identity:
-                claim.unlink()  # only our still-empty reservation
+                os.unlink(claim, dir_fd=root_fd)  # only our still-empty reservation
             else:
-                preserved = _preserve_claim(claim, path)
+                preserved = _preserve_claim(root_fd, sub_fd, claim, entry)
         except FileNotFoundError:
             pass
         except OSError:
-            preserved = {"retained_at": str(claim)}
+            preserved = {"retained_at": _claim_path(root_fd, claim)}
         return HTTPStatus.INTERNAL_SERVER_ERROR, {
             "ok": False, "detail": str(exc), **preserved,
         }
     try:
-        claimed_digest = _sha(_read_regular(claim))
+        claimed_digest = _sha(_read_regular(claim, dir_fd=root_fd))
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {
-            "ok": False, "detail": str(exc), **_preserve_claim(claim, path),
+            "ok": False, "detail": str(exc), **_preserve_claim(root_fd, sub_fd, claim, entry),
         }
     if claimed_digest != declared_sha.lower():
         return HTTPStatus.UNPROCESSABLE_ENTITY, {
@@ -286,12 +298,12 @@ def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict
             "detail": "inbox entry changed during confirmation; not deleting",
             "expected": claimed_digest,
             "received": declared_sha.lower(),
-            **_preserve_claim(claim, path),
+            **_preserve_claim(root_fd, sub_fd, claim, entry),
         }
     try:
-        claim.unlink()
+        os.unlink(claim, dir_fd=root_fd)
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {
-            "ok": False, "detail": str(exc), **_preserve_claim(claim, path),
+            "ok": False, "detail": str(exc), **_preserve_claim(root_fd, sub_fd, claim, entry),
         }
     return HTTPStatus.OK, {"ok": True, "name": name, "deleted": True, "at": utc_ts()}
