@@ -570,10 +570,12 @@ watchdog is scheduled by `BootReceiver`; no Magisk boot wrapper is required.
 
 The desktop already runs `sinnix-capture-clipboard` and `sinnix-capture-primary`
 (CLIPBOARD and PRIMARY, respectively). Phone continuity feeds those existing
-lanes and the events plane rather than opening a second writer to the lake --
-see sinnix-uyvt.5 for the sizing decision (KDE Connect evaluated and rejected;
-a bespoke tailnet-only path chosen instead, to avoid opening LAN ports
-1714-1764).
+lanes and the events plane rather than opening a second writer to the lake.
+The current implementation uses a bespoke tailnet path. Its ownership is under
+review in `sinnix-z8iq.5`: evaluate KDE Connect for commodity continuity while
+retaining Sinnix's capture, rooted control and durable action protocols.
+`sinnix-uyvt.5` records the remaining continuity work; it does not establish a
+current decision to reject KDE Connect or authorize another clipboard writer.
 
 **Clipboard, desktop -> phone: live.** `sinnix-phone clip-push` reads the
 desktop CLIPBOARD (`wl-paste`, text/\* only) and sets it on the phone via
