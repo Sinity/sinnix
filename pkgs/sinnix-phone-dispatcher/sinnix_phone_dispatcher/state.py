@@ -89,8 +89,8 @@ TOKEN_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 
 def ensure_dirs() -> None:
-    for d in (RECEIPTS_DIR, NOTIFY_DIR, DECKS_DIR, TOKENS_DIR):
-        d.mkdir(parents=True, exist_ok=True)
+    for d in (STATE_DIR, INBOX_DIR, RECEIPTS_DIR, NOTIFY_DIR, DECKS_DIR, TOKENS_DIR):
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
 
 
 def emit_receipt(

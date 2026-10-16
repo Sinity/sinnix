@@ -1,6 +1,7 @@
 """The phone inbox contract, shared by the dispatcher and the scorer."""
 
 import json
+import os
 
 from sinnix_lib import phone_inbox
 
@@ -45,3 +46,14 @@ def test_names_are_unique_within_a_second(tmp_path):
     b = phone_inbox.emit_receipt(tmp_path, "k", "t", "b", None)
     assert a != b
     assert len(list(tmp_path.iterdir())) == 2
+
+
+def test_new_message_directory_is_private_under_permissive_umask(tmp_path):
+    previous = os.umask(0o022)
+    try:
+        path = phone_inbox.emit_notify(tmp_path / 'new-inbox', 'Fixture', 'Unchanged')
+    finally:
+        os.umask(previous)
+    assert path.parent.stat().st_mode & 0o777 == 0o700
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert json.loads(path.read_text())['body'] == 'Unchanged'

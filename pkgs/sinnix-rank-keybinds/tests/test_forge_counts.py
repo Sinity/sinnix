@@ -132,3 +132,17 @@ def test_failed_typing_publication_preserves_the_previous_profile(forge, tmp_pat
     with pytest.raises(OSError):
         forge.cmd_typing(SimpleNamespace(days=1, max_lines=1000))
     assert dest.read_bytes() == before
+
+
+def test_personalized_deck_is_private_and_unchanged(forge, tmp_path, monkeypatch):
+    directory = tmp_path / 'private-decks'
+    monkeypatch.setattr(forge, 'DECKS_DIR', directory)
+    payload = {'id': 'fixture', 'trials': [{'stimulus': 'synthetic input'}]}
+    previous = os.umask(0o022)
+    try:
+        path = forge.write_deck(payload)
+    finally:
+        os.umask(previous)
+    assert directory.stat().st_mode & 0o777 == 0o700
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert json.loads(path.read_text()) == payload

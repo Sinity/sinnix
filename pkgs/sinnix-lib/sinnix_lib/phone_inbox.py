@@ -47,7 +47,7 @@ def write_message(directory: Path | str, payload: dict[str, Any]) -> Path:
     a unique sibling temporary and renames only complete, durable bytes.
     """
     d = Path(directory)
-    d.mkdir(parents=True, exist_ok=True)
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
     target = d / message_name()
     atomic_publish(
         target,

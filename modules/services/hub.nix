@@ -90,7 +90,8 @@ let
   # device telemetry's subject root, not this module's own reportsDir/
   # feedbackDir -- see modules/foundation.nix.
   phoneLaneRoot = "${config.sinnix.paths.devicesRoot}/shared";
-  phoneAmbientProgressPath = "${config.sinnix.paths.stateRoot}/sinnix-phone/ambient-progress";
+  phoneStateRoot = "${config.sinnix.paths.stateRoot}/sinnix-phone";
+  phoneAmbientProgressPath = "${phoneStateRoot}/ambient-progress";
   phoneStreamPort = helpers.data.ports.phoneStream;
 in
 mkServiceModule {
@@ -579,12 +580,12 @@ mkServiceModule {
         # no-op. On the NVMe volume rather than the wear-limited root, and
         # under /realm/state because losing the token set would let an
         # already-executed intent run a second time after a reboot.
-        "d ${config.sinnix.paths.stateRoot}/sinnix-phone 0755 ${userName} users -"
-        "d /realm/state/sinnix-phone/inbox 0755 ${userName} users -"
-        "d /realm/state/sinnix-phone/inbox/receipts 0755 ${userName} users -"
-        "d /realm/state/sinnix-phone/inbox/notify 0755 ${userName} users -"
-        "d /realm/state/sinnix-phone/inbox/decks 0755 ${userName} users -"
-        "d /realm/state/sinnix-phone/tokens 0755 ${userName} users -"
+        "d ${phoneStateRoot} 0700 ${userName} users -"
+        "d ${phoneStateRoot}/inbox 0700 ${userName} users -"
+        "d ${phoneStateRoot}/inbox/receipts 0700 ${userName} users -"
+        "d ${phoneStateRoot}/inbox/notify 0700 ${userName} users -"
+        "d ${phoneStateRoot}/inbox/decks 0700 ${userName} users -"
+        "d ${phoneStateRoot}/tokens 0700 ${userName} users -"
       ];
 
       environment.systemPackages = [
@@ -722,6 +723,7 @@ mkServiceModule {
             # to inherits.
             Environment = [
               "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
+              "SINNIX_PHONE_STATE_DIR=${phoneStateRoot}"
               "SINNIX_PHONE_LAKE=${phoneLaneRoot}/phone"
               "SINNIX_PHONE_AMBIENT_PROGRESS_MARKER=${phoneAmbientProgressPath}"
               "SINNIX_PHONE_CAMERA_DIR=${config.sinnix.paths.photosRoot}/phone-dispatcher/DCIM"

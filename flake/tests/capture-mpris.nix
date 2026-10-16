@@ -20,6 +20,9 @@
             sinnix.services.xiaomi-witness.enable = true;
             sinnix.services.video-resolve.enable = true;
             sinnix.services.stt.enable = true;
+            sinnix.services.hub.enable = true;
+            sinnix.services.tailscale.enable = true;
+            sinnix.services.ops-reducer.enable = true;
           }
         ];
         assertions = config: [
@@ -82,6 +85,12 @@
                   config.sinnix.paths.capturePaths.transcripts
                   "${config.sinnix.paths.machineRoot}/netflow"
                   "/realm/health/xiaomi-cloud"
+                  "${config.sinnix.paths.stateRoot}/sinnix-phone"
+                  "${config.sinnix.paths.stateRoot}/sinnix-phone/inbox"
+                  "${config.sinnix.paths.stateRoot}/sinnix-phone/inbox/receipts"
+                  "${config.sinnix.paths.stateRoot}/sinnix-phone/inbox/notify"
+                  "${config.sinnix.paths.stateRoot}/sinnix-phone/inbox/decks"
+                  "${config.sinnix.paths.stateRoot}/sinnix-phone/tokens"
                 ];
             message = "Private capture entrances must be owner-only.";
           }

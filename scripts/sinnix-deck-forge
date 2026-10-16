@@ -68,13 +68,13 @@ def write_deck(deck: dict, *, dry_run: bool = False) -> Path | None:
     if dry_run:
         print(json.dumps(deck, ensure_ascii=False, indent=2))
         return None
-    DECKS_DIR.mkdir(parents=True, exist_ok=True)
+    DECKS_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
     dest = DECKS_DIR / f"{deck['id']}.json"
     atomic_publish(
         dest,
         (json.dumps(deck, ensure_ascii=False, indent=2) + "\n").encode(),
         fsync=True,
-        mode=0o644,
+        mode=0o600,
     )
     return dest
 
@@ -683,6 +683,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    os.umask(0o077)
     args = build_parser().parse_args(argv)
     return args.func(args)
 
