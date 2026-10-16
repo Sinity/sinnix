@@ -15,7 +15,17 @@
 // sid=miothealth realm, the CN Mi Health app), which is why the browser
 // route is the primary one, not a fallback.
 
-import { MiHealthClient, XiaomiAuth } from "./upstream/src/xiaomi/client.ts";
+// Handle informational/invalid requests before importing the credential client.
+const args = process.argv.slice(2);
+if (args.length > 0) {
+  const help = args.length === 1 && (args[0] === "--help" || args[0] === "-h");
+  const usage = "Usage: sinnix xiaomi-witness-login\n\nStart interactive Xiaomi login. Takes no arguments.";
+  if (help) console.log(usage);
+  else console.error(usage);
+  process.exit(help ? 0 : 2);
+}
+
+const { MiHealthClient, XiaomiAuth } = await import("./upstream/src/xiaomi/client.ts");
 
 process.umask(0o077);
 

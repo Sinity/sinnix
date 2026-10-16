@@ -12,6 +12,7 @@
   fetchFromGitHub,
   bun,
   makeWrapper,
+  python3,
 }:
 
 stdenvNoCC.mkDerivation {
@@ -28,6 +29,16 @@ stdenvNoCC.mkDerivation {
   };
 
   nativeBuildInputs = [ makeWrapper ];
+  nativeCheckInputs = [
+    bun
+    python3
+  ];
+  doCheck = true;
+  checkPhase = ''
+    runHook preCheck
+    BUN=${lib.getExe bun} ${lib.getExe python3} test_cli.py
+    runHook postCheck
+  '';
 
   installPhase = ''
     runHook preInstall

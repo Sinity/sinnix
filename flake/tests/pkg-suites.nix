@@ -116,6 +116,7 @@
         # (subprocess.TimeoutExpired; 1 failed, 30 passed); reverted after
         # confirming red.
         sinnix-lib-suite = sinnixScriptRegistry.packageSet.sinnix-lib;
+        xiaomi-witness-cli = sinnixScriptRegistry.packageSet.sinnix-xiaomi-witness;
 
         # The selection capture both Wayland lanes run. Provably fails when:
         # the MIME preference order is permuted (an adjacent swap fails
