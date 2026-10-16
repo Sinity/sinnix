@@ -11,7 +11,8 @@
 #                       decompose into SAE features (Gemma Scope) on small models
 #                       (GPT-2 / Pythia / Gemma-2-2B) that fit 10 GB easily.
 #
-#   sinnix-steer        builds a control / steering vector with repeng from a
+#   sinnix-control-vector
+#                       builds a control / steering vector with repeng from a
 #                       contrastive dataset and exports it as a GGUF, ready for
 #                       llama.cpp `--control-vector`. This is the
 #                       DIY-abliteration path: compute the refusal direction
@@ -62,7 +63,7 @@ mkFeatureModule {
 
       # repeng driver: read a JSON dataset of {positive, negative} string pairs,
       # train a control vector against a HF base model, export GGUF.
-      steerDriver = pkgs.writeText "sinnix-steer-driver.py" ''
+      controlVectorDriver = pkgs.writeText "sinnix-control-vector-driver.py" ''
         import argparse, json, torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
         from repeng import ControlVector, ControlModel, DatasetEntry
@@ -108,8 +109,8 @@ mkFeatureModule {
         '';
       };
 
-      steer = pkgs.writeShellApplication {
-        name = "sinnix-steer";
+      controlVector = pkgs.writeShellApplication {
+        name = "sinnix-control-vector";
         runtimeInputs = [
           pkgs.uv
           pkgs.coreutils
@@ -117,9 +118,9 @@ mkFeatureModule {
         text = ''
           if [ "$#" -lt 3 ]; then
             cat <<'USAGE'
-          sinnix-steer — build a control/steering (or abliteration) vector as GGUF.
+          sinnix-control-vector — build a control/steering (or abliteration) vector as GGUF.
 
-            sinnix-steer <hf-model-id> <dataset.json> <out-name.gguf> [start:stop]
+            sinnix-control-vector <hf-model-id> <dataset.json> <out-name.gguf> [start:stop]
 
           dataset.json: [{"positive": "...", "negative": "..."}, ...]
             For abliteration: positive = compliant continuations, negative =
@@ -138,7 +139,7 @@ mkFeatureModule {
           export UV_CACHE_DIR="${interpDir}/uv-cache"
           export UV_TORCH_BACKEND="''${UV_TORCH_BACKEND:-auto}"
           exec uv run --with repeng --with torch --with transformers --with accelerate \
-            python ${steerDriver} --model "$model" --dataset "$dataset" \
+            python ${controlVectorDriver} --model "$model" --dataset "$dataset" \
             --out "$outdir/$outname" --layers "$layers"
         '';
       };
@@ -148,7 +149,7 @@ mkFeatureModule {
         pkgs.uv
         pkgs.marimo
         interpLab
-        steer
+        controlVector
       ];
 
       systemd.tmpfiles.rules = [
