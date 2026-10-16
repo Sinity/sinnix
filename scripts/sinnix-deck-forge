@@ -30,10 +30,12 @@ from __future__ import annotations
 import argparse
 import collections
 import datetime as dt
+from fnmatch import fnmatchcase
 import json
 import os
 import random
 import sqlite3
+import stat
 import sys
 from contextlib import closing
 from pathlib import Path
@@ -128,21 +130,26 @@ def _is_flag(tok: str) -> bool:
     return tok.startswith("-") and len(tok) > 1
 
 
-def atuin_commands(limit: int = 40000) -> list[str]:
-    if not ATUIN_DB.is_file():
-        return []
+def _atuin_rows(query: str, parameters: tuple = ()) -> list[tuple] | None:
     try:
         with closing(
             sqlite3.connect(ATUIN_DB.resolve().as_uri() + "?mode=ro", uri=True)
         ) as con:
-            rows = con.execute(
-                "select command from history where deleted_at is null "
-                "order by timestamp desc limit ?",
-                (limit,),
-            ).fetchall()
-    except sqlite3.Error as exc:
+            con.execute("PRAGMA temp_store=FILE")
+            rows = con.execute(query, parameters).fetchall()
+    except (OSError, sqlite3.Error) as exc:
         print(f"forge: atuin unreadable ({exc})", file=sys.stderr)
-        return []
+        return None
+    return rows
+
+
+def atuin_commands(limit: int = 40000) -> list[str] | None:
+    rows = _atuin_rows(
+        "select command from history where deleted_at is null "
+        "order by timestamp desc limit ?", (limit,),
+    )
+    if rows is None:
+        return None
     return [r[0] for r in rows if r and r[0]]
 
 
@@ -159,6 +166,8 @@ def build_shell_deck(n_trials: int, rng: random.Random) -> dict | None:
     touchscreen; naming a flag is the same task on any keyboard.
     """
     history = atuin_commands()
+    if history is None:
+        return None
     if len(history) < 500:
         print(f"forge: only {len(history)} shell commands; skipping the shell deck", file=sys.stderr)
         return None
@@ -264,12 +273,44 @@ def build_shell_deck(n_trials: int, rng: random.Random) -> dict | None:
 # --------------------------------------------------------- Fermi estimation
 
 
-def _count_lines(path: Path, limit: int = 5_000_000) -> int:
+def _count_lines(path: Path, limit: int = 5_000_000) -> int | None:
     try:
         with path.open("rb") as fh:
-            return sum(1 for _ in zip(range(limit), fh, strict=False))
-    except OSError:
-        return 0
+            count = 0
+            for count, _ in enumerate(fh, 1):
+                if count > limit:
+                    print(f"forge: line count exceeds {limit}: {str(path)!r}", file=sys.stderr)
+                    return None
+            return count
+    except OSError as exc:
+        print(f"forge: cannot count {str(path)!r} ({exc})", file=sys.stderr)
+        return None
+
+
+def _source_files(root: Path, pattern: str, latest: int | None = None) -> list[Path] | None:
+    try:
+        paths = [path for path in root.iterdir() if fnmatchcase(path.name, pattern)]
+        if latest is not None:
+            paths = sorted(paths, reverse=True)[:latest]
+        for path in paths:
+            if not stat.S_ISREG(path.stat().st_mode):
+                raise OSError(f"expected a regular capture file: {str(path)!r}")
+        return paths
+    except OSError as exc:
+        print(f"forge: source unavailable {str(root)!r} ({exc})", file=sys.stderr)
+        return None
+
+
+def _line_total(paths: list[Path] | None) -> int | None:
+    if paths is None:
+        return None
+    total = 0
+    for path in paths:
+        count = _count_lines(path)
+        if count is None:
+            return None
+        total += count
+    return total
 
 
 def lake_facts() -> list[tuple[str, float, str]]:
@@ -281,31 +322,33 @@ def lake_facts() -> list[tuple[str, float, str]]:
     """
     facts: list[tuple[str, float, str]] = []
 
-    cmds = atuin_commands(limit=200000)
-    if cmds:
-        facts.append(("shell commands in your recorded history", len(cmds), "commands"))
-        distinct = len(set(cmds))
+    counts = _atuin_rows(
+        "select count(*), count(distinct command collate binary) from history "
+        "where deleted_at is null and command is not null and command != ''"
+    )
+    if counts and counts[0][0]:
+        total, distinct = counts[0]
+        facts.append(("shell commands in your recorded history", total, "commands"))
         facts.append(("distinct shell command lines you have run", distinct, "commands"))
 
     ambient = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/device/shared/phone")) / "ambient"
-    if ambient.is_dir():
-        n = sum(1 for p in ambient.iterdir() if p.suffix == ".m4a")
+    ambient_files = _source_files(ambient, "*.m4a")
+    if ambient_files is not None:
+        n = len(ambient_files)
         if n:
             facts.append(("ambient .m4a files retained in the host lake", n, "chunks"))
 
     levels = Path(os.environ.get("SINNIX_PHONE_LAKE", "/realm/device/shared/phone")) / "ambient-levels.jsonl"
-    if levels.is_file():
-        n = _count_lines(levels)
-        if n:
-            facts.append(("inspection records retained in the ambient levels ledger", n, "records"))
+    n = _count_lines(levels)
+    if n:
+        facts.append(("lines retained in the ambient levels ledger", n, "lines"))
 
     transcripts = capture_lane_path(ACTIVITY, "transcripts")
-    if transcripts.is_dir():
-        n = sum(_count_lines(p) for p in transcripts.glob("2*.jsonl"))
-        if n:
-            facts.append(("audio files sinnix has transcribed", n, "files"))
+    n = _line_total(_source_files(transcripts, "2*.jsonl"))
+    if n:
+        facts.append(("lines retained in transcript ledgers", n, "lines"))
 
-    for day in sorted(KEYLOG.glob("*.jsonl"), reverse=True)[:1]:
+    for day in _source_files(KEYLOG, "*.jsonl", latest=1) or []:
         n = _count_lines(day)
         if n:
             facts.append((f"input events captured on {day.stem}", n, "events"))
@@ -395,9 +438,7 @@ def analyse_typing(days: int, max_lines: int) -> dict | None:
     the operator types most, which is not the same as the letters they get
     wrong.
     """
-    if not KEYLOG.is_dir():
-        return None
-    files = sorted(KEYLOG.glob("*.jsonl"), reverse=True)[:days]
+    files = _source_files(KEYLOG, "*.jsonl", latest=days)
     if not files:
         return None
 
@@ -410,7 +451,7 @@ def analyse_typing(days: int, max_lines: int) -> dict | None:
         try:
             with path.open(errors="replace") as fh:
                 for i, line in enumerate(fh):
-                    if i > max_lines:
+                    if i >= max_lines:
                         break
                     try:
                         o = json.loads(line)
@@ -434,8 +475,9 @@ def analyse_typing(days: int, max_lines: int) -> dict | None:
                             occur["".join(prev)] += 1
                     else:
                         prev.clear()
-        except OSError:
-            continue
+        except OSError as exc:
+            print(f"forge: typing source unavailable {str(path)!r} ({exc})", file=sys.stderr)
+            return None
 
     if presses < 1000:
         return None
@@ -574,7 +616,7 @@ def cmd_typing(args: argparse.Namespace) -> int:
     out_dir = Path(os.environ.get("SINNIX_TYPING_OUTPUT", "/realm/activity/desktop/keyboard/analysis"))
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / f"{dt.datetime.now(dt.timezone.utc).date().isoformat()}.json"
-    dest.write_text(json.dumps(profile, indent=2) + "\n", encoding="utf-8")
+    atomic_publish(dest, (json.dumps(profile, indent=2) + "\n").encode(), fsync=True, mode=0o600)
     top = profile["weakest"][:5]
     print(f"forge: typing profile -> {dest}")
     print(
