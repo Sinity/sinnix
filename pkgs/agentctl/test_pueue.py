@@ -798,3 +798,46 @@ def test_cancelling_a_task_reaps_every_descendant_it_started(
     assert pueue.wait(unrelated, timeout_seconds=60).succeeded, (
         "cancelling one task must not disturb another"
     )
+
+
+def test_live_tasks_use_one_filtered_snapshot(monkeypatch):
+    rows = {
+        str(i): {"id": i, "status": {state: {}}, "group": "agent"}
+        for i, state in enumerate(("Stashed", "Paused", "Queued", "Running"))
+    }
+    groups = {"agent": {"status": "Paused", "parallel_tasks": 2}}
+    calls = []
+
+    def run(arguments):
+        calls.append(arguments)
+        assert arguments == ["status", "--json", "status!=success", "status!=failed"]
+        return json.dumps({"tasks": rows, "groups": groups})
+
+    monkeypatch.setattr(pueue, "_run", run)
+    result = pueue.live()
+    assert len(calls) == 1
+    assert {row.status for row in result.tasks.values()} == {"Stashed", "Paused", "Queued", "Running"}
+    assert result.groups == groups
+
+
+def test_live_native_filter_keeps_stashes_and_excludes_all_terminal_results(live_pueue, tmp_path):
+    def add(name, command, **kwargs):
+        return pueue.add(group="default", label=f"fixture:{name}", command=command, working_directory=tmp_path, **kwargs)
+
+    success = add("success", ("true",))
+    failure = add("failure", ("sh", "-c", "exit 3"))
+    assert pueue.wait(success, timeout_seconds=5).succeeded
+    assert pueue.wait(failure, timeout_seconds=5).result == "Failed"
+    killed = add("killed", ("sleep", "30"))
+    deadline = time.monotonic() + 5
+    while pueue.task(killed).status != "Running":
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    pueue.kill(killed)
+    assert pueue.wait(killed, timeout_seconds=5).result == "Killed"
+    stashed = add("stashed", ("true",), stashed=True)
+    result = pueue.live()
+    assert set(result.tasks) == {stashed}
+    assert result.tasks[stashed].status == "Stashed"
+    assert "default" in result.groups
+    assert all(pueue.task(task_id).terminal for task_id in (success, failure, killed))

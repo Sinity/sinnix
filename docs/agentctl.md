@@ -250,14 +250,16 @@ check runs under the admission lock on every enqueue into the pool and on
 every `job wait` and `job get` of a queued task in it.
 
 `launch.queue_state` reports a group's occupancy from the unfinished tasks
-alone (filtered `pueue status` requests, never the full history): its width
+alone (one filtered `pueue status` snapshot): its width
 and state, each running task with its age and whether it is `promoted`, the
 queued tasks with their wait, and the held count. `launch.job_queue` adds one
 job's position, the jobs ahead of it, and the running jobs that hold the
 slots it needs. A single-task read (`pueue.task`) uses `pueue log --json
 --lines 0 <id>`, and a launch reference is found through a `command%=`
-filter, so a job read costs one small response however long the queue's
-history grows.
+filter. Admission and cross-pool hold release also parse only unfinished
+rows. Upstream Pueue still transfers the full state to its CLI for status
+queries before filtering JSON; the reduction bounds AgentCTL's parsing, not
+that upstream transfer. Direct task-id reads use the bounded log route.
 
 When the admission pass reports `hold` or `clear`, the recurring backpressure
 command releases cross-pool holds only when the launch reference and both

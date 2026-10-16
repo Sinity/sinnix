@@ -108,11 +108,10 @@ class Task:
 
 @dataclass(frozen=True)
 class Status:
-    """One complete response from ``pueue status --json``.
+    """One coherent Pueue status response, with caller-selected task coverage.
 
-    Pueue currently publishes its full task history for this request.  Callers
-    that present it to people must reduce it before returning it, but the
-    groups and task states still come from this one coherent queue read.
+    The CLI can filter its JSON output, but the upstream daemon still sends
+    its full state to the CLI. Groups and tasks here share one snapshot.
     """
 
     tasks: dict[int, Task]
@@ -243,8 +242,8 @@ def add(
         raise PueueError(f"pueue add did not print a task id: {printed!r}") from error
 
 
-def status() -> Status:
-    document = _decode(_run(["status", "--json"]), "status")
+def _status(query: Sequence[str]) -> Status:
+    document = _decode(_run(["status", "--json", *query]), "status")
     if not isinstance(document, Mapping):
         raise PueueError("pueue status did not print an object")
     entries = document.get("tasks")
@@ -260,6 +259,11 @@ def status() -> Status:
         if isinstance(detail, Mapping)
     }
     return Status({task.task_id: task for task in parsed}, groups)
+
+
+def status() -> Status:
+    """The explicit full-history status read."""
+    return _status(())
 
 
 def tasks() -> dict[int, Task]:
@@ -298,8 +302,8 @@ def task(task_id: int) -> Task | None:
 def tasks_by_command(fragment: str) -> dict[int, Task]:
     """Tasks whose command contains ``fragment``: a filter pueue applies itself.
 
-    Only the matching rows cross the socket, so looking a launch up by its
-    reference costs one small response, not the full history.
+    Only matching rows reach this Python process. Upstream Pueue still
+    transfers its full state to the CLI before filtering its JSON output.
     """
     document = _decode(_run(["status", "--json", f"command%={fragment}"]), "status")
     entries = document.get("tasks") if isinstance(document, Mapping) else None
@@ -309,39 +313,14 @@ def tasks_by_command(fragment: str) -> dict[int, Task]:
     return {task.task_id: task for task in parsed}
 
 
-# The unfinished states `pueue status` filters by; `Done` is everything else.
-# Read in the order tasks move through them (a stash is enqueued, a queued
-# task starts), so a task that moves between two reads is seen in its later
-# state rather than missed.
-LIVE_STATUSES = ("stashed", "paused", "queued", "running")
-
-
 def live() -> Status:
-    """Every unfinished task and every group, without the terminal history.
+    """Every unfinished task and group from one filtered status snapshot.
 
-    One filtered status request per unfinished state; a later read of a task
-    replaces an earlier one. Each answer carries the groups too; the last one
-    read is returned with the tasks.
+    Success and failure cover terminal outcomes, including killed tasks.
+    Keeping all other states in one response also avoids missing a task that
+    changes between running and paused during separate per-state reads.
     """
-    found: dict[int, Task] = {}
-    groups: dict[str, dict[str, Any]] = {}
-    for state in LIVE_STATUSES:
-        document = _decode(_run(["status", "--json", f"status={state}"]), "status")
-        if not isinstance(document, Mapping):
-            raise PueueError("pueue status did not print an object")
-        entries = document.get("tasks")
-        raw_groups = document.get("groups")
-        if not isinstance(entries, Mapping) or not isinstance(raw_groups, Mapping):
-            raise PueueError("pueue status published no tasks or groups")
-        for entry in entries.values():
-            parsed = Task.from_entry(entry)
-            found[parsed.task_id] = parsed
-        groups = {
-            str(name): dict(detail)
-            for name, detail in raw_groups.items()
-            if isinstance(detail, Mapping)
-        }
-    return Status(found, groups)
+    return _status(("status!=success", "status!=failed"))
 
 
 def start(task_id: int) -> None:

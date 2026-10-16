@@ -691,7 +691,7 @@ def _admission_hold(config: Config, group: str, *, label: str) -> dict[str, Any]
         raise JobError(
             f"{label} runs in pool {group!r}, which excludes its launcher {launcher!r}"
         )
-    blocking = pools.blocking_tasks(config.pools, group, pueue.tasks())
+    blocking = pools.blocking_tasks(config.pools, group, pueue.live().tasks)
     if not blocking:
         return None
     return {
@@ -746,7 +746,7 @@ def release_holds(config: Config) -> dict[str, list[dict[str, Any]]]:
     """Release only AgentCTL-created cross-pool holds whose partners drained."""
     try:
         with admission_lock(config):
-            tasks = pueue.tasks()
+            tasks = pueue.live().tasks
             held = {
                 task.task_id: hold
                 for task in tasks.values()
