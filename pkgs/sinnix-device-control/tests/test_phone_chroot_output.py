@@ -27,10 +27,9 @@ def test_chroot_output_survives_scratch_cleanup(tmp_path, relative):
     shell = r"""
 set -euo pipefail
 chroot_module_source() { printf '%s\n' "$MODULE"; }
-mktemp() { command mktemp -d "$SCRATCH/build.XXXXXX"; }
 sudo() {
   case "$1" in
-    debootstrap) return 0 ;;
+    debootstrap) [[ "$6" == "$SCRATCH/"* ]] ;;
     tar|rm) local program="$1"; shift; command "$program" "$@" ;;
     *) return 99 ;;
   esac
@@ -51,6 +50,7 @@ zip() { printf 'synthetic archive\n' > "$3"; }
             "PATH": os.environ["PATH"],
             "MODULE": str(module),
             "SCRATCH": str(scratch),
+            "TMPDIR": str(scratch),
         },
         capture_output=True,
         text=True,

@@ -1189,7 +1189,7 @@ chroot_build() (
   # The archive command runs inside scratch; resolve the caller's destination
   # before changing directories so cleanup cannot discard a relative output.
   output=$(realpath -m -- "$output")
-  work=$(mktemp -d /realm/tmp/work/sinnix-debian-chroot.XXXXXX)
+  work=$(mktemp -d "${TMPDIR:-/realm/tmp/work}/sinnix-debian-chroot.XXXXXX")
   cleanup_chroot_build() {
     if ! sudo rm -rf -- "$work"; then
       printf 'chroot-build: could not remove temporary workspace %s\n' "$work" >&2
