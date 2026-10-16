@@ -753,3 +753,77 @@ def test_invalid_check_budget_refused_before_source_access(tmp_path, budget, ver
     assert result.returncode == 2
     assert "--check-budget-seconds must be finite and nonnegative" in result.stderr
     assert not (tmp_path / "output.zst").exists()
+
+
+@pytest.mark.parametrize("failure", [None, "frame", "sqlite", "limit"])
+def test_compressed_restore_checks_real_frame_and_sqlite(tmp_path, failure):
+    source = tmp_path / "source.sqlite"
+    with sqlite3.connect(source) as connection:
+        connection.execute("CREATE TABLE sample(value TEXT)")
+        connection.execute("INSERT INTO sample VALUES ('retained payload')")
+    if failure == "sqlite":
+        source.write_bytes(b"not a SQLite database" * 100)
+    before = source.read_bytes()
+    archive = tmp_path / "source.zst"
+    subprocess.run(["zstd", "-q", str(source), "-o", str(archive)], check=True)
+    if failure == "frame":
+        data = bytearray(archive.read_bytes())
+        data[-1] ^= 1
+        archive.write_bytes(data)
+    archive_before = archive.read_bytes()
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    result = subprocess.run(["python3", str(SCRIPT), str(archive), "--immutable-source",
+        "--verify-only", "--compressed-source", "--max-restore-bytes",
+        str(1 if failure == "limit" else 1024 * 1024), "--check-budget-seconds", "10"],
+        env={**os.environ, "TMPDIR": str(scratch)}, capture_output=True, text=True, timeout=10)
+    assert source.read_bytes() == before and archive.read_bytes() == archive_before
+    assert list(scratch.iterdir()) == []
+    if failure is None:
+        import hashlib
+        assert result.returncode == 0, result.stderr
+        assert "structural_check=ok" in result.stdout
+        assert f"archive_sha256={hashlib.sha256(archive_before).hexdigest()}" in result.stdout
+        assert f"restored_bytes={len(before)}" in result.stdout
+        assert f"restored_sha256={hashlib.sha256(before).hexdigest()}" in result.stdout
+    else:
+        assert result.returncode != 0
+        assert "sqlite-backup restore receipt:" not in result.stdout
+
+
+@pytest.mark.parametrize("stop", ["cancel", "deadline"])
+def test_compressed_restore_stops_its_decoder(tmp_path, stop):
+    archive = tmp_path / "retained.zst"
+    archive.write_bytes(b"unchanged archive")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    pidfile = tmp_path / "decoder.pid"
+    decoder = tmp_path / "zstd"
+    decoder.write_text("#!/usr/bin/env python3\nimport os, time\nfrom pathlib import Path\n"
+        + f"Path({str(pidfile)!r}).write_text(str(os.getpid()))\n"
+        + "os.write(1, b'x')\ntime.sleep(30)\n")
+    decoder.chmod(0o700)
+    process = subprocess.Popen(["python3", str(SCRIPT), str(archive), "--immutable-source",
+        "--verify-only", "--compressed-source", "--max-restore-bytes", "1048576",
+        "--acquire-budget-seconds", "0.5" if stop == "deadline" else "10",
+        "--check-budget-seconds", "10"],
+        env={**os.environ, "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
+             "TMPDIR": str(scratch)}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        until = time.monotonic() + 5
+        while not pidfile.exists() and process.poll() is None and time.monotonic() < until:
+            time.sleep(0.01)
+        assert pidfile.exists()
+        if stop == "cancel":
+            process.send_signal(signal.SIGTERM)
+        stdout, stderr = process.communicate(timeout=5)
+        assert process.returncode == (143 if stop == "cancel" else 1), stderr
+        with pytest.raises(ProcessLookupError):
+            os.kill(int(pidfile.read_text()), 0)
+        assert list(scratch.iterdir()) == []
+        assert archive.read_bytes() == b"unchanged archive"
+        assert "sqlite-backup restore receipt:" not in stdout
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.communicate(timeout=5)

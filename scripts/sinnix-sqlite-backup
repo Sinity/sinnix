@@ -6,17 +6,20 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
-from contextlib import contextmanager
 import os
 import select
+import shutil
 import signal
 import sqlite3
+import stat
 import subprocess
 import sys
-import threading
 import tempfile
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
@@ -327,6 +330,66 @@ def verify_immutable_source(source_path: Path, check_budget_seconds: float) -> N
         source.close()
 
 
+def verify_compressed_source(source_path: Path, max_bytes: int, acquire_budget: float, check_budget: float) -> None:
+    """Restore an exact retained frame privately, then check its SQLite pages."""
+    source_path = source_path.resolve(strict=True)
+    descriptor = os.open(source_path, os.O_RDONLY | os.O_NONBLOCK)
+    with os.fdopen(descriptor, "rb") as archive:
+        before = os.fstat(archive.fileno())
+        if not stat.S_ISREG(before.st_mode):
+            raise RuntimeError("compressed source must be a regular file")
+        if shutil.disk_usage(tempfile.gettempdir()).free < max_bytes + 2 * 1024**3:
+            raise RuntimeError("insufficient scratch space for bounded restore and reserve")
+        deadline = time.monotonic() + acquire_budget
+        digest = hashlib.sha256()
+        while block := archive.read(1024 * 1024):
+            if cancel_requested:
+                raise BackupCancelled
+            if time.monotonic() >= deadline:
+                raise RuntimeError("compressed restore exceeded its acquisition budget")
+            digest.update(block)
+        archive.seek(0)
+        with tempfile.TemporaryDirectory(prefix="sqlite-restore-") as scratch:
+            restored = Path(scratch) / "restored.sqlite"
+            process = subprocess.Popen(["zstd", "-q", "-d", "-c"], stdin=archive, stdout=subprocess.PIPE)
+            count = 0
+            restored_digest = hashlib.sha256()
+            try:
+                with restored.open("xb") as output:
+                    os.chmod(restored, 0o600)
+                    while True:
+                        if cancel_requested:
+                            raise BackupCancelled
+                        if time.monotonic() >= deadline:
+                            raise RuntimeError("compressed restore exceeded its acquisition budget")
+                        readable, _, _ = select.select([process.stdout], [], [], CHECK_POLL_SECONDS)
+                        if not readable:
+                            continue
+                        block = os.read(process.stdout.fileno(), 1024 * 1024)
+                        if not block:
+                            break
+                        count += len(block)
+                        if count > max_bytes:
+                            raise RuntimeError("compressed restore exceeded its byte limit")
+                        output.write(block)
+                        restored_digest.update(block)
+                if process.wait() != 0:
+                    raise RuntimeError("compressed restore failed frame validation")
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                    process.wait()
+                process.stdout.close()
+            verify_immutable_source(restored, check_budget)
+            after = os.fstat(archive.fileno())
+            current = source_path.stat()
+            if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
+                raise RuntimeError("compressed source path changed during restore")
+            if (before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+                raise RuntimeError("compressed source changed during restore")
+            print(f"sqlite-backup restore receipt: archive={source_path} archive_sha256={digest.hexdigest()} archive_bytes={before.st_size} restored_bytes={count} restored_sha256={restored_digest.hexdigest()} frame_check=ok structural_check=ok", flush=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path)
@@ -362,11 +425,18 @@ def main() -> int:
         default="structural",
         help="structural page walk or a qualified, bounded schema/header check",
     )
+    parser.add_argument("--compressed-source", action="store_true", help="restore a retained zstd frame before verify-only structural checking")
+    parser.add_argument("--max-restore-bytes", type=int, default=0, help="required positive restored-byte ceiling for compressed sources")
     args = parser.parse_args()
     if not math.isfinite(args.acquire_budget_seconds) or args.acquire_budget_seconds <= 0:
         parser.error("--acquire-budget-seconds must be positive")
     if not math.isfinite(args.check_budget_seconds) or args.check_budget_seconds < 0:
         parser.error("--check-budget-seconds must be finite and nonnegative")
+    if args.compressed_source:
+        if not args.verify_only or args.max_restore_bytes <= 0:
+            parser.error("--compressed-source requires --verify-only and positive --max-restore-bytes")
+    elif args.max_restore_bytes:
+        parser.error("--max-restore-bytes requires --compressed-source")
     if args.verify_only:
         if not args.immutable_source or args.output is not None:
             parser.error("--verify-only requires --immutable-source and no output")
@@ -382,7 +452,9 @@ def main() -> int:
     signal.signal(signal.SIGINT, request_cancel)
     try:
         with cancellation_wakeup():
-            if args.verify_only:
+            if args.compressed_source:
+                verify_compressed_source(args.source, args.max_restore_bytes, args.acquire_budget_seconds, args.check_budget_seconds)
+            elif args.verify_only:
                 verify_immutable_source(args.source, args.check_budget_seconds)
             else:
                 backup_database(

@@ -109,6 +109,17 @@ pool = "normal"
 result = "exit"
 timeout_seconds = 1800
 
+[operations.verify_telemetry_restore]
+description = "Restore and structurally verify one retained telemetry SQLite zstd artifact"
+exec = ["sinnix", "sqlite-backup", "--immutable-source", "--verify-only", "--compressed-source", "--max-restore-bytes", "85899345920", "--acquire-budget-seconds", "3600", "--check-budget-seconds", "5400"]
+arguments = "required"
+pool = "bulk"
+result = "exit"
+cache = "none"
+scratch = "nvme"
+timeout_seconds = 9600
+admission = { memory_mib = 4096 }
+
 [operations.verify_agent_recovery]
 description = "Verify pinned CLI recovery and native versions in an isolated HOME"
 exec = ["python3", "scripts/tests/verify_agent_recovery.py"]
