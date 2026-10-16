@@ -553,8 +553,8 @@ across the last 35 days. Both managed routes hold the same exclusive state lock.
 The recovery pass preserves existing raw revisions and uses the normal
 write-on-change ledger; a response reaching the raw endpoint's record limit
 is reported as incomplete instead of replacing a day with a truncated array.
-Historical raw reads start at UTC midnight and use contiguous windows of at
-most seven days; the current day remains an observation as of the pass time.
+Raw reads start at UTC midnight and use individual UTC-day requests because
+the vendor can truncate multi-day responses below the requested record limit; the current day remains an observation as of the pass time.
 A successful recent pass does not establish older vendor coverage.
 
 **Direct Boot**: a `directBootAware` service buffers into device-protected

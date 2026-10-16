@@ -29,7 +29,7 @@ export class MiHealthClient {
   async getAggregatedData() {return [];}
   async getFitnessData(_uid, key, start, end) {
     appendFileSync(process.env.WINDOWS!, JSON.stringify({key, start, end}) + "\\n");
-    if (start % 86400 !== 0 || end - start + 1 > 7 * 86400) {
+    if (start % 86400 !== 0 || end - start + 1 > 86400) {
       throw new Error("raw query is not a bounded complete-day window");
     }
     return Array.from({length: Number(process.env.ROWS)}, (_, i) => ({time: start + i, value: "{}"}));
@@ -60,11 +60,11 @@ export class MiHealthClient {
             windows = [json.loads(line) for line in (root / f"windows-{rows}").read_text().splitlines()]
             for key in {window["key"] for window in windows}:
                 spans = [window for window in windows if window["key"] == key]
-                assert len(spans) == 6
+                assert len(spans) == 36
                 assert spans[0]["start"] == int(datetime(2026, 9, 11, tzinfo=UTC).timestamp())
                 assert spans[-1]["end"] == int(datetime(2026, 10, 16, 12, 34, 56, tzinfo=UTC).timestamp())
                 assert all(a["end"] + 1 == b["start"] for a, b in zip(spans[:-1], spans[1:], strict=True))
-            assert len([row for row in data if row["kind"].startswith("vendor_raw_")]) == 48
+            assert len([row for row in data if row["kind"].startswith("vendor_raw_")]) == 288
         else:
             assert result.returncode != 0 and receipt["failures"] == 8
             assert not any(row["kind"].startswith("vendor_raw_") for row in data)

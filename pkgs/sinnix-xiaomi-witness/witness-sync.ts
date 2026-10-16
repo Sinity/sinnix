@@ -235,7 +235,9 @@ const rawStart = Math.floor((rawEnd - WINDOW_DAYS * 86_400) / 86_400) * 86_400;
 for (const key of RAW_KEYS) {
   try {
     const byDay = new Map<string, unknown[]>();
-    const batchSeconds = WINDOW_DAYS > 7 ? 7 * 86_400 : rawEnd - rawStart + 1;
+    // The vendor can silently truncate multi-day responses below our requested limit.
+    // Read one UTC day per request for ordinary and recovery passes alike.
+    const batchSeconds = 86_400;
     for (let start = rawStart; start <= rawEnd;) {
       const end = Math.min(start + batchSeconds - 1, rawEnd);
       const items = await client.getFitnessData(uid, key, start, end, 100_000);
