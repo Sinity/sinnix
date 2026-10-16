@@ -50,6 +50,29 @@ def test_owner_stderr_remains_bounded(tmp_path, write):
     assert caught.value.code == "response_bound"
 
 
+@pytest.mark.parametrize("write", [False, True])
+@pytest.mark.parametrize("body", [
+    "print('{\"count\":' + '9'*5000 + '}')\n",
+    "sys.stdout.buffer.write(b'\\xff')\n",
+])
+def test_unusable_owner_json_is_a_typed_failure(tmp_path, write, body):
+    service, _ = beads_service(tmp_path)
+    owner_program(service, body)
+    with pytest.raises(BeadsError) as caught:
+        service._run(service.config.projects["fixture"], ["fixture"], write)
+    assert caught.value.code == "owner_failed"
+
+
+def test_undecodable_owner_query_reports_partial_coverage(tmp_path):
+    service, _ = beads_service(tmp_path)
+    owner_program(service, "print('{\"count\":' + '9'*5000 + '}')\n")
+    value = service.query(project_ids=["fixture"], view="all")
+    assert value["items"] == []
+    assert value["coverage"]["fixture"]["state"] == "partial"
+    assert value["coverage"]["fixture"]["code"] == "owner_failed"
+    assert value["totals"]["exact"] is False
+
+
 @pytest.mark.parametrize("write", [True, False])
 def test_large_owner_response_preserves_exit_failure_and_timeout(
     tmp_path, monkeypatch, write

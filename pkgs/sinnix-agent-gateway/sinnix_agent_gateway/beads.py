@@ -173,9 +173,9 @@ class BeadsService:
                     return output.read().decode("utf-8", "replace")
                 try:
                     return json.load(output)
-                except json.JSONDecodeError as exc:
+                except ValueError as exc:
                     raise BeadsError(
-                        "Beads did not return JSON", "owner_failed"
+                        "Beads response could not be decoded", "owner_failed"
                     ) from exc
             result = replace(result, stdout=output.read(self.config.max_result_bytes))
         if result.failure_class == "command_timeout":
