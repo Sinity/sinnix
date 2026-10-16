@@ -8,8 +8,8 @@ let
     IOAccounting = true;
     CPUWeight = 5;
     IOWeight = 2;
-    MemoryHigh = "22G";
-    MemoryMax = "28G";
+    MemoryHigh = "10G";
+    MemoryMax = "12G";
     ManagedOOMMemoryPressure = "kill";
     ManagedOOMMemoryPressureLimit = "50%";
     ManagedOOMMemoryPressureDurationSec = "30s";
@@ -245,10 +245,10 @@ rec {
       nix-build = {
         CPUWeight = 5;
         IOWeight = 2;
-        # Rust workspaces and NixOS rebuilds should use the workstation, while
-        # still leaving room for the desktop and always-on data services.
-        MemoryHigh = "22G";
-        MemoryMax = "28G";
+        # Daemon builds run outside the AgentCTL work budget. Bound this
+        # additional working set so concurrent jobs leave desktop headroom.
+        MemoryHigh = "10G";
+        MemoryMax = "12G";
         # PSI-scoped oomd: kill sacrificial work at cgroup granularity when
         # ITS OWN memory pressure stalls it, rather than letting global
         # earlyoom pick victims. 50%/30s (not the 10%/5s defaults) so only a

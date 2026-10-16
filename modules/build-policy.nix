@@ -50,8 +50,8 @@ in
         # The overcommit guard is nix-build.slice's memory ceiling (the daemon
         # and every build it spawns run inside it — see Slice= below), not
         # these numbers.
-        max-jobs = 4;
-        cores = 16;
+        max-jobs = 2;
+        cores = 4;
         builders-use-substitutes = true;
         keep-outputs = true;
         keep-derivations = true;
