@@ -1278,13 +1278,33 @@ def cmd_run(args: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     result = {}
     attempt = args.index_dir / "last-attempt.json"
-    if attempt.exists():
+    try:
+        attempt.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        result["last_attempt_error"] = str(exc)
+    else:
         try:
             result["last_attempt"] = json.loads(attempt.read_text())
         except (OSError, ValueError) as exc:
             result["last_attempt_error"] = str(exc)
-    result["unpublished_candidates"] = [str(p) for p in sorted(
-        (args.index_dir / "generations").glob(".building-*")) if p.is_dir()]
+    generations = args.index_dir / "generations"
+    result["unpublished_candidates"] = []
+    try:
+        generations.lstat()
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        result.update(unpublished_candidates=None, candidate_inventory_error=str(exc))
+    else:
+        try:
+            with os.scandir(generations) as entries:
+                result["unpublished_candidates"] = sorted(
+                    entry.path for entry in entries
+                    if entry.name.startswith(".building-") and entry.is_dir(follow_symlinks=False))
+        except OSError as exc:
+            result.update(unpublished_candidates=None, candidate_inventory_error=str(exc))
     lock = args.index_dir / "publication.lock"
     result["publication_in_progress"] = False
     try:
@@ -1318,7 +1338,8 @@ def cmd_status(args: argparse.Namespace) -> int:
     except (OSError, ValueError) as exc:
         result.update(valid=False, reason=str(exc))
     print(json.dumps(result, indent=2))
-    return 0 if result["valid"] and not result["classifications_stale"] and "publication_state_error" not in result else 1
+    return 0 if result["valid"] and not result["classifications_stale"] and not any(key in result for key in (
+        "publication_state_error", "last_attempt_error", "candidate_inventory_error")) else 1
 
 
 def cmd_query(args: argparse.Namespace) -> int:

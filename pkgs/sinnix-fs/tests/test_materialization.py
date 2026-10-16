@@ -328,3 +328,52 @@ def test_status_reports_unreadable_publication_lock(tmp_path, monkeypatch, capsy
         assert status["classifications_stale"] is False
     else:
         assert "no published generation" in status["reason"]
+
+
+@pytest.mark.parametrize("failure", ["missing", "receipt-directory", "receipt-denied", "receipt-malformed", "candidates-denied", "candidates-file"])
+def test_status_preserves_unknown_publication_observations(tmp_path, monkeypatch, capsys, failure):
+    import json
+    fs = load_script()
+    generation = tmp_path / "selected"
+    generation.mkdir()
+    manifest = generation / "manifest.json"
+    manifest.write_text(json.dumps({"scan": {}, "invalid_definitions": [], "ledger_sha256": "a" * 64}))
+    before = manifest.read_bytes()
+    monkeypatch.setattr(fs, "resolve_generation", lambda _index: generation)
+    monkeypatch.setattr(fs, "validate_generation", lambda _generation: {})
+    monkeypatch.setattr(fs, "generation_coverage", lambda _generation: {})
+    monkeypatch.setattr(fs, "read_judgments", lambda _path: {"sha256": "a" * 64})
+    receipt = tmp_path / "last-attempt.json"
+    candidates = tmp_path / "generations"
+    if failure == "receipt-directory":
+        receipt.mkdir()
+    elif failure in ("receipt-denied", "receipt-malformed"):
+        receipt.write_text("not-json")
+        if failure == "receipt-denied":
+            original = Path.read_text
+            def read_text(path, *args, **kwargs):
+                if path == receipt:
+                    raise PermissionError("synthetic receipt denied")
+                return original(path, *args, **kwargs)
+            monkeypatch.setattr(Path, "read_text", read_text)
+    elif failure == "candidates-denied":
+        candidates.mkdir()
+        (candidates / ".building-retained").mkdir()
+        original = fs.os.scandir
+        def scandir(path):
+            if Path(path) == candidates:
+                raise PermissionError("synthetic candidate inventory denied")
+            return original(path)
+        monkeypatch.setattr(fs.os, "scandir", scandir)
+    elif failure == "candidates-file":
+        candidates.write_text("retained wrong-type source")
+    assert fs.cmd_status(SimpleNamespace(index_dir=tmp_path)) == (0 if failure == "missing" else 1)
+    status = json.loads(capsys.readouterr().out)
+    assert status["valid"] is True and status["classifications_stale"] is False
+    if failure.startswith("receipt-"):
+        assert status["last_attempt_error"]
+    elif failure.startswith("candidates-"):
+        assert status["unpublished_candidates"] is None and status["candidate_inventory_error"]
+    else:
+        assert status["unpublished_candidates"] == []
+    assert manifest.read_bytes() == before
