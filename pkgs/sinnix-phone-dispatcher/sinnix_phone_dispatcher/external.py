@@ -60,6 +60,40 @@ def _score_worker() -> None:
         print(f"phone-dispatcher: score: {proc.stdout.strip()}", file=sys.stderr)
 
 
+_score_lock = threading.Lock()
+_score_running = False
+_score_pending = False
+
+
+def _score_loop() -> None:
+    global _score_running, _score_pending
+    while True:
+        with _score_lock:
+            if not _score_pending:
+                _score_running = False
+                return
+            _score_pending = False
+        try:
+            _score_worker()
+        except Exception as exc:  # noqa: BLE001 - advisory; retain future triggers
+            print(f"phone-dispatcher: score: scoring pass failed: {exc}", file=sys.stderr)
+
+
 def trigger_score() -> None:
-    """Score whatever just landed, without making the caller wait for it."""
-    threading.Thread(target=_score_worker, daemon=True, name="phone-score").start()
+    """Request scoring without spawning a process for every arrival.
+
+    A pass re-scans the durable outbox, so arrivals can share one pending
+    follow-up pass. Changing pending/running under one lock prevents losing
+    a trigger as the worker becomes idle. No intent or trace is discarded.
+    """
+    global _score_running, _score_pending
+    with _score_lock:
+        _score_pending = True
+        if _score_running:
+            return
+        _score_running = True
+        try:
+            threading.Thread(target=_score_loop, daemon=True, name="phone-score").start()
+        except BaseException:
+            _score_running = False
+            raise
