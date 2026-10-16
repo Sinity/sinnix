@@ -298,8 +298,9 @@ def test_symlinks_cannot_expose_outside_inbox(isolated_state_dirs, tmp_path, sub
     status, body = inbox_mod.read_inbox('receipts/entry.json')
     assert status == HTTPStatus.INTERNAL_SERVER_ERROR
     assert isinstance(body, dict) and not body['ok']
-    _, listing = inbox_mod.list_inbox()
-    assert not any(f['name'] == 'receipts/entry.json' for f in listing['files'])
+    listing_status, listing = inbox_mod.list_inbox()
+    assert listing_status == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert not listing['ok'] and 'files' not in listing
     status, body = inbox_mod.confirm_inbox('receipts/entry.json', hashlib.sha256(target.read_bytes()).hexdigest())
     assert status == HTTPStatus.INTERNAL_SERVER_ERROR
     after = target.stat()
@@ -333,3 +334,53 @@ def test_refused_entry_reads_do_not_leak_descriptors(isolated_state_dirs):
     for _ in range(8):
         assert inbox_mod.read_inbox('receipts/entry.json')[0] == HTTPStatus.INTERNAL_SERVER_ERROR
     assert set(os.listdir('/proc/self/fd')) == before
+
+
+@pytest.mark.parametrize("denied_at", ["root", "directory", "entry", "enumeration"])
+def test_listing_access_errors_are_not_empty_inboxes(isolated_state_dirs, monkeypatch, denied_at):
+    _write(isolated_state_dirs, 'receipts', 'entry.json', '{}')
+    original_open = os.open
+    original_listdir = os.listdir
+    def guarded_open(path, *args, **kwargs):
+        target = str(path)
+        if ((denied_at == 'root' and target == str(isolated_state_dirs['inbox_dir'])) or
+            (denied_at == 'directory' and target == 'receipts') or
+            (denied_at == 'entry' and target == 'entry.json')):
+            raise PermissionError('synthetic denied inbox')
+        return original_open(path, *args, **kwargs)
+    def guarded_listdir(path):
+        if denied_at == 'enumeration' and isinstance(path, int):
+            raise PermissionError('synthetic denied inbox')
+        return original_listdir(path)
+    before = set(os.listdir('/proc/self/fd'))
+    monkeypatch.setattr(os, 'open', guarded_open)
+    monkeypatch.setattr(os, 'listdir', guarded_listdir)
+    status, payload = inbox_mod.list_inbox()
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR
+    assert not payload['ok'] and 'files' not in payload
+    assert 'synthetic denied inbox' in payload['detail']
+    assert set(os.listdir('/proc/self/fd')) == before
+
+
+def test_missing_inbox_is_empty_but_wrong_type_is_unavailable(isolated_state_dirs):
+    inbox_mod.GENERATED.clear()
+    assert inbox_mod.list_inbox()[1]['files'] == []
+    root = isolated_state_dirs['inbox_dir']
+    root.parent.mkdir(parents=True)
+    root.write_bytes(b'synthetic wrong object')
+    status, payload = inbox_mod.list_inbox()
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR and not payload['ok']
+    assert root.read_bytes() == b'synthetic wrong object'
+
+
+def test_listing_handles_concurrently_consumed_receipt(isolated_state_dirs, monkeypatch):
+    _write(isolated_state_dirs, 'receipts', 'entry.json', '{}')
+    original = inbox_mod._read_regular
+    def consumed(path, **kwargs):
+        if path == 'entry.json':
+            raise FileNotFoundError('synthetic concurrent confirmation')
+        return original(path, **kwargs)
+    monkeypatch.setattr(inbox_mod, '_read_regular', consumed)
+    status, payload = inbox_mod.list_inbox()
+    assert status == HTTPStatus.OK and payload['ok']
+    assert not any(f['name'] == 'receipts/entry.json' for f in payload['files'])

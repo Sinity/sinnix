@@ -37,7 +37,7 @@ import os
 import re
 import stat
 import tempfile
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from http import HTTPStatus
 from pathlib import Path
 
@@ -110,28 +110,31 @@ def list_inbox() -> tuple[HTTPStatus, dict]:
             }
         )
     for sub, one_shot in SUBDIRS.items():
-        directory = INBOX_DIR / sub
-        if not directory.is_dir():
+        try:
+            with _entry_directory(sub) as directory_fd:
+                for name in sorted(os.listdir(directory_fd)):
+                    # Writers publish .part files by rename; never offer a
+                    # still-incomplete publication to the phone.
+                    if name.endswith(".part"):
+                        continue
+                    try:
+                        body = _read_regular(name, dir_fd=directory_fd)
+                    except FileNotFoundError:
+                        # A concurrent confirmation can consume a one-shot.
+                        continue
+                    files.append({
+                        "name": f"{sub}/{name}", "bytes": len(body),
+                        "sha256": _sha(body), "generated": False,
+                        "one_shot": one_shot,
+                    })
+        except FileNotFoundError:
+            # Optional inbox subdirectories do not exist before first use.
             continue
-        for path in sorted(directory.iterdir()):
-            # `.part` is a file prime is still writing (emit_receipt renames
-            # into place); handing one over would be the same torn-read bug
-            # the phone's own writers take care to avoid.
-            if not path.is_file() or path.name.endswith(".part"):
-                continue
-            try:
-                body = _read_entry(path)
-            except OSError:
-                continue
-            files.append(
-                {
-                    "name": f"{sub}/{path.name}",
-                    "bytes": len(body),
-                    "sha256": _sha(body),
-                    "generated": False,
-                    "one_shot": one_shot,
-                }
-            )
+        except OSError as exc:
+            # A partial inventory must not masquerade as an empty inbox.
+            return HTTPStatus.INTERNAL_SERVER_ERROR, {
+                "ok": False, "detail": f"cannot enumerate inbox {sub!r}: {exc}",
+            }
     return HTTPStatus.OK, {"ok": True, "at": utc_ts(), "files": files}
 
 
@@ -164,16 +167,22 @@ def _read_regular(path: str | Path, *, dir_fd: int | None = None) -> bytes:
         os.close(fd)
 
 
-def _read_entry(path: Path) -> bytes:
+@contextmanager
+def _entry_directory(sub: str):
     # Anchor each directory before opening its child. O_NOFOLLOW on only the
     # final entry would still allow a replaced subdirectory to escape the inbox.
     with ExitStack() as stack:
         root_fd = os.open(INBOX_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         stack.callback(os.close, root_fd)
-        sub_fd = os.open(path.parent.name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+        sub_fd = os.open(sub, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                          dir_fd=root_fd)
         stack.callback(os.close, sub_fd)
-        return _read_regular(path.name, dir_fd=sub_fd)
+        yield sub_fd
+
+
+def _read_entry(path: Path) -> bytes:
+    with _entry_directory(path.parent.name) as directory_fd:
+        return _read_regular(path.name, dir_fd=directory_fd)
 
 
 def _preserve_claim(claim: Path, original: Path) -> dict:
