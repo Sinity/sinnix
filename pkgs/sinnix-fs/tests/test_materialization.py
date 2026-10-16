@@ -350,12 +350,12 @@ def test_status_preserves_unknown_publication_observations(tmp_path, monkeypatch
     elif failure in ("receipt-denied", "receipt-malformed"):
         receipt.write_text("not-json")
         if failure == "receipt-denied":
-            original = Path.read_text
-            def read_text(path, *args, **kwargs):
-                if path == receipt:
+            original = fs.os.open
+            def open_file(path, *args, **kwargs):
+                if Path(path) == receipt:
                     raise PermissionError("synthetic receipt denied")
                 return original(path, *args, **kwargs)
-            monkeypatch.setattr(Path, "read_text", read_text)
+            monkeypatch.setattr(fs.os, "open", open_file)
     elif failure == "candidates-denied":
         candidates.mkdir()
         (candidates / ".building-retained").mkdir()
@@ -372,8 +372,48 @@ def test_status_preserves_unknown_publication_observations(tmp_path, monkeypatch
     assert status["valid"] is True and status["classifications_stale"] is False
     if failure.startswith("receipt-"):
         assert status["last_attempt_error"]
+        if failure == "receipt-denied":
+            assert "synthetic receipt denied" in status["last_attempt_error"]
     elif failure.startswith("candidates-"):
         assert status["unpublished_candidates"] is None and status["candidate_inventory_error"]
     else:
         assert status["unpublished_candidates"] == []
     assert manifest.read_bytes() == before
+
+
+@pytest.mark.parametrize("special", ["receipt", "lock", "manifest"])
+def test_status_refuses_fifo_metadata_without_waiting(tmp_path, special):
+    import json
+    import os
+    import subprocess
+    import sys
+
+    generation = tmp_path / "generations/selected"
+    generation.mkdir(parents=True)
+    (tmp_path / "current").symlink_to("generations/selected")
+    manifest = generation / "manifest.json"
+    paths = {"receipt": tmp_path / "last-attempt.json", "lock": tmp_path / "publication.lock", "manifest": manifest}
+    manifest.write_text(json.dumps({"schema": "sinnix.fs-generation.v1", "generation": "selected", "scan": {}, "invalid_definitions": [], "ledger_sha256": "a" * 64}))
+    if special == "manifest":
+        manifest.unlink()
+    os.mkfifo(paths[special])
+    # Only database validation is synthetic. The metadata paths, reader and
+    # FIFO are real; the child deadline makes a blocking open a test failure.
+    code = r'''
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+from types import SimpleNamespace
+import sys
+fs = SourceFileLoader("fs_fifo_probe", sys.argv[1]).load_module()
+fs.validate_generation = lambda _path: {}
+fs.generation_coverage = lambda _path: {}
+fs.read_judgments = lambda _path: {"sha256": "a" * 64}
+raise SystemExit(fs.cmd_status(SimpleNamespace(index_dir=Path(sys.argv[2]))))
+'''
+    result = subprocess.run([sys.executable, "-c", code, str(SCRIPT), str(tmp_path)], capture_output=True, text=True, timeout=3)
+    assert result.returncode == 1, result.stderr
+    report = json.loads(result.stdout)
+    error = {"receipt": "last_attempt_error", "lock": "publication_state_error", "manifest": "reason"}[special]
+    assert "regular file" in report[error]
+    assert report["valid"] is (special != "manifest")
+    assert paths[special].is_fifo()

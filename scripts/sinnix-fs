@@ -20,6 +20,7 @@ from sinnix_lib.atomic import atomic_text_writer
 import argparse
 import datetime as dt
 import fcntl
+import errno
 import hashlib
 import json
 import os
@@ -1115,6 +1116,24 @@ RELATIONS = {
 }
 
 
+def open_regular_text(path: Path):
+    """Refuse streams after a nonblocking open, including path replacements."""
+    handle = open(path, "r", encoding="utf-8",
+                  opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK))
+    try:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise OSError(errno.EINVAL, "not a regular file", str(path))
+    except BaseException:
+        handle.close()
+        raise
+    return handle
+
+
+def read_json_metadata(path: Path):
+    with open_regular_text(path) as handle:
+        return json.load(handle)
+
+
 def resolve_generation(index_dir: Path) -> Path:
     pointer = index_dir / "current"
     if not pointer.is_symlink():
@@ -1122,7 +1141,7 @@ def resolve_generation(index_dir: Path) -> Path:
     generation = pointer.resolve(strict=True)
     if generation.parent != (index_dir / "generations").resolve():
         raise ValueError("generation pointer escapes its owning store")
-    manifest = json.loads((generation / "manifest.json").read_text())
+    manifest = read_json_metadata(generation / "manifest.json")
     if not isinstance(manifest, dict) or manifest.get("schema") != "sinnix.fs-generation.v1" or manifest.get("generation") != generation.name:
         raise ValueError("invalid generation manifest")
     return generation
@@ -1197,7 +1216,7 @@ def publish_generation(index_dir: Path, *, roots=None, retained_inputs: Path | N
                     if result.returncode:
                         raise ValueError(f"cannot preserve {source}")
                 prior_manifest = previous / "manifest.json"
-                scan = json.loads(prior_manifest.read_text())["scan"] if prior_manifest.exists() else {
+                scan = read_json_metadata(prior_manifest)["scan"] if prior_manifest.exists() else {
                     "kind": "retained-inputs", "fresh": False,
                     "inputs": [source_identity(previous / n) for n in ("nodes.jsonl", "files.jsonl")],
                     "exclusions": "historical exclusions were not recorded; no fresh coverage claim",
@@ -1286,7 +1305,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         result["last_attempt_error"] = str(exc)
     else:
         try:
-            result["last_attempt"] = json.loads(attempt.read_text())
+            result["last_attempt"] = read_json_metadata(attempt)
         except (OSError, ValueError) as exc:
             result["last_attempt_error"] = str(exc)
     generations = args.index_dir / "generations"
@@ -1308,7 +1327,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     lock = args.index_dir / "publication.lock"
     result["publication_in_progress"] = False
     try:
-        with lock.open("r") as handle:
+        with open_regular_text(lock) as handle:
             try:
                 fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
             except BlockingIOError:
@@ -1320,7 +1339,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         result.update(publication_in_progress=None, publication_state_error=str(exc))
     try:
         generation = resolve_generation(args.index_dir)
-        manifest = json.loads((generation / "manifest.json").read_text())
+        manifest = read_json_metadata(generation / "manifest.json")
         if (not isinstance(manifest.get("scan"), dict)
                 or not isinstance(manifest.get("invalid_definitions"), list)
                 or not isinstance(manifest.get("ledger_sha256"), str)
