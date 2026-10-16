@@ -438,6 +438,7 @@ def append_events(
                             "day": day,
                         }
                     _sync_capture_path(target, fd, observed)
+                    mirror_fd = os.dup(fd)
             except FileNotFoundError:
                 if offset == 0:
                     raise
@@ -456,12 +457,14 @@ def append_events(
     # notification for every retry. Advisory: a mirroring failure must never
     # turn a landed upload into one the phone believes it has to resend.
     try:
-        mirror_new_events(day, body[overlap:])
+        mirror_new_events(mirror_fd, size, offset + len(body))
     except Exception as exc:  # noqa: BLE001 - the upload above already landed
         print(
             f"phone-dispatcher: notifications: mirror_new_events failed: {exc}",
             file=sys.stderr,
         )
+    finally:
+        os.close(mirror_fd)
 
     return HTTPStatus.OK, {
         "ok": True,

@@ -15,8 +15,8 @@ than re-implementing the D-Bus/session-bus dance.
 Only genuinely NEW bytes are ever scanned -- `append_events` already resolves
 a replayed or partially-overlapping batch, and this must not re-notify for a
 line it already handled. A batch's byte boundary has no reason to land on a
-line boundary, so a small per-day tail buffer holds an undecoded trailing
-partial line until the batch that completes it arrives.
+line boundary, so the retained capture file supplies any prefix from an earlier batch.
+Incomplete records need no in-memory tail and survive dispatcher restarts.
 
 `ongoing` notifications are dropped rather than mirrored. Measured live
 2026-08-18: 230 of 240 `notification_posted` events on an ordinary day were
@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import json
 import sys
-import threading
+import os
 
 from sinnix_lib.notify import notify_desktop
 
@@ -42,8 +42,7 @@ from sinnix_lib.notify import notify_desktop
 #: mirroring a dismissal as a second popup would just be noise.
 _MIRRORED_KINDS = frozenset({"notification_posted"})
 
-_lock = threading.Lock()
-_tail_by_day: dict[str, bytes] = {}
+_SCAN_BYTES = 64 * 1024
 
 
 def _forward(event: dict) -> None:
@@ -64,36 +63,62 @@ def _forward(event: dict) -> None:
         )
 
 
-def mirror_new_events(day: str, new_bytes: bytes) -> None:
-    """Scan bytes newly landed in a day's event file, mirroring any
-    `notification_posted` line to the desktop.
+def mirror_new_events(fd: int, start: int, end: int) -> None:
+    """Mirror complete records whose terminating newline was newly appended.
 
-    Call with exactly the suffix of the file this write actually added, not
-    the whole batch -- a batch may repeat bytes already handled (a retried
-    upload, a rewound overlap), and re-notifying for those would pop a
-    duplicate desktop notification for every retry.
+    Read only the acknowledged range through the same opened capture object.
+    Scan in fixed-size blocks before reading records so an unfinished line,
+    however many uploads it spans, never accumulates in process memory.
+    Parsing remains proportional to one complete record, not the day's log.
     """
-    if not new_bytes:
+    complete_end = None
+    cursor = end
+    while cursor > start:
+        begin = max(start, cursor - _SCAN_BYTES)
+        block = os.pread(fd, cursor - begin, begin)
+        if len(block) != cursor - begin:
+            raise OSError("notification capture range became unavailable")
+        newline = block.rfind(b"\n")
+        if newline >= 0:
+            complete_end = begin + newline + 1
+            break
+        cursor = begin
+    if complete_end is None:
         return
-    with _lock:
-        buf = _tail_by_day.pop(day, b"") + new_bytes
-        lines = buf.split(b"\n")
-        # The last element is either b"" (buf ended cleanly on a newline) or
-        # an undecoded tail -- either way it is not a line to parse yet.
-        tail = lines.pop()
-        if tail:
-            _tail_by_day[day] = tail
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            event = json.loads(line)
-        except ValueError:
-            # JSON syntax, UTF-8 decoding and integer digit-limit failures
-            # are record-local; raw bytes have already been captured.
-            continue
-        if not isinstance(event, dict):
-            continue
-        if event.get("kind") in _MIRRORED_KINDS:
-            _forward(event)
+
+    # A prior upload can end midway through a record. Recover its beginning
+    # from retained bytes; a completed prior record is never mirrored again.
+    cursor = start
+    while cursor:
+        begin = max(0, cursor - _SCAN_BYTES)
+        block = os.pread(fd, cursor - begin, begin)
+        if len(block) != cursor - begin:
+            raise OSError("notification capture prefix became unavailable")
+        newline = block.rfind(b"\n")
+        if newline >= 0:
+            cursor = begin + newline + 1
+            break
+        cursor = begin
+    with os.fdopen(os.dup(fd), "rb") as stream:
+        stream.seek(cursor)
+        while stream.tell() < complete_end:
+            line = stream.readline(complete_end - stream.tell())
+            if not line.endswith(b"\n"):
+                raise OSError("notification capture record became unavailable")
+            _mirror_line(line)
+
+
+def _mirror_line(line: bytes) -> None:
+    line = line.strip()
+    if not line:
+        return
+    try:
+        event = json.loads(line)
+    except ValueError:
+        # JSON syntax, UTF-8 decoding and integer digit-limit failures
+        # are record-local; raw bytes have already been captured.
+        return
+    if not isinstance(event, dict):
+        return
+    if event.get("kind") in _MIRRORED_KINDS:
+        _forward(event)

@@ -159,7 +159,7 @@ def test_a_landed_batch_is_mirrored_with_only_its_new_bytes(
     monkeypatch.setattr(
         uploads_mod,
         "mirror_new_events",
-        lambda day, new_bytes: mirrored.append((day, new_bytes)),
+        lambda fd, start, end: mirrored.append((start, end)),
     )
     first = b'{"kind":"mark"}\n'
     uploads_mod.append_events("20260818", 0, first, _sha(first))
@@ -167,7 +167,7 @@ def test_a_landed_batch_is_mirrored_with_only_its_new_bytes(
 
     uploads_mod.append_events("20260818", 0, overlapping, _sha(overlapping))
 
-    assert mirrored[-1] == ("20260818", b'{"kind":"notification_posted","app":"x"}\n')
+    assert mirrored[-1] == (len(first), len(overlapping))
 
 
 def test_a_pure_replay_mirrors_nothing(isolated_state_dirs, monkeypatch) -> None:
@@ -175,7 +175,7 @@ def test_a_pure_replay_mirrors_nothing(isolated_state_dirs, monkeypatch) -> None
     monkeypatch.setattr(
         uploads_mod,
         "mirror_new_events",
-        lambda day, new_bytes: mirrored.append((day, new_bytes)),
+        lambda fd, start, end: mirrored.append((start, end)),
     )
     first = b'{"kind":"notification_posted","app":"x"}\n'
     uploads_mod.append_events("20260818", 0, first, _sha(first))
@@ -189,7 +189,7 @@ def test_a_pure_replay_mirrors_nothing(isolated_state_dirs, monkeypatch) -> None
 def test_a_mirroring_failure_does_not_fail_the_upload(
     isolated_state_dirs, monkeypatch
 ) -> None:
-    def _boom(day, new_bytes):
+    def _boom(fd, start, end):
         raise RuntimeError("notify-send is not installed")
 
     monkeypatch.setattr(uploads_mod, "mirror_new_events", _boom)
@@ -485,3 +485,16 @@ def test_new_event_bytes_do_not_restore_group_write_access(tmp_path, monkeypatch
     assert int(status) == 200
     assert target.read_bytes() == b"first\nsecond\n"
     assert target.stat().st_mode & 0o777 == 0o600
+
+
+def test_partial_notification_survives_dispatcher_restart(isolated_state_dirs, monkeypatch):
+    import importlib
+    from sinnix_phone_dispatcher import notifications
+
+    calls = []
+    line = b'{"kind":"notification_posted","title":"fixture","text":"preserved"}\n'
+    assert uploads_mod.append_events("20260101", 0, line[:30], None)[0] == HTTPStatus.OK
+    importlib.reload(notifications)
+    monkeypatch.setattr(notifications, "notify_desktop", lambda *a, **kw: calls.append(a))
+    assert uploads_mod.append_events("20260101", 30, line[30:], None)[0] == HTTPStatus.OK
+    assert calls == [("fixture", "preserved")]
