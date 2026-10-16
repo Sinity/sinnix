@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Report gaps between what sinnix declares and what it actually does — confinement, empty lanes, units that never succeed
-# runtimeInputs: bash python3 coreutils findutils gawk gnugrep jq systemd audit
+# runtimeInputs: bash python3 coreutils findutils gawk gnugrep jq systemd audit util-linux
 set -euo pipefail
 umask 077
 
@@ -35,11 +35,27 @@ if ! jq -e '.surfaces | type == "object"' "$INVENTORY" >/dev/null; then
   exit 1
 fi
 
+manager_exec() {
+  local manager=$1
+  shift
+  if [[ "$manager" == user && "$EUID" -eq 0 ]]; then
+    if [[ -z "${SINNIX_AUDIT_USER:-}" ]]; then
+      echo "sinnix-sandbox-audit: SINNIX_AUDIT_USER is required for root to inspect user units" >&2
+      return 1
+    fi
+    local uid
+    uid="$(id -u "$SINNIX_AUDIT_USER")" || return
+    runuser -u "$SINNIX_AUDIT_USER" -- env "XDG_RUNTIME_DIR=/run/user/$uid" "$@"
+  else
+    "$@"
+  fi
+}
+
 show_prop() {
   # $1=manager $2=unit $3=property -> bare value
   local scope=()
   [[ "$1" == "user" ]] && scope=(--user)
-  systemctl "${scope[@]}" show "$2" -p "$3" --value || {
+  manager_exec "$1" systemctl "${scope[@]}" show "$2" -p "$3" --value || {
     local status=$?
     printf 'sinnix-sandbox-audit: cannot inspect %s unit %s property %s\n' "$1" "$2" "$3" >&2
     return "$status"
@@ -224,7 +240,7 @@ while IFS=$'\t' read -r unit manager acknowledged; do
   fi
   # Keep the journal reader's status separate from the match result. An
   # unavailable journal says nothing about whether the unit succeeded.
-  if journalctl "${scope[@]}" -u "$unit" --since "$SINCE_WINDOW" --no-pager >"$journal_output"; then
+  if manager_exec "$manager" journalctl "${scope[@]}" -u "$unit" --since "$SINCE_WINDOW" --no-pager >"$journal_output"; then
     if ! grep -E "Deactivated successfully|Finished " "$journal_output" >/dev/null; then
       emit "$manager" "$unit" "never-succeeded" "$timer" \
         "timer-driven unit with no successful completion in the journal since $SINCE_WINDOW"

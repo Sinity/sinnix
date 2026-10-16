@@ -63,6 +63,7 @@ mkServiceModule {
         }
         {
           execStart = "${scriptPkgs.sinnix-sandbox-audit}/bin/sinnix-sandbox-audit --quiet";
+          environment.SINNIX_AUDIT_USER = username;
           serviceConfig = {
             TimeoutStartSec = "300s";
           };
