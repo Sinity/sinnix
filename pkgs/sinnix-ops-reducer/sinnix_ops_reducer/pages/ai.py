@@ -155,7 +155,11 @@ def gpu_lifecycle_events(units: list[str]) -> tuple[list[dict[str, Any]], str | 
     journalctl = shutil.which("journalctl")
     if not journalctl:
         return [], "journalctl not on PATH"
-    arguments = [journalctl, "-o", "json", "--since", GPU_EVICTION_SINCE, "--no-pager"]
+    arguments = [
+        journalctl, "-o", "json", "--since", GPU_EVICTION_SINCE,
+        "-n", str(GPU_EVICTION_MAX_EVENTS),
+        "--output-fields=JOB_RESULT,JOB_TYPE,UNIT,__REALTIME_TIMESTAMP", "--no-pager",
+    ]
     for unit in units:
         arguments += ["-u", unit]
     try:
