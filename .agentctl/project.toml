@@ -309,3 +309,11 @@ pool = "normal"
 result = "exit"
 cache = "none"
 timeout_seconds = 3600
+
+[operations.xiaomi_witness_login]
+description = "Authenticate the existing Xiaomi cloud witness through browser confirmation"
+exec = ["sinnix", "xiaomi-witness-login"]
+pool = "normal"
+result = "exit"
+cache = "none"
+timeout_seconds = 420
