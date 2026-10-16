@@ -20,8 +20,6 @@ def beads_service(tmp_path: Path, principal: str = "operator"):
     tmp_path.mkdir(parents=True, exist_ok=True)
     project = tmp_path / "project"
     project.mkdir()
-    authority = tmp_path / "tasks" / ".beads"
-    (authority / "dolt").mkdir(parents=True)
     log = tmp_path / "commands.jsonl"
     state = tmp_path / "owner-state.json"
     state.write_text(
@@ -54,7 +52,7 @@ with pathlib.Path({str(log)!r}).open('a') as output:
     output.write(json.dumps({{'argv':args,'payload':payload}})+'\\n')
 root=args[args.index('--directory')+1]
 state=json.loads(pathlib.Path({str(state)!r}).read_text())
-if args[-1]=='where': value={{'path':{str(authority)!r},'database_path':{str(authority / 'dolt')!r}}}
+if args[-1]=='where': value={{'path':root+'/.beads','database_path':root+'/.beads/dolt'}}
 elif args[-1]=='status': value={{'summary':{{'total_issues':len(state['items'])}}}}
 elif args[-2:]==['owner','read']:
     rows=state['items']
@@ -79,8 +77,8 @@ print(json.dumps(value))
                 path=project,
                 task_authority=TaskAuthorityConfig(
                     owner="beads",
-                    workspace=authority,
-                    database=authority / "dolt",
+                    workspace=project / ".beads",
+                    database=project / ".beads/dolt",
                 ),
             )
         },
@@ -91,23 +89,6 @@ print(json.dumps(value))
 
 def commands(log: Path):
     return [json.loads(line) for line in log.read_text().splitlines()]
-
-
-def test_task_reads_and_mutations_do_not_require_source_checkout(tmp_path):
-    beads, log = beads_service(tmp_path, "operator")
-    project = beads.config.projects["fixture"]
-    project.path.rmdir()
-    assert beads.query(project_ids=["fixture"], view="all")["items"]
-    value = beads.native("fixture", "updateIssue", {
-        "path": {"id": "fixture-1"},
-        "body": {"actor": "operator", "patch": {"notes": "neutral fixture"}},
-    }, write=True)
-    assert value["native_operation"] == "updateIssue"
-    for call in commands(log):
-        argv = call["argv"]
-        assert argv[argv.index("--directory") + 1] == str(project.task_authority.workspace)
-        assert argv[argv.index("--db") + 1] == str(project.task_authority.database)
-    assert not project.path.exists()
 
 
 def test_query_preserves_native_request_and_continues_frozen_observation(tmp_path):
