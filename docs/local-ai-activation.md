@@ -37,6 +37,14 @@ process is in a separate cgroup from the systemd client unit, whose memory
 counter does not describe the model's working set. These limits do not govern
 other AI containers.
 
+Kokoro also applies the shared Host/Origin policy before request-body processing,
+on both host interfaces and its native in-container health interface. Native
+OpenAI clients and its same-origin web player remain supported. The vendor
+entrypoint, model-download setting and uvicorn lifecycle are retained; an
+incompatible entrypoint fails explicitly. `verify_kokoro_boundary` checks the
+retained image offline with `--image DIGEST_PINNED_IMAGE --ports PUBLIC BACKEND 8880`.
+It uses no production state, network, GPU, synthesis or lifespan startup.
+
 The canonical model roster is `flake/data/local-models.nix`. The canonical port and front-door map is `flake/data/ports.nix`. Edit those sources when changing the platform. Do not add a model only to LiteLLM or only to an agent wrapper.
 
 ## The operator control plane

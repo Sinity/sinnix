@@ -10,12 +10,18 @@ from pathlib import Path
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", required=True)
-    parser.add_argument("--ports", nargs=2, type=int, required=True)
+    parser.add_argument("--provider", choices=["tts", "kokoro"], default="tts")
+    parser.add_argument("--ports", nargs="+", type=int, required=True)
     args = parser.parse_args()
     if "@sha256:" not in args.image:
         parser.error("a digest-pinned, already retained image is required")
     root = Path(__file__).resolve().parents[2] / "pkgs/sinnix-litellm-boundary"
-    name = "sinnix-tts-boundary-" + uuid.uuid4().hex
+    provider = args.provider
+    directory = f"/run/sinnix-{provider}"
+    launcher = "tts.py" if provider == "tts" else "sinnix_kokoro.py"
+    interpreter = "python" if provider == "tts" else "/app/.venv/bin/python"
+    memory = "1g" if provider == "tts" else "2g"
+    name = f"sinnix-{provider}-boundary-" + uuid.uuid4().hex
 
     def interrupted(number, frame):
         raise SystemExit(128 + number)
@@ -33,18 +39,19 @@ def main():
         name,
         "--network=none",
         "--read-only",
-        "--memory=1g",
+        f"--memory={memory}",
         "--cpus=1",
-        "--entrypoint=python",
+        f"--entrypoint={interpreter}",
         "--env=PYTHONDONTWRITEBYTECODE=1",
+        f"--env=SINNIX_{provider.upper()}_PORTS=" + ",".join(map(str, args.ports)),
     ]
     for source, target in [
-        (root / "tts.py", "tts.py"),
+        (root / f"{provider}.py", launcher),
         (root / "boundary.py", "sinnix_ai_browser_boundary.py"),
-        (root / "tests/verify_tts_image.py", "verify.py"),
+        (root / f"tests/verify_{provider}_image.py", "verify.py"),
     ]:
-        command += ["--volume", f"{source}:/run/sinnix-tts/{target}:ro"]
-    command += [args.image, "/run/sinnix-tts/verify.py", *map(str, args.ports)]
+        command += ["--volume", f"{source}:{directory}/{target}:ro"]
+    command += [args.image, f"{directory}/verify.py", *map(str, args.ports)]
     try:
         return subprocess.run(command, check=False, timeout=120).returncode
     finally:

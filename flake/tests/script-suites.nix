@@ -381,6 +381,7 @@
           packageFiles = [
             "boundary.py"
             "tts.py"
+            "kokoro.py"
           ];
           pythonPackages = [ "fastapi" ];
         };

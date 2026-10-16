@@ -59,6 +59,14 @@ mkAiService {
       virtualisation.oci-containers.containers.kokoro = {
         inherit (cfg) image autoStart;
         pull = "never";
+        cmd = [
+          "python"
+          "/run/sinnix-kokoro/sinnix_kokoro.py"
+        ];
+        volumes = [
+          "${../../pkgs/sinnix-litellm-boundary/kokoro.py}:/run/sinnix-kokoro/sinnix_kokoro.py:ro"
+          "${../../pkgs/sinnix-litellm-boundary/boundary.py}:/run/sinnix-kokoro/sinnix_ai_browser_boundary.py:ro"
+        ];
         # Container listens on 8880 internally (not a host allocation, so not
         # in the port registry); mapped to the private backend port the
         # kokoro-proxy socket forwards to (the public port is the proxy's own
@@ -68,6 +76,13 @@ mkAiService {
           # Weights are already baked into the pinned image; skip the
           # runtime re-download check on every start.
           DOWNLOAD_MODEL = "false";
+          SINNIX_KOKORO_PORTS = lib.concatStringsSep "," (
+            map toString [
+              helpers.data.ports.kokoro.public
+              helpers.data.ports.kokoro.backend
+              8880 # Native in-container interface, not another host port.
+            ]
+          );
         };
         # Podman's model process lives outside the service wrapper's cgroup.
         # Bound the container itself: the retained startup/runtime peak was

@@ -24,35 +24,17 @@ def startup_script(source, launcher):
 
 
 def install(openedai, ports):
-    from fastapi.middleware.cors import CORSMiddleware
-    from sinnix_ai_browser_boundary import BrowserBoundary
+    from sinnix_ai_browser_boundary import BrowserBoundary, admit_fastapi
 
     original = openedai.OpenAIStub
     # Validate configuration before constructing any vendor/model state.
     BrowserBoundary(None, allowed_ports=ports)
-    origins = [
-        f"http://{host}:{port}"
-        for host in ("127.0.0.1", "localhost", "[::1]")
-        for port in sorted(ports)
-    ]
 
     class AdmittedOpenAIStub(original):
         def __init__(self, **kwargs):
             super().__init__(**kwargs)
-            self.user_middleware = [
-                middleware
-                for middleware in self.user_middleware
-                if middleware.cls is not CORSMiddleware
-            ]
-            self.add_middleware(
-                CORSMiddleware,
-                allow_origins=origins,
-                allow_credentials=True,
-                allow_methods=["*"],
-                allow_headers=["*"],
-            )
             # Added last so this surrounds the vendor logging middleware too.
-            self.add_middleware(BrowserBoundary, allowed_ports=ports)
+            admit_fastapi(self, allowed_ports=ports, allow_credentials=True)
 
     openedai.OpenAIStub = AdmittedOpenAIStub
 

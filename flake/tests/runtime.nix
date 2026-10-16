@@ -253,6 +253,22 @@ in
               && lib.elem "--memory-swap=6g" config.virtualisation.oci-containers.containers.kokoro.extraOptions;
             message = "Kokoro needs bounds on its actual container, not just the Podman client unit";
           }
+          {
+            assertion =
+              let
+                kokoro = config.virtualisation.oci-containers.containers.kokoro;
+              in
+              kokoro.cmd == [
+                "python"
+                "/run/sinnix-kokoro/sinnix_kokoro.py"
+              ]
+              && kokoro.environment.SINNIX_KOKORO_PORTS == "8890,8891,8880"
+              && lib.any (volume: lib.hasSuffix ":/run/sinnix-kokoro/sinnix_kokoro.py:ro" volume) kokoro.volumes
+              && lib.any (
+                volume: lib.hasSuffix ":/run/sinnix-kokoro/sinnix_ai_browser_boundary.py:ro" volume
+              ) kokoro.volumes;
+            message = "Kokoro must retain guarded startup, registered host ports and its native internal interface";
+          }
         ];
       };
       cpuContainerEvaluated = evalTestSpec system cpuContainerSpec;
