@@ -35,8 +35,8 @@ import hashlib
 import json
 import os
 import re
-import stat
 import secrets
+import stat
 from contextlib import ExitStack, contextmanager
 from http import HTTPStatus
 from pathlib import Path
@@ -113,9 +113,9 @@ def list_inbox() -> tuple[HTTPStatus, dict]:
         try:
             with _entry_directory(sub) as (_, directory_fd):
                 for name in sorted(os.listdir(directory_fd)):
-                    # Writers publish .part files by rename; never offer a
-                    # still-incomplete publication to the phone.
-                    if name.endswith(".part"):
+                    # Atomic publication uses hidden sibling temporaries.
+                    # Neither those nor explicit .part files are deliverable.
+                    if name.startswith(".") or name.endswith(".part"):
                         continue
                     try:
                         body = _read_regular(name, dir_fd=directory_fd)

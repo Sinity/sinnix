@@ -4,7 +4,7 @@ Two producers write this directory -- the dispatcher
 (``pkgs/sinnix-phone-dispatcher``) and the scorer (``scripts/sinnix-score``,
 which posts a receipt back for every trace it scores) -- and the Android app
 is the only reader. The schema string, the file naming and the
-write-then-rename convention therefore live here once instead of in two
+atomic publication convention therefore live here once instead of in two
 copies kept identical by review; a drifted copy would be invisible on prime
 and show up as a message the phone silently ignores.
 
@@ -34,7 +34,7 @@ SCHEMA = "sinnix.phone.receipt/1"
 
 
 def message_name() -> str:
-    """A stamped, collision-free file name: sortable by hand, unique by uuid."""
+    """A sortable candidate name; publication arbitrates collisions atomically."""
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{stamp}-{uuid.uuid4().hex[:8]}.json"
 
@@ -44,18 +44,17 @@ def write_message(directory: Path | str, payload: dict[str, Any]) -> Path:
 
     The reader (drain or app) polls this directory, so a partially written
     file must never carry the final name. The shared publisher writes under
-    a unique sibling temporary and renames only complete, durable bytes.
+    a unique sibling temporary and publishes complete, durable bytes without
+    replacing an earlier message.
     """
     d = Path(directory)
     d.mkdir(mode=0o700, parents=True, exist_ok=True)
-    target = d / message_name()
-    atomic_publish(
-        target,
-        (json.dumps(payload) + "\n").encode("utf-8"),
-        fsync=True,
-        mode=0o600,
-    )
-    return target
+    body = (json.dumps(payload) + "\n").encode("utf-8")
+    for _ in range(8):
+        target = d / message_name()
+        if atomic_publish(target, body, fsync=True, mode=0o600, exclusive=True):
+            return target
+    raise FileExistsError("could not allocate a unique phone inbox message name")
 
 
 def emit_receipt(

@@ -446,3 +446,21 @@ def test_claim_recovery_reports_relocated_root(isolated_state_dirs, tmp_path, mo
     assert (retained / 'receipts' / 'entry.json').read_bytes() == b'replacement'
     assert payload['current_path_restored']
     assert list(outside.iterdir()) == []
+
+
+def test_atomic_temporary_is_not_offered_before_publication(isolated_state_dirs):
+    root = isolated_state_dirs['receipts_dir']
+    root.mkdir(parents=True)
+    temporary = root / '.fixture.json.atomic-tmp-test'
+    temporary.write_bytes(b'{"incomplete":')
+    status, payload = inbox_mod.list_inbox()
+    assert status == HTTPStatus.OK and payload['ok']
+    assert not any(f['name'].startswith('receipts/') for f in payload['files'])
+    assert temporary.read_bytes() == b'{"incomplete":'
+    completed = b'{"fixture":"complete"}\n'
+    temporary.write_bytes(completed)
+    temporary.rename(root / 'fixture.json')
+    status, payload = inbox_mod.list_inbox()
+    row = next(f for f in payload['files'] if f['name'] == 'receipts/fixture.json')
+    assert status == HTTPStatus.OK and row['sha256'] == hashlib.sha256(completed).hexdigest()
+    assert inbox_mod.read_inbox('receipts/fixture.json') == (HTTPStatus.OK, completed)
