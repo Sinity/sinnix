@@ -840,4 +840,32 @@ def test_live_native_filter_keeps_stashes_and_excludes_all_terminal_results(live
     assert set(result.tasks) == {stashed}
     assert result.tasks[stashed].status == "Stashed"
     assert "default" in result.groups
-    assert all(pueue.task(task_id).terminal for task_id in (success, failure, killed))
+    selected = pueue.tasks_by_ids([success, failure, killed, stashed])
+    assert set(selected) == {success, failure, killed, stashed}
+    assert all(selected[task_id].terminal for task_id in (success, failure, killed))
+
+
+def test_selected_tasks_use_one_bounded_log_request(monkeypatch):
+    calls = []
+
+    def run(arguments):
+        calls.append(arguments)
+        return json.dumps({str(i): {"task": LIVE_STATUS["tasks"][str(i)]} for i in (0, 1)})
+
+    monkeypatch.setattr(pueue, "_run", run)
+    assert set(pueue.tasks_by_ids([1, 0, 1, 999])) == {0, 1}
+    assert calls == [["log", "--json", "--lines", "0", "0", "1", "999"]]
+
+
+def test_empty_selected_task_page_does_not_query_pueue(monkeypatch):
+    def query(arguments):
+        raise AssertionError("empty page queried pueue")
+    monkeypatch.setattr(pueue, "_run", query)
+    assert pueue.tasks_by_ids([]) == {}
+
+
+@pytest.mark.parametrize("payload", [[], {"0": {"task": {"id": 1, "status": "Queued"}}}])
+def test_selected_tasks_refuse_malformed_or_mismatched_records(monkeypatch, payload):
+    monkeypatch.setattr(pueue, "_run", lambda arguments: json.dumps(payload))
+    with pytest.raises(pueue.PueueError):
+        pueue.tasks_by_ids([0])

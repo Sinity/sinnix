@@ -260,6 +260,10 @@ filter. Admission and cross-pool hold release also parse only unfinished
 rows. Upstream Pueue still transfers the full state to its CLI for status
 queries before filtering JSON; the reduction bounds AgentCTL's parsing, not
 that upstream transfer. Direct task-id reads use the bounded log route.
+Execution bindings are attached after paging through one selected-id log
+request, with no queue request for an empty page. Launch references prevent
+a reordered queue id from attaching another job's binding; moved jobs use
+the existing reference resolver.
 
 When the admission pass reports `hold` or `clear`, the recurring backpressure
 command releases cross-pool holds only when the launch reference and both

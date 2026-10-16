@@ -4773,3 +4773,63 @@ def test_clean_keeps_denied_recorded_checkout_instead_of_reporting_absent(harnes
     finally:
         parent.chmod(0o700)
     assert payload.read_bytes() == b"unpublished fixture bytes"
+
+
+def test_attach_bindings_does_not_load_unrelated_history(harness, monkeypatch):
+    run = harness.start("fx-solo")
+    worker = run["workers"][0]["task_id"]
+    page = [row for row in launch.list_jobs("fixture") if row["job_id"] == worker]
+
+    def history():
+        raise AssertionError("binding page loaded unrelated queue history")
+
+    monkeypatch.setattr(launch.pueue, "tasks", history)
+    result = launch.attach_bindings(harness.config, page)
+    assert result[0]["binding"]["beads"] == ["fx-solo"]
+
+
+def test_attach_bindings_follows_launch_reference_after_queue_reorder(harness):
+    run = harness.start("fx-lead", "fx-solo")
+    first, second = [worker["task_id"] for worker in run["workers"]]
+    for task_id in (first, second):
+        harness.pueue._tasks[task_id] = replace(harness.pueue.task(task_id), status="Queued")
+    page = [row for row in launch.list_jobs("fixture") if row["job_id"] == first]
+    expected = read_launch(harness.config, harness.pueue.task(first))["binding"]
+    harness.pueue.switch(first, second)
+    assert launch.attach_bindings(harness.config, page)[0]["binding"] == expected
+
+
+def test_attach_bindings_never_uses_a_replacement_jobs_binding(harness):
+    run = harness.start("fx-lead", "fx-solo")
+    first, second = [worker["task_id"] for worker in run["workers"]]
+    page = [row for row in launch.list_jobs("fixture") if row["job_id"] == first]
+    other = harness.pueue.task(second)
+    harness.pueue._tasks[first] = replace(other, task_id=first)
+    del harness.pueue._tasks[second]
+    assert "binding" not in launch.attach_bindings(harness.config, page)[0]
+
+
+def test_unusable_integer_input_does_not_discard_other_page_bindings(harness, monkeypatch):
+    import sys
+
+    run = harness.start("fx-lead", "fx-solo")
+    first, second = [worker["task_id"] for worker in run["workers"]]
+    page = launch.list_jobs("fixture")
+    bad_path = launch.launch_input_path(harness.pueue.task(first))
+    original_read = launch.read_bounded
+
+    def read(path, limit):
+        if path == bad_path:
+            return b'{"invalid":' + b"9" * 4301 + b'}'
+        return original_read(path, limit)
+
+    monkeypatch.setattr(launch, "read_bounded", read)
+    previous = sys.get_int_max_str_digits()
+    try:
+        sys.set_int_max_str_digits(4300)
+        rows = launch.attach_bindings(harness.config, page)
+    finally:
+        sys.set_int_max_str_digits(previous)
+    indexed = {row["job_id"]: row for row in rows}
+    assert "binding" not in indexed[first]
+    assert indexed[second]["binding"]["beads"] == ["fx-solo"]

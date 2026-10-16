@@ -149,6 +149,9 @@ class FakePueue:
     def task(self, task_id: int) -> Task | None:
         return self._tasks.get(task_id)
 
+    def tasks_by_ids(self, task_ids: Sequence[int]) -> dict[int, Task]:
+        return {key: self._tasks[key] for key in task_ids if key in self._tasks}
+
     def tasks_by_command(self, fragment: str) -> dict[int, Task]:
         return {
             task_id: task
@@ -384,6 +387,7 @@ def fake_pueue(monkeypatch: pytest.MonkeyPatch) -> FakePueue:
         "running_tasks",
         "task",
         "tasks_by_command",
+        "tasks_by_ids",
         "live",
         "start",
         "kill",

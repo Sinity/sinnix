@@ -154,7 +154,7 @@ def _launch_input(config: Config, task: Task) -> dict[str, Any] | None:
         return None
     try:
         value = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError):
+    except ValueError:
         return None
     return value if isinstance(value, dict) else None
 
@@ -1402,13 +1402,20 @@ def attach_bindings(
 ) -> list[dict[str, Any]]:
     """Each row with the binding recorded in the launch input its task names.
 
-    One queue read for the whole page, so a caller pages first and pays for
-    the launch inputs of the rows it returns.
+    One selected-id read for the page. A queue id can move after listing,
+    so a launch reference, when present, owns the binding's identity.
     """
-    tasks = pueue.tasks()
+    tasks = pueue.tasks_by_ids([
+        value for row in rows
+        if isinstance(value := row.get("job_id"), int) and not isinstance(value, bool) and value >= 0
+    ])
+    references = index_task_references(tuple(tasks.values()))
     attached = []
     for row in rows:
-        task = tasks.get(row.get("job_id"))
+        task_id, reference = row.get("job_id"), row.get("reference")
+        task = find_task(tasks, task_id, reference, references=references)
+        if task is None and isinstance(reference, str) and REFERENCE.fullmatch(reference):
+            task = locate(task_id, reference)
         binding = (_launch_input(config, task) or {}).get("binding") if task else None
         attached.append({**row, "binding": binding} if binding else dict(row))
     return attached

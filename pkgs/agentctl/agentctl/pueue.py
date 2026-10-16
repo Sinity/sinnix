@@ -287,16 +287,38 @@ def _selected_tasks(group: str, query: str) -> dict[int, Task]:
     return {task.task_id: task for task in parsed}
 
 
-def task(task_id: int) -> Task | None:
-    """One task by id, without loading the daemon's task history.
+def tasks_by_ids(task_ids: Sequence[int]) -> dict[int, Task]:
+    """Read selected task records in one log request, without output or history."""
+    requested = tuple(task_ids)
+    if any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in requested):
+        raise PueueError("task ids must be nonnegative integers")
+    identifiers = sorted(set(requested))
+    if not identifiers:
+        return {}
+    document = _decode(
+        _run(["log", "--json", "--lines", "0", *(str(value) for value in identifiers)]),
+        "log",
+    )
+    if not isinstance(document, Mapping):
+        raise PueueError("pueue log did not print an object")
+    found = {}
+    for task_id in identifiers:
+        if str(task_id) not in document:
+            continue
+        row = document[str(task_id)]
+        entry = row.get("task") if isinstance(row, Mapping) else None
+        if not isinstance(entry, Mapping):
+            raise PueueError("pueue log published no task record")
+        parsed = Task.from_entry(entry)
+        if parsed.task_id != task_id:
+            raise PueueError("pueue log task identity does not match the requested id")
+        found[task_id] = parsed
+    return found
 
-    `pueue log` publishes the same task record `status` does for any task,
-    queued, running or done, and an empty object for an id it does not hold.
-    """
-    document = _decode(_run(["log", "--json", "--lines", "0", str(task_id)]), "log")
-    row = document.get(str(task_id)) if isinstance(document, Mapping) else None
-    entry = row.get("task") if isinstance(row, Mapping) else None
-    return Task.from_entry(entry) if isinstance(entry, Mapping) else None
+
+def task(task_id: int) -> Task | None:
+    """One task, queued/running/done, or None for an id the queue does not hold."""
+    return tasks_by_ids((task_id,)).get(task_id)
 
 
 def tasks_by_command(fragment: str) -> dict[int, Task]:
