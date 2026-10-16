@@ -58,6 +58,11 @@ mkFeatureModule {
       cliCoreEnabled = nixosConfig.sinnix.features.cli.core.enable;
 
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+      lynchpinRuntime =
+        if sinnixCfg.services.lynchpin.enable then
+          nixosConfig.system.build.lynchpinRuntime
+        else
+          scriptPkgs.lynchpin-python;
 
       findFlakeRoot = pkgs.writeShellScriptBin "find-flake-root" (builtins.readFile ./find-flake-root.sh);
     in
@@ -329,7 +334,7 @@ mkFeatureModule {
                 pkgs.libGL
                 pkgs.libglvnd
               ];
-              LYNCHPIN_PYTHON = "${scriptPkgs.lynchpin-python}/bin/lynchpin-python";
+              LYNCHPIN_PYTHON = "${lynchpinRuntime}/bin/lynchpin-python";
               POLYLOGUE_PYTHON = "${scriptPkgs.polylogue-python}/bin/polylogue-python";
             };
 
@@ -360,7 +365,7 @@ mkFeatureModule {
                 ]
               )
               ++ [
-                scriptPkgs.lynchpin-python
+                lynchpinRuntime
                 scriptPkgs.polylogue-python
                 findFlakeRoot
                 scriptPkgs.ccusage

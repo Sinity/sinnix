@@ -232,10 +232,11 @@ in
         cli-lynchpin-host-storage =
           let
             host = inputs.self.nixosConfigurations.sinnix-prime.config;
-            runtime = lib.findFirst (
-              package: lib.getName package == "lynchpin-host-runtime"
-            ) (throw "Lynchpin host runtime is absent") host.environment.systemPackages;
+            runtime = host.system.build.lynchpinRuntime;
+            home = host.home-manager.users.${host.sinnix.user.name};
           in
+          assert home.home.sessionVariables.LYNCHPIN_PYTHON == "${runtime}/bin/lynchpin-python";
+          assert lib.any (package: toString package == toString runtime) home.home.packages;
           pkgs.runCommand "cli-lynchpin-host-storage" { } ''
             unset LYNCHPIN_CHISEL_CACHE_ROOT LYNCHPIN_CHISEL_SCRATCH_ROOT
             export LYNCHPIN_REPO_ROOT="$TMPDIR/repo"

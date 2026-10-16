@@ -157,6 +157,7 @@ mkServiceModule {
     in
     lib.mkMerge [
       {
+        system.build.lynchpinRuntime = hostRuntime;
         environment.systemPackages = [ hostRuntime ];
 
         environment.variables = chiselEnvironment // {
