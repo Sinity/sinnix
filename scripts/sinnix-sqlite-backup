@@ -365,6 +365,8 @@ def main() -> int:
     args = parser.parse_args()
     if not math.isfinite(args.acquire_budget_seconds) or args.acquire_budget_seconds <= 0:
         parser.error("--acquire-budget-seconds must be positive")
+    if not math.isfinite(args.check_budget_seconds) or args.check_budget_seconds < 0:
+        parser.error("--check-budget-seconds must be finite and nonnegative")
     if args.verify_only:
         if not args.immutable_source or args.output is not None:
             parser.error("--verify-only requires --immutable-source and no output")

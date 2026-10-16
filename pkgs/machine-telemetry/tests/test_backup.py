@@ -741,3 +741,15 @@ def test_acquisition_failure_preserves_selected_archive(tmp_path: Path) -> None:
         helper["backup_database"](source, output, acquire_budget_seconds=1e-12)
     assert output.read_bytes() == b"previous archive"
     assert not list(tmp_path.glob(".sqlite-backup-*"))
+
+
+@pytest.mark.parametrize("budget", ["nan", "inf", "-inf", "-1"])
+@pytest.mark.parametrize("verify_only", [False, True])
+def test_invalid_check_budget_refused_before_source_access(tmp_path, budget, verify_only):
+    command = ["python3", str(SCRIPT), str(tmp_path / "absent.sqlite"),
+               "--immutable-source", f"--check-budget-seconds={budget}"]
+    command += ["--verify-only"] if verify_only else [str(tmp_path / "output.zst")]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=5)
+    assert result.returncode == 2
+    assert "--check-budget-seconds must be finite and nonnegative" in result.stderr
+    assert not (tmp_path / "output.zst").exists()
