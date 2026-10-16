@@ -23,6 +23,8 @@ CAPTURES_ROOT="${SINNIX_CAPTURES_ROOT:-/realm/activity}"
 # rather than implying the unit has never run since it was written.
 SINCE_WINDOW="${SINNIX_AUDIT_SINCE:-7 days ago}"
 NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+NOW_EPOCH="$(date -d "$NOW" +%s)"
+SINCE_EPOCH="$(date -d "$SINCE_WINDOW" +%s)"
 QUIET=0
 [[ "${1:-}" == "--quiet" ]] && QUIET=1
 
@@ -237,6 +239,17 @@ while IFS=$'\t' read -r unit manager acknowledged; do
   if [[ -z "$timer_load" ]]; then
     printf 'sinnix-sandbox-audit: timer load state unavailable for %s\n' "$timer" >&2
     exit 1
+  fi
+  # Journal hygiene may drop routine completion messages. A recent native
+  # exited/zero-status witness is sufficient; Result alone can be reset.
+  exit_code="$(show_prop "$manager" "$unit" ExecMainCode)"
+  exit_status="$(show_prop "$manager" "$unit" ExecMainStatus)"
+  exit_stamp="$(show_prop "$manager" "$unit" ExecMainExitTimestamp)"
+  if [[ "$exit_code" == 1 && "$exit_status" == 0 && -n "$exit_stamp" ]]; then
+    if exit_epoch="$(date -d "$exit_stamp" +%s 2>/dev/null)" \
+      && [[ "$exit_epoch" -ge "$SINCE_EPOCH" && "$exit_epoch" -le "$NOW_EPOCH" ]]; then
+      continue
+    fi
   fi
   # Keep the journal reader's status separate from the match result. An
   # unavailable journal says nothing about whether the unit succeeded.

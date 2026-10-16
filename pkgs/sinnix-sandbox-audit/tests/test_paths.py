@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone, timedelta
 import os
 import subprocess
 import sys
@@ -161,3 +162,24 @@ def test_unreadable_journal_is_not_failed_execution(tmp_path, journal, expected)
     assert result.returncode == 0, result.stderr
     diagnoses = [r['kind'] for r in rows if r['kind'] in ('never-succeeded', 'journal-unavailable')]
     assert diagnoses == ([expected] if expected else [])
+
+
+@pytest.mark.parametrize("case,healthy", [("recent", True), ("failed", False),
+                                          ("default", False), ("expired", False),
+                                          ("future", False), ("invalid", False)])
+def test_native_success_requires_exact_recent_exit(tmp_path, case, healthy):
+    now = datetime.now(timezone.utc)
+    stamp = (now - timedelta(hours=1)).isoformat()
+    if case == 'expired':
+        stamp = (now - timedelta(days=10)).isoformat()
+    elif case == 'future':
+        stamp = (now + timedelta(days=1)).isoformat()
+    elif case == 'invalid':
+        stamp = 'not a timestamp'
+    props = {'LoadState': 'loaded', 'Result': 'success',
+             'ExecMainCode': '0' if case == 'default' else '1',
+             'ExecMainStatus': '1' if case == 'failed' else '0',
+             'ExecMainExitTimestamp': stamp}
+    result, rows = run_audit(tmp_path, '/synthetic/missing-capture', props, journal=('', 0))
+    assert result.returncode == 0, result.stderr
+    assert any(row['kind'] == 'never-succeeded' for row in rows) is not healthy
