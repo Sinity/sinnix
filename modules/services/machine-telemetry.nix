@@ -409,7 +409,7 @@ mkServiceModule {
             btrfs subvolume snapshot -r ${lib.escapeShellArg dbRoot} "$snapshot"
             resume_writer
             sinnix-sqlite-backup --immutable-source --verify-only \
-              --check-budget-seconds 5400 "$snapshot/telemetry.sqlite"
+              --check-budget-seconds 9000 "$snapshot/telemetry.sqlite"
             btrfs subvolume delete "$snapshot" >/dev/null
             write_state ok
           '';
@@ -422,9 +422,9 @@ mkServiceModule {
           user = "root";
           serviceConfig = {
             Group = "users";
-            TimeoutStartSec = "100min";
+            TimeoutStartSec = "160min";
             IOReadBandwidthMax = map (
-              # Leave room for a repeated page walk inside the 90-minute check budget.
+              # Leave room for a repeated page walk inside the 150-minute check budget.
               limit: if lib.hasPrefix "${realmRoot} " limit then "${realmRoot} 100M" else limit
             ) config.sinnix.runtime.inventory.classes.backup.serviceConfig.IOReadBandwidthMax;
           };
