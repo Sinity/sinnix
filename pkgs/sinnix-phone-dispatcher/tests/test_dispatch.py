@@ -170,7 +170,7 @@ def test_wrong_type_outbox_fails_visibly(tmp_path, capsys):
     outbox = tmp_path / "outbox"
     outbox.write_text("retained object")
     assert dispatch_mod.cmd_dispatch(_args(outbox)) == 1
-    assert "outbox unavailable" in capsys.readouterr().err
+    assert "unavailable" in capsys.readouterr().err
     assert outbox.read_text() == "retained object"
 
 
@@ -179,12 +179,12 @@ def test_unreadable_outbox_fails_visibly(monkeypatch, tmp_path, capsys):
     outbox.mkdir()
 
     def denied(path):
-        assert Path(path) == outbox
+        assert isinstance(path, int)
         raise PermissionError("synthetic access denied")
 
     monkeypatch.setattr(dispatch_mod.os, "scandir", denied)
     assert dispatch_mod.cmd_dispatch(_args(outbox)) == 1
-    assert "outbox unavailable" in capsys.readouterr().err
+    assert "unavailable" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("kind", ["fifo", "directory", "symlink"])
@@ -221,3 +221,75 @@ def test_nonregular_intent_is_refused_without_blocking(monkeypatch, tmp_path, ki
     assert outside.read_text() == '{"kind":"outside"}'
     assert not good.exists()
     assert calls == [{"kind": "mark"}]
+
+
+def test_replacement_during_execution_is_preserved(monkeypatch, tmp_path):
+    box = tmp_path / "outbox"
+    box.mkdir()
+    path = box / "intent-1.json"
+    path.write_text('{"kind":"old"}')
+
+    def execute(intent):
+        assert intent == {"kind": "old"}
+        replacement = box / "new"
+        replacement.write_text('{"kind":"new"}')
+        replacement.replace(path)
+        return {"ok": True}
+
+    monkeypatch.setattr(dispatch_mod, "execute", execute)
+    assert dispatch_mod.cmd_dispatch(_args(box)) == 1
+    assert path.read_text() == '{"kind":"new"}'
+
+
+def test_replaced_outbox_cannot_redirect_consumption(monkeypatch, tmp_path):
+    box = tmp_path / "outbox"
+    box.mkdir()
+    path = box / "intent-1.json"
+    path.write_text('{"kind":"old"}')
+    moved = tmp_path / "retained"
+
+    def execute(intent):
+        box.rename(moved)
+        box.mkdir()
+        (box / path.name).write_text('{"kind":"new"}')
+        return {"ok": True}
+
+    monkeypatch.setattr(dispatch_mod, "execute", execute)
+    assert dispatch_mod.cmd_dispatch(_args(box)) == 0
+    assert (box / path.name).read_text() == '{"kind":"new"}'
+    assert not (moved / path.name).exists()
+
+
+def test_replacement_during_consumption_is_retained(monkeypatch, tmp_path, capsys):
+    box = tmp_path / "outbox"
+    box.mkdir()
+    path = box / "intent-1.json"
+    path.write_text('{"kind":"old"}')
+    original_rename = dispatch_mod.os.rename
+
+    def race(source, destination, **kwargs):
+        replacement = box / "replacement"
+        replacement.write_text('{"kind":"new"}')
+        replacement.replace(path)
+        original_rename(source, destination, **kwargs)
+
+    monkeypatch.setattr(dispatch_mod.os, "rename", race)
+    monkeypatch.setattr(dispatch_mod, "execute", lambda intent: {"ok": True})
+    assert dispatch_mod.cmd_dispatch(_args(box)) == 1
+    assert path.read_text() == '{"kind":"new"}'
+    assert "retained_at" in capsys.readouterr().err
+    claims = list(box.glob(".confirmation-*.json"))
+    assert len(claims) == 1 and claims[0].read_bytes() == path.read_bytes()
+
+
+def test_dispatch_does_not_accept_utf16_as_utf8(monkeypatch, tmp_path):
+    box = tmp_path / "outbox"
+    box.mkdir()
+    path = box / "intent-1.json"
+    body = '{"kind":"mark"}'.encode("utf-16")
+    path.write_bytes(body)
+    monkeypatch.setattr(
+        dispatch_mod, "execute", lambda intent: pytest.fail("non-UTF8 intent executed")
+    )
+    assert dispatch_mod.cmd_dispatch(_args(box)) == 1
+    assert path.read_bytes() == body

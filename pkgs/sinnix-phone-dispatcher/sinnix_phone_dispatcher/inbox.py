@@ -232,7 +232,7 @@ def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict
         return HTTPStatus.OK, {"ok": True, "name": name, "retained": True}
     try:
         with _entry_directory(sub) as (root_fd, sub_fd):
-            return _confirm_entry(name, path.name, declared_sha, root_fd, sub_fd)
+            return confirm_directory_entry(name, path.name, declared_sha, root_fd, sub_fd)
     except FileNotFoundError:
         # A repeated confirmation of a consumed one-shot is idempotent.
         return HTTPStatus.OK, {
@@ -242,8 +242,13 @@ def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
 
 
-def _confirm_entry(name: str, entry: str, declared_sha: str | None,
+def confirm_directory_entry(name: str, entry: str, declared_sha: str | None,
                    root_fd: int, sub_fd: int) -> tuple[HTTPStatus, dict]:
+    """Consume only the acknowledged bytes in already-opened directories.
+
+    Shared by phone confirmations and retained-intent dispatch. A changed
+    publication stays recoverable even when its original name is reused.
+    """
     # Hold the same directory handles from the initial read through the last
     # mutation. Content checks alone cannot identify a replaced parent path.
     body = _read_regular(entry, dir_fd=sub_fd)
