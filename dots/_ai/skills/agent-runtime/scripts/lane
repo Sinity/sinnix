@@ -98,8 +98,8 @@ validate_result() {
   agentctl result validate-worker "$result" >&2 || die "result does not validate"
 }
 
-lane_done() {
-  local result dirty head sha
+lane_done() (
+  local result dirty head sha snapshot
   [[ $# -eq 1 ]] || {
     usage
     exit 2
@@ -111,6 +111,23 @@ lane_done() {
     printf 'lane: refusing to finish with uncommitted changes. Offenders:\n%s\n' "$dirty" >&2
     exit 1
   fi
+  snapshot=$(mktemp "${TMPDIR:-/realm/tmp/work}/lane-result.XXXXXXXX") || die "cannot allocate result snapshot"
+  trap 'rm -f -- "$snapshot"' EXIT
+  # Validate, inspect and emit one captured sequence, even if the worker
+  # replaces its original result while validation is running.
+  python3 - "$result" "$snapshot" <<'PY' || die "cannot capture result file"
+import os
+import shutil
+import stat
+import sys
+
+with os.fdopen(os.open(sys.argv[1], os.O_RDONLY | os.O_NONBLOCK), "rb") as source:
+    if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+        raise ValueError("result is not a regular file")
+    with open(sys.argv[2], "wb") as destination:
+        shutil.copyfileobj(source, destination, length=1024 * 1024)
+PY
+  result=$snapshot
   validate_result "$result"
   head=$(git rev-parse HEAD)
   sha=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["candidate_sha"])' "$result")
@@ -118,7 +135,7 @@ lane_done() {
   # The backend adapter stores stdout as the final message: the result
   # document must be the last stdout of this command.
   cat -- "$result"
-}
+)
 
 main() {
   case ${1:-} in

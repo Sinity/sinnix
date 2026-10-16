@@ -8,6 +8,8 @@ origin=$root/origin.git
 repo=$root/repo
 bin=$root/bin
 mkdir -p "$bin" "$origin" "$repo"
+export TMPDIR=$root/scratch
+mkdir -p "$TMPDIR"
 export HOME=$root/home
 mkdir -p "$HOME"
 export GIT_CONFIG_COUNT=1
@@ -118,6 +120,21 @@ test ! -s "$root/status-failed.out"
 grep -Fq 'cannot inspect checkout status' "$root/status-failed.err"
 rm "$bin/git"
 
+# Validation must bind the bytes emitted even if the source is replaced.
+real_agentctl=$(command -v agentctl)
+cp "$root/result.json" "$root/expected-result.json"
+printf '#!%s\n' "$BASH" >"$bin/agentctl"
+cat >>"$bin/agentctl" <<'EOF'
+set -euo pipefail
+"${REAL_AGENTCTL:?}" "$@"
+printf '{"candidate_sha":"%s","beads":"invalid replacement"}\n' "$RESULT_HEAD" >"$ORIGINAL_RESULT"
+EOF
+chmod +x "$bin/agentctl"
+(cd "$repo" && REAL_AGENTCTL="$real_agentctl" ORIGINAL_RESULT="$root/result.json" RESULT_HEAD="$head" PATH="$bin:$PATH" "$lane" done "$root/result.json") >"$root/replaced-result.json"
+cmp "$root/expected-result.json" "$root/replaced-result.json"
+cp "$root/expected-result.json" "$root/result.json"
+rm "$bin/agentctl"
+
 mkdir -p "$repo/.agentctl"
 cat >"$repo/.agentctl/project.toml" <<'EOF'
 schema = 1
@@ -192,5 +209,9 @@ test "$task_output" = 'launch snapshot'
 printf 'named prompt\n' >"$root/named.md"
 task_output=$(cd "$repo" && AGENTCTL_JOB_PROMPT_FILE="$root/named.md" "$lane" task)
 test "$task_output" = 'named prompt'
+
+shopt -s nullglob dotglob
+scratch_entries=("$TMPDIR"/*)
+test "${#scratch_entries[@]}" -eq 0
 
 printf 'lane toolbelt fixture passed\n'
