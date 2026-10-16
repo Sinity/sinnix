@@ -98,6 +98,26 @@ test "$(cat "$captured")" = "$(cat "$root/result.json")"
 remote_head=$(git --git-dir="$origin" rev-parse refs/heads/batch/fixture/w1)
 test "$remote_head" != "$head"
 
+# A failed status lookup is unavailable evidence, never a clean checkout.
+real_git=$(command -v git)
+printf '#!%s\n' "$BASH" >"$bin/git"
+cat >>"$bin/git" <<'EOF'
+if [[ "$1" == status ]]; then
+  printf 'fixture: cannot read checkout status\n' >&2
+  exit 128
+fi
+exec "${REAL_GIT:?}" "$@"
+EOF
+chmod +x "$bin/git"
+set +e
+(cd "$repo" && REAL_GIT="$real_git" PATH="$bin:$PATH" "$lane" done "$root/result.json") >"$root/status-failed.out" 2>"$root/status-failed.err"
+status_failed=$?
+set -e
+test "$status_failed" -eq 1
+test ! -s "$root/status-failed.out"
+grep -Fq 'cannot inspect checkout status' "$root/status-failed.err"
+rm "$bin/git"
+
 mkdir -p "$repo/.agentctl"
 cat >"$repo/.agentctl/project.toml" <<'EOF'
 schema = 1

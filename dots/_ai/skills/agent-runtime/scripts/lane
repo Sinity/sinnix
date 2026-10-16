@@ -85,8 +85,10 @@ print(reference)
 }
 
 git_offenders() {
+  local listing
   # Untracked files under .agentctl/ are agentctl's own (prompt, schema, result).
-  git status --porcelain=v1 --untracked-files=all | grep -v '^?? \.agentctl/' || true
+  listing=$(git status --porcelain=v1 --untracked-files=all) || return
+  printf '%s\n' "$listing" | grep -v '^?? \.agentctl/' || [[ $? -eq 1 ]]
 }
 
 validate_result() {
@@ -104,7 +106,7 @@ lane_done() {
   }
   result=$1
   [[ -f $result && -r $result ]] || die "result is not a readable file: $result"
-  dirty=$(git_offenders)
+  dirty=$(git_offenders) || die "cannot inspect checkout status"
   if [[ -n $dirty ]]; then
     printf 'lane: refusing to finish with uncommitted changes. Offenders:\n%s\n' "$dirty" >&2
     exit 1
