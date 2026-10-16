@@ -245,6 +245,10 @@ rec {
       nix-build = {
         CPUWeight = 5;
         IOWeight = 2;
+        # Store restores bypass build concurrency. Bound their device traffic
+        # as well as memory; scratch and the store share this device.
+        IOReadBandwidthMax = "/nix 80M";
+        IOWriteBandwidthMax = "/nix 40M";
         # Daemon builds run outside the AgentCTL work budget. Bound this
         # additional working set so concurrent jobs leave desktop headroom.
         MemoryHigh = "10G";
