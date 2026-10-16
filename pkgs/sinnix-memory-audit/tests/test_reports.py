@@ -227,3 +227,16 @@ def test_literal_filename_bytes_remain_readable_in_json_report(tmp_path):
     assert result.returncode == 0, result.stderr
     rows = [json.loads(line) for line in output.read_text().splitlines()]
     assert any(os.fsencode(row["file"]) == os.fsencode(source) for row in rows)
+
+
+@pytest.mark.parametrize("valid_prefix", [False, True])
+def test_invalid_calendar_date_cannot_reuse_a_previous_epoch(tmp_path, valid_prefix):
+    source = tmp_path / "MEMORY.md"
+    content = ("2000-01-01 neutral dated fixture\n" if valid_prefix else "")
+    source.write_text(content + "2026-02-30 invalid calendar fixture\n")
+    output = tmp_path / "report.jsonl"
+    result = subprocess.run(["bash", str(SCRIPT), "--root", str(tmp_path), "--output", str(output)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    rows = [json.loads(line) for line in output.read_text().splitlines()]
+    stale = [row["value"] for row in rows if row["kind"] == "stale_date"]
+    assert stale == (["2000-01-01"] if valid_prefix else [])

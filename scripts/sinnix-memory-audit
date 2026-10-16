@@ -82,9 +82,9 @@ sort -zu "$listing" | while IFS= read -r -d '' file; do
     match($0, /20[0-9][0-9]-[0-9][0-9]-[0-9][0-9]/) {
       date_value = substr($0, RSTART, RLENGTH)
       command = "date -d " date_value " +%s"
-      command | getline epoch
+      parsed = (command | getline epoch)
       close(command)
-      if (now - epoch > stale_seconds)
+      if (parsed == 1 && now - epoch > stale_seconds)
         emit("stale_date", NR, "dated entry is older than the configured threshold", date_value)
     }
     {
