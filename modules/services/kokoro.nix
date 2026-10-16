@@ -69,6 +69,14 @@ mkAiService {
           # runtime re-download check on every start.
           DOWNLOAD_MODEL = "false";
         };
+        # Podman's model process lives outside the service wrapper's cgroup.
+        # Bound the container itself: the retained startup/runtime peak was
+        # 2.23 GB; 4 GiB leaves headroom without an unbounded model workload.
+        # Podman's memory-swap value is RAM plus swap, hence 2 GiB extra.
+        extraOptions = [
+          "--memory=4g"
+          "--memory-swap=6g"
+        ];
       };
 
       # Bind the container to the proxy's lifecycle: a clean idle exit of

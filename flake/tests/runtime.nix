@@ -247,6 +247,12 @@ in
             assertion = !config.hardware.nvidia-container-toolkit.enable;
             message = "CPU-only AI containers must not require NVIDIA CDI";
           }
+          {
+            assertion =
+              lib.elem "--memory=4g" config.virtualisation.oci-containers.containers.kokoro.extraOptions
+              && lib.elem "--memory-swap=6g" config.virtualisation.oci-containers.containers.kokoro.extraOptions;
+            message = "Kokoro needs bounds on its actual container, not just the Podman client unit";
+          }
         ];
       };
       cpuContainerEvaluated = evalTestSpec system cpuContainerSpec;

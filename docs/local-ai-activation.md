@@ -32,6 +32,11 @@ operation accepts `--image DIGEST_PINNED_IMAGE --ports PUBLIC BACKEND` and check
 an already retained image offline, without GPU access, models or production-state
 mounts. This check does not start the TTS service or qualify speech generation.
 
+Kokoro's RAM and swap bounds apply directly to its Podman container. Its model
+process is in a separate cgroup from the systemd client unit, whose memory
+counter does not describe the model's working set. These limits do not govern
+other AI containers.
+
 The canonical model roster is `flake/data/local-models.nix`. The canonical port and front-door map is `flake/data/ports.nix`. Edit those sources when changing the platform. Do not add a model only to LiteLLM or only to an agent wrapper.
 
 ## The operator control plane
