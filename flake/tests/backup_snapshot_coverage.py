@@ -32,6 +32,42 @@ COVERAGE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(COVERAGE)
 
 
+class SnapshotInventoryFixture(unittest.TestCase):
+    def test_empty_and_filtered_inventory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertEqual(COVERAGE.snapshot_names(root, "realm.*"), [])
+            old = "realm.20261015T020000+0200"
+            new = "realm.20261016T020000+0200"
+            for name in (new, old, "persist.20261016T020000+0200"):
+                (root / name).mkdir()
+            (root / "realm.20261014T020000+0200").symlink_to(root / old)
+            (root / "realm.20261013T020000+0200").touch()
+            self.assertEqual(COVERAGE.snapshot_names(root, "realm.*"), [old, new])
+
+    def test_unavailable_root_is_not_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "snapshots"
+            with self.assertRaises(FileNotFoundError):
+                COVERAGE.snapshot_names(root, "realm.*")
+            root.touch()
+            with self.assertRaises(NotADirectoryError):
+                COVERAGE.snapshot_names(root, "realm.*")
+        with patch.object(COVERAGE.os, "scandir", side_effect=PermissionError(errno.EACCES, "denied")):
+            with self.assertRaises(PermissionError):
+                COVERAGE.snapshot_names("/synthetic/snapshots", "realm.*")
+
+    def test_entry_lookup_error_is_not_omitted(self):
+        entry = SimpleNamespace(name="realm.20261016T020000+0200")
+        def unavailable(**kwargs):
+            raise OSError(errno.EIO, "entry lookup failed")
+        entry.stat = unavailable
+        from contextlib import nullcontext
+        with patch.object(COVERAGE.os, "scandir", return_value=nullcontext(iter([entry]))):
+            with self.assertRaises(OSError):
+                COVERAGE.snapshot_names("/synthetic/snapshots", "realm.*")
+
+
 class FilesystemIdentityFixture(unittest.TestCase):
     def test_exact_filesystem_uuid_is_required(self):
         mount = json.dumps({"filesystems": [{"target": "/synthetic", "fstype": "btrfs"}]})

@@ -83,16 +83,16 @@ def marker_order(fields):
 
 
 def snapshot_names(directory, glob):
-    if not Path(directory).is_dir():
-        raise ValueError(f"snapshot directory unavailable: {directory}")
-    return sorted(
-        (
-            path.name
-            for path in Path(directory).glob(glob)
-            if path.is_dir() and not path.is_symlink()
-        ),
-        key=snapshot_epoch,
-    )
+    # Path.glob suppresses directory-read errors. A failed inventory must not
+    # become an empty pending queue or an incomplete pruning inventory.
+    with os.scandir(directory) as entries:
+        names = [
+            entry.name
+            for entry in entries
+            if fnmatchcase(entry.name, glob)
+            and stat.S_ISDIR(entry.stat(follow_symlinks=False).st_mode)
+        ]
+    return sorted(names, key=snapshot_epoch)
 
 
 def acknowledgement_directory(marker):
