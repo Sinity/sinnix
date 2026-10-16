@@ -46,6 +46,12 @@ sys.exit(1)
     assert detail.returncode == 0 and 'manual' in detail.stdout, detail
     assert 'backend is not running' in detail.stdout
     assert not any('sinnix-ops-reducer.service' in json.loads(line) for line in calls.read_text().splitlines())
+    before = calls.read_bytes()
+    for name in ('--help', '--version', '-e'):
+        result = run('start', name)
+        assert result.returncode != 0 and 'unknown service:' in result.stderr, result
+        assert not result.stdout, result.stdout
+    assert calls.read_bytes() == before, 'invalid names reached systemctl'
     for content in ('{', '{"surfaces": null}', '{"surfaces": []}'):
         inventory.write_text(content)
         result = run('list')

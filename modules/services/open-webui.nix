@@ -125,6 +125,8 @@ mkAiService {
       };
       users.groups.open-webui = { };
       systemd.services.open-webui.serviceConfig = {
+        # The verified identity resolver reads interface addresses via rtnetlink.
+        RestrictAddressFamilies = lib.mkAfter [ "AF_NETLINK" ];
         ExecStartPre = [ "${resolveIdentity} /run/open-webui/bind.env" ];
         EnvironmentFile = [ "-/run/open-webui/bind.env" ];
         DynamicUser = lib.mkForce false;

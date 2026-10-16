@@ -150,7 +150,7 @@ pin_summary() {
 lookup() {
   local name="$1" surface names
   names="$(service_names)"
-  if ! grep -qxF "$name" <<<"$names"; then
+  if ! grep -qxF -- "$name" <<<"$names"; then
     echo "unknown service: ${name} (see: sinnix-ai list)" >&2
     exit 1
   fi
