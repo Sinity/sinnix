@@ -47,7 +47,11 @@ in
                 ];
               };
             };
-            sinnix.runtime.captureSubjects.fixture = [ "fixture-system-capture" "fixture-user-capture" "fixture-standalone-capture" ];
+            sinnix.runtime.captureSubjects.fixture = [
+              "fixture-system-capture"
+              "fixture-user-capture"
+              "fixture-standalone-capture"
+            ];
             sinnix.runtime.captures = [
               {
                 name = "fixture-standalone-capture";
@@ -127,8 +131,14 @@ in
               message = "flattened captures must preserve declared manager/unit ownership and leave standalone producers unknown";
             }
             {
-              assertion = config.sinnix.runtime.inventory.capture_scopes.schema == "sinnix-capture-scope-v1"
-                && config.sinnix.runtime.inventory.capture_scopes.subjects.fixture == [ "fixture-system-capture" "fixture-user-capture" "fixture-standalone-capture" ];
+              assertion =
+                config.sinnix.runtime.inventory.capture_scopes.schema == "sinnix-capture-scope-v1"
+                &&
+                  config.sinnix.runtime.inventory.capture_scopes.subjects.fixture == [
+                    "fixture-system-capture"
+                    "fixture-user-capture"
+                    "fixture-standalone-capture"
+                  ];
               message = "capture subjects must project exact enabled IDs from the explicit versioned registry";
             }
             {
@@ -270,7 +280,7 @@ in
               && lib.any (
                 volume: lib.hasSuffix ":/run/sinnix-kokoro/sinnix_fastapi_admission.py:ro" volume
               ) kokoro.volumes;
-              message = "Kokoro must retain guarded startup, registered host ports and its native internal interface";
+            message = "Kokoro must retain guarded startup, registered host ports and its native internal interface";
           }
         ];
       };
@@ -331,7 +341,8 @@ in
             hardware.nvidia-container-toolkit.suppressNvidiaDriverAssertion = true;
           })
         ];
-        # Provably fails when: a backend declares `bindsTo` on its proxy; a
+        # Provably fails when: a manual start lacks its socket FD; an idle exit
+        # leaves its backend alive; a
         # proxy socket's ListenStream drifts from its inventory
         # publicEndpoint; a proxy's socket-proxyd target drifts from its
         # backendEndpoint; a conflicts edge is added or removed on one side
@@ -425,6 +436,10 @@ in
               message = "Each OCI backend must publish the endpoint its runtime inventory advertises";
             }
             {
+              assertion = config.sinnix.runtime.inventory.surfaces.stt.ai.browserRequests == "native-only";
+              message = "STT must refuse browser metadata before starting its native-only receiver";
+            }
+            {
               # ai-control must discover the owning service declarations,
               # rather than carry another backend-name list. Every marked
               # enabled socket backend therefore gets exactly one front door.
@@ -432,19 +447,20 @@ in
               message = "Every AI service that declares socket-proxy activation must receive exactly one derived front door";
             }
             {
-              # Guards the PartOf-not-BindsTo invariant from ai-control's
-              # mkProxy (see there for the mechanism): the edge must never
-              # point back up, or a backend start pulls the proxy in outside
-              # socket activation and both die.
+              # Manual starts acquire the private listen FD; natural proxy
+              # idle exit must release its backend. Ordering only runs from
+              # proxy to backend, so the mutual lifetime binding has no cycle.
               assertion = builtins.all (
                 proxyName:
-                builtins.all (
+                lib.elem "${proxyName}.socket" (config.systemd.services.${proxyName}.bindsTo or [ ])
+                && builtins.all (
                   backend:
-                  !(lib.elem "${proxyName}.service" (config.systemd.services.${backend}.bindsTo or [ ]))
-                  && !(lib.elem "${proxyName}.service" (config.systemd.services.${backend}.requires or [ ]))
+                  lib.elem "${proxyName}.service" (config.systemd.services.${backend}.bindsTo or [ ])
+                  && !(lib.elem "${proxyName}.service" (config.systemd.services.${backend}.after or [ ]))
+                  && lib.elem "${backend}.service" (config.systemd.services.${proxyName}.bindsTo or [ ])
                 ) (backendUnitsOf proxyName)
               ) proxyNames;
-              message = "A socket-proxy backend must not declare BindsTo=/Requires= on its own proxy: that starts the proxy without socket activation and cascades its failure back into the backend";
+              message = "AI proxy/backend lifetime binding must release idle backends and acquire socket FDs without a manual-start ordering cycle";
             }
             {
               # The downward edge must exist, or an idle proxy exit leaves the
@@ -471,9 +487,13 @@ in
               # each other catches drift without pinning any port literal
               # here (which would only force a two-place edit).
               assertion = builtins.all (
-                proxy: config.systemd.sockets.${proxy.name}.listenStreams == [ proxy.activation.publicEndpoint ]
+                proxy:
+                config.systemd.sockets.${proxy.name}.listenStreams == [ "/run/sinnix-ai/${proxy.name}.sock" ]
+                && config.systemd.sockets.${proxy.name}.socketConfig.SocketMode == "0660"
+                && config.systemd.sockets.${proxy.name}.socketConfig.SocketUser == config.sinnix.user.name
+                && lib.hasInfix "http://:${lib.last (lib.splitString ":" proxy.activation.publicEndpoint)}" config.services.caddy.extraConfig
               ) proxies;
-              message = "Each socket-proxy front door must listen on exactly the public endpoint its runtime inventory advertises";
+              message = "Each AI HTTP front door must guard the public endpoint before its operator/Caddy-only Unix activation socket";
             }
             {
               assertion = builtins.all (

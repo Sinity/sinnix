@@ -340,7 +340,8 @@ let
     // {
       capture_scopes = {
         schema = "sinnix-capture-scope-v1";
-        subjects = lib.mapAttrs (_: names:
+        subjects = lib.mapAttrs (
+          _: names:
           builtins.filter (name: builtins.elem name (map (lane: lane.name) runtimeInventory.captures)) names
         ) config.sinnix.runtime.captureSubjects;
       };
@@ -524,6 +525,14 @@ in
                       ];
                       default = "native";
                     };
+                    browserRequests = lib.mkOption {
+                      type = lib.types.enum [
+                        "loopback"
+                        "native-only"
+                      ];
+                      default = "loopback";
+                      description = "Admission before socket activation: loopback browser UI or native requests only.";
+                    };
                     requiresCuda = lib.mkOption {
                       type = lib.types.bool;
                       default = false;
@@ -681,9 +690,13 @@ in
       sinnix.runtime.captureSubjects = import ../flake/data/capture-subjects.nix;
       assertions = lib.mkAfter [
         {
-          assertion = builtins.all (lane:
-            builtins.length (builtins.filter (names: builtins.elem lane.name names)
-              (builtins.attrValues config.sinnix.runtime.captureSubjects)) == 1
+          assertion = builtins.all (
+            lane:
+            builtins.length (
+              builtins.filter (names: builtins.elem lane.name names) (
+                builtins.attrValues config.sinnix.runtime.captureSubjects
+              )
+            ) == 1
           ) runtimeInventory.captures;
           message = "Each declared capture lane must belong to exactly one explicit runtime capture subject.";
         }

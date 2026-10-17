@@ -503,7 +503,7 @@ def render_ai(
         '<section class="card wide"><h2>Local AI backends</h2>'
         '<p class="sub">These sit behind <code>systemd-socket-proxyd</code> and '
         "exit after their idle timeout, so <em>idle</em> is the resting state, not "
-        "a fault: connecting to the public endpoint starts one with no privileged "
+        "a fault: an admitted HTTP request starts one with no privileged "
         "action at all. CUDA backends hold the same "
         "<code>gpu-inference</code> admission key and conflict by design.</p>"
         f"{blocks}</section>"

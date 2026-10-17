@@ -194,6 +194,7 @@ let
       stateDirectories ? [ ],
       backendKind ? "native",
       requiresCuda ? false,
+      browserRequests ? "loopback",
       extraOptions ? { },
       meta ? { },
       docs ? null,
@@ -210,7 +211,7 @@ let
       surface = {
         inherit unit resourceClass activation;
         ai = {
-          inherit backendKind requiresCuda;
+          inherit backendKind requiresCuda browserRequests;
         };
         observe = {
           enable = true;

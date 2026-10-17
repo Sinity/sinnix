@@ -1,6 +1,6 @@
 # Local AI activation
 
-Most local AI backends use on-demand socket activation. A systemd proxy starts them on the first request and stops them after their idle window. Open WebUI is a direct, manually started frontend; its URL does not start the service. `sinnix ai list` distinguishes boot, on-demand and manual services from the runtime inventory and installed units.
+Most local AI backends use on-demand socket activation. Caddy checks Host and browser provenance on the public HTTP entrance, then connects to a private systemd socket. Accepted requests start the backend; an idle systemd proxy stops it after its declared window. A TCP connection or refused HTTP request does not activate a model. Open WebUI is a direct, manually started frontend; its URL does not start the service. `sinnix ai list` distinguishes boot, on-demand and manual services from the runtime inventory and installed units.
 
 ## Service map
 
@@ -42,8 +42,7 @@ the native router proxy.
 The CPU and CUDA packages have separate source patches for their pinned
 versions. `llama-http-admission` checks both HTTP libraries without models;
 `llama-package-admission` checks both full binaries as empty offline routers.
-This receiver policy does not stop the public TCP activation proxy from
-starting a backend before request headers arrive.
+The public Caddy gate applies before socket activation. These receiver checks also protect direct backend entrances.
 
 OpenedAI Speech uses the shared Host/Origin admission policy before its vendor
 middleware reads request bodies. Native API clients and same-origin browser
@@ -87,7 +86,7 @@ sinnix ai pin muse-glimmer 2h
 sinnix ai unpin muse-glimmer
 ```
 
-`start` is useful when you want the cold load to happen before sending work. A first Glimmer load can take several minutes because the 17 GB GGUF is being mapped and the hybrid layer fit is computed. `pin` holds a connection to the public socket for a bounded period, so the backend remains resident during a work session. The pin is a transient user unit, releases automatically, and does not survive a reboot.
+`start` is useful when you want the cold load to happen before sending work. A first Glimmer load can take several minutes because the 17 GB GGUF is being mapped and the hybrid layer fit is computed. `pin` holds the private activation socket through a transient user unit. Its socket is accessible only to the operator and Caddy. It releases at the deadline, or earlier if the backend closes the connection. The pin is a transient user unit, releases automatically, and does not survive a reboot.
 
 The GPU services share an exclusive `gpu-inference` resource. Ollama, the llama.cpp GPU profiles, ComfyUI, and the GPU TTS service cannot use the card concurrently. Starting one can stop a conflicting resident service. Check before and after a switch with `sinnix ai status` and `sinnix ai gpu`.
 
@@ -247,10 +246,16 @@ The runtime inventory at `/etc/sinnix/runtime-inventory.json` records the declar
 
 The direct LiteLLM HTTP application checks the loopback Host authority and browser Origin/Fetch Metadata before reading request bodies or dispatching work. Native API clients and same-origin UI requests remain supported. Foreign browser requests receive 403 without wildcard CORS; deliberate document navigation remains available. Public and backend listener ports come from the shared port registry.
 
-This HTTP boundary does not prevent the systemd TCP socket proxy from starting the lightweight gateway before headers arrive. Other AI backends retain their own acceptance requirements.
+The public HTTP gate checks provenance before the private socket activates LiteLLM. Native API requests retain the existing cold-start behavior.
 
 ### Ollama browser admission
 
 Ollama accepts HTTP browser origins only at its registry-declared public and backend loopback ports. Its configured origin list replaces upstream's unrestricted localhost defaults. Native app protocols remain supported. Fetch Metadata without an Origin must identify a same-origin context or deliberate document navigation; passive cross-site requests are refused before handlers read their bodies. Host checks also precede CORS preflight handling. Native API clients and model loading retain their existing routes.
 
-The `ollama-package-boundary` check builds the configured CUDA package, including its origin and browser-admission tests. This boundary does not prevent the TCP proxy from starting the daemon before HTTP headers arrive.
+The `ollama-package-boundary` check builds the configured CUDA package, including its origin and browser-admission tests. The public HTTP gate refuses untrusted requests before socket activation.
+
+### HTTP activation boundary
+
+The system Caddy service fronts the registry-declared loopback ports independently of the tailnet hub. Each private activation socket is owned by the operator, with group access for Caddy and mode `0660`. The public raw TCP socket interface is removed. STT declares a native-only entrance matching its receiver, so even same-origin browser metadata is refused before it loads. The backend and proxy retain the readiness wait, idle timeout, native manual-start route and GPU conflict mesh. Their systemd lifetimes are bound so a natural proxy idle exit releases the backend. Manual prewarming acquires the listening socket before starting its proxy; idle timing starts after the first proxy connection. Declared public-API consumers (such as the Ollama model loader) require the HTTP gate before they start. Caddy does not pool upstream connections, so it cannot extend a backend's idle window after a request ends. Streaming and WebSocket connections remain active work until they close.
+
+Caddy's administration entrance is an owner-only Unix socket under `/run/caddy`; it does not expose an additional TCP control API. `ai-http-boundary` checks the generated request gate with no models. `ai-http-activation-vm` checks the actual systemd/Caddy lifecycle using lightweight fake backends, including zero starts for refused requests, idle release and exclusive-resource transitions.

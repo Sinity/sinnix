@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: On-demand control plane for local AI services (list/status/start/stop/logs/pin)
-# runtimeInputs: bash coreutils systemd curl gnugrep gawk gnused jq
+# runtimeInputs: bash coreutils systemd curl gnugrep gawk gnused jq python3
 set -euo pipefail
 
 export LC_ALL=C
 
-# `sinnix-ai pin <name>` runs a transient --user unit holding one open TCP
-# connection to the service's public (proxy) port. That is what inhibits
+# `sinnix-ai pin <name>` runs a transient --user unit holding one open Unix
+# connection to the service's private activation socket. That is what inhibits
 # systemd-socket-proxyd's --exit-idle-time: the idle timer only starts once
 # the proxy has zero active connections, regardless of traffic. RuntimeMaxSec
 # on the transient unit is the auto-release -- systemd kills the holder and
@@ -63,7 +63,7 @@ list` to see exactly what this host currently has registered.
 Pinning: services fronted by an idle-aware socket proxy (see
 modules/services/ai-control.nix) tear down after a short idle window
 once nothing is connected. `pin` holds one open connection to the
-service's public port for a bounded duration so it stays resident during
+service's operator-accessible Unix socket for a bounded duration during
 a work session. Release is automatic (systemd RuntimeMaxSec on a
 transient --user unit kills the holder and closes the connection at the
 deadline), so a pin cannot outlive its duration and never survives a
@@ -344,7 +344,7 @@ cmd_pin() {
     echo "$REG_NAME has no idle-aware proxy (${REG_NAME}-proxy.service not installed) -- nothing auto-tears it down, so there is nothing to pin against" >&2
     exit 1
   }
-  local port="${REG_ENDPOINT##*:}"
+  local socket="/run/sinnix-ai/${REG_NAME}-proxy.sock"
   local seconds; seconds=$(parse_duration "$duration")
   local unit="${PIN_PREFIX}${REG_NAME}"
   local deadline=$(( $(date +%s) + seconds ))
@@ -357,9 +357,13 @@ cmd_pin() {
   systemd-run --user --unit="$unit" --collect \
     --description="sinnix-ai pin ${REG_NAME} until ${deadline}" \
     --property="RuntimeMaxSec=${seconds}" \
-    -- bash -c "exec 9<>/dev/tcp/127.0.0.1/${port} || exit 1; sleep infinity" \
+    -- python3 -c 'import socket, sys
+with socket.socket(socket.AF_UNIX) as connection:
+    connection.connect(sys.argv[1])
+    while connection.recv(4096):
+        pass' "$socket" \
     >/dev/null
-  echo "pinned $REG_NAME: holding a connection on port $port for ${duration} (releases automatically; unit: ${unit}.service)"
+  echo "pinned $REG_NAME: holding $socket for ${duration} (releases automatically; unit: ${unit}.service)"
 }
 
 cmd_unpin() {

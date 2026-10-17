@@ -1,6 +1,7 @@
 """AI CLI discovery and lifecycle labels with an unavailable hub."""
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -36,6 +37,34 @@ sys.exit(1)
         'ordinary': {'ai': None, 'unit': 'ordinary.service', 'activation': {'mode': 'direct'}},
     }
     inventory.write_text(json.dumps({'surfaces': surfaces}))
+    launcher = root / 'systemd-run'
+    launch_log = root / 'launch.json'
+    launcher.write_text(f'#!{sys.executable}\n' + "import json,sys\nfrom pathlib import Path\n" + f"Path({str(launch_log)!r}).write_text(json.dumps(sys.argv[1:]))\n")
+    launcher.chmod(0o700)
+    pinned = run('pin', 'proxy-ai', '2s')
+    assert pinned.returncode == 0, pinned.stderr
+    launch = json.loads(launch_log.read_text())
+    assert '--user' in launch and '--property=RuntimeMaxSec=2' in launch, launch
+    holder = launch[launch.index('--') + 1:]
+    assert holder[:2] == ['python3', '-c'], holder
+    assert holder[-1] == '/run/sinnix-ai/proxy-ai-proxy.sock', holder
+    # Exercise the exact holder code captured from the CLI, substituting
+    # only the socket address. Closing the backend must release the pin.
+    with socket.socket(socket.AF_UNIX) as listener:
+        address = str(root / 'pin.sock')
+        listener.bind(address)
+        listener.listen(1)
+        listener.settimeout(2)
+        process = subprocess.Popen([*holder[:-1], address], env=env)
+        try:
+            connection, _ = listener.accept()
+            assert process.poll() is None
+            connection.close()
+            assert process.wait(timeout=2) == 0
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                process.wait(timeout=2)
     result = run('list')
     assert result.returncode == 0, result.stderr
     rows = {line.split()[0]: line.split() for line in result.stdout.splitlines()[1:]}

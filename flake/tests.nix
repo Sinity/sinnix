@@ -51,6 +51,8 @@ in
     ./tests/vm.nix
     ./tests/host-build.nix
     ./tests/desktop-io.nix
+    ./tests/ai-http-vm.nix
+    ./tests/ai-http.nix
     ./tests/runtime.nix
     ./tests/llama-http-admission.nix
     ./tests/export-manifest.nix

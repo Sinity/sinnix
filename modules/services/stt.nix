@@ -36,6 +36,7 @@ mkAiService {
   docs = "docs/speech.md";
   unit = "sinnix-stt.service";
   requiresCuda = false;
+  browserRequests = "native-only";
   activation = {
     mode = "socket-proxy";
     publicEndpoint = "127.0.0.1:${toString helpers.data.ports.stt.public}";

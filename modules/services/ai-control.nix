@@ -12,13 +12,16 @@
 }:
 let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+  httpFrontdoor = import ../lib/ai-http-frontdoor.nix { inherit lib; };
   systemdSocketProxyd = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd";
 
-  # Backends declare `partOf` and NOTHING stronger. PartOf propagates
-  # stop/restart only, which frees the GPU when the proxy idles out. BindsTo
-  # also implies Requires, so any backend start pulls in the proxy outside
-  # socket activation, where systemd-socket-proxyd has no listen fds, exits 1,
-  # and propagates that failure back into the backend.
+  # The backend and proxy bind their lifetimes to each other. The proxy
+  # orders after the backend and its listening socket; the backend MUST NOT
+  # order after the proxy, or cold/manual startup would have an ordering cycle.
+  # Requiring the socket on the proxy supplies listen FDs even on a manual
+  # backend start. PartOf additionally propagates explicit proxy restarts.
+  # BindsTo is needed for a natural idle exit, which PartOf alone does not
+  # propagate to the backend.
   #
   # Every value the front door needs is read from the backend's own runtime
   # surface: endpoints, the idle window, the readiness bound, and the
@@ -47,6 +50,7 @@ let
       backendHost = lib.elemAt backendParts 0;
       backendPort = lib.elemAt backendParts 1;
       proxy = "${name}-proxy";
+      socketPath = "/run/sinnix-ai/${proxy}.sock";
       waitForBackend = pkgs.writeShellApplication {
         name = "${proxy}-wait-backend";
         runtimeInputs = [ pkgs.coreutils ];
@@ -64,11 +68,21 @@ let
     in
     {
       inherit proxy backendUnit exclusiveResource;
+      consumers = surface.activation.consumers or [ ];
+      httpConfig = httpFrontdoor {
+        inherit publicEndpoint backendEndpoint socketPath;
+        inherit (surface.ai) browserRequests;
+      };
       socket = {
-        description = "Socket activation front door for ${backendUnit}";
+        description = "Private activation socket for ${backendUnit}";
         wantedBy = [ "sockets.target" ];
-        listenStreams = [ publicEndpoint ];
+        listenStreams = [ socketPath ];
         socketConfig = {
+          SocketUser = config.sinnix.user.name;
+          SocketGroup = config.services.caddy.group;
+          SocketMode = "0660";
+          DirectoryMode = "0755";
+          RemoveOnStop = true;
           # systemd's default (200 triggers in 2s) is sized for cheap
           # short-lived handlers. A cold model load holds the accept backlog
           # for as long as readinessTimeout, and an impatient client retrying
@@ -83,7 +97,16 @@ let
       service = {
         description = "Idle-aware socket proxy for ${backendUnit}";
         requires = [ backendUnit ];
-        after = [ backendUnit ];
+        # Closing/replacing the activation socket must also release the old
+        # proxy's listen FD and backend, including during a host switch.
+        bindsTo = [
+          backendUnit
+          "${proxy}.socket"
+        ];
+        after = [
+          backendUnit
+          "${proxy}.socket"
+        ];
         serviceConfig = {
           ExecStartPre = "${waitForBackend}/bin/${proxy}-wait-backend";
           ExecStart = "${systemdSocketProxyd} --exit-idle-time=${idleTimeout} ${backendEndpoint}";
@@ -95,9 +118,9 @@ let
   # AI membership and activation are both owned by the backend surface.
   backendNames = lib.naturalSort (
     lib.attrNames (
-      lib.filterAttrs (
-        _: surface: surface.ai != null && surface.activation.mode == "socket-proxy"
-      ) config.sinnix.runtime.surfaces
+      lib.filterAttrs (_: surface: surface.ai != null && surface.activation.mode == "socket-proxy") (
+        builtins.removeAttrs config.sinnix.runtime.surfaces [ "ai-http" ]
+      )
     )
   );
   proxies = lib.genAttrs backendNames mkProxy;
@@ -142,16 +165,60 @@ let
 in
 {
   environment.systemPackages = [ scriptPkgs.sinnix-ai ];
+  # Keep membership unconditional: conditioning this registry entry on a
+  # query of the same registry creates a module fixed-point recursion.
+  # Observation follows the actual Caddy enablement instead.
+  sinnix.runtime.surfaces.ai-http = {
+    unit = "caddy.service";
+    ai = null;
+    resourceClass = "ordinary";
+    observe = {
+      enable = backendNames != [ ];
+      restartable = backendNames != [ ];
+    };
+  };
+  services.caddy = lib.mkIf (backendNames != [ ]) {
+    enable = true;
+    # The native reload route uses this owner-only Unix admin socket, never
+    # an additional loopback HTTP administration entrance.
+    globalConfig = "admin unix//run/caddy/admin.sock\nauto_https off\npersist_config off\ngrace_period 5s";
+    extraConfig = lib.concatMapStringsSep "\n" (name: proxies.${name}.httpConfig) backendNames;
+  };
   systemd.sockets = forEachProxy (proxy: {
     ${proxy.proxy} = proxy.socket;
   });
   systemd.services = lib.mkMerge [
-    (forEachProxy (proxy: {
-      ${proxy.proxy} = proxy.service;
-      ${lib.removeSuffix ".service" proxy.backendUnit}.partOf = [
-        "${proxy.proxy}.service"
-      ];
-    }))
+    {
+      caddy = lib.mkIf (backendNames != [ ]) {
+        wants = map (name: "${proxies.${name}.proxy}.socket") backendNames;
+        after = map (name: "${proxies.${name}.proxy}.socket") backendNames;
+        serviceConfig = {
+          RuntimeDirectory = "caddy";
+          RuntimeDirectoryMode = "0700";
+        };
+      };
+    }
+
+    (forEachProxy (
+      proxy:
+      lib.mkMerge [
+        {
+          ${proxy.proxy} = proxy.service;
+          ${lib.removeSuffix ".service" proxy.backendUnit} = {
+            partOf = [ "${proxy.proxy}.service" ];
+            bindsTo = [ "${proxy.proxy}.service" ];
+          };
+        }
+        (lib.mkMerge (
+          map (consumer: {
+            ${consumer.unit} = {
+              requires = [ "caddy.service" ];
+              after = [ "caddy.service" ];
+            };
+          }) proxy.consumers
+        ))
+      ]
+    ))
     exclusivityConflicts
   ];
 }
