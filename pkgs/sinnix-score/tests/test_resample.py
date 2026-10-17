@@ -442,3 +442,92 @@ def test_history_storage_failure_stops_before_scores_or_receipts(score, tmp_path
     with pytest.raises(score['sqlite3'].OperationalError, match='disk is full'):
         score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=False))
     assert set(root.iterdir()) == {root / '.score.lock'} and not calls
+
+
+def test_discovery_does_not_stat_unrelated_outbox_entries(score, tmp_path, monkeypatch):
+    import os
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    trace(outbox / 'a.csv', 'imu', False)
+    scores = tmp_path / 'scores'
+    glob = score['cmd_run'].__globals__
+    glob.update(SCORES=scores, LEDGER=scores / 'scored.jsonl')
+    original_iterdir, original_stat = Path.iterdir, os.stat
+    unrelated_stats = []
+    def entries(path):
+        if path == outbox:
+            yield from (outbox / f'ignored-{n}.bin' for n in range(10000))
+        yield from original_iterdir(path)
+    def observed_stat(path, *args, **kwargs):
+        if not isinstance(path, int):
+            candidate = Path(os.fsdecode(path))
+            if candidate.parent == outbox and candidate.suffix not in ('.csv', '.m4a'):
+                unrelated_stats.append(candidate.name)
+        return original_stat(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'iterdir', entries)
+    monkeypatch.setattr(os, 'stat', observed_stat)
+    assert score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True)) == 0
+    assert not unrelated_stats, f'{len(unrelated_stats)} unnecessary metadata lookups'
+    assert len((scores / 'scored.jsonl').read_text().splitlines()) == 1
+
+
+@pytest.mark.parametrize('kind', ['file', 'broken-link'])
+def test_unusable_outbox_is_not_absent(score, tmp_path, kind):
+    outbox = tmp_path / 'outbox'
+    if kind == 'file':
+        outbox.write_text('not a directory')
+    else:
+        outbox.symlink_to(tmp_path / 'missing')
+    scores = tmp_path / 'scores'
+    score['cmd_run'].__globals__.update(SCORES=scores, LEDGER=scores / 'scored.jsonl')
+    with pytest.raises((OSError, ValueError)):
+        score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True))
+    assert not scores.exists()
+
+
+def test_outbox_access_error_is_not_absent(score, tmp_path, monkeypatch):
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    scores = tmp_path / 'scores'
+    score['cmd_run'].__globals__.update(SCORES=scores, LEDGER=scores / 'scored.jsonl')
+    original = Path.stat
+    def denied(path, *args, **kwargs):
+        if path == outbox:
+            raise PermissionError('synthetic outbox denial')
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(Path, 'stat', denied)
+    with pytest.raises(PermissionError, match='synthetic outbox denial'):
+        score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True))
+    assert not scores.exists()
+
+
+@pytest.mark.parametrize('kind', ['directory', 'fifo', 'broken-link'])
+def test_unusable_candidate_stops_before_processing(score, tmp_path, kind):
+    import os
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    path = outbox / 'a.csv'
+    if kind == 'directory':
+        path.mkdir()
+    elif kind == 'fifo':
+        os.mkfifo(path)
+    else:
+        path.symlink_to(outbox / 'missing')
+    scores = tmp_path / 'scores'
+    calls = []
+    score['cmd_run'].__globals__.update(SCORES=scores, LEDGER=scores / 'scored.jsonl', score_blob=lambda *args: calls.append(args))
+    with pytest.raises((OSError, ValueError)):
+        score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True))
+    assert not calls and set(scores.iterdir()) == {scores / '.score.lock'}
+
+
+def test_missing_and_empty_outbox_remain_distinct(score, tmp_path, capsys):
+    outbox = tmp_path / 'outbox'
+    scores = tmp_path / 'scores'
+    score['cmd_run'].__globals__.update(SCORES=scores, LEDGER=scores / 'scored.jsonl')
+    args = argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True)
+    assert score['cmd_run'](args) == 0
+    assert 'no outbox' in capsys.readouterr().out and not scores.exists()
+    outbox.mkdir()
+    assert score['cmd_run'](args) == 0
+    assert 'scored 0' in capsys.readouterr().out

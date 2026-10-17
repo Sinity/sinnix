@@ -791,10 +791,18 @@ def receipt_for(record: dict) -> tuple[str, str]:
 
 def cmd_run(args: argparse.Namespace) -> int:
     outbox = Path(args.outbox)
+    try:
+        outbox_mode = outbox.stat().st_mode
+    except FileNotFoundError:
+        try:
+            outbox.lstat()
+        except FileNotFoundError:
+            print(f"score: no outbox at {outbox}")
+            return 0
+        raise
+    if not stat.S_ISDIR(outbox_mode):
+        raise ValueError("score outbox must be a directory")
     SCORES.mkdir(parents=True, exist_ok=True)
-    if not outbox.is_dir():
-        print(f"score: no outbox at {outbox}")
-        return 0
     # Keep this inode after unlocking: unlinking it could let later callers
     # lock a replacement while an earlier waiter still owns the old inode.
     with open(
@@ -810,14 +818,21 @@ def cmd_run(args: argparse.Namespace) -> int:
             return _score_outbox(args, outbox, seen)
 
 
+def _candidate_paths(outbox: Path) -> Iterator[Path]:
+    for path in outbox.iterdir():
+        # Most outbox entries are unrelated payloads or paired metadata. Do
+        # not look up their inodes merely to reject their filename suffixes.
+        if path.suffix not in (".csv", ".m4a"):
+            continue
+        if not stat.S_ISREG(path.stat().st_mode):
+            raise ValueError(f"score candidate must be a regular file: {path.name}")
+        yield path
+
+
 def _score_outbox(args: argparse.Namespace, outbox: Path, seen: ScoreHistory) -> int:
     scored = failed = 0
 
-    candidates = sorted(
-        p
-        for p in outbox.iterdir()
-        if p.is_file() and p.suffix in (".csv", ".m4a") and not p.name.endswith(".part")
-    )
+    candidates = sorted(_candidate_paths(outbox))
     for path in candidates:
         size = path.stat().st_size
         # Legacy scores lack a sidecar binding. Preserve their established

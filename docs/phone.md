@@ -506,6 +506,10 @@ Malformed rows stop the run without new scores or receipts; preserve and repair
 the ledger before retrying instead of treating damaged history as unseen input.
 Only a missing ledger starts empty history. Access failures, dangling links and
 non-regular objects stop processing; regular-file links remain supported.
+An absent outbox reports that state without creating a score directory. An
+inaccessible or wrongly typed outbox fails explicitly. Discovery checks trace
+extensions before looking up file metadata; unavailable or non-regular trace
+entries stop the pass before processing, while unrelated payloads are ignored.
 Scoring runs share a kernel file lock in the score directory, acquired before
 reading history or loading traces and held through publication and receipts.
 Contenders wait, then re-read history; the dispatcher retains its existing
