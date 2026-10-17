@@ -101,6 +101,8 @@ def _phone_stream_transcribe(wav: bytes, *, timeout: float = 60.0) -> dict | Non
             result = json.loads(resp.read().decode("utf-8", "replace"))
             if not isinstance(result, dict):
                 raise ValueError("STT response must be a JSON object")
+            if not isinstance(result.get("text"), str):
+                raise ValueError("STT response text must be a string")
             return result
     except (urllib.error.URLError, OSError, ValueError) as exc:
         print(

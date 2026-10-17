@@ -141,9 +141,27 @@ def test_speech_recording_is_durably_published_before_transcription(
     assert not list(lane.blob_dir.glob(".*.atomic-tmp-*"))
 
 
-@pytest.mark.parametrize("response", [None, [], "invalid", 42])
-def test_nonobject_stt_response_retains_speech_envelope(
-    tmp_path, monkeypatch, response
+@pytest.mark.parametrize(
+    "response, transcribed",
+    [
+        (value, False)
+        for value in [
+            None,
+            [],
+            "invalid",
+            42,
+            {},
+            {"text": None},
+            {"text": []},
+            {"text": {"bad": "value"}},
+            {"text": 42},
+            {"text": True},
+        ]
+    ]
+    + [({"text": ""}, True), ({"text": "synthetic"}, True)],
+)
+def test_stt_response_validation_retains_speech_envelope(
+    tmp_path, monkeypatch, response, transcribed
 ):
     monkeypatch.setattr(
         receiver.urllib.request,
@@ -161,11 +179,17 @@ def test_nonobject_stt_response_retains_speech_envelope(
             }
         )
     )
-    records = [p for p in (tmp_path / "phone-speech").glob("phone-speech-*.jsonl") if not p.name.endswith("-index.jsonl")]
+    records = [
+        p
+        for p in (tmp_path / "phone-speech").glob("phone-speech-*.jsonl")
+        if not p.name.endswith("-index.jsonl")
+    ]
     assert len(records) == 1
     envelope = json.loads(records[0].read_text())
     payload = envelope["payload"]
-    assert payload["transcribed"] is False
+    assert payload["transcribed"] is transcribed
+    if transcribed:
+        assert payload["text"] == response["text"]
     recording = tmp_path / "phone" / "speech" / payload["audio_file"]
     assert recording.read_bytes()[44:] == b"\x00\x00"
 
@@ -187,6 +211,7 @@ def test_speech_publish_failure_leaves_no_claimed_recording(
 @pytest.mark.parametrize("existing", [False, True])
 def test_speech_directory_is_private_under_permissive_umask(tmp_path, existing):
     import os
+
     target = tmp_path / "phone" / "speech"
     if existing:
         target.mkdir(parents=True)
@@ -202,7 +227,9 @@ def test_speech_directory_is_private_under_permissive_umask(tmp_path, existing):
         assert (target / "retained.wav").read_bytes() == b"neutral retained fixture"
 
 
-def test_phone_stream_bounds_handlers_without_dropping_queued_bytes(running_server, monkeypatch):
+def test_phone_stream_bounds_handlers_without_dropping_queued_bytes(
+    running_server, monkeypatch
+):
     import threading
 
     lock = threading.Lock()
@@ -256,7 +283,9 @@ def test_phone_stream_bounds_handlers_without_dropping_queued_bytes(running_serv
             client.close()
 
 
-def test_phone_stream_shutdown_does_not_wait_for_a_handler_slot(running_server, monkeypatch):
+def test_phone_stream_shutdown_does_not_wait_for_a_handler_slot(
+    running_server, monkeypatch
+):
     import threading
 
     lock = threading.Lock()
@@ -311,14 +340,18 @@ def test_phone_stream_shutdown_does_not_wait_for_a_handler_slot(running_server, 
             assert not stopper.is_alive()
 
 
-def test_phone_stream_probes_unreachable_peers_without_an_idle_read_deadline(running_server, monkeypatch):
+def test_phone_stream_probes_unreachable_peers_without_an_idle_read_deadline(
+    running_server, monkeypatch
+):
     import threading
 
     checked = threading.Event()
     observed = {}
 
     def handle(self):
-        observed["keepalive"] = self.request.getsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE)
+        observed["keepalive"] = self.request.getsockopt(
+            socket.SOL_SOCKET, socket.SO_KEEPALIVE
+        )
         for option in (socket.TCP_KEEPIDLE, socket.TCP_KEEPINTVL, socket.TCP_KEEPCNT):
             observed[option] = self.request.getsockopt(socket.IPPROTO_TCP, option)
         observed["timeout"] = self.request.gettimeout()
@@ -328,6 +361,9 @@ def test_phone_stream_probes_unreachable_peers_without_an_idle_read_deadline(run
     with _connect(running_server):
         assert checked.wait(3)
     assert observed == {
-        "keepalive": 1, socket.TCP_KEEPIDLE: 60,
-        socket.TCP_KEEPINTVL: 10, socket.TCP_KEEPCNT: 3, "timeout": None,
+        "keepalive": 1,
+        socket.TCP_KEEPIDLE: 60,
+        socket.TCP_KEEPINTVL: 10,
+        socket.TCP_KEEPCNT: 3,
+        "timeout": None,
     }
