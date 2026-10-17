@@ -180,6 +180,47 @@ def test_file_keeps_claim_separate_from_clean_receipt_observation(
     assert evidence.get_record(config, "fixture", record["evidence_id"]) == record
 
 
+def test_file_without_publication_workspace_retains_unknown_observation(
+    config: Config,
+    fake_pueue: FakePueue,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = resolve_project(config, "fixture").root
+    descriptor = root / ".agentctl" / "project.toml"
+    text = descriptor.read_text()
+    start = text.index("[workspace]")
+    end = text.index("[packets]", start)
+    descriptor.write_text(text[:start] + text[end:])
+    project = resolve_project(config, "fixture")
+    assert project.workspace is None
+    job_id, reference = _receipt_job(config, fake_pueue, project)
+    monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
+    monkeypatch.setattr(
+        evidence, "_candidate",
+        lambda project, candidate: {"candidate_sha": candidate, "checked": True, "eligible": True},
+    )
+
+    def unexpected_remote(*args, **kwargs):
+        pytest.fail("missing publication policy must not invent a remote branch")
+
+    monkeypatch.setattr(evidence.github, "remote_head", unexpected_remote)
+    path = tmp_path / "native.json"
+    path.write_text(json.dumps(_claim(
+        receipt=f"agentctl://jobs/{job_id}/{reference}", schema_version=2,
+    )))
+    record = evidence.file(config, project, path)
+    publication = record["publication"]
+    assert publication["state"] == "unknown"
+    assert publication["checked"] is False
+    assert publication["candidate_reachable"] is None
+    assert publication["branch"] is None
+    assert publication["policy"] is None
+    assert publication["gaps"] == ["project has no workspace publication policy"]
+    assert record["verification"][0]["observation"]["eligible"] is True
+    assert evidence.get_record(config, "fixture", record["evidence_id"]) == record
+
+
 def test_v2_claim_must_match_the_current_filing_snapshot(
     config: Config,
     fake_pueue: FakePueue,

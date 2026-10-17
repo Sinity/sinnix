@@ -255,11 +255,12 @@ def _publication(project: ProjectAdapter, candidate: str) -> dict[str, Any]:
     The local remote-tracking ref must equal the advertised remote head before
     it can prove that the candidate is reachable from that head.
     """
-    branch = project.workspace.base_branch
+    workspace = project.workspace
+    branch = workspace.base_branch if workspace is not None else None
     document: dict[str, Any] = {
         "observed_at": datetime.now(timezone.utc).isoformat(),
         "source": "git+origin",
-        "policy": project.workspace.publish,
+        "policy": workspace.publish if workspace is not None else None,
         "branch": branch,
         "remote_head": None,
         "local_remote_head": None,
@@ -268,6 +269,9 @@ def _publication(project: ProjectAdapter, candidate: str) -> dict[str, Any]:
         "state": "unknown",
         "gaps": [],
     }
+    if workspace is None:
+        document["gaps"].append("project has no workspace publication policy")
+        return document
     try:
         remote_head = github.remote_head(project.root, branch)
         document["remote_head"] = remote_head
