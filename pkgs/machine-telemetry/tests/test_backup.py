@@ -6,6 +6,7 @@ import shutil
 import signal
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -808,7 +809,7 @@ def test_compressed_restore_stops_its_decoder(tmp_path, stop, close_stdout, igno
     scratch.mkdir()
     pidfile = tmp_path / "decoder.pid"
     decoder = tmp_path / "zstd"
-    decoder.write_text("#!/usr/bin/env python3\nimport os, signal, time\nfrom pathlib import Path\n"
+    decoder.write_text(f"#!{sys.executable}\nimport os, signal, time\nfrom pathlib import Path\n"
         + ("signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignore_term else "")
         + "os.write(1, b'x')\n"
         + ("os.close(1)\n" if close_stdout else "")
@@ -825,7 +826,10 @@ def test_compressed_restore_stops_its_decoder(tmp_path, stop, close_stdout, igno
         until = time.monotonic() + 5
         while not pidfile.exists() and process.poll() is None and time.monotonic() < until:
             time.sleep(0.01)
-        assert pidfile.exists()
+        assert pidfile.exists(), (
+            process.communicate(timeout=5) if process.poll() is not None
+            else "decoder did not report startup within five seconds"
+        )
         if stop == "cancel":
             if close_stdout:
                 time.sleep(0.1)
@@ -952,3 +956,63 @@ def test_backup_rejects_nonregular_source_before_open(tmp_path, route, kind):
     assert (before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns) == (
         after.st_ino, after.st_mode, after.st_size, after.st_mtime_ns
     )
+
+
+@pytest.mark.parametrize("mode", ["structural", "header"])
+def test_walk_read_advice_is_scoped_to_open_main_database(tmp_path, monkeypatch, mode):
+    import runpy
+
+    helper = runpy.run_path(str(SCRIPT))
+    main = tmp_path / "sample.sqlite"
+    other_dir = tmp_path / "other"
+    other_dir.mkdir()
+    other = other_dir / "sample.sqlite"
+    for path in (main, other):
+        with sqlite3.connect(path) as connection:
+            connection.execute("CREATE TABLE sample(value TEXT)")
+            connection.execute("INSERT INTO sample VALUES ('synthetic')")
+        connection.close()
+    before = {path: path.read_bytes() for path in (main, other)}
+    advised = []
+    original = os.posix_fadvise
+
+    def observe(fd, offset, length, advice):
+        info = os.fstat(fd)
+        advised.append((info.st_dev, info.st_ino, offset, length, advice))
+        return original(fd, offset, length, advice)
+
+    monkeypatch.setattr(os, "posix_fadvise", observe)
+    with sqlite3.connect(main) as connection:
+        connection.execute("ATTACH DATABASE ? AS unrelated", (str(other),))
+        check, verdict = helper["check_immutable_snapshot"](connection, None, mode=mode)
+    connection.close()
+    assert verdict == ("ok" if mode == "structural" else "limited")
+    if mode == "structural":
+        identity = main.stat()
+        assert advised == [(identity.st_dev, identity.st_ino, 0, 0, os.POSIX_FADV_RANDOM)]
+        assert check == "integrity_check"
+    else:
+        assert advised == []
+    assert {path: path.read_bytes() for path in before} == before
+
+
+def test_unsupported_read_advice_does_not_hide_integrity_verdict(tmp_path, monkeypatch, capsys):
+    import errno
+    import runpy
+
+    helper = runpy.run_path(str(SCRIPT))
+    main = tmp_path / "sample.sqlite"
+    with sqlite3.connect(main) as connection:
+        connection.execute("CREATE TABLE sample(value TEXT)")
+    connection.close()
+    before = main.read_bytes()
+
+    def unsupported(*_args):
+        raise OSError(errno.EOPNOTSUPP, "synthetic unsupported advice")
+
+    monkeypatch.setattr(os, "posix_fadvise", unsupported)
+    with sqlite3.connect(main) as connection:
+        assert helper["check_immutable_snapshot"](connection, None, mode="structural") == ("integrity_check", "ok")
+    connection.close()
+    assert "read advice unavailable" in capsys.readouterr().err
+    assert main.read_bytes() == before

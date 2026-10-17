@@ -164,6 +164,8 @@
           scriptPkgs.sinnix-census
           scriptPkgs.sinnix-navigation-audit
           scriptPkgs.sinnix-url-ledger
+          # Verification must use this checkout, not the installed CLI dispatcher.
+          scriptPkgs.sinnix-sqlite-backup
 
           # Help
           help

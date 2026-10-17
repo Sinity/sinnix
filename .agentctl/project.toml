@@ -131,7 +131,7 @@ timeout_seconds = 1800
 
 [operations.verify_telemetry_restore]
 description = "Restore and structurally verify one retained telemetry SQLite zstd artifact"
-exec = ["sinnix", "sqlite-backup", "--immutable-source", "--verify-only", "--compressed-source", "--max-restore-bytes", "85899345920", "--acquire-budget-seconds", "3600", "--check-budget-seconds", "9000"]
+exec = ["sinnix-sqlite-backup", "--immutable-source", "--verify-only", "--compressed-source", "--max-restore-bytes", "85899345920", "--acquire-budget-seconds", "3600", "--check-budget-seconds", "9000"]
 arguments = "required"
 pool = "bulk"
 result = "exit"
@@ -143,7 +143,7 @@ unit_properties = ["MemoryHigh=4G", "MemoryMax=5G", "IOWeight=10", "IOReadBandwi
 
 [operations.verify_telemetry_structure]
 description = "Structurally verify one retained immutable telemetry SQLite image"
-exec = ["sinnix", "sqlite-backup", "--immutable-source", "--verify-only", "--check-budget-seconds", "9000"]
+exec = ["sinnix-sqlite-backup", "--immutable-source", "--verify-only", "--check-budget-seconds", "9000"]
 arguments = "required"
 pool = "bulk"
 result = "exit"

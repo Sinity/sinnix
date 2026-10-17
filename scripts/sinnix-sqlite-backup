@@ -143,6 +143,41 @@ def run_check(
     return verdict
 
 
+def advise_page_walk(connection: sqlite3.Connection) -> None:
+    """Avoid speculative reads of interleaved pages during a bounded walk.
+
+    SQLite does not expose its descriptor in Python. Match the open main-file
+    descriptor by filesystem identity, excluding WAL and unrelated files. The
+    hint affects only this process's open descriptions, not global read-ahead.
+    Its absence must not prevent a structural integrity verdict.
+    """
+    try:
+        main = next(
+            row[2] for row in connection.execute("PRAGMA database_list") if row[1] == "main"
+        )
+        if not main:
+            return
+        identity = os.stat(main)
+        descriptors = list(Path("/proc/self/fd").iterdir())
+        advised = 0
+        for entry in descriptors:
+            fd = int(entry.name)
+            try:
+                opened = os.fstat(fd)
+            except OSError:
+                continue  # The directory enumeration can include its closed fd.
+            if (opened.st_dev, opened.st_ino) == (identity.st_dev, identity.st_ino):
+                os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_RANDOM)
+                advised += 1
+        print(
+            f"sqlite-backup: page-walk random-read advice on {advised} descriptor(s)",
+            file=sys.stderr,
+            flush=True,
+        )
+    except OSError as error:
+        print(f"sqlite-backup: page-walk read advice unavailable: {error}", file=sys.stderr, flush=True)
+
+
 def check_immutable_snapshot(
     connection: sqlite3.Connection, deadline: float | None, *, mode: str
 ) -> tuple[str, str]:
@@ -175,6 +210,7 @@ def check_immutable_snapshot(
     # faults trigger read-ahead of unrelated pages, amplifying bounded-cache
     # walks. Use SQLite's page reads even if the caller enabled mapping.
     connection.execute("PRAGMA mmap_size=0")
+    advise_page_walk(connection)
     # The walk is the longest silent stretch of the run, so say what started.
     print(f"sqlite-backup: {check} over {page_count} pages", flush=True)
     verdict = run_check(connection, f"PRAGMA {check}", deadline)
