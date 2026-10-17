@@ -32,6 +32,15 @@
         ];
         assertions = config: [
           {
+            assertion =
+              let
+                rules = builtins.filter (rule: lib.hasPrefix "d /realm/worktree " rule) config.systemd.tmpfiles.rules;
+                expected = "d /realm/worktree 0700 ${config.sinnix.user.name} users -";
+              in
+              rules != [ ] && builtins.all (rule: rule == expected) rules;
+            message = "Shared worktrees must retain an owner-only entrance before any checkout producer runs.";
+          }
+          {
             assertion = builtins.elem "d ${config.sinnix.paths.activityRoot}/shared/ranking 0700 ${config.sinnix.user.name} ${config.users.users.${config.sinnix.user.name}.group} -" config.systemd.tmpfiles.rules;
             message = "Raw ranking evidence must have an owner-only entrance.";
           }

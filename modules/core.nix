@@ -105,6 +105,9 @@ in
         "d /realm/state/db-dumps 0755 ${username} users -"
         # Scratch owners decide removal; age alone does not establish disposability.
         "d /realm/tmp/work 0700 ${username} users -"
+        # Worktrunk can create checkouts before AgentCTL; enforce their shared
+        # private entrance regardless of the first producer's umask.
+        "d /realm/worktree 0700 ${username} users -"
         "d ${paths.realmRoot}/account 0755 ${username} users -"
         "d ${paths.personalRoot} 0700 ${username} users -"
         "d ${paths.devicesRoot} 0755 ${username} users -"
