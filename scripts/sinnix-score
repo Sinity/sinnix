@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import argparse
 import cmath
-from contextlib import closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager
 import datetime as dt
 import fcntl
 import hashlib
@@ -488,6 +488,13 @@ def score_sway(path: Path) -> dict:
 # ------------------------------------------------------------- interoception
 
 
+def _directory_paths(root: Path) -> Iterator[Path]:
+    # Path.iterdir materializes DirEntry objects in supported Python versions.
+    with os.scandir(root) as entries:
+        for entry in entries:
+            yield Path(entry.path)
+
+
 def iter_recent_events(days: int = 3) -> Iterator[dict]:
     try:
         mode = EVENTS.stat().st_mode
@@ -500,25 +507,25 @@ def iter_recent_events(days: int = 3) -> Iterator[dict]:
     if not stat.S_ISDIR(mode):
         raise ValueError("score event home must be a directory")
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
-    paths = sorted(path for path in EVENTS.iterdir()
-                   if path.name.startswith("events-") and path.suffix == ".jsonl")
-    for path in paths:
-        if dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc) < cutoff:
-            continue
-        with open(
-            path, encoding="utf-8", errors="replace",
-            opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
-        ) as source:
-            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                raise ValueError("score event source must be a regular file")
-            for number, line in enumerate(source, 1):
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if not isinstance(record, dict):
-                    raise ValueError(f"score event record {number} must be an object")
-                yield record
+    with _ordered_paths(path for path in _directory_paths(EVENTS)
+                        if path.name.startswith("events-") and path.suffix == ".jsonl") as paths:
+        for path in paths:
+            if dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc) < cutoff:
+                continue
+            with open(
+                path, encoding="utf-8", errors="replace",
+                opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
+            ) as source:
+                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                    raise ValueError("score event source must be a regular file")
+                for number, line in enumerate(source, 1):
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(record, dict):
+                        raise ValueError(f"score event record {number} must be an object")
+                    yield record
 
 
 def score_interoception(trace_path: Path, ppg: dict, started_at: float | None) -> dict | None:
@@ -688,7 +695,7 @@ class ScoreHistory:
 
 
 @contextmanager
-def ledger_seen() -> Iterator[ScoreHistory]:
+def _scratch_database() -> Iterator[sqlite3.Connection]:
     # An empty SQLite filename creates a private temporary database, removed
     # by SQLite on close. On Unix its spill file is unlinked immediately, so
     # killing a scorer cannot leave a named history cache behind. SQLite uses
@@ -699,6 +706,33 @@ def ledger_seen() -> Iterator[ScoreHistory]:
         database.execute("PRAGMA mmap_size=0")
         database.execute("PRAGMA journal_mode=OFF")
         database.execute("PRAGMA synchronous=OFF")
+        yield database
+
+
+@contextmanager
+def _ordered_paths(paths: Iterator[Path]) -> Iterator[Iterator[Path]]:
+    # Preserve Path's component-wise Unicode order, including undecodable
+    # native names. Spill the inventory rather than retaining every Path.
+    # Fully consume input before yielding so a failed inventory publishes none.
+    with ExitStack() as cleanup, _scratch_database() as database:
+        cleanup.callback(getattr(paths, "close", lambda: None))
+        database.execute(
+            "CREATE TABLE paths (ordering BLOB, sequence INTEGER, value BLOB, "
+            "PRIMARY KEY(ordering,sequence)) WITHOUT ROWID"
+        )
+        database.executemany(
+            "INSERT INTO paths VALUES (?,?,?)",
+            (("\0".join(path.parts).encode("utf-32-be", "surrogatepass"),
+              number, os.fsencode(path)) for number, path in enumerate(paths)),
+        )
+        database.commit()
+        with closing(database.execute("SELECT value FROM paths ORDER BY ordering,sequence")) as rows:
+            yield (Path(os.fsdecode(row[0])) for row in rows)
+
+
+@contextmanager
+def ledger_seen() -> Iterator[ScoreHistory]:
+    with _scratch_database() as database:
         database.execute(
             "CREATE TABLE seen (file TEXT, bytes TEXT, bound INTEGER, signature TEXT, "
             "PRIMARY KEY(file,bytes,bound,signature)) WITHOUT ROWID"
@@ -890,7 +924,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 
 def _candidate_paths(outbox: Path) -> Iterator[Path]:
-    for path in outbox.iterdir():
+    for path in _directory_paths(outbox):
         # Most outbox entries are unrelated payloads or paired metadata. Do
         # not look up their inodes merely to reject their filename suffixes.
         if path.suffix not in (".csv", ".m4a"):
@@ -903,44 +937,44 @@ def _candidate_paths(outbox: Path) -> Iterator[Path]:
 def _score_outbox(args: argparse.Namespace, outbox: Path, seen: ScoreHistory) -> int:
     scored = failed = 0
 
-    candidates = sorted(_candidate_paths(outbox))
-    for path in candidates:
-        size = path.stat().st_size
-        # Legacy scores lack a sidecar binding. Preserve their established
-        # skip behavior without inventing retrospective metadata provenance.
-        if (path.name, size, None) in seen:
-            continue
-        if args.limit and scored + failed >= args.limit:
-            break
-        sidecar = read_sidecar(path)
-        if (path.name, size, sidecar.signature) in seen:
-            continue
-        record = score_blob(path, sidecar)
+    with _ordered_paths(_candidate_paths(outbox)) as candidates:
+        for path in candidates:
+            if args.limit and scored + failed >= args.limit:
+                break
+            size = path.stat().st_size
+            # Legacy scores lack a sidecar binding. Preserve their established
+            # skip behavior without inventing retrospective metadata provenance.
+            if (path.name, size, None) in seen:
+                continue
+            sidecar = read_sidecar(path)
+            if (path.name, size, sidecar.signature) in seen:
+                continue
+            record = score_blob(path, sidecar)
 
-        # Validate the complete record before opening a publication file.
-        record_line = json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n"
-        day = dt.datetime.now(dt.timezone.utc).date().isoformat()
-        with (SCORES / f"{day}.jsonl").open("a", encoding="utf-8") as fh:
-            fh.write(record_line)
-        append_jsonl(
-            LEDGER,
-            {"file": path.name, "bytes": size, "ok": record.get("ok"), "at": utc_ts(),
-             "sidecar_signature": sidecar.signature},
-        )
-        if not args.no_receipt:
-            title, body = receipt_for(record)
-            emit_receipt(
-                RECEIPTS_DIR,
-                record.get("kind") or "score",
-                title,
-                body,
-                sidecar.send_token,
-                "instruments",
+            # Validate the complete record before opening a publication file.
+            record_line = json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n"
+            day = dt.datetime.now(dt.timezone.utc).date().isoformat()
+            with (SCORES / f"{day}.jsonl").open("a", encoding="utf-8") as fh:
+                fh.write(record_line)
+            append_jsonl(
+                LEDGER,
+                {"file": path.name, "bytes": size, "ok": record.get("ok"), "at": utc_ts(),
+                 "sidecar_signature": sidecar.signature},
             )
-        if record.get("ok"):
-            scored += 1
-        else:
-            failed += 1
+            if not args.no_receipt:
+                title, body = receipt_for(record)
+                emit_receipt(
+                    RECEIPTS_DIR,
+                    record.get("kind") or "score",
+                    title,
+                    body,
+                    sidecar.send_token,
+                    "instruments",
+                )
+            if record.get("ok"):
+                scored += 1
+            else:
+                failed += 1
 
     print(f"score: scored {scored}, {failed} could not be scored")
     if failed:

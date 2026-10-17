@@ -452,19 +452,19 @@ def test_discovery_does_not_stat_unrelated_outbox_entries(score, tmp_path, monke
     scores = tmp_path / 'scores'
     glob = score['cmd_run'].__globals__
     glob.update(SCORES=scores, LEDGER=scores / 'scored.jsonl')
-    original_iterdir, original_stat = Path.iterdir, os.stat
+    original_entries, original_stat = score['_directory_paths'], os.stat
     unrelated_stats = []
     def entries(path):
         if path == outbox:
             yield from (outbox / f'ignored-{n}.bin' for n in range(10000))
-        yield from original_iterdir(path)
+        yield from original_entries(path)
     def observed_stat(path, *args, **kwargs):
         if not isinstance(path, int):
             candidate = Path(os.fsdecode(path))
             if candidate.parent == outbox and candidate.suffix not in ('.csv', '.m4a'):
                 unrelated_stats.append(candidate.name)
         return original_stat(path, *args, **kwargs)
-    monkeypatch.setattr(Path, 'iterdir', entries)
+    glob['_directory_paths'] = entries
     monkeypatch.setattr(os, 'stat', observed_stat)
     assert score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True)) == 0
     assert not unrelated_stats, f'{len(unrelated_stats)} unnecessary metadata lookups'
@@ -748,3 +748,69 @@ def test_nonfinite_internal_result_cannot_escape_json_publication(score, tmp_pat
         assert set(root.iterdir()) == {root / '.score.lock'}
     else:
         assert not root.exists()
+
+
+def test_disk_order_preserves_path_order_and_duplicates(score):
+    paths = [Path('/a-b/x'), Path('/a/b'), Path('/a/é'), Path('/a/\udc80'),
+             Path('/a/a'), Path('/a/b')]
+    with score['_ordered_paths'](iter(paths)) as ordered:
+        assert list(ordered) == sorted(paths)
+
+
+def test_inventory_failure_closes_private_database_before_yield(score, monkeypatch):
+    import sqlite3
+    connect = sqlite3.connect
+    opened = []
+    def track(*args, **kwargs):
+        database = connect(*args, **kwargs)
+        opened.append(database)
+        return database
+    monkeypatch.setattr(sqlite3, 'connect', track)
+    def unavailable():
+        yield Path('/a/first.csv')
+        raise PermissionError('inventory unavailable')
+    with pytest.raises(PermissionError, match='inventory unavailable'):
+        with score['_ordered_paths'](unavailable()):
+            pytest.fail('partial inventory became available')
+    assert len(opened) == 1
+    with pytest.raises(sqlite3.ProgrammingError, match='closed'):
+        opened[0].execute('SELECT 1')
+
+
+def test_candidate_inventory_keeps_lexical_publication_order(score, tmp_path):
+    root = tmp_path / 'scores'
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    for name in ['z.csv', 'a.csv', 'm.csv']:
+        (outbox / name).write_text('synthetic')
+    score['cmd_run'].__globals__.update(
+        SCORES=root, LEDGER=root / 'scored.jsonl',
+        score_blob=lambda path, sidecar: {'ok': True, 'file': path.name},
+    )
+    score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=2, no_receipt=True))
+    records = [json.loads(line) for line in next(root.glob('20*.jsonl')).read_text().splitlines()]
+    assert [record['file'] for record in records] == ['a.csv', 'm.csv']
+
+
+def test_reached_limit_does_not_touch_next_inventory_entry(score, tmp_path):
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    first, later = outbox / 'a.csv', outbox / 'b.csv'
+    first.write_text('synthetic')
+    later.write_text('synthetic')
+    def process(path, sidecar):
+        later.unlink()
+        return {'ok': True, 'file': path.name}
+    root = tmp_path / 'scores'
+    score['cmd_run'].__globals__.update(SCORES=root, LEDGER=root/'scored.jsonl', score_blob=process)
+    assert score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=1, no_receipt=True)) == 0
+    assert len((root/'scored.jsonl').read_text().splitlines()) == 1
+
+
+def test_directory_inventory_does_not_materialize_path_iterdir(score, tmp_path, monkeypatch):
+    path = tmp_path / 'a.csv'
+    path.write_text('synthetic')
+    def forbidden(*args, **kwargs):
+        raise AssertionError('Path.iterdir retains a whole directory')
+    monkeypatch.setattr(Path, 'iterdir', forbidden)
+    assert list(score['_candidate_paths'](tmp_path)) == [path]
