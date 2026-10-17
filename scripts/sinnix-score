@@ -550,27 +550,65 @@ def score_interoception(trace_path: Path, ppg: dict, started_at: float | None) -
     if distance(best) > 900:
         return None
 
-    counted = best.get("counted") or []
-    windows = best.get("window_ms") or []
+    counted = best.get("counted")
+    windows = best.get("window_ms")
+    if counted is None and windows is None:
+        return None
+    if not isinstance(counted, list) or not isinstance(windows, list):
+        raise ValueError("interoception count/window fields must be arrays")
+    if not counted and not windows:
+        return None
     if not counted or len(counted) != len(windows):
-        return None
-    hr = ppg["hr_bpm"] / 60.0
-    errors = []
-    for c, w_ms in zip(counted, windows):
-        actual = hr * (w_ms / 1000.0)
-        if actual <= 0:
-            continue
-        errors.append(abs(float(c) - actual) / actual)
-    if not errors:
-        return None
+        raise ValueError("interoception count/window arrays must align")
+
+    def finite_number(value: Any, label: str) -> float:
+        if type(value) not in (int, float):
+            raise ValueError(f"interoception {label} must be numeric")
+        try:
+            number = float(value)
+        except OverflowError as error:
+            raise ValueError(f"interoception {label} exceeds numeric range") from error
+        if not math.isfinite(number):
+            raise ValueError(f"interoception {label} must be finite")
+        return number
+
+    reference = finite_number(ppg.get("hr_bpm"), "reference")
+    if reference <= 0:
+        raise ValueError("interoception reference must be positive")
+    hr = reference / 60.0
+    window_count = len(counted)
+
+    def normalized_errors() -> Iterator[float]:
+        for c, w_ms in zip(counted, windows, strict=True):
+            count = finite_number(c, "count")
+            duration = finite_number(w_ms, "window")
+            if count < 0 or duration <= 0:
+                raise ValueError("interoception count must be nonnegative and window positive")
+            actual = hr * (duration / 1000.0)
+            if not math.isfinite(actual) or actual <= 0:
+                raise ValueError("interoception reference/window exceeds numeric range")
+            error = abs(count - actual) / actual
+            if not math.isfinite(error):
+                raise ValueError("interoception error exceeds numeric range")
+            # Scale before summing so a finite mean does not overflow merely
+            # because the unscaled sum exceeds the floating-point range.
+            yield error / window_count
+
+    try:
+        accuracy = 1.0 - math.fsum(normalized_errors())
+    except OverflowError as error:
+        raise ValueError("interoception mean exceeds numeric range") from error
+    if not math.isfinite(accuracy):
+        raise ValueError("interoception accuracy must be finite")
     return {
         "ok": True,
-        "accuracy": round(1.0 - sum(errors) / len(errors), 3),
-        "windows": len(errors),
+        "accuracy": round(accuracy, 3),
+        "windows": window_count,
         "hr_bpm_reference": ppg["hr_bpm"],
         "counted": counted,
         "epoch": best.get("epoch"),
     }
+
 
 
 def transcribe(path: Path) -> dict | None:
@@ -699,8 +737,15 @@ def read_sidecar(path: Path) -> SidecarInput:
     except (OSError, ValueError) as error:
         return SidecarInput({}, f"unavailable:{type(error).__name__}:{getattr(error, 'errno', None)}", f"sidecar cannot be read ({type(error).__name__})")
     signature = "sha256:" + hashlib.sha256(raw).hexdigest()
+
+    def json_number(value: str) -> float:
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError("sidecar JSON numbers must be finite")
+        return number
+
     try:
-        meta = json.loads(raw)
+        meta = json.loads(raw, parse_float=json_number, parse_constant=json_number)
     except (ValueError, UnicodeError, RecursionError):
         return SidecarInput({}, signature, "sidecar JSON cannot be parsed")
     if not isinstance(meta, dict):
@@ -872,9 +917,11 @@ def _score_outbox(args: argparse.Namespace, outbox: Path, seen: ScoreHistory) ->
             continue
         record = score_blob(path, sidecar)
 
+        # Validate the complete record before opening a publication file.
+        record_line = json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n"
         day = dt.datetime.now(dt.timezone.utc).date().isoformat()
         with (SCORES / f"{day}.jsonl").open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+            fh.write(record_line)
         append_jsonl(
             LEDGER,
             {"file": path.name, "bytes": size, "ok": record.get("ok"), "at": utc_ts(),
@@ -906,7 +953,7 @@ def _score_outbox(args: argparse.Namespace, outbox: Path, seen: ScoreHistory) ->
 
 
 def cmd_one(args: argparse.Namespace) -> int:
-    print(json.dumps(score_blob(Path(args.file)), indent=2, ensure_ascii=False))
+    print(json.dumps(score_blob(Path(args.file)), indent=2, ensure_ascii=False, allow_nan=False))
     return 0
 
 

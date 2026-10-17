@@ -157,7 +157,7 @@ def test_timestamp_overflow_is_recorded_without_stalling_later_files(score, tmp_
     assert (root / 'scored.jsonl').read_bytes() == before
 
 
-@pytest.mark.parametrize('body', [b'[]', b'null', b'{', b'\xff', b'{"recorded_at":17}', b'{"send_token":[]}'])
+@pytest.mark.parametrize('body', [b'[]', b'null', b'{', b'\xff', b'{"recorded_at":17}', b'{"send_token":[]}', b'{"epoch":NaN}', b'{"epoch":Infinity}', b'{"epoch":-Infinity}', b'{"epoch":1e999}'])
 def test_invalid_sidecar_refuses_continues_and_retries_only_after_repair(score, tmp_path, body):
     outbox = tmp_path / 'outbox'
     outbox.mkdir()
@@ -680,3 +680,71 @@ def test_current_and_historical_timestamp_formats_keep_the_same_instant(score):
     assert score['parse_stamp']('19700101T000000Z') == 0.0
     assert score['parse_stamp']('not-a-time') is None
     assert score['parse_stamp'](17) is None
+
+
+def numeric_interoception(score, tmp_path, counted, windows, reference=60):
+    events = tmp_path / 'events'
+    events.mkdir()
+    (events / 'events-a.jsonl').write_text(json.dumps({'kind': 'instrument_run', 'instrument': 'interoception', 'started_at': '1970-01-01T00:00:00Z', 'counted': counted, 'window_ms': windows}) + '\n')
+    score['cmd_run'].__globals__['EVENTS'] = events
+    return score['score_interoception'](tmp_path / 'trace.csv', {'ok': True, 'trustworthy': True, 'hr_bpm': reference}, 0.0)
+
+
+@pytest.mark.parametrize('counted,windows', [
+    ([float('nan')], [10000]), ([float('inf')], [10000]), ([-1], [10000]),
+    ([True], [10000]), (['10'], [10000]), ({'a': 10}, [10000]),
+    ([10], [float('nan')]), ([10], [float('inf')]), ([10], [True]),
+    ([10, 10], [0, 10000]), ([10, 10], [-1, 10000]),
+    ([10], ['10000']), ([10, 20], [10000]), (None, [10000]),
+])
+def test_malformed_interoception_measurements_refuse_a_result(score, tmp_path, counted, windows):
+    with pytest.raises(ValueError, match='interoception'):
+        numeric_interoception(score, tmp_path, counted, windows)
+
+
+@pytest.mark.parametrize('reference', [float('nan'), float('inf'), 0, -1, True, None])
+def test_invalid_interoception_reference_refuses_a_result(score, tmp_path, reference):
+    with pytest.raises(ValueError, match='interoception'):
+        numeric_interoception(score, tmp_path, [10], [10000], reference)
+
+
+@pytest.mark.parametrize('counts,windows,expected', [([0], [10000], 0.0), ([100], [10000], -8.0), ([25, 35, 45], [25000, 35000, 45000], 1.0)])
+def test_valid_interoception_keeps_zero_overcounts_and_native_windows(score, tmp_path, counts, windows, expected):
+    result = numeric_interoception(score, tmp_path, counts, windows)
+    assert result['accuracy'] == expected and result['windows'] == len(counts)
+    assert result['counted'] == counts
+
+
+def test_interoception_mean_does_not_overflow_finite_measurements(score, tmp_path):
+    import math
+    result = numeric_interoception(score, tmp_path, [1e308, 1e308], [1000, 1000])
+    assert math.isfinite(result['accuracy']) and result['accuracy'] == -1e308
+
+
+def test_empty_interoception_run_is_not_a_measured_zero(score, tmp_path):
+    assert numeric_interoception(score, tmp_path, [], []) is None
+
+
+@pytest.mark.parametrize('entry', ['one', 'run'])
+@pytest.mark.parametrize('bad', [float('nan'), float('inf'), -float('inf')])
+def test_nonfinite_internal_result_cannot_escape_json_publication(score, tmp_path, capsys, entry, bad):
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    path = outbox / 'a.csv'
+    trace(path, 'imu', False)
+    def bad_result(*args, **kwargs):
+        return {'ok': True, 'file': path.name, 'internal_bug': bad}
+    score['cmd_run'].__globals__['score_blob'] = bad_result
+    root = tmp_path / 'scores'
+    receipts = []
+    score['cmd_run'].__globals__.update(SCORES=root, LEDGER=root / 'scored.jsonl', emit_receipt=lambda *args: receipts.append(args))
+    with pytest.raises(ValueError, match='JSON'):
+        if entry == 'one':
+            score['cmd_one'](argparse.Namespace(file=str(path)))
+        else:
+            score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=False))
+    assert not capsys.readouterr().out and not receipts
+    if entry == 'run':
+        assert set(root.iterdir()) == {root / '.score.lock'}
+    else:
+        assert not root.exists()

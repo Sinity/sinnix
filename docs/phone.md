@@ -516,6 +516,15 @@ Unknown trace time does not participate in interoception pairing. A matching
 event without a valid timestamp is an explicit correlation error, rather than
 an invented epoch-zero instant. Genuine epoch-zero and historical compact
 timestamps remain valid; the phone continues to emit whole-second UTC.
+Interoception requires aligned numeric count/window arrays, nonnegative counts,
+positive windows and a finite positive pulse reference. Invalid windows are not
+silently dropped. Empty runs remain unmeasured; a genuine zero count can yield
+zero accuracy, and overcounts can still yield negative accuracy. A scaled mean
+avoids overflow from summing otherwise finite errors; no error list is retained.
+Non-finite sidecar numbers produce a refusal, allowing later files to continue.
+Both JSON output routes reject non-finite numbers anywhere in the result. A
+record is serialized before opening its score output, so serialization failure
+cannot publish a score, ledger entry or receipt for that record.
 
 An absent outbox reports that state without creating a score directory. An
 inaccessible or wrongly typed outbox fails explicitly. Discovery checks trace
