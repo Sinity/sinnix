@@ -19,6 +19,8 @@
             sinnix.services.capture-netflow.enable = true;
             sinnix.services.xiaomi-witness.enable = true;
             sinnix.services.polylogue.enable = true;
+            sinnix.services.below.enable = true;
+            sinnix.services.below.storeDir = "/sinnix-test-below";
             sinnix.services.polylogue.dataDir = "/sinnix-test-polylogue";
             sinnix.paths.healthRoot = "/sinnix-test-health";
             sinnix.paths.documentsRoot = "/sinnix-test-documents";
@@ -38,6 +40,18 @@
           {
             assertion =
               let
+                root = config.sinnix.services.below.storeDir;
+                expected = "d ${root} 0700 ${config.sinnix.user.name} users -";
+                rules = builtins.filter (rule: lib.hasPrefix "d ${root} " rule) config.systemd.tmpfiles.rules;
+              in
+              rules != [ ]
+              && builtins.all (rule: rule == expected) rules
+              && lib.hasInfix ''store_dir = "${root}/store"'' config.environment.etc."below/below.conf".text;
+            message = "Below process history must have an operator-only configured entrance without conflicting creation rules.";
+          }
+          {
+            assertion =
+              let
                 root = config.sinnix.services.polylogue.dataDir;
                 user = config.sinnix.user.name;
                 expected = [
@@ -48,7 +62,8 @@
                   rule: lib.hasPrefix "d ${root} " rule || lib.hasPrefix "d ${root}/inbox " rule
                 ) config.systemd.tmpfiles.rules;
               in
-              rules != [ ] && builtins.all (rule: builtins.elem rule expected) rules
+              rules != [ ]
+              && builtins.all (rule: builtins.elem rule expected) rules
               && builtins.all (rule: builtins.elem rule rules) expected;
             message = "Polylogue archive and inbox entrances must remain private without conflicting creation rules.";
           }
@@ -61,7 +76,9 @@
           {
             assertion =
               let
-                rules = builtins.filter (rule: lib.hasPrefix "d /realm/worktree " rule) config.systemd.tmpfiles.rules;
+                rules = builtins.filter (
+                  rule: lib.hasPrefix "d /realm/worktree " rule
+                ) config.systemd.tmpfiles.rules;
                 expected = "d /realm/worktree 0700 ${config.sinnix.user.name} users -";
               in
               rules != [ ] && builtins.all (rule: rule == expected) rules;
