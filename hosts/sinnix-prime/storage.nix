@@ -30,7 +30,9 @@ let
   # modules/profiles/workstation.nix) absorbs bursts at RAM speed; this NVMe
   # file (priority 10) takes sustained overflow so cold anon leaves RAM
   # entirely. Lives on /realm NVMe, not the wear-limited root SATA SSD, so
-  # swap I/O never competes with Postgres/nix-store writes on that disk.
+  # swap I/O does not share the root device with Postgres/nix-store writes.
+  # Leave cold pages swapped until demanded. Periodic swapoff forces them
+  # into RAM even while other workloads are reclaiming memory.
   prepareSwapfile = pkgs.writeShellApplication {
     name = "sinnix-prime-prepare-swapfile";
     runtimeInputs = [
@@ -83,76 +85,6 @@ let
       fi
     '';
   };
-  drainSwapfile = pkgs.writeShellApplication {
-    name = "sinnix-prime-drain-swapfile";
-    runtimeInputs = [
-      pkgs.gawk
-      pkgs.util-linux
-    ];
-    text = ''
-      set -euo pipefail
-
-      swap_file=${lib.escapeShellArg swapFile}
-      min_headroom_kib=$(( 2 * 1024 * 1024 ))
-
-      if ! swapon --noheadings --raw --show=NAME | awk -v swap_file="$swap_file" '$1 == swap_file { found = 1 } END { exit found ? 0 : 1 }'; then
-        exit 0
-      fi
-
-      read -r mem_available_kib swap_total_kib swap_free_kib < <(
-        awk '
-          $1 == "MemAvailable:" { mem = $2 }
-          $1 == "SwapTotal:" { total = $2 }
-          $1 == "SwapFree:" { free = $2 }
-          END { print mem + 0, total + 0, free + 0 }
-        ' /proc/meminfo
-      )
-
-      swap_used_kib=$(( swap_total_kib - swap_free_kib ))
-      if [ "$swap_used_kib" -le 0 ]; then
-        exit 0
-      fi
-
-      if [ "$mem_available_kib" -le "$(( swap_used_kib + min_headroom_kib ))" ]; then
-        echo "Leaving swap resident: MemAvailable=''${mem_available_kib}KiB SwapUsed=''${swap_used_kib}KiB" >&2
-        exit 0
-      fi
-
-      swapoff "$swap_file"
-      swapon --priority ${toString swapPriority} "$swap_file"
-    '';
-  };
-
-  # Previously hand-rolled with no registered runtime surface at all (no
-  # resourceClass resolution, no failure-notify) -- an intended semantic
-  # delta of this conversion: it now carries the background class's
-  # Nice/IOScheduling/CPU/IOWeight/Memory governance and the standard
-  # OnFailure path, matching every other scheduled oneshot on this host.
-  # The explicit IOSchedulingPriority=7 override is dropped along with it:
-  # the background class doesn't set one (defaults to systemd's own
-  # priority-4-within-class), which is the class this job now defers to.
-  drainSwapfileJob =
-    lib.sinnix.mkScheduledJob
-      {
-        inherit config;
-        unitName = "sinnix-drain-swapfile";
-        description = "Drain resident pages from the bounded sinnix-prime swapfile";
-        surface = config.sinnix.runtime.surfaces.sinnix-drain-swapfile;
-      }
-      {
-        execStart = "${drainSwapfile}/bin/sinnix-prime-drain-swapfile";
-        unit.after = [
-          swapUnit
-          "multi-user.target"
-        ];
-        timer = {
-          onBootSec = "2min";
-          intervalSec = 300;
-          accuracySec = "30s";
-          persistent = false;
-        };
-      };
-
   realmFsDevice = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
 
   # Initrd scaffold: early-boot placeholders derived from persistence config
@@ -412,8 +344,6 @@ in
       };
     };
 
-    services.sinnix-drain-swapfile = drainSwapfileJob.systemd.services.sinnix-drain-swapfile;
-
     services.sinnix-fstrim = fstrimJob.systemd.services.sinnix-fstrim;
 
     services."btrfs-scrub--".serviceConfig = {
@@ -435,8 +365,6 @@ in
     };
 
     timers.sinnix-fstrim = fstrimJob.systemd.timers.sinnix-fstrim;
-
-    timers.sinnix-drain-swapfile = drainSwapfileJob.systemd.timers.sinnix-drain-swapfile;
 
     # Ensure the dedicated sinex subvolume exists on the /realm NVMe (not the
     # MX500) before /var/lib/sinex is mounted. The btrfs top level
@@ -610,12 +538,6 @@ in
     "/home/${username}/.local/share"
     polylogueShareMount
   ];
-
-  sinnix.runtime.surfaces.sinnix-drain-swapfile = {
-    unit = "sinnix-drain-swapfile.service";
-    resourceClass = "background";
-    observe.enable = true;
-  };
 
   sinnix.runtime.surfaces.sinnix-fstrim = {
     unit = "sinnix-fstrim.service";

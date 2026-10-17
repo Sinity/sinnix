@@ -49,6 +49,12 @@ mkServiceModule {
       execStart = "${scriptPkgs.sinnix-fs}/bin/sinnix-fs run --out-dir ${lib.escapeShellArg indexDir}";
       serviceConfig = {
         TimeoutStartSec = cfg.maxSecondsPerRun;
+        # DuckDB also allocates outside its buffer manager. At 1G this run
+        # repeatedly reclaimed and refaulted anonymous pages through swap.
+        # Keep resident headroom without allowing the scan to grow unbounded.
+        MemoryHigh = "2G";
+        MemoryMax = "3G";
+        MemorySwapMax = 0;
         # Low weight alone does not bound sequential scans on these devices.
         # The observed scanner read burst exceeded 600 MiB/s during reclaim.
         IOReadBandwidthMax = [
