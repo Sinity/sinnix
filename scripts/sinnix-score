@@ -573,12 +573,23 @@ def ledger_seen() -> set[tuple[str, int, str | None]]:
     seen: set[tuple[str, int, str | None]] = set()
     if not LEDGER.is_file():
         return seen
-    for line in LEDGER.read_text(encoding="utf-8", errors="replace").splitlines():
-        try:
-            o = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        seen.add((o.get("file", ""), int(o.get("bytes") or 0), o.get("sidecar_signature")))
+    with LEDGER.open(encoding="utf-8") as ledger:
+        for number, line in enumerate(ledger, 1):
+            try:
+                row = json.loads(line)
+                if not isinstance(row, dict):
+                    raise ValueError("record must be an object")
+                name, size = row.get("file"), row.get("bytes")
+                signature = row.get("sidecar_signature")
+                if not isinstance(name, str) or not name:
+                    raise ValueError("file must be nonempty text")
+                if type(size) is not int or size < 0:
+                    raise ValueError("bytes must be a nonnegative integer")
+                if signature is not None and not isinstance(signature, str):
+                    raise ValueError("sidecar_signature must be text or null")
+            except (ValueError, TypeError) as error:
+                raise ValueError(f"score ledger record {number} is invalid; preserve and repair it before retrying") from error
+            seen.add((name, size, signature))
     return seen
 
 

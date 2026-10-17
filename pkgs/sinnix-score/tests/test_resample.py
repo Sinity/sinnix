@@ -261,3 +261,30 @@ def test_legacy_scores_remain_history_without_automatic_reprocessing(score, tmp_
     assert score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True)) == 0
     assert ledger.read_text() == legacy
     assert not list(root.glob('20*.jsonl'))
+
+
+@pytest.mark.parametrize('row', ['{', '[]', 'null', '{"file":"a.csv","bytes":true}', '{"file":"a.csv","bytes":-1}', '{"file":"a.csv","bytes":"12"}', '{"file":"a.csv","bytes":12,"sidecar_signature":[]}'])
+def test_invalid_ledger_refuses_before_scoring(score, tmp_path, row):
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    trace(outbox / 'a.csv', 'ppg', False)
+    root = tmp_path / 'scores'
+    root.mkdir()
+    ledger = root / 'scored.jsonl'
+    ledger.write_text(row + '\n')
+    before = ledger.read_bytes()
+    score['cmd_run'].__globals__.update(SCORES=root, LEDGER=ledger)
+    with pytest.raises(ValueError, match='ledger record 1 is invalid'):
+        score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True))
+    assert ledger.read_bytes() == before
+    assert list(root.iterdir()) == [ledger]
+
+
+def test_ledger_streams_and_preserves_legacy_keys(score, tmp_path, monkeypatch):
+    ledger = tmp_path / 'scored.jsonl'
+    ledger.write_text('{"file":"a.csv","bytes":12}\n{"file":"b.csv","bytes":0,"sidecar_signature":"absent"}\n')
+    score['ledger_seen'].__globals__['LEDGER'] = ledger
+    def forbid(*args, **kwargs):
+        raise AssertionError('whole-file read')
+    monkeypatch.setattr(Path, 'read_text', forbid)
+    assert score['ledger_seen']() == {('a.csv', 12, None), ('b.csv', 0, 'absent')}
