@@ -453,6 +453,7 @@ in
               assertion = builtins.all (
                 proxyName:
                 lib.elem "${proxyName}.socket" (config.systemd.services.${proxyName}.bindsTo or [ ])
+                && config.systemd.services.${proxyName}.serviceConfig.Sockets == [ "${proxyName}.socket" ]
                 && builtins.all (
                   backend:
                   lib.elem "${proxyName}.service" (config.systemd.services.${backend}.bindsTo or [ ])

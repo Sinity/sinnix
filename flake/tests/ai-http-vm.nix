@@ -93,20 +93,21 @@
           machine.succeed("test $(stat -c %a /run/sinnix-ai/fixture-one-proxy.sock) = 660")
           machine.succeed("test $(stat -c %U /run/sinnix-ai/fixture-one-proxy.sock) = fixture")
           assert not machine.succeed("ss -H -ltn 'sport = :2019'").strip()
-          assert "native fixture response" in machine.succeed("curl --fail --max-time 15 -sS http://127.0.0.1:24821/")
-          machine.succeed("test $(wc -l < /run/fixture-one-starts) = 1")
-          machine.wait_until_fails("systemctl is-active --quiet fixture-one.service", timeout=15)
-          machine.fail("systemctl is-active --quiet fixture-one-proxy.service")
-          # Admission persists after idle-out and does not restart the model.
-          assert machine.succeed("curl -s -o /dev/null -w '%{http_code}' -H 'Origin: null' http://127.0.0.1:24821/").strip() == "403"
-          machine.succeed("test $(wc -l < /run/fixture-one-starts) = 1")
+          machine.succeed("systemctl daemon-reexec")
           # Manual backend startup must pull in an actual listening socket,
           # not a socket-proxyd process with no inherited file descriptors.
           machine.succeed("systemctl start fixture-one.service")
           machine.wait_for_unit("fixture-one-proxy.service")
-          machine.succeed("test $(wc -l < /run/fixture-one-starts) = 2")
+          machine.succeed("test $(wc -l < /run/fixture-one-starts) = 1")
           assert "native fixture response" in machine.succeed("curl --fail --max-time 15 -sS http://127.0.0.1:24821/")
           machine.wait_until_fails("systemctl is-active --quiet fixture-one.service", timeout=15)
+          assert "native fixture response" in machine.succeed("curl --fail --max-time 15 -sS http://127.0.0.1:24821/")
+          machine.succeed("test $(wc -l < /run/fixture-one-starts) = 2")
+          machine.wait_until_fails("systemctl is-active --quiet fixture-one.service", timeout=15)
+          machine.fail("systemctl is-active --quiet fixture-one-proxy.service")
+          # Admission persists after idle-out and does not restart the model.
+          assert machine.succeed("curl -s -o /dev/null -w '%{http_code}' -H 'Origin: null' http://127.0.0.1:24821/").strip() == "403"
+          machine.succeed("test $(wc -l < /run/fixture-one-starts) = 2")
           # The operator can deliberately hold the private socket. Its
           # transient systemd lifetime releases the native pin automatically.
           machine.succeed("systemd-run --unit=fixture-pin --property=User=fixture --property=RuntimeMaxSec=6s ${pkgs.python3}/bin/python3 ${pinSource}")

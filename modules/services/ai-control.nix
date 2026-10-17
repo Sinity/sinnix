@@ -108,6 +108,9 @@ let
           "${proxy}.socket"
         ];
         serviceConfig = {
+          # Preserve descriptor association across manager reloads and cold
+          # manual starts, not only an earlier socket-triggered activation.
+          Sockets = [ "${proxy}.socket" ];
           ExecStartPre = "${waitForBackend}/bin/${proxy}-wait-backend";
           ExecStart = "${systemdSocketProxyd} --exit-idle-time=${idleTimeout} ${backendEndpoint}";
           Restart = "no";
