@@ -23,7 +23,7 @@ EOF
 }
 
 canonical_file() {
-  readlink -f -- "$1"
+  readlink -fz -- "$1"
 }
 
 thumb_path() {
@@ -31,8 +31,8 @@ thumb_path() {
   local percent="${2:-$default_percent}"
   local resolved metadata key shard
 
-  resolved="$(canonical_file "$file")"
-  metadata="$(stat --printf='%s\t%Y\t%Z' -- "$resolved")"
+  IFS= read -r -d '' resolved < <(canonical_file "$file") || return
+  metadata="$(stat --printf='%s\t%Y\t%Z' -- "$resolved")" || return
   key="$(printf '%s\t%s\t%s\n' "$resolved" "$metadata" "$percent" | sha256sum | cut -d' ' -f1)"
   shard="${key:0:2}"
 
@@ -44,8 +44,8 @@ ensure_thumb() (
   local percent="${2:-$default_percent}"
   local resolved output lock_dir lock_file tmp_file status
 
-  resolved="$(canonical_file "$file")"
-  output="$(thumb_path "$resolved" "$percent")"
+  IFS= read -r -d '' resolved < <(canonical_file "$file") || return
+  output="$(thumb_path "$resolved" "$percent")" || return
   lock_dir="$(dirname "$output")"
   lock_file="${output}.lock"
 
@@ -95,7 +95,7 @@ warm_tree() {
   local jobs="${MEDIA_PREVIEW_JOBS:-$(nproc)}"
   local resolved_dir
 
-  resolved_dir="$(canonical_file "$dir")"
+  IFS= read -r -d '' resolved_dir < <(canonical_file "$dir") || return
 
   fd \
     -HI \
