@@ -53,6 +53,7 @@ description = "Run default Sinnix checks"
 exec = ["check"]
 pool = "bulk"
 result = "exit"
+scratch = "nvme"
 cache = "tree+environment"
 timeout_seconds = 7200
 # Four evaluation workers, each replaced past 512 MiB, so the peak is about
@@ -66,6 +67,7 @@ description = "Build explicitly selected Sinnix flake checks"
 exec = ["nix", "build", "--no-link"]
 pool = "bulk"
 result = "exit"
+scratch = "nvme"
 timeout_seconds = 1800
 
 [operations.verify_snapshot_restore]
@@ -127,6 +129,7 @@ description = "Run selected AgentCTL and gateway Python tests"
 exec = ["nix", "develop", ".#gateway-tests", "--command", "gateway-pytest", "-q"]
 pool = "normal"
 result = "exit"
+scratch = "nvme"
 timeout_seconds = 1800
 
 [operations.verify_telemetry_restore]
@@ -208,6 +211,7 @@ description = "Run maintained Nix and shell linters"
 exec = ["lint"]
 pool = "normal"
 result = "exit"
+scratch = "nvme"
 cache = "tree+environment"
 
 [operations.switch]
@@ -215,6 +219,7 @@ description = "Build and activate the workstation configuration"
 exec = ["switch"]
 pool = "bulk"
 result = "exit"
+scratch = "nvme"
 timeout_seconds = 28800
 
 [operations.sinex_cache_prebuild]
