@@ -156,8 +156,8 @@ mkServiceModule {
       # The inbox is where `polylogue import <path>` stages account exports.
       # Exports are imported deliberately, never watched in place.
       systemd.tmpfiles.rules = [
-        "d ${cfg.dataDir} 0755 ${userName} users -"
-        "d ${cfg.dataDir}/inbox 0755 ${userName} users -"
+        "d ${cfg.dataDir} 0700 ${userName} ${config.users.users.${userName}.group} -"
+        "d ${cfg.dataDir}/inbox 0700 ${userName} users -"
       ];
 
       sinnix.runtime.dataStores = {

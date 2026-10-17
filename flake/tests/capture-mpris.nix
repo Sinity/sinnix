@@ -18,6 +18,8 @@
             sinnix.services.capture-audio.enable = true;
             sinnix.services.capture-netflow.enable = true;
             sinnix.services.xiaomi-witness.enable = true;
+            sinnix.services.polylogue.enable = true;
+            sinnix.services.polylogue.dataDir = "/sinnix-test-polylogue";
             sinnix.paths.healthRoot = "/sinnix-test-health";
             sinnix.paths.documentsRoot = "/sinnix-test-documents";
             sinnix.services.video-resolve.enable = true;
@@ -33,6 +35,23 @@
           }
         ];
         assertions = config: [
+          {
+            assertion =
+              let
+                root = config.sinnix.services.polylogue.dataDir;
+                user = config.sinnix.user.name;
+                expected = [
+                  "d ${root} 0700 ${user} ${config.users.users.${user}.group} -"
+                  "d ${root}/inbox 0700 ${user} users -"
+                ];
+                rules = builtins.filter (
+                  rule: lib.hasPrefix "d ${root} " rule || lib.hasPrefix "d ${root}/inbox " rule
+                ) config.systemd.tmpfiles.rules;
+              in
+              rules != [ ] && builtins.all (rule: builtins.elem rule expected) rules
+              && builtins.all (rule: builtins.elem rule rules) expected;
+            message = "Polylogue archive and inbox entrances must remain private without conflicting creation rules.";
+          }
           {
             assertion =
               config.systemd.user.services.sinnix-xiaomi-witness.environment.XIAOMI_WITNESS_LANE
