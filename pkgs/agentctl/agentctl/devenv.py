@@ -21,9 +21,10 @@ import argparse
 import hashlib
 import os
 import signal
-import tempfile
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from types import FrameType
@@ -45,20 +46,39 @@ def cache_dir() -> Path:
     return Path(base) / "agentctl" / "devenv"
 
 
+def _input_files(path: Path, ancestors: frozenset[tuple[int, int]] = frozenset()):
+    metadata = path.stat()
+    if stat.S_ISREG(metadata.st_mode):
+        yield path
+    elif stat.S_ISDIR(metadata.st_mode):
+        identity = (metadata.st_dev, metadata.st_ino)
+        if identity in ancestors:
+            raise DevenvError(f"directory cycle in declared input: {path}")
+        # scandir propagates access and lookup failures. Path.rglob suppresses
+        # them, making inaccessible inputs indistinguishable from empty ones.
+        with os.scandir(path) as entries:
+            for entry in entries:
+                yield from _input_files(path / entry.name, ancestors | {identity})
+    else:
+        raise DevenvError(f"unsupported declared input type: {path}")
+
+
 def _digest_path(hasher: "hashlib._Hash", root: Path, relative: str) -> None:
     path = root / relative
-    if path.is_dir():
-        for child in sorted(p for p in path.rglob("*") if p.is_file()):
-            _digest_file(hasher, root, child)
-    elif path.is_file():
-        _digest_file(hasher, root, path)
-    else:
+    try:
+        path.lstat()
+    except FileNotFoundError:
         hasher.update(f"absent:{relative}\0".encode())
+        return
+    for child in sorted(_input_files(path)):
+        _digest_file(hasher, root, child)
 
 
 def _digest_file(hasher: "hashlib._Hash", root: Path, path: Path) -> None:
     hasher.update(f"file:{path.relative_to(root)}\0".encode())
-    hasher.update(path.read_bytes())
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            hasher.update(chunk)
     hasher.update(b"\0")
 
 
@@ -139,8 +159,13 @@ def _run_command(script: Path, command: Sequence[str]) -> int:
             environment = dict(os.environ, TMPDIR=temporary)
             child = subprocess.Popen(
                 [
-                    "bash", "--noprofile", "--norc", "-c",
-                    'source "$0"; exec "$@"', str(script), *command,
+                    "bash",
+                    "--noprofile",
+                    "--norc",
+                    "-c",
+                    'source "$0"; exec "$@"',
+                    str(script),
+                    *command,
                 ],
                 env=environment,
                 # Preserve explicit descriptor channels, as the former exec did.
@@ -171,7 +196,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     workdir = Path.cwd().resolve()
     try:
         script = realize(workdir, arguments.inputs)
-    except DevenvError as error:
+    except (DevenvError, OSError) as error:
         print(f"agentctl-devenv: {error}", file=sys.stderr)
         return 1
     return _run_command(script, command)

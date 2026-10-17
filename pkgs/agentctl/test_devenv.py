@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import os
+import hashlib
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -93,44 +94,74 @@ def _temporary_environment_command(workdir, tmp_path, command):
     script.write_text(
         'export NIX_BUILD_TOP="$(mktemp -d -t nix-shell.XXXXXX)"\n'
         'export TMPDIR="$NIX_BUILD_TOP"\n'
-        'export DEVENV_MARK=from-cache\n'
-        'false\n'  # A failed shellHook still permits the command, as nix develop does.
+        "export DEVENV_MARK=from-cache\n"
+        "false\n"  # A failed shellHook still permits the command, as nix develop does.
     )
     temporary = tmp_path / "command-temp"
     temporary.mkdir()
     (temporary / "keep").write_text("caller-owned")
     environment = dict(os.environ)
     environment["TMPDIR"] = str(temporary)
-    environment["PYTHONPATH"] = os.pathsep.join([str(Path(devenv.__file__).parent.parent), *sys.path])
-    argv = [sys.executable, "-m", "agentctl.devenv", "--input", "flake.nix",
-            "--input", "flake.lock", "--input", "nix", "--", *command]
+    environment["PYTHONPATH"] = os.pathsep.join(
+        [str(Path(devenv.__file__).parent.parent), *sys.path]
+    )
+    argv = [
+        sys.executable,
+        "-m",
+        "agentctl.devenv",
+        "--input",
+        "flake.nix",
+        "--input",
+        "flake.lock",
+        "--input",
+        "nix",
+        "--",
+        *command,
+    ]
     return argv, environment, temporary, tree
 
 
 @pytest.mark.parametrize("exit_code", [0, 7])
 def test_temporary_environment_is_cleaned_after_command(workdir, tmp_path, exit_code):
     code = (
-        'import os,sys,json;from pathlib import Path;'
+        "import os,sys,json;from pathlib import Path;"
         'p=Path(os.environ["TMPDIR"]);(p/"child-output").write_text("temporary");'
         'print(json.dumps([os.environ["DEVENV_MARK"],sys.argv[1:],sys.stdin.read()]));'
-        f'sys.exit({exit_code})'
+        f"sys.exit({exit_code})"
     )
     argv, env, temporary, cwd = _temporary_environment_command(
-        workdir, tmp_path, [sys.executable, "-c", code, "argument with spaces"])
-    result = subprocess.run(argv, cwd=cwd, env=env, input="input payload",
-                            text=True, capture_output=True, timeout=10)
+        workdir, tmp_path, [sys.executable, "-c", code, "argument with spaces"]
+    )
+    result = subprocess.run(
+        argv,
+        cwd=cwd,
+        env=env,
+        input="input payload",
+        text=True,
+        capture_output=True,
+        timeout=10,
+    )
     assert result.returncode == exit_code, result.stderr
-    assert json.loads(result.stdout) == ["from-cache", ["argument with spaces"], "input payload"]
+    assert json.loads(result.stdout) == [
+        "from-cache",
+        ["argument with spaces"],
+        "input payload",
+    ]
     assert sorted(p.name for p in temporary.iterdir()) == ["keep"]
 
 
 @pytest.mark.parametrize("stop_signal", [signal.SIGTERM, signal.SIGINT])
-def test_temporary_environment_is_cleaned_after_termination(workdir, tmp_path, stop_signal):
+def test_temporary_environment_is_cleaned_after_termination(
+    workdir, tmp_path, stop_signal
+):
     ready = tmp_path / "ready"
-    code = 'import os,signal,sys;from pathlib import Path;Path(sys.argv[1]).write_text(str(os.getpid()));signal.pause()'
+    code = "import os,signal,sys;from pathlib import Path;Path(sys.argv[1]).write_text(str(os.getpid()));signal.pause()"
     argv, env, temporary, cwd = _temporary_environment_command(
-        workdir, tmp_path, [sys.executable, "-c", code, str(ready)])
-    process = subprocess.Popen(argv, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        workdir, tmp_path, [sys.executable, "-c", code, str(ready)]
+    )
+    process = subprocess.Popen(
+        argv, cwd=cwd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+    )
     try:
         deadline = time.monotonic() + 5
         while not ready.exists() and time.monotonic() < deadline:
@@ -155,11 +186,78 @@ def test_temporary_environment_preserves_inherited_descriptor(workdir, tmp_path)
     try:
         code = 'import os,sys;os.write(int(sys.argv[1]), b"inherited payload")'
         argv, env, temporary, cwd = _temporary_environment_command(
-            workdir, tmp_path, [sys.executable, "-c", code, str(descriptor)])
-        result = subprocess.run(argv, cwd=cwd, env=env, pass_fds=(descriptor,),
-                                text=True, capture_output=True, timeout=10)
+            workdir, tmp_path, [sys.executable, "-c", code, str(descriptor)]
+        )
+        result = subprocess.run(
+            argv,
+            cwd=cwd,
+            env=env,
+            pass_fds=(descriptor,),
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
         assert result.returncode == 0, result.stderr
         assert channel.read_bytes() == b"inherited payload"
         assert sorted(p.name for p in temporary.iterdir()) == ["keep"]
     finally:
         os.close(descriptor)
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_unreadable_declared_directory_refuses_cached_environment(workdir, nested):
+    tree, _ = workdir
+    directory = tree / "nix"
+    if nested:
+        directory = directory / "nested"
+        directory.mkdir()
+    (directory / "hidden.nix").write_text("must be fingerprinted")
+    if os.geteuid() == 0:
+        pytest.skip("root bypasses directory permissions")
+    directory.chmod(0)
+    try:
+        with pytest.raises(PermissionError):
+            devenv.cache_key(tree, INPUTS, "fixture")
+    finally:
+        directory.chmod(0o700)
+
+
+@pytest.mark.parametrize("kind", ["fifo", "dangling", "directory-link"])
+def test_unsupported_declared_inputs_refuse_cache_key(workdir, kind):
+    tree, _ = workdir
+    path = tree / "nix" / "entry"
+    if kind == "fifo":
+        os.mkfifo(path)
+    elif kind == "dangling":
+        path.symlink_to(tree / "missing")
+    else:
+        path.symlink_to(tree, target_is_directory=True)
+    with pytest.raises((devenv.DevenvError, OSError)):
+        devenv.cache_key(tree, INPUTS, "fixture")
+
+
+def test_file_hashing_streams_without_changing_existing_keys(workdir, monkeypatch):
+    tree, _ = workdir
+    reference = hashlib.sha256(f"workdir:{tree}\0nix:fixture\0".encode())
+    reference.update(
+        b"file:flake.lock\0{}\n\0file:flake.nix\0{ }\n\0file:nix/shell.sh\0echo hi\n\0"
+    )
+    expected = reference.hexdigest()
+
+    def refuse_whole_file_read(self):
+        raise AssertionError("whole input file buffered")
+
+    monkeypatch.setattr(Path, "read_bytes", refuse_whole_file_read)
+    assert devenv.cache_key(tree, INPUTS, "fixture") == expected
+
+
+def test_directory_link_target_edits_invalidate_the_environment(workdir):
+    tree, _ = workdir
+    target = tree / "shared"
+    target.mkdir()
+    source = target / "runtime.nix"
+    source.write_text("before")
+    (tree / "nix" / "linked").symlink_to(target, target_is_directory=True)
+    before = devenv.cache_key(tree, INPUTS, "fixture")
+    source.write_text("after")
+    assert devenv.cache_key(tree, INPUTS, "fixture") != before
