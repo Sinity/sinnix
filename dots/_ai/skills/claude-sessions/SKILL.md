@@ -18,6 +18,7 @@ scripts/sinnix-claude-session prose <session-id-or-path> [--thinking] [--tools] 
 
 - `list` shows sessions newest-first with size and the first real user
   message, across all projects or one.
+- File exports from `--out` are private and published only after successful extraction. Input aliases are refused; failure or cancellation before publication preserves an existing export.
 - `prose` renders user + assistant text as markdown. `--tools` adds one-line
   tool-call summaries (name + command/path hint); `--thinking` includes
   thinking blocks as quoted asides; tool results are always omitted (bulk,

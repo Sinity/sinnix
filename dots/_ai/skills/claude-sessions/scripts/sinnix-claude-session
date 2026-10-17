@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prose-oriented extraction from raw Claude Code session JSONL.
 
-Stopgap until Polylogue is back: turn a session transcript into readable
+When Polylogue is unavailable, turn a raw session transcript into readable
 prose (user + assistant text), optionally with thinking and one-line tool
 summaries, so a session's accumulated understanding survives context
 exhaustion and can be re-read or re-fed cheaply.
@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import signal
+import stat
 import sys
+import tempfile
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -68,7 +73,9 @@ def first_user_snippet(path: Path, limit: int = 110) -> str:
 
 def cmd_list(args):
     roots = (
-        [PROJECTS_ROOT / args.project] if args.project else sorted(PROJECTS_ROOT.iterdir())
+        [PROJECTS_ROOT / args.project]
+        if args.project
+        else sorted(PROJECTS_ROOT.iterdir())
     )
     rows = []
     for root in roots:
@@ -103,11 +110,48 @@ def tool_one_liner(block) -> str:
     return f"> [tool] {name}: {hint}" if hint else f"> [tool] {name}"
 
 
+@contextmanager
+def prose_output(source: Path, filename: str | None):
+    if filename is None:
+        yield sys.stdout
+        return
+    target = Path(filename).resolve()
+    try:
+        metadata = target.stat()
+    except FileNotFoundError:
+        pass
+    else:
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("output must be a regular file")
+        if target.samefile(source):
+            raise ValueError("output must differ from the raw session file")
+        # Atomic replacement must still respect existing write permissions.
+        os.close(os.open(target, os.O_WRONLY | os.O_NONBLOCK))
+    staged = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix=".claude-prose-",
+            dir=target.parent,
+            delete=False,
+        ) as handle:
+            staged = Path(handle.name)
+            os.fchmod(handle.fileno(), 0o600)
+            yield handle
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(staged, target)
+        staged = None
+    finally:
+        if staged is not None:
+            staged.unlink(missing_ok=True)
+
+
 def cmd_prose(args):
     path = resolve_session(args.session)
-    out = open(args.out, "w", encoding="utf-8") if args.out else sys.stdout
-    emitted_role = None
-    try:
+    with prose_output(path, args.out) as out:
+        emitted_role = None
         print(f"# Session {path.stem} ({path.parent.name})\n", file=out)
         for rec in iter_records(path):
             rtype = rec.get("type")
@@ -128,9 +172,7 @@ def cmd_prose(args):
                 elif btype == "thinking" and args.thinking:
                     think = block.get("thinking", "").strip()
                     if think:
-                        parts.append(
-                            "*[thinking]* " + think.replace("\n", "\n> ")
-                        )
+                        parts.append("*[thinking]* " + think.replace("\n", "\n> "))
                 elif btype == "tool_use" and args.tools:
                     parts.append(tool_one_liner(block))
                 # tool_result blocks are always skipped: bulk, not prose
@@ -142,10 +184,8 @@ def cmd_prose(args):
                 emitted_role = rtype
             print("\n\n".join(parts), file=out)
             print("", file=out)
-    finally:
-        if args.out:
-            out.close()
-            print(f"wrote {args.out}", file=sys.stderr)
+    if args.out:
+        print(f"wrote {args.out}", file=sys.stderr)
 
 
 def main():
@@ -153,20 +193,43 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_list = sub.add_parser("list", help="list sessions, newest first")
-    p_list.add_argument("--project", help="munged project dir name (e.g. -realm-project-polylogue)")
+    p_list.add_argument(
+        "--project", help="munged project dir name (e.g. -realm-project-polylogue)"
+    )
     p_list.add_argument("--limit", type=int, default=25)
     p_list.set_defaults(func=cmd_list)
 
     p_prose = sub.add_parser("prose", help="emit prose-only markdown for a session")
     p_prose.add_argument("session", help="session file path or id (prefix ok)")
-    p_prose.add_argument("--thinking", action="store_true", help="include thinking blocks")
-    p_prose.add_argument("--tools", action="store_true", help="include one-line tool summaries")
-    p_prose.add_argument("--sidechains", action="store_true", help="include subagent sidechains")
+    p_prose.add_argument(
+        "--thinking", action="store_true", help="include thinking blocks"
+    )
+    p_prose.add_argument(
+        "--tools", action="store_true", help="include one-line tool summaries"
+    )
+    p_prose.add_argument(
+        "--sidechains", action="store_true", help="include subagent sidechains"
+    )
     p_prose.add_argument("--out", help="write to file instead of stdout")
     p_prose.set_defaults(func=cmd_prose)
 
     args = parser.parse_args()
-    args.func(args)
+
+    def stop(signum, _frame):
+        raise SystemExit(128 + signum)
+
+    previous = {
+        sig: signal.signal(sig, stop)
+        for sig in (signal.SIGTERM, signal.SIGHUP)
+        if signal.getsignal(sig) == signal.SIG_DFL
+    }
+    try:
+        args.func(args)
+    except (OSError, ValueError) as error:
+        parser.exit(1, f"sinnix-claude-session: {error}\n")
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
 
 
 if __name__ == "__main__":
