@@ -345,6 +345,64 @@ def test_recovery_tail_memory_does_not_grow_with_record_count(tmp_path: Path) ->
     assert peak < 1024 * 1024, f"recovery allocated {peak} bytes"
 
 
+def test_pending_index_recovery_has_bounded_memory_and_sequence_order(tmp_path, monkeypatch):
+    writer = CaptureWriter(tmp_path, "lane")
+    count = 30000
+    monkeypatch.setattr(writer, "_read_seq", lambda: count)
+    monkeypatch.setattr(writer, "_last_indexed_seq", lambda: 0)
+    monkeypatch.setattr(writer, "_daily_paths", lambda: [tmp_path / "day.jsonl"])
+    monkeypatch.setattr(writer, "_payload_records", lambda path: (
+        {"seq": seq, "ts": seq, "payload": "unused"}
+        for seq in range(count, 0, -1)
+    ))
+    seen = 0
+
+    def append(path, entry, *, fsync):
+        nonlocal seen
+        seen += 1
+        assert entry == {"seq": seen, "ts": seen, "file": "day.jsonl"}
+        assert fsync
+
+    monkeypatch.setattr(ledger, "append_jsonl", append)
+    tracemalloc.start()
+    try:
+        writer._recover_unindexed()
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert seen == count
+    assert peak < 4 * 1024 * 1024, f"pending index recovery allocated {peak} bytes"
+
+
+@pytest.mark.parametrize("failure", ["duplicate-sequence", "malformed-record"])
+def test_pending_index_recovery_failure_preserves_index_and_cleans_scratch(tmp_path, monkeypatch, failure):
+    import sqlite3
+    from tempfile import TemporaryDirectory
+
+    import sinnix_capture.writer as writer_module
+
+    writer = CaptureWriter(tmp_path, "lane")
+    writer.write({"original": True}, ts=100)
+    before = writer._index_path.read_bytes()
+    payload_before = writer._record_path(100).read_bytes()
+    monkeypatch.setattr(writer_module, "TemporaryDirectory", lambda **kwargs: TemporaryDirectory(dir=tmp_path, **kwargs))
+    monkeypatch.setattr(writer, "_read_seq", lambda: 3)
+    monkeypatch.setattr(writer, "_last_indexed_seq", lambda: 0)
+    records = [{"seq": 1, "ts": 100}]
+    if failure == "duplicate-sequence":
+        records.append({"seq": 1, "ts": 200})
+        error = sqlite3.IntegrityError
+    else:
+        records.append({"seq": 2})
+        error = KeyError
+    monkeypatch.setattr(writer, "_payload_records", lambda path: iter(records))
+    with pytest.raises(error):
+        writer._recover_unindexed()
+    assert writer._index_path.read_bytes() == before
+    assert writer._record_path(100).read_bytes() == payload_before
+    assert not list(tmp_path.glob("capture-index-recovery-*"))
+
+
 def test_recovery_tail_honors_exact_byte_window(tmp_path: Path) -> None:
     path = tmp_path / "tail.jsonl"
     prefix = b'{"ts":9999}\n'

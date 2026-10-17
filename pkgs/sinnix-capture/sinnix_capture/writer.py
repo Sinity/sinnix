@@ -22,8 +22,11 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sqlite3
 import time
+from contextlib import closing
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from sinnix_lib.layout import capture_lane_path
 
@@ -229,16 +232,25 @@ class CaptureWriter:
         last = self._last_indexed_seq()
         if last >= counter:
             return
-        missing = []
-        for path in self._daily_paths():
-            for record in self._payload_records(path):
-                seq = record["seq"]
-                if last < seq <= counter:
-                    missing.append(
-                        (seq, {"ts": record["ts"], "seq": seq, "file": path.name})
-                    )
-        for _, entry in sorted(missing):
-            ledger.append_jsonl(self._index_path, entry, fsync=True)
+        # Caller timestamps can rotate back to an earlier day, so filename
+        # order is not sequence order. Spill pending projections to task
+        # scratch rather than retaining an arbitrarily large recovery in RAM.
+        with TemporaryDirectory(prefix="capture-index-recovery-") as scratch:
+            with closing(sqlite3.connect(Path(scratch) / "pending.sqlite")) as db:
+                db.execute("PRAGMA cache_size = -1024")
+                # This private spool is regenerable, never a recovery authority.
+                db.execute("PRAGMA synchronous = OFF")
+                db.execute("CREATE TABLE pending (seq INTEGER PRIMARY KEY, entry TEXT NOT NULL)")
+                for path in self._daily_paths():
+                    for record in self._payload_records(path):
+                        seq = record["seq"]
+                        if last < seq <= counter:
+                            entry = {"ts": record["ts"], "seq": seq, "file": path.name}
+                            db.execute("INSERT INTO pending VALUES (?, ?)", (seq, json.dumps(entry)))
+                # Finish reading and validating inputs before modifying the
+                # index. Duplicate sequences refuse ambiguous recovery.
+                for (entry,) in db.execute("SELECT entry FROM pending ORDER BY seq"):
+                    ledger.append_jsonl(self._index_path, json.loads(entry), fsync=True)
 
     def _record_path(self, ts: float) -> Path:
         day = time.strftime("%Y%m%d", time.gmtime(ts))
