@@ -1,6 +1,7 @@
 """Exercise BCR intake with real decoding and a controlled ADB transport."""
 
 import hashlib
+import fcntl
 import json
 import os
 import subprocess
@@ -10,7 +11,7 @@ from pathlib import Path
 
 source = Path(sys.argv[1]).read_text()
 function = source[
-    source.index("drain_bcr_calls_adb() {") : source.index("nix_userland_identity() {")
+    source.index("drain_bcr_calls_adb() (") : source.index("nix_userland_identity() {")
 ]
 builder = source[
     source.index("adb_shell_args() {") : source.index("# The grants the app needs")
@@ -135,6 +136,21 @@ with tempfile.TemporaryDirectory() as scratch:
     assert (root / "remote-hashes").stat().st_size == hashes_before
     second_audio.unlink()
     second_sidecar.unlink()
+
+    # A second writer must refuse before loading or mutating call receipts.
+    locked_lake = root / "locked-lake"
+    (locked_lake / "calls").mkdir(parents=True)
+    with (locked_lake / "calls" / ".sync.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        hashes_before = (root / "remote-hashes").stat().st_size
+        result = run("normal", locked_lake)
+        assert result.returncode == 75, result.stderr + result.stdout
+        assert "sync already active" in result.stderr
+        assert not (locked_lake / "calls" / "levels.jsonl").exists()
+        assert (root / "remote-hashes").stat().st_size == hashes_before
+    result = run("normal", locked_lake)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert len((locked_lake / "calls" / "levels.jsonl").read_text().splitlines()) == 1
 
     lake = root / "lake"
     result = run("normal", lake)

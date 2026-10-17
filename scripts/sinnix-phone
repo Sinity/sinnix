@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Reach the phone over the tailnet — status, shell, screen mirror, media pull, clipboard push
-# runtimeInputs: bash python3 coreutils openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl tailscale debootstrap zip avahi @sinnix-phone-dispatcher @sinnix-remote-command @sinnix-phone-keyguard
+# runtimeInputs: bash python3 coreutils util-linux openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl tailscale debootstrap zip avahi @sinnix-phone-dispatcher @sinnix-remote-command @sinnix-phone-keyguard
 
 #
 # Device control uses authenticated Android wireless debugging. Its connection
@@ -617,11 +617,11 @@ drain_ambient_adb() {
 # A valid Ogg/Opus file can still contain exact zeroes for an entire call when
 # the vendor VOICE_CALL route fails. Decode every newly observed recording at
 # intake so "BCR produced a file" is never confused with "call audio exists".
-drain_bcr_calls_adb() {
+drain_bcr_calls_adb() (
   local remote_dir export_dir dest debug_dir history_dir ledger seen remote name
   local remote_size export_size duration rate channels
   local levels mean max dead truncated_export log_remote log_name display audio_candidate decode_ok
-  local listing checked_at metadata_missing row_needed failed=0
+  local listing checked_at metadata_missing row_needed sync_lock_fd failed=0
   local rollback_kind rollback_target rollback_source rollback_stage
   local pulled=0 repaired=0 audited=0 silent=0 broken=0
   local -A revision_source_path revision_archive_path revision_source_identity
@@ -636,7 +636,15 @@ drain_bcr_calls_adb() {
   debug_dir="$dest/debug"
   history_dir="$dest/history"
   ledger="$dest/levels.jsonl"
-  mkdir -p "$dest" "$debug_dir" || return 1
+  mkdir -p "$dest" || return 1
+  # Serialize the complete receipt/publication transaction, including rollback.
+  # The function subshell closes this descriptor on every return or signal.
+  exec {sync_lock_fd}>>"$dest/.sync.lock" || return 1
+  if ! flock -n "$sync_lock_fd"; then
+    echo "bcr: sync already active for this archive; retry later" >&2
+    return 75
+  fi
+  mkdir -p "$debug_dir" || return 1
   touch "$ledger" || return 1
   seen=$(jq -c -s 'map(select(type == "object"))' "$ledger") || return 1
 
@@ -1140,7 +1148,7 @@ drain_bcr_calls_adb() {
   if [ "$silent" -gt 0 ] || [ "$broken" -gt 0 ] || [ "$failed" -gt 0 ]; then
     return 2
   fi
-}
+)
 
 nix_userland_identity() {
   NIX_APP_UID=$(adb_any shell pm list packages -U com.termux.nix 2>/dev/null \

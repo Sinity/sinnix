@@ -294,6 +294,13 @@ continuously; Android may still choose the delivered rate.
 
 ### What is still a pull, and why
 
+BCR archive sync holds a nonblocking destination lock across inventory,
+revision checks, publication, receipt append and rollback. A competing sync
+returns 75 with an explicit retry message before reading receipts or changing
+archive payloads. The lock is released when that sync returns or exits, so a
+manual invocation and the scheduled collector cannot publish competing
+revisions to the same destination.
+
 **The system log and BCR calls.** Reading the log needs `READ_LOGS`, which
 Android grants to system and privileged apps only; the Sinnix capture app
 cannot hold it at any appop scope. BCR is privileged but is a separate app,
