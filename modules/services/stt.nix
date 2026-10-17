@@ -81,6 +81,19 @@ mkAiService {
           serviceConfig = {
             Group = "users";
             UMask = "0077";
+            # Each recording starts a recognizer with resident model weights.
+            # Allow its working set without turning the 1G class soft limit
+            # into repeated swap I/O, while retaining the 3G hard boundary.
+            MemoryHigh = "2G";
+            MemorySwapMax = "0";
+            IOReadBandwidthMax = [
+              "/realm 20M"
+              "/nix 20M"
+            ];
+            IOWriteBandwidthMax = [
+              "/realm 10M"
+              "/nix 10M"
+            ];
           };
           environment = {
             SINNIX_STT_MODEL_ROOT = modelDir;
@@ -107,15 +120,6 @@ mkAiService {
         sinnix.runtime.surfaces.stt-lake = {
           unit = "sinnix-stt-lake.service";
           resourceClass = "background";
-          resources = {
-            # Each recording starts a recognizer with resident model weights.
-            # Allow its working set without turning the 1G class soft limit
-            # into repeated swap I/O, while retaining the 3G hard boundary.
-            MemoryHigh = "2G";
-            MemorySwapMax = "0";
-            IOReadBandwidthMax = [ "/realm 20M" "/nix 20M" ];
-            IOWriteBandwidthMax = [ "/realm 10M" "/nix 10M" ];
-          };
           observe = {
             enable = true;
             restartable = true;
