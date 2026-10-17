@@ -5,6 +5,8 @@ import subprocess
 from html.parser import HTMLParser
 from pathlib import Path
 
+import pytest
+
 MODULE = runpy.run_path(
     str(Path(__file__).parents[3] / "scripts/sinnix-file-catalog-report")
 )
@@ -403,3 +405,27 @@ def test_ambiguous_or_unavailable_evidence_has_no_active_link():
     page = MODULE["render_enrichment"](asset, {"assets": [{**owner, "location_status": "denied"}]})
     assert "explicitly unavailable" in page
     assert 'href=' not in page
+
+
+@pytest.mark.parametrize("source", ["catalog", "template"])
+def test_nonregular_input_keeps_previous_report(tmp_path, source):
+    import os
+
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text(json.dumps({"schema_version": 1, "updated_at": "2026-01-01", "assets": []}))
+    template = tmp_path / "template.html"
+    template.write_text(TEMPLATE)
+    output = tmp_path / "report.html"
+    output.write_bytes(b"verified previous report")
+    blocked = catalog if source == "catalog" else template
+    blocked.unlink()
+    os.mkfifo(blocked)
+    result = subprocess.run(
+        [str(Path(__file__).parents[3] / "scripts/sinnix-file-catalog-report"),
+         "--catalog", str(catalog), "--template", str(template), "--output", str(output)],
+        text=True, capture_output=True, timeout=2,
+    )
+    assert result.returncode == 2
+    assert "regular file" in result.stderr
+    assert output.read_bytes() == b"verified previous report"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["catalog.json", "report.html", "template.html"]

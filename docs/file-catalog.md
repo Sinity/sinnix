@@ -52,6 +52,9 @@ metadata at that address, retaining earlier inspections and identity evidence in
 history. A dangling link at the old address is still an occupied address.
 Writes use an adjacent lock and an atomic replacement, so invalid input cannot
 leave a partially written catalog.
+Catalogs, observation inputs and report templates must resolve to regular files.
+Named pipes and devices are rejected before reading; ordinary file symlinks remain
+supported. Failed input reads preserve the previous catalog or report.
 
 Use `observe observations.json --expected-sha256 DIGEST` for reviewed location
 changes. Each row names an asset ID, actor, basis, reason and explicit action:

@@ -491,3 +491,74 @@ def test_denied_import_keeps_the_access_error_and_catalog(tmp_path, monkeypatch,
         assert "cannot inspect current_path" in error
         assert "synthetic access denied" in error
         assert catalog.read_bytes() == before
+
+
+def test_nonregular_catalog_fails_promptly(tmp_path):
+    import os
+
+    catalog = tmp_path / "catalog.fifo"
+    os.mkfifo(catalog)
+    result = subprocess.run(
+        [str(SCRIPT), "--catalog", str(catalog), "coverage"],
+        text=True, capture_output=True, timeout=2,
+    )
+    assert result.returncode == 2
+    assert "regular file" in result.stderr
+
+
+def test_reader_checks_opened_object_and_keeps_regular_symlinks(tmp_path):
+    import sys
+
+    from sinnix_lib.files import read_regular_text
+
+    source = tmp_path / "source.txt"
+    source.write_text("complete observation\n")
+    reference = tmp_path / "reference.txt"
+    reference.symlink_to(source)
+    assert read_regular_text(reference) == "complete observation\n"
+    # Bound the actual FIFO-open race so a regression cannot hang pytest.
+    probe = """
+import os
+import sys
+from pathlib import Path
+from sinnix_lib.files import read_regular_text
+source = Path(sys.argv[1])
+original_open = os.open
+
+def replace_before_open(name, flags, *args, **kwargs):
+    if Path(name) == source:
+        source.unlink()
+        os.mkfifo(source)
+    return original_open(name, flags, *args, **kwargs)
+
+os.open = replace_before_open
+try:
+    read_regular_text(source)
+except ValueError as error:
+    assert "regular file" in str(error)
+else:
+    raise AssertionError("replacement FIFO was not rejected")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", probe, str(source)],
+        capture_output=True, text=True, timeout=2,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_nonregular_import_preserves_authored_catalog(tmp_path):
+    import os
+
+    catalog = tmp_path / "catalog.json"
+    original = json.dumps({"schema_version": 1, "updated_at": "2026-01-01", "assets": []}).encode()
+    catalog.write_bytes(original)
+    assert invoke(catalog, "coverage").returncode == 0
+    source = tmp_path / "observations.fifo"
+    os.mkfifo(source)
+    result = subprocess.run(
+        [str(SCRIPT), "--catalog", str(catalog), "import", str(source)],
+        text=True, capture_output=True, timeout=2,
+    )
+    assert result.returncode == 2
+    assert "regular file" in result.stderr
+    assert catalog.read_bytes() == original

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.catalog_paths import resolve_historical_path
+from sinnix_lib.files import read_regular_text
 
 
 STYLE = """
@@ -382,7 +383,7 @@ def main() -> None:
     parser.add_argument("--judgments", type=Path, help="Explicit authored classification ledger; source catalog observations remain unchanged")
     args = parser.parse_args()
     source = args.catalog.resolve()
-    catalog = json.loads(source.read_text(encoding="utf-8"))
+    catalog = json.loads(read_regular_text(source))
     command_args = [
         sys.executable, str(Path(__file__).resolve()), "--catalog", str(source),
         "--template", str(args.template.resolve()), "--output", str(args.output.resolve()),
@@ -393,11 +394,15 @@ def main() -> None:
         judgments = read_judgments(args.judgments)
         command_args.extend(["--judgments", str(args.judgments.resolve())])
     command = shlex.join(command_args)
-    output = render(catalog, source, args.template.read_text(encoding="utf-8"), command, judgments)
+    output = render(catalog, source, read_regular_text(args.template), command, judgments)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     atomic_publish(args.output, output.encode("utf-8"), fsync=True, mode=0o600)
     print(args.output)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except (OSError, ValueError) as error:
+        print(f"sinnix-file-catalog-report: {error}", file=sys.stderr)
+        raise SystemExit(2) from None

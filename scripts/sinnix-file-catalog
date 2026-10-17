@@ -31,6 +31,7 @@ from typing import Any
 
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.catalog_paths import normalized, relocate_path, resolve_historical_path
+from sinnix_lib.files import read_regular_text
 from sinnix_lib.mounts import has_mounted_ancestor, read_mountpoints
 
 SCHEMA_VERSION = 1
@@ -65,12 +66,11 @@ def now() -> str:
 
 def read_json(path: Path) -> Any:
     try:
-        with path.open(encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        raise CatalogError(f"catalog does not exist: {path}")
-    except (OSError, UnicodeError, json.JSONDecodeError) as e:
-        raise CatalogError(f"cannot read JSON {path}: {e}")
+        return json.loads(read_regular_text(path))
+    except FileNotFoundError as error:
+        raise CatalogError(f"catalog does not exist: {path}") from error
+    except (OSError, ValueError) as e:
+        raise CatalogError(f"cannot read JSON {path}: {e}") from e
 
 
 def identity(path: Path) -> dict[str, Any]:
