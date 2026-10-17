@@ -153,6 +153,10 @@ class A11yDaemon:
             )
 
     def on_focus(self, event) -> None:
+        # Modern state-change events report both gaining and losing focus.
+        # A loss must not replace the window selected by a newer gain.
+        if event.type == "object:state-changed:focused" and not event.detail1:
+            return
         acc = event.source
         if acc is None:
             return

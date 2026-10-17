@@ -116,6 +116,29 @@ def test_on_focus_emits_focus_record_then_a_bounded_subtree_dump(tmp_path: Path)
     assert written[1]["tree"]["role"] == "entry"
 
 
+def test_focus_loss_does_not_replace_focused_window_or_emit_dump(tmp_path):
+    daemon, written = _make_daemon(tmp_path)
+    current = FakeAccessible("frame", "Current")
+    daemon.on_focus(FakeEvent(current))
+    written.clear()
+    event = FakeEvent(FakeAccessible("frame", "Previous"),
+                      type_="object:state-changed:focused")
+    event.detail1 = 0
+    daemon.on_focus(event)
+    assert written == []
+    assert daemon._focused_window is current
+
+
+def test_modern_focus_gain_still_emits_focus_and_subtree(tmp_path):
+    daemon, written = _make_daemon(tmp_path)
+    current = FakeAccessible("frame", "Current")
+    event = FakeEvent(current, type_="object:state-changed:focused")
+    event.detail1 = 1
+    daemon.on_focus(event)
+    assert [p["kind"] for p in written] == ["focus", "subtree"]
+    assert daemon._focused_window is current
+
+
 def test_on_text_changed_debounces_rapid_repeat_events(tmp_path: Path):
     daemon, written = _make_daemon(tmp_path, text_debounce_seconds=1000.0)
     acc = FakeAccessible("entry", "Search")
