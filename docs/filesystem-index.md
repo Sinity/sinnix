@@ -117,3 +117,5 @@ available, and the authored ledger is unchanged. Direct `judgments explain`
 continues to include winning evidence for an individual path. With
 `--current-only`, inaccessible locations fail explicitly instead of silently
 disappearing from the report.
+
+Directory totals are incomplete when either listing the directory or inspecting an individual entry fails. The inventory retains observed counts and bytes, records a bounded error summary, and propagates incompleteness to ancestor totals. A file disappearing during a scan is an observation gap, not evidence that the directory was completely measured.

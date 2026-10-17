@@ -290,6 +290,17 @@ def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_ev
             files: list[os.DirEntry] = []
             dirs: list[os.DirEntry] = []
             links = 0
+            entry_errors = 0
+            first_entry_error = None
+
+            def record_entry_error(entry, error):
+                nonlocal entry_errors, first_entry_error
+                entry_errors += 1
+                # A large unreadable directory must not accumulate a second
+                # unbounded list of failures. Keep the count and first reason.
+                if first_entry_error is None:
+                    first_entry_error = f"{entry.name}: {error.__class__.__name__}"
+
             for e in entries:
                 try:
                     if e.is_symlink():
@@ -298,7 +309,8 @@ def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_ev
                         dirs.append(e)
                     else:
                         files.append(e)
-                except OSError:
+                except OSError as exc:
+                    record_entry_error(e, exc)
                     continue
 
             direct_bytes = 0
@@ -308,7 +320,8 @@ def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_ev
             for e in files:
                 try:
                     est = e.stat(follow_symlinks=False)
-                except OSError:
+                except OSError as exc:
+                    record_entry_error(e, exc)
                     continue
                 direct_bytes += est.st_size
                 mtimes.append(est.st_mtime)
@@ -347,7 +360,11 @@ def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_ev
                 "biggest_files": [{"bytes": b, "name": n} for b, n in biggest[:5]],
                 "child_dirs": [e.name for e in dirs[:40]],
                 "prune_reason": prune_reason,
-                "error": None,
+                # Counts/bytes describe only observed entries. Reuse the
+                # existing error contract so rollup and coverage mark the
+                # directory and every ancestor incomplete.
+                "error": (f"entry metadata unavailable ({entry_errors} entries): {first_entry_error}"
+                          if entry_errors else None),
             }
             out.write(json.dumps(safe(record), ensure_ascii=False) + "\n")
             written += 1

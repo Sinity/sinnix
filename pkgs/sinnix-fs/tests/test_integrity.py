@@ -590,3 +590,48 @@ def test_all_internal_duckdb_sessions_have_bounded_buffers_and_workers(tmp_path)
     stored = fs.duckdb_query(db, "SELECT * FROM proof")
     assert stored.returncode == 0, stored.stderr
     assert stored.stdout.strip() == reader.stdout.strip()
+
+
+@pytest.mark.parametrize("stage", ["classification", "stat"])
+@pytest.mark.parametrize("failure", [PermissionError, FileNotFoundError, OSError])
+def test_inventory_entry_errors_make_ancestor_totals_incomplete(tmp_path, monkeypatch, stage, failure):
+    from contextlib import contextmanager
+    fs = load()
+    root = tmp_path / "source"
+    child = root / "child"
+    child.mkdir(parents=True)
+    (child / "readable.txt").write_bytes(b"seen")
+    (child / "unavailable.txt").write_bytes(b"unknown")
+    original = fs.os.scandir
+
+    class Entry:
+        def __init__(self, entry):
+            self.entry = entry
+        def __getattr__(self, name):
+            return getattr(self.entry, name)
+        def is_symlink(self):
+            if stage == "classification":
+                raise failure("synthetic metadata failure")
+            return self.entry.is_symlink()
+        def stat(self, **kwargs):
+            raise failure("synthetic metadata failure")
+
+    @contextmanager
+    def scan(path):
+        with original(path) as entries:
+            yield iter([Entry(e) if Path(path) == child and e.name == "unavailable.txt" else e
+                        for e in entries])
+
+    monkeypatch.setattr(fs.os, "scandir", scan)
+    source = tmp_path / "nodes.jsonl"
+    assert fs.inventory_scan([str(root)], -1, source, 0) == 2
+    monkeypatch.setattr(fs.os, "scandir", original)
+    nodes = {r["path"]: r for r in map(json.loads, source.read_text().splitlines())}
+    assert nodes[str(child)]["error"] is not None
+    assert "unavailable.txt" in nodes[str(child)]["error"]
+    assert failure.__name__ in nodes[str(child)]["error"]
+    assert nodes[str(child)]["direct_bytes"] == 4
+    db = tmp_path / "inventory.duckdb"
+    fs.inventory_materialize(source, db, tmp_path / "nodes.parquet")
+    rows = sql(db, "SELECT total_bytes::BIGINT AS total_bytes, subtree_complete FROM inventory ORDER BY depth")
+    assert rows == [{"total_bytes": 4, "subtree_complete": False}] * 2
