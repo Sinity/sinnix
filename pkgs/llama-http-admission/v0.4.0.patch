@@ -1,0 +1,52 @@
+--- a/tools/server/server-http.cpp
++++ b/tools/server/server-http.cpp
+@@ -5,6 +5,7 @@
+ #include "ui.h"
+ 
+ #include <cpp-httplib/httplib.h>
++#include "sinnix-http-admission.h"
+ 
+ #include <functional>
+ #include <future>
+@@ -45,16 +46,6 @@
+ 
+     SRV_DBG("request:  %s\n", req.body.c_str());
+     SRV_DBG("response: %s\n", res.body.c_str());
+-}
+-
+-// returns true if the Origin header value's host is localhost / 127.0.0.1 / ::1 (any port)
+-static bool origin_is_localhost(const std::string & origin) {
+-    try {
+-        const std::string host = common_http_parse_url(origin).host;
+-        return host == "localhost" || host == "127.0.0.1" || host == "::1";
+-    } catch (const std::exception &) {
+-        return false;
+-    }
+ }
+ 
+ // For Google Cloud Platform deployment compatibility
+@@ -274,20 +265,10 @@
+     };
+ 
+     // register server middlewares
+-    srv->set_pre_routing_handler([&params, middleware_validate_api_key, middleware_server_state](const httplib::Request & req, httplib::Response & res) {
+-        if (params.cors_credentials && params.cors_origins == "*") {
+-            // special case: echo back the Origin header to allow any origin to access the server with credentials
+-            res.set_header("Access-Control-Allow-Origin", req.get_header_value("Origin"));
+-        } else if (params.cors_origins == "localhost") {
+-            // special case: only reflect the Origin header if it is a localhost origin
+-            std::string origin = req.get_header_value("Origin");
+-            if (!origin.empty() && origin_is_localhost(origin)) {
+-                res.set_header("Access-Control-Allow-Origin", origin);
+-            } else if (!origin.empty()) {
+-                SRV_WRN("(CORS) skip non-localhost origin: %s\n", origin.c_str());
+-            }
+-        } else {
+-            res.set_header("Access-Control-Allow-Origin", params.cors_origins);
++    const sinnix_http_admission request_policy(port, is_ssl, params.cors_origins);
++    srv->set_pre_routing_handler([&params, middleware_validate_api_key, middleware_server_state, request_policy](const httplib::Request & req, httplib::Response & res) {
++        if (!request_policy.allow(req, res)) {
++            return httplib::Server::HandlerResponse::Handled;
+         }
+         // If this is OPTIONS request, skip validation because browsers don't include Authorization header
+         if (req.method == "OPTIONS") {

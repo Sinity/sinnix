@@ -85,12 +85,32 @@ mkServiceModule {
           ]
           ++ profile.arguments
         );
+      allowedOrigins =
+        profile:
+        lib.concatStringsSep "," (
+          lib.concatMap
+            (
+              host:
+              map (port: "http://${host}:${toString port}") [
+                (portFor profile).public
+                (portFor profile).backend
+              ]
+            )
+            [
+              "127.0.0.1"
+              "localhost"
+              "[::1]"
+            ]
+        );
       mkService = name: profile: {
         description = profile.description;
         wantedBy = [ ];
         after = [ "network.target" ];
         serviceConfig = lib.mkMerge [
-          { ExecStart = mkExecStart profile; }
+          {
+            ExecStart = mkExecStart profile;
+            Environment = [ "SINNIX_LLAMA_ALLOWED_ORIGINS=${allowedOrigins profile}" ];
+          }
           (
             if profile.dynamicUser then
               {

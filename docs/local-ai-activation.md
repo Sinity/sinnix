@@ -27,6 +27,24 @@ speech defaults alone. Existing persisted audio settings take precedence over
 these defaults; switch those through Open WebUI's configuration API when changing
 providers, preserving unrelated settings.
 
+The llama.cpp profiles validate Host, Origin and Fetch Metadata in the HTTP
+pre-routing hook, before reading request bodies. Allowed loopback origins for
+each profile's public and backend ports come from the port registry through
+`SINNIX_LLAMA_ALLOWED_ORIGINS`. Native requests, the local llama UI and
+user-activated document navigation remain supported. Unknown authorities,
+foreign or opaque origins and duplicate browser headers are refused.
+Upstream CORS options still control response headers for admitted origins;
+they cannot broaden the request boundary. An unmanaged server invocation
+without that environment variable defaults to its own loopback listener.
+Router children also accept their parent loopback origins using upstream
+`LLAMA_SERVER_ROUTER_PORT`; private child listener ports remain usable by
+the native router proxy.
+The CPU and CUDA packages have separate source patches for their pinned
+versions. `llama-http-admission` checks both HTTP libraries without models;
+`llama-package-admission` checks both full binaries as empty offline routers.
+This receiver policy does not stop the public TCP activation proxy from
+starting a backend before request headers arrive.
+
 OpenedAI Speech uses the shared Host/Origin admission policy before its vendor
 middleware reads request bodies. Native API clients and same-origin browser
 requests remain supported; wildcard CORS is removed. Its launcher retains the

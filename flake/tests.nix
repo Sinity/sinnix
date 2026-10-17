@@ -51,6 +51,7 @@ in
     ./tests/vm.nix
     ./tests/host-build.nix
     ./tests/runtime.nix
+    ./tests/llama-http-admission.nix
     ./tests/export-manifest.nix
     ./tests/script-suites.nix
     ./tests/phone-bcr.nix

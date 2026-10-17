@@ -35,12 +35,22 @@ let
   };
 in
 {
+  llama-cpp = _prev.llama-cpp.overrideAttrs (
+    old:
+    assert old.version == "0.4.0";
+    {
+      patches = (old.patches or [ ]) ++ [ ../../../pkgs/llama-http-admission/v0.4.0.patch ];
+      postPatch = (old.postPatch or "") + ''
+        cp ${../../../pkgs/llama-http-admission/admission.h} tools/server/sinnix-http-admission.h
+      '';
+    }
+  );
   # Muse Glimmer support landed after the nixpkgs-ai package snapshot. Keep
   # the existing CUDA package recipe and replace only its pinned upstream
   # source until nixpkgs-ai carries b10353 or newer.
   llama-cpp-cuda =
     (aiPkgs.pkgsForCudaArch.sm_86.llama-cpp.override { cudaSupport = true; }).overrideAttrs
-      (_old: {
+      (old: {
         # llama.cpp embeds this value as a C++ integer in build-info.cpp.
         version = "10353";
         src = final.fetchFromGitHub {
@@ -50,6 +60,10 @@ in
           hash = "sha256-MQP91lL8zQLYcnYw5GlkMvH5sXiES+C6L4/1G3Y6TPY=";
         };
         npmDepsHash = "sha256-2Q7XhaLAArmviOLdQsNbYTfdyDE5pW9lR26cRHEVl9k=";
+        patches = (old.patches or [ ]) ++ [ ../../../pkgs/llama-http-admission/b10353.patch ];
+        postPatch = (old.postPatch or "") + ''
+          cp ${../../../pkgs/llama-http-admission/admission.h} tools/server/sinnix-http-admission.h
+        '';
       });
   # Prebuilt top-level attribute upstream; narrow it the same way so
   # services/ollama.nix's `pkgs.ollama-cuda` references pick this up for free.
