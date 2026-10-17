@@ -499,17 +499,55 @@ def _read_range(fd: int, offset: int, length: int) -> bytes:
     return b"".join(chunks)
 
 
-def _read_capture_bytes(target: Path) -> bytes:
+def _capture_digest(target: Path) -> tuple[int, str]:
+    """Read-only comparison; custody sync remains in _retained_digest."""
     with _regular_file(target, os.O_RDONLY) as fd:
-        with os.fdopen(fd, "rb", closefd=False) as stream:
-            body = stream.read()
+        before = os.fstat(fd)
+        size = 0
+        digest = hashlib.sha256()
+        for chunk in iter(lambda: os.read(fd, 1 << 20), b""):
+            size += len(chunk)
+            digest.update(chunk)
         _verify_capture_path(target, fd)
-        return body
+        after = os.fstat(fd)
+        if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+            after.st_size, after.st_mtime_ns, after.st_ctime_ns
+        ):
+            raise ValueError("capture changed during repair comparison")
+        return size, digest.hexdigest()
+
+
+def _event_source_digest(source: Path, output=None) -> tuple[int, str]:
+    """Validate one record at a time, optionally copying the exact bytes."""
+    import json
+
+    size = 0
+    digest = hashlib.sha256()
+    with _regular_file(source, os.O_RDONLY) as fd:
+        before = os.fstat(fd)
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            for line in stream:
+                if not line.endswith(b"\n"):
+                    raise ValueError("source must contain complete JSONL records")
+                if not isinstance(json.loads(line), dict):
+                    raise ValueError("source contains a non-object record")
+                if output is not None:
+                    output.write(line)
+                size += len(line)
+                digest.update(line)
+        _verify_capture_path(source, fd)
+        after = os.fstat(fd)
+        if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+            after.st_size, after.st_mtime_ns, after.st_ctime_ns
+        ):
+            raise ValueError("source changed during repair validation")
+    if not size:
+        raise ValueError("source must contain complete JSONL records")
+    return size, digest.hexdigest()
 
 
 def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
     """Replace a closed UTC day from verified device bytes, retaining the old inode."""
-    import json
     import tempfile
     from datetime import datetime, timezone
 
@@ -517,29 +555,25 @@ def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
         "%Y%m%d"
     ):
         raise ValueError("repair requires a closed UTC day")
-    body = _read_capture_bytes(source.resolve(strict=True))
-    if not body or not body.endswith(b"\n"):
-        raise ValueError("source must contain complete JSONL records")
-    for line in body.splitlines():
-        if not isinstance(json.loads(line), dict):
-            raise ValueError("source contains a non-object record")
+    source = source.resolve(strict=True)
+    replacement = _event_source_digest(source)
+    new_size, new_sha = replacement
     target = _day_file(day)
     with flock(EVENTS_DIR / ".write.lock"):
-        previous = _read_capture_bytes(target)
-        old_sha = hashlib.sha256(previous).hexdigest()
+        previous = _capture_digest(target)
+        _, old_sha = previous
         if old_sha != expected_sha256:
             raise ValueError("destination changed; expected SHA-256 does not match")
-        new_sha = hashlib.sha256(body).hexdigest()
-        if body == previous:
-            if _retained_digest(target) != (len(previous), old_sha):
+        if replacement == previous:
+            if _retained_digest(target) != previous:
                 raise ValueError("destination changed during repair verification")
             return {"ok": True, "changed": False, "sha256": new_sha}
         backups = EVENTS_DIR / ".repairs"
-        backups.mkdir(exist_ok=True)
+        backups.mkdir(mode=0o700, exist_ok=True)
         backup = backups / f"{day}-{old_sha}.jsonl"
         if not backup.exists():
             os.link(target, backup)
-        if _retained_digest(backup) != (len(previous), old_sha):
+        if _retained_digest(backup) != previous:
             raise ValueError("backup verification failed")
         pending: Path | None = None
         try:
@@ -547,15 +581,16 @@ def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
                 dir=EVENTS_DIR, prefix=".repair-", delete=False
             ) as out:
                 pending = Path(out.name)
-                out.write(body)
+                if _event_source_digest(source, out) != replacement:
+                    raise ValueError("source changed during repair staging")
                 out.flush()
                 os.fsync(out.fileno())
-            if _read_capture_bytes(target) != previous:
+            if _capture_digest(target) != previous:
                 raise ValueError("destination changed during repair")
             os.chmod(pending, 0o600)
             os.replace(pending, target)
             pending = None
-            if _retained_digest(target) != (len(body), new_sha):
+            if _retained_digest(target) != replacement:
                 raise ValueError("replacement verification failed")
         finally:
             if pending is not None:
@@ -567,5 +602,5 @@ def repair_event_day(day: str, source: Path, expected_sha256: str) -> dict:
             "sha256": new_sha,
             "previous_sha256": old_sha,
             "backup": str(backup),
-            "bytes": len(body),
+            "bytes": new_size,
         }

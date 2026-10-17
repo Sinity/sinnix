@@ -14,6 +14,7 @@ import hashlib
 import os
 import stat
 import multiprocessing
+import tracemalloc
 from http import HTTPStatus
 
 import pytest
@@ -197,6 +198,7 @@ def test_repair_closed_day_preserves_original(monkeypatch, tmp_path):
     result = uploads_mod.repair_event_day(
         "20200101", source, hashlib.sha256(original).hexdigest()
     )
+
     from pathlib import Path
 
     assert target.read_bytes() == source.read_bytes()
@@ -206,6 +208,82 @@ def test_repair_closed_day_preserves_original(monkeypatch, tmp_path):
         uploads_mod.repair_event_day("20200101", source, result["sha256"])["changed"]
         is False
     )
+
+
+def test_closed_day_repair_streams_large_sources(monkeypatch, tmp_path):
+    monkeypatch.setattr(uploads_mod, "EVENTS_DIR", tmp_path)
+    target = tmp_path / "events-20200101.jsonl"
+    previous = b"retained malformed day\n"
+    target.write_bytes(previous)
+    source = tmp_path / "device.jsonl"
+    line = b'{"kind":"synthetic","payload":"' + b"x" * 256 + b'"}\n'
+    digest = hashlib.sha256()
+    with source.open("wb") as stream:
+        for _ in range(40000):
+            stream.write(line)
+            digest.update(line)
+    expected_size = source.stat().st_size
+    tracemalloc.start()
+    try:
+        result = uploads_mod.repair_event_day(
+            "20200101", source, hashlib.sha256(previous).hexdigest(),
+        )
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert result["changed"] and result["bytes"] == expected_size
+    assert result["sha256"] == digest.hexdigest()
+    with target.open("rb") as stream:
+        assert hashlib.file_digest(stream, "sha256").hexdigest() == digest.hexdigest()
+    with source.open("rb") as stream:
+        assert hashlib.file_digest(stream, "sha256").hexdigest() == digest.hexdigest()
+    from pathlib import Path
+
+    assert Path(result["backup"]).read_bytes() == previous
+    assert Path(result["backup"]).parent.stat().st_mode & 0o777 == 0o700
+    assert not list(tmp_path.glob(".repair-*"))
+    assert peak < 3 * 1024 * 1024, f"closed-day repair allocated {peak} bytes"
+
+
+def test_unchanged_day_does_not_stage_a_full_copy(monkeypatch, tmp_path):
+    import tempfile
+
+    monkeypatch.setattr(uploads_mod, "EVENTS_DIR", tmp_path)
+    body = b'{"synthetic":true}\n'
+    (tmp_path / "events-20200101.jsonl").write_bytes(body)
+    source = tmp_path / "source.jsonl"
+    source.write_bytes(body)
+
+    def refuse_staging(*args, **kwargs):
+        raise AssertionError("unchanged repair must not allocate a staged copy")
+
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", refuse_staging)
+    result = uploads_mod.repair_event_day("20200101", source, hashlib.sha256(body).hexdigest())
+    assert result["ok"] and not result["changed"]
+    assert not (tmp_path / ".repairs").exists()
+
+
+def test_changed_source_during_staging_preserves_previous_day(monkeypatch, tmp_path):
+    import tempfile
+
+    monkeypatch.setattr(uploads_mod, "EVENTS_DIR", tmp_path)
+    target = tmp_path / "events-20200101.jsonl"
+    previous = b"retained previous day\n"
+    target.write_bytes(previous)
+    source = tmp_path / "source.jsonl"
+    source.write_bytes(b'{"version":1}\n')
+    factory = tempfile.NamedTemporaryFile
+
+    def change_source(*args, **kwargs):
+        source.write_bytes(b'{"version":2}\n')
+        return factory(*args, **kwargs)
+
+    monkeypatch.setattr(tempfile, "NamedTemporaryFile", change_source)
+    with pytest.raises(ValueError, match="source changed"):
+        uploads_mod.repair_event_day("20200101", source, hashlib.sha256(previous).hexdigest())
+    assert target.read_bytes() == previous
+    assert next((tmp_path / ".repairs").iterdir()).read_bytes() == previous
+    assert not list(tmp_path.glob(".repair-*"))
 
 
 def test_repair_rejects_changed_destination_and_invalid_source(monkeypatch, tmp_path):
