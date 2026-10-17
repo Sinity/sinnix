@@ -69,7 +69,7 @@ mkFeatureModule {
         let
           mkDotsFile = mkDotsFileFor config;
           scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-          noctalia = inputs.noctalia.packages.${pkgs.stdenv.hostPlatform.system}.default.overrideAttrs (old: {
+          noctalia = pkgs.noctalia.overrideAttrs (old: {
             patches = (old.patches or [ ]) ++ [
               ./noctalia-notification-prewarm.patch
               # Keep policy in Noctalia's typed state boundary. These patches
@@ -105,16 +105,18 @@ mkFeatureModule {
             systemd.enable = true;
           };
 
-          systemd.user.services.noctalia.Service = (lib.sinnix.mkRuntimeServiceConfig {
-            runtimeInventory = nixosConfig.sinnix.runtime.inventory;
-            unit = "noctalia.service";
-            manager = "user";
-          }) // {
-            # A lost Wayland connection can exit successfully; restore the shell
-            # while the graphical session remains active. Explicit stops stay stopped.
-            Restart = lib.mkForce "always";
-            RestartSec = 2;
-          };
+          systemd.user.services.noctalia.Service =
+            (lib.sinnix.mkRuntimeServiceConfig {
+              runtimeInventory = nixosConfig.sinnix.runtime.inventory;
+              unit = "noctalia.service";
+              manager = "user";
+            })
+            // {
+              # A lost Wayland connection can exit successfully; restore the shell
+              # while the graphical session remains active. Explicit stops stay stopped.
+              Restart = lib.mkForce "always";
+              RestartSec = 2;
+            };
 
           home.file.".local/share/noctalia/pinned/official/timer".source = "${officialPlugins}/timer";
           home.file.".local/share/noctalia/pinned/official/notes".source = "${officialPlugins}/notes";

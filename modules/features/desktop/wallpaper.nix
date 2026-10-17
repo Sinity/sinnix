@@ -30,7 +30,6 @@
   mkFeatureModule,
   lib,
   pkgs,
-  inputs,
   ...
 }@args:
 mkFeatureModule {
@@ -92,7 +91,7 @@ mkFeatureModule {
     }:
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-      noctaliaPkg = inputs.noctalia.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      noctaliaPkg = pkgs.noctalia;
       moodDirs = lib.concatMap (mood: [
         "d ${cfg.corpusRoot}/sets/${mood}/dark 0755 ${user} users -"
         "d ${cfg.corpusRoot}/sets/${mood}/light 0755 ${user} users -"

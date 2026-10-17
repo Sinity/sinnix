@@ -1796,11 +1796,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1787861497,
-        "narHash": "sha256-5oK4/++IN2CPLd73idabOrbQpBzX+Zll5xc8qoaKJ0o=",
+        "lastModified": 1792255449,
+        "narHash": "sha256-4lTGN7OdO+Waay4DvQx53mHsYgvOaEjL/BGgy4HQ2S4=",
         "ref": "master",
-        "rev": "84f6ca0fe025d3f5d8bc96f76bd9f77784cc76c5",
-        "revCount": 111,
+        "rev": "a3565d43061f284d66d5fddb4ed752bab83e7824",
+        "revCount": 113,
         "type": "git",
         "url": "https://github.com/Sinity/yt-polisher.git"
       },

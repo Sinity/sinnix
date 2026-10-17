@@ -301,6 +301,13 @@ pool = "bulk"
 result = "exit"
 timeout_seconds = 14400
 
+[operations.eval_system]
+description = "Measure uncached workstation evaluation with native Nix statistics"
+exec = ["env", "NIX_SHOW_STATS=1", "SINNIX_SECRET_DECLARATIONS=/realm/state/secrets/sinnix/runtime.nix", "nix", "eval", "--impure", "--no-eval-cache", ".#nixosConfigurations.sinnix-prime.config.system.build.toplevel.drvPath"]
+pool = "bulk"
+result = "exit"
+timeout_seconds = 1800
+
 [operations.navigation_audit]
 description = "Audit current entrance links against the private explicit manifest"
 exec = ["sinnix-navigation-audit", "--manifest", "/realm/report/catalog/navigation-audit.json"]

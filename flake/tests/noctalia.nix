@@ -5,7 +5,7 @@
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
-      noctalia = inputs.noctalia.packages.${system}.default;
+      noctalia = pkgs.callPackage "${inputs.noctalia}/nix/package.nix" { };
       noctaliaThemeDefaultsMigration = noctalia.overrideAttrs (old: {
         # Match the deployed source, but opt into Meson's test targets only for
         # this check. The production package deliberately keeps tests disabled.
