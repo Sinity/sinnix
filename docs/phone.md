@@ -512,6 +512,10 @@ retains only the nearest matching run, preserving file/line order on ties.
 Unavailable event homes/files fail explicitly; a genuinely missing or empty
 event home still has no matching run. Sources close when selection fails.
 The existing policy of skipping malformed JSON lines is unchanged.
+Unknown trace time does not participate in interoception pairing. A matching
+event without a valid timestamp is an explicit correlation error, rather than
+an invented epoch-zero instant. Genuine epoch-zero and historical compact
+timestamps remain valid; the phone continues to emit whole-second UTC.
 
 An absent outbox reports that state without creating a score directory. An
 inaccessible or wrongly typed outbox fails explicitly. Discovery checks trace

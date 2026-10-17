@@ -594,7 +594,7 @@ def test_event_source_closes_when_candidate_timestamp_fails(score, tmp_path, mon
     glob = score['cmd_run'].__globals__
     glob['EVENTS'] = events
     monkeypatch.setitem(glob, 'open', tracked)
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError, match='timestamp'):
         score['score_interoception'](tmp_path / 'trace.csv', {'ok': True, 'trustworthy': True, 'hr_bpm': 60}, 0)
     assert opened and all(handle.closed for handle in opened)
 
@@ -643,3 +643,40 @@ def test_csv_source_closes_when_consumer_raises(score, tmp_path, monkeypatch):
             assert next(rows) == ['0', '1']
             raise RuntimeError('synthetic consumer failure')
     assert opened and all(handle.closed for handle in opened)
+
+
+@pytest.mark.parametrize('trace_stamp', [None, '', 'not-a-time'])
+def test_unknown_trace_time_cannot_pair_with_unknown_event_time(score, tmp_path, trace_stamp):
+    events = tmp_path / 'events'
+    events.mkdir()
+    (events / 'events-a.jsonl').write_text(json.dumps({'kind': 'instrument_run', 'instrument': 'interoception', 'counted': [10], 'window_ms': [10000]}) + '\n')
+    score['cmd_run'].__globals__['EVENTS'] = events
+    result = score['score_interoception'](tmp_path / 'trace.csv', {'ok': True, 'trustworthy': True, 'hr_bpm': 60}, score['parse_stamp'](trace_stamp))
+    assert result is None
+
+
+def test_valid_epoch_zero_remains_distinct_from_unknown_time(score, tmp_path):
+    events = tmp_path / 'events'
+    events.mkdir()
+    stamp = '1970-01-01T00:00:00Z'
+    (events / 'events-a.jsonl').write_text(json.dumps({'kind': 'instrument_run', 'instrument': 'interoception', 'started_at': stamp, 'counted': [10], 'window_ms': [10000]}) + '\n')
+    score['cmd_run'].__globals__['EVENTS'] = events
+    assert score['parse_stamp'](stamp) == 0.0
+    result = score['score_interoception'](tmp_path / 'trace.csv', {'ok': True, 'trustworthy': True, 'hr_bpm': 60}, score['parse_stamp'](stamp))
+    assert result['accuracy'] == 1.0
+
+
+def test_unknown_matching_event_time_refuses_correlation(score, tmp_path):
+    events = tmp_path / 'events'
+    events.mkdir()
+    (events / 'events-a.jsonl').write_text(json.dumps({'kind': 'instrument_run', 'instrument': 'interoception', 'counted': [10], 'window_ms': [10000]}) + '\n')
+    score['cmd_run'].__globals__['EVENTS'] = events
+    with pytest.raises(ValueError, match='timestamp'):
+        score['score_interoception'](tmp_path / 'trace.csv', {'ok': True, 'trustworthy': True, 'hr_bpm': 60}, 0.0)
+
+
+def test_current_and_historical_timestamp_formats_keep_the_same_instant(score):
+    assert score['parse_stamp']('2026-10-18T00:00:00Z') == score['parse_stamp']('20261018T000000Z')
+    assert score['parse_stamp']('19700101T000000Z') == 0.0
+    assert score['parse_stamp']('not-a-time') is None
+    assert score['parse_stamp'](17) is None

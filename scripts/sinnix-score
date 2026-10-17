@@ -69,21 +69,21 @@ LEDGER = SCORES / "scored.jsonl"
 RECEIPTS_DIR = STATE_DIR / "inbox" / "receipts"
 
 
-def parse_stamp(s: str | None) -> float:
+def parse_stamp(s: str | None) -> float | None:
     """Both stamp shapes this system has written, as epoch seconds.
 
     Records before 2026-08-14 carry the compact filename stamp in `ts` because
     the event writer reached for the wrong helper. The log is append-only, so
     a parser that only knew extended ISO would silently drop that history.
     """
-    if not s:
-        return 0.0
+    if not isinstance(s, str) or not s:
+        return None
     for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y%m%dT%H%M%SZ"):
         try:
             return dt.datetime.strptime(s, fmt).replace(tzinfo=dt.timezone.utc).timestamp()
         except ValueError:
             continue
-    return 0.0
+    return None
 
 
 # ------------------------------------------------------------------ signal
@@ -521,7 +521,7 @@ def iter_recent_events(days: int = 3) -> Iterator[dict]:
                 yield record
 
 
-def score_interoception(trace_path: Path, ppg: dict, started_at: float) -> dict | None:
+def score_interoception(trace_path: Path, ppg: dict, started_at: float | None) -> dict | None:
     """Schandry accuracy, against the pulse the phone recorded at the same time.
 
     This is the pairing that normally keeps interoceptive accuracy in a lab:
@@ -529,8 +529,14 @@ def score_interoception(trace_path: Path, ppg: dict, started_at: float) -> dict 
     records what the heart actually did. Without the simultaneous PPG there is
     no truth to score against, so this returns None rather than a guess.
     """
-    if not ppg.get("ok") or not ppg.get("trustworthy"):
+    if started_at is None or not math.isfinite(started_at) or not ppg.get("ok") or not ppg.get("trustworthy"):
         return None
+    def distance(event: dict) -> float:
+        timestamp = parse_stamp(event.get("started_at") or event.get("ts"))
+        if timestamp is None:
+            raise ValueError("interoception event has no valid timestamp")
+        return abs(timestamp - started_at)
+
     with closing(iter_recent_events()) as events:
         runs = (
             e for e in events
@@ -538,10 +544,10 @@ def score_interoception(trace_path: Path, ppg: dict, started_at: float) -> dict 
         )
         # min retains only the nearest run and keeps the first authored
         # candidate on a tie, as the previous list-based lookup did.
-        best = min(runs, key=lambda e: abs(parse_stamp(e.get("started_at") or e.get("ts")) - started_at), default=None)
+        best = min(runs, key=distance, default=None)
     if best is None:
         return None
-    if abs(parse_stamp(best.get("started_at") or best.get("ts")) - started_at) > 900:
+    if distance(best) > 900:
         return None
 
     counted = best.get("counted") or []
