@@ -163,14 +163,13 @@ in
       ];
     };
 
-    # Btrfs on this workstation coordinates write ordering itself; block-layer
-    # WBT adds another latency throttle in front of fsync-heavy workloads.
-    # Keep the Crucial P3 NVMe conservative while giving the root/Nix MX500
-    # enough request tags for store writes, build scratch, and journald.
+    # Preserve read responsiveness during buffered writes on both SSDs.
+    # Btrfs write ordering does not replace block-layer read-latency feedback;
+    # cgroup weights also cannot separate a download from its terminal scope.
+    # Keep the SSD default 2ms WBT target and the existing request-tag limits.
     udev.extraRules = ''
-      ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_SERIAL_SHORT}=="2003E282E456", ATTR{queue/wbt_lat_usec}="0", ATTR{queue/nr_requests}="256"
-      ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_SERIAL_SHORT}=="2247E6897FB8", ATTR{queue/wbt_lat_usec}="0", ATTR{queue/nr_requests}="64"
-      ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="sd[b-z]", ATTR{queue/wbt_lat_usec}="0"
+      ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_SERIAL_SHORT}=="2003E282E456", ATTR{queue/wbt_lat_usec}="2000", ATTR{queue/nr_requests}="256"
+      ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_SERIAL_SHORT}=="2247E6897FB8", ATTR{queue/wbt_lat_usec}="2000", ATTR{queue/nr_requests}="64"
     '';
   };
 
