@@ -38,6 +38,7 @@ in
     ./tests/capture-clipboard.nix
     ./tests/capture-primary.nix
     ./tests/capture-mail.nix
+    ./tests/capture-awair.nix
     ./tests/capture-mpris.nix
     ./tests/backup.nix
     ./tests/agent-environment.nix

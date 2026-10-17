@@ -41,14 +41,20 @@ let
       # A sensor that stops answering must look like an outage, never like a
       # calm room -- so a failed poll exits non-zero (surfacing in the unit's
       # state) rather than writing a zero-valued record.
-      payload="$(curl -fsS --max-time 10 "http://$host/air-data/latest")"
+      # A normal sensor document is a few hundred bytes. Refuse oversized
+      # responses before parsing, including bodies without Content-Length.
+      # Keep the response out of shell memory and never capture a partial body.
+      payload_file="$(mktemp)"
+      trap 'unlink -- "$payload_file"' EXIT
+      curl -fsS --max-time 10 --max-filesize 1048576 \
+        --output "$payload_file" "http://$host/air-data/latest"
 
       # Reject a well-formed-but-empty response too: the score field is always
       # present on a healthy Element.
-      echo "$payload" | jq -e 'has("score")' >/dev/null
+      jq -e 'has("score")' "$payload_file" >/dev/null
 
-      echo "$payload" | "$capture_bin" write \
-        --capture-root "$capture_root" --lane environment
+      "$capture_bin" write \
+        --capture-root "$capture_root" --lane environment < "$payload_file"
     '';
   };
 in
