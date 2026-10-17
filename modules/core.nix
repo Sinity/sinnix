@@ -108,7 +108,7 @@ in
         # Worktrunk can create checkouts before AgentCTL; enforce their shared
         # private entrance regardless of the first producer's umask.
         "d /realm/worktree 0700 ${username} users -"
-        "d ${paths.realmRoot}/account 0755 ${username} users -"
+        "d ${paths.realmRoot}/account 0700 ${username} users -"
         "d ${paths.personalRoot} 0700 ${username} users -"
         "d ${paths.devicesRoot} 0755 ${username} users -"
         "d ${config.sinnix.projects.root} 0755 ${username} users -"
@@ -125,7 +125,7 @@ in
         "d ${paths.realmRoot}/report 0755 ${username} users -"
         "d ${paths.libraryRoot} 0755 ${username} users -"
         "d ${paths.datasetsRoot} 0755 ${username} users -"
-        "d ${paths.documentsRoot} 0755 ${username} users -"
+        "d ${paths.documentsRoot} 0700 ${username} users -"
         "d ${paths.collectionPaths.account-lastpass} 0700 ${username} users -"
         "d ${paths.collectionPaths.account-lastpass}/raw 0700 ${username} users -"
         "d ${paths.capturePaths.activitywatch} 0700 ${username} users -"

@@ -19,6 +19,7 @@
             sinnix.services.capture-netflow.enable = true;
             sinnix.services.xiaomi-witness.enable = true;
             sinnix.paths.healthRoot = "/sinnix-test-health";
+            sinnix.paths.documentsRoot = "/sinnix-test-documents";
             sinnix.services.video-resolve.enable = true;
             sinnix.services.url-ledger.enable = true;
             sinnix.services.lynchpin.enable = true;
@@ -145,6 +146,8 @@
                   config.sinnix.paths.capturePaths.transcripts
                   "${config.sinnix.paths.machineRoot}/netflow"
                   config.sinnix.paths.healthRoot
+                  config.sinnix.paths.documentsRoot
+                  "${config.sinnix.paths.realmRoot}/account"
                   "${config.sinnix.paths.healthRoot}/xiaomi-cloud"
                   "${config.sinnix.paths.stateRoot}/sinnix-phone"
                   "${config.sinnix.paths.stateRoot}/sinnix-phone/inbox"
