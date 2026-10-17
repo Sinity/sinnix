@@ -373,10 +373,18 @@ def execution_receipt(
     }
 
 
-def remove_scratch(path: Path | None) -> None:
-    """Drop a job's scratch directory; the job it belonged to is over."""
-    if path is not None:
-        shutil.rmtree(path, ignore_errors=True)
+def remove_scratch(path: Path | None) -> str | None:
+    """Drop owned scratch, reporting failures without hiding command status."""
+    if path is None:
+        return None
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        return None
+    except OSError as error:
+        # Do not copy a potentially sensitive child filename into the receipt.
+        return f"{type(error).__name__} (errno {error.errno})"
+    return None
 
 
 def scratch_footprint(path: Path) -> dict[str, Any]:
@@ -826,12 +834,14 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             with log_path.open("ab") as log:
                 log.write(f"candidate cleanup deferred: {error}\n".encode())
 
-    def refused() -> int:
+    def refused(*, scratch_error: str | None = None) -> int:
         record: dict[str, Any] = {
             "outcome": "refused",
             "exit_code": REFUSED_EXIT_CODE,
             "attempt": launch["attempt"],
         }
+        if scratch_error is not None:
+            record["scratch"] = {"path": str(scratch_dir), "cleanup_error": scratch_error}
         request = artifacts.cancellation(declared_log_path, launch["attempt"])
         if request:
             record["cancellation"] = request
@@ -903,7 +913,9 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     if scratch_dir is not None:
         try:
             scratch_dir.parent.mkdir(parents=True, exist_ok=True)
-            scratch_dir.mkdir(mode=0o700, exist_ok=True)
+            # Existing material has not been created by this attempt. Never
+            # adopt it, follow its link, or later remove it as owned scratch.
+            scratch_dir.mkdir(mode=0o700)
         except OSError as error:
             log_path.write_text(f"could not create the scratch directory: {error}\n")
             return refused()
@@ -986,8 +998,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
                 log.write(
                     f"could not start the command: {argv[0]} not found\n".encode()
                 )
-                remove_scratch(scratch_dir)
-                return refused()
+                return refused(scratch_error=remove_scratch(scratch_dir))
             argv[0] = executable
             try:
                 if unit is None or pool is None:
@@ -1041,8 +1052,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
                                 )
             except OSError as error:
                 log.write(f"could not start the command: {error}\n".encode())
-                remove_scratch(scratch_dir)
-                return refused()
+                return refused(scratch_error=remove_scratch(scratch_dir))
             if outcome is Outcome.TIMEOUT:
                 log.write(
                     f"timed out after {launch['timeout_seconds']} seconds\n".encode()
@@ -1102,7 +1112,9 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             "path": str(scratch_dir),
             **scratch_footprint(scratch_dir),
         }
-        remove_scratch(scratch_dir)
+        cleanup_error = remove_scratch(scratch_dir)
+        if cleanup_error is not None:
+            record["scratch"]["cleanup_error"] = cleanup_error
     publish_outcome(record)
     release_candidate()
     return status

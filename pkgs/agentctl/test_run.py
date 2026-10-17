@@ -1963,3 +1963,67 @@ def test_pending_start_job_is_not_terminal():
     properties = {"LoadState": "loaded", "ActiveState": "inactive", "Job": "17",
                   "Result": "success", "ExecMainStatus": "0", "ExecMainCode": "0"}
     assert not run_module._unit_is_terminal(properties)
+
+
+@pytest.mark.parametrize('kind', ['directory', 'symlink', 'file'])
+def test_a_preexisting_scratch_entrance_is_preserved_and_refused(tmp_path, monkeypatch, kind):
+    monkeypatch.setenv('AGENTCTL_TMPFS_SCRATCH_ROOT', str(tmp_path / 'tmpfs'))
+    root = tmp_path / 'tmpfs'
+    root.mkdir()
+    scratch = root / 'job-a'
+    retained = tmp_path / 'retained'
+    retained.mkdir()
+    evidence = retained / 'keep'
+    evidence.write_text('recoverable previous work')
+    if kind == 'directory':
+        scratch.mkdir()
+        evidence = scratch / 'keep'
+        evidence.write_text('recoverable previous work')
+    elif kind == 'symlink':
+        scratch.symlink_to(retained, target_is_directory=True)
+    else:
+        scratch.write_text('existing file')
+    before = scratch.lstat()
+    command_marker = tmp_path / 'command-ran'
+    launch = write_launch(
+        tmp_path,
+        argv=['sh', '-c', 'touch "$1"', 'fixture', str(command_marker)],
+        scratch={'kind': 'tmpfs', 'path': str(scratch)},
+    )
+    assert main([str(launch)]) == REFUSED_EXIT_CODE
+    assert not command_marker.exists()
+    after = scratch.lstat()
+    assert (after.st_dev, after.st_ino, after.st_mode) == (before.st_dev, before.st_ino, before.st_mode)
+    assert evidence.read_text() == 'recoverable previous work'
+    if kind == 'symlink':
+        assert scratch.is_symlink() and scratch.readlink() == retained
+    if kind == 'file':
+        assert scratch.read_text() == 'existing file'
+    assert outcome_of(tmp_path)['outcome'] == 'refused'
+
+
+@pytest.mark.parametrize('missing_command', [False, True])
+def test_scratch_cleanup_failure_is_reported_without_hiding_command_status(tmp_path, monkeypatch, missing_command):
+    import errno
+
+    monkeypatch.setenv('AGENTCTL_TMPFS_SCRATCH_ROOT', str(tmp_path / 'tmpfs'))
+    scratch = tmp_path / 'tmpfs' / 'job-a'
+
+    def denied(path):
+        assert path == scratch
+        raise PermissionError(errno.EACCES, 'denied', 'private-child-name')
+
+    monkeypatch.setattr(run_module.shutil, 'rmtree', denied)
+    launch = write_launch(
+        tmp_path,
+        argv=['agentctl-no-such-command'] if missing_command else ['sh', '-c', 'exit 7'],
+        scratch={'kind': 'tmpfs', 'path': str(scratch)},
+    )
+    expected = REFUSED_EXIT_CODE if missing_command else 7
+    assert main([str(launch)]) == expected
+    outcome = outcome_of(tmp_path)
+    assert outcome['exit_code'] == expected
+    assert outcome['scratch']['cleanup_error'] == 'PermissionError (errno 13)'
+    assert outcome['scratch']['path'] == str(scratch)
+    assert scratch.is_dir()
+    assert 'private-child-name' not in json.dumps(outcome)

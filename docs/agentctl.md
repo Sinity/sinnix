@@ -201,11 +201,15 @@ Native evidence records are private, immutable result artifacts under `$XDG_STAT
 An operation declaring `scratch = "tmpfs"` or `scratch = "nvme"` gets one
 job-owned directory, `/dev/shm/agentctl/<ref>` or
 `/realm/tmp/work/agentctl/<ref>`. `job start` resolves the path into the
-launch input; the wrapper creates it 0700, exports it as `AGENTCTL_SCRATCH`
+launch input; the wrapper creates it exclusively with mode 0700, refusing and
+preserving an existing directory, file or symlink before command dispatch.
+It exports the newly created directory as `AGENTCTL_SCRATCH`
 and `TMPDIR`. At unit exit the wrapper measures it (bytes, file count, both bounded at 100,000
 entries; `truncated` says the count stopped there) and records the footprint
 under `scratch` in `jobs/<ref>.outcome` and on the `finished` event, then
-removes the directory. `job get` renders it. The typed result artifact stays
+removes the directory. If removal fails, `scratch.cleanup_error` records the
+error class and errno while preserving the command's exit status; the path
+remains available for recovery. `job get` renders it. The typed result artifact stays
 the command's own stdout. A launch input naming a scratch path outside its
 tier's root is refused (exit 125): the wrapper removes what it created and
 nothing else. `scratch = "none"`, the default, allocates no job scratch root.
