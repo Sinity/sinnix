@@ -78,6 +78,7 @@ mkServiceModule {
         {
           manager = "user";
           resourceClass = "ordinary";
+          serviceConfig.UMask = "0077";
           execStart = "${steer}/bin/sinnix-steer ritual morning";
           environment = {
             SINNIX_STEERING_STATE_DIR = stateDir;
@@ -101,6 +102,7 @@ mkServiceModule {
         {
           manager = "user";
           resourceClass = "ordinary";
+          serviceConfig.UMask = "0077";
           execStart = "${steer}/bin/sinnix-steer ritual evening";
           environment = {
             SINNIX_STEERING_STATE_DIR = stateDir;
@@ -126,6 +128,7 @@ mkServiceModule {
         {
           manager = "user";
           resourceClass = "ordinary";
+          serviceConfig.UMask = "0077";
           execStart = "${steer}/bin/sinnix-steer export";
           environment = {
             SINNIX_STEERING_STATE_DIR = stateDir;
@@ -146,7 +149,7 @@ mkServiceModule {
         ];
         systemd.tmpfiles.rules = [
           "d ${stateDir} 0700 ${username} users -"
-          "d ${exportDir} 0755 ${username} users -"
+          "d ${exportDir} 0700 ${username} users -"
         ];
 
         sinnix.runtime.surfaces.steering-evening = {

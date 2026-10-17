@@ -19,6 +19,8 @@
             sinnix.services.capture-netflow.enable = true;
             sinnix.services.xiaomi-witness.enable = true;
             sinnix.services.video-resolve.enable = true;
+            sinnix.services.steering.enable = true;
+            sinnix.services.sandbox-audit.enable = true;
             sinnix.services.stt.enable = true;
             sinnix.services.hub.enable = true;
             sinnix.services.tailscale.enable = true;
@@ -29,6 +31,16 @@
           {
             assertion = builtins.elem "d ${config.sinnix.paths.activityRoot}/shared/ranking 0700 ${config.sinnix.user.name} ${config.users.users.${config.sinnix.user.name}.group} -" config.systemd.tmpfiles.rules;
             message = "Raw ranking evidence must have an owner-only entrance.";
+          }
+          {
+            assertion =
+              builtins.all (name: config.systemd.user.services.${name}.serviceConfig.UMask == "0077")
+                [
+                  "sinnix-steering-morning"
+                  "sinnix-steering-evening"
+                  "sinnix-steering-export"
+                ];
+            message = "Steering jobs must create owner-only evidence.";
           }
           {
             assertion = config.systemd.services.sinnix-stt-lake.serviceConfig.UMask == "0077";
@@ -69,6 +81,10 @@
                   rules != [ ] && builtins.all (rule: rule == expected) rules
                 )
                 [
+                  config.sinnix.paths.capturePaths.irc
+                  config.sinnix.paths.capturePaths.shell
+                  config.sinnix.paths.capturePaths.steering
+                  config.sinnix.paths.capturePaths.audit
                   config.sinnix.paths.capturePaths.activitywatch
                   "${config.sinnix.paths.capturePaths.activitywatch}/raw"
                   config.sinnix.paths.capturePaths.screenshot

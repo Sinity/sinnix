@@ -136,7 +136,7 @@ mkServiceModule {
         ];
 
         systemd.tmpfiles.rules = [
-          "d ${auditLane} 0775 ${username} users -"
+          "d ${auditLane} 0700 ${username} users -"
           "d ${auditState} 0755 root root -"
           # auditd's own LogsDirectory=audit (upstream unit) only manages
           # /var/log/audit; log_file below is redirected elsewhere, so this
