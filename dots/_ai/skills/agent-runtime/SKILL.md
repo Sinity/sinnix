@@ -98,7 +98,9 @@ fast-forward), and closes the tasks its acceptance record satisfies.
 
 ## Worker toolbelt
 
-Batch workers have `lane` on PATH. `lane task` prints the packet. `lane
+Batch workers have `lane` on PATH. `lane task` prints the original packet and
+current owner task amendments for its bound attempt. Assess changed requirements
+against retained work; unavailable comparisons stay explicit. `lane
 verify` runs the descriptor's focused profile without arguments. For an
 operation requiring a selector, use `agentctl job start <project> <operation>
 --workspace <worktree> -- <selector>` explicitly. `lane done <result.json>` requires a clean tree,

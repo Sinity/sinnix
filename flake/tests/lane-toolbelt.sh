@@ -157,6 +157,9 @@ cat >>"$bin/agentctl" <<'EOF'
 set -euo pipefail
 printf '%s\n' "$*" >> "${AGENTCTL_CALLS:?}"
 case "$1 $2" in
+  batch\ task)
+    printf '{"tasks":[{"comparison":"acceptance_changed","current_task":{"description":"amended task"}}]}\n'
+    ;;
   job\ start)
     if [[ ${AGENTCTL_FIXTURE_MISSING_REFERENCE:-0} == 1 ]]; then
       printf '{"job_id": 7, "phase": "queued", "terminal": false}\n'
@@ -209,6 +212,16 @@ test "$task_output" = 'launch snapshot'
 printf 'named prompt\n' >"$root/named.md"
 task_output=$(cd "$repo" && AGENTCTL_JOB_PROMPT_FILE="$root/named.md" "$lane" task)
 test "$task_output" = 'named prompt'
+
+# The same bound reread keeps the packet and observes current owner amendments.
+: >"$AGENTCTL_CALLS"
+task_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_RUN_ID=fixture-run AGENTCTL_WORKER_ID=w1 AGENTCTL_ATTEMPT=1 "$lane" task)
+grep -Fq 'launch snapshot' <<<"$task_output"
+if ! grep -Fq 'amended task' <<<"$task_output"; then
+  printf 'bound lane task omitted the current owner amendment\n' >&2
+  exit 1
+fi
+grep -Fxq 'batch task --run fixture-run --worker w1 --json --attempt 1' "$AGENTCTL_CALLS"
 
 shopt -s nullglob dotglob
 scratch_entries=("$TMPDIR"/*)

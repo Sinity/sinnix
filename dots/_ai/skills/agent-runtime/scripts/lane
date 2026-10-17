@@ -5,7 +5,7 @@ set -euo pipefail
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  lane task                       print the dispatch packet
+  lane task                       print dispatch plus current owner task amendments
   lane verify                     run the descriptor's focused verification as a job and wait
   lane done <result.json>         validate with agentctl and print the result as the final message
 EOF
@@ -40,6 +40,16 @@ lane_task() {
   prompt=${AGENTCTL_JOB_PROMPT_FILE:-$(repo_root)/.agentctl/prompt.md}
   [[ -r $prompt ]] || die "dispatch packet is unavailable: $prompt"
   cat -- "$prompt"
+  if [[ -z ${AGENTCTL_RUN_ID:-} || -z ${AGENTCTL_WORKER_ID:-} ]]; then
+    printf '\nlane: current owner tasks unavailable without a dispatch run/worker identity; packet is historical.\n' >&2
+    return 0
+  fi
+  printf '\n## Current owner tasks (read-only)\n'
+  local -a context=(agentctl batch task --run "$AGENTCTL_RUN_ID" --worker "$AGENTCTL_WORKER_ID" --json)
+  if [[ -n ${AGENTCTL_ATTEMPT:-} ]]; then
+    context+=(--attempt "$AGENTCTL_ATTEMPT")
+  fi
+  "${context[@]}"
 }
 
 focused_operation() {
