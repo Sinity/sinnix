@@ -50,6 +50,7 @@ in
     ./tests/polylogue.nix
     ./tests/vm.nix
     ./tests/host-build.nix
+    ./tests/desktop-io.nix
     ./tests/runtime.nix
     ./tests/llama-http-admission.nix
     ./tests/export-manifest.nix

@@ -232,6 +232,13 @@ rec {
 
   slices = {
     system = {
+      # Input and other critical system services share system.slice. Give
+      # that ancestor the same target so protecting the user slice cannot
+      # throttle the input route at their root-level competition.
+      system = {
+        IOAccounting = true;
+        IODeviceLatencyTargetSec = interactiveIoLatency;
+      };
       # memory.low protection is limited by every ancestor. This carries the
       # user-manager app/session/shell allocations to the root hierarchy.
       user = {
@@ -273,6 +280,7 @@ rec {
       };
       system-critical = {
         IOAccounting = true;
+        IODeviceLatencyTargetSec = interactiveIoLatency;
         CPUWeight = 400;
         IOWeight = 300;
         MemoryLow = "2G";
