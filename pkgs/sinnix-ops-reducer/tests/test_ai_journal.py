@@ -1,6 +1,8 @@
 import json
+import subprocess
 import sys
 
+import pytest
 from sinnix_ops_reducer.pages import ai
 
 
@@ -33,3 +35,24 @@ def test_journal_limits_rows_and_fields_before_capture(tmp_path, monkeypatch):
     assert emitted["args"][emitted["args"].index("--since") + 1] == ai.GPU_EVICTION_SINCE
     assert emitted["args"].count("-u") == 2
     assert "fixture.service" in emitted["args"] and "second.service" in emitted["args"]
+
+
+@pytest.mark.parametrize("bad", [
+    "[]", "null", "123", "1" * 5000,
+    json.dumps({"JOB_RESULT": "done", "JOB_TYPE": ["start"], "UNIT": "fixture.service", "__REALTIME_TIMESTAMP": "12"}),
+    json.dumps({"JOB_RESULT": "done", "JOB_TYPE": "start", "UNIT": {"name": "fixture.service"}, "__REALTIME_TIMESTAMP": "12"}),
+])
+def test_invalid_journal_row_preserves_neighboring_events(monkeypatch, bad):
+    def event(kind, timestamp):
+        return json.dumps({"JOB_RESULT": "done", "JOB_TYPE": kind, "UNIT": "fixture.service", "__REALTIME_TIMESTAMP": str(timestamp)})
+
+    monkeypatch.setattr(ai.shutil, "which", lambda _: "journalctl")
+    monkeypatch.setattr(ai.subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(
+        args, 0, event("start", 10) + "\n" + bad + "\n" + event("stop", 20), ""
+    ))
+    events, error = ai.gpu_lifecycle_events(["fixture.service"])
+    assert error is None
+    assert events == [
+        {"unit": "fixture.service", "type": "start", "ts": 10},
+        {"unit": "fixture.service", "type": "stop", "ts": 20},
+    ]

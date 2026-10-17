@@ -174,16 +174,18 @@ def gpu_lifecycle_events(units: list[str]) -> tuple[list[dict[str, Any]], str | 
     for line in result.stdout.splitlines()[-GPU_EVICTION_MAX_EVENTS:]:
         try:
             entry = json.loads(line)
-        except json.JSONDecodeError:
+        except ValueError:
             continue
-        if entry.get("JOB_RESULT") != "done" or entry.get("JOB_TYPE") not in {
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("JOB_RESULT") != "done" or entry.get("JOB_TYPE") not in (
             "start",
             "stop",
-        }:
+        ):
             continue
         unit = entry.get("UNIT")
         timestamp = as_int(entry.get("__REALTIME_TIMESTAMP"))
-        if not unit or timestamp is None:
+        if not isinstance(unit, str) or not unit or timestamp is None:
             continue
         events.append({"unit": str(unit), "type": entry["JOB_TYPE"], "ts": timestamp})
     events.sort(key=lambda event: event["ts"])
