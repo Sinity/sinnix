@@ -531,3 +531,115 @@ def test_missing_and_empty_outbox_remain_distinct(score, tmp_path, capsys):
     outbox.mkdir()
     assert score['cmd_run'](args) == 0
     assert 'scored 0' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('mode', ['ppg', 'imu', 'imu_sway'])
+def test_direct_fifo_trace_refuses_without_waiting_for_a_writer(score, tmp_path, mode):
+    import os
+    import subprocess
+    import sys
+    path = tmp_path / 'trace.csv'
+    os.mkfifo(path)
+    path.with_name(path.name + '.json').write_text(json.dumps({'mode': mode}))
+    result = subprocess.run([sys.executable, score['__file__'], 'one', str(path)], capture_output=True, text=True, timeout=3,
+                            env=dict(os.environ, SINNIX_PHONE_LAKE=str(tmp_path / 'lake'), SINNIX_PHONE_STATE_DIR=str(tmp_path / 'state')))
+    assert result.returncode == 0, result.stderr
+    record = json.loads(result.stdout)
+    assert record['ok'] is False and 'regular file' in record['reason']
+    assert path.lstat()
+
+
+def test_interoception_streams_events_and_keeps_first_nearest_run(score, tmp_path):
+    import tracemalloc
+    events = tmp_path / 'events'
+    events.mkdir()
+    stamp = '2026-10-18T00:00:00Z'
+    selected = {'kind': 'instrument_run', 'instrument': 'interoception', 'started_at': stamp, 'counted': [10], 'window_ms': [10000], 'epoch': 'first'}
+    with (events / 'events-a.jsonl').open('w') as output:
+        output.write(json.dumps(selected) + '\n')
+        for _ in range(5000):
+            output.write(json.dumps({'kind': 'unrelated', 'payload': 'x' * 512}) + '\n')
+        output.write(json.dumps(selected | {'epoch': 'later', 'counted': [1]}) + '\n')
+    (events / 'events-z.jsonl').write_text(json.dumps(selected | {'epoch': 'other-file', 'counted': [1]}) + '\n')
+    score['cmd_run'].__globals__['EVENTS'] = events
+    started_at = score['parse_stamp'](stamp)  # Exclude one-time datetime parser imports.
+    tracemalloc.start()
+    try:
+        result = score['score_interoception'](tmp_path / 'trace.csv', {'ok': True, 'trustworthy': True, 'hr_bpm': 60}, started_at)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert result['accuracy'] == 1.0 and result['epoch'] == 'first'
+    assert peak < 512 * 1024, f'event lookup retained {peak} Python bytes'
+
+
+def test_interoception_unusable_event_home_is_not_no_runs(score, tmp_path):
+    events = tmp_path / 'events'
+    events.write_text('not a directory')
+    score['cmd_run'].__globals__['EVENTS'] = events
+    with pytest.raises((OSError, ValueError)):
+        score['score_interoception'](tmp_path / 'trace.csv', {'ok': True, 'trustworthy': True, 'hr_bpm': 60}, 0)
+
+
+def test_event_source_closes_when_candidate_timestamp_fails(score, tmp_path, monkeypatch):
+    import builtins
+    events = tmp_path / 'events'
+    events.mkdir()
+    (events / 'events-a.jsonl').write_text(json.dumps({'kind': 'instrument_run', 'instrument': 'interoception', 'started_at': 17}) + '\n')
+    opened = []
+    def tracked(*args, **kwargs):
+        handle = builtins.open(*args, **kwargs)
+        opened.append(handle)
+        return handle
+    glob = score['cmd_run'].__globals__
+    glob['EVENTS'] = events
+    monkeypatch.setitem(glob, 'open', tracked)
+    with pytest.raises(TypeError):
+        score['score_interoception'](tmp_path / 'trace.csv', {'ok': True, 'trustworthy': True, 'hr_bpm': 60}, 0)
+    assert opened and all(handle.closed for handle in opened)
+
+
+def test_event_window_and_existing_malformed_line_policy(score, tmp_path):
+    import os
+    import time
+    events = tmp_path / 'events'
+    events.mkdir()
+    stamp = '2026-10-18T00:00:00Z'
+    good = {'kind': 'instrument_run', 'instrument': 'interoception', 'started_at': stamp, 'counted': [10], 'window_ms': [10000], 'epoch': 'current'}
+    old = events / 'events-old.jsonl'
+    old.write_text(json.dumps(good | {'epoch': 'old', 'counted': [0]}) + '\n')
+    os.utime(old, (time.time() - 10 * 86400,) * 2)
+    (events / 'events-new.jsonl').write_text('{malformed\n' + json.dumps(good) + '\n')
+    score['cmd_run'].__globals__['EVENTS'] = events
+    result = score['score_interoception'](tmp_path / 'trace.csv', {'ok': True, 'trustworthy': True, 'hr_bpm': 60}, score['parse_stamp'](stamp))
+    assert result['accuracy'] == 1.0 and result['epoch'] == 'current'
+
+
+def test_event_missing_empty_and_broken_home(score, tmp_path):
+    events = tmp_path / 'events'
+    score['cmd_run'].__globals__['EVENTS'] = events
+    args = (tmp_path / 'trace.csv', {'ok': True, 'trustworthy': True, 'hr_bpm': 60}, 0)
+    assert score['score_interoception'](*args) is None
+    events.mkdir()
+    assert score['score_interoception'](*args) is None
+    events.rmdir()
+    events.symlink_to(tmp_path / 'missing')
+    with pytest.raises(FileNotFoundError):
+        score['score_interoception'](*args)
+
+
+def test_csv_source_closes_when_consumer_raises(score, tmp_path, monkeypatch):
+    import builtins
+    path = tmp_path / 'a.csv'
+    path.write_text('header\n0,1\n')
+    opened = []
+    def tracked(*args, **kwargs):
+        handle = builtins.open(*args, **kwargs)
+        opened.append(handle)
+        return handle
+    monkeypatch.setitem(score['cmd_run'].__globals__, 'open', tracked)
+    with pytest.raises(RuntimeError, match='synthetic consumer failure'):
+        with score['csv_rows'](path) as rows:
+            assert next(rows) == ['0', '1']
+            raise RuntimeError('synthetic consumer failure')
+    assert opened and all(handle.closed for handle in opened)

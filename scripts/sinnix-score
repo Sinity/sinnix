@@ -273,7 +273,12 @@ def stdev(xs: Sequence[float]) -> float:
 @contextmanager
 def csv_rows(path: Path) -> Iterator[Iterator[list[str]]]:
     """Stream data rows and close the source even if scoring refuses a row."""
-    with path.open(encoding="utf-8", errors="replace") as fh:
+    with open(
+        path, encoding="utf-8", errors="replace",
+        opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
+    ) as fh:
+        if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+            raise UnscorableTrace("trace source must be a regular file")
         next(fh, None)  # The instrument's header is not a signal sample.
 
         def rows() -> Iterator[list[str]]:
@@ -483,23 +488,37 @@ def score_sway(path: Path) -> dict:
 # ------------------------------------------------------------- interoception
 
 
-def recent_events(days: int = 3) -> list[dict]:
-    out: list[dict] = []
-    if not EVENTS.is_dir():
-        return out
-    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
-    for f in sorted(EVENTS.glob("events-*.jsonl")):
+def iter_recent_events(days: int = 3) -> Iterator[dict]:
+    try:
+        mode = EVENTS.stat().st_mode
+    except FileNotFoundError:
         try:
-            if dt.datetime.fromtimestamp(f.stat().st_mtime, dt.timezone.utc) < cutoff:
-                continue
-            for line in f.read_text(encoding="utf-8", errors="replace").splitlines():
+            EVENTS.lstat()
+        except FileNotFoundError:
+            return
+        raise
+    if not stat.S_ISDIR(mode):
+        raise ValueError("score event home must be a directory")
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
+    paths = sorted(path for path in EVENTS.iterdir()
+                   if path.name.startswith("events-") and path.suffix == ".jsonl")
+    for path in paths:
+        if dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc) < cutoff:
+            continue
+        with open(
+            path, encoding="utf-8", errors="replace",
+            opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
+        ) as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise ValueError("score event source must be a regular file")
+            for number, line in enumerate(source, 1):
                 try:
-                    out.append(json.loads(line))
+                    record = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-        except OSError:
-            continue
-    return out
+                if not isinstance(record, dict):
+                    raise ValueError(f"score event record {number} must be an object")
+                yield record
 
 
 def score_interoception(trace_path: Path, ppg: dict, started_at: float) -> dict | None:
@@ -512,15 +531,16 @@ def score_interoception(trace_path: Path, ppg: dict, started_at: float) -> dict 
     """
     if not ppg.get("ok") or not ppg.get("trustworthy"):
         return None
-    runs = [
-        e
-        for e in recent_events()
-        if e.get("kind") == "instrument_run" and e.get("instrument") == "interoception"
-    ]
-    if not runs:
+    with closing(iter_recent_events()) as events:
+        runs = (
+            e for e in events
+            if e.get("kind") == "instrument_run" and e.get("instrument") == "interoception"
+        )
+        # min retains only the nearest run and keeps the first authored
+        # candidate on a tie, as the previous list-based lookup did.
+        best = min(runs, key=lambda e: abs(parse_stamp(e.get("started_at") or e.get("ts")) - started_at), default=None)
+    if best is None:
         return None
-    # The run whose start is nearest this trace: they were recorded together.
-    best = min(runs, key=lambda e: abs(parse_stamp(e.get("started_at") or e.get("ts")) - started_at))
     if abs(parse_stamp(best.get("started_at") or best.get("ts")) - started_at) > 900:
         return None
 

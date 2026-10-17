@@ -506,6 +506,13 @@ Malformed rows stop the run without new scores or receipts; preserve and repair
 the ledger before retrying instead of treating damaged history as unseen input.
 Only a missing ledger starts empty history. Access failures, dangling links and
 non-regular objects stop processing; regular-file links remain supported.
+CSV readers validate the opened descriptor without blocking on special files,
+including the direct `one` command. Interoception streams recent event rows and
+retains only the nearest matching run, preserving file/line order on ties.
+Unavailable event homes/files fail explicitly; a genuinely missing or empty
+event home still has no matching run. Sources close when selection fails.
+The existing policy of skipping malformed JSON lines is unchanged.
+
 An absent outbox reports that state without creating a score directory. An
 inaccessible or wrongly typed outbox fails explicitly. Discovery checks trace
 extensions before looking up file metadata; unavailable or non-regular trace
