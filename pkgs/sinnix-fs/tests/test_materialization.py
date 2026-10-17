@@ -417,3 +417,38 @@ raise SystemExit(fs.cmd_status(SimpleNamespace(index_dir=Path(sys.argv[2]))))
     assert "regular file" in report[error]
     assert report["valid"] is (special != "manifest")
     assert paths[special].is_fifo()
+
+
+@pytest.mark.parametrize("receipt", [
+    None, [], "published", 1, {},
+    {"status": "unknown", "generation": "selected"},
+    {"status": "published"},
+    {"status": "published", "generation": []},
+    {"status": "published", "generation": "  "},
+    {"status": "failed", "candidate": "retained"},
+    {"status": "failed", "candidate": [], "reason": "interrupted"},
+    {"status": "failed", "candidate": "retained", "reason": None},
+])
+def test_status_rejects_invalid_receipt_shape_without_invalidating_generation(
+    tmp_path, monkeypatch, capsys, receipt
+):
+    import json
+    fs = load_script()
+    generation = tmp_path / "selected"
+    generation.mkdir()
+    (generation / "manifest.json").write_text(json.dumps({
+        "scan": {}, "invalid_definitions": [], "ledger_sha256": "a" * 64,
+    }))
+    monkeypatch.setattr(fs, "resolve_generation", lambda _index: generation)
+    monkeypatch.setattr(fs, "validate_generation", lambda _generation: {})
+    monkeypatch.setattr(fs, "generation_coverage", lambda _generation: {})
+    monkeypatch.setattr(fs, "read_judgments", lambda _path: {"sha256": "a" * 64})
+    source = tmp_path / "last-attempt.json"
+    source.write_text(json.dumps(receipt))
+    before = source.read_bytes()
+    assert fs.cmd_status(SimpleNamespace(index_dir=tmp_path)) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["valid"] is True and report["classifications_stale"] is False
+    assert "invalid publication receipt" in report["last_attempt_error"]
+    assert "last_attempt" not in report
+    assert source.read_bytes() == before

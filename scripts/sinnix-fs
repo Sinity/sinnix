@@ -58,8 +58,8 @@ def safe(value):
 
 
 # DuckDB otherwise sizes buffers and workers from the whole host, even inside
-# the scheduled service's 1 GiB memory.high boundary. Leave room for Python,
-# native allocations and file metadata; spill beside the database on /realm.
+# the scheduled service's memory boundary. Leave room for Python, native
+# allocations and file metadata; spill beside the database on /realm.
 DUCKDB_SETTINGS = "SET memory_limit='512MiB'; SET threads=2; SET preserve_insertion_order=false;"
 
 
@@ -1322,7 +1322,13 @@ def cmd_status(args: argparse.Namespace) -> int:
         result["last_attempt_error"] = str(exc)
     else:
         try:
-            result["last_attempt"] = read_json_metadata(attempt)
+            receipt = read_json_metadata(attempt)
+            if not isinstance(receipt, dict) or receipt.get("status") not in ("published", "failed"):
+                raise ValueError("invalid publication receipt status")
+            required = ("generation",) if receipt["status"] == "published" else ("candidate", "reason")
+            if any(not isinstance(receipt.get(key), str) or not receipt[key].strip() for key in required):
+                raise ValueError("invalid publication receipt fields")
+            result["last_attempt"] = receipt
         except (OSError, ValueError) as exc:
             result["last_attempt_error"] = str(exc)
     generations = args.index_dir / "generations"
