@@ -8,6 +8,7 @@
     "clipboard"
     "kitty-scrollback"
     "mpris"
+    "idle-inhibitors"
     "notifications"
     "primary"
     "screen-frames"

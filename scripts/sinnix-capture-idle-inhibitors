@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Capture structured idle-inhibitor provenance without inferring presence
+# runtimeInputs: python3 systemd hyprland
+"""Poll native inhibitor inventories; publish changes and bounded heartbeats."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import time
+
+
+def query(command, expected):
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=5)
+        if result.returncode:
+            return {
+                "status": "unavailable",
+                "reason": "command-failed",
+                "exit_code": result.returncode,
+            }
+        value = json.loads(result.stdout)
+        if not isinstance(value, expected):
+            raise ValueError("unexpected response type")
+        if isinstance(value, list) and any(not isinstance(row, dict) for row in value):
+            raise ValueError("invalid inventory row")
+        return {"status": "available", "value": value}
+    except subprocess.TimeoutExpired:
+        return {"status": "unavailable", "reason": "timeout"}
+    except OSError:
+        return {"status": "unavailable", "reason": "command-unavailable"}
+    except (ValueError, UnicodeError):
+        return {"status": "unavailable", "reason": "malformed-response"}
+
+
+def snapshot(hyprctl="hyprctl", inhibit="systemd-inhibit"):
+    clients = query([hyprctl, "clients", "-j"], list)
+    if clients["status"] == "available":
+        rows = clients.pop("value")
+        if any(type(row.get("inhibitingIdle")) is not bool for row in rows):
+            clients = {"status": "unavailable", "reason": "missing-inhibitor-state"}
+        else:
+            clients["inhibitors"] = sorted(
+                [
+                    {
+                        key: row.get(key)
+                        for key in ("address", "pid", "class", "title", "workspace")
+                    }
+                    for row in rows
+                    if row["inhibitingIdle"]
+                ],
+                key=lambda row: str(row["address"]),
+            )
+    systemd = query([inhibit, "--list", "--json=short"], list)
+    if systemd["status"] == "available":
+        rows = systemd.pop("value")
+        required = ("who", "what", "why", "mode", "pid", "uid")
+        if any(any(key not in row for key in required) for row in rows):
+            systemd = {"status": "unavailable", "reason": "missing-inhibitor-fields"}
+        else:
+            systemd["inhibitors"] = sorted(
+                [{key: row[key] for key in required} for row in rows],
+                key=lambda row: json.dumps(row, sort_keys=True),
+            )
+    active = query([hyprctl, "activewindow", "-j"], dict)
+    if active["status"] == "available":
+        row = active.pop("value")
+        active["window"] = {
+            key: row.get(key)
+            for key in ("address", "pid", "class", "title", "workspace")
+        }
+    return {
+        "hyprland_clients": clients,
+        "systemd_logind": systemd,
+        "active_window": active,
+        "other_session_dbus": {
+            "status": "unsupported",
+            "reason": "no-enumerable-provenance-interface",
+        },
+    }
+
+
+def emit_if_due(state, previous, now, last, heartbeat, write):
+    if state != previous or now - last >= heartbeat:
+        write(
+            {
+                "event": "change" if state != previous else "heartbeat",
+                "provenance": state,
+            }
+        )
+        return state, now
+    return previous, last
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--capture-bin", required=True)
+    parser.add_argument("--capture-root", required=True)
+    parser.add_argument("--heartbeat", type=int, default=300)
+    parser.add_argument("--interval", type=int, default=30)
+    parser.add_argument("--once", action="store_true")
+    args = parser.parse_args()
+    if args.interval < 1 or args.heartbeat < args.interval:
+        parser.error(
+            "heartbeat must be at least interval, and interval must be positive"
+        )
+
+    def write(payload):
+        subprocess.run(
+            [
+                args.capture_bin,
+                "write",
+                "--capture-root",
+                args.capture_root,
+                "--lane",
+                "idle-inhibitors",
+                "--payload",
+                json.dumps(payload),
+            ],
+            check=True,
+        )
+
+    previous, last = None, 0.0
+    while True:
+        previous, last = emit_if_due(
+            snapshot(), previous, time.monotonic(), last, args.heartbeat, write
+        )
+        if args.once:
+            return
+        time.sleep(args.interval)
+
+
+if __name__ == "__main__":
+    main()
