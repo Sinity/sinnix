@@ -3,11 +3,11 @@
 import importlib.machinery
 import importlib.util
 import os
-from pathlib import Path
 import re
 import shlex
 import subprocess
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 if "UNIT_COMMAND" in os.environ:

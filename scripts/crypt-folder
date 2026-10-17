@@ -3,6 +3,7 @@
 # description: Encrypt a folder into a gocryptfs store, or mount one
 # runtimeInputs: coreutils gocryptfs rsync util-linux
 set -euo pipefail
+umask 077
 
 usage() {
   cat <<'USAGE'
@@ -12,40 +13,61 @@ Usage:
 USAGE
 }
 
-encrypt_folder() {
-  local source="$1" encrypted="$2" mount_point
+encrypt_folder() (
+  local source="$1" encrypted="$2" mount_point first_entry
 
+  IFS= read -r -d '' source < <(realpath -ze -- "$source")
   if [ ! -d "$source" ]; then
-    echo "Error: Source folder does not exist" >&2
+    echo "Error: Source is not a folder" >&2
     exit 1
   fi
+  IFS= read -r -d '' encrypted < <(realpath -zm -- "$encrypted")
+  case "$encrypted/" in
+    "${source%/}/"*)
+      echo "Error: Source and encrypted folders must not overlap" >&2
+      exit 1
+      ;;
+  esac
+  case "$source/" in
+    "${encrypted%/}/"*)
+      echo "Error: Source and encrypted folders must not overlap" >&2
+      exit 1
+      ;;
+  esac
 
   mkdir -p "$encrypted"
-
-  # find's exit status reports errors, not matches, so emptiness must be read
-  # from its output.
-  if [ -f "$encrypted/gocryptfs.conf" ] || [ -n "$(find "$encrypted" -mindepth 1 -print -quit)" ]; then
+  # Keep the inventory status separate from its emptiness result: a failed
+  # lookup must never permit initialization of an unverified destination.
+  first_entry=$(find "$encrypted" -mindepth 1 -print -quit)
+  if [ -n "$first_entry" ]; then
     echo "Error: Encrypted folder already initialised or non-empty" >&2
     exit 1
   fi
+  chmod 0700 "$encrypted"
 
-  gocryptfs -init "$encrypted"
-  mount_point="/tmp/encrypt-mount-$$"
-  mkdir -p "$mount_point"
-
+  # Allocate exclusively before prompting or initializing. Only this private,
+  # invocation-owned directory is ever considered for unmount and cleanup.
+  mount_point=$(mktemp -d --tmpdir crypt-folder.XXXXXXXX)
   cleanup() {
+    local rc=$?
+    trap - EXIT
     if mountpoint -q "$mount_point"; then
-      fusermount -u "$mount_point" || true
+      if ! fusermount -u "$mount_point"; then
+        echo "Error: Could not unmount private workspace: $mount_point" >&2
+        exit 1
+      fi
     fi
-    rmdir "$mount_point" 2>/dev/null || true
+    rmdir "$mount_point" || rc=1
+    exit "$rc"
   }
   trap cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 
+  gocryptfs -init "$encrypted"
   gocryptfs "$encrypted" "$mount_point"
   rsync -av --progress "$source/" "$mount_point/"
-  trap - EXIT
-  cleanup
-}
+)
 
 decrypt_folder() {
   local encrypted="$1" mount_point="$2"

@@ -37,6 +37,7 @@ in
     ./tests/terminal-capture.nix
     ./tests/capture-clipboard.nix
     ./tests/capture-primary.nix
+    ./tests/crypt-folder.nix
     ./tests/capture-idle-inhibitors.nix
     ./tests/capture-mail.nix
     ./tests/capture-awair.nix
