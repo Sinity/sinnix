@@ -269,8 +269,7 @@ def confirm_directory_entry(name: str, entry: str, declared_sha: str | None,
     """
     # Hold the same directory handles from the initial read through the last
     # mutation. Content checks alone cannot identify a replaced parent path.
-    body = _read_regular(entry, dir_fd=sub_fd)
-    digest = _sha(body)
+    _, digest = _inspect_regular(entry, dir_fd=sub_fd)
     if not declared_sha or declared_sha.lower() != digest:
         return HTTPStatus.UNPROCESSABLE_ENTITY, {
             "ok": False,
@@ -310,7 +309,7 @@ def confirm_directory_entry(name: str, entry: str, declared_sha: str | None,
             "ok": False, "detail": str(exc), **preserved,
         }
     try:
-        claimed_digest = _sha(_read_regular(claim, dir_fd=root_fd))
+        _, claimed_digest = _inspect_regular(claim, dir_fd=root_fd)
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {
             "ok": False, "detail": str(exc), **_preserve_claim(root_fd, sub_fd, claim, entry),

@@ -127,6 +127,35 @@ def test_confirming_a_receipt_deletes_it(isolated_state_dirs) -> None:
     assert not list(isolated_state_dirs["inbox_dir"].glob(".confirmation-*.json"))
 
 
+@pytest.mark.parametrize("correct_digest", [False, True])
+def test_confirmation_hashing_has_bounded_memory(isolated_state_dirs, correct_digest):
+    directory = isolated_state_dirs["receipts_dir"]
+    directory.mkdir(parents=True)
+    path = directory / "large.json"
+    chunk = b"synthetic receipt\n" * 4096
+    digest = hashlib.sha256()
+    with path.open("wb") as handle:
+        for _ in range(160):
+            handle.write(chunk)
+            digest.update(chunk)
+    tracemalloc.start()
+    try:
+        status, payload = inbox_mod.confirm_inbox(
+            "receipts/large.json", digest.hexdigest() if correct_digest else "0" * 64,
+        )
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    if correct_digest:
+        assert status == HTTPStatus.OK and payload["deleted"]
+        assert not path.exists()
+    else:
+        assert status == HTTPStatus.UNPROCESSABLE_ENTITY
+        assert path.stat().st_size == len(chunk) * 160
+        assert payload["expected"] == digest.hexdigest()
+    assert peak < 3 * 1024 * 1024, f"inbox confirmation allocated {peak} bytes"
+
+
 @pytest.mark.parametrize("publish_again", [False, True])
 def test_confirmation_preserves_replacement_before_claim(
     isolated_state_dirs, monkeypatch, publish_again,
@@ -137,18 +166,20 @@ def test_confirmation_preserves_replacement_before_claim(
     _write(isolated_state_dirs, "receipts", "r1.json", original.decode())
     path = isolated_state_dirs["receipts_dir"] / "r1.json"
     sha = inbox_mod._sha
+    inspect = inbox_mod._inspect_regular
     calls = 0
 
-    def digest(body):
+    def digest(entry, **kwargs):
+        result = inspect(entry, **kwargs)
         nonlocal calls
         calls += 1
         if calls == 1 or (calls == 2 and publish_again):
             temporary = path.with_suffix(".next")
             temporary.write_bytes(replacement if calls == 1 else latest)
             temporary.replace(path)
-        return sha(body)
+        return result
 
-    monkeypatch.setattr(inbox_mod, "_sha", digest)
+    monkeypatch.setattr(inbox_mod, "_inspect_regular", digest)
     status, payload = inbox_mod.confirm_inbox("receipts/r1.json", sha(original))
     assert status == HTTPStatus.UNPROCESSABLE_ENTITY
     assert path.read_bytes() == (latest if publish_again else replacement)
@@ -162,16 +193,18 @@ def test_confirmation_keeps_new_publication_after_claim(isolated_state_dirs, mon
     _write(isolated_state_dirs, "receipts", "r1.json", original.decode())
     path = isolated_state_dirs["receipts_dir"] / "r1.json"
     sha = inbox_mod._sha
+    inspect = inbox_mod._inspect_regular
     calls = 0
 
-    def digest(body):
+    def digest(entry, **kwargs):
+        result = inspect(entry, **kwargs)
         nonlocal calls
         calls += 1
         if calls == 2:
             path.write_bytes(replacement)
-        return sha(body)
+        return result
 
-    monkeypatch.setattr(inbox_mod, "_sha", digest)
+    monkeypatch.setattr(inbox_mod, "_inspect_regular", digest)
     status, payload = inbox_mod.confirm_inbox("receipts/r1.json", sha(original))
     assert status == HTTPStatus.OK and payload["deleted"] is True
     assert path.read_bytes() == replacement
@@ -202,13 +235,15 @@ def test_nonregular_replacement_is_preserved_without_blocking(isolated_state_dir
     _write(isolated_state_dirs, "receipts", "r1.json", text)
     path = isolated_state_dirs["receipts_dir"] / "r1.json"
     sha = inbox_mod._sha
+    inspect = inbox_mod._inspect_regular
 
-    def replace_with_fifo(body):
+    def replace_with_fifo(entry, **kwargs):
+        result = inspect(entry, **kwargs)
         path.unlink()
         os.mkfifo(path)
-        return sha(body)
+        return result
 
-    monkeypatch.setattr(inbox_mod, "_sha", replace_with_fifo)
+    monkeypatch.setattr(inbox_mod, "_inspect_regular", replace_with_fifo)
     status, payload = inbox_mod.confirm_inbox("receipts/r1.json", sha(text.encode()))
     assert status == HTTPStatus.INTERNAL_SERVER_ERROR
     assert "not a regular file" in payload["detail"]
@@ -219,16 +254,18 @@ def test_interrupted_confirmation_retains_claimed_bytes(isolated_state_dirs, mon
     text = '{"title":"retained"}\n'
     _write(isolated_state_dirs, "receipts", "r1.json", text)
     sha = inbox_mod._sha
+    inspect = inbox_mod._inspect_regular
     calls = 0
 
-    def interrupt(body):
+    def interrupt(entry, **kwargs):
+        result = inspect(entry, **kwargs)
         nonlocal calls
         calls += 1
         if calls == 2:
             raise KeyboardInterrupt
-        return sha(body)
+        return result
 
-    monkeypatch.setattr(inbox_mod, "_sha", interrupt)
+    monkeypatch.setattr(inbox_mod, "_inspect_regular", interrupt)
     with pytest.raises(KeyboardInterrupt):
         inbox_mod.confirm_inbox("receipts/r1.json", sha(text.encode()))
     claims = list(isolated_state_dirs["inbox_dir"].glob(".confirmation-*.json"))
@@ -427,15 +464,17 @@ def test_confirmation_stays_with_opened_directories(isolated_state_dirs, tmp_pat
     external_file.write_bytes(content)
     before = external_file.stat()
     sha = inbox_mod._sha
+    inspect = inbox_mod._inspect_regular
     calls = 0
-    def digest(body):
+    def digest(entry, **kwargs):
+        result = inspect(entry, **kwargs)
         nonlocal calls
         calls += 1
         if calls == (2 if after_claim else 1):
             original.rename(retained)
             original.symlink_to(outside, target_is_directory=True)
-        return sha(body)
-    monkeypatch.setattr(inbox_mod, '_sha', digest)
+        return result
+    monkeypatch.setattr(inbox_mod, '_inspect_regular', digest)
     status, payload = inbox_mod.confirm_inbox('receipts/entry.json', sha(content))
     assert status == HTTPStatus.OK and payload['deleted']
     after = external_file.stat()
@@ -453,16 +492,18 @@ def test_claim_recovery_reports_relocated_root(isolated_state_dirs, tmp_path, mo
     outside = tmp_path / 'outside'
     outside.mkdir()
     sha = inbox_mod._sha
+    inspect = inbox_mod._inspect_regular
     calls = 0
-    def digest(body):
+    def digest(entry, **kwargs):
+        result = inspect(entry, **kwargs)
         nonlocal calls
         calls += 1
         if calls == 1:
             (root / 'receipts' / 'entry.json').write_text('replacement')
             root.rename(retained)
             root.symlink_to(outside, target_is_directory=True)
-        return sha(body)
-    monkeypatch.setattr(inbox_mod, '_sha', digest)
+        return result
+    monkeypatch.setattr(inbox_mod, '_inspect_regular', digest)
     status, payload = inbox_mod.confirm_inbox('receipts/entry.json', sha(b'original'))
     assert status == HTTPStatus.UNPROCESSABLE_ENTITY
     claim = Path(payload['retained_at'])
