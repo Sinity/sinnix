@@ -120,5 +120,6 @@ def _mirror_line(line: bytes) -> None:
         return
     if not isinstance(event, dict):
         return
-    if event.get("kind") in _MIRRORED_KINDS:
+    kind = event.get("kind")
+    if isinstance(kind, str) and kind in _MIRRORED_KINDS:
         _forward(event)

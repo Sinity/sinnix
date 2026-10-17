@@ -14,6 +14,7 @@ twice.
 
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 
@@ -70,11 +71,25 @@ def test_integer_digit_limit_does_not_discard_later_notifications(monkeypatch):
         sys.set_int_max_str_digits(4300)
         _mirror(
             "20260101",
-            b'{"value":' + b"9" * 4301 + b'}\n'
+            b'{"value":' + b"9" * 4301 + b"}\n"
             b'{"kind":"notification_posted","title":"fixture","text":"retained"}\n',
         )
     finally:
         sys.set_int_max_str_digits(previous_limit)
+    assert calls == [("fixture", "retained")]
+
+
+@pytest.mark.parametrize("kind", [[], {}, ["notification_posted"]])
+def test_invalid_kind_does_not_discard_later_notifications(monkeypatch, kind):
+    calls = []
+    monkeypatch.setattr(
+        notifications_mod, "notify_desktop", lambda *a, **kw: calls.append(a)
+    )
+    _mirror(
+        "20260101",
+        json.dumps({"kind": kind}).encode() + b"\n"
+        b'{"kind":"notification_posted","title":"fixture","text":"retained"}\n',
+    )
     assert calls == [("fixture", "retained")]
 
 
@@ -194,6 +209,7 @@ def test_tail_buffer_is_kept_per_day(monkeypatch) -> None:
 
 def test_large_unfinished_record_does_not_accumulate_in_memory():
     import tracemalloc
+
     with tempfile.TemporaryFile() as stream:
         chunk = b"x" * (64 * 1024)
         for _ in range(128):
@@ -210,7 +226,9 @@ def test_large_unfinished_record_does_not_accumulate_in_memory():
 
 def test_mirror_respects_acknowledged_end(monkeypatch):
     calls = []
-    monkeypatch.setattr(notifications_mod, "notify_desktop", lambda *a, **kw: calls.append(a))
+    monkeypatch.setattr(
+        notifications_mod, "notify_desktop", lambda *a, **kw: calls.append(a)
+    )
     line = b'{"kind":"notification_posted","title":"fixture"}\n'
     with tempfile.TemporaryFile() as stream:
         stream.write(line + line)
