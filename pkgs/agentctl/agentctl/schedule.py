@@ -2,9 +2,9 @@
 
 systemd's only role: the durable wake-up a calendar needs. Each declared
 schedule is one transient user timer running `agentctl job fire`. The timer
-set is reconciled from the descriptors alone — the unit name encodes the
+set is reconciled from descriptors and native unit metadata — the unit name encodes the
 project, operation, expression, agentctl executable and selected config path,
-so a changed input is a new unit and the old one is stopped. The set has one
+so a changed input is a new unit and the proven old timer is stopped. The set has one
 host-wide owner: applying another config replaces the prior timer set. No
 state file.
 """
@@ -12,7 +12,9 @@ state file.
 from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
+from pathlib import Path
 from typing import Any, Sequence
 
 from .config import Config
@@ -80,6 +82,95 @@ def existing_units() -> set[str]:
     return units
 
 
+def timer_owner(unit: str, executable_name: str) -> dict[str, str | None]:
+    """Identify a transient scheduler service from native, structured argv."""
+    destination = "org.freedesktop.systemd1"
+    prefix = ["busctl", "--user", "--json=short"]
+    for suffix in (".timer", ".service"):
+        value = json.loads(
+            _run(
+                prefix
+                + [
+                    "call",
+                    destination,
+                    "/org/freedesktop/systemd1",
+                    destination + ".Manager",
+                    "GetUnit",
+                    "s",
+                    unit + suffix,
+                ]
+            )
+        )
+        paths = value.get("data")
+        if (
+            not isinstance(paths, list)
+            or len(paths) != 1
+            or not isinstance(paths[0], str)
+        ):
+            raise TimerError("invalid scheduled unit identity")
+        path = paths[0]
+        transient = json.loads(
+            _run(
+                prefix
+                + [
+                    "get-property",
+                    destination,
+                    path,
+                    destination + ".Unit",
+                    "Transient",
+                ]
+            )
+        )
+        if transient.get("data") is not True:
+            raise TimerError("scheduled unit is not transient")
+    value = json.loads(
+        _run(
+            prefix
+            + [
+                "get-property",
+                destination,
+                path,
+                destination + ".Service",
+                "ExecStart",
+            ]
+        )
+    )
+    commands = value.get("data")
+    if (
+        not isinstance(commands, list)
+        or len(commands) != 1
+        or not isinstance(commands[0], list)
+        or len(commands[0]) < 2
+    ):
+        raise TimerError("unrecognized scheduled service command")
+    executable, argv = commands[0][:2]
+    if (
+        not isinstance(executable, str)
+        or Path(executable).name != executable_name
+        or not isinstance(argv, list)
+        or not all(isinstance(arg, str) for arg in argv)
+        or not argv
+        or argv[0] != executable
+    ):
+        raise TimerError("unrecognized scheduled service executable")
+    arguments = argv[1:]
+    config_path = None
+    if len(arguments) == 6 and arguments[0] == "--config":
+        config_path = arguments[1]
+        arguments = arguments[2:]
+    if (
+        len(arguments) != 4
+        or arguments[:2] != ["job", "fire"]
+        or any(not arg or arg.startswith("-") for arg in arguments[2:])
+    ):
+        raise TimerError("unrecognized scheduled service arguments")
+    return {
+        "project": arguments[2],
+        "operation": arguments[3],
+        "config_path": config_path,
+    }
+
+
 def apply(config: Config) -> dict[str, Any]:
     """Make the live timer set equal the declared schedules."""
     catalog = config.catalog()
@@ -99,19 +190,30 @@ def apply(config: Config) -> dict[str, Any]:
             "schedule": operation.schedule,
         }
     present = existing_units()
-    # A partially read catalog cannot prove that an existing timer was
-    # deliberately removed. Register known schedules, but defer retirement
-    # until every configured descriptor can be inspected.
+    # Partial discovery cannot retire unknown projects, but must not keep
+    # accumulating generations for projects whose current descriptor is known.
     incomplete = bool(catalog.unavailable)
-    stopped = [] if incomplete else sorted(present - set(desired))
-    for unit in stopped:
-        # A transient timer's service unit exists only while it is running;
-        # stopping the timer alone is the whole retirement when it is not.
+    available = {row["id"] for row in catalog.list()}
+    current_config = str(config.config_path) if config.config_path is not None else None
+    stopped = []
+    deferred = []
+    for unit in sorted(present - set(desired)):
+        try:
+            owner = timer_owner(unit, Path(config.agentctl_executable).name)
+            if incomplete and (
+                owner["project"] not in available
+                or owner["config_path"] != current_config
+            ):
+                raise TimerError(
+                    "owner is not an available project in this configuration"
+                )
+        except (TimerError, ValueError, TypeError, AttributeError) as error:
+            deferred.append({"unit": unit, "reason": str(error)})
+            continue
+        # The timer stops future admission. Its already-triggered service may
+        # still be reconciling an accepted launch; let that handler finish.
         _run(["systemctl", "--user", "stop", f"{unit}.timer"])
-        _run(
-            ["systemctl", "--user", "stop", "--no-block", f"{unit}.service"],
-            check=False,
-        )
+        stopped.append(unit)
     started: list[str] = []
     for unit, entry in sorted(desired.items()):
         if unit in present:
@@ -135,10 +237,11 @@ def apply(config: Config) -> dict[str, Any]:
         )
         started.append(unit)
     return {
-        "status": "incomplete" if incomplete else "complete",
+        "status": "incomplete" if incomplete or deferred else "complete",
         "timers": [{"unit": unit, **entry} for unit, entry in sorted(desired.items())],
         "started": started,
         "stopped": stopped,
+        "retirement_deferred": deferred,
         "unavailable": [
             {"root": root, "reason": reason}
             for root, reason in sorted(catalog.unavailable.items())
