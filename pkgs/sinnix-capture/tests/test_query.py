@@ -1,4 +1,7 @@
 from pathlib import Path
+import json
+import multiprocessing
+import os
 
 import pytest
 from sinnix_capture.query import discover_lanes, lane_delta, query
@@ -83,6 +86,97 @@ def test_query_refuses_a_terminated_malformed_index_line(tmp_path: Path) -> None
         handle.write(b"not json\n")
     with pytest.raises(ValueError):
         lane_delta(tmp_path, "lane-x")
+
+
+@pytest.mark.parametrize("patch", [
+    {"ts": float("nan")}, {"ts": float("inf")}, {"ts": True}, {"ts": "100"},
+    {"seq": True}, {"seq": 0}, {"seq": -1}, {"seq": 1.5},
+])
+def test_query_rejects_invalid_index_fields(tmp_path, patch):
+    writer = CaptureWriter(tmp_path, "lane")
+    writer.write({"synthetic": True}, ts=100)
+    entry = json.loads(writer._index_path.read_text())
+    entry.update(patch)
+    writer._index_path.write_text(json.dumps(entry) + "\n")
+    with pytest.raises(ValueError, match="capture index"):
+        lane_delta(tmp_path, "lane")
+
+
+@pytest.mark.parametrize("seq", [1, 0])
+def test_query_rejects_duplicate_or_reversed_sequence(tmp_path, seq):
+    writer = CaptureWriter(tmp_path, "lane")
+    writer.write({"synthetic": True}, ts=100)
+    entry = json.loads(writer._index_path.read_text())
+    entry["seq"] = seq
+    with writer._index_path.open("a") as handle:
+        handle.write(json.dumps(entry) + "\n")
+    with pytest.raises(ValueError, match="capture index"):
+        lane_delta(tmp_path, "lane")
+
+
+def test_query_refuses_fifo_index_without_blocking(tmp_path):
+    writer = CaptureWriter(tmp_path, "lane")
+    os.mkfifo(writer._index_path)
+    ctx = multiprocessing.get_context("fork")
+    parent, child = ctx.Pipe(duplex=False)
+
+    def query_fifo():
+        try:
+            lane_delta(tmp_path, "lane")
+        except ValueError:
+            child.send("refused")
+
+    process = ctx.Process(target=query_fifo)
+    try:
+        process.start()
+        process.join(1)
+        assert not process.is_alive(), "capture query blocked opening a FIFO index"
+        assert parent.poll(1) and parent.recv() == "refused"
+    finally:
+        if process.is_alive():
+            process.terminate()
+            process.join(5)
+        parent.close()
+        child.close()
+
+
+@pytest.mark.parametrize("since", [float("nan"), float("inf"), True, "100", 2 ** 1024])
+@pytest.mark.parametrize("operation", ["lane_delta", "query"])
+def test_query_rejects_invalid_since_timestamp_even_for_empty_lane(tmp_path, since, operation):
+    with pytest.raises(ValueError, match="since timestamp"):
+        if operation == "lane_delta":
+            lane_delta(tmp_path, "missing-lane", since)
+        else:
+            query(tmp_path, since)
+
+
+@pytest.mark.parametrize("kind", ["index", "lane"])
+def test_query_does_not_treat_broken_entrance_as_empty(tmp_path, kind):
+    writer = CaptureWriter(tmp_path, "lane")
+    path = writer._index_path if kind == "index" else writer.lane_dir
+    if kind == "lane":
+        path.rmdir()
+    path.symlink_to(tmp_path / "missing-target")
+    with pytest.raises(FileNotFoundError):
+        lane_delta(tmp_path, "lane")
+
+
+def test_query_preserves_working_index_link(tmp_path):
+    writer = CaptureWriter(tmp_path, "lane")
+    writer.write({"synthetic": True}, ts=100)
+    retained = tmp_path / "retained-index"
+    writer._index_path.rename(retained)
+    writer._index_path.symlink_to(retained)
+    assert lane_delta(tmp_path, "lane")["records_since"] == 1
+
+
+def test_query_closes_descriptor_when_index_is_a_directory(tmp_path):
+    writer = CaptureWriter(tmp_path, "lane")
+    writer._index_path.mkdir()
+    before = set(os.listdir("/proc/self/fd"))
+    with pytest.raises(ValueError, match="not a regular file"):
+        lane_delta(tmp_path, "lane")
+    assert set(os.listdir("/proc/self/fd")) == before
 
 
 @pytest.mark.parametrize("operation", ["lane_delta", "discover"])
