@@ -49,10 +49,11 @@ mkServiceModule {
       execStart = "${scriptPkgs.sinnix-fs}/bin/sinnix-fs run --out-dir ${lib.escapeShellArg indexDir}";
       serviceConfig = {
         TimeoutStartSec = cfg.maxSecondsPerRun;
-        # DuckDB also allocates outside its buffer manager. At 1G this run
-        # repeatedly reclaimed and refaulted anonymous pages through swap.
-        # Keep resident headroom without allowing the scan to grow unbounded.
-        MemoryHigh = "2G";
+        # DuckDB also allocates outside its buffer manager. A soft boundary
+        # caused prolonged reclaim/refault loops even below the hard bound.
+        # Let the buffer manager spill; fail at the hard limit rather than
+        # throttle the whole scan through repeated kernel reclaim.
+        MemoryHigh = "infinity";
         MemoryMax = "3G";
         MemorySwapMax = 0;
         # Low weight alone does not bound sequential scans on these devices.
