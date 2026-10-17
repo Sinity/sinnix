@@ -112,8 +112,11 @@ capture() {
   # The newest transcript for the session's directory is the one it was
   # writing; a hung session's queue records show what arrived unanswered.
   project="$HOME/.claude/projects/$(sed 's#[^A-Za-z0-9]#-#g' <<<"$cwd")"
-  transcript=$(find "$project" -maxdepth 1 -name '*.jsonl' -printf '%T@ %p\n' 2>/dev/null |
-    sort -n | tail -1 | cut -d' ' -f2-)
+  if ! transcript=$(find "$project" -maxdepth 1 -name '*.jsonl' -printf '%T@ %p\n' \
+    2>"$dir/transcript-discovery-error.txt" | sort -n | tail -1 | cut -d' ' -f2-); then
+    echo "transcript discovery unavailable: $project" >>"$dir/summary.txt"
+    transcript=""
+  fi
   if [ -n "$transcript" ]; then
     echo "transcript: $transcript" >>"$dir/summary.txt"
     tail -n 200 "$transcript" | jq -c '{t: .timestamp, type, op: .operation, sub: .subtype}' \

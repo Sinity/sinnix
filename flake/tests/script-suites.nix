@@ -77,6 +77,12 @@
     in
     {
       checks = {
+        claude-hang-capture-suite = mkScriptSuite {
+          name = "claude-hang-capture";
+          suiteDir = ../../pkgs/claude-hang-capture/tests;
+          scripts = [ "claude-hang-capture" ];
+          nativeBuildInputs = with pkgs; [ bash procps gawk gnugrep findutils jq ];
+        };
         phone-score-suite = mkScriptSuite {
           name = "sinnix-score";
           suiteDir = ../../pkgs/sinnix-score/tests;
