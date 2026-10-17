@@ -455,12 +455,16 @@ mkServiceModule {
         systemd.tmpfiles.rules = [
           "d ${config.sinnix.paths.machinePaths.experiment} 0775 ${username} users -"
           "d ${dataDir}/legacy 0775 ${username} users -"
+          # Adjust existing subvolumes without creating a plain directory before scaffold.
+          "z ${dbRoot} 0700 ${username} users -"
           "d ${backupRoot} 0700 ${username} users -"
           "d ${backupSnapshotRoot} 0700 ${username} users -"
         ];
 
         systemd.services.machine-telemetry-db-scaffold = {
           description = "Create machine telemetry SQLite nodatacow subvolume";
+          # Existing entrances are repaired by tmpfiles without restarting capture.
+          restartIfChanged = false;
           requiredBy = [ "machine-telemetry.service" ];
           before = [ "machine-telemetry.service" ];
           requires = [ "realm.mount" ];
@@ -477,8 +481,8 @@ mkServiceModule {
               btrfs subvolume create ${lib.escapeShellArg dbRoot}
               chattr +C ${lib.escapeShellArg dbRoot} || true
             fi
-            chown root:users ${lib.escapeShellArg dbRoot}
-            chmod 0755 ${lib.escapeShellArg dbRoot}
+            chown ${username}:users ${lib.escapeShellArg dbRoot}
+            chmod 0700 ${lib.escapeShellArg dbRoot}
             chattr +C ${lib.escapeShellArg dbRoot} || true
           '';
         };

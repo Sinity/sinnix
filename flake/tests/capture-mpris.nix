@@ -19,6 +19,7 @@
             sinnix.services.capture-netflow.enable = true;
             sinnix.services.xiaomi-witness.enable = true;
             sinnix.services.polylogue.enable = true;
+            sinnix.services.machine-telemetry.enable = true;
             sinnix.services.below.enable = true;
             sinnix.services.below.storeDir = "/sinnix-test-below";
             sinnix.services.polylogue.dataDir = "/sinnix-test-polylogue";
@@ -37,6 +38,20 @@
           }
         ];
         assertions = config: [
+          {
+            assertion =
+              let
+                root = "${config.sinnix.paths.realmRoot}/state/machine-telemetry";
+                user = config.sinnix.user.name;
+                scaffold = config.systemd.services.machine-telemetry-db-scaffold;
+                rules = builtins.filter (rule: lib.hasInfix " ${root} " rule) config.systemd.tmpfiles.rules;
+              in
+              rules == [ "z ${root} 0700 ${user} users -" ]
+              && !scaffold.restartIfChanged
+              && lib.hasInfix "chown ${user}:users ${lib.escapeShellArg root}" scaffold.script
+              && lib.hasInfix "chmod 0700 ${lib.escapeShellArg root}" scaffold.script;
+            message = "Telemetry process history must retain a private operator-owned subvolume entrance without creating a plain directory or restarting capture.";
+          }
           {
             assertion =
               let
