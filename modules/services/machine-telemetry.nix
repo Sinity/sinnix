@@ -243,7 +243,7 @@ mkServiceModule {
         {
           label = "user.desktop-shell";
           scope = "user";
-          path = "${userSliceRoot}/desktop-shell.slice";
+          path = "${userSliceRoot}/desktop.slice/desktop-shell.slice";
         }
       ]
       ++ agentctlPoolCgroups;

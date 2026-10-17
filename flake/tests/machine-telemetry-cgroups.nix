@@ -46,7 +46,7 @@ in
           "user.agentctl-work|user|${userSliceRoot}/agentctl.slice"
           "user.app|user|${userSliceRoot}/app.slice"
           "user.session|user|${userSliceRoot}/session.slice"
-          "user.desktop-shell|user|${userSliceRoot}/desktop-shell.slice"
+          "user.desktop-shell|user|${userSliceRoot}/desktop.slice/desktop-shell.slice"
         ];
 
       spec = mkFeatureTest {

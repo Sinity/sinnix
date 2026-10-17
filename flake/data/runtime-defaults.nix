@@ -4,6 +4,14 @@ let
     inherit description serviceConfig;
   };
 
+  # Protect interactive reads on both the store/home SSD and Realm NVMe.
+  # io.latency only arbitrates siblings, so the root user slice and the
+  # desktop parent must carry this policy as well as app/session children.
+  interactiveIoLatency = [
+    "/nix 20ms"
+    "/realm 20ms"
+  ];
+
   buildSlicePolicy = {
     IOAccounting = true;
     CPUWeight = 5;
@@ -227,6 +235,8 @@ rec {
       # memory.low protection is limited by every ancestor. This carries the
       # user-manager app/session/shell allocations to the root hierarchy.
       user = {
+        IOAccounting = true;
+        IODeviceLatencyTargetSec = interactiveIoLatency;
         MemoryLow = "11776M";
       };
       background = {
@@ -344,7 +354,7 @@ rec {
         # Weights share bandwidth only while both sides issue IO; a latency
         # target throttles batch whenever the desktop's own requests wait,
         # which is what swap-in feels like under six lanes.
-        IODeviceLatencyTargetSec = "/dev/nvme0n1 20ms";
+        IODeviceLatencyTargetSec = interactiveIoLatency;
         # Batch under agentctl.slice grows into swap; the desktop's working
         # set must not be what gets reclaimed to make room for it.
         MemoryLow = "6G";
@@ -356,7 +366,7 @@ rec {
         # Weights share bandwidth only while both sides issue IO; a latency
         # target throttles batch whenever the desktop's own requests wait,
         # which is what swap-in feels like under six lanes.
-        IODeviceLatencyTargetSec = "/dev/nvme0n1 20ms";
+        IODeviceLatencyTargetSec = interactiveIoLatency;
         # The interactive part of session.slice, measured 2026-09-02 21:30 at
         # 7 GB current. Its 23 GB peak is Claude-session subagents running
         # pytest, which belong in the work slice, not behind this guarantee.
@@ -366,12 +376,14 @@ rec {
       # Carry the shell policy to its competition with the other user slices.
       desktop = {
         IOAccounting = true;
+        IODeviceLatencyTargetSec = interactiveIoLatency;
         CPUWeight = 400;
         IOWeight = 300;
         MemoryLow = "512M";
       };
       desktop-shell = {
         IOAccounting = true;
+        IODeviceLatencyTargetSec = interactiveIoLatency;
         CPUWeight = 400;
         IOWeight = 300;
         MemoryLow = "512M";
@@ -540,8 +552,14 @@ rec {
         # IOWeight arbitrates contention through io.cost but does not cap
         # throughput. Share a device ceiling across concurrent bulk jobs,
         # matching the backup class; stricter operation budgets still apply.
-        IOReadBandwidthMax = [ "/realm 80M" "/nix 80M" ];
-        IOWriteBandwidthMax = [ "/realm 40M" "/nix 40M" ];
+        IOReadBandwidthMax = [
+          "/realm 80M"
+          "/nix 80M"
+        ];
+        IOWriteBandwidthMax = [
+          "/realm 40M"
+          "/nix 40M"
+        ];
         MemoryHigh = "10G";
         MemoryMax = "10G";
         MemorySwapMax = "0";
