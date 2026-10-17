@@ -199,6 +199,10 @@
         echo "backup_phase=independent_full_audit status=deferred reason=borg-lock-contention remains_due=true"
         exit 0
       fi
+      # The full inventory can outgrow the source filesystem's remaining
+      # headroom. Keep this disposable index with Borg's cache on persist.
+      export TMPDIR=${lib.escapeShellArg "${borgCacheDir}/coverage-scratch"}
+      install -d -m 0700 "$TMPDIR"
       audit="$(${snapshotCoverage} audit \
         ${lib.escapeShellArg "${borgDrainStateRoot}/realm.latest-archived"} \
         ${lib.escapeShellArg realmSnapshots} ${realmCoveragePolicy})"

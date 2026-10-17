@@ -353,8 +353,9 @@ let
   '';
 
   # Full verification indexes millions of paths on disk. System services do
-  # not inherit the workstation session's TMPDIR; keep disposable inventory
-  # and SQLite sort files on the declared Realm scratch filesystem.
+  # not inherit the workstation session's TMPDIR; default to Realm scratch.
+  # The independent full audit overrides it with Borg's cache on persist so
+  # its inventory cannot consume the audited filesystem's remaining space.
   snapshotCoverage = "${pkgs.coreutils}/bin/env TMPDIR=\"\${TMPDIR:-${realmRoot}/tmp/work}\" ${pkgs.python3}/bin/python3 ${./lib/backup/snapshot-coverage.py}";
 
   mkCoveragePolicy =
