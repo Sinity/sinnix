@@ -1004,3 +1004,137 @@ def test_unlinked_snapshot_is_readable_by_child_and_closes_after_use(score, tmp_
                                     str(payload.path)], capture_output=True, timeout=5)
             assert child.returncode == 0 and child.stdout == b'synthetic audio bytes'
         assert not os.path.exists(descriptor) and not payload.path.exists()
+
+
+IMU_REFERENCE_RESULTS = {'regular': {'score_tremor': {'ok': True,
+                              'peak_hz': 7.96,
+                              'peak_magnitude': 0.02498,
+                              'band_power_4_12': 0.00096,
+                              'band_fraction': 1.0,
+                              'samples': 2000,
+                              'sample_rate_hz': 100.0,
+                              'duration_s': 20.0},
+             'score_sway': {'ok': True,
+                            'units': 'm/s^2 (acceleration, not displacement)',
+                            'path_length': 1.6152,
+                            'path_length_per_s': 0.0808,
+                            'ellipse_area_95': 0.003618,
+                            'duration_s': 20.0,
+                            'sample_rate_hz': 100.0,
+                            'samples': 2000}},
+ 'jitter': {'score_tremor': {'ok': True,
+                             'peak_hz': 7.95,
+                             'peak_magnitude': 0.02419,
+                             'band_power_4_12': 0.000926,
+                             'band_fraction': 1.0,
+                             'samples': 2000,
+                             'sample_rate_hz': 99.9,
+                             'duration_s': 20.0},
+            'score_sway': {'ok': True,
+                           'units': 'm/s^2 (acceleration, not displacement)',
+                           'path_length': 1.6155,
+                           'path_length_per_s': 0.08082,
+                           'ellipse_area_95': 0.00362,
+                           'duration_s': 20.0,
+                           'sample_rate_hz': 99.9,
+                           'samples': 2000}},
+ 'malformed': {'score_tremor': {'ok': True,
+                                'peak_hz': 7.96,
+                                'peak_magnitude': 0.02498,
+                                'band_power_4_12': 0.00096,
+                                'band_fraction': 1.0,
+                                'samples': 2000,
+                                'sample_rate_hz': 100.0,
+                                'duration_s': 20.0},
+               'score_sway': {'ok': True,
+                              'units': 'm/s^2 (acceleration, not displacement)',
+                              'path_length': 1.6152,
+                              'path_length_per_s': 0.0808,
+                              'ellipse_area_95': 0.003618,
+                              'duration_s': 20.0,
+                              'sample_rate_hz': 100.0,
+                              'samples': 2000}},
+ 'short': {'score_tremor': {'ok': False, 'reason': 'only 20 accelerometer samples'},
+           'score_sway': {'ok': False, 'reason': 'only 20 accelerometer samples'}}}
+
+@pytest.mark.parametrize('case', ['regular', 'jitter', 'malformed', 'short'])
+def test_imu_spill_preserves_existing_numerical_results(score, tmp_path, case):
+    import math
+    path = tmp_path/'imu.csv'
+    with path.open('w') as source:
+        source.write('ts,type,x,y,z\n')
+        for i in range(20 if case == 'short' else 2000):
+            stamp = i*10000000+(i%5)*10000 if case == 'jitter' else i*10000000
+            source.write(f'{stamp},accel,{.02*math.sin(i*.03)},{.025*math.cos(i*.05)},{9.81+.1*math.sin(i*.5)}\n')
+            if case == 'malformed':
+                source.write('invalid,accel,no,signal,here\n')
+    for name in ['score_tremor', 'score_sway']:
+        assert score['score_trace'](score[name], path) == IMU_REFERENCE_RESULTS[case][name]
+
+
+def test_imu_source_keeps_exact_rows_and_releases_private_spill(score, tmp_path, monkeypatch):
+    import os
+    path = tmp_path/'imu.csv'
+    with path.open('w') as source:
+        source.write('ts,type,x,y,z\n')
+        for i in range(4100):
+            source.write(f'{i*10000000},accel,{i},2,3\n')
+    opened = []
+    original = score['tempfile'].TemporaryFile
+    def tracked(*args, **kwargs):
+        handle = original(*args, **kwargs)
+        opened.append(handle)
+        return handle
+    monkeypatch.setattr(score['tempfile'], 'TemporaryFile', tracked)
+    with score['_imu_series'](path) as (times, vectors, rate, duration):
+        assert len(times) == len(vectors) == 4100
+        assert [times[i] for i in [0, 2047, 2048, 4099, -1]] == [0, 20.47, 20.48, 40.99, 40.99]
+        assert list(vectors[2047:2050]) == [(2047.,2.,3.),(2048.,2.,3.),(2049.,2.,3.)]
+        assert list(times[-3:][::-1]) == [40.99,40.98,40.97]
+        assert rate == pytest.approx(100) and duration == 40.99
+        assert os.fstat(opened[0].fileno()).st_mode & 0o777 == 0o600
+        assert os.readlink(f'/proc/self/fd/{opened[0].fileno()}').endswith(' (deleted)')
+    assert opened and all(handle.closed for handle in opened)
+
+
+def test_imu_source_failure_closes_spill_without_modifying_trace(score, tmp_path, monkeypatch):
+    path = tmp_path/'imu.csv'
+    path.write_text('ts,type,x,y,z\n0,accel,1,2,3\n')
+    before = path.read_bytes()
+    opened = []
+    original = score['tempfile'].TemporaryFile
+    def tracked(*args, **kwargs):
+        handle = original(*args, **kwargs)
+        opened.append(handle)
+        def failed(*args, **kwargs):
+            raise OSError('synthetic storage exhaustion')
+        handle.write = failed
+        return handle
+    monkeypatch.setattr(score['tempfile'], 'TemporaryFile', tracked)
+    with pytest.raises(OSError, match='storage exhaustion'):
+        with score['_imu_series'](path):
+            pytest.fail('storage failure became a measurement')
+    assert opened and all(handle.closed for handle in opened)
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize('kind', ['backward', 'duplicate', 'nan-x', 'inf-z'])
+def test_imu_spill_preserves_invalid_channel_and_timestamp_rules(score, tmp_path, kind):
+    path = tmp_path/'imu.csv'
+    with path.open('w') as source:
+        source.write('ts,type,x,y,z\n')
+        for i in range(80):
+            stamp = i*10000000
+            if i == 40 and kind in ('backward', 'duplicate'):
+                stamp = (38 if kind == 'backward' else 39)*10000000
+            x = 'nan' if i == 40 and kind == 'nan-x' else '1'
+            z = 'inf' if i == 40 and kind == 'inf-z' else '1'
+            source.write(f'{stamp},accel,{x},0,{z}\n')
+    tremor = score['score_trace'](score['score_tremor'], path)
+    sway = score['score_trace'](score['score_sway'], path)
+    assert not tremor['ok']
+    assert sway['ok'] == (kind == 'inf-z')  # Sway uses the horizontal channels.
+    if kind in ('backward', 'duplicate'):
+        assert 'strictly increase' in tremor['reason'] and 'strictly increase' in sway['reason']
+    else:
+        assert 'non-finite' in tremor['reason']

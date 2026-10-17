@@ -519,7 +519,13 @@ the ledger before retrying instead of treating damaged history as unseen input.
 Only a missing ledger starts empty history. Access failures, dangling links and
 non-regular objects stop processing; regular-file links remain supported.
 CSV readers validate the opened descriptor without blocking on special files,
-including the direct `one` command. Interoception streams recent event rows and
+including the direct `one` command. Raw accelerometer samples and exact median
+intervals spill into private unlinked temporary storage. Tremor and sway use
+lazy sample/axis views with a fixed-size read block instead of lists growing
+with raw trace length. All accepted samples and the existing numerical rules
+are retained. Derived grids and FFT buffers still use the existing million-point
+resampling limit. Raw PPG arrays and the largest individual CSV record still
+grow with input size. Interoception streams recent event rows and
 retains only the nearest matching run, preserving file/line order on ties.
 Candidate and event-file inventories use private disk-backed lexical ordering;
 directory entries stream without Python's whole-directory `Path.iterdir` buffer.

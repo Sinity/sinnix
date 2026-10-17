@@ -45,6 +45,7 @@ import re
 import shutil
 import stat
 import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
@@ -370,28 +371,90 @@ def score_ppg(path: Path) -> dict:
     }
 
 
-def _imu_series(path: Path) -> tuple[list[float], list[tuple[float, float, float]], float, float]:
-    t: list[float] = []
-    xyz: list[tuple[float, float, float]] = []
-    with csv_rows(path) as rows:
-        for r in rows:
-            if len(r) < 5 or r[1] != "accel":
-                continue
-            try:
-                stamp = int(r[0]) / 1e9
-                vector = (float(r[2]), float(r[3]), float(r[4]))
-                t.append(stamp)
-                xyz.append(vector)
-            except OverflowError as error:
-                raise UnscorableTrace("trace timestamp exceeds numeric range") from error
-            except ValueError:
-                continue
-    if len(t) < 32:
-        return t, xyz, 0.0, 0.0
-    dts = sorted(t[i + 1] - t[i] for i in range(len(t) - 1) if t[i + 1] > t[i])
-    median_dt = dts[len(dts) // 2] if dts else 0.0
-    rate = 1.0 / median_dt if median_dt else 0.0
-    return t, xyz, rate, t[-1] - t[0]
+_IMU_SAMPLE = struct.Struct("=dddd")
+
+
+class _IMUSampleStore:
+    def __init__(self, source):
+        self.source = source
+        self.block_start = -1
+        self.block = b""
+
+    def row(self, index: int) -> tuple[float, float, float, float]:
+        offset = index * _IMU_SAMPLE.size
+        start = offset // 65536 * 65536
+        if start != self.block_start:
+            self.source.seek(start)
+            self.block = self.source.read(65536)
+            self.block_start = start
+        return _IMU_SAMPLE.unpack_from(self.block, offset - start)
+
+
+class _IMUColumn(Sequence):
+    def __init__(self, store: _IMUSampleStore, indices: range, project):
+        self.store, self.indices, self.project = store, indices, project
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+    def __getitem__(self, index):
+        if isinstance(index, slice):
+            return _IMUColumn(self.store, self.indices[index], self.project)
+        return self.project(self.store.row(self.indices[index]))
+
+    def map(self, transform):
+        return _IMUColumn(self.store, self.indices, lambda row: transform(self.project(row)))
+
+
+@contextmanager
+def _imu_series(path: Path) -> Iterator[tuple[Sequence[float], Sequence[tuple[float, float, float]], float, float]]:
+    # Retain every accepted sample in unlinked private storage. Only one
+    # fixed-size sample block lives in Python; slices and projections remain
+    # lazy. The median is exact, ordered on disk rather than in a raw-size list.
+    with tempfile.TemporaryFile() as raw, _scratch_database() as database:
+        database.execute(
+            "CREATE TABLE intervals (value REAL, ordinal INTEGER, "
+            "PRIMARY KEY(value,ordinal)) WITHOUT ROWID"
+        )
+        count = 0
+        previous = None
+
+        def intervals():
+            nonlocal count, previous
+            with csv_rows(path) as rows:
+                for row in rows:
+                    if len(row) < 5 or row[1] != "accel":
+                        continue
+                    try:
+                        stamp = int(row[0]) / 1e9
+                        vector = (float(row[2]), float(row[3]), float(row[4]))
+                    except OverflowError as error:
+                        raise UnscorableTrace("trace timestamp exceeds numeric range") from error
+                    except ValueError:
+                        continue
+                    raw.write(_IMU_SAMPLE.pack(stamp, *vector))
+                    delta = stamp - previous if previous is not None else 0.0
+                    previous = stamp
+                    count += 1
+                    if delta > 0:
+                        yield delta, count
+
+        database.executemany("INSERT INTO intervals VALUES (?,?)", intervals())
+        database.commit()
+        raw.flush()
+        store = _IMUSampleStore(raw)
+        t = _IMUColumn(store, range(count), lambda row: row[0])
+        xyz = _IMUColumn(store, range(count), lambda row: row[1:])
+        if count < 32:
+            yield t, xyz, 0.0, 0.0
+            return
+        interval_count = database.execute("SELECT count(*) FROM intervals").fetchone()[0]
+        median_dt = database.execute(
+            "SELECT value FROM intervals ORDER BY value,ordinal LIMIT 1 OFFSET ?",
+            (interval_count // 2,),
+        ).fetchone()[0] if interval_count else 0.0
+        rate = 1.0 / median_dt if median_dt else 0.0
+        yield t, xyz, rate, t[-1] - t[0]
 
 
 def score_tremor(path: Path) -> dict:
@@ -402,37 +465,37 @@ def score_tremor(path: Path) -> dict:
     is what makes that band resolvable at all — the usual 50 Hz UI rate puts
     Nyquist at 25 Hz and aliases the top of it.
     """
-    t, xyz, rate, duration = _imu_series(path)
-    if rate <= 0:
-        return {"ok": False, "reason": f"only {len(t)} accelerometer samples"}
-    if rate < 30:
-        return {"ok": False, "reason": f"{rate:.0f} Hz sampling cannot resolve a 4-12 Hz band"}
+    with _imu_series(path) as (t, xyz, rate, duration):
+        if rate <= 0:
+            return {"ok": False, "reason": f"only {len(t)} accelerometer samples"}
+        if rate < 30:
+            return {"ok": False, "reason": f"{rate:.0f} Hz sampling cannot resolve a 4-12 Hz band"}
 
-    mags = [math.sqrt(x * x + y * y + z * z) for x, y, z in xyz]
-    grid = resample_uniform(t, mags, rate)
-    if len(grid) < 64:
-        return {"ok": False, "reason": "trace too short after resampling"}
-    freqs, mags_spec = spectrum(grid, rate)
-    if not freqs:
-        return {"ok": False, "reason": "spectrum unavailable"}
+        mags = xyz.map(lambda p: math.sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]))
+        grid = resample_uniform(t, mags, rate)
+        if len(grid) < 64:
+            return {"ok": False, "reason": "trace too short after resampling"}
+        freqs, mags_spec = spectrum(grid, rate)
+        if not freqs:
+            return {"ok": False, "reason": "spectrum unavailable"}
 
-    band = [(f, m) for f, m in zip(freqs, mags_spec) if 3.0 <= f <= 15.0]
-    if not band:
-        return {"ok": False, "reason": "no energy in the tremor band"}
-    peak_hz, peak_mag = max(band, key=lambda p: p[1])
-    power_4_12 = sum(m * m for f, m in zip(freqs, mags_spec) if 4.0 <= f <= 12.0)
-    total = sum(m * m for f, m in zip(freqs, mags_spec) if f >= 0.5) or 1e-12
+        band = [(f, m) for f, m in zip(freqs, mags_spec) if 3.0 <= f <= 15.0]
+        if not band:
+            return {"ok": False, "reason": "no energy in the tremor band"}
+        peak_hz, peak_mag = max(band, key=lambda p: p[1])
+        power_4_12 = sum(m * m for f, m in zip(freqs, mags_spec) if 4.0 <= f <= 12.0)
+        total = sum(m * m for f, m in zip(freqs, mags_spec) if f >= 0.5) or 1e-12
 
-    return {
-        "ok": True,
-        "peak_hz": round(peak_hz, 2),
-        "peak_magnitude": round(peak_mag, 5),
-        "band_power_4_12": round(power_4_12, 6),
-        "band_fraction": round(power_4_12 / total, 4),
-        "samples": len(t),
-        "sample_rate_hz": round(rate, 1),
-        "duration_s": round(duration, 1),
-    }
+        return {
+            "ok": True,
+            "peak_hz": round(peak_hz, 2),
+            "peak_magnitude": round(peak_mag, 5),
+            "band_power_4_12": round(power_4_12, 6),
+            "band_fraction": round(power_4_12 / total, 4),
+            "samples": len(t),
+            "sample_rate_hz": round(rate, 1),
+            "duration_s": round(duration, 1),
+        }
 
 
 def score_sway(path: Path) -> dict:
@@ -444,47 +507,47 @@ def score_sway(path: Path) -> dict:
     no meaning. Path length and the 95% ellipse are computed on the low-passed
     horizontal acceleration, and the record says so.
     """
-    t, xyz, rate, duration = _imu_series(path)
-    if rate <= 0:
-        return {"ok": False, "reason": f"only {len(t)} accelerometer samples"}
+    with _imu_series(path) as (t, xyz, rate, duration):
+        if rate <= 0:
+            return {"ok": False, "reason": f"only {len(t)} accelerometer samples"}
 
-    xs = resample_uniform(t, [p[0] for p in xyz], rate)
-    ys = resample_uniform(t, [p[1] for p in xyz], rate)
-    if len(xs) < 32:
-        return {"ok": False, "reason": "trace too short after resampling"}
-    # Sway is slow; anything above a few Hz is tremor or handling noise.
-    win = max(2, int(rate / 3.0))
-    xs = [v - m for v, m in zip(xs, moving_average(xs, max(2, int(rate * 5))))]
-    ys = [v - m for v, m in zip(ys, moving_average(ys, max(2, int(rate * 5))))]
-    xs = moving_average(xs, win)
-    ys = moving_average(ys, win)
+        xs = resample_uniform(t, xyz.map(lambda p: p[0]), rate)
+        ys = resample_uniform(t, xyz.map(lambda p: p[1]), rate)
+        if len(xs) < 32:
+            return {"ok": False, "reason": "trace too short after resampling"}
+        # Sway is slow; anything above a few Hz is tremor or handling noise.
+        win = max(2, int(rate / 3.0))
+        xs = [v - m for v, m in zip(xs, moving_average(xs, max(2, int(rate * 5))))]
+        ys = [v - m for v, m in zip(ys, moving_average(ys, max(2, int(rate * 5))))]
+        xs = moving_average(xs, win)
+        ys = moving_average(ys, win)
 
-    path_len = sum(
-        math.hypot(xs[i + 1] - xs[i], ys[i + 1] - ys[i]) for i in range(len(xs) - 1)
-    )
-    mx = sum(xs) / len(xs)
-    my = sum(ys) / len(ys)
-    cxx = sum((v - mx) ** 2 for v in xs) / len(xs)
-    cyy = sum((v - my) ** 2 for v in ys) / len(ys)
-    cxy = sum((a - mx) * (b - my) for a, b in zip(xs, ys)) / len(xs)
-    # Eigenvalues of the 2x2 covariance, closed form; the 95% ellipse is the
-    # chi-square(2) 95th percentile (5.991) scaled by the principal axes.
-    tr, det = cxx + cyy, cxx * cyy - cxy * cxy
-    disc = max(0.0, tr * tr / 4 - det)
-    l1 = tr / 2 + math.sqrt(disc)
-    l2 = max(0.0, tr / 2 - math.sqrt(disc))
-    area = math.pi * 5.991 * math.sqrt(max(l1, 0.0) * l2)
+        path_len = sum(
+            math.hypot(xs[i + 1] - xs[i], ys[i + 1] - ys[i]) for i in range(len(xs) - 1)
+        )
+        mx = sum(xs) / len(xs)
+        my = sum(ys) / len(ys)
+        cxx = sum((v - mx) ** 2 for v in xs) / len(xs)
+        cyy = sum((v - my) ** 2 for v in ys) / len(ys)
+        cxy = sum((a - mx) * (b - my) for a, b in zip(xs, ys)) / len(xs)
+        # Eigenvalues of the 2x2 covariance, closed form; the 95% ellipse is the
+        # chi-square(2) 95th percentile (5.991) scaled by the principal axes.
+        tr, det = cxx + cyy, cxx * cyy - cxy * cxy
+        disc = max(0.0, tr * tr / 4 - det)
+        l1 = tr / 2 + math.sqrt(disc)
+        l2 = max(0.0, tr / 2 - math.sqrt(disc))
+        area = math.pi * 5.991 * math.sqrt(max(l1, 0.0) * l2)
 
-    return {
-        "ok": True,
-        "units": "m/s^2 (acceleration, not displacement)",
-        "path_length": round(path_len, 4),
-        "path_length_per_s": round(path_len / duration, 5) if duration else None,
-        "ellipse_area_95": round(area, 6),
-        "duration_s": round(duration, 1),
-        "sample_rate_hz": round(rate, 1),
-        "samples": len(t),
-    }
+        return {
+            "ok": True,
+            "units": "m/s^2 (acceleration, not displacement)",
+            "path_length": round(path_len, 4),
+            "path_length_per_s": round(path_len / duration, 5) if duration else None,
+            "ellipse_area_95": round(area, 6),
+            "duration_s": round(duration, 1),
+            "sample_rate_hz": round(rate, 1),
+            "samples": len(t),
+        }
 
 
 # ------------------------------------------------------------- interoception
