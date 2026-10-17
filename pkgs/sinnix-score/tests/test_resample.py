@@ -283,11 +283,13 @@ def test_invalid_ledger_refuses_before_scoring(score, tmp_path, row):
 def test_ledger_streams_and_preserves_legacy_keys(score, tmp_path, monkeypatch):
     ledger = tmp_path / 'scored.jsonl'
     ledger.write_text('{"file":"a.csv","bytes":12}\n{"file":"b.csv","bytes":0,"sidecar_signature":"absent"}\n')
-    score['ledger_seen'].__globals__['LEDGER'] = ledger
+    score['cmd_run'].__globals__['LEDGER'] = ledger
     def forbid(*args, **kwargs):
         raise AssertionError('whole-file read')
     monkeypatch.setattr(Path, 'read_text', forbid)
-    assert score['ledger_seen']() == {('a.csv', 12, None), ('b.csv', 0, 'absent')}
+    with score['ledger_seen']() as seen:
+        assert ('a.csv', 12, None) in seen and ('b.csv', 0, 'absent') in seen
+        assert ('a.csv', 12, '') not in seen and ('b.csv', 0, None) not in seen
 
 
 @pytest.mark.parametrize('kind', ['directory', 'fifo', 'broken-link'])
@@ -300,32 +302,36 @@ def test_unavailable_ledger_is_not_empty_history(score, tmp_path, kind):
         os.mkfifo(ledger)
     else:
         ledger.symlink_to(tmp_path / 'missing')
-    score['ledger_seen'].__globals__['LEDGER'] = ledger
+    score['cmd_run'].__globals__['LEDGER'] = ledger
     with pytest.raises((OSError, ValueError)):
-        score['ledger_seen']()
+        with score['ledger_seen']():
+            pass
     assert ledger.lstat()
 
 
 def test_ledger_absence_and_regular_link(score, tmp_path):
     ledger = tmp_path / 'scored.jsonl'
-    score['ledger_seen'].__globals__['LEDGER'] = ledger
-    assert score['ledger_seen']() == set()
+    score['cmd_run'].__globals__['LEDGER'] = ledger
+    with score['ledger_seen']() as seen:
+        assert ('a.csv', 12, None) not in seen
     target = tmp_path / 'history'
     target.write_text('{"file":"a.csv","bytes":12}\n')
     ledger.symlink_to(target)
-    assert score['ledger_seen']() == {('a.csv', 12, None)}
+    with score['ledger_seen']() as seen:
+        assert ('a.csv', 12, None) in seen
     assert ledger.is_symlink()
 
 
 def test_ledger_open_denial_propagates(score, tmp_path, monkeypatch):
     ledger = tmp_path / 'scored.jsonl'
     ledger.write_text('')
-    score['ledger_seen'].__globals__['LEDGER'] = ledger
+    score['cmd_run'].__globals__['LEDGER'] = ledger
     def deny(*args, **kwargs):
         raise PermissionError('synthetic denied ledger')
-    monkeypatch.setitem(score['ledger_seen'].__globals__, 'open', deny)
+    monkeypatch.setitem(score['cmd_run'].__globals__, 'open', deny)
     with pytest.raises(PermissionError, match='synthetic denied ledger'):
-        score['ledger_seen']()
+        with score['ledger_seen']():
+            pass
 
 
 def test_scorer_waits_for_other_process_owner_before_reading_ledger(score, tmp_path):
@@ -377,3 +383,62 @@ def test_scorer_releases_owner_after_failure(score, tmp_path):
         score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True))
     with (root / '.score.lock').open('a') as owner:
         fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def test_history_memory_does_not_retain_all_ledger_keys(score, tmp_path):
+    import tracemalloc
+    ledger = tmp_path / 'scored.jsonl'
+    with ledger.open('w') as output:
+        for n in range(25000):
+            output.write(json.dumps({'file': f'trace-{n:08d}.csv', 'bytes': n, 'sidecar_signature': 'sha256:' + str(n).zfill(64)}) + '\n')
+    score['cmd_run'].__globals__['LEDGER'] = ledger
+    tracemalloc.start()
+    try:
+        with score['ledger_seen']() as history:
+            assert ('trace-00024999.csv', 24999, 'sha256:' + str(24999).zfill(64)) in history
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1024 * 1024, f'history retained {peak} Python bytes'
+
+
+def test_disk_history_preserves_full_key_and_integer_semantics(score, tmp_path):
+    ledger = tmp_path / 'scored.jsonl'
+    rows = [dict(file='unicode-ą.csv', bytes=2**80), dict(file='a.csv', bytes=0, sidecar_signature=''), dict(file='a.csv', bytes=1, sidecar_signature='absent')]
+    ledger.write_text(''.join(json.dumps(row) + '\n' for row in rows + rows))
+    score['cmd_run'].__globals__['LEDGER'] = ledger
+    with score['ledger_seen']() as seen:
+        assert ('unicode-ą.csv', 2**80, None) in seen
+        assert ('unicode-ą.csv', 2**80 + 1, None) not in seen
+        assert ('a.csv', 0, '') in seen and ('a.csv', 0, None) not in seen
+        assert ('a.csv', 1, 'absent') in seen and ('a.csv', 1, '') not in seen
+        assert ('a.csv', 2, 'absent') not in seen
+        database = seen.database
+    with pytest.raises(score['sqlite3'].ProgrammingError):
+        database.execute('SELECT 1')
+
+
+def test_history_connection_closes_after_processing_failure(score, tmp_path):
+    score['cmd_run'].__globals__['LEDGER'] = tmp_path / 'missing'
+    with pytest.raises(RuntimeError, match='synthetic processing failure'):
+        with score['ledger_seen']() as seen:
+            database = seen.database
+            raise RuntimeError('synthetic processing failure')
+    with pytest.raises(score['sqlite3'].ProgrammingError):
+        database.execute('SELECT 1')
+
+
+def test_history_storage_failure_stops_before_scores_or_receipts(score, tmp_path, monkeypatch):
+    root = tmp_path / 'scores'
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    trace(outbox / 'a.csv', 'imu', False)
+    glob = score['cmd_run'].__globals__
+    def full(*args, **kwargs):
+        raise score['sqlite3'].OperationalError('synthetic database or disk is full')
+    monkeypatch.setattr(score['sqlite3'], 'connect', full)
+    calls = []
+    glob.update(SCORES=root, LEDGER=root / 'scored.jsonl', emit_receipt=lambda *args: calls.append(args))
+    with pytest.raises(score['sqlite3'].OperationalError, match='disk is full'):
+        score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=False))
+    assert set(root.iterdir()) == {root / '.score.lock'} and not calls

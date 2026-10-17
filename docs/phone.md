@@ -496,6 +496,11 @@ create repeated receipts and corrected metadata can be processed again.
 Legacy ledger entries have no sidecar binding and are retained without
 inventing retrospective provenance or automatically launching new scoring.
 The scorer streams ledger rows and validates deduplication keys before scoring.
+Historical keys are loaded into a private temporary SQLite lookup with a 1 MiB
+page cache and disk spill under the calling owner’s `TMPDIR`, rather than a
+Python set proportional to retained history. The temporary database is never
+published; its Unix spill file is unlinked while open and released on close or
+process exit. Storage failures stop processing before new scores or receipts.
 Malformed rows stop the run without new scores or receipts; preserve and repair
 the ledger before retrying instead of treating damaged history as unseen input.
 Only a missing ledger starts empty history. Access failures, dangling links and
