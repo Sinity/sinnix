@@ -8,7 +8,7 @@
 #
 # Usage:
 #   nix run .#router-deploy               # full deployment (backup + packages + config + health check)
-#   nix run .#router-deploy -- --dry-run   # print scripts without applying
+#   nix run .#router-deploy -- --dry-run   # preview undecrypted scripts without applying
 #   nix run .#router-shell                 # SSH shell into the router
 #   nix run .#router-health                # verify router health post-deploy
 
@@ -315,11 +315,25 @@ _: {
               echo "Router: ${routerCfg.sshUser}@${routerCfg.address}"
               echo ""
               echo "Options:"
-              echo "  --dry-run   Print scripts without executing on router"
+              echo "  --dry-run   Preview undecrypted scripts without contacting router"
               exit 0
+              ;;
+            *)
+              echo "Unknown option: $arg" >&2
+              exit 64
               ;;
           esac
         done
+
+        # Preview the undecrypted source without reading secrets or staging it.
+        if [ "$DRY_RUN" -eq 1 ]; then
+          echo "=== DRY RUN: undecrypted scripts; secret markers are retained ==="
+          for script in install-packages.sh configure.sh health-check.sh; do
+            echo "--- $script ---"
+            cat "$ORIG_CONFIG_DIR/$script"
+          done
+          exit 0
+        fi
 
         # ── Inject WiFi PSK from agenix secret ──
         CONFIG_DIR=$(mktemp -d)
@@ -327,60 +341,9 @@ _: {
         cp "$ORIG_CONFIG_DIR"/* "$CONFIG_DIR/"
         chmod u+w "$CONFIG_DIR"/*
 
-        if [ -f "$WIFI_PSK_FILE" ]; then
-          WIFI_PSK=$(cat "$WIFI_PSK_FILE")
-          ${pkgs.gnused}/bin/sed -i "s|@@WIFI_PSK@@|$WIFI_PSK|g" "$CONFIG_DIR/configure.sh"
-          echo "✓ WiFi PSK injected from agenix secret"
-        else
-          echo "⚠  $WIFI_PSK_FILE not found — WiFi PSK will be a placeholder."
-          echo "   Create it: echo -n 'your-psk' | agenix -e secret/wifi-psk.age"
-        fi
-
-        if [ -f "$SINNIX_PRIME_MAC_FILE" ]; then
-          SINNIX_PRIME_MAC=$(cat "$SINNIX_PRIME_MAC_FILE")
-          ${pkgs.gnused}/bin/sed -i "s|@@SINNIX_PRIME_MAC@@|$SINNIX_PRIME_MAC|g" "$CONFIG_DIR/configure.sh"
-          echo "✓ sinnix-prime MAC injected from agenix secret"
-        else
-          echo "⚠  $SINNIX_PRIME_MAC_FILE not found — static lease MAC will be a placeholder."
-          echo "   Create it: echo -n 'aa:bb:cc:dd:ee:ff' | agenix -e secret/router-sinnix-prime-mac.age"
-        fi
-
-        if [ -f "$ROUTER_AUTHORIZED_KEY_FILE" ]; then
-          ROUTER_AUTHORIZED_KEY_FILE="$ROUTER_AUTHORIZED_KEY_FILE" \
-          ROUTER_CONFIGURE_SCRIPT="$CONFIG_DIR/configure.sh" \
-            ${pkgs.python3}/bin/python - <<'PY'
-          import os
-          from pathlib import Path
-
-          key = Path(os.environ["ROUTER_AUTHORIZED_KEY_FILE"]).read_text().strip()
-          if "\n" in key or not key.startswith(("ssh-ed25519 ", "ssh-rsa ", "ecdsa-sha2-")):
-              raise SystemExit("router SSH authorization must contain one OpenSSH public key")
-          script = Path(os.environ["ROUTER_CONFIGURE_SCRIPT"])
-          text = script.read_text()
-          marker = "@@ROUTER_AUTHORIZED_KEY@@"
-          if text.count(marker) != 1:
-              raise SystemExit("router SSH authorization marker is missing or duplicated")
-          script.write_text(text.replace(marker, key))
-          PY
-          echo "✓ router SSH authorization injected from agenix secret"
-        else
-          echo "✗ router SSH authorization is missing: $ROUTER_AUTHORIZED_KEY_FILE" >&2
-          exit 66
-        fi
-
-        if [ "$DRY_RUN" -eq 1 ]; then
-          echo "=== DRY RUN: scripts that would be applied ==="
-          echo ""
-          echo "--- install-packages.sh ---"
-          cat "$CONFIG_DIR/install-packages.sh"
-          echo ""
-          echo "--- configure.sh ---"
-          cat "$CONFIG_DIR/configure.sh"
-          echo ""
-          echo "--- health-check.sh ---"
-          cat "$CONFIG_DIR/health-check.sh"
-          exit 0
-        fi
+        ${pkgs.python3}/bin/python ${./router-secrets.py} \
+          "$CONFIG_DIR/configure.sh" "$WIFI_PSK_FILE" \
+          "$SINNIX_PRIME_MAC_FILE" "$ROUTER_AUTHORIZED_KEY_FILE"
 
         ${sshSetupFragment}
 
@@ -487,6 +450,16 @@ _: {
       packages = {
         router-config = routerConfigDrv;
       };
+
+      checks.router-deploy-runtime =
+        pkgs.runCommand "router-deploy-runtime"
+          {
+            nativeBuildInputs = [ pkgs.python3 ];
+          }
+          ''
+            python ${./tests/router_deploy.py} ${deployScript}/bin/router-deploy ${routerConfigDrv} ${./router-secrets.py}
+            touch "$out"
+          '';
 
       apps = {
         router-deploy = {
