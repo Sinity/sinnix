@@ -912,7 +912,13 @@ info)
   }
   page_id=$(resolve_page_id "$1")
   shift
-  curl -s "${CDP_BASE}/json" | jq --arg id "$page_id" '.[] | select(.id == $id)'
+  targets=$(curl --fail --silent --show-error --max-time "$CDP_RESPONSE_TIMEOUT_SEC" "${CDP_BASE}/json")
+  page_info=$(jq --arg id "$page_id" '.[] | select(.id == $id)' <<<"$targets")
+  [[ -n $page_info ]] || {
+    echo "page not found: $page_id" >&2
+    exit 1
+  }
+  printf '%s\n' "$page_info"
   ;;
 
 new-tab)
