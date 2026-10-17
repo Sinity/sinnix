@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import cmath
+from contextlib import contextmanager
 import datetime as dt
 import json
 import math
@@ -43,7 +44,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Iterator, Sequence
 
 from sinnix_lib.ledger import append_jsonl, utc_ts
 from sinnix_lib.phone_inbox import emit_receipt
@@ -265,18 +266,19 @@ def stdev(xs: Sequence[float]) -> float:
 # ------------------------------------------------------------------- traces
 
 
-def read_csv(path: Path) -> tuple[list[str], list[list[str]]]:
-    rows: list[list[str]] = []
-    header: list[str] = []
+@contextmanager
+def csv_rows(path: Path) -> Iterator[Iterator[list[str]]]:
+    """Stream data rows and close the source even if scoring refuses a row."""
     with path.open(encoding="utf-8", errors="replace") as fh:
-        for i, line in enumerate(fh):
-            parts = line.rstrip("\n").split(",")
-            if i == 0:
-                header = parts
-                continue
-            if parts and parts[0]:
-                rows.append(parts)
-    return header, rows
+        next(fh, None)  # The instrument's header is not a signal sample.
+
+        def rows() -> Iterator[list[str]]:
+            for line in fh:
+                parts = line.rstrip("\n").split(",")
+                if parts and parts[0]:
+                    yield parts
+
+        yield rows()
 
 
 def score_ppg(path: Path) -> dict:
@@ -286,16 +288,18 @@ def score_ppg(path: Path) -> dict:
     fingertip, which is a very small ripple on a very large baseline, so the
     band-pass matters more than the peak picker.
     """
-    _, rows = read_csv(path)
     t: list[float] = []
     y: list[float] = []
-    for r in rows:
-        try:
-            stamp, value = int(r[0]) / 1e9, float(r[1])
-            t.append(stamp)
-            y.append(value)
-        except (ValueError, IndexError):
-            continue
+    with csv_rows(path) as rows:
+        for r in rows:
+            try:
+                stamp, value = int(r[0]) / 1e9, float(r[1])
+                t.append(stamp)
+                y.append(value)
+            except OverflowError as error:
+                raise UnscorableTrace("trace timestamp exceeds numeric range") from error
+            except (ValueError, IndexError):
+                continue
     if len(t) < 60:
         return {"ok": False, "reason": f"only {len(t)} samples; a pulse needs a real trace"}
 
@@ -356,19 +360,21 @@ def score_ppg(path: Path) -> dict:
 
 
 def _imu_series(path: Path) -> tuple[list[float], list[tuple[float, float, float]], float, float]:
-    _, rows = read_csv(path)
     t: list[float] = []
     xyz: list[tuple[float, float, float]] = []
-    for r in rows:
-        if len(r) < 5 or r[1] != "accel":
-            continue
-        try:
-            stamp = int(r[0]) / 1e9
-            vector = (float(r[2]), float(r[3]), float(r[4]))
-            t.append(stamp)
-            xyz.append(vector)
-        except ValueError:
-            continue
+    with csv_rows(path) as rows:
+        for r in rows:
+            if len(r) < 5 or r[1] != "accel":
+                continue
+            try:
+                stamp = int(r[0]) / 1e9
+                vector = (float(r[2]), float(r[3]), float(r[4]))
+                t.append(stamp)
+                xyz.append(vector)
+            except OverflowError as error:
+                raise UnscorableTrace("trace timestamp exceeds numeric range") from error
+            except ValueError:
+                continue
     if len(t) < 32:
         return t, xyz, 0.0, 0.0
     dts = sorted(t[i + 1] - t[i] for i in range(len(t) - 1) if t[i + 1] > t[i])

@@ -111,3 +111,47 @@ def test_moving_average_retains_small_signal_after_large_value_leaves(score):
         lo = max(0, min(i - window // 2, len(values) - window))
         expected.append(math.fsum(values[lo:lo + window]) / window)
     assert score['moving_average'](values, window) == expected
+
+
+def test_ignored_csv_rows_do_not_accumulate_in_memory(score, tmp_path):
+    import tracemalloc
+
+    path = tmp_path / 'ignored.csv'
+    with path.open('w') as stream:
+        stream.write('ts,value,unused\n')
+        for _ in range(2000):
+            stream.write('invalid,1,' + 'x' * 4096 + '\n')
+    tracemalloc.start()
+    try:
+        result = score['score_ppg'](path)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert result['ok'] is False
+    assert 'only 0 samples' in result['reason']
+    assert peak < 512 * 1024
+
+
+@pytest.mark.parametrize('mode', ['ppg', 'imu', 'imu_sway'])
+def test_timestamp_overflow_is_recorded_without_stalling_later_files(score, tmp_path, mode):
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    bad, good = outbox / 'a.csv', outbox / 'b.csv'
+    columns = ',1' if mode == 'ppg' else ',accel,0,0,1'
+    header = 'ts,value' if mode == 'ppg' else 'ts,type,x,y,z'
+    bad.write_text(header + '\n' + '9' * 400 + columns + '\n')
+    bad.with_name(bad.name + '.json').write_text(json.dumps({'mode': mode}))
+    trace(good, mode, False)
+    original = bad.read_bytes()
+    root = tmp_path / 'scores'
+    score['cmd_run'].__globals__.update(SCORES=root, LEDGER=root / 'scored.jsonl')
+    args = argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True)
+    assert score['cmd_run'](args) == 0
+    records = [json.loads(line) for line in next(root.glob('20*.jsonl')).read_text().splitlines()]
+    assert [r['file'] for r in records] == ['a.csv', 'b.csv']
+    assert records[0]['ok'] is False
+    assert 'numeric range' in records[0]['reason']
+    assert bad.read_bytes() == original
+    before = (root / 'scored.jsonl').read_bytes()
+    assert score['cmd_run'](args) == 0
+    assert (root / 'scored.jsonl').read_bytes() == before
