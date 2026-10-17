@@ -61,3 +61,53 @@ def test_native_run_records_refusal_continues_and_does_not_repeat(score, tmp_pat
     before = (root / 'scored.jsonl').read_bytes()
     assert score['cmd_run'](args) == 0
     assert (root / 'scored.jsonl').read_bytes() == before
+
+
+@pytest.mark.parametrize('window', [0, 1, 2, 3, 8, 17, 31, 32])
+def test_moving_average_preserves_centered_and_clamped_windows(score, window):
+    import math
+
+    values = [100.0 + math.sin(i / 3) - i / 100 for i in range(31)]
+    if window <= 1 or window > len(values):
+        expected = values
+    else:
+        expected = []
+        for i in range(len(values)):
+            lo = max(0, min(i - window // 2, len(values) - window))
+            expected.append(sum(values[lo:lo + window]) / window)
+    assert score['moving_average'](values, window) == pytest.approx(expected, abs=1e-10)
+
+
+def test_moving_average_work_is_linear_for_wide_windows(score):
+    class CountedSignal:
+        def __init__(self, count):
+            self.values = [float(i % 11) for i in range(count)]
+            self.reads = 0
+
+        def __len__(self):
+            return len(self.values)
+
+        def __getitem__(self, key):
+            if isinstance(key, slice):
+                self.reads += len(range(*key.indices(len(self))))
+            else:
+                self.reads += 1
+            return self.values[key]
+
+    values = CountedSignal(4096)
+    output = score['moving_average'](values, 2048)
+    assert len(output) == len(values)
+    assert values.reads <= 3 * len(values)
+
+
+
+def test_moving_average_retains_small_signal_after_large_value_leaves(score):
+    import math
+
+    values = [1e16, 1.0, 1.0, -1e16, 2.0, 3.0, 4.0]
+    window = 2
+    expected = []
+    for i in range(len(values)):
+        lo = max(0, min(i - window // 2, len(values) - window))
+        expected.append(math.fsum(values[lo:lo + window]) / window)
+    assert score['moving_average'](values, window) == expected

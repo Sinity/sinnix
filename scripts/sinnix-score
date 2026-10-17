@@ -174,17 +174,32 @@ def resample_uniform(t: Sequence[float], y: Sequence[float], rate_hz: float) -> 
 def moving_average(y: Sequence[float], window: int) -> list[float]:
     if window <= 1 or window > len(y):
         return list(y)
+    # Slide the same centered, edge-clamped window instead of summing it
+    # again at every point. Compensate additions/removals so a large outgoing
+    # value does not erase the small samples left in the window.
+    total = correction = 0.0
+
+    def add(value: float) -> None:
+        nonlocal total, correction
+        updated = total + value
+        if abs(total) >= abs(value):
+            correction += (total - updated) + value
+        else:
+            correction += (value - updated) + total
+        total = updated
+
+    for value in y[:window]:
+        add(value)
     out: list[float] = []
-    acc = sum(y[:window])
+    previous_lo = 0
     half = window // 2
     for i in range(len(y)):
-        lo, hi = i - half, i - half + window
-        if lo < 0 or hi > len(y):
-            lo = max(0, min(lo, len(y) - window))
-            acc_local = sum(y[lo : lo + window])
-            out.append(acc_local / window)
-        else:
-            out.append(sum(y[lo:hi]) / window)
+        lo = max(0, min(i - half, len(y) - window))
+        if lo != previous_lo:
+            add(-y[previous_lo])
+            add(y[lo + window - 1])
+            previous_lo = lo
+        out.append((total + correction) / window)
     return out
 
 
