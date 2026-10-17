@@ -1138,3 +1138,155 @@ def test_imu_spill_preserves_invalid_channel_and_timestamp_rules(score, tmp_path
         assert 'strictly increase' in tremor['reason'] and 'strictly increase' in sway['reason']
     else:
         assert 'non-finite' in tremor['reason']
+
+
+PPG_REFERENCE_RESULTS = {'regular': {'ok': True,
+             'hr_bpm': 72.0,
+             'rmssd_ms': 0.0,
+             'sdnn_ms': 0.0,
+             'beats': 80,
+             'duration_s': 66.6,
+             'sample_rate_hz': 30.0,
+             'jitter_cv': 0.0,
+             'trustworthy': True,
+             'caveat': None},
+ 'jitter': {'ok': True,
+            'hr_bpm': 72.0,
+            'rmssd_ms': 0.0,
+            'sdnn_ms': 0.0,
+            'beats': 80,
+            'duration_s': 66.6,
+            'sample_rate_hz': 29.99,
+            'jitter_cv': 0.001,
+            'trustworthy': True,
+            'caveat': None},
+ 'variable-pulse': {'ok': True,
+                    'hr_bpm': 72.0,
+                    'rmssd_ms': 22.6,
+                    'sdnn_ms': 16.0,
+                    'beats': 80,
+                    'duration_s': 66.6,
+                    'sample_rate_hz': 30.0,
+                    'jitter_cv': 0.0,
+                    'trustworthy': True,
+                    'caveat': None},
+ 'malformed': {'ok': True,
+               'hr_bpm': 72.0,
+               'rmssd_ms': 0.0,
+               'sdnn_ms': 0.0,
+               'beats': 80,
+               'duration_s': 66.6,
+               'sample_rate_hz': 30.0,
+               'jitter_cv': 0.0,
+               'trustworthy': True,
+               'caveat': None},
+ 'short': {'ok': False, 'reason': 'only 20 samples; a pulse needs a real trace'},
+ 'low-rate': {'ok': False,
+              'reason': 'frame rate 5.0 Hz is too low to resolve a pulse',
+              'sample_rate_hz': 5.0},
+ 'nonadvancing': {'ok': False, 'reason': 'timestamps do not advance'},
+ 'backward': {'ok': False, 'reason': 'trace timestamps must strictly increase'},
+ 'nonfinite': {'ok': False, 'reason': 'trace contains non-finite timestamps or signal values'}}
+
+
+@pytest.mark.parametrize('case', list(PPG_REFERENCE_RESULTS))
+def test_ppg_spill_preserves_pulse_hrv_and_rejection_results(score, tmp_path, case):
+    import math
+    path = tmp_path/'ppg.csv'
+    with path.open('w') as source:
+        source.write('ts,value\n')
+        for i in range(20 if case == 'short' else 2000):
+            stamp = i*(200000000 if case == 'low-rate' else 33333333)
+            if case == 'jitter': stamp += (i%7-3)*10000
+            if case == 'nonadvancing': stamp = 0
+            if case == 'backward' and i == 100: stamp = 98*33333333
+            phase = 2*math.pi*(1.2*i/30+(.03*math.sin(i*.03) if case == 'variable-pulse' else 0))
+            value = 100+2*math.sin(phase)+.2*math.sin(2*phase)
+            if case == 'nonfinite' and i == 100: value = float('nan')
+            source.write(f'{stamp},{value}\n')
+            if case == 'malformed' and i%100 == 0: source.write('invalid,no-signal\n')
+    assert score['score_trace'](score['score_ppg'], path) == PPG_REFERENCE_RESULTS[case]
+
+
+def test_ppg_huge_gap_refuses_before_jitter_overflow(score, tmp_path):
+    path = tmp_path/'ppg.csv'
+    with path.open('w') as source:
+        source.write('ts,value\n')
+        for i in range(80): source.write(f'{i*33333333},1\n')
+        source.write('1'+'0'*200+',1\n')
+    result = score['score_trace'](score['score_ppg'], path)
+    assert not result['ok'] and 'resampled-sample limit' in result['reason']
+
+
+def test_ppg_source_retains_exact_rows_and_releases_private_spill(score, tmp_path, monkeypatch):
+    import os
+    path = tmp_path/'ppg.csv'
+    with path.open('w') as source:
+        source.write('ts,value\n')
+        for i in range(8200): source.write(f'{i*33333333},{i}\n')
+    opened = []
+    original = score['tempfile'].TemporaryFile
+    def tracked(*args, **kwargs):
+        handle = original(*args, **kwargs)
+        opened.append(handle)
+        return handle
+    monkeypatch.setattr(score['tempfile'], 'TemporaryFile', tracked)
+    with score['_ppg_series'](path) as (times, values, intervals):
+        assert len(times) == len(values) == 8200 and len(intervals) == 8199
+        assert [values[i] for i in [0,4095,4096,8199,-1]] == [0,4095,4096,8199,8199]
+        assert list(values[4095:4098]) == [4095,4096,4097]
+        assert times[-1] == 8199*33333333/1e9
+        assert intervals[len(intervals)//2] == pytest.approx(.033333333)
+        assert os.fstat(opened[0].fileno()).st_mode & 0o777 == 0o600
+        assert os.readlink(f'/proc/self/fd/{opened[0].fileno()}').endswith(' (deleted)')
+    assert opened and all(handle.closed for handle in opened)
+
+
+def test_ppg_source_exhaustion_closes_spill_and_preserves_trace(score, tmp_path, monkeypatch):
+    path = tmp_path/'ppg.csv'
+    path.write_text('ts,value\n0,1\n33333333,2\n')
+    before = path.read_bytes()
+    opened = []
+    original = score['tempfile'].TemporaryFile
+    def tracked(*args, **kwargs):
+        handle = original(*args, **kwargs)
+        opened.append(handle)
+        def failed(*args, **kwargs): raise OSError('synthetic storage exhaustion')
+        handle.write = failed
+        return handle
+    monkeypatch.setattr(score['tempfile'], 'TemporaryFile', tracked)
+    with pytest.raises(OSError, match='storage exhaustion'):
+        with score['_ppg_series'](path):
+            pytest.fail('storage failure became a measurement')
+    assert opened and all(handle.closed for handle in opened)
+    assert path.read_bytes() == before
+
+
+def test_ppg_interval_median_and_variance_preserve_sorted_float_order(score, tmp_path):
+    path = tmp_path/'ppg.csv'
+    stamps = [0]
+    for step in [33000000,35000000,31000000]*30:
+        stamps.append(stamps[-1]+step)
+    path.write_text('ts,value\n'+''.join(f'{stamp},1\n' for stamp in stamps))
+    times = [stamp/1e9 for stamp in stamps]
+    expected = sorted(right-left for left,right in zip(times,times[1:]))
+    with score['_ppg_series'](path) as (_, _, intervals):
+        assert list(intervals) == expected
+        assert intervals[len(intervals)//2] == expected[len(expected)//2]
+        assert score['stdev'](intervals) == score['stdev'](expected)
+
+
+def test_huge_ppg_gap_records_refusal_and_processes_later_trace(score, tmp_path):
+    outbox = tmp_path/'outbox'
+    outbox.mkdir()
+    bad = outbox/'a.csv'
+    bad.write_text('ts,value\n'+''.join(f'{i*33333333},1\n' for i in range(80))+'1'+'0'*200+',1\n')
+    bad.with_name(bad.name+'.json').write_text('{"mode":"ppg"}')
+    trace(outbox/'b.csv', 'imu', False)
+    root = tmp_path/'scores'
+    score['cmd_run'].__globals__.update(SCORES=root,LEDGER=root/'scored.jsonl')
+    assert score['cmd_run'](argparse.Namespace(outbox=str(outbox),limit=0,no_receipt=True)) == 0
+    rows = [json.loads(line) for line in next(root.glob('20*.jsonl')).read_text().splitlines()]
+    assert [row['file'] for row in rows] == ['a.csv','b.csv']
+    assert not rows[0]['ok'] and 'resampled-sample limit' in rows[0]['reason']
+    assert rows[1]['ok']

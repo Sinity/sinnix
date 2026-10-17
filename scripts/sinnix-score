@@ -300,98 +300,86 @@ def score_ppg(path: Path) -> dict:
     fingertip, which is a very small ripple on a very large baseline, so the
     band-pass matters more than the peak picker.
     """
-    t: list[float] = []
-    y: list[float] = []
-    with csv_rows(path) as rows:
-        for r in rows:
-            try:
-                stamp, value = int(r[0]) / 1e9, float(r[1])
-                t.append(stamp)
-                y.append(value)
-            except OverflowError as error:
-                raise UnscorableTrace("trace timestamp exceeds numeric range") from error
-            except (ValueError, IndexError):
-                continue
-    if len(t) < 60:
-        return {"ok": False, "reason": f"only {len(t)} samples; a pulse needs a real trace"}
+    with _ppg_series(path) as (t, y, dts):
+        if len(t) < 60:
+            return {"ok": False, "reason": f"only {len(t)} samples; a pulse needs a real trace"}
 
-    dts = [t[i + 1] - t[i] for i in range(len(t) - 1) if t[i + 1] > t[i]]
-    if not dts:
-        return {"ok": False, "reason": "timestamps do not advance"}
-    dts.sort()
-    median_dt = dts[len(dts) // 2]
-    rate = 1.0 / median_dt if median_dt > 0 else 0.0
-    jitter_cv = stdev(dts) / median_dt if median_dt else 0.0
-    duration = t[-1] - t[0]
+        if not dts:
+            return {"ok": False, "reason": "timestamps do not advance"}
+        median_dt = dts[len(dts) // 2]
+        rate = 1.0 / median_dt if median_dt > 0 else 0.0
+        duration = t[-1] - t[0]
 
-    if rate < 10:
+        if rate < 10:
+            return {
+                "ok": False,
+                "reason": f"frame rate {rate:.1f} Hz is too low to resolve a pulse",
+                "sample_rate_hz": round(rate, 2),
+            }
+
+        grid = resample_uniform(t, y, rate)
+        jitter_cv = stdev(dts) / median_dt if median_dt else 0.0
+        filtered = bandpass(grid, rate, 0.7, 3.5)
+        peaks = find_peaks(filtered, rate, refractory_s=0.35)
+        ibis = [(peaks[i + 1] - peaks[i]) / rate for i in range(len(peaks) - 1)]
+        # Physiologically possible inter-beat intervals only: 40-200 bpm. A gap
+        # outside that is a missed or doubled beat, and averaging it in would move
+        # the variability numbers far more than the rate.
+        ibis = [x for x in ibis if 0.3 <= x <= 1.5]
+
+        if len(ibis) < 15:
+            return {
+                "ok": False,
+                "reason": f"only {len(ibis)} usable beats in {duration:.0f}s — hold still, cover the lens fully",
+                "sample_rate_hz": round(rate, 2),
+                "jitter_cv": round(jitter_cv, 3),
+                "duration_s": round(duration, 1),
+            }
+
+        mean_ibi = sum(ibis) / len(ibis)
+        diffs = [ibis[i + 1] - ibis[i] for i in range(len(ibis) - 1)]
+        rmssd = math.sqrt(sum(d * d for d in diffs) / len(diffs)) * 1000
+        sdnn = stdev(ibis) * 1000
+
+        # A trace whose beat intervals scatter this much is finger movement, not
+        # heart-rate variability, and RMSSD would read as a spectacular result.
+        trustworthy = sdnn < 250 and jitter_cv < 0.5
         return {
-            "ok": False,
-            "reason": f"frame rate {rate:.1f} Hz is too low to resolve a pulse",
-            "sample_rate_hz": round(rate, 2),
-        }
-
-    grid = resample_uniform(t, y, rate)
-    filtered = bandpass(grid, rate, 0.7, 3.5)
-    peaks = find_peaks(filtered, rate, refractory_s=0.35)
-    ibis = [(peaks[i + 1] - peaks[i]) / rate for i in range(len(peaks) - 1)]
-    # Physiologically possible inter-beat intervals only: 40-200 bpm. A gap
-    # outside that is a missed or doubled beat, and averaging it in would move
-    # the variability numbers far more than the rate.
-    ibis = [x for x in ibis if 0.3 <= x <= 1.5]
-
-    if len(ibis) < 15:
-        return {
-            "ok": False,
-            "reason": f"only {len(ibis)} usable beats in {duration:.0f}s — hold still, cover the lens fully",
+            "ok": True,
+            "hr_bpm": round(60.0 / mean_ibi, 1),
+            "rmssd_ms": round(rmssd, 1),
+            "sdnn_ms": round(sdnn, 1),
+            "beats": len(ibis) + 1,
+            "duration_s": round(duration, 1),
             "sample_rate_hz": round(rate, 2),
             "jitter_cv": round(jitter_cv, 3),
-            "duration_s": round(duration, 1),
+            "trustworthy": trustworthy,
+            "caveat": None if trustworthy else "interval scatter suggests movement, not variability",
         }
-
-    mean_ibi = sum(ibis) / len(ibis)
-    diffs = [ibis[i + 1] - ibis[i] for i in range(len(ibis) - 1)]
-    rmssd = math.sqrt(sum(d * d for d in diffs) / len(diffs)) * 1000
-    sdnn = stdev(ibis) * 1000
-
-    # A trace whose beat intervals scatter this much is finger movement, not
-    # heart-rate variability, and RMSSD would read as a spectacular result.
-    trustworthy = sdnn < 250 and jitter_cv < 0.5
-    return {
-        "ok": True,
-        "hr_bpm": round(60.0 / mean_ibi, 1),
-        "rmssd_ms": round(rmssd, 1),
-        "sdnn_ms": round(sdnn, 1),
-        "beats": len(ibis) + 1,
-        "duration_s": round(duration, 1),
-        "sample_rate_hz": round(rate, 2),
-        "jitter_cv": round(jitter_cv, 3),
-        "trustworthy": trustworthy,
-        "caveat": None if trustworthy else "interval scatter suggests movement, not variability",
-    }
 
 
 _IMU_SAMPLE = struct.Struct("=dddd")
+_PPG_SAMPLE = struct.Struct("=dd")
 
 
-class _IMUSampleStore:
-    def __init__(self, source):
-        self.source = source
+class _SampleStore:
+    def __init__(self, source, layout: struct.Struct):
+        self.source, self.layout = source, layout
         self.block_start = -1
         self.block = b""
 
-    def row(self, index: int) -> tuple[float, float, float, float]:
-        offset = index * _IMU_SAMPLE.size
+    def row(self, index: int) -> tuple[float, ...]:
+        offset = index * self.layout.size
         start = offset // 65536 * 65536
         if start != self.block_start:
             self.source.seek(start)
             self.block = self.source.read(65536)
             self.block_start = start
-        return _IMU_SAMPLE.unpack_from(self.block, offset - start)
+        return self.layout.unpack_from(self.block, offset - start)
 
 
-class _IMUColumn(Sequence):
-    def __init__(self, store: _IMUSampleStore, indices: range, project):
+class _SampleColumn(Sequence):
+    def __init__(self, store: _SampleStore, indices: range, project):
         self.store, self.indices, self.project = store, indices, project
 
     def __len__(self) -> int:
@@ -399,11 +387,67 @@ class _IMUColumn(Sequence):
 
     def __getitem__(self, index):
         if isinstance(index, slice):
-            return _IMUColumn(self.store, self.indices[index], self.project)
+            return _SampleColumn(self.store, self.indices[index], self.project)
         return self.project(self.store.row(self.indices[index]))
 
     def map(self, transform):
-        return _IMUColumn(self.store, self.indices, lambda row: transform(self.project(row)))
+        return _SampleColumn(self.store, self.indices, lambda row: transform(self.project(row)))
+
+
+class _OrderedIntervals(Sequence[float]):
+    def __init__(self, database):
+        self.database = database
+        self.count = database.execute("SELECT count(*) FROM intervals").fetchone()[0]
+
+    def __len__(self) -> int:
+        return self.count
+
+    def __getitem__(self, index: int) -> float:
+        index = range(self.count)[index]
+        return self.database.execute(
+            "SELECT value FROM intervals ORDER BY value,ordinal LIMIT 1 OFFSET ?", (index,),
+        ).fetchone()[0]
+
+    def __iter__(self) -> Iterator[float]:
+        with closing(self.database.execute("SELECT value FROM intervals ORDER BY value,ordinal")) as rows:
+            for row in rows:
+                yield row[0]
+
+
+@contextmanager
+def _ppg_series(path: Path) -> Iterator[tuple[_SampleColumn, _SampleColumn, _OrderedIntervals]]:
+    with tempfile.TemporaryFile() as raw, _scratch_database() as database:
+        database.execute(
+            "CREATE TABLE intervals (value REAL, ordinal INTEGER, "
+            "PRIMARY KEY(value,ordinal)) WITHOUT ROWID"
+        )
+        count = 0
+        previous = None
+
+        def intervals():
+            nonlocal count, previous
+            with csv_rows(path) as rows:
+                for row in rows:
+                    try:
+                        stamp, value = int(row[0]) / 1e9, float(row[1])
+                    except OverflowError as error:
+                        raise UnscorableTrace("trace timestamp exceeds numeric range") from error
+                    except (ValueError, IndexError):
+                        continue
+                    raw.write(_PPG_SAMPLE.pack(stamp, value))
+                    delta = stamp - previous if previous is not None else 0.0
+                    previous = stamp
+                    count += 1
+                    if delta > 0:
+                        yield delta, count
+
+        database.executemany("INSERT INTO intervals VALUES (?,?)", intervals())
+        database.commit()
+        raw.flush()
+        store = _SampleStore(raw, _PPG_SAMPLE)
+        t = _SampleColumn(store, range(count), lambda row: row[0])
+        values = _SampleColumn(store, range(count), lambda row: row[1])
+        yield t, values, _OrderedIntervals(database)
 
 
 @contextmanager
@@ -442,17 +486,14 @@ def _imu_series(path: Path) -> Iterator[tuple[Sequence[float], Sequence[tuple[fl
         database.executemany("INSERT INTO intervals VALUES (?,?)", intervals())
         database.commit()
         raw.flush()
-        store = _IMUSampleStore(raw)
-        t = _IMUColumn(store, range(count), lambda row: row[0])
-        xyz = _IMUColumn(store, range(count), lambda row: row[1:])
+        store = _SampleStore(raw, _IMU_SAMPLE)
+        t = _SampleColumn(store, range(count), lambda row: row[0])
+        xyz = _SampleColumn(store, range(count), lambda row: row[1:])
         if count < 32:
             yield t, xyz, 0.0, 0.0
             return
-        interval_count = database.execute("SELECT count(*) FROM intervals").fetchone()[0]
-        median_dt = database.execute(
-            "SELECT value FROM intervals ORDER BY value,ordinal LIMIT 1 OFFSET ?",
-            (interval_count // 2,),
-        ).fetchone()[0] if interval_count else 0.0
+        timing = _OrderedIntervals(database)
+        median_dt = timing[len(timing) // 2] if timing else 0.0
         rate = 1.0 / median_dt if median_dt else 0.0
         yield t, xyz, rate, t[-1] - t[0]
 
