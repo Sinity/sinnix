@@ -476,3 +476,39 @@ def test_generation_pointer_errors_are_not_reported_as_absent(tmp_path, monkeypa
         with pytest.raises(ValueError, match="not a symbolic link"):
             fs.resolve_generation(tmp_path)
         assert pointer.exists()
+
+
+@pytest.mark.parametrize("operation", ["content-views", "ledger"])
+@pytest.mark.parametrize("failure", ["denied", "io", "wrong-parent", "directory", "fifo", "missing"])
+def test_index_input_failures_keep_their_reason(tmp_path, monkeypatch, capsys, operation, failure):
+    import errno
+    import os
+    fs = load_script()
+    target = tmp_path / ("content.duckdb" if operation == "content-views" else "judgments.jsonl")
+    if failure == "directory":
+        target.mkdir()
+    elif failure == "fifo":
+        os.mkfifo(target)
+    elif failure != "missing":
+        target.write_text("retained input")
+    if failure in ("denied", "io", "wrong-parent"):
+        original = fs.Path.stat
+        code = {"denied": errno.EACCES, "io": errno.EIO, "wrong-parent": errno.ENOTDIR}[failure]
+        def stat_input(path, *args, **kwargs):
+            if path == target:
+                raise OSError(code, "synthetic input failure", str(target))
+            return original(path, *args, **kwargs)
+        monkeypatch.setattr(fs.Path, "stat", stat_input)
+    monkeypatch.setattr(fs, "duckdb_query", lambda *args: pytest.fail("must refuse before database access"))
+    monkeypatch.setattr(fs, "read_judgments", lambda *args: pytest.fail("must refuse before reading ledger"))
+    rc = fs.content_views_refresh(target) if operation == "content-views" else fs.ledger_run(tmp_path)
+    assert rc == 1
+    error = capsys.readouterr().err
+    if failure in ("denied", "io", "wrong-parent"):
+        assert "unavailable" in error and "synthetic input failure" in error
+        assert "missing" not in error and "absent" not in error
+    elif failure in ("directory", "fifo"):
+        assert "not a regular file" in error
+    else:
+        assert "missing" in error or "absent" in error
+    assert not (tmp_path / ".effective.jsonl").exists()

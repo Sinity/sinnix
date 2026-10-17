@@ -518,10 +518,25 @@ GROUP BY {sampled}, bytes HAVING count(*) > 1;
 """
 
 
+def require_regular_index_input(path: Path, operation: str) -> bool:
+    """Refuse invalid inputs without collapsing lookup errors into absence."""
+    try:
+        info = path.stat()
+    except FileNotFoundError:
+        print(f"sinnix-fs {operation}: missing {path}", file=sys.stderr)
+        return False
+    except OSError as exc:
+        print(f"sinnix-fs {operation}: unavailable {path}: {exc}", file=sys.stderr)
+        return False
+    if not stat.S_ISREG(info.st_mode):
+        print(f"sinnix-fs {operation}: not a regular file: {path}", file=sys.stderr)
+        return False
+    return True
+
+
 def content_views_refresh(db: Path) -> int:
     """Repair comparison semantics without rescanning or changing file rows."""
-    if not db.is_file():
-        print(f"sinnix-fs content-views: database absent: {db}", file=sys.stderr)
+    if not require_regular_index_input(db, "content-views"):
         return 1
     probe = duckdb_query(db, "SELECT column_name FROM information_schema.columns WHERE table_name='files'")
     if probe.returncode:
@@ -1048,9 +1063,7 @@ def ledger_run(index_dir: Path, judgments_path: Path | None = None) -> int:
     inv_db = index_dir / "inventory.duckdb"
     content_db = index_dir / "content.duckdb"
     for p in (judgments, inv_db, content_db):
-        if not p.exists():
-            print(f"sinnix-fs ledger: missing {p} -- build a scan generation with "
-                  f"sinnix-fs run first", file=sys.stderr)
+        if not require_regular_index_input(p, "ledger"):
             return 1
 
     from sinnix_lib.judgments import effective_target_judgments
