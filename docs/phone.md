@@ -708,3 +708,12 @@ closed recorder files awaiting publication on an I/O worker. Missing directory
 observations remain unavailable; a currently open recording is not queued.
 
 The native phone HTTP API rejects requests carrying `Origin` or browser Fetch Metadata headers before reading a body or reaching an upload, acknowledgement or intent owner. The hub rejects the same browser metadata before proxying, so a refusal does not wait for a body. The receiver also checks direct Unix-socket requests. Native app and drain clients omit these headers. This guard is browser-request protection; the socket permissions and tailnet binding remain the transport boundary.
+
+
+## Local models over the tailnet
+
+With Tailscale connected on the phone, open [the workstation AI panel](http://sinnix-prime:8880/ai/), start Open WebUI, and follow its [Open WebUI link](http://sinnix-prime:8881/). The desktop equivalent is `sinnix ai start open-webui`. Open WebUI is manually started: a 502 from its frontend while it is stopped means the frontend needs starting, rather than that the phone needs another proxy. Stop it through the same panel or `sinnix ai stop open-webui` when finished.
+
+The model picker includes the workstation's Ollama models and LiteLLM lanes. Selecting an owned local model runs inference on the workstation; the phone remains a browser client. Cloud models, if listed, remain separate choices. The frontend uses the existing loopback and tailnet listeners and per-interface firewall rules; raw model ports stay on loopback. No LAN-wide listener or second phone transfer/control daemon is needed.
+
+The phone uses Open WebUI's normal session flow even when its single-operator mode disables the login form. API clients must obtain a session through the frontend's sign-in endpoint before listing models or sending completions; an unauthenticated API 401 does not contradict a successful frontend page load. See [local AI activation](local-ai-activation.md#open-webui) for lifecycle and backend details.

@@ -1,6 +1,7 @@
 # Open WebUI — ChatGPT-style web frontend for the local Ollama hub.
 #
-# Localhost-only (127.0.0.1:8080), single-user → auth disabled. RAG/document
+# Loopback upstream (127.0.0.1:8080), republished by the hub on its tailnet
+# frontend. Single-operator mode disables the login form. RAG/document
 # chat uses the Ollama embedding model; TTS read-aloud / voice-call points at the
 # enabled local speech provider. STT is left at Open WebUI's
 # built-in local engine.
