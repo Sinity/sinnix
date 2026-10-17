@@ -41,11 +41,13 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import stat
 import sqlite3
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Sequence
 
@@ -642,7 +644,7 @@ def transcribe(path: Path) -> dict | None:
 # -------------------------------------------------------------------- ledger
 
 
-def _ledger_keys() -> Iterator[tuple[str, int, str | None]]:
+def _ledger_keys() -> Iterator[tuple[str, int, str | None, str | None, str | None, str | None]]:
     try:
         ledger_input = open(
             LEDGER, encoding="utf-8",
@@ -665,15 +667,27 @@ def _ledger_keys() -> Iterator[tuple[str, int, str | None]]:
                     raise ValueError("record must be an object")
                 name, size = row.get("file"), row.get("bytes")
                 signature = row.get("sidecar_signature")
+                payload = row.get("payload_sha256")
+                observation = row.get("payload_observation")
+                kind = row.get("kind")
                 if not isinstance(name, str) or not name:
                     raise ValueError("file must be nonempty text")
                 if type(size) is not int or size < 0:
                     raise ValueError("bytes must be a nonnegative integer")
                 if signature is not None and not isinstance(signature, str):
                     raise ValueError("sidecar_signature must be text or null")
+                for value in (payload, observation):
+                    if value is not None and (not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None):
+                        raise ValueError("payload bindings must be full SHA-256 digests")
+                if observation is not None and payload is None:
+                    raise ValueError("a payload observation requires a content digest")
+                if kind not in (None, "payload_observation"):
+                    raise ValueError("unknown score ledger record kind")
+                if kind == "payload_observation" and (payload is None or observation is None or signature is None):
+                    raise ValueError("an observation requires complete payload and sidecar bindings")
             except (ValueError, TypeError) as error:
                 raise ValueError(f"score ledger record {number} is invalid; preserve and repair it before retrying") from error
-            yield name, size, signature
+            yield name, size, signature, payload, observation, kind
 
 
 def _history_key(key: tuple[str, int, str | None]) -> tuple[str, str, int, str]:
@@ -689,8 +703,22 @@ class ScoreHistory:
 
     def __contains__(self, key: tuple[str, int, str | None]) -> bool:
         return self.database.execute(
-            "SELECT 1 FROM seen WHERE file=? AND bytes=? AND bound=? AND signature=?",
+            "SELECT 1 FROM seen WHERE file=? AND bytes=? AND bound=? AND signature=? AND payload=''",
             _history_key(key),
+        ).fetchone() is not None
+
+
+    def contains_payload(self, key: tuple[str, int, str | None], digest: str) -> bool:
+        return self.database.execute(
+            "SELECT 1 FROM seen WHERE file=? AND bytes=? AND bound=? AND signature=? AND payload=?",
+            _history_key(key) + (digest,),
+        ).fetchone() is not None
+
+    def observed_payload(self, key: tuple[str, int, str | None], observation: str) -> bool:
+        return self.database.execute(
+            "SELECT 1 FROM seen WHERE file=? AND bytes=? AND bound=? AND signature=? "
+            "AND payload!='' AND observation=?",
+            _history_key(key) + (observation,),
         ).fetchone() is not None
 
 
@@ -734,15 +762,95 @@ def _ordered_paths(paths: Iterator[Path]) -> Iterator[Iterator[Path]]:
 def ledger_seen() -> Iterator[ScoreHistory]:
     with _scratch_database() as database:
         database.execute(
-            "CREATE TABLE seen (file TEXT, bytes TEXT, bound INTEGER, signature TEXT, "
-            "PRIMARY KEY(file,bytes,bound,signature)) WITHOUT ROWID"
+            "CREATE TABLE seen (file TEXT, bytes TEXT, bound INTEGER, signature TEXT, payload TEXT, observation TEXT, "
+            "PRIMARY KEY(file,bytes,bound,signature,payload,observation)) WITHOUT ROWID"
         )
-        database.executemany(
-            "INSERT OR IGNORE INTO seen VALUES (?,?,?,?)",
-            (_history_key(key) for key in _ledger_keys()),
-        )
+        def entries():
+            for row in _ledger_keys():
+                key = _history_key(row[:3])
+                if row[5] == "payload_observation" and database.execute(
+                    "SELECT 1 FROM seen WHERE file=? AND bytes=? AND bound=? AND signature=? AND payload=?",
+                    key + (row[3],),
+                ).fetchone() is None:
+                    raise ValueError("score payload observation has no earlier content-bound score")
+                yield key + (row[3] or "", row[4] or "")
+        database.executemany("INSERT OR IGNORE INTO seen VALUES (?,?,?,?,?,?)", entries())
         database.commit()
         yield ScoreHistory(database)
+
+
+def _boot_id() -> str:
+    # A filesystem observation is a same-boot cache guard, never durable
+    # content identity. Reboot or changed inode/timestamps requires hashing.
+    with open("/proc/sys/kernel/random/boot_id", encoding="ascii") as source:
+        value = source.read(80).strip()
+    if re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", value) is None:
+        raise ValueError("score cannot establish the current boot identity")
+    return value
+
+
+def _payload_observation(info: os.stat_result, boot: str) -> str:
+    fields = (boot, info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    return hashlib.sha256(repr(fields).encode("ascii")).hexdigest()
+
+
+def _payload_hash(source) -> str:
+    digest = hashlib.sha256()
+    while block := source.read(65536):
+        digest.update(block)
+    return digest.hexdigest()
+
+
+class PayloadInput(NamedTuple):
+    path: Path
+    digest: str
+    observation: str
+    size: int
+
+
+@contextmanager
+def _score_input(path: Path, signature: str, seen: ScoreHistory, boot: str) -> Iterator[PayloadInput | None]:
+    with open(path, "rb", opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK)) as source:
+        info = os.fstat(source.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError("score payload must be a regular file")
+        key = (path.name, info.st_size, signature)
+        observation = _payload_observation(info, boot)
+        if seen.observed_payload(key, observation):
+            yield None
+            return
+        digest = _payload_hash(source)
+        if _payload_observation(os.fstat(source.fileno()), boot) != observation:
+            raise ValueError("score payload changed while hashing; no result published")
+        if seen.contains_payload(key, digest):
+            # Record a fresh cache observation, not another score or receipt.
+            # Otherwise every trigger after a reboot would rehash old audio.
+            append_jsonl(LEDGER, {
+                "kind": "payload_observation", "file": key[0], "bytes": key[1],
+                "sidecar_signature": signature, "payload_sha256": digest,
+                "payload_observation": observation, "at": utc_ts(),
+            })
+            yield None
+            return
+        # Only new content is copied. The private snapshot fixes the bytes
+        # passed to CSV readers and child ASR processes without changing raw
+        # inputs or trusting pathname/size as content identity.
+        with tempfile.TemporaryDirectory(prefix="sinnix-score-") as scratch:
+            # Keep payload storage unlinked even if the scorer is killed.
+            # A private filename alias retains CSV/audio suffixes for readers
+            # and child processes while this context owns the descriptor.
+            with tempfile.TemporaryFile(dir=scratch) as target:
+                snapshot = Path(scratch) / path.name
+                source.seek(0)
+                copied = hashlib.sha256()
+                while block := source.read(65536):
+                    target.write(block)
+                    copied.update(block)
+                target.flush()
+                if copied.hexdigest() != digest or _payload_observation(os.fstat(source.fileno()), boot) != observation:
+                    raise ValueError("score payload changed while snapshotting; no result published")
+                snapshot.symlink_to(f"/proc/{os.getpid()}/fd/{target.fileno()}")
+                yield PayloadInput(snapshot, digest, observation, info.st_size)
 
 
 class SidecarInput(NamedTuple):
@@ -936,6 +1044,7 @@ def _candidate_paths(outbox: Path) -> Iterator[Path]:
 
 def _score_outbox(args: argparse.Namespace, outbox: Path, seen: ScoreHistory) -> int:
     scored = failed = 0
+    boot = _boot_id()
 
     with _ordered_paths(_candidate_paths(outbox)) as candidates:
         for path in candidates:
@@ -949,7 +1058,11 @@ def _score_outbox(args: argparse.Namespace, outbox: Path, seen: ScoreHistory) ->
             sidecar = read_sidecar(path)
             if (path.name, size, sidecar.signature) in seen:
                 continue
-            record = score_blob(path, sidecar)
+            with _score_input(path, sidecar.signature, seen, boot) as payload:
+                if payload is None:
+                    continue
+                record = score_blob(payload.path, sidecar)
+                record["payload_sha256"] = payload.digest
 
             # Validate the complete record before opening a publication file.
             record_line = json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n"
@@ -958,8 +1071,9 @@ def _score_outbox(args: argparse.Namespace, outbox: Path, seen: ScoreHistory) ->
                 fh.write(record_line)
             append_jsonl(
                 LEDGER,
-                {"file": path.name, "bytes": size, "ok": record.get("ok"), "at": utc_ts(),
-                 "sidecar_signature": sidecar.signature},
+                {"file": path.name, "bytes": payload.size, "ok": record.get("ok"), "at": utc_ts(),
+                 "sidecar_signature": sidecar.signature, "payload_sha256": payload.digest,
+                 "payload_observation": payload.observation},
             )
             if not args.no_receipt:
                 title, body = receipt_for(record)

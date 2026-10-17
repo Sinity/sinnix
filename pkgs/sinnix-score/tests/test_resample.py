@@ -814,3 +814,193 @@ def test_directory_inventory_does_not_materialize_path_iterdir(score, tmp_path, 
         raise AssertionError('Path.iterdir retains a whole directory')
     monkeypatch.setattr(Path, 'iterdir', forbidden)
     assert list(score['_candidate_paths'](tmp_path)) == [path]
+
+
+def test_same_size_payload_replacement_gets_its_own_score(score, tmp_path):
+    import hashlib
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    path = outbox / 'a.csv'
+    first, second = b'ts,value\n0,1\n1,2\n', b'ts,value\n0,9\n1,8\n'
+    assert len(first) == len(second)
+    path.write_bytes(first)
+    root = tmp_path / 'scores'
+    score['cmd_run'].__globals__.update(SCORES=root, LEDGER=root / 'scored.jsonl')
+    args = argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True)
+    assert score['cmd_run'](args) == 0
+    assert score['cmd_run'](args) == 0
+    path.write_bytes(second)
+    assert score['cmd_run'](args) == 0
+    rows = [json.loads(line) for line in (root/'scored.jsonl').read_text().splitlines()]
+    assert [row['payload_sha256'] for row in rows] == [hashlib.sha256(first).hexdigest(), hashlib.sha256(second).hexdigest()]
+    records = [json.loads(line) for line in next(root.glob('20*.jsonl')).read_text().splitlines()]
+    assert [record['payload_sha256'] for record in records] == [row['payload_sha256'] for row in rows]
+
+
+def test_scoring_uses_private_snapshot_when_original_changes(score, tmp_path):
+    import hashlib
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    original = outbox / 'a.csv'
+    payload = b'ts,value\n0,1\n1,2\n'
+    original.write_bytes(payload)
+    root = tmp_path / 'scores'
+    observed = []
+    def process(path, sidecar):
+        original.write_bytes(b'ts,value\n0,9\n1,8\n')
+        observed.append((path, path.read_bytes(), path.stat().st_mode & 0o777))
+        return {'ok': True, 'file': path.name}
+    score['cmd_run'].__globals__.update(SCORES=root, LEDGER=root/'scored.jsonl', score_blob=process)
+    assert score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True)) == 0
+    assert observed[0][0] != original
+    assert observed[0][1:] == (payload, 0o600)
+    assert not observed[0][0].exists()
+    row = json.loads((root/'scored.jsonl').read_text())
+    assert row['payload_sha256'] == hashlib.sha256(payload).hexdigest()
+
+
+@pytest.mark.parametrize('digest', ['', 'x'*64, 'a'*63, 42])
+def test_bad_payload_binding_refuses_before_scoring(score, tmp_path, digest):
+    root = tmp_path/'scores'
+    root.mkdir()
+    ledger = root/'scored.jsonl'
+    ledger.write_text(json.dumps({'file':'a.csv','bytes':1,'payload_sha256':digest})+'\n')
+    score['cmd_run'].__globals__['LEDGER'] = ledger
+    with pytest.raises(ValueError, match='ledger record 1 is invalid'):
+        with score['ledger_seen']():
+            pytest.fail('invalid content binding accepted')
+
+
+def test_unchanged_payload_does_not_read_or_snapshot_again(score, tmp_path):
+    outbox = tmp_path/'outbox'
+    outbox.mkdir()
+    (outbox/'a.csv').write_text('ts,value\n0,1\n1,2\n')
+    root = tmp_path/'scores'
+    glob = score['cmd_run'].__globals__
+    glob.update(SCORES=root, LEDGER=root/'scored.jsonl')
+    args = argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True)
+    assert score['cmd_run'](args) == 0
+    def forbidden(*args, **kwargs):
+        raise AssertionError('unchanged content was reread')
+    glob['_payload_hash'] = forbidden
+    assert score['cmd_run'](args) == 0
+    assert len((root/'scored.jsonl').read_text().splitlines()) == 1
+
+
+def test_replaced_inode_same_content_is_rehashed_without_scoring_or_copying(score, tmp_path, monkeypatch):
+    outbox = tmp_path/'outbox'
+    outbox.mkdir()
+    path = outbox/'a.csv'
+    path.write_text('ts,value\n0,1\n1,2\n')
+    root = tmp_path/'scores'
+    glob = score['cmd_run'].__globals__
+    glob.update(SCORES=root, LEDGER=root/'scored.jsonl')
+    args = argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True)
+    assert score['cmd_run'](args) == 0
+    replacement = tmp_path/'replacement'
+    replacement.write_bytes(path.read_bytes())
+    replacement.replace(path)
+    calls = []
+    hash_payload = glob['_payload_hash']
+    def observed(source):
+        calls.append(True)
+        return hash_payload(source)
+    def forbidden(*args, **kwargs):
+        raise AssertionError('already scored bytes were copied or scored again')
+    glob.update(_payload_hash=observed, score_blob=forbidden)
+    monkeypatch.setattr(score['tempfile'], 'TemporaryDirectory', forbidden)
+    assert score['cmd_run'](args) == 0
+    assert calls == [True]
+    rows = [json.loads(line) for line in (root/'scored.jsonl').read_text().splitlines()]
+    assert len(rows) == 2 and rows[1]['kind'] == 'payload_observation'
+    glob['_payload_hash'] = forbidden
+    assert score['cmd_run'](args) == 0
+    assert calls == [True]
+
+
+def test_changed_boot_requires_content_validation(score, tmp_path):
+    outbox = tmp_path/'outbox'
+    outbox.mkdir()
+    (outbox/'a.csv').write_text('ts,value\n0,1\n1,2\n')
+    root = tmp_path/'scores'
+    glob = score['cmd_run'].__globals__
+    glob.update(SCORES=root, LEDGER=root/'scored.jsonl', _boot_id=lambda:'first-boot')
+    args = argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True)
+    assert score['cmd_run'](args) == 0
+    calls = []
+    hash_payload = glob['_payload_hash']
+    def observed(source):
+        calls.append(True)
+        return hash_payload(source)
+    glob.update(_boot_id=lambda:'second-boot', _payload_hash=observed)
+    assert score['cmd_run'](args) == 0
+    assert calls == [True]
+    rows = [json.loads(line) for line in (root/'scored.jsonl').read_text().splitlines()]
+    assert len(rows) == 2 and rows[1]['kind'] == 'payload_observation'
+    assert score['cmd_run'](args) == 0
+    assert calls == [True]
+
+
+def test_hashing_mutable_payload_refuses_before_publication(score, tmp_path):
+    outbox = tmp_path/'outbox'
+    outbox.mkdir()
+    path = outbox/'a.csv'
+    path.write_text('ts,value\n0,1\n1,2\n')
+    root = tmp_path/'scores'
+    glob = score['cmd_run'].__globals__
+    original = glob['_payload_hash']
+    def changed(source):
+        digest = original(source)
+        path.write_text('ts,value\n0,9\n1,8\n')
+        return digest
+    glob.update(SCORES=root, LEDGER=root/'scored.jsonl', _payload_hash=changed)
+    with pytest.raises(ValueError, match='changed while hashing'):
+        score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True))
+    assert set(root.iterdir()) == {root/'.score.lock'}
+
+
+def test_private_payload_snapshot_is_removed_on_processing_failure(score, tmp_path):
+    outbox = tmp_path/'outbox'
+    outbox.mkdir()
+    (outbox/'a.csv').write_text('ts,value\n0,1\n1,2\n')
+    root = tmp_path/'scores'
+    snapshots = []
+    def failed(path, sidecar):
+        snapshots.append(path)
+        raise RuntimeError('processing failed')
+    score['cmd_run'].__globals__.update(SCORES=root, LEDGER=root/'scored.jsonl', score_blob=failed)
+    with pytest.raises(RuntimeError, match='processing failed'):
+        score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True))
+    assert snapshots and not snapshots[0].exists()
+    assert set(root.iterdir()) == {root/'.score.lock'}
+
+
+def test_observation_cannot_invent_a_missing_score(score, tmp_path):
+    ledger = tmp_path/'scored.jsonl'
+    ledger.write_text(json.dumps({'kind':'payload_observation','file':'a.csv','bytes':17,
+                                 'payload_sha256':'a'*64,'payload_observation':'b'*64,
+                                 'sidecar_signature':'absent'})+'\n')
+    score['cmd_run'].__globals__['LEDGER'] = ledger
+    with pytest.raises(ValueError, match='no earlier content-bound score'):
+        with score['ledger_seen']():
+            pytest.fail('observation invented an inspection')
+
+
+def test_unlinked_snapshot_is_readable_by_child_and_closes_after_use(score, tmp_path):
+    import os
+    import subprocess
+    import sys
+    path = tmp_path/'voice-synthetic.m4a'
+    path.write_bytes(b'synthetic audio bytes')
+    score['cmd_run'].__globals__['LEDGER'] = tmp_path/'missing-ledger'
+    with score['ledger_seen']() as seen:
+        with score['_score_input'](path, 'absent', seen, 'synthetic-boot') as payload:
+            assert payload.path.name == path.name and payload.path.is_symlink()
+            descriptor = os.readlink(payload.path)
+            assert os.readlink(descriptor).endswith(' (deleted)')
+            assert payload.path.stat().st_mode & 0o777 == 0o600
+            child = subprocess.run([sys.executable, '-c',
+                                    'import pathlib,sys;sys.stdout.buffer.write(pathlib.Path(sys.argv[1]).read_bytes())',
+                                    str(payload.path)], capture_output=True, timeout=5)
+            assert child.returncode == 0 and child.stdout == b'synthetic audio bytes'
+        assert not os.path.exists(descriptor) and not payload.path.exists()

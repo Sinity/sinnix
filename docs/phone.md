@@ -493,8 +493,20 @@ Missing metadata retains the filename fallback; unreadable, wrongly typed or
 malformed metadata produces an explicit refusal while later files continue.
 New ledger entries bind the sidecar revision, so an unchanged refusal does not
 create repeated receipts and corrected metadata can be processed again.
-Legacy ledger entries have no sidecar binding and are retained without
-inventing retrospective provenance or automatically launching new scoring.
+New scores also carry a full payload SHA-256. They use a private `0600` copy
+of the input, streamed through bounded buffers, so a mutable pathname cannot
+change the bytes being scored. Payload storage is unlinked while open; a
+private filename alias supports CSV and child audio readers without retaining
+the copied payload after process death. Same-name, same-size replacement content gets
+its own result. Unchanged files use a same-boot inode/size/ctime/mtime
+observation to avoid rereading old audio. Changed observations require a full
+hash; matching known content records an explicit `payload_observation` ledger
+entry, not another score or receipt. Such an observation must refer to an
+earlier content-bound score. Device numbers are cache observations, not durable
+identity. Reboot invalidates the cache guard.
+Historical ledger entries lack payload and sometimes sidecar bindings. They
+retain their old skip behavior without invented retrospective hashes or
+automatically launching new scoring; their byte continuity is unqualified.
 The scorer streams ledger rows and validates deduplication keys before scoring.
 Historical keys are loaded into a private temporary SQLite lookup with a 1 MiB
 page-cache setting and disk spill under the calling owner’s `TMPDIR`, rather than a
@@ -509,6 +521,10 @@ non-regular objects stop processing; regular-file links remain supported.
 CSV readers validate the opened descriptor without blocking on special files,
 including the direct `one` command. Interoception streams recent event rows and
 retains only the nearest matching run, preserving file/line order on ties.
+Candidate and event-file inventories use private disk-backed lexical ordering;
+directory entries stream without Python's whole-directory `Path.iterdir` buffer.
+The full inventory is checked before processing, and a reached run limit stops
+before looking up the next file.
 Unavailable event homes/files fail explicitly; a genuinely missing or empty
 event home still has no matching run. Sources close when selection fails.
 The existing policy of skipping malformed JSON lines is unchanged.
