@@ -1153,8 +1153,12 @@ def read_json_metadata(path: Path):
 
 def resolve_generation(index_dir: Path) -> Path:
     pointer = index_dir / "current"
-    if not pointer.is_symlink():
-        raise ValueError("no published generation; restore retained scan inputs explicitly")
+    try:
+        mode = pointer.lstat().st_mode
+    except FileNotFoundError:
+        raise ValueError("no published generation; restore retained scan inputs explicitly") from None
+    if not stat.S_ISLNK(mode):
+        raise ValueError("generation pointer is not a symbolic link")
     generation = pointer.resolve(strict=True)
     if generation.parent != (index_dir / "generations").resolve():
         raise ValueError("generation pointer escapes its owning store")

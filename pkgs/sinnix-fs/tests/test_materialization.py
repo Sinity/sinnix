@@ -452,3 +452,27 @@ def test_status_rejects_invalid_receipt_shape_without_invalidating_generation(
     assert "invalid publication receipt" in report["last_attempt_error"]
     assert "last_attempt" not in report
     assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("failure", ["denied", "io", "file", "directory"])
+def test_generation_pointer_errors_are_not_reported_as_absent(tmp_path, monkeypatch, failure):
+    fs = load_script()
+    pointer = tmp_path / "current"
+    if failure in ("denied", "io"):
+        original = fs.Path.lstat
+        error = PermissionError("synthetic pointer denied") if failure == "denied" else OSError("synthetic pointer IO failure")
+        def lstat(path, *args, **kwargs):
+            if path == pointer:
+                raise error
+            return original(path, *args, **kwargs)
+        monkeypatch.setattr(fs.Path, "lstat", lstat)
+        with pytest.raises(type(error), match="synthetic pointer"):
+            fs.resolve_generation(tmp_path)
+    else:
+        if failure == "file":
+            pointer.write_text("retained wrong-type pointer")
+        else:
+            pointer.mkdir()
+        with pytest.raises(ValueError, match="not a symbolic link"):
+            fs.resolve_generation(tmp_path)
+        assert pointer.exists()
