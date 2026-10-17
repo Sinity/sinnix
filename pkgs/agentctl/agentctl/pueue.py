@@ -267,7 +267,8 @@ def status() -> Status:
 
 
 def tasks() -> dict[int, Task]:
-    return status().tasks
+    """Task-only history without environment payloads or captured output."""
+    return _log_tasks(_decode(_run(["log", "--all", "--json", "--lines", "0"]), "log"))
 
 
 def running_tasks(group: str) -> dict[int, Task]:
@@ -299,8 +300,19 @@ def tasks_by_ids(task_ids: Sequence[int]) -> dict[int, Task]:
         _run(["log", "--json", "--lines", "0", *(str(value) for value in identifiers)]),
         "log",
     )
+    return _log_tasks(document, identifiers)
+
+
+def _log_tasks(document: Any, identifiers: Sequence[int] | None = None) -> dict[int, Task]:
     if not isinstance(document, Mapping):
         raise PueueError("pueue log did not print an object")
+    if identifiers is None:
+        try:
+            identifiers = sorted(int(key) for key in document)
+        except (TypeError, ValueError) as error:
+            raise PueueError("pueue log published an invalid task id") from error
+        if any(value < 0 or str(value) not in document for value in identifiers):
+            raise PueueError("pueue log published an invalid task id")
     found = {}
     for task_id in identifiers:
         if str(task_id) not in document:

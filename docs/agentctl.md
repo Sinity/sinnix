@@ -259,7 +259,10 @@ slots it needs. A single-task read (`pueue.task`) uses `pueue log --json
 filter. Admission and cross-pool hold release also parse only unfinished
 rows. Upstream Pueue still transfers the full state to its CLI for status
 queries before filtering JSON; the reduction bounds AgentCTL's parsing, not
-that upstream transfer. Direct task-id reads use the bounded log route.
+that upstream transfer. Task-only history reads use `pueue log --all --json
+--lines 0`, preserving the task metadata AgentCTL uses while omitting the
+unused environment payload from CLI JSON. Group-and-task snapshots still
+use status. Direct task-id reads use the bounded log route.
 Execution bindings are attached after paging through one selected-id log
 request, with no queue request for an empty page. Launch references prevent
 a reordered queue id from attaching another job's binding; moved jobs use

@@ -136,7 +136,10 @@ def stub_pueue(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "    else:\n"
         "        print(json.dumps(json.loads(status)['groups']))\n"
         "elif verb == 'log':\n"
-        "    print(log)\n"
+        "    if '--all' in sys.argv:\n"
+        "        print(json.dumps({key: {'task': dict(row, envs={}), 'output': ''} for key, row in json.loads(status)['tasks'].items()}))\n"
+        "    else:\n"
+        "        print(log)\n"
         "elif verb == 'add':\n"
         "    print('7')\n"
         "sys.exit(0)\n"
@@ -869,3 +872,50 @@ def test_selected_tasks_refuse_malformed_or_mismatched_records(monkeypatch, payl
     monkeypatch.setattr(pueue, "_run", lambda arguments: json.dumps(payload))
     with pytest.raises(pueue.PueueError):
         pueue.tasks_by_ids([0])
+
+
+def test_history_tasks_request_metadata_without_output(monkeypatch):
+    calls = []
+    def query(arguments):
+        calls.append(arguments)
+        assert arguments == ["log", "--all", "--json", "--lines", "0"]
+        return json.dumps({key: {"task": row} for key, row in LIVE_STATUS["tasks"].items()})
+    monkeypatch.setattr(pueue, "_run", query)
+    result = pueue.tasks()
+    assert set(result) == {0, 1, 2}
+    assert len(calls) == 1
+
+
+def test_native_history_metadata_preserves_every_task_field_and_state(live_pueue, tmp_path):
+    def add(name, command, **kwargs):
+        return pueue.add(group="default", label=f"fixture:{name}", command=command, working_directory=tmp_path, **kwargs)
+    def state(task_id, expected):
+        deadline = time.monotonic() + 5
+        while pueue.task(task_id).status != expected:
+            assert time.monotonic() < deadline
+            time.sleep(0.01)
+    pueue.set_parallel("default", 2)
+    success = add("success", ("true",))
+    failure = add("failure", ("sh", "-c", "exit 3"))
+    pueue.wait(success, timeout_seconds=5)
+    pueue.wait(failure, timeout_seconds=5)
+    killed = add("killed", ("sleep", "30"))
+    state(killed, "Running")
+    pueue.kill(killed)
+    pueue.wait(killed, timeout_seconds=5)
+    running = add("running", ("sleep", "30"))
+    paused = add("paused", ("sleep", "30"))
+    try:
+        state(running, "Running")
+        state(paused, "Running")
+        pueue._run(["pause", str(paused)])
+        state(paused, "Paused")
+        queued = add("queued", ("true",), after=(running,))
+        stashed = add("stashed", ("true",), stashed=True)
+        full = pueue.status().tasks
+        assert set(full) == {success, failure, killed, running, paused, queued, stashed}
+        assert pueue.tasks() == full
+    finally:
+        for task_id in (running, paused):
+            if pueue.task(task_id).status in {"Running", "Paused"}:
+                pueue.kill(task_id)
