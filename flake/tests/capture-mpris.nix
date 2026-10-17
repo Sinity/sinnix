@@ -18,6 +18,7 @@
             sinnix.services.capture-audio.enable = true;
             sinnix.services.capture-netflow.enable = true;
             sinnix.services.xiaomi-witness.enable = true;
+            sinnix.paths.healthRoot = "/sinnix-test-health";
             sinnix.services.video-resolve.enable = true;
             sinnix.services.url-ledger.enable = true;
             sinnix.services.lynchpin.enable = true;
@@ -31,6 +32,12 @@
           }
         ];
         assertions = config: [
+          {
+            assertion =
+              config.systemd.user.services.sinnix-xiaomi-witness.environment.XIAOMI_WITNESS_LANE
+              == "${config.sinnix.paths.healthRoot}/xiaomi-cloud";
+            message = "The health witness writer must use the configured health root.";
+          }
           {
             assertion =
               let
@@ -137,7 +144,8 @@
                   config.sinnix.paths.capturePaths.audio-index
                   config.sinnix.paths.capturePaths.transcripts
                   "${config.sinnix.paths.machineRoot}/netflow"
-                  "/realm/health/xiaomi-cloud"
+                  config.sinnix.paths.healthRoot
+                  "${config.sinnix.paths.healthRoot}/xiaomi-cloud"
                   "${config.sinnix.paths.stateRoot}/sinnix-phone"
                   "${config.sinnix.paths.stateRoot}/sinnix-phone/inbox"
                   "${config.sinnix.paths.stateRoot}/sinnix-phone/inbox/receipts"

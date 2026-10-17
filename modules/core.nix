@@ -115,7 +115,7 @@ in
         "d ${paths.activityRoot} 0755 ${username} users -"
         "d ${paths.activityRoot}/shared/ranking 0700 ${username} ${config.users.users.${username}.group} -"
         "d ${paths.machineRoot} 0775 ${username} users -"
-        "d ${paths.healthRoot} 0755 ${username} users -"
+        "d ${paths.healthRoot} 0700 ${username} users -"
         "d ${paths.capturePaths.irc} 0700 ${username} users -"
         "d ${paths.capturePaths.shell} 0700 ${username} users -"
         "d ${paths.capturePaths.shell}/zsh 0700 ${username} users -"

@@ -18,17 +18,13 @@
   lib,
   pkgs,
   helpers,
+  config,
   ...
 }@args:
 let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   stateDir = "/realm/state/xiaomi-witness";
-  # Under health/, where the 2026-08-17 subject recut moved this lane's files
-  # while the service was running -- the writer kept its old captures/ path and
-  # would have split the lane in two on the next changed envelope. A literal,
-  # like stateDir above, because this `let` runs outside the module's config
-  # scope; point it at paths.healthRoot once that option lands.
-  laneDir = "/realm/health/xiaomi-cloud";
+  laneDir = "${config.sinnix.paths.healthRoot}/xiaomi-cloud";
 in
 mkServiceModule {
   name = "xiaomi-witness";
