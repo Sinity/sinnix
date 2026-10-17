@@ -115,6 +115,22 @@ def _fft(x: list[complex]) -> list[complex]:
     return x
 
 
+# Bounds the derived grid, not the retained source trace. One million points
+# already exceeds the phone instruments' normal short recording windows.
+MAX_RESAMPLED_SAMPLES = 1_000_000
+
+
+class UnscorableTrace(ValueError):
+    """The trace cannot be processed within the scorer's signal budget."""
+
+
+def score_trace(scorer, path: Path) -> dict:
+    try:
+        return scorer(path)
+    except UnscorableTrace as error:
+        return {"ok": False, "reason": str(error)}
+
+
 def resample_uniform(t: Sequence[float], y: Sequence[float], rate_hz: float) -> list[float]:
     """Linear interpolation onto a uniform grid.
 
@@ -125,8 +141,19 @@ def resample_uniform(t: Sequence[float], y: Sequence[float], rate_hz: float) -> 
     """
     if len(t) < 2:
         return []
+    if len(t) != len(y):
+        raise UnscorableTrace("timestamps and signal samples do not align")
+    if not math.isfinite(rate_hz) or rate_hz <= 0:
+        raise UnscorableTrace("resampling rate must be finite and positive")
+    if any(not math.isfinite(value) for value in t) or any(not math.isfinite(value) for value in y):
+        raise UnscorableTrace("trace contains non-finite timestamps or signal values")
+    if any(right <= left for left, right in zip(t, t[1:])):
+        raise UnscorableTrace("trace timestamps must strictly increase")
     span = t[-1] - t[0]
-    n = int(span * rate_hz)
+    requested = span * rate_hz
+    if not math.isfinite(requested) or requested > MAX_RESAMPLED_SAMPLES:
+        raise UnscorableTrace(f"trace exceeds the {MAX_RESAMPLED_SAMPLES} resampled-sample limit")
+    n = int(requested)
     if n < 2:
         return []
     out: list[float] = []
@@ -249,8 +276,9 @@ def score_ppg(path: Path) -> dict:
     y: list[float] = []
     for r in rows:
         try:
-            t.append(int(r[0]) / 1e9)
-            y.append(float(r[1]))
+            stamp, value = int(r[0]) / 1e9, float(r[1])
+            t.append(stamp)
+            y.append(value)
         except (ValueError, IndexError):
             continue
     if len(t) < 60:
@@ -320,8 +348,10 @@ def _imu_series(path: Path) -> tuple[list[float], list[tuple[float, float, float
         if len(r) < 5 or r[1] != "accel":
             continue
         try:
-            t.append(int(r[0]) / 1e9)
-            xyz.append((float(r[2]), float(r[3]), float(r[4])))
+            stamp = int(r[0]) / 1e9
+            vector = (float(r[2]), float(r[3]), float(r[4]))
+            t.append(stamp)
+            xyz.append(vector)
         except ValueError:
             continue
     if len(t) < 32:
@@ -580,7 +610,7 @@ def score_blob(path: Path) -> dict:
         return record
 
     if mode == "ppg" or instrument in ("ppg", "interoception"):
-        ppg = score_ppg(path)
+        ppg = score_trace(score_ppg, path)
         record["ppg"] = ppg
         record["ok"] = ppg.get("ok", False)
         if not ppg.get("ok"):
@@ -591,14 +621,14 @@ def score_blob(path: Path) -> dict:
         return record
 
     if mode == "imu_sway" or instrument == "sway":
-        sway = score_sway(path)
+        sway = score_trace(score_sway, path)
         record["sway"] = sway
         record["ok"] = sway.get("ok", False)
         record["reason"] = sway.get("reason")
         return record
 
     if mode == "imu" or instrument == "tremor":
-        tremor = score_tremor(path)
+        tremor = score_trace(score_tremor, path)
         record["tremor"] = tremor
         record["ok"] = tremor.get("ok", False)
         record["reason"] = tremor.get("reason")

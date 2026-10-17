@@ -77,6 +77,12 @@
     in
     {
       checks = {
+        phone-score-suite = mkScriptSuite {
+          name = "sinnix-score";
+          suiteDir = ../../pkgs/sinnix-score/tests;
+          scripts = [ "sinnix-score" ];
+          extraPythonPackages = [ sinnix-lib ];
+        };
         media-preview-cache-suite = mkScriptSuite {
           name = "media-preview-cache";
           suiteDir = ../../pkgs/media-preview-cache/tests;
