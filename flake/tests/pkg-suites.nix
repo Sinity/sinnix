@@ -166,6 +166,7 @@
             pkgs.ripgrep
           ];
           beforeTests = ''
+            export SINNIX_CAPTURE_TEST_EXECUTABLE="${sinnixScriptRegistry.packageSet.sinnix-capture}/bin/sinnix-capture"
             export SINNIX_GATEWAY_TEST_EXECUTABLE="${sinnixScriptRegistry.packageSet.sinnix-agent-gateway}/bin/sinnix-agent-gateway"
             python generate_owner_inputs.py --polylogue ${polylogueContracts} --lynchpin ${lynchpinContract} --check
             ${sinnixScriptRegistry.packageSet.beads}/bin/bd owner schema --json > "$TMPDIR/beads-owner-schema.json"

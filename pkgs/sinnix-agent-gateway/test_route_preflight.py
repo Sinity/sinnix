@@ -12,7 +12,7 @@ from sinnix_agent_gateway.route_preflight import GatewayRoutePreflight
 
 
 def make_inventory(tmp_path: Path) -> tuple[Path, Path]:
-    lane_path = tmp_path / "activity" / "clipboard"
+    lane_path = tmp_path / "activity" / "desktop" / "clipboard"
     lane_path.mkdir(parents=True)
     (lane_path / "clipboard-index.jsonl").write_text('{"ts":1,"seq":1}\n')
     inventory = tmp_path / "runtime-inventory.json"
@@ -155,7 +155,7 @@ def test_route_preflight_probes_two_distinct_capture_roots(tmp_path: Path) -> No
                 "captures": [
                     {
                         "name": "clipboard",
-                        "path": str(tmp_path / "activity" / "clipboard"),
+                        "path": str(tmp_path / "activity" / "desktop" / "clipboard"),
                     },
                     {"name": "environment", "path": str(environment_path)},
                 ]

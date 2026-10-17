@@ -10,14 +10,15 @@ import pytest
 from sinnix_agent_gateway.capabilities import Capability, PolicyError, Principal
 from sinnix_agent_gateway.captures import CaptureService
 from sinnix_agent_gateway.config import GatewayConfig
+from sinnix_lib.layout import ACTIVITY_LANES, capture_lane_path
 
 
 def make_inventory(tmp_path: Path) -> tuple[Path, dict[str, Path]]:
     activity_root = tmp_path / "activity"
     machine_root = tmp_path / "machine"
     lane_paths = {
-        "mpris": activity_root / "mpris",
-        "clipboard": activity_root / "clipboard",
+        "mpris": capture_lane_path(activity_root, "mpris"),
+        "clipboard": capture_lane_path(activity_root, "clipboard"),
         "router": machine_root / "router",
     }
     for lane, path in lane_paths.items():
@@ -70,7 +71,7 @@ def test_capture_lanes_tool_lists_runtime_declared_envelope_lanes(
                 "name": "clipboard",
                 "ref": "sinnix://captures/clipboard",
                 "path": str(lane_paths["clipboard"]),
-                "capture_root": str(lane_paths["clipboard"].parent),
+                "capture_root": str(lane_paths["clipboard"].parents[1]),
                 "native_lane": "clipboard",
                 "native_contract": "sinnix-capture-v1-sidecar",
             },
@@ -78,7 +79,7 @@ def test_capture_lanes_tool_lists_runtime_declared_envelope_lanes(
                 "name": "mpris",
                 "ref": "sinnix://captures/mpris",
                 "path": str(lane_paths["mpris"]),
-                "capture_root": str(lane_paths["mpris"].parent),
+                "capture_root": str(lane_paths["mpris"].parents[1]),
                 "native_lane": "mpris",
                 "native_contract": "sinnix-capture-v1-sidecar",
             },
@@ -138,7 +139,7 @@ def test_capture_query_groups_declared_lanes_by_inventory_root(tmp_path: Path) -
         [
             "query",
             "--capture-root",
-            str(lane_paths["mpris"].parent),
+            str(lane_paths["mpris"].parents[1]),
             "--since",
             "0.0",
             "--lane",
@@ -180,7 +181,7 @@ def test_capture_query_reports_missing_collector_for_declared_lane(
             str(tmp_path / "missing-sinnix-capture"),
             "query",
             "--capture-root",
-            str(lane_paths["mpris"].parent),
+            str(lane_paths["mpris"].parents[1]),
             "--since",
             "0.0",
             "--lane",
@@ -451,3 +452,42 @@ def test_scope_and_principal_limits_apply_before_filesystem_probes(tmp_path, mon
     monkeypatch.setattr(Path, "is_file", probe)
     assert [row["name"] for row in CaptureService(cfg, principal).lanes_visible()["lanes"]] == ["clipboard"]
     assert observed == [paths["clipboard"] / "clipboard-index.jsonl"]
+
+
+@pytest.mark.parametrize("identity", ACTIVITY_LANES)
+def test_managed_lane_contract_round_trips_shared_layout(tmp_path: Path, identity: str) -> None:
+    root = tmp_path / "custom-capture-root"
+    path = capture_lane_path(root, identity)
+    path.mkdir(parents=True)
+    index = path / f"{identity}-index.jsonl"
+    index.write_text('{"ts":1,"seq":1}\n')
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(json.dumps({"captures": [{"name": "display-name", "path": str(path)}]}))
+    service = CaptureService(GatewayConfig(state_dir=tmp_path / "state", projects={}, runtime_inventory=inventory), Principal.for_name("operator"))
+    lane = service.lane("display-name")
+    assert lane["native_lane"] == identity
+    assert lane["capture_root"] == str(root)
+    assert service.freshness("display-name")["progress_path"] == str(index)
+
+
+def test_retired_flat_managed_lane_is_not_admitted_as_empty(tmp_path: Path) -> None:
+    lane = tmp_path / "activity" / "mpris"
+    lane.mkdir(parents=True)
+    (lane / "mpris-index.jsonl").write_text('{"ts":1,"seq":1}\n')
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(json.dumps({"captures": [{"name": "mpris", "path": str(lane)}]}))
+    service = CaptureService(GatewayConfig(state_dir=tmp_path / "state", projects={}, runtime_inventory=inventory), Principal.for_name("operator"))
+    result = service.query(["mpris"])
+    assert result["available"] is False
+    assert result["failure_class"] == "native_contract_unavailable"
+
+
+def test_capture_query_reads_actual_native_cli_at_canonical_homes(tmp_path: Path) -> None:
+    gateway_config, _ = config(tmp_path)
+    command = os.environ.get("SINNIX_CAPTURE_TEST_EXECUTABLE", "sinnix-capture")
+    service = CaptureService(GatewayConfig(state_dir=gateway_config.state_dir, projects={}, runtime_inventory=gateway_config.runtime_inventory, capture_command=command), Principal.for_name("operator"))
+    result = service.query(["mpris", "clipboard"])
+    assert "available" not in result, result
+    records = {record["lane"]: record for record in result["records"]}
+    assert set(records) == {"mpris", "clipboard"}
+    assert all(record["records_since"] == 1 for record in records.values())

@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from sinnix_lib.layout import ACTIVITY_LANES, capture_lane_path
+
 from .capabilities import Capability, PolicyError, Principal
 from .config import GatewayConfig
 from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
@@ -34,7 +36,7 @@ class CaptureLane:
         if self.native_contract == "sinnix-capture-v1-sidecar":
             if self.root is None or self.native_lane is None:
                 return None
-            return self.root / self.native_lane / f"{self.native_lane}-index.jsonl"
+            return self.path / f"{self.native_lane}-index.jsonl"
         if self.path.is_file():
             return self.path
         return None
@@ -47,9 +49,9 @@ def queryable_capture_lanes(runtime_inventory: Path, selectors: frozenset[str] =
     visible, including direct-file lanes that have no ``sinnix-capture``
     reader.  Sidecar capability is discovered only to choose the established
     reader, never to decide whether a runtime declaration exists.  Its native
-    lane is the path basename, not the inventory's globally unique display
-    name: a declaration such as ``peripherals-logitech`` owns the native
-    ``peripherals/logitech`` sidecar.
+    identity and collection root follow the shared layout registry. Custom
+    lanes retain their basename identity, independently of globally unique
+    inventory display names such as ``peripherals-logitech``.
     """
     try:
         inventory = json.loads(runtime_inventory.read_text())
@@ -82,13 +84,23 @@ def queryable_capture_lanes(runtime_inventory: Path, selectors: frozenset[str] =
         if name not in selected:
             continue
         native_lane = lane_path.name
+        root = lane_path.parent
+        for identity, relative in ACTIVITY_LANES.items():
+            parts = Path(relative).parts
+            if lane_path.parts[-len(parts):] == parts:
+                native_lane = identity
+                root = lane_path.parents[len(parts) - 1]
+                break
+        # A retired flat managed path cannot be read by the registry-aware
+        # owner. Never admit it only to query a different, empty directory.
+        matches_owner = capture_lane_path(root, native_lane) == lane_path
         index_path = lane_path / f"{native_lane}-index.jsonl"
-        if index_path.is_file():
+        if matches_owner and index_path.is_file():
             lanes[name] = CaptureLane(
                 name=name,
                 path=lane_path,
                 native_contract="sinnix-capture-v1-sidecar",
-                root=lane_path.parent,
+                root=root,
                 native_lane=native_lane,
             )
         else:
