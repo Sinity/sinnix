@@ -288,3 +288,41 @@ def test_ledger_streams_and_preserves_legacy_keys(score, tmp_path, monkeypatch):
         raise AssertionError('whole-file read')
     monkeypatch.setattr(Path, 'read_text', forbid)
     assert score['ledger_seen']() == {('a.csv', 12, None), ('b.csv', 0, 'absent')}
+
+
+@pytest.mark.parametrize('kind', ['directory', 'fifo', 'broken-link'])
+def test_unavailable_ledger_is_not_empty_history(score, tmp_path, kind):
+    import os
+    ledger = tmp_path / 'scored.jsonl'
+    if kind == 'directory':
+        ledger.mkdir()
+    elif kind == 'fifo':
+        os.mkfifo(ledger)
+    else:
+        ledger.symlink_to(tmp_path / 'missing')
+    score['ledger_seen'].__globals__['LEDGER'] = ledger
+    with pytest.raises((OSError, ValueError)):
+        score['ledger_seen']()
+    assert ledger.lstat()
+
+
+def test_ledger_absence_and_regular_link(score, tmp_path):
+    ledger = tmp_path / 'scored.jsonl'
+    score['ledger_seen'].__globals__['LEDGER'] = ledger
+    assert score['ledger_seen']() == set()
+    target = tmp_path / 'history'
+    target.write_text('{"file":"a.csv","bytes":12}\n')
+    ledger.symlink_to(target)
+    assert score['ledger_seen']() == {('a.csv', 12, None)}
+    assert ledger.is_symlink()
+
+
+def test_ledger_open_denial_propagates(score, tmp_path, monkeypatch):
+    ledger = tmp_path / 'scored.jsonl'
+    ledger.write_text('')
+    score['ledger_seen'].__globals__['LEDGER'] = ledger
+    def deny(*args, **kwargs):
+        raise PermissionError('synthetic denied ledger')
+    monkeypatch.setitem(score['ledger_seen'].__globals__, 'open', deny)
+    with pytest.raises(PermissionError, match='synthetic denied ledger'):
+        score['ledger_seen']()

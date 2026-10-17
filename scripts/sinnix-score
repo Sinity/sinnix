@@ -42,6 +42,7 @@ import math
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -571,9 +572,21 @@ def transcribe(path: Path) -> dict | None:
 
 def ledger_seen() -> set[tuple[str, int, str | None]]:
     seen: set[tuple[str, int, str | None]] = set()
-    if not LEDGER.is_file():
-        return seen
-    with LEDGER.open(encoding="utf-8") as ledger:
+    try:
+        ledger_input = open(
+            LEDGER, encoding="utf-8",
+            opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
+        )
+    except FileNotFoundError:
+        # A dangling link is unavailable history, not a new empty ledger.
+        try:
+            LEDGER.lstat()
+        except FileNotFoundError:
+            return seen
+        raise
+    with ledger_input as ledger:
+        if not stat.S_ISREG(os.fstat(ledger.fileno()).st_mode):
+            raise ValueError("score ledger must be a regular file")
         for number, line in enumerate(ledger, 1):
             try:
                 row = json.loads(line)

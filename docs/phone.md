@@ -498,6 +498,8 @@ inventing retrospective provenance or automatically launching new scoring.
 The scorer streams ledger rows and validates deduplication keys before scoring.
 Malformed rows stop the run without new scores or receipts; preserve and repair
 the ledger before retrying instead of treating damaged history as unseen input.
+Only a missing ledger starts empty history. Access failures, dangling links and
+non-regular objects stop processing; regular-file links remain supported.
 
 Cut, with reasons: **panel-based CFF and contrast sensitivity** (the display is
 not a photometric instrument, and a 120 Hz panel puts a 60 Hz ceiling exactly
