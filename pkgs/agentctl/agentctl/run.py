@@ -41,6 +41,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from enum import Enum
 from pathlib import Path, PurePosixPath
@@ -67,6 +68,10 @@ REFUSED_EXIT_CODE = 125
 CANCELLED_EXIT_CODE = 130
 VANISHED_EXIT_CODE = 126
 SLOT_OCCUPIED_EXIT_CODE = 75
+BUS_CONNECT_RETRY_SECONDS = 10
+USER_BUS_CONNECTION_REFUSED = (
+    b"Failed to connect to user scope bus via local transport: Connection refused"
+)
 UNIT_OBSERVATION_GRACE_SECONDS = 10
 # Every running job's wrapper polls its unit through the user manager. A fixed
 # 50 ms poll is 20 `systemctl show` calls a second per job; with two dozen jobs
@@ -178,23 +183,70 @@ def _attempt_root_for_marker(marker: Path) -> Path:
 
 
 def _start_service(command: Sequence[str], marker: Path, attempt: int, log: Any):
-    """Serialize service start acknowledgement with cancellation."""
+    """Serialize startup with cancellation; retry only a confirmed absent unit."""
     root = _attempt_root_for_marker(marker)
-    with (root / ".allocation.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        if _marker_targets(marker, attempt):
-            return None
-        # Exec services acknowledge executable startup. Notify services use
-        # --no-block to acknowledge unit creation instead: their admission
-        # wait must not retain this cancellation lock until READY=1.
-        # Observe either service outside the lock.
-        return subprocess.run(
-            command,
-            stdout=subprocess.DEVNULL,
-            stderr=log,
-            check=False,
-            env=systemd_environment(),
-        )
+    unit = next((arg.removeprefix("--unit=") for arg in command if arg.startswith("--unit=")), None)
+    deadline = None
+    delay = 0.25
+
+    def note(message: str) -> None:
+        if log is None:
+            print(message, file=sys.stderr)
+        else:
+            log.write((message + "\n").encode())
+            log.flush()
+
+    while True:
+        with (root / ".allocation.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if _marker_targets(marker, attempt):
+                return None
+            # Keep client diagnostics separate from payload stderr: a payload
+            # must never be able to print its way into a startup retry.
+            with tempfile.TemporaryFile(dir=root) as errors:
+                client = subprocess.run(
+                    command, stdout=subprocess.DEVNULL, stderr=errors, check=False,
+                    # Only the startup client needs a stable diagnostic locale;
+                    # the payload environment is declared separately on the unit.
+                    env={**systemd_environment(), "LC_ALL": "C"},
+                )
+                errors.seek(0)
+                retryable = (
+                    client.returncode != 0
+                    and errors.read(512).strip() == USER_BUS_CONNECTION_REFUSED
+                    and not errors.read(1)
+                )
+                errors.seek(0)
+                if log is None:
+                    while block := errors.read(65536):
+                        sys.stderr.write(block.decode("utf-8", errors="backslashreplace"))
+                else:
+                    shutil.copyfileobj(errors, log)
+                    log.flush()
+        if not retryable or unit is None:
+            return client
+        if deadline is None:
+            deadline = time.monotonic() + BUS_CONNECT_RETRY_SECONDS
+            note("startup connection refused; waiting for confirmed unit absence before retry")
+        # Neither backoff nor manager observation may retain the cancellation lock.
+        while True:
+            if _marker_targets(marker, attempt):
+                return None
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                note("startup connection recovery budget exhausted; service not resubmitted")
+                return client
+            time.sleep(min(delay, remaining))
+            delay = min(delay * 2, 1.0)
+            if _marker_targets(marker, attempt):
+                return None
+            properties = _unit_snapshot(unit)
+            if properties is not None and properties.get("LoadState") != "not-found":
+                note("startup unit is not confirmed absent; service not resubmitted")
+                return client
+            if time.monotonic() < deadline and properties is not None:
+                note("user manager confirms unit absent; retrying the same service identity")
+                break
 
 
 def outcome_path_for(log_path: object) -> Path:
@@ -414,7 +466,7 @@ def _unit_snapshot(unit: str) -> dict[str, str] | None:
     shown = _systemctl(
         "show",
         "-p",
-        "LoadState,ActiveState,SubState,Result,ExecMainStatus,ExecMainCode,Type,ActiveEnterTimestampMonotonic",
+        "LoadState,ActiveState,SubState,Result,ExecMainStatus,ExecMainCode,Type,ActiveEnterTimestampMonotonic,Job",
         unit,
     )
     if shown is None:
@@ -433,6 +485,8 @@ def unit_properties(unit: str) -> dict[str, str]:
 
 
 def _unit_is_terminal(properties: Mapping[str, str]) -> bool:
+    if properties.get("Job", "") not in {"", "0"}:
+        return False
     return properties.get("LoadState") == "loaded" and (
         properties.get("ActiveState") in {"inactive", "failed"}
         or (
@@ -627,6 +681,9 @@ def _classify(
     if properties.get("ExecMainCode") in {"2", "3", "killed", "dumped"}:
         status += 128
     if properties.get("Result") == "success" and status == 0:
+        if properties.get("ExecMainCode") not in {"1", "exited"}:
+            # A loaded but never-executed unit also reports default zero status.
+            return Outcome.VANISHED, VANISHED_EXIT_CODE
         return Outcome.SUCCESS, 0
     return Outcome.FAILED, status or 1
 
@@ -961,11 +1018,15 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
                             outcome, status = Outcome.CANCELLED, CANCELLED_EXIT_CODE
                         else:
                             return_code = client.returncode
-                            properties = (
-                                _wait_for_unit(unit, launch["timeout_seconds"])
-                                if return_code == 0
-                                else unit_properties(unit)
-                            )
+                            if return_code == 0:
+                                properties = _wait_for_unit(unit, launch["timeout_seconds"])
+                            else:
+                                properties = _unit_snapshot(unit)
+                                if (properties and properties.get("LoadState") == "loaded"
+                                        and not _unit_is_terminal(properties)):
+                                    # An acknowledgement can be lost after acceptance.
+                                    # Observe that unit; never resubmit its payload.
+                                    properties = _wait_for_unit(unit, launch["timeout_seconds"])
                             outcome, status = _classify(
                                 _marker_targets(marker, launch["attempt"]),
                                 properties,

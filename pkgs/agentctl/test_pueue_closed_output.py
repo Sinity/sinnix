@@ -10,7 +10,11 @@ from pathlib import Path
 
 
 def test_quiet_wait_survives_closed_output_and_panic_reporting():
-    with tempfile.TemporaryDirectory(prefix="pqclosed-") as directory:
+    # Unix sockets cannot use deeply nested job TMPDIR paths. This fixture
+    # stores only tiny IPC state; sandbox builds retain their short TMPDIR.
+    runtime = Path(f"/run/user/{os.getuid()}")
+    parent = runtime if runtime.is_dir() else None
+    with tempfile.TemporaryDirectory(prefix="pqclosed-", dir=parent) as directory:
         root = Path(directory)
         config = root / "pueue.yml"
         config.write_text(
@@ -32,7 +36,7 @@ def test_quiet_wait_survives_closed_output_and_panic_reporting():
                 while subprocess.run(
                     [*command, "status", "--json"], capture_output=True
                 ).returncode:
-                    assert daemon.poll() is None
+                    assert daemon.poll() is None, (root / "daemon.log").read_text()
                     assert time.monotonic() < deadline
                     time.sleep(0.05)
                 # Prevent this deliberate synthetic abort from creating a host core.

@@ -101,10 +101,11 @@ that task and no clean removes it.
 event to the spool naming the group pueue ran it in, then runs the argv as a
 transient service `agentctl-<group>-<stem>-<digest of the launch input
 path>.service` in the declarative `agentctl-<group>.slice`:
-`systemd-run --user --wait -p Type=exec -p ExitType=cgroup
--p KillMode=control-group -p IOAccounting=yes -p RuntimeMaxSec=<timeout>`,
+`systemd-run --user -p Type=exec -p ExitType=cgroup
+-p KillMode=control-group -p IOAccounting=yes -p RemainAfterExit=yes
+-p RuntimeMaxSec=<timeout>`,
 with the launch environment as `--setenv` and the pueue task id as the unit
-description. The wait returns once the unit's cgroup is empty, so a
+description. The wrapper observes completion once the unit's cgroup is empty, so a
 descendant that outlives the command's leader still holds the task and its
 pool slot. Each invocation allocates `jobs/<ref>.attempts/<n>/`: `output.log` captures diagnostics and exit-only output, `output.result` captures stdout alone for `json`/`pytest`, and `output.outcome` records how that invocation ended. Capture is complete, including logs above 8 MB and JSON above 64 KB. The old `jobs/<ref>.log`, `.result`, and `.outcome` names are compatibility links to the latest attempt. A retry first moves any pre-upgrade regular files into attempt 1, then allocates the next directory. Retries never reset a previous attempt, including partial output left by interruption. An absent outcome means the wrapper did not record completion.
 
@@ -151,6 +152,17 @@ Transient units retain their terminal status with `RemainAfterExit=yes` until th
 wrapper observes completion. The wrapper then stops and clears its exact unit,
 including retained verifier descendants. Missing unit state is `vanished`; it
 never establishes success from the startup acknowledgement alone.
+
+A refused user-bus startup connection has a ten-second resubmission window,
+with bounded manager probes and backoff outside the cancellation lock. Only
+a confirmed `LoadState=not-found` permits retrying the same unit identity.
+Other errors and unobservable or loaded units are not resubmitted. A loaded
+unit after a lost acknowledgement is observed to completion; an already observed
+terminal result is retained. Pending systemd jobs are not terminal, and default
+zero status without an executed process cannot certify success. Startup-client
+diagnostics are preserved separately
+from payload stderr, which cannot trigger a retry.
+
 If its wrapper is lost, the next admission settles a foreign unit only after
 pueue records its owner terminal. This applies to every pool; unknown or still
 running foreign owners remain untouched in multi-slot pools. An explicit retry

@@ -116,6 +116,7 @@
       # environment so pytest can import the gateway's runtime dependencies.
       gatewayTestPython = pkgs.python3.withPackages (ps: [
         ps.pytest
+        ps.pytest-timeout
         scriptPkgs.sinnix-agent-gateway-tooling
       ]);
       gatewayTestRunner = pkgs.writeShellScriptBin "gateway-pytest" ''

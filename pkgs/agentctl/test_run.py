@@ -1767,3 +1767,199 @@ def test_same_reference_restart_preserves_its_prior_unit_release(
         ["systemctl", "--user", "stop", unit],
         ["systemctl", "--user", "stop", unit],
     ]
+
+
+CONNECT_REFUSED = "Failed to connect to user scope bus via local transport: Connection refused\n"
+
+
+def refusing_startup_client(fake: FakeSystemd, failures: int, *, exit_status: int = 0) -> Path:
+    runner = fake.root / "bin/systemd-run"
+    delegate = runner.with_name("systemd-run-delegate")
+    runner.rename(delegate)
+    counter = fake.root / "startup-attempts"
+    fake.show.write_text("LoadState=not-found\n")
+    result = "success" if exit_status == 0 else "exit-code"
+    terminal = f"LoadState=loaded\nActiveState=inactive\nResult={result}\nExecMainStatus={exit_status}\nExecMainCode=exited\n"
+    runner.write_text(
+        f"#!{sys.executable}\n"
+        "import os,sys\nfrom pathlib import Path\n"
+        f"counter=Path({str(counter)!r})\n"
+        "n=int(counter.read_text())+1 if counter.exists() else 1\n"
+        "counter.write_text(str(n))\n"
+        f"if n <= {failures}:\n sys.stderr.write({CONNECT_REFUSED!r});sys.exit(1)\n"
+        f"Path({str(fake.show)!r}).write_text({terminal!r})\n"
+        f"os.execv({str(delegate)!r},[{str(delegate)!r},*sys.argv[1:]])\n"
+    )
+    runner.chmod(0o755)
+    return counter
+
+
+def test_startup_connection_refusal_recovers_without_duplicate_payload(
+    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue,
+) -> None:
+    attempts = refusing_startup_client(fake_systemd, 2)
+    payload = tmp_path / "payload-runs"
+    launch = write_launch(tmp_path, pool="pytest", argv=[
+        sys.executable, "-c", "import sys;open(sys.argv[1], 'a').write('run\\n')", str(payload),
+    ])
+    assert main([str(launch)]) == 0
+    assert attempts.read_text() == "3"
+    assert payload.read_text() == "run\n"
+    assert CONNECT_REFUSED in log_of(tmp_path)
+    assert outcome_of(tmp_path)["outcome"] == "success"
+
+
+def test_startup_connection_outage_is_bounded_without_resubmission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_systemd: FakeSystemd,
+) -> None:
+    attempts = refusing_startup_client(fake_systemd, 100)
+    marker = cancel_marker_for(tmp_path / "job-a.log")
+    (tmp_path / "job-a.attempts").mkdir()
+    clock = [0.0]
+    monkeypatch.setattr(run_module, "BUS_CONNECT_RETRY_SECONDS", 1, raising=False)
+    monkeypatch.setattr(run_module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(run_module.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay))
+    monkeypatch.setattr(run_module, "_unit_snapshot", lambda _unit: None)
+    with (tmp_path / "startup.log").open("wb") as log:
+        client = run_module._start_service(
+            ["systemd-run", "--user", "--unit=fixture.service", "--", "true"], marker, 1, log,
+        )
+    assert client is not None and client.returncode == 1
+    assert clock[0] >= 1
+    assert attempts.read_text() == "1"
+    assert CONNECT_REFUSED in (tmp_path / "startup.log").read_text()
+
+
+def test_startup_connection_wait_releases_cancellation_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_systemd: FakeSystemd,
+) -> None:
+    attempts = refusing_startup_client(fake_systemd, 100)
+    marker = cancel_marker_for(tmp_path / "job-a.log")
+    root = tmp_path / "job-a.attempts"
+    root.mkdir()
+
+    def cancel(_delay):
+        with (root / ".allocation.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            marker.write_text(json.dumps({"attempt": 1}))
+
+    monkeypatch.setattr(run_module.time, "sleep", cancel)
+    monkeypatch.setattr(run_module, "_unit_snapshot", lambda _unit: None)
+    with (tmp_path / "startup.log").open("wb") as log:
+        client = run_module._start_service(
+            ["systemd-run", "--user", "--unit=fixture.service", "--", "true"], marker, 1, log,
+        )
+    assert client is None
+    assert attempts.read_text() == "1"
+    assert json.loads(marker.read_text()) == {"attempt": 1}
+
+
+def test_real_lost_startup_ack_waits_without_resubmitting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_pueue: FakePueue,
+) -> None:
+    user_manager()
+    monkeypatch.setenv("PUEUE_GROUP", "fixture")
+    payload = tmp_path / "payload-runs"
+    launch = write_launch(tmp_path, argv=[
+        sys.executable, "-c",
+        "import sys,time;time.sleep(.2);open(sys.argv[1], 'a').write('run\\n')", str(payload),
+    ])
+    original = run_module._start_service
+    calls = []
+
+    def lost_ack(*args, **kwargs):
+        client = original(*args, **kwargs)
+        assert client is not None and client.returncode == 0
+        calls.append(client)
+        return subprocess.CompletedProcess(client.args, 1)
+
+    monkeypatch.setattr(run_module, "_start_service", lost_ack)
+    assert main([str(launch)]) == 0
+    assert payload.read_text() == "run\n"
+    assert len(calls) == 1
+    assert outcome_of(tmp_path)["outcome"] == "success"
+
+
+def test_startup_connection_does_not_resubmit_an_observed_loaded_unit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_systemd: FakeSystemd,
+) -> None:
+    attempts = refusing_startup_client(fake_systemd, 100)
+    marker = cancel_marker_for(tmp_path / "job-a.log")
+    (tmp_path / "job-a.attempts").mkdir()
+    monkeypatch.setattr(run_module.time, "sleep", lambda _delay: None)
+    monkeypatch.setattr(run_module, "_unit_snapshot", lambda _unit: {"LoadState": "loaded", "ActiveState": "active"})
+    with (tmp_path / "startup.log").open("wb") as log:
+        client = run_module._start_service(
+            ["systemd-run", "--user", "--unit=fixture.service", "--", "true"], marker, 1, log,
+        )
+    assert client is not None and client.returncode == 1
+    assert attempts.read_text() == "1"
+
+
+@pytest.mark.parametrize("diagnostic", [
+    "Failed to start transient service unit: Connection reset by peer\n",
+    CONNECT_REFUSED + "another diagnostic\n",
+    "Failed to connect to user scope bus via local transport: Operation not permitted\n",
+])
+def test_startup_connection_does_not_retry_other_client_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_systemd: FakeSystemd, diagnostic: str,
+) -> None:
+    attempts = refusing_startup_client(fake_systemd, 1)
+    runner = fake_systemd.root / "bin/systemd-run"
+    runner.write_text(runner.read_text().replace(repr(CONNECT_REFUSED), repr(diagnostic)))
+    marker = cancel_marker_for(tmp_path / "job-a.log")
+    (tmp_path / "job-a.attempts").mkdir()
+    monkeypatch.setattr(run_module, "_unit_snapshot", lambda _unit: {"LoadState": "not-found"})
+    with (tmp_path / "startup.log").open("wb") as log:
+        client = run_module._start_service(
+            ["systemd-run", "--user", "--unit=fixture.service", "--", "true"], marker, 1, log,
+        )
+    assert client is not None and client.returncode == 1
+    assert attempts.read_text() == "1"
+    assert diagnostic in (tmp_path / "startup.log").read_text()
+
+
+def test_startup_connection_payload_stderr_cannot_trigger_retry(
+    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue,
+) -> None:
+    attempts = refusing_startup_client(fake_systemd, 0, exit_status=1)
+    launch = write_launch(tmp_path, pool="pytest", argv=[
+        sys.executable, "-c", "import sys;sys.stderr.write(sys.argv[1]);sys.exit(1)", CONNECT_REFUSED,
+    ])
+    assert main([str(launch)]) == 1
+    assert attempts.read_text() == "1"
+    assert outcome_of(tmp_path)["outcome"] == "failed"
+    assert CONNECT_REFUSED in log_of(tmp_path)
+
+
+def test_lost_startup_ack_retains_already_observed_terminal_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_systemd: FakeSystemd, fake_pueue: FakePueue,
+) -> None:
+    launch = write_launch(tmp_path, pool="pytest")
+    original = run_module._start_service
+
+    def lost_ack(*args, **kwargs):
+        client = original(*args, **kwargs)
+        assert client is not None and client.returncode == 0
+        return subprocess.CompletedProcess(client.args, 1)
+
+    def no_second_observation(*_args):
+        raise AssertionError("a confirmed terminal result must not be discarded")
+
+    monkeypatch.setattr(run_module, "_start_service", lost_ack)
+    monkeypatch.setattr(run_module, "_wait_for_unit", no_second_observation)
+    assert main([str(launch)]) == 0
+    assert outcome_of(tmp_path)["outcome"] == "success"
+
+
+
+def test_startup_default_status_does_not_prove_execution():
+    properties = {"LoadState": "loaded", "ActiveState": "inactive", "Job": "",
+                  "Result": "success", "ExecMainStatus": "0", "ExecMainCode": "0"}
+    assert run_module._classify(False, properties) == (run_module.Outcome.VANISHED, VANISHED_EXIT_CODE)
+
+
+def test_pending_start_job_is_not_terminal():
+    properties = {"LoadState": "loaded", "ActiveState": "inactive", "Job": "17",
+                  "Result": "success", "ExecMainStatus": "0", "ExecMainCode": "0"}
+    assert not run_module._unit_is_terminal(properties)
