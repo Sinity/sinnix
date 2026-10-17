@@ -337,3 +337,28 @@ def test_complete_catalog_preserves_unknown_units_and_triggered_services(
         and any(arg.endswith(".service") for arg in call)
         for call in fake_systemd["calls"]
     )
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_registration_failure_preserves_the_old_schedule(
+    fake_systemd, config, project_root, tmp_path, monkeypatch, partial
+):
+    from dataclasses import replace
+
+    old = schedule.apply(config)["started"][0]
+    original_run = schedule._run
+
+    def failing_registration(argv, *, check=True):
+        if argv[0] == "systemd-run":
+            raise schedule.TimerError("synthetic registration failure")
+        return original_run(argv, check=check)
+
+    monkeypatch.setattr(schedule, "_run", failing_registration)
+    rebuilt = replace(config, agentctl_executable="/nix/store/rebuilt/bin/agentctl")
+    if partial:
+        rebuilt = replace(
+            rebuilt, project_roots=(project_root, tmp_path / "unavailable")
+        )
+    with pytest.raises(schedule.TimerError, match="registration failure"):
+        schedule.apply(rebuilt)
+    assert old in fake_systemd["units"]

@@ -195,7 +195,7 @@ def apply(config: Config) -> dict[str, Any]:
     incomplete = bool(catalog.unavailable)
     available = {row["id"] for row in catalog.list()}
     current_config = str(config.config_path) if config.config_path is not None else None
-    stopped = []
+    retired: list[str] = []
     deferred = []
     for unit in sorted(present - set(desired)):
         try:
@@ -210,10 +210,7 @@ def apply(config: Config) -> dict[str, Any]:
         except (TimerError, ValueError, TypeError, AttributeError) as error:
             deferred.append({"unit": unit, "reason": str(error)})
             continue
-        # The timer stops future admission. Its already-triggered service may
-        # still be reconciling an accepted launch; let that handler finish.
-        _run(["systemctl", "--user", "stop", f"{unit}.timer"])
-        stopped.append(unit)
+        retired.append(unit)
     started: list[str] = []
     for unit, entry in sorted(desired.items()):
         if unit in present:
@@ -236,6 +233,13 @@ def apply(config: Config) -> dict[str, Any]:
             ]
         )
         started.append(unit)
+    # Do not disable an existing schedule if replacement registration fails.
+    # The timer stops future admission; an already-triggered handler may still
+    # be reconciling an accepted launch, so let its service finish.
+    stopped: list[str] = []
+    for unit in retired:
+        _run(["systemctl", "--user", "stop", f"{unit}.timer"])
+        stopped.append(unit)
     return {
         "status": "incomplete" if incomplete or deferred else "complete",
         "timers": [{"unit": unit, **entry} for unit, entry in sorted(desired.items())],
