@@ -14,6 +14,7 @@ write) fails test_envelope_seq_is_continuous_across_lines.
 from __future__ import annotations
 
 import base64
+import io
 import json
 import socket
 import time
@@ -138,6 +139,35 @@ def test_speech_recording_is_durably_published_before_transcription(
     assert recording.stat().st_mode & 0o777 == 0o600
     assert not list(lane.blob_dir.glob("*.part"))
     assert not list(lane.blob_dir.glob(".*.atomic-tmp-*"))
+
+
+@pytest.mark.parametrize("response", [None, [], "invalid", 42])
+def test_nonobject_stt_response_retains_speech_envelope(
+    tmp_path, monkeypatch, response
+):
+    monkeypatch.setattr(
+        receiver.urllib.request,
+        "urlopen",
+        lambda *_a, **_kw: io.BytesIO(json.dumps(response).encode()),
+    )
+    demux = _PhoneStreamDemuxer(tmp_path)
+    demux.ingest_line(
+        json.dumps(
+            {
+                "kind": "speech",
+                "audio_b64": base64.b64encode(b"\x00\x00").decode(),
+                "rate": 16000,
+                "seconds": 0.1,
+            }
+        )
+    )
+    records = [p for p in (tmp_path / "phone-speech").glob("phone-speech-*.jsonl") if not p.name.endswith("-index.jsonl")]
+    assert len(records) == 1
+    envelope = json.loads(records[0].read_text())
+    payload = envelope["payload"]
+    assert payload["transcribed"] is False
+    recording = tmp_path / "phone" / "speech" / payload["audio_file"]
+    assert recording.read_bytes()[44:] == b"\x00\x00"
 
 
 def test_speech_publish_failure_leaves_no_claimed_recording(

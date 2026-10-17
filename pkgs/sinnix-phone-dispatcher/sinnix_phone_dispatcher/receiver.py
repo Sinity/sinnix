@@ -98,7 +98,10 @@ def _phone_stream_transcribe(wav: bytes, *, timeout: float = 60.0) -> dict | Non
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8", "replace"))
+            result = json.loads(resp.read().decode("utf-8", "replace"))
+            if not isinstance(result, dict):
+                raise ValueError("STT response must be a JSON object")
+            return result
     except (urllib.error.URLError, OSError, ValueError) as exc:
         print(
             f"phone-dispatcher: phone-stream: stt hub did not answer: {exc}",
