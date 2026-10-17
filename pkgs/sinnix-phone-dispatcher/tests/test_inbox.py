@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tracemalloc
 from http import HTTPStatus
 from pathlib import Path
 
@@ -55,6 +56,29 @@ def test_listing_carries_a_sha_the_bytes_match(isolated_state_dirs) -> None:
     assert status == HTTPStatus.OK
     assert hashlib.sha256(body).hexdigest() == entry["sha256"]
     assert entry["one_shot"] is True
+
+
+def test_listing_hashes_large_entries_without_buffering_them(isolated_state_dirs):
+    directory = isolated_state_dirs["decks_dir"]
+    directory.mkdir(parents=True)
+    path = directory / "large.deck"
+    chunk = b"synthetic deck\n" * 4096
+    digest = hashlib.sha256()
+    with path.open("wb") as handle:
+        for _ in range(160):
+            handle.write(chunk)
+            digest.update(chunk)
+    tracemalloc.start()
+    try:
+        status, payload = inbox_mod.list_inbox()
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert status == HTTPStatus.OK
+    entry = next(f for f in payload["files"] if f["name"] == "decks/large.deck")
+    assert entry["bytes"] == path.stat().st_size
+    assert entry["sha256"] == digest.hexdigest()
+    assert peak < 3 * 1024 * 1024, f"inbox listing allocated {peak} bytes"
 
 
 def test_generated_state_is_served_without_a_file(isolated_state_dirs) -> None:
@@ -375,12 +399,12 @@ def test_missing_inbox_is_empty_but_wrong_type_is_unavailable(isolated_state_dir
 
 def test_listing_handles_concurrently_consumed_receipt(isolated_state_dirs, monkeypatch):
     _write(isolated_state_dirs, 'receipts', 'entry.json', '{}')
-    original = inbox_mod._read_regular
+    original = inbox_mod._inspect_regular
     def consumed(path, **kwargs):
         if path == 'entry.json':
             raise FileNotFoundError('synthetic concurrent confirmation')
         return original(path, **kwargs)
-    monkeypatch.setattr(inbox_mod, '_read_regular', consumed)
+    monkeypatch.setattr(inbox_mod, '_inspect_regular', consumed)
     status, payload = inbox_mod.list_inbox()
     assert status == HTTPStatus.OK and payload['ok']
     assert not any(f['name'] == 'receipts/entry.json' for f in payload['files'])

@@ -118,13 +118,13 @@ def list_inbox() -> tuple[HTTPStatus, dict]:
                     if name.startswith(".") or name.endswith(".part"):
                         continue
                     try:
-                        body = _read_regular(name, dir_fd=directory_fd)
+                        size, digest = _inspect_regular(name, dir_fd=directory_fd)
                     except FileNotFoundError:
                         # A concurrent confirmation can consume a one-shot.
                         continue
                     files.append({
-                        "name": f"{sub}/{name}", "bytes": len(body),
-                        "sha256": _sha(body), "generated": False,
+                        "name": f"{sub}/{name}", "bytes": size,
+                        "sha256": digest, "generated": False,
                         "one_shot": one_shot,
                     })
         except FileNotFoundError:
@@ -156,15 +156,33 @@ def read_inbox(name: str) -> tuple[HTTPStatus, bytes | dict]:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
 
 
-def _read_regular(path: str | Path, *, dir_fd: int | None = None) -> bytes:
+@contextmanager
+def _open_regular(path: str | Path, *, dir_fd: int | None = None):
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise OSError("inbox entry is not a regular file")
         with os.fdopen(fd, "rb", closefd=False) as stream:
-            return stream.read()
+            yield stream
     finally:
         os.close(fd)
+
+
+def _read_regular(path: str | Path, *, dir_fd: int | None = None) -> bytes:
+    with _open_regular(path, dir_fd=dir_fd) as stream:
+        return stream.read()
+
+
+def _inspect_regular(path: str | Path, *, dir_fd: int | None = None) -> tuple[int, str]:
+    # Inventory needs metadata, not a second in-memory copy of each deck.
+    # Count the bytes actually hashed rather than taking a separate path stat.
+    digest = hashlib.sha256()
+    size = 0
+    with _open_regular(path, dir_fd=dir_fd) as stream:
+        while chunk := stream.read(1 << 20):
+            size += len(chunk)
+            digest.update(chunk)
+    return size, digest.hexdigest()
 
 
 @contextmanager
