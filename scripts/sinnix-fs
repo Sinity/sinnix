@@ -57,6 +57,12 @@ def safe(value):
     return value
 
 
+# DuckDB otherwise sizes buffers and workers from the whole host, even inside
+# the scheduled service's 1 GiB memory.high boundary. Leave room for Python,
+# native allocations and file metadata; spill beside the database on /realm.
+DUCKDB_SETTINGS = "SET memory_limit='512MiB'; SET threads=2; SET preserve_insertion_order=false;"
+
+
 def run_duckdb_file(db: Path, sql: str, script_name: str) -> subprocess.CompletedProcess:
     """Execute SQL through a private scratch file beside its staged database."""
     db.parent.mkdir(parents=True, exist_ok=True)
@@ -65,7 +71,7 @@ def run_duckdb_file(db: Path, sql: str, script_name: str) -> subprocess.Complete
         dir=db.parent, delete=False,
     ) as handle:
         script = Path(handle.name)
-        handle.write(sql)
+        handle.write(DUCKDB_SETTINGS + "\n" + sql)
     try:
         return subprocess.run(["duckdb", "-no-init", str(db), "-f", str(script)], text=True,
                               capture_output=True, check=False)
@@ -74,7 +80,7 @@ def run_duckdb_file(db: Path, sql: str, script_name: str) -> subprocess.Complete
 
 
 def duckdb_query(db: Path, sql: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["duckdb", "-readonly", "-no-init", str(db), "-noheader", "-list", "-c", sql],
+    return subprocess.run(["duckdb", "-readonly", "-no-init", str(db), "-noheader", "-list", "-c", DUCKDB_SETTINGS + "\n" + sql],
                           text=True, capture_output=True, check=False)
 
 
@@ -916,7 +922,6 @@ definitions remain in the raw ledger and are excluded from effective results.
 The validated databases, Parquet and manifest publish through one atomic pointer.
 """
 
-LEDGER_MEMORY_LIMIT = "768MiB"
 
 LEDGER_SQL = r"""
 -- JSON readers are supplied by the declared DuckDB runtime. No extension
@@ -1049,7 +1054,7 @@ def ledger_run(index_dir: Path, judgments_path: Path | None = None) -> int:
         "SELECT table_name, 'TABLE' FROM duckdb_tables() "
         "UNION ALL SELECT view_name, 'VIEW' FROM duckdb_views();"
     )
-    probe = subprocess.run(["duckdb", str(inv_db), "-csv", "-c", catalog_probe],
+    probe = subprocess.run(["duckdb", str(inv_db), "-csv", "-no-init", "-c", DUCKDB_SETTINGS + "\n" + catalog_probe],
                             text=True, capture_output=True)
     existing = {}
     if probe.returncode == 0:
@@ -1076,11 +1081,6 @@ def ledger_run(index_dir: Path, judgments_path: Path | None = None) -> int:
     # content.duckdb needs ATTACHing, as a view rather than a copy, so a
     # re-run of either scanner remains the only place that table is written.
     full_sql = f"""
--- Keep buffer memory below the service's 1G soft limit and allow the
--- prefix/window join to spill beside the database on /realm.
-SET memory_limit = '{LEDGER_MEMORY_LIMIT}';
-SET threads = 2;
-SET preserve_insertion_order = false;
 ATTACH {sql_string(content_db)} AS ctn (READ_ONLY);
 BEGIN TRANSACTION;
 {precise_drops}
@@ -1364,8 +1364,9 @@ def cmd_status(args: argparse.Namespace) -> int:
 def cmd_query(args: argparse.Namespace) -> int:
     generation = resolve_generation(args.index_dir)
     # Read-only databases still permit external COPY writes. Safe mode locks
-    # external access off; skip user init commands for this query interface.
-    proc = subprocess.run(["duckdb", "-readonly", "-safe", "-no-init", "-json", str(generation / args.database), "-c", args.sql], check=False)
+    # external access off. Set budgets before safe mode locks configuration;
+    # never execute caller SQL until safe mode is enabled. Skip user init files.
+    proc = subprocess.run(["duckdb", "-readonly", "-no-init", "-json", str(generation / args.database), "-cmd", DUCKDB_SETTINGS, "-cmd", ".safe_mode", "-c", args.sql], check=False)
     return proc.returncode
 
 

@@ -2,6 +2,8 @@
 
 `sinnix-fs` owns a directory inventory, bounded content observations, and materialized views of separately authored judgments. It is not a storage owner, an application-archive replacement, or an automatic deduplicator. On the installed workstation, invoke it through `sinnix fs`; service units use the `sinnix-fs` package binary.
 
+Every DuckDB session starts with a 512 MiB buffer limit, two workers, and insertion-order preservation disabled so larger operations can spill beside their databases. Read-only queries enable safe mode after these settings and before caller SQL. The scheduled scan also bounds disk traffic per device: 40 MB/s reads and 10 MB/s writes on the managed realm device, and 20 MB/s reads and 10 MB/s writes on the store and external archive devices. These limits complement the service memory boundary and low scheduling weight. They do not change scan coverage or publication validation.
+
 ## Content identity
 
 Content schema v2 separates full-file `sha256` from `sample_sha256`. Files at or below the 8 MiB full-hash bound receive `fingerprint_kind: sha256-full`; larger files receive `sha256-head-tail-size-v1`, calculated from the first MiB, last MiB, and decimal file size. `fingerprint_bytes` states the payload bytes read. Matching samples are candidates, not evidence of byte equality.

@@ -309,16 +309,7 @@ def test_nested_prefix_ledger_completes_with_a_bounded_buffer(tmp_path, monkeypa
     (tmp_path / "judgments.jsonl").write_text(
         "".join(json.dumps(j) + "\n" for j in judgments)
     )
-    monkeypatch.setattr(fs, "LEDGER_MEMORY_LIMIT", "256MiB", raising=False)
-    original_runner = fs.run_duckdb_file
-
-    def many_core_defaults(db, statement, name):
-        return original_runner(
-            db, "SET memory_limit='256MiB'; SET threads=24; "
-            "SET preserve_insertion_order=true;\n" + statement, name
-        )
-
-    monkeypatch.setattr(fs, "run_duckdb_file", many_core_defaults)
+    monkeypatch.setattr(fs, "DUCKDB_SETTINGS", fs.DUCKDB_SETTINGS.replace("512MiB", "256MiB"))
     assert fs.ledger_run(tmp_path) == 0
     assert sql(db, "SELECT count(*) AS n FROM inherited_judgments") == [{"n": 360000}]
     assert sql(db, "SELECT DISTINCT value FROM inherited_judgments") == [
@@ -584,3 +575,18 @@ def test_repeated_physical_root_spellings_are_not_counted_twice(tmp_path, monkey
     content = tmp_path / "files.jsonl"
     assert fs.content_walk(roots, content, 0) == 1
     assert json.loads(content.read_text())["path"] == str(root / "note.md")
+
+
+def test_all_internal_duckdb_sessions_have_bounded_buffers_and_workers(tmp_path):
+    fs = load()
+    db = tmp_path / "bounded.duckdb"
+    query = "SELECT current_setting('memory_limit'), current_setting('threads')"
+    writer = fs.run_duckdb_file(db, "CREATE TABLE proof AS " + query, "budget")
+    assert writer.returncode == 0, writer.stderr
+    reader = fs.duckdb_query(db, query)
+    assert reader.returncode == 0, reader.stderr
+    assert reader.stdout.strip() == "512.0 MiB|2"
+    # The write/materialization route must apply the same policy as readers.
+    stored = fs.duckdb_query(db, "SELECT * FROM proof")
+    assert stored.returncode == 0, stored.stderr
+    assert stored.stdout.strip() == reader.stdout.strip()

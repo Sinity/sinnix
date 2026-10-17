@@ -49,6 +49,18 @@ mkServiceModule {
       execStart = "${scriptPkgs.sinnix-fs}/bin/sinnix-fs run --out-dir ${lib.escapeShellArg indexDir}";
       serviceConfig = {
         TimeoutStartSec = cfg.maxSecondsPerRun;
+        # Low weight alone does not bound sequential scans on these devices.
+        # The observed scanner read burst exceeded 600 MiB/s during reclaim.
+        IOReadBandwidthMax = [
+          "${config.sinnix.paths.realmRoot} 40M"
+          "/nix 20M"
+          "${config.sinnix.paths.outerRealm} 20M"
+        ];
+        IOWriteBandwidthMax = [
+          "${config.sinnix.paths.realmRoot} 10M"
+          "/nix 10M"
+          "${config.sinnix.paths.outerRealm} 10M"
+        ];
       };
       timer = {
         onCalendar = cfg.schedule;
