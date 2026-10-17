@@ -19,13 +19,14 @@ import os
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import nullcontext
 from pathlib import Path
-
-from sinnix_lib.layout import capture_lane_path
+from typing import BinaryIO
 
 from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.layout import capture_lane_path
 from sinnix_lib.lock import flock
 
 from .writer import CaptureWriter
@@ -69,7 +70,7 @@ def is_binary_mime(mime: str) -> bool:
     return not (mime.startswith("text/") or mime in {"STRING", "UTF8_STRING"})
 
 
-def store_blob(lane_dir: Path, content: bytes, digest: str) -> Path:
+def store_blob(lane_dir: Path, content: bytes | BinaryIO, digest: str) -> Path:
     """Write content once under its own sha256 and return the blob path."""
     shard_dir = lane_dir / "blobs" / digest[:BLOB_SHARD_CHARS]
     shard_dir.mkdir(parents=True, exist_ok=True)
@@ -92,20 +93,20 @@ def source_window(raw: str) -> dict:
     return {"class": parsed.get("class"), "title": parsed.get("title")}
 
 
-def _run(argv: list[str]) -> tuple[int, bytes]:
+def _run(argv: list[str], *, output: BinaryIO | None = None) -> tuple[int, bytes]:
     """A command's exit status and stdout; a status of -1 means it never ran."""
     if not argv:
         return (-1, b"")
     try:
         completed = subprocess.run(
             argv,
-            stdout=subprocess.PIPE,
+            stdout=subprocess.PIPE if output is None else output,
             stderr=subprocess.DEVNULL,
             check=False,
         )
     except OSError:
         return (-1, b"")
-    return (completed.returncode, completed.stdout)
+    return (completed.returncode, completed.stdout or b"")
 
 
 def _drain_watch_payload() -> None:
@@ -184,56 +185,64 @@ def capture_selection(
         # gone) -- there is nothing to capture.
         return 0
 
-    # A failed transfer is not a capture: its output is a truncated prefix
-    # of the selection, which would be recorded as the whole of it.
-    status, content = _run([*shlex.split(paste_command), mime])
-    if status != 0 or not content:
-        return 0
-
-    digest = hashlib.sha256(content).hexdigest()
-
-    if debounce_ms is not None and _is_superseded(debounce_state, debounce_ms):
-        return 0
-
-    window_status, window_json = (
-        _run(shlex.split(window_command)) if window_command else (-1, b"")
-    )
-    window = source_window(
-        window_json.decode("utf-8", "replace") if window_status == 0 else "null"
-    )
-
-    key = f"{mime}:{digest}"
-    gate = (
-        flock(dedup_state.with_name(dedup_state.name + ".lock"))
-        if dedup_state
-        else nullcontext()
-    )
-    with gate:
-        if dedup_state is not None and _is_duplicate(dedup_state, key):
+    # Spool the transfer privately in the lane's writable filesystem. Binary
+    # content stays out of Python memory through hashing and atomic publish;
+    # text retains its existing inline representation in the capture schema.
+    lane_dir = capture_lane_path(capture_root, lane)
+    lane_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryFile(mode="w+b", dir=lane_dir) as content:
+        # A failed transfer is not a capture: its output is a truncated prefix
+        # of the selection, which would be recorded as the whole of it.
+        status, _ = _run([*shlex.split(paste_command), mime], output=content)
+        size = os.fstat(content.fileno()).st_size
+        if status != 0 or not size:
             return 0
-        size = len(content)
-        if is_binary_mime(mime):
-            raw_ref: str | None = str(
-                store_blob(capture_lane_path(capture_root, lane), content, digest)
-            )
-            payload = {
-                "category": "binary",
-                "mime": mime,
-                "sha256": digest,
-                "size": size,
-                "source_window": window,
-            }
-        else:
-            raw_ref = None
-            payload = {
-                "category": "text",
-                "mime": mime,
-                "text": content.decode("utf-8", "replace"),
-                "size": size,
-                "source_window": window,
-            }
 
-        CaptureWriter(capture_root, lane).write(payload, raw_ref=raw_ref)
-        if dedup_state is not None:
-            atomic_publish(dedup_state, key.encode(), fsync=True, mode=0o600)
-    return 0
+        content.seek(0)
+        digest = hashlib.file_digest(content, "sha256").hexdigest()
+        content.seek(0)
+
+        if debounce_ms is not None and _is_superseded(debounce_state, debounce_ms):
+            return 0
+
+        window_status, window_json = (
+            _run(shlex.split(window_command)) if window_command else (-1, b"")
+        )
+        window = source_window(
+            window_json.decode("utf-8", "replace") if window_status == 0 else "null"
+        )
+
+        key = f"{mime}:{digest}"
+        gate = (
+            flock(dedup_state.with_name(dedup_state.name + ".lock"))
+            if dedup_state
+            else nullcontext()
+        )
+        with gate:
+            if dedup_state is not None and _is_duplicate(dedup_state, key):
+                return 0
+            if is_binary_mime(mime):
+                raw_ref: str | None = str(
+                    store_blob(capture_lane_path(capture_root, lane), content, digest)
+                )
+                payload = {
+                    "category": "binary",
+                    "mime": mime,
+                    "sha256": digest,
+                    "size": size,
+                    "source_window": window,
+                }
+            else:
+                raw_ref = None
+                payload = {
+                    "category": "text",
+                    "mime": mime,
+                    "text": content.read().decode("utf-8", "replace"),
+                    "size": size,
+                    "source_window": window,
+                }
+
+            CaptureWriter(capture_root, lane).write(payload, raw_ref=raw_ref)
+            if dedup_state is not None:
+                atomic_publish(dedup_state, key.encode(), fsync=True, mode=0o600)
+        return 0

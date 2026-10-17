@@ -11,14 +11,15 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from sinnix_lib.layout import capture_lane_path
 
 import pytest
 from sinnix_capture.cli import main
 from sinnix_capture.selection import _is_duplicate, pick_mime, store_blob
+from sinnix_lib.layout import capture_lane_path
 
 # The preference order this lane promises, spelled out independently of the
 # table the implementation reads: any permutation of that table has to break
@@ -367,4 +368,37 @@ def test_unrecognized_non_text_mime_preserves_original_bytes(lane: Lane) -> None
     (record,) = lane.records()
     assert record["payload"]["category"] == "binary"
     assert record["payload"]["mime"] == "application/x-vendor"
+    assert Path(record["raw_ref"]).read_bytes() == body
+
+
+@pytest.mark.parametrize("lane_name", ["clipboard", "primary"])
+def test_binary_paste_streams_to_a_private_file_before_blob_publication(
+    tmp_path, monkeypatch, lane_name
+):
+    import subprocess
+
+    import sinnix_capture.selection as selection
+
+    lane = Lane(tmp_path, lane=lane_name)
+    lane.types_file.write_text("application/octet-stream\n")
+    body = bytes(range(256)) * 4096
+    lane.content_file.write_bytes(body)
+    real_run = selection.subprocess.run
+    transfers = []
+
+    def observe_run(argv, **kwargs):
+        if str(argv[1]).endswith("paste.py"):
+            output = kwargs.get("stdout")
+            assert output != subprocess.PIPE, "paste must not accumulate its payload in RAM"
+            assert hasattr(output, "fileno")
+            assert os.fstat(output.fileno()).st_mode & 0o777 == 0o600
+            transfers.append(True)
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(selection.subprocess, "run", observe_run)
+    assert lane.run() == 0
+    assert transfers == [True]
+    record, = lane.records()
+    assert record["payload"]["size"] == len(body)
+    assert record["payload"]["sha256"] == hashlib.sha256(body).hexdigest()
     assert Path(record["raw_ref"]).read_bytes() == body
