@@ -36,6 +36,7 @@ import argparse
 import cmath
 from contextlib import contextmanager
 import datetime as dt
+import fcntl
 import hashlib
 import json
 import math
@@ -754,6 +755,21 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not outbox.is_dir():
         print(f"score: no outbox at {outbox}")
         return 0
+    # Keep this inode after unlocking: unlinking it could let later callers
+    # lock a replacement while an earlier waiter still owns the old inode.
+    with open(
+        SCORES / ".score.lock", "a",
+        opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK | os.O_NOFOLLOW, 0o600),
+    ) as owner:
+        if not stat.S_ISREG(os.fstat(owner.fileno()).st_mode):
+            raise ValueError("score ownership lock must be a regular file")
+        # Wait before loading history or allocating trace buffers. The
+        # dispatcher's existing subprocess deadline also bounds this wait.
+        fcntl.flock(owner, fcntl.LOCK_EX)
+        return _score_outbox(args, outbox)
+
+
+def _score_outbox(args: argparse.Namespace, outbox: Path) -> int:
     seen = ledger_seen()
     scored = failed = 0
 

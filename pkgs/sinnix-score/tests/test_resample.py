@@ -277,7 +277,7 @@ def test_invalid_ledger_refuses_before_scoring(score, tmp_path, row):
     with pytest.raises(ValueError, match='ledger record 1 is invalid'):
         score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True))
     assert ledger.read_bytes() == before
-    assert list(root.iterdir()) == [ledger]
+    assert set(root.iterdir()) == {ledger, root / '.score.lock'}
 
 
 def test_ledger_streams_and_preserves_legacy_keys(score, tmp_path, monkeypatch):
@@ -326,3 +326,54 @@ def test_ledger_open_denial_propagates(score, tmp_path, monkeypatch):
     monkeypatch.setitem(score['ledger_seen'].__globals__, 'open', deny)
     with pytest.raises(PermissionError, match='synthetic denied ledger'):
         score['ledger_seen']()
+
+
+def test_scorer_waits_for_other_process_owner_before_reading_ledger(score, tmp_path):
+    import fcntl
+    import threading
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    trace(outbox / 'a.csv', 'imu', False)
+    root = tmp_path / 'scores'
+    root.mkdir()
+    called = threading.Event()
+    errors = []
+    glob = score['cmd_run'].__globals__
+    original = glob['score_blob']
+    def observed(*args, **kwargs):
+        called.set()
+        return original(*args, **kwargs)
+    glob.update(SCORES=root, LEDGER=root / 'scored.jsonl', score_blob=observed)
+    def run():
+        try:
+            assert score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True)) == 0
+        except BaseException as error:
+            errors.append(error)
+    with (root / '.score.lock').open('a') as owner:
+        fcntl.flock(owner, fcntl.LOCK_EX)
+        thread = threading.Thread(target=run)
+        thread.start()
+        try:
+            assert not called.wait(0.25), 'competing scorer bypassed the active owner'
+            assert not (root / 'scored.jsonl').exists()
+        finally:
+            fcntl.flock(owner, fcntl.LOCK_UN)
+            thread.join(3)
+    assert not thread.is_alive() and not errors
+    assert called.is_set()
+    assert score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True)) == 0
+    assert len((root / 'scored.jsonl').read_text().splitlines()) == 1
+
+
+def test_scorer_releases_owner_after_failure(score, tmp_path):
+    import fcntl
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    root = tmp_path / 'scores'
+    def fail():
+        raise ValueError('synthetic ledger failure')
+    score['cmd_run'].__globals__.update(SCORES=root, LEDGER=root / 'scored.jsonl', ledger_seen=fail)
+    with pytest.raises(ValueError, match='synthetic ledger failure'):
+        score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True))
+    with (root / '.score.lock').open('a') as owner:
+        fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)

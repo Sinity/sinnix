@@ -500,6 +500,11 @@ Malformed rows stop the run without new scores or receipts; preserve and repair
 the ledger before retrying instead of treating damaged history as unseen input.
 Only a missing ledger starts empty history. Access failures, dangling links and
 non-regular objects stop processing; regular-file links remain supported.
+Scoring runs share a kernel file lock in the score directory, acquired before
+reading history or loading traces and held through publication and receipts.
+Contenders wait, then re-read history; the dispatcher retains its existing
+subprocess deadline. The lock file stays in place, and process exit releases
+ownership without deleting history or requiring stale-lock cleanup.
 
 Cut, with reasons: **panel-based CFF and contrast sensitivity** (the display is
 not a photometric instrument, and a 120 Hz panel puts a 60 Hz ceiling exactly
