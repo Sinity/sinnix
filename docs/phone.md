@@ -488,6 +488,14 @@ anything needing a model ships a trace and gets a receipt. That falls out of not
 shipping ML and is the right architecture anyway — a live heart-rate readout
 would invite exactly the realtime self-steering this design excludes.
 
+Prime uses one validated sidecar snapshot for scoring and receipt correlation.
+Missing metadata retains the filename fallback; unreadable, wrongly typed or
+malformed metadata produces an explicit refusal while later files continue.
+New ledger entries bind the sidecar revision, so an unchanged refusal does not
+create repeated receipts and corrected metadata can be processed again.
+Legacy ledger entries have no sidecar binding and are retained without
+inventing retrospective provenance or automatically launching new scoring.
+
 Cut, with reasons: **panel-based CFF and contrast sensitivity** (the display is
 not a photometric instrument, and a 120 Hz panel puts a 60 Hz ceiling exactly
 where foveal CFF sits); **pupillometry and saccades** (face landmarks means a

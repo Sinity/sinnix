@@ -155,3 +155,109 @@ def test_timestamp_overflow_is_recorded_without_stalling_later_files(score, tmp_
     before = (root / 'scored.jsonl').read_bytes()
     assert score['cmd_run'](args) == 0
     assert (root / 'scored.jsonl').read_bytes() == before
+
+
+@pytest.mark.parametrize('body', [b'[]', b'null', b'{', b'\xff', b'{"recorded_at":17}', b'{"send_token":[]}'])
+def test_invalid_sidecar_refuses_continues_and_retries_only_after_repair(score, tmp_path, body):
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    bad, good = outbox / 'a.csv', outbox / 'b.csv'
+    trace(bad, 'imu', False)
+    trace(good, 'imu', False)
+    sidecar = bad.with_name(bad.name + '.json')
+    sidecar.write_bytes(body)
+    original = bad.read_bytes()
+    root = tmp_path / 'scores'
+    tokens = []
+    score['cmd_run'].__globals__.update(SCORES=root, LEDGER=root / 'scored.jsonl', emit_receipt=lambda *args: tokens.append(args[4]))
+    args = argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=False)
+    assert score['cmd_run'](args) == 0
+    records_path = next(root.glob('20*.jsonl'))
+    records = [json.loads(line) for line in records_path.read_text().splitlines()]
+    assert [r['file'] for r in records] == ['a.csv', 'b.csv']
+    assert records[0]['ok'] is False and 'sidecar' in records[0]['reason']
+    assert len(tokens) == 2 and tokens[0] is None
+    before = records_path.read_bytes()
+    assert score['cmd_run'](args) == 0
+    assert records_path.read_bytes() == before and len(tokens) == 2
+    sidecar.write_text(json.dumps({'mode': 'imu', 'send_token': 'repaired'}))
+    assert score['cmd_run'](args) == 0
+    records = [json.loads(line) for line in records_path.read_text().splitlines()]
+    assert [r['file'] for r in records] == ['a.csv', 'b.csv', 'a.csv']
+    assert records[-1]['ok'] is True
+    assert 'sidecar' not in (records[-1].get('reason') or '')
+    assert tokens[-1] == 'repaired' and bad.read_bytes() == original
+
+
+def test_receipt_uses_the_same_metadata_snapshot_as_scoring(score, tmp_path):
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    path = outbox / 'a.csv'
+    trace(path, 'imu', False)
+    sidecar = path.with_name(path.name + '.json')
+    sidecar.write_text(json.dumps({'mode': 'imu', 'send_token': 'first'}))
+    root = tmp_path / 'scores'
+    tokens = []
+    original = score['score_blob']
+    def change_after_scoring(*args, **kwargs):
+        result = original(*args, **kwargs)
+        sidecar.write_text(json.dumps({'mode': 'imu', 'send_token': 'second'}))
+        return result
+    score['cmd_run'].__globals__.update(SCORES=root, LEDGER=root / 'scored.jsonl', score_blob=change_after_scoring, emit_receipt=lambda *args: tokens.append(args[4]))
+    assert score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=False)) == 0
+    assert tokens == ['first']
+
+
+@pytest.mark.parametrize('kind', ['fifo', 'directory', 'broken-link'])
+def test_special_sidecars_are_refused_without_blocking(score, tmp_path, kind):
+    import os
+    import subprocess
+
+    path = tmp_path / 'trace.csv'
+    trace(path, 'imu', False)
+    sidecar = path.with_name(path.name + '.json')
+    sidecar.unlink()
+    if kind == 'fifo':
+        os.mkfifo(sidecar)
+    elif kind == 'directory':
+        sidecar.mkdir()
+    else:
+        sidecar.symlink_to(tmp_path / 'missing.json')
+    script = Path(__file__).resolve().parents[3] / 'scripts/sinnix-score'
+    result = subprocess.run([str(script), 'one', str(path)], capture_output=True, text=True, timeout=3)
+    assert result.returncode == 0, result.stderr
+    record = json.loads(result.stdout)
+    assert record['ok'] is False and 'sidecar' in record['reason']
+    assert sidecar.lstat()
+
+
+def test_sidecar_absence_and_regular_link_remain_distinct_from_unavailability(score, tmp_path):
+    path = tmp_path / 'trace.csv'
+    path.write_text('ts,value\n')
+    absent = score['read_sidecar'](path)
+    assert absent.error is None and absent.signature == 'absent'
+    target = tmp_path / 'metadata.json'
+    target.write_text('{"mode":"imu"}')
+    sidecar = path.with_name(path.name + '.json')
+    sidecar.symlink_to(target)
+    linked = score['read_sidecar'](path)
+    assert linked.error is None and linked.values == {'mode': 'imu'}
+    assert linked.signature.startswith('sha256:') and sidecar.is_symlink()
+
+
+def test_legacy_scores_remain_history_without_automatic_reprocessing(score, tmp_path):
+    outbox = tmp_path / 'outbox'
+    outbox.mkdir()
+    path = outbox / 'legacy.csv'
+    trace(path, 'imu', False)
+    root = tmp_path / 'scores'
+    root.mkdir()
+    ledger = root / 'scored.jsonl'
+    legacy = json.dumps({'file': path.name, 'bytes': path.stat().st_size, 'ok': True}) + '\n'
+    ledger.write_text(legacy)
+    def no_replay(*args, **kwargs):
+        raise AssertionError('legacy result must not launch new scoring')
+    score['cmd_run'].__globals__.update(SCORES=root, LEDGER=ledger, score_blob=no_replay, read_sidecar=no_replay)
+    assert score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True)) == 0
+    assert ledger.read_text() == legacy
+    assert not list(root.glob('20*.jsonl'))

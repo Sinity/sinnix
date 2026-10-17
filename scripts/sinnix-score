@@ -36,6 +36,7 @@ import argparse
 import cmath
 from contextlib import contextmanager
 import datetime as dt
+import hashlib
 import json
 import math
 import os
@@ -44,8 +45,9 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Sequence
+from typing import Any, Iterable, Iterator, NamedTuple, Sequence
 
+from sinnix_lib.files import read_regular_bytes
 from sinnix_lib.ledger import append_jsonl, utc_ts
 from sinnix_lib.phone_inbox import emit_receipt
 
@@ -567,8 +569,8 @@ def transcribe(path: Path) -> dict | None:
 # -------------------------------------------------------------------- ledger
 
 
-def ledger_seen() -> set[tuple[str, int]]:
-    seen: set[tuple[str, int]] = set()
+def ledger_seen() -> set[tuple[str, int, str | None]]:
+    seen: set[tuple[str, int, str | None]] = set()
     if not LEDGER.is_file():
         return seen
     for line in LEDGER.read_text(encoding="utf-8", errors="replace").splitlines():
@@ -576,39 +578,71 @@ def ledger_seen() -> set[tuple[str, int]]:
             o = json.loads(line)
         except json.JSONDecodeError:
             continue
-        seen.add((o.get("file", ""), int(o.get("bytes") or 0)))
+        seen.add((o.get("file", ""), int(o.get("bytes") or 0), o.get("sidecar_signature")))
     return seen
 
 
-def sidecar_for(path: Path) -> dict:
+class SidecarInput(NamedTuple):
+    values: dict[str, Any]
+    signature: str
+    error: str | None = None
+
+    @property
+    def send_token(self) -> str | None:
+        value = self.values.get("send_token")
+        return value if isinstance(value, str) else None
+
+
+def read_sidecar(path: Path) -> SidecarInput:
     side = path.with_name(path.name + ".json")
-    if not side.is_file():
-        return {}
     try:
-        return json.loads(side.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
+        raw = read_regular_bytes(side)
+    except FileNotFoundError:
+        try:
+            side.lstat()
+        except FileNotFoundError:
+            return SidecarInput({}, "absent")
+        except OSError as error:
+            return SidecarInput({}, f"unavailable:{type(error).__name__}:{error.errno}", "sidecar location is inaccessible")
+        return SidecarInput({}, "unavailable:broken-link", "sidecar target is unavailable")
+    except (OSError, ValueError) as error:
+        return SidecarInput({}, f"unavailable:{type(error).__name__}:{getattr(error, 'errno', None)}", f"sidecar cannot be read ({type(error).__name__})")
+    signature = "sha256:" + hashlib.sha256(raw).hexdigest()
+    try:
+        meta = json.loads(raw)
+    except (ValueError, UnicodeError, RecursionError):
+        return SidecarInput({}, signature, "sidecar JSON cannot be parsed")
+    if not isinstance(meta, dict):
+        return SidecarInput({}, signature, "sidecar must contain a JSON object")
+    for key in ("kind", "mode", "instrument", "recorded_at", "ts", "send_token"):
+        if meta.get(key) is not None and not isinstance(meta[key], str):
+            return SidecarInput(meta, signature, f"sidecar field {key} must be text")
+    return SidecarInput(meta, signature)
 
 
-def score_blob(path: Path) -> dict:
-    """One blob to one record. The sidecar says what it is; the name is a fallback."""
-    meta = sidecar_for(path)
-    kind = meta.get("kind") or ""
-    mode = meta.get("mode") or ""
-    instrument = meta.get("instrument") or ""
-    started_at = parse_stamp(meta.get("recorded_at") or meta.get("ts"))
-
+def score_blob(path: Path, sidecar: SidecarInput | None = None) -> dict:
+    """Score with one metadata snapshot, shared with the receipt and ledger."""
     record: dict[str, Any] = {
         "schema": SCHEMA,
         "file": path.name,
         "bytes": path.stat().st_size,
-        "kind": kind or ("voice" if path.name.startswith("voice-") else "unknown"),
-        "instrument": instrument,
-        "mode": mode,
-        "epoch": meta.get("epoch"),
-        "recorded_at": meta.get("recorded_at"),
+        "kind": "voice" if path.name.startswith("voice-") else "unknown",
+        "instrument": "",
+        "mode": "",
+        "epoch": None,
+        "recorded_at": None,
         "scored_at": utc_ts(),
     }
+    sidecar = read_sidecar(path) if sidecar is None else sidecar
+    if sidecar.error is not None:
+        return record | {"ok": False, "reason": sidecar.error}
+    meta = sidecar.values
+    kind = meta.get("kind") or ""
+    mode = meta.get("mode") or ""
+    instrument = meta.get("instrument") or ""
+    started_at = parse_stamp(meta.get("recorded_at") or meta.get("ts"))
+    record.update(kind=kind or record["kind"], instrument=instrument, mode=mode,
+                  epoch=meta.get("epoch"), recorded_at=meta.get("recorded_at"))
 
     if path.suffix == ".m4a" or path.name.startswith("voice-"):
         tr = transcribe(path)
@@ -706,18 +740,24 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
     for path in candidates:
         size = path.stat().st_size
-        if (path.name, size) in seen:
+        # Legacy scores lack a sidecar binding. Preserve their established
+        # skip behavior without inventing retrospective metadata provenance.
+        if (path.name, size, None) in seen:
             continue
         if args.limit and scored + failed >= args.limit:
             break
-        record = score_blob(path)
+        sidecar = read_sidecar(path)
+        if (path.name, size, sidecar.signature) in seen:
+            continue
+        record = score_blob(path, sidecar)
 
         day = dt.datetime.now(dt.timezone.utc).date().isoformat()
         with (SCORES / f"{day}.jsonl").open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
         append_jsonl(
             LEDGER,
-            {"file": path.name, "bytes": size, "ok": record.get("ok"), "at": utc_ts()},
+            {"file": path.name, "bytes": size, "ok": record.get("ok"), "at": utc_ts(),
+             "sidecar_signature": sidecar.signature},
         )
         if not args.no_receipt:
             title, body = receipt_for(record)
@@ -726,7 +766,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 record.get("kind") or "score",
                 title,
                 body,
-                meta_token(path),
+                sidecar.send_token,
                 "instruments",
             )
         if record.get("ok"):
@@ -742,10 +782,6 @@ def cmd_run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
     return 0
-
-
-def meta_token(path: Path) -> str | None:
-    return sidecar_for(path).get("send_token")
 
 
 def cmd_one(args: argparse.Namespace) -> int:
