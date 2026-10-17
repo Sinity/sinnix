@@ -6,9 +6,15 @@ python3Packages.buildPythonPackage {
   pname = "sinnix-lib";
   version = "0.1.0";
   pyproject = true;
-  src = lib.cleanSource ./.;
+  src = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [
+      ./pyproject.toml
+      ./sinnix_lib
+    ];
+  };
+  doCheck = false;
   build-system = [ python3Packages.setuptools ];
-  nativeCheckInputs = [ python3Packages.pytestCheckHook ];
   pythonImportsCheck = [
     "sinnix_lib"
     "sinnix_lib.atomic"

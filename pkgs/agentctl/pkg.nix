@@ -39,7 +39,14 @@ python3Packages.buildPythonApplication {
   pname = "agentctl";
   version = "0.1.0";
   pyproject = true;
-  src = ./.;
+  src = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [
+      ./pyproject.toml
+      ./agentctl
+    ];
+  };
+  doCheck = false;
 
   build-system = [ python3Packages.setuptools ];
   dependencies = [
@@ -65,20 +72,6 @@ python3Packages.buildPythonApplication {
         ]
       }
     ln -s ../libexec/agentctl-agent "$out/bin/agentctl-agent"
-  '';
-  nativeCheckInputs = [
-    python3Packages.pytest
-    python3Packages.pytest-timeout
-    git
-    beads
-    scopedWorktrunk
-    pueue
-  ];
-
-  checkPhase = ''
-    runHook preCheck
-    pytest
-    runHook postCheck
   '';
 
   passthru = { inherit runtimeDependencies; };

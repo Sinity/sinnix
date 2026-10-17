@@ -111,21 +111,47 @@
 
       # Keep package-specific Python test dependencies out of the general
       # development shell.  This shell is the lightweight source-test entry
-      # point for focused gateway tests; inputsFrom carries the gateway
-      # package's runtime and native check inputs. The runner uses one Python
+      # point for focused gateway tests. Test executables are declared here;
+      # they are not dependencies of the deployed runtime. The runner uses one Python
       # environment so pytest can import the gateway's runtime dependencies.
-      gatewayTestPython = pkgs.python3.withPackages (ps: [
-        ps.pytest
-        ps.pytest-timeout
-        scriptPkgs.sinnix-agent-gateway-tooling
-      ]);
+      agentctlTestTools = builtins.filter (
+        p:
+        lib.elem (p.pname or (lib.getName p)) [
+          "git"
+          "beads"
+          "beads-with-dolt"
+          "worktrunk"
+          "pueue"
+        ]
+      ) scriptPkgs.agentctl.runtimeDependencies;
+      gatewayTestPython = pkgs.python3.withPackages (
+        ps:
+        [
+          ps.pytest
+          ps.pytest-timeout
+          ps.ijson
+        ]
+        ++ builtins.filter (
+          p:
+          !(lib.elem (p.pname or "") [
+            "agentctl"
+            "sinnix-lib"
+          ])
+        ) scriptPkgs.sinnix-agent-gateway.dependencies
+      );
       gatewayTestRunner = pkgs.writeShellScriptBin "gateway-pytest" ''
         exec ${gatewayTestPython}/bin/python -m pytest "$@"
       '';
       gatewayTestShell = pkgs.mkShellNoCC {
         name = "sinnix-agent-gateway-tests";
-        inputsFrom = [ scriptPkgs.sinnix-agent-gateway-tooling ];
-        packages = [ gatewayTestRunner ];
+        packages = [
+          gatewayTestRunner
+          pkgs.fd
+          pkgs.file
+          pkgs.git
+          pkgs.ripgrep
+        ]
+        ++ agentctlTestTools;
         shellHook = ''
           _gateway_root="''${PRJ_ROOT:-$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || pwd)}"
           export PYTHONPATH="$_gateway_root/pkgs/sinnix-lib:$_gateway_root/pkgs/agentctl:$_gateway_root/pkgs/sinnix-agent-gateway:''${PYTHONPATH:-}"

@@ -172,6 +172,8 @@ Common commands:
 Direct commands stay direct. Submit scheduled or heavy work as a named
 AgentCTL project operation; `switch` remains the supported activation command.
 
+The deployed AgentCTL, gateway, shared library, capture, accessibility and phone-dispatcher packages include runtime sources and cheap import checks. Their full suites remain separate named checks in `flake/tests/pkg-suites.nix` and import the exact runtime outputs. Focused source tests use a fixed third-party environment and retain their own source fingerprint. Run the affected suites before integration; activation does not rerun them merely because a test file changed. Gateway owner-schema verification reads only the three Polylogue files and one Lynchpin file consumed by its generator. A contract change still invalidates that check and stale generated contracts still fail it.
+
 AgentCTL caches the devshell from its declared package and wrapper inputs. Each
 entry captures the current checkout as an immutable source with its Git revision;
 `switch` keeps using that source if the caller later changes directory. A missing

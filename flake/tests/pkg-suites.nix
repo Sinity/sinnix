@@ -1,13 +1,5 @@
-# Packaged pytest suites (pkgs/*/pkg.nix with a checkPhase) that were never
-# forced to build by any check target -- exactly the sinnix-2e46 pattern
-# found in machine-telemetry/sinnix-config-drift (script-suites.nix): the
-# suite existed and even worked, but no tier's dependency graph ever
-# required the derivation to be realized, so a broken checkPhase left `check`
-# green. Unlike script-suites.nix's subjects, these already have a real
-# derivation with nativeCheckInputs/checkPhase (mirrors ops-reducer.nix and
-# quota.nix, which already did this for sinnix-ops-reducer/sinnix-quota) --
-# so the fix is just forcing the package to build here, not reimplementing a
-# fixture around the bare script.
+# Full suites depend on the exact deployed runtime outputs. Test sources and
+# owner-contract validation never become inputs of those runtime packages.
 { inputs, ... }:
 {
   perSystem =
@@ -18,13 +10,8 @@
       ...
     }:
     let
-      # sinnix-phone-dispatcher's checkPhase needs the package built at all,
-      # and its pkg.nix pulls in sinnix-steer (runtimeInputs pkgs.claude-code)
-      # as steerPackage -- claude-code is unfree, and the shared registry's
-      # unconfigured pkgs refuses to even evaluate its drvPath. One
-      # locally-configured instance, same pattern as
-      # flake/overlay/package/local-ai.nix's aiPkgs, rather than flipping
-      # allowUnfree for every check in the tree.
+      # The phone runtime's steering dependency carries unfree claude-code.
+      # Scope that permission to its existing package and suite.
       unfreePkgs = import inputs.nixpkgs {
         inherit system;
         config.allowUnfree = true;
@@ -32,6 +19,67 @@
       scriptRegistryUnfree = import ../scripts.nix {
         inherit inputs;
         pkgs = unfreePkgs;
+      };
+      lib = pkgs.lib;
+      pythonSuite =
+        {
+          name,
+          package ? sinnixScriptRegistry.packageSet.${name},
+          extraInputs ? [ ],
+          beforeTests ? "",
+        }:
+        let
+          module = builtins.replaceStrings [ "-" ] [ "_" ] name;
+          testSource = lib.sources.sourceByRegex (../../pkgs + "/${name}") [
+            "tests"
+            "tests/.*"
+            "test_.*[.]py"
+            "conftest[.]py"
+            "pyproject[.]toml"
+            "fixtures"
+            "fixtures/.*"
+            "generate_.*[.]py"
+          ];
+          python = pkgs.python3.withPackages (ps: [
+            package
+            ps.pytest
+            ps.pytest-timeout
+          ]);
+        in
+        pkgs.runCommand "${name}-suite"
+          {
+            nativeBuildInputs = [
+              python
+              package
+            ]
+            ++ extraInputs;
+            RUNTIME_PACKAGE = package;
+            RUNTIME_MODULE = module;
+          }
+          ''
+            cp -R ${testSource} source
+            chmod -R u+w source
+            cd source
+            ln -s ${package}/${pkgs.python3.sitePackages}/${module} ${module}
+            python -c 'import importlib, os; from pathlib import Path; module = importlib.import_module(os.environ["RUNTIME_MODULE"]); assert Path(module.__file__).resolve().is_relative_to(Path(os.environ["RUNTIME_PACKAGE"]))'
+            ${beforeTests}
+            cp ${./python-runtime-imports.py} runtime_import_contract.py
+            python -m pytest -q -p runtime_import_contract
+            mkdir "$out"
+            cp runtime-import-before.json runtime-import-after.json "$out/"
+            printf '%s\n' "$RUNTIME_PACKAGE" > "$out/runtime"
+          '';
+      polylogueContracts = lib.sources.sourceByRegex inputs.polylogue [
+        "polylogue"
+        "polylogue/(operations|core|archive)"
+        "polylogue/archive/query"
+        "polylogue/operations/session_contracts[.]py"
+        "polylogue/core/enums[.]py"
+        "polylogue/archive/query/spec[.]py"
+      ];
+      lynchpinContract = builtins.path {
+        path = "${inputs.lynchpin}/lynchpin/mcp/project_contracts.py";
+        name = "lynchpin-project-contracts.py";
       };
       # Exercise the real registry entries and renderer without realizing
       # unrelated commands (including their unfree runtime dependencies).
@@ -64,7 +112,7 @@
         # inverts. Verified by flipping `< self._min_interval` to `>` in
         # debounce.py -- caught by three tests (two unit, one daemon
         # integration: 3 failed, 16 passed); reverted after confirming red.
-        sinnix-capture-a11y-suite = sinnixScriptRegistry.packageSet.sinnix-capture-a11y;
+        sinnix-capture-a11y-suite = pythonSuite { name = "sinnix-capture-a11y"; };
 
         # Provably fails when: /today stops distinguishing open from closed
         # commitments. Verified by changing store.py's open_commitments query
@@ -98,7 +146,10 @@
         # even evaluate its drvPath. Same pattern as
         # flake/overlay/package/local-ai.nix's aiPkgs, scoped to this one
         # check rather than flipping allowUnfree tree-wide.
-        sinnix-phone-dispatcher-suite = scriptRegistryUnfree.packageSet.sinnix-phone-dispatcher;
+        sinnix-phone-dispatcher-suite = pythonSuite {
+          name = "sinnix-phone-dispatcher";
+          package = scriptRegistryUnfree.packageSet.sinnix-phone-dispatcher;
+        };
 
         # Provably fails when: the project-path sandbox stops rejecting a
         # path that resolves outside the project root (e.g. via a symlink).
@@ -106,15 +157,27 @@
         # resolved.parents` -> `False`) in projects.py -- caught by
         # test_project_tree_and_read_reject_symlink_escape ("DID NOT RAISE
         # ProjectError"; 1 failed, 23 passed); reverted after confirming red.
-        sinnix-agent-gateway-suite = sinnixScriptRegistry.packageSet.sinnix-agent-gateway;
+        sinnix-agent-gateway-suite = pythonSuite {
+          name = "sinnix-agent-gateway";
+          extraInputs = [
+            pkgs.fd
+            pkgs.file
+            pkgs.git
+            pkgs.ripgrep
+          ];
+          beforeTests = ''
+            export SINNIX_GATEWAY_TEST_EXECUTABLE="${sinnixScriptRegistry.packageSet.sinnix-agent-gateway}/bin/sinnix-agent-gateway"
+            python generate_owner_inputs.py --polylogue ${polylogueContracts} --lynchpin ${lynchpinContract} --check
+            ${sinnixScriptRegistry.packageSet.beads}/bin/bd owner schema --json > "$TMPDIR/beads-owner-schema.json"
+            python generate_beads_inputs.py "$TMPDIR/beads-owner-schema.json" --check
+          '';
+        };
         # The deployed telemetry executable is now a real Python package;
         # its checkPhase covers the collector code that service launches.
         machine-telemetry-suite = sinnixScriptRegistry.packageSet.machine-telemetry;
         sqlite-backup-package = sinnixScriptRegistry.packageSet.sinnix-sqlite-backup;
 
-        # The shared library every other Python package here depends on, so
-        # its suite only ever ran as a side effect of building a consumer.
-        # Named here it fails on its own contract, not on a consumer's.
+        # Shared-library verification is explicit, independent of consumers.
         #
         # Provably fails when: sd_notify stops translating a leading "@" into
         # the abstract namespace. Verified by deleting the
@@ -126,7 +189,7 @@
         # process.py -- caught by test_run_returns_a_result_when_the_command_hangs
         # (subprocess.TimeoutExpired; 1 failed, 30 passed); reverted after
         # confirming red.
-        sinnix-lib-suite = sinnixScriptRegistry.packageSet.sinnix-lib;
+        sinnix-lib-suite = pythonSuite { name = "sinnix-lib"; };
         xiaomi-witness-cli = sinnixScriptRegistry.packageSet.sinnix-xiaomi-witness;
         xiaomi-witness-dispatch =
           pkgs.runCommand "xiaomi-witness-dispatch-check"
@@ -154,14 +217,25 @@
         # test_preference_order_holds_for_every_adjacent_pair), or the blob
         # shard prefix length changes (fails
         # test_binary_selection_lands_in_a_two_character_shard and the
-        # store-once case). Its tests otherwise run only as a side effect of
-        # the clipboard runtime check building the package.
-        sinnix-capture-suite = sinnixScriptRegistry.packageSet.sinnix-capture;
+        # store-once case). Both Wayland lanes use this exact runtime output.
+        sinnix-capture-suite = pythonSuite { name = "sinnix-capture"; };
 
         # Provably fails when: the launch input stops carrying the descriptor's
         # argv, pool, label or artifact paths, or the pueue adapter misreads
         # the daemon's JSON. The suite drives a private pueued end to end.
-        agentctl-suite = sinnixScriptRegistry.packageSet.agentctl;
+        agentctl-suite = pythonSuite {
+          name = "agentctl";
+          extraInputs = builtins.filter (
+            p:
+            lib.elem (p.pname or (lib.getName p)) [
+              "git"
+              "beads"
+              "beads-with-dolt"
+              "worktrunk"
+              "pueue"
+            ]
+          ) sinnixScriptRegistry.packageSet.agentctl.runtimeDependencies;
+        };
       };
     };
 }

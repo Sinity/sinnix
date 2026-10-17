@@ -17,7 +17,14 @@ python3Packages.buildPythonApplication {
   pname = "sinnix-phone-dispatcher";
   version = "0.1.0";
   pyproject = true;
-  src = ./.;
+  src = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [
+      ./pyproject.toml
+      ./sinnix_phone_dispatcher
+    ];
+  };
+  doCheck = false;
   build-system = [ python3Packages.setuptools ];
   # sinnix-capture-lib: the CaptureWriter/build_envelope the phone-stream
   # receiver appends through -- this package is their canonical origin, no
@@ -41,12 +48,8 @@ python3Packages.buildPythonApplication {
       scorePackage
     ])
   ];
-  nativeCheckInputs = [ python3Packages.pytest ];
-  checkPhase = ''
-    runHook preCheck
-    pytest -q
-    runHook postCheck
-  '';
+  pythonImportsCheck = [ "sinnix_phone_dispatcher" ];
+
   meta = {
     description = "Prime's phone transport, retained-request dispatcher, and telemetry receiver";
     mainProgram = "sinnix-phone-dispatcher";

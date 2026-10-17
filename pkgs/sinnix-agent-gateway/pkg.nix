@@ -14,9 +14,6 @@
   gobject-introspection,
   sinnix-lib,
   agentctl,
-  polylogue-contract-source,
-  lynchpin-contract-source,
-  beads-owner,
   ...
 }:
 let
@@ -120,7 +117,14 @@ python3Packages.buildPythonApplication {
   pname = "sinnix-agent-gateway";
   version = "0.3.0";
   pyproject = true;
-  src = ./.;
+  src = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [
+      ./pyproject.toml
+      ./sinnix_agent_gateway
+    ];
+  };
+  doCheck = false;
 
   build-system = [ python3Packages.setuptools ];
 
@@ -134,14 +138,6 @@ python3Packages.buildPythonApplication {
     # pyatspi does not propagate pygobject3; both are required for desktop.tree.
     python3Packages.pyatspi
     python3Packages.pygobject3
-  ];
-
-  nativeCheckInputs = [
-    fd
-    file
-    git
-    python3Packages.pytest
-    ripgrep
   ];
 
   makeWrapperArgs = [
@@ -169,20 +165,6 @@ python3Packages.buildPythonApplication {
     ":"
     "${at-spi2-core}/lib/girepository-1.0:${gobject-introspection}/lib/girepository-1.0"
   ];
-
-  checkPhase = ''
-    runHook preCheck
-    export SINNIX_GATEWAY_TEST_EXECUTABLE="$out/bin/sinnix-agent-gateway"
-    python generate_owner_inputs.py \
-      --polylogue ${polylogue-contract-source} \
-      --lynchpin ${lynchpin-contract-source}/lynchpin/mcp/project_contracts.py --check
-    ${beads-owner}/bin/bd owner schema --json > "$TMPDIR/beads-owner-schema.json"
-    python generate_beads_inputs.py "$TMPDIR/beads-owner-schema.json" --check
-    # Bare `pytest` (default discovery), not a hardcoded file list, so a new
-    # test file runs without needing a pkg.nix edit.
-    pytest
-    runHook postCheck
-  '';
 
   postInstall = ''
     mkdir -p "$out/share/sinnix-agent-gateway/manifests"
