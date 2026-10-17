@@ -1,4 +1,4 @@
-"""Digest-guarded repair of index ordering, preserving every original line."""
+"""Digest-guarded capture index repair, preserving every original line."""
 
 from contextlib import closing
 import hashlib
@@ -41,13 +41,52 @@ def _digest_regular(path):
         os.close(fd)
 
 
-def repair_index_order(capture_root, lane, *, expected_sha256, expected_size):
-    """Reorder reviewed metadata under the producer lock; never renumber/drop.
+def _verified_entry(directory, lane, evidence):
+    """Project a reviewed original record, never metadata supplied on trust."""
+    if (not isinstance(evidence, dict) or type(evidence.get("seq")) is not int
+            or evidence["seq"] < 1 or not _valid_timestamp(evidence.get("ts"))):
+        raise ValueError("invalid restoration metadata")
+    filename = evidence.get("file")
+    offset = evidence.get("offset")
+    if (not isinstance(filename, str) or Path(filename).name != filename
+            or not Path(filename).match(f"{lane}-[0-9]*.jsonl")
+            or type(offset) is not int or offset < 0):
+        raise ValueError("invalid restoration source location")
+    path = directory / filename
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError("restoration source is not a regular file")
+        if offset and os.pread(fd, 1, offset - 1) != b"\n":
+            raise ValueError("restoration offset is not a record boundary")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            stream.seek(offset)
+            line = stream.readline()
+        if (not line.endswith(b"\n")
+                or hashlib.sha256(line).hexdigest() != evidence.get("sha256")):
+            raise ValueError("restoration source record changed")
+        row = json.loads(line)
+        if (not isinstance(row, dict) or type(row.get("seq")) is not int
+                or row["seq"] < 1 or not _valid_timestamp(row.get("ts"))
+                or (row["seq"], row["ts"]) != (evidence.get("seq"), evidence.get("ts"))):
+            raise ValueError("restoration source metadata differs from review")
+        current = path.lstat()
+        if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
+            raise ValueError("restoration source entrance changed")
+        return {"seq": row["seq"], "ts": row["ts"], "file": filename}
+    finally:
+        os.close(fd)
+
+
+def repair_index(capture_root, lane, *, expected_sha256, expected_size, restore_entries=()):
+    """Repair reviewed metadata under the producer lock; never renumber/drop.
 
     This maintenance operation holds the lane's writer lock through publication.
     Callers must admit its work from the explicitly reviewed index size. Scratch
     memory stays bounded with a disk-backed sorter. It does not certify that the
     index covers every payload, or repair ambiguous duplicate sequence IDs.
+    Restorations require exact record boundaries and full source-record hashes.
     """
     if (not isinstance(expected_sha256, str) or len(expected_sha256) != 64
             or any(c not in "0123456789abcdef" for c in expected_sha256)):
@@ -104,7 +143,18 @@ def repair_index_order(capture_root, lane, *, expected_sha256, expected_size):
                     os.close(fd)
                 if digest.hexdigest() != expected_sha256 or _identity(index.lstat()) != _identity(observed):
                     raise ValueError("index changed since review")
-                if ordered:
+                restored = 0
+                for evidence in restore_entries:
+                    row = _verified_entry(directory, lane, evidence)
+                    seq = row["seq"]
+                    key = str(seq)
+                    line = (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode()
+                    try:
+                        db.execute("INSERT INTO rows VALUES (?, ?, ?)", (len(key), key, line))
+                    except sqlite3.IntegrityError as exc:
+                        raise ValueError("restored sequence is already indexed; reconciliation required") from exc
+                    restored += 1
+                if ordered and not restored:
                     return {"changed": False, "records": count, "sha256": expected_sha256}
                 pending = Path(scratch) / "index.jsonl"
                 new_digest = hashlib.sha256()
@@ -137,5 +187,5 @@ def repair_index_order(capture_root, lane, *, expected_sha256, expected_size):
                 _sync_directory(directory)
                 if _digest_regular(index) != new_digest.hexdigest():
                     raise ValueError("published index verification failed; preimage retained")
-                return {"changed": True, "records": count, "sha256": new_digest.hexdigest(),
+                return {"changed": True, "records": count + restored, "restored_records": restored, "sha256": new_digest.hexdigest(),
                         "previous_sha256": expected_sha256, "backup": str(backup)}

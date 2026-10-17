@@ -7,7 +7,7 @@ import tracemalloc
 import pytest
 
 from sinnix_capture.query import lane_delta
-from sinnix_capture.repair import repair_index_order
+from sinnix_capture.repair import repair_index
 from sinnix_capture.writer import CaptureWriter
 
 
@@ -21,7 +21,7 @@ def fixture_index(tmp_path):
 
 
 def repair(tmp_path, writer, before):
-    return repair_index_order(tmp_path, "lane", expected_sha256=hashlib.sha256(before).hexdigest(), expected_size=len(before))
+    return repair_index(tmp_path, "lane", expected_sha256=hashlib.sha256(before).hexdigest(), expected_size=len(before))
 
 
 def test_repair_preserves_every_line_payload_counter_and_preimage(tmp_path):
@@ -60,7 +60,7 @@ def test_refused_repair_keeps_original_and_cleans_scratch(tmp_path, failure):
     writer._index_path.write_bytes(before)
     expected = hashlib.sha256(before).hexdigest() if failure != "digest" else "0" * 64
     with pytest.raises(ValueError):
-        repair_index_order(tmp_path, "lane", expected_sha256=expected, expected_size=len(before) + (1 if failure == "size" else 0))
+        repair_index(tmp_path, "lane", expected_sha256=expected, expected_size=len(before) + (1 if failure == "size" else 0))
     assert writer._index_path.read_bytes() == before
     assert not (writer.lane_dir / ".index-repairs").exists()
     assert not list(writer.lane_dir.glob(".index-order-*"))
@@ -93,7 +93,7 @@ def test_order_repair_uses_bounded_memory_and_exact_large_integers(tmp_path):
         digest = hashlib.file_digest(stream, "sha256").hexdigest()
     tracemalloc.start()
     try:
-        result = repair_index_order(tmp_path, "lane", expected_sha256=digest, expected_size=index.stat().st_size)
+        result = repair_index(tmp_path, "lane", expected_sha256=digest, expected_size=index.stat().st_size)
         _, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
@@ -108,7 +108,7 @@ def test_order_repair_uses_bounded_memory_and_exact_large_integers(tmp_path):
 
 def test_missing_index_does_not_create_an_entrance(tmp_path):
     with pytest.raises(FileNotFoundError):
-        repair_index_order(tmp_path, "missing", expected_sha256="0" * 64, expected_size=0)
+        repair_index(tmp_path, "missing", expected_sha256="0" * 64, expected_size=0)
     assert list(tmp_path.iterdir()) == []
 
 
@@ -122,4 +122,51 @@ def test_preimage_directory_link_is_refused_without_external_writes(tmp_path):
         repair(tmp_path, writer, before)
     assert list(outside.iterdir()) == []
     assert writer._index_path.read_bytes() == before
+    assert not list(writer.lane_dir.glob(".index-order-*"))
+
+
+def missing_entry(tmp_path):
+    writer, ordered = fixture_index(tmp_path)
+    writer._index_path.write_bytes(ordered[0] + ordered[2])
+    payload = writer._record_path(100)
+    lines = payload.read_bytes().splitlines(keepends=True)
+    evidence = {"seq": 2, "ts": 101, "file": payload.name,
+                "offset": len(lines[0]), "sha256": hashlib.sha256(lines[1]).hexdigest()}
+    return writer, ordered, payload, evidence
+
+
+def test_restore_verified_missing_record_without_changing_existing_data(tmp_path):
+    writer, ordered, payload, evidence = missing_entry(tmp_path)
+    before = writer._index_path.read_bytes()
+    raw_before = payload.read_bytes()
+    counter = writer._seq_path.read_bytes()
+    result = repair_index(tmp_path, "lane", expected_sha256=hashlib.sha256(before).hexdigest(),
+                          expected_size=len(before), restore_entries=[evidence])
+    assert result["changed"] and result["restored_records"] == 1 and result["records"] == 3
+    assert writer._index_path.read_bytes() == b"".join(ordered)
+    assert payload.read_bytes() == raw_before and writer._seq_path.read_bytes() == counter
+    assert Path(result["backup"]).read_bytes() == before
+    assert lane_delta(tmp_path, "lane")["records_since"] == 3
+    assert lane_delta(tmp_path, "lane")["gap_records"] == 0
+
+
+@pytest.mark.parametrize("failure", ["digest", "seq", "offset", "path", "duplicate-input"])
+def test_refused_restoration_is_atomic(tmp_path, failure):
+    writer, _, payload, evidence = missing_entry(tmp_path)
+    before = writer._index_path.read_bytes()
+    raw_before = payload.read_bytes()
+    if failure == "digest":
+        evidence["sha256"] = "0" * 64
+    elif failure == "seq":
+        evidence["seq"] = 99
+    elif failure == "offset":
+        evidence["offset"] += 1
+    elif failure == "path":
+        evidence["file"] = "../outside.jsonl"
+    entries = [evidence, evidence] if failure == "duplicate-input" else [evidence]
+    with pytest.raises(ValueError):
+        repair_index(tmp_path, "lane", expected_sha256=hashlib.sha256(before).hexdigest(),
+                     expected_size=len(before), restore_entries=entries)
+    assert writer._index_path.read_bytes() == before and payload.read_bytes() == raw_before
+    assert not (writer.lane_dir / ".index-repairs").exists()
     assert not list(writer.lane_dir.glob(".index-order-*"))
