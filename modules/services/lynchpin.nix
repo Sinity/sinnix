@@ -165,6 +165,7 @@ mkServiceModule {
         };
 
         systemd.tmpfiles.rules = [
+          "d ${config.sinnix.paths.capturePaths.webhistory} 0700 ${config.sinnix.user.name} users -"
           "d ${config.sinnix.paths.stateRoot}/lynchpin 0700 ${config.sinnix.user.name} ${config.sinnix.user.name} -"
         ];
 

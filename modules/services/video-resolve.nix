@@ -37,6 +37,9 @@ mkServiceModule {
       }
     ];
   };
+  configFn = _: {
+    systemd.tmpfiles.rules = [ "d ${archiveRoot} 0700 ${config.sinnix.user.name} users -" ];
+  };
   job = {
     description = "Resolve video-hosting URLs from the URL ledger into archived copies";
     user = config.sinnix.user.name;

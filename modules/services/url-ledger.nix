@@ -49,6 +49,9 @@ mkServiceModule {
       }
     ];
   };
+  configFn = _: {
+    systemd.tmpfiles.rules = [ "d ${derivedDir} 0700 ${config.sinnix.user.name} users -" ];
+  };
   job =
     { cfg, ... }:
     {
@@ -58,6 +61,7 @@ mkServiceModule {
       user = config.sinnix.user.name;
       execStart = "${scriptPkgs.sinnix-url-ledger}/bin/sinnix-url-ledger run --history-path ${historyPath} --state-root ${stateDir} --cdx-raw-root ${cdxRawRoot} --derived-root ${derivedDir} --max-requests ${toString cfg.maxRequestsPerRun} --max-seconds ${toString cfg.maxSecondsPerRun} --window-days ${toString cfg.windowDays}";
       serviceConfig = {
+        UMask = "0077";
         # The script stops itself at maxSecondsPerRun; this is the backstop
         # for a wedged provider socket, not the normal bound.
         #

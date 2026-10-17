@@ -99,6 +99,11 @@ mkFeatureModule {
       environment.etc."opt/chrome/policies/managed/sinnix-nav-capture.json".source =
         "${navCaptureExtension}/policy.json";
 
+      systemd.tmpfiles.rules = [
+        "d ${config.sinnix.paths.capturePaths.browser-nav-edges} 0700 ${user} ${user} -"
+        "d ${config.sinnix.paths.capturePaths.reading-stack} 0700 ${user} ${user} -"
+      ];
+
       sinnix.runtime.surfaces = {
         sinnix-nav-capture = {
           unit = "sinnix-nav-capture.service";
@@ -278,6 +283,7 @@ mkFeatureModule {
                 PartOf = [ "graphical-session.target" ];
               };
               Service = {
+                UMask = "0077";
                 ExecStart = "${scriptPkgs.sinnix-nav-capture-daemon}/bin/sinnix-nav-capture-daemon";
                 Environment = [
                   "SINNIX_NAV_CAPTURE_PORT=${toString navigationPort}"

@@ -19,6 +19,9 @@
             sinnix.services.capture-netflow.enable = true;
             sinnix.services.xiaomi-witness.enable = true;
             sinnix.services.video-resolve.enable = true;
+            sinnix.services.url-ledger.enable = true;
+            sinnix.services.lynchpin.enable = true;
+            sinnix.features.desktop.browser.enable = true;
             sinnix.services.steering.enable = true;
             sinnix.services.sandbox-audit.enable = true;
             sinnix.services.stt.enable = true;
@@ -41,6 +44,29 @@
                   "sinnix-steering-export"
                 ];
             message = "Steering jobs must create owner-only evidence.";
+          }
+          {
+            assertion = config.systemd.services.sinnix-url-ledger.serviceConfig.UMask == "0077";
+            message = "URL evidence jobs must create owner-only output.";
+          }
+          {
+            assertion =
+              config.home-manager.users.${config.sinnix.user.name}.systemd.user.services.sinnix-nav-capture.Service.UMask
+              == "0077";
+            message = "Browser capture must create owner-only output.";
+          }
+          {
+            assertion =
+              builtins.all
+                (
+                  path:
+                  builtins.elem "d ${path} 0700 ${config.sinnix.user.name} ${config.sinnix.user.name} -" config.systemd.tmpfiles.rules
+                )
+                [
+                  config.sinnix.paths.capturePaths.browser-nav-edges
+                  config.sinnix.paths.capturePaths.reading-stack
+                ];
+            message = "Browser evidence must retain private entrances owned by its writer.";
           }
           {
             assertion = config.systemd.services.sinnix-stt-lake.serviceConfig.UMask == "0077";
@@ -81,6 +107,8 @@
                   rules != [ ] && builtins.all (rule: rule == expected) rules
                 )
                 [
+                  config.sinnix.paths.capturePaths.webhistory
+                  config.sinnix.paths.capturePaths.url-ledger
                   config.sinnix.paths.capturePaths.irc
                   config.sinnix.paths.capturePaths.shell
                   config.sinnix.paths.capturePaths.steering
