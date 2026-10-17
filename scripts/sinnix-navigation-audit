@@ -11,6 +11,7 @@ import json
 import os
 import re
 import stat
+import string
 import sys
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -23,6 +24,13 @@ from sinnix_lib.note_links import prose_mask
 # a missing closing parenthesis from repartitioning the destination exponentially.
 INLINE = re.compile(r"!?\[(?:\\[^\n]|[^\[\]\\\n])*\]\(\s*(<[^<>\n]+>|(?:\\.|[^\s()\\])++(?:\([^()]*\)(?:\\.|[^\s()\\])*+)*+)[^\n)]*\)")
 REFERENCE = re.compile(r"^\s{0,3}\[[^\]\n]+\]:\s*(<[^>\n]+>|\S+)", re.M)
+# Preserve ordinary backslashes, but decode supported destination escapes
+# before URI delimiters are interpreted. Keep the existing escaped-space form.
+DESTINATION_ESCAPE = re.compile(r"\\([" + re.escape(string.punctuation + " ") + r"])")
+
+
+def _unwrap_destination(target: str) -> str:
+    return target[1:-1] if target.startswith("<") and target.endswith(">") else target
 
 
 def link_targets(text: str):
@@ -32,9 +40,9 @@ def link_targets(text: str):
     for line in inline_text.split("\n"):
         if ")" in line:
             for match in INLINE.finditer(line):
-                yield match.group(1).strip("<>")
+                yield _unwrap_destination(match.group(1))
     for match in REFERENCE.finditer(text):
-        yield match.group(1).strip("<>")
+        yield _unwrap_destination(match.group(1))
 
 
 FAILURES = {"invalid-link", "missing", "denied", "inaccessible", "invalid-document", "wrong-type-document",
@@ -91,7 +99,7 @@ def audit(manifest: dict) -> dict:
             continue
         for target in link_targets(text):
             try:
-                parsed = urlsplit(target)
+                parsed = urlsplit(DESTINATION_ESCAPE.sub(r"\1", target))
             except ValueError as exc:
                 rows.append({"document": str(document), "target": target,
                              "status": "invalid-link", "reason": str(exc)})
@@ -103,7 +111,7 @@ def audit(manifest: dict) -> dict:
             if not parsed.path:
                 continue
             try:
-                decoded = unquote(re.sub(r"\\([() ])", r"\1", parsed.path), errors="strict")
+                decoded = unquote(parsed.path, errors="strict")
             except UnicodeError as exc:
                 rows.append({"document": str(document), "target": target,
                              "status": "invalid-link", "reason": str(exc)})

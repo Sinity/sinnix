@@ -166,7 +166,9 @@ roots are checked; known offline external roots are reported as unprobed
 without accessing them. If the mount table cannot be read or parsed, external
 checks report inaccessible and return a nonzero exit status without probing
 those payloads. Local checks continue. Remote links and code examples are excluded;
-local failures return a nonzero exit status. The tool is read-only
+local failures return a nonzero exit status. Destination punctuation escapes
+are decoded before URL fragments and queries; ordinary literal backslashes
+remain part of the local filename. The tool is read-only
 and does not scan imported packages or historical reports.
 
 The workstation's private manifest is owned by the report catalog. Run its

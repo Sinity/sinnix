@@ -436,3 +436,25 @@ assert [row["status"] for row in report["links"]] == ["wrong-type-document", "ok
         capture_output=True, text=True, timeout=2,
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize('target, filename', [
+    (r'a\[b\].md', 'a[b].md'),
+    (r'a\*b.md', 'a*b.md'),
+    (r'a\\b.md', 'a\\b.md'),
+    (r'a\q.md', 'a\\q.md'),
+    (r'a\#section', 'a'),
+    (r'a\?version=1', 'a'),
+    (r'a\>', 'a>'),
+])
+@pytest.mark.parametrize('reference', [False, True])
+def test_escaped_destinations_use_markdown_punctuation_before_url_parts(tmp_path, target, filename, reference):
+    import runpy
+
+    (tmp_path / filename).write_text('retained target')
+    document = tmp_path / 'README.md'
+    document.write_text(f'[target][asset]\n[asset]: {target}\n' if reference else f'[target]({target})\n')
+    report = runpy.run_path(str(SCRIPT))['audit']({'schema_version': 1, 'documents': [str(document)]})
+    assert report['failures'] == 0, report
+    assert report['links'][0]['status'] == 'ok'
+    assert report['links'][0]['destination'] == str(tmp_path / filename)
