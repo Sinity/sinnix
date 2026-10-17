@@ -177,6 +177,13 @@ entry captures the current checkout as an immutable source with its Git revision
 `switch` keeps using that source if the caller later changes directory. A missing
 checkout is refused. Dirty-source and remote-currency checks still apply.
 
+Activation rebinds changed NixOS socket definitions even when their service is
+idle. Active listener holders follow their systemd stop/start policy; an
+explicit restart opt-out makes the transition fail visibly. Unchanged sockets
+and independent `Accept=yes` connection workers continue running. Failed
+replacements report failure and can be restored by activating the retained
+generation.
+
 ## Repository guide
 
 | Path        | Purpose                                                                                     |
