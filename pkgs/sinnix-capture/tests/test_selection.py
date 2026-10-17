@@ -402,3 +402,79 @@ def test_binary_paste_streams_to_a_private_file_before_blob_publication(
     assert record["payload"]["size"] == len(body)
     assert record["payload"]["sha256"] == hashlib.sha256(body).hexdigest()
     assert Path(record["raw_ref"]).read_bytes() == body
+
+
+@pytest.mark.parametrize("kind", ["wrong-bytes", "directory", "symlink", "fifo"])
+def test_conflicting_blob_is_not_accepted_or_replaced(lane, tmp_path, kind):
+    lane.types_file.write_text("application/octet-stream\n")
+    body = lane.content_file.read_bytes()
+    digest = hashlib.sha256(body).hexdigest()
+    blob = lane.lane_dir / "blobs" / digest[:2] / digest
+    blob.parent.mkdir(parents=True)
+    external = tmp_path / "external"
+    external.write_bytes(body)
+    if kind == "wrong-bytes":
+        blob.write_bytes(b"retained conflicting evidence")
+    elif kind == "directory":
+        blob.mkdir()
+    elif kind == "symlink":
+        blob.symlink_to(external)
+    else:
+        os.mkfifo(blob)
+    before = blob.lstat()
+    state = tmp_path / "state" / "last-selection"
+    with pytest.raises(OSError):
+        lane.run("--dedup-state", str(state))
+    after = blob.lstat()
+    assert (after.st_ino, after.st_mode, after.st_size, after.st_mtime_ns) == (
+        before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns
+    )
+    if kind == "wrong-bytes":
+        assert blob.read_bytes() == b"retained conflicting evidence"
+    assert external.read_bytes() == body
+    assert not state.exists()
+    assert lane.records() == []
+
+
+def test_binary_dedup_does_not_hide_a_corrupted_retained_blob(lane, tmp_path):
+    lane.types_file.write_text("application/octet-stream\n")
+    state = tmp_path / "state" / "last-selection"
+    assert lane.run("--dedup-state", str(state)) == 0
+    marker = state.read_bytes()
+    record, = lane.records()
+    blob = Path(record["raw_ref"])
+    blob.write_bytes(b"conflicting preimage")
+    with pytest.raises(OSError, match="digest mismatch"):
+        lane.run("--dedup-state", str(state))
+    assert blob.read_bytes() == b"conflicting preimage"
+    assert state.read_bytes() == marker
+    assert len(lane.records()) == 1
+
+
+def test_binary_dedup_restores_an_absent_blob_from_complete_transfer(lane, tmp_path):
+    lane.types_file.write_text("application/octet-stream\n")
+    state = tmp_path / "state" / "last-selection"
+    assert lane.run("--dedup-state", str(state)) == 0
+    record, = lane.records()
+    blob = Path(record["raw_ref"])
+    blob.unlink()
+    assert lane.run("--dedup-state", str(state)) == 0
+    assert blob.read_bytes() == lane.content_file.read_bytes()
+    assert len(lane.records()) == 1
+
+
+def test_blob_collision_during_publication_is_verified(tmp_path, monkeypatch):
+    import sinnix_capture.selection as selection
+
+    body = b"complete incoming content"
+    digest = hashlib.sha256(body).hexdigest()
+    real_publish = selection.atomic_publish
+
+    def conflicting_writer(path, content, **kwargs):
+        path.write_bytes(b"retained competing content")
+        return real_publish(path, content, **kwargs)
+
+    monkeypatch.setattr(selection, "atomic_publish", conflicting_writer)
+    with pytest.raises(OSError, match="digest mismatch"):
+        store_blob(tmp_path, body, digest)
+    assert (tmp_path / "blobs" / digest[:2] / digest).read_bytes() == b"retained competing content"

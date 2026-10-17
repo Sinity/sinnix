@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import shlex
+import stat
 import subprocess
 import sys
 import tempfile
@@ -70,6 +71,23 @@ def is_binary_mime(mime: str) -> bool:
     return not (mime.startswith("text/") or mime in {"STRING", "UTF8_STRING"})
 
 
+def _verified_blob(path: Path, digest: str) -> bool:
+    """An absent blob can be published; an invalid retained object cannot."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except FileNotFoundError:
+        return False
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError(f"selection blob is not a regular file: {path}")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            if hashlib.file_digest(handle, "sha256").hexdigest() != digest:
+                raise OSError(f"selection blob digest mismatch: {path}")
+    finally:
+        os.close(descriptor)
+    return True
+
+
 def store_blob(lane_dir: Path, content: bytes | BinaryIO, digest: str) -> Path:
     """Write content once under its own sha256 and return the blob path."""
     shard_dir = lane_dir / "blobs" / digest[:BLOB_SHARD_CHARS]
@@ -78,7 +96,10 @@ def store_blob(lane_dir: Path, content: bytes | BinaryIO, digest: str) -> Path:
     # The name is the digest, so no writer may replace an established blob.
     # `exclusive` uses a unique temporary and links it into place; concurrent
     # callbacks either publish these same bytes or observe the completed blob.
-    atomic_publish(blob_path, content, fsync=True, mode=0o600, exclusive=True)
+    if not _verified_blob(blob_path, digest):
+        published = atomic_publish(blob_path, content, fsync=True, mode=0o600, exclusive=True)
+        if not published and not _verified_blob(blob_path, digest):
+            raise FileNotFoundError(f"selection blob disappeared during publication: {blob_path}")
     return blob_path
 
 
@@ -219,12 +240,15 @@ def capture_selection(
             else nullcontext()
         )
         with gate:
+            # A dedup marker is useful only while its retained payload exists
+            # and still matches. Reuse verified bytes or restore an absent blob
+            # before suppressing the duplicate event.
+            raw_ref = (
+                str(store_blob(lane_dir, content, digest)) if is_binary_mime(mime) else None
+            )
             if dedup_state is not None and _is_duplicate(dedup_state, key):
                 return 0
             if is_binary_mime(mime):
-                raw_ref: str | None = str(
-                    store_blob(capture_lane_path(capture_root, lane), content, digest)
-                )
                 payload = {
                     "category": "binary",
                     "mime": mime,
