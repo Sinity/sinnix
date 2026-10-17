@@ -17,8 +17,22 @@ from urllib.parse import unquote, urlsplit
 from sinnix_lib.note_links import prose_mask
 from sinnix_lib.mounts import has_mounted_ancestor, read_mountpoints
 
-INLINE = re.compile(r"!?\[[^\]\n]*\]\(\s*(<[^>\n]+>|(?:\\.|[^\s()])+(?:\([^()]*\)(?:\\.|[^\s()])*)*)[^\n)]*\)")
+# Escape and literal alternatives are disjoint; possessive repetitions prevent
+# a missing closing parenthesis from repartitioning the destination exponentially.
+INLINE = re.compile(r"!?\[(?:\\[^\n]|[^\[\]\\\n])*\]\(\s*(<[^<>\n]+>|(?:\\.|[^\s()\\])++(?:\([^()]*\)(?:\\.|[^\s()\\])*+)*+)[^\n)]*\)")
 REFERENCE = re.compile(r"^\s{0,3}\[[^\]\n]+\]:\s*(<[^>\n]+>|\S+)", re.M)
+
+
+def link_targets(text: str):
+    # Whitespace after the opener may span lines. Once consumed, inline links
+    # stay on one line, so incomplete lines cannot repeatedly scan their suffix.
+    inline_text = re.sub(r"(\]\()\s+", r"\1", text)
+    for line in inline_text.split("\n"):
+        if ")" in line:
+            for match in INLINE.finditer(line):
+                yield match.group(1).strip("<>")
+    for match in REFERENCE.finditer(text):
+        yield match.group(1).strip("<>")
 
 
 FAILURES = {"invalid-link", "missing", "denied", "inaccessible", "invalid-document", "wrong-type-document",
@@ -70,8 +84,7 @@ def audit(manifest: dict) -> dict:
         except (OSError, UnicodeError) as exc:
             rows.append({"document": str(document), "status": access_error(exc) + "-document", "reason": str(exc)})
             continue
-        for match in (*INLINE.finditer(text), *REFERENCE.finditer(text)):
-            target = match.group(1).strip("<>")
+        for target in link_targets(text):
             try:
                 parsed = urlsplit(target)
             except ValueError as exc:

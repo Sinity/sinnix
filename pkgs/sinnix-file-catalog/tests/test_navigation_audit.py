@@ -2,6 +2,8 @@
 
 import json
 import subprocess
+
+import pytest
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[3] / 'scripts' / 'sinnix-navigation-audit'
@@ -346,3 +348,42 @@ def test_parent_components_keep_offline_mount_policy(tmp_path, monkeypatch):
     })
     assert result["failures"] == 0
     assert [row["status"] for row in result["links"]] == ["external-unprobed"] * 2
+
+
+@pytest.mark.parametrize("malformed", [
+    "[entry](" + "\\" * 64,
+    "[entry](" + "a" * 100_000,
+    "[" * 100_000 + ")",
+    "[entry](<" * 10_000 + ")",
+], ids=["escapes", "bare-destination", "unclosed-labels", "angle-prefixes"])
+def test_malformed_links_do_not_block_following_entrances(tmp_path, malformed):
+    document = tmp_path / "README.md"
+    document.write_text(malformed + "\n[present](README.md)\n")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"schema_version": 1, "documents": [str(document)]}))
+    result = subprocess.run(
+        [str(SCRIPT), "--manifest", str(manifest), "--json"],
+        capture_output=True, text=True, timeout=2,
+    )
+    assert result.returncode in (0, 1), result.stderr
+    assert json.loads(result.stdout)["links"][-1]["status"] == "ok"
+
+
+def test_inline_destinations_preserve_supported_syntax(tmp_path):
+    for name in ("a b.md", "balanced(name).md", "escaped(name).md"):
+        (tmp_path / name).write_text("synthetic fixture")
+    document = tmp_path / "README.md"
+    document.write_text(
+        '[angle](<a b.md> "title")\n'
+        '[balanced](balanced(name).md)\n'
+        '[escaped](escaped\\(name\\).md)\n'
+        '[multiline](\n  a%20b.md "title")\n'
+        '![image](a%20b.md)\n'
+        '[escaped \\[ label](a%20b.md)\n'
+        '[reference]: <a b.md>\n'
+    )
+    import runpy
+    result = runpy.run_path(str(SCRIPT))["audit"]({
+        "schema_version": 1, "documents": [str(document)],
+    })
+    assert [row["status"] for row in result["links"]] == ["ok"] * 7
