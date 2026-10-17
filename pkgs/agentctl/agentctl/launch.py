@@ -2516,15 +2516,30 @@ def wait(
     deadline = time.monotonic() + timeout_seconds
     if reference is None:
         reference = launch_reference(_task(task_id))
-    task = addressed(task_id, reference)
+
+    def observe() -> tuple[Task, dict[str, Any]]:
+        task = (
+            _read_task(config, task_id, reference)
+            if config is not None else addressed(task_id, reference)
+        )
+        if config is not None and task.status == "Archived":
+            view = _job_detail(config, task, None)
+            if not view.get("terminal"):
+                raise JobError(
+                    f"job {reference} is absent from pueue with no verified terminal outcome"
+                )
+            return task, view
+        return task, job_view(task)
+
+    task, view = observe()
     detail: str | None = None
     while True:
-        if task.terminal:
-            return job_view(task)
+        if view.get("terminal"):
+            return view
         remaining = deadline - time.monotonic()
         if remaining <= 0 or detail is not None:
-            view = {**job_view(task), "wait_timed_out": True}
-            return view if detail is None else {**view, "detail": detail}
+            timed_out = {**view, "wait_timed_out": True}
+            return timed_out if detail is None else {**timed_out, "detail": detail}
         if (
             task.status == "Queued"
             and config is not None
@@ -2532,7 +2547,7 @@ def wait(
         ):
             # Something started; this job may be among it. Re-read before
             # blocking so the slice and the answer follow its real state.
-            task = addressed(task_id, reference)
+            task, view = observe()
             continue
         blocking = _wait_slice(task, remaining)
         try:
@@ -2541,10 +2556,10 @@ def wait(
             # A slice covering the whole remaining wait is the caller's own
             # timeout; a shorter one expired only to re-read the queue.
             if blocking >= remaining:
-                task = addressed(task_id, reference)
-                if task.terminal:
-                    return job_view(task)
-                return {**job_view(task), "wait_timed_out": True}
+                task, view = observe()
+                if view.get("terminal"):
+                    return view
+                return {**view, "wait_timed_out": True}
         except PueueError as error:
             detail = str(error)
-        task = addressed(task_id, reference)
+        task, view = observe()

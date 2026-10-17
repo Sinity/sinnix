@@ -86,7 +86,10 @@ wherever the queue has moved it; without one it addresses whatever the queue
 holds at the id it is given. A wait also re-reads which id holds its job
 while the job can still move. Batch manifests store each worker's and the
 landing's reference, so view, resume, cancellation and cleanup address the
-job the run queued. A wait timeout rechecks the addressed job before returning;
+job the run queued. Wait also resolves retained
+terminal receipts after a queue entry is removed, including a confirmed
+never-started cancellation. Retained inputs or a cancellation request alone
+are not terminal proof. A wait timeout rechecks the addressed job before returning;
 it reports a terminal result if the job finished at the deadline. The displayed
 age includes the time spent waiting. `start --wait` and `fire --wait` return
 exit code 4 when the wait expires while the job remains active; expiry does

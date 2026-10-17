@@ -652,9 +652,11 @@ def harness(
     )
 
     def wait(
-        job_id: int, *, timeout_seconds: float, reference: str | None = None
+        job_id: int, *, timeout_seconds: float, reference: str | None = None,
+        config: Config | None = None,
     ) -> dict[str, Any]:
         """Every waited task succeeds; a review task also leaves its verdict."""
+        assert config is built.config
         built.waited.append(job_id)
         task = fake_pueue.task(job_id)
         assert task is not None
@@ -1999,7 +2001,7 @@ def test_a_verification_queued_past_its_budget_waits_and_then_succeeds(
         harness.pueue.queue(job["job_id"])
         return job
 
-    def wait(job_id: int, *, timeout_seconds: float, reference: str | None = None):
+    def wait(job_id: int, *, timeout_seconds: float, reference: str | None = None, config: Config | None = None):
         # The pool stays paused for three full budgets, then admits the job.
         if harness.pueue.clock < 3 * timeout:
             harness.pueue.clock += timeout_seconds
@@ -2009,7 +2011,7 @@ def test_a_verification_queued_past_its_budget_waits_and_then_succeeds(
             }
         harness.pueue.running(job_id)
         return harness_wait(
-            job_id, timeout_seconds=timeout_seconds, reference=reference
+            job_id, timeout_seconds=timeout_seconds, reference=reference, config=config
         )
 
     monkeypatch.setattr(launch, "start_operation", start_queued)

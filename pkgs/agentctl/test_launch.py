@@ -2211,3 +2211,51 @@ def test_queued_environment_uses_current_host_roots_without_losing_explicit_over
     env = read_launch(config, fake_pueue.task(started["job_id"]))["environment"]
     assert env.get("FIXTURE_ROOT") == expected
     assert "NOT_INHERITED" not in env
+
+
+def test_wait_retained_cancelled_launch_does_not_follow_reused_id(fake_pueue, config, project_root):
+    project = load_project_adapter(project_root)
+    own = launch.start_operation(config, project, project.operation("check"))
+    fake_pueue.queue(own["job_id"])
+    launch.cancel(config, own["job_id"], reference=own["reference"])
+    fake_pueue.next_id = own["job_id"]
+    other = launch.start_operation(config, project, project.operation("check"))
+    fake_pueue.succeed(other["job_id"])
+    observed = launch.wait(own["job_id"], timeout_seconds=5, reference=own["reference"], config=config)
+    assert observed["phase"] == "cancelled" and observed["terminal"] is True
+    assert observed["reference"] == own["reference"] and observed["queue_present"] is False
+    assert observed["exit_code"] == CANCELLED_EXIT_CODE
+    assert fake_pueue.waited == []
+
+
+@pytest.mark.parametrize("owner_error", [False, True])
+def test_wait_retained_cancellation_during_observation(fake_pueue, config, project_root, owner_error):
+    project = load_project_adapter(project_root)
+    own = launch.start_operation(config, project, project.operation("check"))
+    fake_pueue.queue(own["job_id"])
+    def cancel_then_reuse(fake):
+        launch.cancel(config, own["job_id"], reference=own["reference"])
+        fake.next_id = own["job_id"]
+        launch.start_operation(config, project, project.operation("check"))
+        if owner_error:
+            raise PueueError("fixture removed during wait")
+    fake_pueue.finish_when_waited(own["job_id"], cancel_then_reuse)
+    # No explicit reference: a wait must retain the identity it first saw.
+    observed = launch.wait(own["job_id"], timeout_seconds=5, config=config)
+    assert observed["phase"] == "cancelled" and observed["terminal"] is True
+    assert observed["reference"] == own["reference"] and not observed.get("wait_timed_out")
+    assert fake_pueue.waited == [own["job_id"]]
+
+
+@pytest.mark.parametrize("request_only", [False, True])
+def test_wait_retained_unverified_launch_is_not_terminal(fake_pueue, config, project_root, request_only):
+    project = load_project_adapter(project_root)
+    own = launch.start_operation(config, project, project.operation("check"))
+    task = fake_pueue.task(own["job_id"])
+    if request_only:
+        launch._write_disposition(config, task, {"outcome": "cancelled", "unresolved": True, "started": True})
+    fake_pueue.remove([own["job_id"]])
+    assert launch.get_job(own["job_id"], config, own["reference"])["terminal"] is False
+    with pytest.raises(JobError, match="no verified terminal"):
+        launch.wait(own["job_id"], timeout_seconds=5, reference=own["reference"], config=config)
+    assert fake_pueue.waited == []

@@ -1180,3 +1180,20 @@ def test_batch_task_refuses_superseded_attempt_before_owner_read(
         == cli.EXIT_REFUSED
     )
     assert "current attempt" in capsys.readouterr().err
+
+
+def test_wait_archived_cancellation_retains_job_failure_exit(fake_pueue, cli_config, capsys):
+    assert cli.main(["job", "start", "fixture", "check"]) == 0
+    own = json.loads(capsys.readouterr().out)
+    fake_pueue.queue(own["job_id"])
+    assert cli.main(["job", "cancel", str(own["job_id"]), "--reference", own["reference"]]) == 0
+    capsys.readouterr()
+    fake_pueue.next_id = own["job_id"]
+    assert cli.main(["job", "start", "fixture", "check"]) == 0
+    capsys.readouterr()
+    assert cli.main(["--json", "job", "wait", str(own["job_id"]), "--reference", own["reference"]]) == cli.EXIT_JOB_NOT_SUCCEEDED
+    output = capsys.readouterr()
+    observed = json.loads(output.out)
+    assert observed["phase"] == "cancelled" and observed["terminal"] is True
+    assert observed["reference"] == own["reference"] and observed["exit_code"] == 130
+    assert "no task" not in output.err

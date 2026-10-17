@@ -625,6 +625,7 @@ def _integrate(
             job["job_id"],
             timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS,
             reference=job.get("reference"),
+            config=config,
         )
         if waited.get("phase") != "succeeded":
             raise BatchRefusal(
@@ -1031,7 +1032,8 @@ def _run_seconds(job: Mapping[str, Any], first_seen: float) -> float:
 
 
 def _await_verification(
-    profile: str, job_id: int, reference: Any, timeout_seconds: float
+    profile: str, job_id: int, reference: Any, timeout_seconds: float,
+    *, config: Config | None = None,
 ) -> dict[str, Any]:
     """Wait for a verification job to reach a terminal state.
 
@@ -1047,7 +1049,7 @@ def _await_verification(
     first_seen: float | None = None
     wait_for = limit if limit is not None else VERIFY_EXIT_GRACE_SECONDS
     while True:
-        waited = launch.wait(job_id, timeout_seconds=wait_for, reference=reference)
+        waited = launch.wait(job_id, timeout_seconds=wait_for, reference=reference, config=config)
         # `launch.wait` can return the last non-terminal view at the instant
         # its deadline passes; pueue's current record decides.
         try:
@@ -1233,7 +1235,7 @@ def _verify(
     if not isinstance(job_id, int):
         raise JobError(f"verification {profile} returned no task id")
     waited = _await_verification(
-        profile, job_id, started.get("reference"), operation.timeout_seconds
+        profile, job_id, started.get("reference"), operation.timeout_seconds, config=config
     )
     if waited.get("phase") != "succeeded":
         raise BatchRefusal(
@@ -1377,6 +1379,7 @@ def _review(
         job["job_id"],
         timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS,
         reference=job.get("reference"),
+        config=config,
     )
     if waited.get("phase") != "succeeded":
         raise BatchRefusal(
