@@ -2,9 +2,9 @@
 
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
-from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[3] / 'scripts' / 'sinnix-navigation-audit'
 
@@ -26,6 +26,7 @@ def test_audit_relative_reference_encoded_and_offline_links(tmp_path):
 
 def test_retired_managed_child_fails_without_rejecting_native_package_names(tmp_path):
     import os
+
     from sinnix_lib.layout import COLLECTION_PATHS, MACHINE_LANES, ROOTS
 
     realm = tmp_path / "realm"
@@ -112,17 +113,18 @@ def test_mountinfo_tab_escape_matches_a_real_link(tmp_path, monkeypatch):
 
 
 def test_unreadable_document_does_not_abort_other_entrances(tmp_path, monkeypatch):
+    import os
     import runpy
     denied = tmp_path / "denied.md"
     denied.write_text("fixture")
     readable = tmp_path / "README.md"
     readable.write_text("[present](denied.md)")
-    original = Path.read_text
+    original = os.open
     def read(path, *args, **kwargs):
-        if path == denied:
+        if Path(path) == denied:
             raise PermissionError("synthetic read denial")
         return original(path, *args, **kwargs)
-    monkeypatch.setattr(Path, "read_text", read)
+    monkeypatch.setattr(os, "open", read)
     result = runpy.run_path(str(SCRIPT))["audit"]({"schema_version": 1, "documents": [str(denied), str(readable)]})
     assert result["failures"] == 1
     assert [row["status"] for row in result["links"]] == ["denied-document", "ok"]
@@ -257,9 +259,9 @@ def test_unknown_mount_state_fails_external_checks_without_probing_payload(tmp_p
         return original_stat(path, *args, **kwargs)
 
     for failure in ('denied', 'malformed'):
-        def read(path, *args, **kwargs):
+        def read(path, *args, _failure=failure, **kwargs):
             if path == Path('/proc/self/mountinfo'):
-                if failure == 'denied':
+                if _failure == 'denied':
                     raise PermissionError('synthetic mountinfo denial')
                 return 'malformed mountinfo record\n'
             assert not path.is_relative_to(external), 'unknown mount document must not be read'
@@ -387,3 +389,50 @@ def test_inline_destinations_preserve_supported_syntax(tmp_path):
         "schema_version": 1, "documents": [str(document)],
     })
     assert [row["status"] for row in result["links"]] == ["ok"] * 7
+
+
+def test_manifest_fifo_fails_promptly(tmp_path):
+    import os
+
+    manifest = tmp_path / "manifest.fifo"
+    os.mkfifo(manifest)
+    result = subprocess.run(
+        [str(SCRIPT), "--manifest", str(manifest), "--json"],
+        capture_output=True, text=True, timeout=2,
+    )
+    assert result.returncode == 2
+    assert "regular file" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_document_replaced_by_fifo_does_not_block_other_entrances(tmp_path):
+    import sys
+
+    document = tmp_path / "changed.md"
+    document.write_text("neutral fixture")
+    readable = tmp_path / "README.md"
+    readable.write_text("[present](README.md)")
+    probe = """
+import os, runpy, sys
+from pathlib import Path
+script, document, readable = sys.argv[1:]
+document = Path(document)
+original = Path.stat
+
+def replaced(path, *args, **kwargs):
+    result = original(path, *args, **kwargs)
+    if path == document:
+        document.unlink()
+        os.mkfifo(document)
+    return result
+
+Path.stat = replaced
+report = runpy.run_path(script)["audit"]({"schema_version": 1, "documents": [str(document), readable]})
+assert report["failures"] == 1, report
+assert [row["status"] for row in report["links"]] == ["wrong-type-document", "ok"], report
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", probe, str(SCRIPT), str(document), str(readable)],
+        capture_output=True, text=True, timeout=2,
+    )
+    assert result.returncode == 0, result.stderr

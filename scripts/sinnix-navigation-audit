@@ -11,11 +11,13 @@ import json
 import os
 import re
 import stat
+import sys
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from sinnix_lib.note_links import prose_mask
+from sinnix_lib.files import read_regular_text
 from sinnix_lib.mounts import has_mounted_ancestor, read_mountpoints
+from sinnix_lib.note_links import prose_mask
 
 # Escape and literal alternatives are disjoint; possessive repetitions prevent
 # a missing closing parenthesis from repartitioning the destination exponentially.
@@ -80,9 +82,12 @@ def audit(manifest: dict) -> dict:
             if not stat.S_ISREG(document.stat().st_mode):
                 rows.append({"document": str(document), "status": "wrong-type-document"})
                 continue
-            text = prose_mask(document.read_text(encoding="utf-8"))
+            text = prose_mask(read_regular_text(document))
         except (OSError, UnicodeError) as exc:
             rows.append({"document": str(document), "status": access_error(exc) + "-document", "reason": str(exc)})
+            continue
+        except ValueError as exc:
+            rows.append({"document": str(document), "status": "wrong-type-document", "reason": str(exc)})
             continue
         for target in link_targets(text):
             try:
@@ -132,7 +137,7 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
-    result = audit(json.loads(args.manifest.read_text()))
+    result = audit(json.loads(read_regular_text(args.manifest)))
     if args.json:
         print(json.dumps(result, indent=2))
     else:
@@ -144,4 +149,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except (OSError, ValueError) as error:
+        print(f"sinnix-navigation-audit: {error}", file=sys.stderr)
+        raise SystemExit(2) from None

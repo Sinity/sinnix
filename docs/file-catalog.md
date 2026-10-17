@@ -196,3 +196,8 @@ The viewer displays a known unavailable current location as text alongside its
 availability explanation. It preserves the address and historical evidence,
 but does not offer that location as an active file link. Available and
 unobserved locations retain their existing link behavior.
+
+Publication manifests must be regular JSON files of at most 4 MiB. The byte limit
+is enforced while reading, before a staging directory is created. Navigation
+manifests and selected Markdown documents also reject special filesystem objects
+before reading; unavailable documents remain explicit audit failures.

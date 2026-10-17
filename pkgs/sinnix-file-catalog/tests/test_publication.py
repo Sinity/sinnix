@@ -1,7 +1,10 @@
 """An explicit publication projection must not expose private directories."""
 
-from pathlib import Path
+import json
+import os
 import runpy
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -98,3 +101,78 @@ def test_encoded_file_directory_collision_is_refused(tmp_path):
         BUILD({"schema_version": 1, "files": [{"url": url, "source": str(source)}
             for url in ["assets", "%61ssets/report.html"]]}, output)
     assert not output.exists()
+
+
+def test_publication_fifo_is_rejected_before_creating_output(tmp_path):
+    manifest = tmp_path / "publication.fifo"
+    os.mkfifo(manifest)
+    output = tmp_path / "site"
+    result = subprocess.run(
+        [str(Path(__file__).parents[3] / "scripts/sinnix-report-site"),
+         "--publication", str(manifest), "--output", str(output)],
+        capture_output=True, text=True, timeout=2,
+    )
+    assert result.returncode == 2
+    assert "regular file" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not output.exists()
+
+
+def test_utf16_publication_manifest_remains_supported(tmp_path):
+    source = tmp_path / "source.html"
+    source.write_text("neutral report")
+    manifest = tmp_path / "publication.json"
+    manifest.write_bytes(json.dumps({"schema_version": 1, "files": [
+        {"url": "report.html", "source": str(source)},
+    ]}).encode("utf-16"))
+    output = tmp_path / "site"
+    result = subprocess.run(
+        [str(Path(__file__).parents[3] / "scripts/sinnix-report-site"),
+         "--publication", str(manifest), "--output", str(output)],
+        capture_output=True, text=True, timeout=2,
+    )
+    assert result.returncode == 0, result.stderr
+    assert (output / "report.html").read_text() == "neutral report"
+
+
+def test_oversized_publication_manifest_cannot_create_output(tmp_path):
+    manifest = tmp_path / "publication.json"
+    manifest.write_bytes(b'{"schema_version": 1, "files": []}' + b" " * (4 << 20))
+    output = tmp_path / "site"
+    result = subprocess.run(
+        [str(Path(__file__).parents[3] / "scripts/sinnix-report-site"),
+         "--publication", str(manifest), "--output", str(output)],
+        capture_output=True, text=True, timeout=2,
+    )
+    assert result.returncode == 2
+    assert "bound" in result.stderr
+    assert not output.exists()
+
+
+def test_manifest_byte_budget_is_enforced_during_read(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+
+    import sinnix_lib.files as files
+
+    source = tmp_path / "manifest.json"
+    source.write_bytes(b"x" * 64)
+    original = files._regular_input
+    consumed = 0
+
+    @contextmanager
+    def observed(path):
+        with original(path) as handle:
+            class Reader:
+                def read(self, size=-1):
+                    nonlocal consumed
+                    assert size >= 0, "a bounded input must not request an unbounded read"
+                    raw = handle.read(size)
+                    consumed += len(raw)
+                    assert consumed <= 17
+                    return raw
+            yield Reader()
+
+    monkeypatch.setattr(files, "_regular_input", observed)
+    with pytest.raises(ValueError, match="16 byte bound"):
+        files.read_regular_bytes(source, max_bytes=16)
+    assert consumed <= 17

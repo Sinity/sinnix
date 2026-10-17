@@ -13,8 +13,11 @@ staged directory. Nothing in the canonical source trees is changed.
 import argparse
 import json
 import re
+import sys
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
+
+from sinnix_lib.files import read_regular_bytes
 
 
 def publication_path(url: str) -> PurePosixPath:
@@ -71,12 +74,14 @@ def main() -> int:
     parser.add_argument("--publication", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    raw = args.publication.read_bytes()
-    if len(raw) > 4 << 20:
-        raise ValueError("publication manifest exceeds 4 MiB bound")
+    raw = read_regular_bytes(args.publication, max_bytes=4 << 20)
     build(json.loads(raw), args.output)
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except (OSError, ValueError) as error:
+        print(f"sinnix-report-site: {error}", file=sys.stderr)
+        raise SystemExit(2) from None
