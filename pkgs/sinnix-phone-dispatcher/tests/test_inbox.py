@@ -40,6 +40,48 @@ def stub_generated(monkeypatch):
     )
 
 
+def _download_bytes(name):
+    # Small protocol fixtures materialize their response for assertions. The
+    # production handler streams; its large-file tests use a counting sink.
+    with inbox_mod.open_inbox(name) as (status, payload):
+        if isinstance(payload, inbox_mod.InboxFile):
+            return status, payload.stream.read()
+        return status, payload
+
+
+def test_download_retains_opened_publication_and_closes_it(isolated_state_dirs):
+    _write(isolated_state_dirs, "receipts", "entry.json", "original")
+    path = isolated_state_dirs["receipts_dir"] / "entry.json"
+    with inbox_mod.open_inbox("receipts/entry.json") as (status, payload):
+        assert status == HTTPStatus.OK
+        replacement = path.with_suffix(".next")
+        replacement.write_bytes(b"replacement")
+        replacement.replace(path)
+        assert payload.stream.read() == b"original"
+        assert payload.size == len(b"original")
+        assert payload.sha256 == hashlib.sha256(b"original").hexdigest()
+    assert payload.stream.closed
+    assert path.read_bytes() == b"replacement"
+
+
+def test_download_refuses_changes_while_hashing(isolated_state_dirs, monkeypatch):
+    _write(isolated_state_dirs, "receipts", "entry.json", "original")
+    path = isolated_state_dirs["receipts_dir"] / "entry.json"
+    inspect = inbox_mod._inspect_stream
+
+    def change(stream):
+        result = inspect(stream)
+        path.write_bytes(b"replacement longer than original")
+        return result
+
+    monkeypatch.setattr(inbox_mod, "_inspect_stream", change)
+    before = set(os.listdir("/proc/self/fd"))
+    with inbox_mod.open_inbox("receipts/entry.json") as (status, payload):
+        assert status == HTTPStatus.INTERNAL_SERVER_ERROR
+        assert "changed" in payload["detail"]
+    assert set(os.listdir("/proc/self/fd")) == before
+
+
 def _write(isolated_state_dirs, sub: str, name: str, text: str) -> None:
     d = isolated_state_dirs["inbox_dir"] / sub
     d.mkdir(parents=True, exist_ok=True)
@@ -52,7 +94,7 @@ def test_listing_carries_a_sha_the_bytes_match(isolated_state_dirs) -> None:
     _, payload = inbox_mod.list_inbox()
     entry = next(f for f in payload["files"] if f["name"] == "receipts/r1.json")
 
-    status, body = inbox_mod.read_inbox("receipts/r1.json")
+    status, body = _download_bytes("receipts/r1.json")
     assert status == HTTPStatus.OK
     assert hashlib.sha256(body).hexdigest() == entry["sha256"]
     assert entry["one_shot"] is True
@@ -86,7 +128,7 @@ def test_generated_state_is_served_without_a_file(isolated_state_dirs) -> None:
     names = [f["name"] for f in payload["files"]]
     assert "glance.json" in names and "steering.json" in names
 
-    status, body = inbox_mod.read_inbox("glance.json")
+    status, body = _download_bytes("glance.json")
     assert status == HTTPStatus.OK
     assert json.loads(body) == {"attention": []}
     assert not (isolated_state_dirs["inbox_dir"] / "glance.json").exists()
@@ -332,12 +374,12 @@ def test_confirming_a_deck_keeps_it(isolated_state_dirs) -> None:
     ],
 )
 def test_traversal_names_are_refused(name) -> None:
-    assert inbox_mod.read_inbox(name)[0] == HTTPStatus.BAD_REQUEST
+    assert _download_bytes(name)[0] == HTTPStatus.BAD_REQUEST
     assert inbox_mod.confirm_inbox(name, "0" * 64)[0] == HTTPStatus.BAD_REQUEST
 
 
 def test_a_missing_entry_is_a_404(isolated_state_dirs) -> None:
-    status, payload = inbox_mod.read_inbox("notify/nothing.json")
+    status, payload = _download_bytes("notify/nothing.json")
     assert status == HTTPStatus.NOT_FOUND
     assert payload["ok"] is False
 
@@ -356,7 +398,7 @@ def test_symlinks_cannot_expose_outside_inbox(isolated_state_dirs, tmp_path, sub
         (root / 'receipts').mkdir()
         (root / 'receipts' / 'entry.json').symlink_to(target)
     before = target.stat()
-    status, body = inbox_mod.read_inbox('receipts/entry.json')
+    status, body = _download_bytes('receipts/entry.json')
     assert status == HTTPStatus.INTERNAL_SERVER_ERROR
     assert isinstance(body, dict) and not body['ok']
     listing_status, listing = inbox_mod.list_inbox()
@@ -379,7 +421,7 @@ def test_wrong_type_is_unavailable_not_already_consumed(isolated_state_dirs, kin
         path.mkdir()
     else:
         os.mkfifo(path)
-    for status, body in [inbox_mod.read_inbox('receipts/entry.json'),
+    for status, body in [_download_bytes('receipts/entry.json'),
                          inbox_mod.confirm_inbox('receipts/entry.json', '0' * 64)]:
         assert status == HTTPStatus.INTERNAL_SERVER_ERROR
         assert not body['ok'] and not body.get('already_gone')
@@ -393,7 +435,7 @@ def test_refused_entry_reads_do_not_leak_descriptors(isolated_state_dirs):
     path.mkdir()
     before = set(os.listdir('/proc/self/fd'))
     for _ in range(8):
-        assert inbox_mod.read_inbox('receipts/entry.json')[0] == HTTPStatus.INTERNAL_SERVER_ERROR
+        assert _download_bytes('receipts/entry.json')[0] == HTTPStatus.INTERNAL_SERVER_ERROR
     assert set(os.listdir('/proc/self/fd')) == before
 
 
@@ -528,4 +570,4 @@ def test_atomic_temporary_is_not_offered_before_publication(isolated_state_dirs)
     status, payload = inbox_mod.list_inbox()
     row = next(f for f in payload['files'] if f['name'] == 'receipts/fixture.json')
     assert status == HTTPStatus.OK and row['sha256'] == hashlib.sha256(completed).hexdigest()
-    assert inbox_mod.read_inbox('receipts/fixture.json') == (HTTPStatus.OK, completed)
+    assert _download_bytes('receipts/fixture.json') == (HTTPStatus.OK, completed)

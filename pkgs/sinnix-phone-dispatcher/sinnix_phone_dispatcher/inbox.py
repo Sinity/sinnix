@@ -40,6 +40,7 @@ import stat
 from contextlib import ExitStack, contextmanager
 from http import HTTPStatus
 from pathlib import Path
+from typing import BinaryIO, NamedTuple
 
 from sinnix_lib.ledger import utc_ts
 
@@ -138,22 +139,45 @@ def list_inbox() -> tuple[HTTPStatus, dict]:
     return HTTPStatus.OK, {"ok": True, "at": utc_ts(), "files": files}
 
 
-def read_inbox(name: str) -> tuple[HTTPStatus, bytes | dict]:
-    """The bytes of one inbox entry, or a JSON refusal."""
+class InboxFile(NamedTuple):
+    stream: BinaryIO
+    size: int
+    sha256: str
+
+
+@contextmanager
+def open_inbox(name: str):
+    """Keep a validated entry open through delivery, or yield a refusal."""
     if name in GENERATED:
-        return HTTPStatus.OK, _generated_bytes(name)
+        yield HTTPStatus.OK, _generated_bytes(name)
+        return
     path = _resolve(name)
     if path is None:
-        return HTTPStatus.BAD_REQUEST, {
+        yield HTTPStatus.BAD_REQUEST, {
             "ok": False,
             "detail": "unacceptable inbox name",
         }
-    try:
-        return HTTPStatus.OK, _read_entry(path)
-    except FileNotFoundError:
-        return HTTPStatus.NOT_FOUND, {"ok": False, "detail": f"no inbox entry {name!r}"}
-    except OSError as exc:
-        return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
+        return
+    with ExitStack() as stack:
+        try:
+            _, directory_fd = stack.enter_context(_entry_directory(path.parent.name))
+            stream = stack.enter_context(_open_regular(path.name, dir_fd=directory_fd))
+            before = os.fstat(stream.fileno())
+            size, digest = _inspect_stream(stream)
+            after = os.fstat(stream.fileno())
+            if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
+                after.st_size, after.st_mtime_ns, after.st_ctime_ns
+            ):
+                raise OSError("inbox entry changed while preparing download")
+            stream.seek(0)
+        except FileNotFoundError:
+            yield HTTPStatus.NOT_FOUND, {"ok": False, "detail": f"no inbox entry {name!r}"}
+        except OSError as exc:
+            yield HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
+        else:
+            # Exceptions during delivery propagate through ExitStack, rather
+            # than being mistaken for an opening error and yielding twice.
+            yield HTTPStatus.OK, InboxFile(stream, size, digest)
 
 
 @contextmanager
@@ -168,20 +192,19 @@ def _open_regular(path: str | Path, *, dir_fd: int | None = None):
         os.close(fd)
 
 
-def _read_regular(path: str | Path, *, dir_fd: int | None = None) -> bytes:
-    with _open_regular(path, dir_fd=dir_fd) as stream:
-        return stream.read()
-
-
 def _inspect_regular(path: str | Path, *, dir_fd: int | None = None) -> tuple[int, str]:
     # Inventory needs metadata, not a second in-memory copy of each deck.
     # Count the bytes actually hashed rather than taking a separate path stat.
+    with _open_regular(path, dir_fd=dir_fd) as stream:
+        return _inspect_stream(stream)
+
+
+def _inspect_stream(stream: BinaryIO) -> tuple[int, str]:
     digest = hashlib.sha256()
     size = 0
-    with _open_regular(path, dir_fd=dir_fd) as stream:
-        while chunk := stream.read(1 << 20):
-            size += len(chunk)
-            digest.update(chunk)
+    while chunk := stream.read(1 << 20):
+        size += len(chunk)
+        digest.update(chunk)
     return size, digest.hexdigest()
 
 
@@ -196,11 +219,6 @@ def _entry_directory(sub: str):
                          dir_fd=root_fd)
         stack.callback(os.close, sub_fd)
         yield root_fd, sub_fd
-
-
-def _read_entry(path: Path) -> bytes:
-    with _entry_directory(path.parent.name) as (_, directory_fd):
-        return _read_regular(path.name, dir_fd=directory_fd)
 
 
 def _claim_path(root_fd: int, claim: str) -> str:

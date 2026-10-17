@@ -5,6 +5,9 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
+import tracemalloc
+import uuid
 
 import pytest
 from email.message import Message
@@ -14,6 +17,56 @@ from types import MethodType
 import sinnix_phone_dispatcher.execute as execute_mod
 import sinnix_phone_dispatcher.server as server_mod
 import sinnix_phone_dispatcher.uploads as uploads_mod
+
+
+@pytest.mark.parametrize("disconnect", [False, True])
+def test_inbox_download_streams_and_closes_files(isolated_state_dirs, disconnect):
+    directory = isolated_state_dirs["decks_dir"]
+    directory.mkdir(parents=True)
+    path = directory / "large.deck"
+    chunk = b"synthetic download\n" * 4096
+    expected = hashlib.sha256()
+    with path.open("wb") as handle:
+        for _ in range(160):
+            handle.write(chunk)
+            expected.update(chunk)
+    size = path.stat().st_size
+    handler, _ = _handler("/v1/inbox/file?name=decks/large.deck", b"", None)
+    headers = {}
+    handler.send_response = lambda status: headers.update(status=status)
+    handler.send_header = lambda name, value: headers.update({name: value})
+    handler.end_headers = lambda: None
+    received = hashlib.sha256()
+    count = 0
+
+    class Sink:
+        def write(self, body):
+            nonlocal count
+            if disconnect:
+                raise BrokenPipeError("synthetic client disconnect")
+            count += len(body)
+            received.update(body)
+
+    handler.wfile = Sink()
+    before = set(os.listdir("/proc/self/fd"))
+    tracemalloc.start()
+    try:
+        if disconnect:
+            with pytest.raises(BrokenPipeError):
+                handler.do_GET()
+        else:
+            handler.do_GET()
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert set(os.listdir("/proc/self/fd")) == before
+    assert headers["status"] == HTTPStatus.OK
+    assert headers["Content-Length"] == str(size)
+    assert headers["X-Sinnix-Sha256"] == expected.hexdigest()
+    if not disconnect:
+        assert count == size and received.hexdigest() == expected.hexdigest()
+    assert path.stat().st_size == size
+    assert peak < 3 * 1024 * 1024, f"inbox download allocated {peak} bytes"
 
 
 def _handler(path: str, body: bytes, content_length: str | None):
@@ -228,7 +281,9 @@ def test_camera_configured_home_over_unix_socket(monkeypatch, tmp_path):
     assert configured["camera"] == camera
     assert configured["ambient"] == lake / "ambient"
     monkeypatch.setattr(uploads_mod, "UPLOAD_LANES", configured)
-    address = str(tmp_path / "api.sock")
+    # Managed scratch paths can exceed Linux's 108-byte pathname limit.
+    # An isolated abstract Unix address exercises the same HTTP transport.
+    address = "\0sinnix-test-" + uuid.uuid4().hex
     server = server_mod.UnixHTTPServer(address, server_mod.Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

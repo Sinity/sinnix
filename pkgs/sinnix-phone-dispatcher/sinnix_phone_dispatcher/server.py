@@ -25,7 +25,7 @@ from sinnix_lib.systemd import sd_notify, watchdog_period
 
 from .execute import execute
 from .glance import build_glance, build_jobs, build_steering
-from .inbox import confirm_inbox, list_inbox, read_inbox
+from .inbox import InboxFile, confirm_inbox, list_inbox, open_inbox
 from .receiver import start_phone_stream_server
 from .state import MAX_BODY, MAX_EVENT_BATCH, MAX_UPLOAD, ensure_dirs
 from .uploads import append_events, events_cursor, store_upload
@@ -74,6 +74,20 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _send_file(self, payload: InboxFile) -> None:
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(payload.size))
+        self.send_header("X-Sinnix-Sha256", payload.sha256)
+        self.end_headers()
+        remaining = payload.size
+        while remaining:
+            chunk = payload.stream.read(min(1 << 20, remaining))
+            if not chunk:
+                raise OSError("inbox entry truncated during download")
+            self.wfile.write(chunk)
+            remaining -= len(chunk)
+
     def _native_request(self) -> bool:
         # This API belongs to native phone/drain clients. The hub forwards
         # browser metadata unchanged, even across its Unix-socket proxy.
@@ -107,11 +121,13 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/inbox":
             self._send(*list_inbox())
         elif route == "/inbox/file":
-            status, payload = read_inbox(self._query().get("name", ""))
-            if isinstance(payload, bytes):
-                self._send_bytes(payload, hashlib.sha256(payload).hexdigest())
-            else:
-                self._send(status, payload)
+            with open_inbox(self._query().get("name", "")) as (status, payload):
+                if isinstance(payload, InboxFile):
+                    self._send_file(payload)
+                elif isinstance(payload, bytes):
+                    self._send_bytes(payload, hashlib.sha256(payload).hexdigest())
+                else:
+                    self._send(status, payload)
         elif route == "/events":
             # The phone's cursor question: how much of this day does prime
             # already hold? Asked once per day file, so a phone that has been
