@@ -4,7 +4,7 @@ Every verb runs to completion in this process, does what it was told, and
 reports.
 
 Output: a read verb (``project``, ``result validate-worker``,
-``job list|get|logs|result|wait``, ``batch status|list``, ``view``,
+``job list|get|logs|result|wait``, ``batch status|list|task``, ``view``,
 ``events tail``) prints a table in local time with an age column, or the
 document with ``--json``. A write verb
 (``job start|fire|cancel|retry|clean``, ``batch start|land|abandon|clean|result|resume``,
@@ -332,6 +332,16 @@ def parser() -> argparse.ArgumentParser:
     batch_queue.add_argument("run_id", help="a run id or its 8-character suffix")
     _project_option(batch_queue)
     _output_arguments(batch_queue)
+    batch_task = batch_verbs.add_parser(
+        "task", help="current owner tasks and changes from one worker's dispatch"
+    )
+    batch_task.add_argument("--run", default=os.environ.get("AGENTCTL_RUN_ID"))
+    batch_task.add_argument("--worker", default=os.environ.get("AGENTCTL_WORKER_ID"))
+    batch_task.add_argument(
+        "--attempt", type=int, default=os.environ.get("AGENTCTL_ATTEMPT")
+    )
+    _project_option(batch_task)
+    _output_arguments(batch_task)
     batch_status = batch_verbs.add_parser(
         "status",
         help="one run: the manifest joined with pueue task state and the landing PR",
@@ -730,6 +740,18 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             f"queued landing task {queued['landing_task_id']} for {out.run(run_id)}",
         )
         return EXIT_OK
+    if verb == "task":
+        if not arguments.run or not arguments.worker:
+            parser().error("name --run and --worker, or use their dispatch environment")
+        run_id = resolve_run_id(config, arguments.run)
+        project = resolve_project(
+            config, arguments.project or load(config, run_id).project
+        )
+        document = batch.task_context(
+            config, project, run_id, arguments.worker, attempt=arguments.attempt
+        )
+        out.read(document)
+        return EXIT_OK if document["complete"] else EXIT_SUBSTRATE
     if verb == "status":
         run_id = resolve_run_id(config, arguments.run_id)
         project = resolve_project(

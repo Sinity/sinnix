@@ -8,7 +8,7 @@ callers use.
 
 from __future__ import annotations
 
-from .landing import abandon, clean, land, queue
+from .landing import abandon, clean, land, queue, task_context
 from .manifest import BatchError, BatchRefusal, list_runs, load, resolve_run_id
 from .operator_view import status
 from .start import correct_scope, result, resume, start
@@ -28,4 +28,5 @@ __all__ = [
     "resume",
     "start",
     "status",
+    "task_context",
 ]

@@ -63,6 +63,7 @@ REFUSALS: dict[str, str] = {
     "result_self_review": "the dispatch requires self_review and the result has none",
     "result_already_filed": "the worker already has an accepted result for this attempt",
     "runner": "the agent runner is missing or not executable",
+    "task_attempt": "the task reread names a superseded or unknown worker attempt",
     "target_moved_twice": "the default branch moved again after one refresh",
     "unknown_run": "no run has this id or suffix",
     "verify_failed": "candidate verification failed, or did not finish (`timed_out`)",

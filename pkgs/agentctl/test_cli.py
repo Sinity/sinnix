@@ -1062,3 +1062,121 @@ def test_job_launch_wait_success_is_success(
     fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
     assert cli.main(["job", verb, "fixture", "check", "--wait"]) == cli.EXIT_OK
     assert json.loads(capsys.readouterr().out)["phase"] == "succeeded"
+
+
+@pytest.mark.parametrize(
+    ("change", "comparison"),
+    [
+        (
+            {"notes": "new owner note", "revision": -9007199254740995},
+            "contract_unchanged",
+        ),
+        (
+            {"design": "new obligation", "revision": -9007199254740995},
+            "contract_changed",
+        ),
+        (
+            {"acceptance_criteria": "new criterion", "revision": -9007199254740995},
+            "acceptance_changed",
+        ),
+        ({}, "contract_unchanged"),
+    ],
+)
+def test_batch_task_reads_amendments_without_changing_dispatch(
+    cli_config,
+    monkeypatch,
+    capsys,
+    change,
+    comparison,
+):
+    from agentctl import landing, prompts
+
+    run_id = "fixture-20260903-080000-0123abcd"
+    _manifest(cli_config, run_id)
+    path = manifest.manifest_path(cli_config, run_id)
+    row = {
+        "id": "fixture-1",
+        "title": "Original task",
+        "description": "original body",
+        "acceptance_criteria": "original criterion",
+        "revision": 9007199254740993,
+    }
+    doc = json.loads(path.read_text())
+    doc["workers"][0].update(
+        attempts=[{"number": 1}],
+        evidence_binding=[{"id": row["id"], **prompts.evidence_binding(row)}],
+    )
+    path.write_text(json.dumps(doc))
+    before = path.read_bytes()
+    row.update(change)
+
+    class Reader:
+        def show(self, ident):
+            assert ident == row["id"]
+            return deepcopy(row)
+
+    monkeypatch.setattr(landing, "SubprocessBeads", lambda root: Reader())
+    monkeypatch.setenv("AGENTCTL_RUN_ID", run_id)
+    monkeypatch.setenv("AGENTCTL_WORKER_ID", "w1")
+    monkeypatch.setenv("AGENTCTL_ATTEMPT", "1")
+    assert cli.main(["batch", "task", "--json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["complete"] is True
+    task = result["tasks"][0]
+    assert task["comparison"] == comparison
+    assert task["current_task"]["revision"] == str(row["revision"])
+    assert task["row_revision_changed"] == bool(change)
+    if "notes" in change:
+        assert task["current_task"]["notes"] == change["notes"]
+    assert path.read_bytes() == before
+
+
+def test_batch_task_unknown_baseline_and_owner_failure_are_explicit(
+    cli_config, monkeypatch, capsys
+):
+    from agentctl import landing
+
+    run_id = "fixture-20260903-080000-0123abcd"
+    _manifest(cli_config, run_id)
+
+    class Reader:
+        failed = False
+
+        def show(self, ident):
+            if self.failed:
+                raise OSError("synthetic owner unavailable")
+            return {
+                "id": ident,
+                "revision": -9007199254740995,
+                "description": "current body",
+            }
+
+    reader = Reader()
+    monkeypatch.setattr(landing, "SubprocessBeads", lambda root: reader)
+    args = ["batch", "task", "--run", run_id, "--worker", "w1", "--json"]
+    assert cli.main(args) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["tasks"][0]["comparison"] == "unavailable"
+    assert result["tasks"][0]["current_task"]["description"] == "current body"
+    reader.failed = True
+    assert cli.main(args) == cli.EXIT_SUBSTRATE
+    result = json.loads(capsys.readouterr().out)
+    assert result["complete"] is False
+    assert result["tasks"][0]["status"] == "unavailable"
+
+
+def test_batch_task_refuses_superseded_attempt_before_owner_read(
+    cli_config, monkeypatch, capsys
+):
+    from agentctl import landing
+
+    run_id = "fixture-20260903-080000-0123abcd"
+    _manifest(cli_config, run_id)
+    monkeypatch.setattr(
+        landing, "SubprocessBeads", lambda root: pytest.fail("owner should not be read")
+    )
+    assert (
+        cli.main(["batch", "task", "--run", run_id, "--worker", "w1", "--attempt", "1"])
+        == cli.EXIT_REFUSED
+    )
+    assert "current attempt" in capsys.readouterr().err

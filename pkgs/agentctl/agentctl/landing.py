@@ -179,6 +179,83 @@ def _contract_drift(
     return None
 
 
+def task_context(
+    config: Config,
+    project: ProjectAdapter,
+    run_id: str,
+    worker_id: str,
+    *,
+    attempt: int | None = None,
+    beads: Beads | None = None,
+) -> dict[str, Any]:
+    """Read current owner tasks beside immutable dispatch facts, without writing."""
+    run = load(config, run_id)
+    if project.project_id != run.project:
+        raise BatchRefusal("project", "task reader project differs from dispatch")
+    worker = run.worker(worker_id)
+    attempts = worker.get("attempts") or []
+    latest = attempts[-1] if attempts else None
+    current_attempt = latest.get("number") if isinstance(latest, Mapping) else None
+    if attempt is not None and attempt != current_attempt:
+        raise BatchRefusal(
+            "task_attempt",
+            f"requested attempt {attempt}, current attempt is {current_attempt}",
+        )
+    reader = beads or SubprocessBeads(project.root)
+    rows = []
+    for bead_id in worker["beads"]:
+        binding = _dispatch_binding(worker, bead_id)
+        row: dict[str, Any] = {"id": bead_id, "dispatch_binding": binding}
+        try:
+            bead = reader.show(bead_id)
+        except (PromptError, BatchError, OSError, ValueError) as error:
+            rows.append({**row, "status": "unavailable", "reason": str(error)})
+            continue
+        # Do not leak a rounded alternative beside the reusable owner token.
+        current_task = prompts.public_bead(bead)
+        revision = prompts._owner_revision(bead.get("revision"))
+        current_task.pop("bead_revision", None)
+        current_task["revision"] = revision
+        row.update(status="ok", current_task=current_task, observed_at=now())
+        try:
+            current = prompts.evidence_binding(
+                bead,
+                semantic_digest_version=(binding or {}).get(
+                    "semantic_digest_version", 1
+                ),
+            )
+            row["current_binding"] = current
+            if (
+                not binding
+                or binding.get("v2_available") is not True
+                or current.get("v2_available") is not True
+            ):
+                row.update(
+                    comparison="unavailable",
+                    comparison_reason="no comparable semantic dispatch binding",
+                )
+            else:
+                drift = _contract_drift(binding, current)
+                row.update(
+                    comparison=drift.reason if drift else "contract_unchanged",
+                    row_revision_changed=binding.get("bead_revision")
+                    != current.get("bead_revision"),
+                )
+        except (PromptError, ValueError) as error:
+            row.update(comparison="unavailable", comparison_reason=str(error))
+        rows.append(row)
+    return {
+        "run_id": run.run_id,
+        "project": run.project,
+        "worker": worker_id,
+        "attempt": current_attempt,
+        "base_commit": run.base_commit,
+        "tasks": rows,
+        "complete": all(row["status"] == "ok" for row in rows),
+        "effect": "read-only; dispatch and retained evidence unchanged",
+    }
+
+
 def _closure_verdicts(
     run: Run, beads: Beads
 ) -> tuple[dict[str, bool], dict[str, ClosureRefusal]]:
