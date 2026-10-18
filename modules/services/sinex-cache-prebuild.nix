@@ -22,6 +22,16 @@
 }@args:
 let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+  # Submitting the operation only to have it report "unchanged" put a pueue
+  # task in the queue every 15 minutes (~990 retained tasks in eleven days).
+  # Skip the submission unless the pinned revision differs from the last
+  # one prebuilt; the operation still makes the authoritative comparison.
+  inputMoved = pkgs.writeShellScript "sinex-cache-prebuild-input-moved" ''
+    set -eu
+    locked=$(${pkgs.jq}/bin/jq -r '.nodes.sinex.locked.rev // empty' ${args.config.sinnix.paths.projectRoot}/flake.lock)
+    last=$(cat "''${XDG_STATE_HOME:-$HOME/.local/state}/sinnix/sinex-cache-prebuild/last-built-rev" 2>/dev/null || true)
+    [ -n "$locked" ] && [ "$locked" != "$last" ]
+  '';
 in
 mkServiceModule {
   name = "sinex-cache-prebuild";
@@ -60,6 +70,7 @@ mkServiceModule {
         # This unit only performs the local AgentCTL submission. The declared
         # operation owns the actual build's lifecycle and timeout.
         TimeoutStartSec = "1min";
+        ExecCondition = "${inputMoved}";
       };
       timer = {
         description = "Periodic sinex input-bump check for pre-building + cache-push";

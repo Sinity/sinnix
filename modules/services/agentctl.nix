@@ -63,13 +63,15 @@ mkServiceModule {
           adaptive = lib.mkOption {
             default = null;
             description = "Optional headroom-based admission. Parallel is the ceiling.";
-            type = lib.types.nullOr (lib.types.submodule {
-              options = {
-                floor = lib.mkOption { type = lib.types.ints.positive; };
-                jobMemoryBytes = lib.mkOption { type = lib.types.ints.positive; };
-                slice = lib.mkOption { type = lib.types.str; };
-              };
-            });
+            type = lib.types.nullOr (
+              lib.types.submodule {
+                options = {
+                  floor = lib.mkOption { type = lib.types.ints.positive; };
+                  jobMemoryBytes = lib.mkOption { type = lib.types.ints.positive; };
+                  slice = lib.mkOption { type = lib.types.str; };
+                };
+              }
+            );
           };
           exclusiveWith = lib.mkOption {
             type = lib.types.listOf lib.types.str;
@@ -254,6 +256,29 @@ mkServiceModule {
             intervalSec = 900;
             onBootSec = 120;
             description = "Reconcile the calendar timers declared by project descriptors";
+          };
+        }
+      )
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "agentctl-clean";
+          description = "Remove finished queue tasks, keeping their results";
+        }
+        {
+          manager = "user";
+          resourceClass = "background";
+          # pueued keeps every finished task in memory until it is cleaned;
+          # nothing cleaned them, and the daemon grew to 1.2 GB over 3.7 days.
+          # Results and receipts stay readable through agentctl afterwards.
+          execStart = "${scriptPkgs.agentctl}/bin/agentctl job clean --all-terminal";
+          serviceConfig = {
+            TimeoutStartSec = "5min";
+          };
+          timer = {
+            onCalendar = "*-*-* 05:10:00";
+            persistent = true;
+            description = "Daily removal of finished queue tasks";
           };
         }
       )

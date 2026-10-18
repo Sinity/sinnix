@@ -149,7 +149,8 @@ mkServiceModule {
           timer = {
             description = "Quarter-hour Lynchpin keylog analysis refresh";
             onCalendar = "*-*-* *:00/15:00";
-            randomizedDelaySec = "60s";
+            # Off the quarter-hour instant every other 15-minute job shares.
+            randomizedDelaySec = "10min";
             persistent = true;
           };
         };

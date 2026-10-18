@@ -292,6 +292,23 @@ in
               calendar = "hourly";
             }
           ];
+      # Interval jobs of five minutes or more get a fixed per-unit offset
+      # inside their period, so they do not all fire on the same instant;
+      # shorter ones and explicit delays are left as declared.
+      cadenceSpread =
+        let
+          spread = renderTimer { intervalSec = 1800; };
+          short = renderTimer { intervalSec = 60; };
+          explicit = renderTimer {
+            intervalSec = 1800;
+            randomizedDelaySec = "1min";
+          };
+        in
+        spread.RandomizedDelaySec == 1350
+        && spread.FixedRandomDelay
+        && !(short ? RandomizedDelaySec)
+        && explicit.RandomizedDelaySec == "1min"
+        && !(explicit ? FixedRandomDelay);
       cadenceRefusals = map cadenceRefused [
         { onUnitActiveSec = "5min"; }
         {
@@ -330,6 +347,7 @@ in
         pkgs.runCommand "sinnix-config-boundaries-timer-cadence" { }
           ''
             test ${if cadenceAccepted then "1" else "0"} = 1
+            test ${if cadenceSpread then "1" else "0"} = 1
             test ${if lib.all (refused: refused) cadenceRefusals then "1" else "0"} = 1
             touch "$out"
           '';

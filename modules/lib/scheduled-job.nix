@@ -88,6 +88,15 @@ let
       "0/${toString (seconds / 3600)}:00:00"
     else
       throw "mkScheduledJob ${unitName}: intervalSec ${toString seconds} does not divide its minute, hour or day evenly; choose a divisor or declare onCalendar";
+  # An interval renders as a calendar step, so every 5-, 15- and 30-minute job
+  # on the host fires on the same wall-clock instant. A fixed per-unit offset
+  # within the period spreads them while keeping each job's cadence; an
+  # explicit randomizedDelaySec still wins.
+  spreadSec =
+    let
+      seconds = j.timer.intervalSec or 0;
+    in
+    if builtins.isInt seconds && seconds >= 300 then seconds * 3 / 4 else null;
   timerConfig = lib.optionalAttrs (j ? timer) (
     assert lib.assertMsg (!(j.timer ? onUnitActiveSec))
       "mkScheduledJob ${unitName}: onUnitActiveSec is refused (a unit-relative timer stops after one failed start); declare intervalSec or onCalendar";
@@ -100,7 +109,8 @@ let
       OnBootSec = j.timer.onBootSec or null;
       OnStartupSec = j.timer.onStartupSec or null;
       Persistent = if j.timer.persistent or false then true else null;
-      RandomizedDelaySec = j.timer.randomizedDelaySec or null;
+      RandomizedDelaySec = j.timer.randomizedDelaySec or spreadSec;
+      FixedRandomDelay = if j.timer ? randomizedDelaySec || spreadSec == null then null else true;
       AccuracySec = j.timer.accuracySec or null;
     }
   );

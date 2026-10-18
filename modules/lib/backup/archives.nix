@@ -132,7 +132,9 @@
       scriptPkgs.sinnix-sqlite-backup
     ];
     timer = {
-      onCalendar = "*-*-* 04:15:00";
+      # Not 04:15: the Polylogue Borg job below starts then and both read the
+      # same state root.
+      onCalendar = "*-*-* 01:30:00";
       randomizedDelaySec = "20min";
       persistent = true;
     };
@@ -218,7 +220,9 @@
       with_borg_lock borg create \
         --compression auto,zstd,1 \
         --lock-wait ${toString borgLockWaitSec} \
-        ${mkBorgExcludeArgs polylogueStateRoot (polylogueDbExcludes ++ [ ".salvage-internals-20261008" ])} \
+        ${
+          mkBorgExcludeArgs polylogueStateRoot (polylogueDbExcludes ++ [ ".salvage-internals-20261008" ])
+        } \
         --exclude ${lib.escapeShellArg "${polylogueStateRoot}/hooks/**"} \
         "::$archive_name" \
         ${lib.escapeShellArg polylogueStateRoot} \

@@ -1,6 +1,7 @@
 {
   mkFeatureModule,
   pkgs,
+  lib,
   ...
 }@args:
 mkFeatureModule {
@@ -9,6 +10,17 @@ mkFeatureModule {
     "git"
   ];
   description = "Git and delta tooling";
+  extraOptions = {
+    reviewStatusPollers = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = ''
+        Run the codex-review-status and stacked-review-threads-status pollers
+        against Polylogue's open PRs every two minutes. Only useful while the
+        Codex review gate is a required status; off by default.
+      '';
+    };
+  };
   configFn =
     {
       config,
@@ -16,6 +28,7 @@ mkFeatureModule {
       pkgs,
       user,
       helpers,
+      cfg,
       ...
     }:
     let
@@ -53,6 +66,7 @@ mkFeatureModule {
             intervalSec = 120;
             accuracySec = "15s";
             description = "Refresh codex-review statuses every two minutes";
+            enable = cfg.reviewStatusPollers;
           };
         }
       )
@@ -75,6 +89,7 @@ mkFeatureModule {
             intervalSec = 120;
             accuracySec = "15s";
             description = "Refresh stacked-review-threads statuses every two minutes";
+            enable = cfg.reviewStatusPollers;
           };
         }
       )
