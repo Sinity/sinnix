@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import argparse
 import cmath
-from contextlib import ExitStack, closing, contextmanager
+from contextlib import closing, contextmanager
 import datetime as dt
 import fcntl
 import hashlib
@@ -44,8 +44,6 @@ import os
 import re
 import shutil
 import stat
-import sqlite3
-import struct
 import subprocess
 import sys
 import tempfile
@@ -358,144 +356,51 @@ def score_ppg(path: Path) -> dict:
         }
 
 
-_IMU_SAMPLE = struct.Struct("=dddd")
-_PPG_SAMPLE = struct.Struct("=dd")
-
-
-class _SampleStore:
-    def __init__(self, source, layout: struct.Struct):
-        self.source, self.layout = source, layout
-        self.block_start = -1
-        self.block = b""
-
-    def row(self, index: int) -> tuple[float, ...]:
-        offset = index * self.layout.size
-        start = offset // 65536 * 65536
-        if start != self.block_start:
-            self.source.seek(start)
-            self.block = self.source.read(65536)
-            self.block_start = start
-        return self.layout.unpack_from(self.block, offset - start)
-
-
-class _SampleColumn(Sequence):
-    def __init__(self, store: _SampleStore, indices: range, project):
-        self.store, self.indices, self.project = store, indices, project
-
-    def __len__(self) -> int:
-        return len(self.indices)
-
-    def __getitem__(self, index):
-        if isinstance(index, slice):
-            return _SampleColumn(self.store, self.indices[index], self.project)
-        return self.project(self.store.row(self.indices[index]))
-
-    def map(self, transform):
-        return _SampleColumn(self.store, self.indices, lambda row: transform(self.project(row)))
-
-
-class _OrderedIntervals(Sequence[float]):
-    def __init__(self, database):
-        self.database = database
-        self.count = database.execute("SELECT count(*) FROM intervals").fetchone()[0]
-
-    def __len__(self) -> int:
-        return self.count
-
-    def __getitem__(self, index: int) -> float:
-        index = range(self.count)[index]
-        return self.database.execute(
-            "SELECT value FROM intervals ORDER BY value,ordinal LIMIT 1 OFFSET ?", (index,),
-        ).fetchone()[0]
-
-    def __iter__(self) -> Iterator[float]:
-        with closing(self.database.execute("SELECT value FROM intervals ORDER BY value,ordinal")) as rows:
-            for row in rows:
-                yield row[0]
+def _sorted_intervals(t: list[float]) -> list[float]:
+    return sorted(b - a for a, b in zip(t, t[1:]) if b > a)
 
 
 @contextmanager
-def _ppg_series(path: Path) -> Iterator[tuple[_SampleColumn, _SampleColumn, _OrderedIntervals]]:
-    with tempfile.TemporaryFile() as raw, _scratch_database() as database:
-        database.execute(
-            "CREATE TABLE intervals (value REAL, ordinal INTEGER, "
-            "PRIMARY KEY(value,ordinal)) WITHOUT ROWID"
-        )
-        count = 0
-        previous = None
-
-        def intervals():
-            nonlocal count, previous
-            with csv_rows(path) as rows:
-                for row in rows:
-                    try:
-                        stamp, value = int(row[0]) / 1e9, float(row[1])
-                    except OverflowError as error:
-                        raise UnscorableTrace("trace timestamp exceeds numeric range") from error
-                    except (ValueError, IndexError):
-                        continue
-                    raw.write(_PPG_SAMPLE.pack(stamp, value))
-                    delta = stamp - previous if previous is not None else 0.0
-                    previous = stamp
-                    count += 1
-                    if delta > 0:
-                        yield delta, count
-
-        database.executemany("INSERT INTO intervals VALUES (?,?)", intervals())
-        database.commit()
-        raw.flush()
-        store = _SampleStore(raw, _PPG_SAMPLE)
-        t = _SampleColumn(store, range(count), lambda row: row[0])
-        values = _SampleColumn(store, range(count), lambda row: row[1])
-        yield t, values, _OrderedIntervals(database)
+def _ppg_series(path: Path) -> Iterator[tuple[list[float], list[float], list[float]]]:
+    t: list[float] = []
+    y: list[float] = []
+    with csv_rows(path) as rows:
+        for row in rows:
+            try:
+                stamp, value = int(row[0]) / 1e9, float(row[1])
+            except OverflowError as error:
+                raise UnscorableTrace("trace timestamp exceeds numeric range") from error
+            except (ValueError, IndexError):
+                continue
+            t.append(stamp)
+            y.append(value)
+    yield t, y, _sorted_intervals(t)
 
 
 @contextmanager
-def _imu_series(path: Path) -> Iterator[tuple[Sequence[float], Sequence[tuple[float, float, float]], float, float]]:
-    # Retain every accepted sample in unlinked private storage. Only one
-    # fixed-size sample block lives in Python; slices and projections remain
-    # lazy. The median is exact, ordered on disk rather than in a raw-size list.
-    with tempfile.TemporaryFile() as raw, _scratch_database() as database:
-        database.execute(
-            "CREATE TABLE intervals (value REAL, ordinal INTEGER, "
-            "PRIMARY KEY(value,ordinal)) WITHOUT ROWID"
-        )
-        count = 0
-        previous = None
-
-        def intervals():
-            nonlocal count, previous
-            with csv_rows(path) as rows:
-                for row in rows:
-                    if len(row) < 5 or row[1] != "accel":
-                        continue
-                    try:
-                        stamp = int(row[0]) / 1e9
-                        vector = (float(row[2]), float(row[3]), float(row[4]))
-                    except OverflowError as error:
-                        raise UnscorableTrace("trace timestamp exceeds numeric range") from error
-                    except ValueError:
-                        continue
-                    raw.write(_IMU_SAMPLE.pack(stamp, *vector))
-                    delta = stamp - previous if previous is not None else 0.0
-                    previous = stamp
-                    count += 1
-                    if delta > 0:
-                        yield delta, count
-
-        database.executemany("INSERT INTO intervals VALUES (?,?)", intervals())
-        database.commit()
-        raw.flush()
-        store = _SampleStore(raw, _IMU_SAMPLE)
-        t = _SampleColumn(store, range(count), lambda row: row[0])
-        xyz = _SampleColumn(store, range(count), lambda row: row[1:])
-        if count < 32:
-            yield t, xyz, 0.0, 0.0
-            return
-        timing = _OrderedIntervals(database)
-        median_dt = timing[len(timing) // 2] if timing else 0.0
-        rate = 1.0 / median_dt if median_dt else 0.0
-        yield t, xyz, rate, t[-1] - t[0]
+def _imu_series(path: Path) -> Iterator[tuple[list[float], list[tuple[float, float, float]], float, float]]:
+    t: list[float] = []
+    xyz: list[tuple[float, float, float]] = []
+    with csv_rows(path) as rows:
+        for row in rows:
+            if len(row) < 5 or row[1] != "accel":
+                continue
+            try:
+                stamp = int(row[0]) / 1e9
+                vector = (float(row[2]), float(row[3]), float(row[4]))
+            except OverflowError as error:
+                raise UnscorableTrace("trace timestamp exceeds numeric range") from error
+            except ValueError:
+                continue
+            t.append(stamp)
+            xyz.append(vector)
+    if len(t) < 32:
+        yield t, xyz, 0.0, 0.0
+        return
+    timing = _sorted_intervals(t)
+    median_dt = timing[len(timing) // 2] if timing else 0.0
+    rate = 1.0 / median_dt if median_dt else 0.0
+    yield t, xyz, rate, t[-1] - t[0]
 
 
 def score_tremor(path: Path) -> dict:
@@ -512,7 +417,7 @@ def score_tremor(path: Path) -> dict:
         if rate < 30:
             return {"ok": False, "reason": f"{rate:.0f} Hz sampling cannot resolve a 4-12 Hz band"}
 
-        mags = xyz.map(lambda p: math.sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]))
+        mags = [math.sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]) for p in xyz]
         grid = resample_uniform(t, mags, rate)
         if len(grid) < 64:
             return {"ok": False, "reason": "trace too short after resampling"}
@@ -552,8 +457,8 @@ def score_sway(path: Path) -> dict:
         if rate <= 0:
             return {"ok": False, "reason": f"only {len(t)} accelerometer samples"}
 
-        xs = resample_uniform(t, xyz.map(lambda p: p[0]), rate)
-        ys = resample_uniform(t, xyz.map(lambda p: p[1]), rate)
+        xs = resample_uniform(t, [p[0] for p in xyz], rate)
+        ys = resample_uniform(t, [p[1] for p in xyz], rate)
         if len(xs) < 32:
             return {"ok": False, "reason": "trace too short after resampling"}
         # Sway is slow; anything above a few Hz is tremor or handling noise.
@@ -594,13 +499,6 @@ def score_sway(path: Path) -> dict:
 # ------------------------------------------------------------- interoception
 
 
-def _directory_paths(root: Path) -> Iterator[Path]:
-    # Path.iterdir materializes DirEntry objects in supported Python versions.
-    with os.scandir(root) as entries:
-        for entry in entries:
-            yield Path(entry.path)
-
-
 def iter_recent_events(days: int = 3) -> Iterator[dict]:
     try:
         mode = EVENTS.stat().st_mode
@@ -613,25 +511,25 @@ def iter_recent_events(days: int = 3) -> Iterator[dict]:
     if not stat.S_ISDIR(mode):
         raise ValueError("score event home must be a directory")
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
-    with _ordered_paths(path for path in _directory_paths(EVENTS)
-                        if path.name.startswith("events-") and path.suffix == ".jsonl") as paths:
-        for path in paths:
-            if dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc) < cutoff:
-                continue
-            with open(
-                path, encoding="utf-8", errors="replace",
-                opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
-            ) as source:
-                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                    raise ValueError("score event source must be a regular file")
-                for number, line in enumerate(source, 1):
-                    try:
-                        record = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if not isinstance(record, dict):
-                        raise ValueError(f"score event record {number} must be an object")
-                    yield record
+    paths = sorted(path for path in EVENTS.iterdir()
+                   if path.name.startswith("events-") and path.suffix == ".jsonl")
+    for path in paths:
+        if dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc) < cutoff:
+            continue
+        with open(
+            path, encoding="utf-8", errors="replace",
+            opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
+        ) as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise ValueError("score event source must be a regular file")
+            for number, line in enumerate(source, 1):
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(record, dict):
+                    raise ValueError(f"score event record {number} must be an object")
+                yield record
 
 
 def score_interoception(trace_path: Path, ppg: dict, started_at: float | None) -> dict | None:
@@ -794,93 +692,40 @@ def _ledger_keys() -> Iterator[tuple[str, int, str | None, str | None, str | Non
             yield name, size, signature, payload, observation, kind
 
 
-def _history_key(key: tuple[str, int, str | None]) -> tuple[str, str, int, str]:
-    name, size, signature = key
-    # Text preserves Python's integer comparison without SQLite's int64 limit.
-    # A separate flag distinguishes a legacy binding from an empty signature.
-    return name, str(size), int(signature is not None), signature or ""
+HistoryKey = tuple[str, int, str | None]
 
 
 class ScoreHistory:
-    def __init__(self, database: sqlite3.Connection):
-        self.database = database
+    """What the ledger already scored, keyed by file name, size and sidecar."""
 
-    def __contains__(self, key: tuple[str, int, str | None]) -> bool:
-        return self.database.execute(
-            "SELECT 1 FROM seen WHERE file=? AND bytes=? AND bound=? AND signature=? AND payload=''",
-            _history_key(key),
-        ).fetchone() is not None
+    def __init__(self) -> None:
+        self.unbound: set[HistoryKey] = set()
+        self.payloads: set[tuple[HistoryKey, str]] = set()
+        self.observations: set[tuple[HistoryKey, str]] = set()
 
+    def __contains__(self, key: HistoryKey) -> bool:
+        return key in self.unbound
 
-    def contains_payload(self, key: tuple[str, int, str | None], digest: str) -> bool:
-        return self.database.execute(
-            "SELECT 1 FROM seen WHERE file=? AND bytes=? AND bound=? AND signature=? AND payload=?",
-            _history_key(key) + (digest,),
-        ).fetchone() is not None
+    def contains_payload(self, key: HistoryKey, digest: str) -> bool:
+        return (key, digest) in self.payloads
 
-    def observed_payload(self, key: tuple[str, int, str | None], observation: str) -> bool:
-        return self.database.execute(
-            "SELECT 1 FROM seen WHERE file=? AND bytes=? AND bound=? AND signature=? "
-            "AND payload!='' AND observation=?",
-            _history_key(key) + (observation,),
-        ).fetchone() is not None
+    def observed_payload(self, key: HistoryKey, observation: str) -> bool:
+        return (key, observation) in self.observations
 
 
-@contextmanager
-def _scratch_database() -> Iterator[sqlite3.Connection]:
-    # An empty SQLite filename creates a private temporary database, removed
-    # by SQLite on close. On Unix its spill file is unlinked immediately, so
-    # killing a scorer cannot leave a named history cache behind. SQLite uses
-    # the calling owner's TMPDIR; no persistent derived index is published.
-    with closing(sqlite3.connect("")) as database:
-        database.execute("PRAGMA temp_store=FILE")
-        database.execute("PRAGMA cache_size=-1024")
-        database.execute("PRAGMA mmap_size=0")
-        database.execute("PRAGMA journal_mode=OFF")
-        database.execute("PRAGMA synchronous=OFF")
-        yield database
-
-
-@contextmanager
-def _ordered_paths(paths: Iterator[Path]) -> Iterator[Iterator[Path]]:
-    # Preserve Path's component-wise Unicode order, including undecodable
-    # native names. Spill the inventory rather than retaining every Path.
-    # Fully consume input before yielding so a failed inventory publishes none.
-    with ExitStack() as cleanup, _scratch_database() as database:
-        cleanup.callback(getattr(paths, "close", lambda: None))
-        database.execute(
-            "CREATE TABLE paths (ordering BLOB, sequence INTEGER, value BLOB, "
-            "PRIMARY KEY(ordering,sequence)) WITHOUT ROWID"
-        )
-        database.executemany(
-            "INSERT INTO paths VALUES (?,?,?)",
-            (("\0".join(path.parts).encode("utf-32-be", "surrogatepass"),
-              number, os.fsencode(path)) for number, path in enumerate(paths)),
-        )
-        database.commit()
-        with closing(database.execute("SELECT value FROM paths ORDER BY ordering,sequence")) as rows:
-            yield (Path(os.fsdecode(row[0])) for row in rows)
-
-
-@contextmanager
-def ledger_seen() -> Iterator[ScoreHistory]:
-    with _scratch_database() as database:
-        database.execute(
-            "CREATE TABLE seen (file TEXT, bytes TEXT, bound INTEGER, signature TEXT, payload TEXT, observation TEXT, "
-            "PRIMARY KEY(file,bytes,bound,signature,payload,observation)) WITHOUT ROWID"
-        )
-        def entries():
-            for row in _ledger_keys():
-                key = _history_key(row[:3])
-                if row[5] == "payload_observation" and database.execute(
-                    "SELECT 1 FROM seen WHERE file=? AND bytes=? AND bound=? AND signature=? AND payload=?",
-                    key + (row[3],),
-                ).fetchone() is None:
-                    raise ValueError("score payload observation has no earlier content-bound score")
-                yield key + (row[3] or "", row[4] or "")
-        database.executemany("INSERT OR IGNORE INTO seen VALUES (?,?,?,?,?,?)", entries())
-        database.commit()
-        yield ScoreHistory(database)
+def ledger_seen() -> ScoreHistory:
+    seen = ScoreHistory()
+    for name, size, signature, payload, observation, kind in _ledger_keys():
+        key = (name, size, signature)
+        if kind == "payload_observation" and (key, payload) not in seen.payloads:
+            raise ValueError("score payload observation has no earlier content-bound score")
+        if payload is None:
+            seen.unbound.add(key)
+            continue
+        seen.payloads.add((key, payload))
+        if observation is not None:
+            seen.observations.add((key, observation))
+    return seen
 
 
 def _boot_id() -> str:
@@ -1131,68 +976,63 @@ def cmd_run(args: argparse.Namespace) -> int:
         # Wait before loading history or allocating trace buffers. The
         # dispatcher's existing subprocess deadline also bounds this wait.
         fcntl.flock(owner, fcntl.LOCK_EX)
-        with ledger_seen() as seen:
-            return _score_outbox(args, outbox, seen)
+        return _score_outbox(args, outbox, ledger_seen())
 
 
-def _candidate_paths(outbox: Path) -> Iterator[Path]:
-    for path in _directory_paths(outbox):
-        # Most outbox entries are unrelated payloads or paired metadata. Do
-        # not look up their inodes merely to reject their filename suffixes.
-        if path.suffix not in (".csv", ".m4a"):
-            continue
+def _candidate_paths(outbox: Path) -> list[Path]:
+    candidates = sorted(path for path in outbox.iterdir() if path.suffix in (".csv", ".m4a"))
+    for path in candidates:
         if not stat.S_ISREG(path.stat().st_mode):
             raise ValueError(f"score candidate must be a regular file: {path.name}")
-        yield path
+    return candidates
 
 
 def _score_outbox(args: argparse.Namespace, outbox: Path, seen: ScoreHistory) -> int:
     scored = failed = 0
     boot = _boot_id()
 
-    with _ordered_paths(_candidate_paths(outbox)) as candidates:
-        for path in candidates:
-            if args.limit and scored + failed >= args.limit:
-                break
-            size = path.stat().st_size
-            # Legacy scores lack a sidecar binding. Preserve their established
-            # skip behavior without inventing retrospective metadata provenance.
-            if (path.name, size, None) in seen:
+    for path in _candidate_paths(outbox):
+        if args.limit and scored + failed >= args.limit:
+            break
+        size = path.stat().st_size
+        # Legacy scores lack a sidecar binding. Preserve their established
+        # skip behavior without inventing retrospective metadata provenance.
+        if (path.name, size, None) in seen:
+            continue
+        sidecar = read_sidecar(path)
+        if (path.name, size, sidecar.signature) in seen:
+            continue
+        with _score_input(path, sidecar.signature, seen, boot) as payload:
+            if payload is None:
                 continue
-            sidecar = read_sidecar(path)
-            if (path.name, size, sidecar.signature) in seen:
-                continue
-            with _score_input(path, sidecar.signature, seen, boot) as payload:
-                if payload is None:
-                    continue
-                record = score_blob(payload.path, sidecar)
-                record["payload_sha256"] = payload.digest
+            record = score_blob(payload.path, sidecar)
+            record["payload_sha256"] = payload.digest
 
-            # Validate the complete record before opening a publication file.
-            record_line = json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n"
-            day = dt.datetime.now(dt.timezone.utc).date().isoformat()
-            with (SCORES / f"{day}.jsonl").open("a", encoding="utf-8") as fh:
-                fh.write(record_line)
-            append_jsonl(
-                LEDGER,
-                {"file": path.name, "bytes": payload.size, "ok": record.get("ok"), "at": utc_ts(),
-                 "sidecar_signature": sidecar.signature, "payload_sha256": payload.digest,
-                 "payload_observation": payload.observation},
+        # Validate the complete record before opening a publication file.
+        record_line = json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n"
+        day = dt.datetime.now(dt.timezone.utc).date().isoformat()
+        with (SCORES / f"{day}.jsonl").open("a", encoding="utf-8") as fh:
+            fh.write(record_line)
+        append_jsonl(
+            LEDGER,
+            {"file": path.name, "bytes": payload.size, "ok": record.get("ok"), "at": utc_ts(),
+             "sidecar_signature": sidecar.signature, "payload_sha256": payload.digest,
+             "payload_observation": payload.observation},
+        )
+        if not args.no_receipt:
+            title, body = receipt_for(record)
+            emit_receipt(
+                RECEIPTS_DIR,
+                record.get("kind") or "score",
+                title,
+                body,
+                sidecar.send_token,
+                "instruments",
             )
-            if not args.no_receipt:
-                title, body = receipt_for(record)
-                emit_receipt(
-                    RECEIPTS_DIR,
-                    record.get("kind") or "score",
-                    title,
-                    body,
-                    sidecar.send_token,
-                    "instruments",
-                )
-            if record.get("ok"):
-                scored += 1
-            else:
-                failed += 1
+        if record.get("ok"):
+            scored += 1
+        else:
+            failed += 1
 
     print(f"score: scored {scored}, {failed} could not be scored")
     if failed:

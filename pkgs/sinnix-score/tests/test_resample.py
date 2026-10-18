@@ -100,7 +100,6 @@ def test_moving_average_work_is_linear_for_wide_windows(score):
     assert values.reads <= 3 * len(values)
 
 
-
 def test_moving_average_retains_small_signal_after_large_value_leaves(score):
     import math
 
@@ -111,25 +110,6 @@ def test_moving_average_retains_small_signal_after_large_value_leaves(score):
         lo = max(0, min(i - window // 2, len(values) - window))
         expected.append(math.fsum(values[lo:lo + window]) / window)
     assert score['moving_average'](values, window) == expected
-
-
-def test_ignored_csv_rows_do_not_accumulate_in_memory(score, tmp_path):
-    import tracemalloc
-
-    path = tmp_path / 'ignored.csv'
-    with path.open('w') as stream:
-        stream.write('ts,value,unused\n')
-        for _ in range(2000):
-            stream.write('invalid,1,' + 'x' * 4096 + '\n')
-    tracemalloc.start()
-    try:
-        result = score['score_ppg'](path)
-        _, peak = tracemalloc.get_traced_memory()
-    finally:
-        tracemalloc.stop()
-    assert result['ok'] is False
-    assert 'only 0 samples' in result['reason']
-    assert peak < 512 * 1024
 
 
 @pytest.mark.parametrize('mode', ['ppg', 'imu', 'imu_sway'])
@@ -287,9 +267,9 @@ def test_ledger_streams_and_preserves_legacy_keys(score, tmp_path, monkeypatch):
     def forbid(*args, **kwargs):
         raise AssertionError('whole-file read')
     monkeypatch.setattr(Path, 'read_text', forbid)
-    with score['ledger_seen']() as seen:
-        assert ('a.csv', 12, None) in seen and ('b.csv', 0, 'absent') in seen
-        assert ('a.csv', 12, '') not in seen and ('b.csv', 0, None) not in seen
+    seen = score['ledger_seen']()
+    assert ('a.csv', 12, None) in seen and ('b.csv', 0, 'absent') in seen
+    assert ('a.csv', 12, '') not in seen and ('b.csv', 0, None) not in seen
 
 
 @pytest.mark.parametrize('kind', ['directory', 'fifo', 'broken-link'])
@@ -304,21 +284,20 @@ def test_unavailable_ledger_is_not_empty_history(score, tmp_path, kind):
         ledger.symlink_to(tmp_path / 'missing')
     score['cmd_run'].__globals__['LEDGER'] = ledger
     with pytest.raises((OSError, ValueError)):
-        with score['ledger_seen']():
-            pass
+        score['ledger_seen']()
     assert ledger.lstat()
 
 
 def test_ledger_absence_and_regular_link(score, tmp_path):
     ledger = tmp_path / 'scored.jsonl'
     score['cmd_run'].__globals__['LEDGER'] = ledger
-    with score['ledger_seen']() as seen:
-        assert ('a.csv', 12, None) not in seen
+    seen = score['ledger_seen']()
+    assert ('a.csv', 12, None) not in seen
     target = tmp_path / 'history'
     target.write_text('{"file":"a.csv","bytes":12}\n')
     ledger.symlink_to(target)
-    with score['ledger_seen']() as seen:
-        assert ('a.csv', 12, None) in seen
+    seen = score['ledger_seen']()
+    assert ('a.csv', 12, None) in seen
     assert ledger.is_symlink()
 
 
@@ -330,8 +309,7 @@ def test_ledger_open_denial_propagates(score, tmp_path, monkeypatch):
         raise PermissionError('synthetic denied ledger')
     monkeypatch.setitem(score['cmd_run'].__globals__, 'open', deny)
     with pytest.raises(PermissionError, match='synthetic denied ledger'):
-        with score['ledger_seen']():
-            pass
+        score['ledger_seen']()
 
 
 def test_scorer_waits_for_other_process_owner_before_reading_ledger(score, tmp_path):
@@ -385,90 +363,17 @@ def test_scorer_releases_owner_after_failure(score, tmp_path):
         fcntl.flock(owner, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
-def test_history_memory_does_not_retain_all_ledger_keys(score, tmp_path):
-    import tracemalloc
-    ledger = tmp_path / 'scored.jsonl'
-    with ledger.open('w') as output:
-        for n in range(25000):
-            output.write(json.dumps({'file': f'trace-{n:08d}.csv', 'bytes': n, 'sidecar_signature': 'sha256:' + str(n).zfill(64)}) + '\n')
-    score['cmd_run'].__globals__['LEDGER'] = ledger
-    tracemalloc.start()
-    try:
-        with score['ledger_seen']() as history:
-            assert ('trace-00024999.csv', 24999, 'sha256:' + str(24999).zfill(64)) in history
-        _, peak = tracemalloc.get_traced_memory()
-    finally:
-        tracemalloc.stop()
-    assert peak < 1024 * 1024, f'history retained {peak} Python bytes'
-
-
-def test_disk_history_preserves_full_key_and_integer_semantics(score, tmp_path):
+def test_history_preserves_full_key_and_integer_semantics(score, tmp_path):
     ledger = tmp_path / 'scored.jsonl'
     rows = [dict(file='unicode-ą.csv', bytes=2**80), dict(file='a.csv', bytes=0, sidecar_signature=''), dict(file='a.csv', bytes=1, sidecar_signature='absent')]
     ledger.write_text(''.join(json.dumps(row) + '\n' for row in rows + rows))
     score['cmd_run'].__globals__['LEDGER'] = ledger
-    with score['ledger_seen']() as seen:
-        assert ('unicode-ą.csv', 2**80, None) in seen
-        assert ('unicode-ą.csv', 2**80 + 1, None) not in seen
-        assert ('a.csv', 0, '') in seen and ('a.csv', 0, None) not in seen
-        assert ('a.csv', 1, 'absent') in seen and ('a.csv', 1, '') not in seen
-        assert ('a.csv', 2, 'absent') not in seen
-        database = seen.database
-    with pytest.raises(score['sqlite3'].ProgrammingError):
-        database.execute('SELECT 1')
-
-
-def test_history_connection_closes_after_processing_failure(score, tmp_path):
-    score['cmd_run'].__globals__['LEDGER'] = tmp_path / 'missing'
-    with pytest.raises(RuntimeError, match='synthetic processing failure'):
-        with score['ledger_seen']() as seen:
-            database = seen.database
-            raise RuntimeError('synthetic processing failure')
-    with pytest.raises(score['sqlite3'].ProgrammingError):
-        database.execute('SELECT 1')
-
-
-def test_history_storage_failure_stops_before_scores_or_receipts(score, tmp_path, monkeypatch):
-    root = tmp_path / 'scores'
-    outbox = tmp_path / 'outbox'
-    outbox.mkdir()
-    trace(outbox / 'a.csv', 'imu', False)
-    glob = score['cmd_run'].__globals__
-    def full(*args, **kwargs):
-        raise score['sqlite3'].OperationalError('synthetic database or disk is full')
-    monkeypatch.setattr(score['sqlite3'], 'connect', full)
-    calls = []
-    glob.update(SCORES=root, LEDGER=root / 'scored.jsonl', emit_receipt=lambda *args: calls.append(args))
-    with pytest.raises(score['sqlite3'].OperationalError, match='disk is full'):
-        score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=False))
-    assert set(root.iterdir()) == {root / '.score.lock'} and not calls
-
-
-def test_discovery_does_not_stat_unrelated_outbox_entries(score, tmp_path, monkeypatch):
-    import os
-    outbox = tmp_path / 'outbox'
-    outbox.mkdir()
-    trace(outbox / 'a.csv', 'imu', False)
-    scores = tmp_path / 'scores'
-    glob = score['cmd_run'].__globals__
-    glob.update(SCORES=scores, LEDGER=scores / 'scored.jsonl')
-    original_entries, original_stat = score['_directory_paths'], os.stat
-    unrelated_stats = []
-    def entries(path):
-        if path == outbox:
-            yield from (outbox / f'ignored-{n}.bin' for n in range(10000))
-        yield from original_entries(path)
-    def observed_stat(path, *args, **kwargs):
-        if not isinstance(path, int):
-            candidate = Path(os.fsdecode(path))
-            if candidate.parent == outbox and candidate.suffix not in ('.csv', '.m4a'):
-                unrelated_stats.append(candidate.name)
-        return original_stat(path, *args, **kwargs)
-    glob['_directory_paths'] = entries
-    monkeypatch.setattr(os, 'stat', observed_stat)
-    assert score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True)) == 0
-    assert not unrelated_stats, f'{len(unrelated_stats)} unnecessary metadata lookups'
-    assert len((scores / 'scored.jsonl').read_text().splitlines()) == 1
+    seen = score['ledger_seen']()
+    assert ('unicode-ą.csv', 2**80, None) in seen
+    assert ('unicode-ą.csv', 2**80 + 1, None) not in seen
+    assert ('a.csv', 0, '') in seen and ('a.csv', 0, None) not in seen
+    assert ('a.csv', 1, 'absent') in seen and ('a.csv', 1, '') not in seen
+    assert ('a.csv', 2, 'absent') not in seen
 
 
 @pytest.mark.parametrize('kind', ['file', 'broken-link'])
@@ -549,8 +454,7 @@ def test_direct_fifo_trace_refuses_without_waiting_for_a_writer(score, tmp_path,
     assert path.lstat()
 
 
-def test_interoception_streams_events_and_keeps_first_nearest_run(score, tmp_path):
-    import tracemalloc
+def test_interoception_keeps_first_nearest_run(score, tmp_path):
     events = tmp_path / 'events'
     events.mkdir()
     stamp = '2026-10-18T00:00:00Z'
@@ -562,15 +466,9 @@ def test_interoception_streams_events_and_keeps_first_nearest_run(score, tmp_pat
         output.write(json.dumps(selected | {'epoch': 'later', 'counted': [1]}) + '\n')
     (events / 'events-z.jsonl').write_text(json.dumps(selected | {'epoch': 'other-file', 'counted': [1]}) + '\n')
     score['cmd_run'].__globals__['EVENTS'] = events
-    started_at = score['parse_stamp'](stamp)  # Exclude one-time datetime parser imports.
-    tracemalloc.start()
-    try:
-        result = score['score_interoception'](tmp_path / 'trace.csv', {'ok': True, 'trustworthy': True, 'hr_bpm': 60}, started_at)
-        _, peak = tracemalloc.get_traced_memory()
-    finally:
-        tracemalloc.stop()
+    started_at = score['parse_stamp'](stamp)
+    result = score['score_interoception'](tmp_path / 'trace.csv', {'ok': True, 'trustworthy': True, 'hr_bpm': 60}, started_at)
     assert result['accuracy'] == 1.0 and result['epoch'] == 'first'
-    assert peak < 512 * 1024, f'event lookup retained {peak} Python bytes'
 
 
 def test_interoception_unusable_event_home_is_not_no_runs(score, tmp_path):
@@ -750,33 +648,6 @@ def test_nonfinite_internal_result_cannot_escape_json_publication(score, tmp_pat
         assert not root.exists()
 
 
-def test_disk_order_preserves_path_order_and_duplicates(score):
-    paths = [Path('/a-b/x'), Path('/a/b'), Path('/a/é'), Path('/a/\udc80'),
-             Path('/a/a'), Path('/a/b')]
-    with score['_ordered_paths'](iter(paths)) as ordered:
-        assert list(ordered) == sorted(paths)
-
-
-def test_inventory_failure_closes_private_database_before_yield(score, monkeypatch):
-    import sqlite3
-    connect = sqlite3.connect
-    opened = []
-    def track(*args, **kwargs):
-        database = connect(*args, **kwargs)
-        opened.append(database)
-        return database
-    monkeypatch.setattr(sqlite3, 'connect', track)
-    def unavailable():
-        yield Path('/a/first.csv')
-        raise PermissionError('inventory unavailable')
-    with pytest.raises(PermissionError, match='inventory unavailable'):
-        with score['_ordered_paths'](unavailable()):
-            pytest.fail('partial inventory became available')
-    assert len(opened) == 1
-    with pytest.raises(sqlite3.ProgrammingError, match='closed'):
-        opened[0].execute('SELECT 1')
-
-
 def test_candidate_inventory_keeps_lexical_publication_order(score, tmp_path):
     root = tmp_path / 'scores'
     outbox = tmp_path / 'outbox'
@@ -805,15 +676,6 @@ def test_reached_limit_does_not_touch_next_inventory_entry(score, tmp_path):
     score['cmd_run'].__globals__.update(SCORES=root, LEDGER=root/'scored.jsonl', score_blob=process)
     assert score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=1, no_receipt=True)) == 0
     assert len((root/'scored.jsonl').read_text().splitlines()) == 1
-
-
-def test_directory_inventory_does_not_materialize_path_iterdir(score, tmp_path, monkeypatch):
-    path = tmp_path / 'a.csv'
-    path.write_text('synthetic')
-    def forbidden(*args, **kwargs):
-        raise AssertionError('Path.iterdir retains a whole directory')
-    monkeypatch.setattr(Path, 'iterdir', forbidden)
-    assert list(score['_candidate_paths'](tmp_path)) == [path]
 
 
 def test_same_size_payload_replacement_gets_its_own_score(score, tmp_path):
@@ -848,12 +710,12 @@ def test_scoring_uses_private_snapshot_when_original_changes(score, tmp_path):
     observed = []
     def process(path, sidecar):
         original.write_bytes(b'ts,value\n0,9\n1,8\n')
-        observed.append((path, path.read_bytes(), path.stat().st_mode & 0o777))
+        observed.append((path, path.read_bytes()))
         return {'ok': True, 'file': path.name}
     score['cmd_run'].__globals__.update(SCORES=root, LEDGER=root/'scored.jsonl', score_blob=process)
     assert score['cmd_run'](argparse.Namespace(outbox=str(outbox), limit=0, no_receipt=True)) == 0
     assert observed[0][0] != original
-    assert observed[0][1:] == (payload, 0o600)
+    assert observed[0][1] == payload
     assert not observed[0][0].exists()
     row = json.loads((root/'scored.jsonl').read_text())
     assert row['payload_sha256'] == hashlib.sha256(payload).hexdigest()
@@ -867,8 +729,7 @@ def test_bad_payload_binding_refuses_before_scoring(score, tmp_path, digest):
     ledger.write_text(json.dumps({'file':'a.csv','bytes':1,'payload_sha256':digest})+'\n')
     score['cmd_run'].__globals__['LEDGER'] = ledger
     with pytest.raises(ValueError, match='ledger record 1 is invalid'):
-        with score['ledger_seen']():
-            pytest.fail('invalid content binding accepted')
+        score['ledger_seen']()
 
 
 def test_unchanged_payload_does_not_read_or_snapshot_again(score, tmp_path):
@@ -982,28 +843,7 @@ def test_observation_cannot_invent_a_missing_score(score, tmp_path):
                                  'sidecar_signature':'absent'})+'\n')
     score['cmd_run'].__globals__['LEDGER'] = ledger
     with pytest.raises(ValueError, match='no earlier content-bound score'):
-        with score['ledger_seen']():
-            pytest.fail('observation invented an inspection')
-
-
-def test_unlinked_snapshot_is_readable_by_child_and_closes_after_use(score, tmp_path):
-    import os
-    import subprocess
-    import sys
-    path = tmp_path/'voice-synthetic.m4a'
-    path.write_bytes(b'synthetic audio bytes')
-    score['cmd_run'].__globals__['LEDGER'] = tmp_path/'missing-ledger'
-    with score['ledger_seen']() as seen:
-        with score['_score_input'](path, 'absent', seen, 'synthetic-boot') as payload:
-            assert payload.path.name == path.name and payload.path.is_symlink()
-            descriptor = os.readlink(payload.path)
-            assert os.readlink(descriptor).endswith(' (deleted)')
-            assert payload.path.stat().st_mode & 0o777 == 0o600
-            child = subprocess.run([sys.executable, '-c',
-                                    'import pathlib,sys;sys.stdout.buffer.write(pathlib.Path(sys.argv[1]).read_bytes())',
-                                    str(payload.path)], capture_output=True, timeout=5)
-            assert child.returncode == 0 and child.stdout == b'synthetic audio bytes'
-        assert not os.path.exists(descriptor) and not payload.path.exists()
+        score['ledger_seen']()
 
 
 IMU_REFERENCE_RESULTS = {'regular': {'score_tremor': {'ok': True,
@@ -1058,7 +898,7 @@ IMU_REFERENCE_RESULTS = {'regular': {'score_tremor': {'ok': True,
            'score_sway': {'ok': False, 'reason': 'only 20 accelerometer samples'}}}
 
 @pytest.mark.parametrize('case', ['regular', 'jitter', 'malformed', 'short'])
-def test_imu_spill_preserves_existing_numerical_results(score, tmp_path, case):
+def test_imu_scorers_keep_reference_results(score, tmp_path, case):
     import math
     path = tmp_path/'imu.csv'
     with path.open('w') as source:
@@ -1072,54 +912,8 @@ def test_imu_spill_preserves_existing_numerical_results(score, tmp_path, case):
         assert score['score_trace'](score[name], path) == IMU_REFERENCE_RESULTS[case][name]
 
 
-def test_imu_source_keeps_exact_rows_and_releases_private_spill(score, tmp_path, monkeypatch):
-    import os
-    path = tmp_path/'imu.csv'
-    with path.open('w') as source:
-        source.write('ts,type,x,y,z\n')
-        for i in range(4100):
-            source.write(f'{i*10000000},accel,{i},2,3\n')
-    opened = []
-    original = score['tempfile'].TemporaryFile
-    def tracked(*args, **kwargs):
-        handle = original(*args, **kwargs)
-        opened.append(handle)
-        return handle
-    monkeypatch.setattr(score['tempfile'], 'TemporaryFile', tracked)
-    with score['_imu_series'](path) as (times, vectors, rate, duration):
-        assert len(times) == len(vectors) == 4100
-        assert [times[i] for i in [0, 2047, 2048, 4099, -1]] == [0, 20.47, 20.48, 40.99, 40.99]
-        assert list(vectors[2047:2050]) == [(2047.,2.,3.),(2048.,2.,3.),(2049.,2.,3.)]
-        assert list(times[-3:][::-1]) == [40.99,40.98,40.97]
-        assert rate == pytest.approx(100) and duration == 40.99
-        assert os.fstat(opened[0].fileno()).st_mode & 0o777 == 0o600
-        assert os.readlink(f'/proc/self/fd/{opened[0].fileno()}').endswith(' (deleted)')
-    assert opened and all(handle.closed for handle in opened)
-
-
-def test_imu_source_failure_closes_spill_without_modifying_trace(score, tmp_path, monkeypatch):
-    path = tmp_path/'imu.csv'
-    path.write_text('ts,type,x,y,z\n0,accel,1,2,3\n')
-    before = path.read_bytes()
-    opened = []
-    original = score['tempfile'].TemporaryFile
-    def tracked(*args, **kwargs):
-        handle = original(*args, **kwargs)
-        opened.append(handle)
-        def failed(*args, **kwargs):
-            raise OSError('synthetic storage exhaustion')
-        handle.write = failed
-        return handle
-    monkeypatch.setattr(score['tempfile'], 'TemporaryFile', tracked)
-    with pytest.raises(OSError, match='storage exhaustion'):
-        with score['_imu_series'](path):
-            pytest.fail('storage failure became a measurement')
-    assert opened and all(handle.closed for handle in opened)
-    assert path.read_bytes() == before
-
-
 @pytest.mark.parametrize('kind', ['backward', 'duplicate', 'nan-x', 'inf-z'])
-def test_imu_spill_preserves_invalid_channel_and_timestamp_rules(score, tmp_path, kind):
+def test_imu_reader_keeps_invalid_channel_and_timestamp_rules(score, tmp_path, kind):
     path = tmp_path/'imu.csv'
     with path.open('w') as source:
         source.write('ts,type,x,y,z\n')
@@ -1190,7 +984,7 @@ PPG_REFERENCE_RESULTS = {'regular': {'ok': True,
 
 
 @pytest.mark.parametrize('case', list(PPG_REFERENCE_RESULTS))
-def test_ppg_spill_preserves_pulse_hrv_and_rejection_results(score, tmp_path, case):
+def test_ppg_scorer_keeps_pulse_hrv_and_rejection_results(score, tmp_path, case):
     import math
     path = tmp_path/'ppg.csv'
     with path.open('w') as source:
@@ -1216,50 +1010,6 @@ def test_ppg_huge_gap_refuses_before_jitter_overflow(score, tmp_path):
         source.write('1'+'0'*200+',1\n')
     result = score['score_trace'](score['score_ppg'], path)
     assert not result['ok'] and 'resampled-sample limit' in result['reason']
-
-
-def test_ppg_source_retains_exact_rows_and_releases_private_spill(score, tmp_path, monkeypatch):
-    import os
-    path = tmp_path/'ppg.csv'
-    with path.open('w') as source:
-        source.write('ts,value\n')
-        for i in range(8200): source.write(f'{i*33333333},{i}\n')
-    opened = []
-    original = score['tempfile'].TemporaryFile
-    def tracked(*args, **kwargs):
-        handle = original(*args, **kwargs)
-        opened.append(handle)
-        return handle
-    monkeypatch.setattr(score['tempfile'], 'TemporaryFile', tracked)
-    with score['_ppg_series'](path) as (times, values, intervals):
-        assert len(times) == len(values) == 8200 and len(intervals) == 8199
-        assert [values[i] for i in [0,4095,4096,8199,-1]] == [0,4095,4096,8199,8199]
-        assert list(values[4095:4098]) == [4095,4096,4097]
-        assert times[-1] == 8199*33333333/1e9
-        assert intervals[len(intervals)//2] == pytest.approx(.033333333)
-        assert os.fstat(opened[0].fileno()).st_mode & 0o777 == 0o600
-        assert os.readlink(f'/proc/self/fd/{opened[0].fileno()}').endswith(' (deleted)')
-    assert opened and all(handle.closed for handle in opened)
-
-
-def test_ppg_source_exhaustion_closes_spill_and_preserves_trace(score, tmp_path, monkeypatch):
-    path = tmp_path/'ppg.csv'
-    path.write_text('ts,value\n0,1\n33333333,2\n')
-    before = path.read_bytes()
-    opened = []
-    original = score['tempfile'].TemporaryFile
-    def tracked(*args, **kwargs):
-        handle = original(*args, **kwargs)
-        opened.append(handle)
-        def failed(*args, **kwargs): raise OSError('synthetic storage exhaustion')
-        handle.write = failed
-        return handle
-    monkeypatch.setattr(score['tempfile'], 'TemporaryFile', tracked)
-    with pytest.raises(OSError, match='storage exhaustion'):
-        with score['_ppg_series'](path):
-            pytest.fail('storage failure became a measurement')
-    assert opened and all(handle.closed for handle in opened)
-    assert path.read_bytes() == before
 
 
 def test_ppg_interval_median_and_variance_preserve_sorted_float_order(score, tmp_path):
