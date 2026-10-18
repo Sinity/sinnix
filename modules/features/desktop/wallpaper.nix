@@ -7,8 +7,7 @@
 #
 #   - a curated corpus at `corpusRoot` (default /realm/library/image/wallpaper, off
 #     the wear-limited root SSD) organized as sets/<mood>/{dark,light}, plus a
-#     flat pool/ for imported-but-unclassified images and generated/ for the
-#     opt-in ComfyUI lane (modules/services/wallpaper-generate.nix);
+#     flat pool/ for imported-but-unclassified images;
 #   - Noctalia's per-mode wallpaper directories (config.toml:
 #     wallpaper.directory_{dark,light}) pointed at STABLE paths under
 #     ~/wallpaper (the live, persisted, Noctalia-watched directory) so
@@ -44,8 +43,7 @@ mkFeatureModule {
       default = "/realm/library/image/wallpaper";
       description = ''
         Canonical wallpaper corpus: sets/<mood>/{dark,light} (curated,
-        time-of-day x theme-mode), pool/ (imported, not yet classified), and
-        generated/ (opt-in ComfyUI batch output before curation). Lives on
+        time-of-day x theme-mode) and pool/ (imported, not yet classified). Lives on
         the /realm NVMe media volume, never in the repository -- wallpapers
         are data, not repo content.
       '';
@@ -147,8 +145,6 @@ mkFeatureModule {
           "d ${cfg.corpusRoot} 0755 ${user} users -"
           "d ${cfg.corpusRoot}/sets 0755 ${user} users -"
           "d ${cfg.corpusRoot}/pool 0755 ${user} users -"
-          "d ${cfg.corpusRoot}/generated 0755 ${user} users -"
-          "d ${cfg.corpusRoot}/generated/rejected 0755 ${user} users -"
         ]
         ++ moodDirs;
 

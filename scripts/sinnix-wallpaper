@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Wallpaper corpus + Noctalia palette CLI (current/next/prev/pin/import/status)
-# runtimeInputs: bash coreutils jq imagemagick systemd @sinnix-wallpaper-generate
+# runtimeInputs: bash coreutils jq imagemagick systemd
 set -euo pipefail
 
 export LC_ALL=C
@@ -30,9 +30,7 @@ commands:
       --mode <dark|light>    Theme-mode subset (requires --mood)
       --no-oled-check        Skip the brightness/uniformity OLED heuristic
   classify <pool-path> --mood <name> --mode <dark|light>
-                             Symlink an already-imported/generated image into a set
-  generate [args...]        Trigger a ComfyUI batch (see sinnix-wallpaper-generate --help;
-                             requires sinnix.services.wallpaper-generate.enable)
+                             Symlink an already-imported image into a set
   status                    Corpus counts, active set, timers
 
 Corpus root defaults to /realm/library/image/wallpaper (override via
@@ -217,14 +215,6 @@ cmd_status() {
   printf '%s\n' "$timers" | grep -E "wallpaper|^NEXT" || echo "  (none active)"
 }
 
-cmd_generate() {
-  command -v sinnix-wallpaper-generate >/dev/null 2>&1 || {
-    echo "sinnix-wallpaper: sinnix-wallpaper-generate not found. Enable sinnix.services.wallpaper-generate to install it." >&2
-    exit 1
-  }
-  exec sinnix-wallpaper-generate "$@"
-}
-
 case "${1:-}" in
   current) cmd_current ;;
   palette) shift; cmd_palette "$@" ;;
@@ -235,7 +225,6 @@ case "${1:-}" in
   unpin) cmd_unpin ;;
   import) shift; cmd_import "$@" ;;
   classify) shift; cmd_classify "$@" ;;
-  generate) shift; cmd_generate "$@" ;;
   status) cmd_status ;;
   -h|--help|help|"") usage ;;
   *) echo "unknown command: $1" >&2; usage; exit 1 ;;
