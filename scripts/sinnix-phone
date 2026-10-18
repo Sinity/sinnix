@@ -611,8 +611,10 @@ drain_ambient_adb() {
 #
 # BCR writes a staging recording under its app-specific external directory and
 # then copies it through Android's document provider to /sdcard/sinnix-calls.
-# The staging file is the archive authority: a document-provider copy can be
-# shorter if that final copy is interrupted. Nothing here deletes phone data.
+# A retained staging file is the archive authority: a document-provider copy
+# can be shorter if that final copy is interrupted. Successful exports may
+# remove staging; accept those only with matching native completion metadata.
+# Nothing here deletes phone data.
 #
 # A valid Ogg/Opus file can still contain exact zeroes for an entire call when
 # the vendor VOICE_CALL route fails. Decode every newly observed recording at
@@ -620,6 +622,7 @@ drain_ambient_adb() {
 drain_bcr_calls_adb() (
   local remote_dir export_dir dest debug_dir history_dir ledger seen remote name
   local remote_size export_size duration rate channels
+  local source_kind sidecar_target samples expected_frames expected_rate expected_channels staging_bytes
   local levels mean max dead truncated_export log_remote log_name display audio_candidate decode_ok
   local listing checked_at metadata_missing row_needed sync_lock_fd failed=0
   local rollback_kind rollback_target rollback_source rollback_stage
@@ -645,6 +648,7 @@ drain_bcr_calls_adb() (
     return 75
   fi
   mkdir -p "$debug_dir" || return 1
+  mkdir -p "$dest/metadata" || return 1
   touch "$ledger" || return 1
   seen=$(jq -c -s 'map(select(type == "object"))' "$ledger") || return 1
 
@@ -899,16 +903,35 @@ drain_bcr_calls_adb() (
   # BCR updates the staging file while a call is active. One quiet minute is
   # enough to distinguish a completed file from the current recording.
   listing=$(mktemp "$dest/.inventory.XXXXXX") || return 1
-  if ! adb_shell_args find "$remote_dir" -maxdepth 1 -type f -name '*.oga' -mmin +1 -print0 >"$listing"; then
+  if ! adb_shell_args find "$remote_dir" "$export_dir" -maxdepth 1 -type f -name '*.oga' -mmin +1 -print0 >"$listing"; then
     rm -f "$listing"
-    echo "bcr: staging inventory failed" >&2
+    echo "bcr: staging/export inventory failed" >&2
     return 1
   fi
   while IFS= read -r -d '' remote; do
     [ -n "$remote" ] || continue
     name=${remote##*/}
+    source_kind=staging
+    if [[ "$remote" == "$export_dir/"* ]]; then
+      # A retained staging copy wins, including one still being recorded.
+      # Successful BCR exports can remove staging; those need native metadata.
+      if adb_shell_args test -f "$remote_dir/$name" >/dev/null 2>&1 </dev/null; then
+        continue
+      fi
+      source_kind=export
+    fi
     log_remote="${remote%.oga}.log.txt"
     log_name="${name%.oga}.log.txt"
+    sidecar_target="debug/$log_name"
+    if adb_shell_args test -f "$export_dir/${name%.oga}.json" >/dev/null 2>&1 </dev/null; then
+      log_remote="$export_dir/${name%.oga}.json"
+      log_name="${name%.oga}.json"
+      sidecar_target="metadata/$log_name"
+    elif [ "$source_kind" = export ]; then
+      echo "bcr: exported call has no native completion metadata; source preserved" >&2
+      failed=$((failed + 1))
+      continue
+    fi
     revision_source_path=()
     revision_archive_path=()
     revision_source_identity=()
@@ -936,7 +959,7 @@ drain_bcr_calls_adb() (
     # ADB otherwise forwards this loop's inventory as remote stdin and can
     # discard every recording after the first metadata check.
     if adb_shell_args test -f "$log_remote" >/dev/null 2>&1 </dev/null; then
-      if ! bcr_prepare_revision sidecar "$log_remote" "debug/$log_name"; then
+      if ! bcr_prepare_revision sidecar "$log_remote" "$sidecar_target"; then
         echo "bcr: metadata identity or digest verification failed; archive preserved" >&2
         for stage in "${revision_stage[audio]:-}" "${revision_stage[sidecar]:-}"; do
           [ -z "$stage" ] || rm -- "$stage"
@@ -967,7 +990,7 @@ drain_bcr_calls_adb() (
         if [ "$BCR_IDENTITY" != "${revision_source_identity[sidecar]}" ]; then
           failed=$((failed + 1)); continue
         fi
-        bcr_local_identity "$dest/debug/$log_name" || { failed=$((failed + 1)); continue; }
+        bcr_local_identity "$dest/$sidecar_target" || { failed=$((failed + 1)); continue; }
         if [ "$BCR_IDENTITY" != "${revision_archive_identity[sidecar]}" ]; then
           failed=$((failed + 1)); continue
         fi
@@ -987,10 +1010,9 @@ drain_bcr_calls_adb() (
     decode_ok=true
     levels=$(ffmpeg -nostdin -hide_banner -nostats -i "$audio_candidate" \
       -af volumedetect -f null - 2>&1 \
-      | awk '/mean_volume:/ {mean=$(NF-1)} /max_volume:/ {max=$(NF-1)} END {print mean, max}' \
+      | awk '/mean_volume:/ {mean=$(NF-1)} /max_volume:/ {max=$(NF-1)} /n_samples:/ {samples=$NF} END {print mean, max, samples}' \
       ) || decode_ok=false
-    mean=${levels% *}
-    max=${levels#* }
+    read -r mean max samples <<< "$levels"
     if [ "$decode_ok" = false ] || [ -z "$duration" ] || [ -z "$max" ]; then
       echo "bcr: candidate audio did not decode; archive preserved" >&2
       for stage in "${revision_stage[audio]:-}" "${revision_stage[sidecar]:-}"; do
@@ -998,6 +1020,35 @@ drain_bcr_calls_adb() (
       done
       broken=$((broken + 1))
       continue
+    fi
+    if [[ "$log_remote" == *.json ]]; then
+      local metadata_candidate completion
+      metadata_candidate=${revision_stage[sidecar]:-$dest/$sidecar_target}
+      if ! completion=$(jq -er '.output.recording |
+        select((.frames_encoded|type)=="number" and .frames_encoded>0 and (.frames_encoded|floor)==.frames_encoded and
+          (.sample_rate|type)=="number" and .sample_rate>0 and (.sample_rate|floor)==.sample_rate and
+          (.channel_count|type)=="number" and .channel_count>0 and (.channel_count|floor)==.channel_count) |
+        [.frames_encoded,.sample_rate,.channel_count] | @tsv' "$metadata_candidate"); then
+        echo "bcr: native completion metadata is invalid; source preserved" >&2
+        failed=$((failed + 1))
+        for stage in "${revision_stage[audio]:-}" "${revision_stage[sidecar]:-}"; do
+          [ -z "$stage" ] || rm -- "$stage"
+        done
+        continue
+      fi
+      IFS=$'\t' read -r expected_frames expected_rate expected_channels <<< "$completion"
+      # Opus decodes at 48kHz even when BCR recorded at 16kHz. Compare the
+      # exact frame duration in both sample-rate domains, without rounding.
+      if ! awk -v frames="$expected_frames" -v expected_rate="$expected_rate" -v expected_channels="$expected_channels" \
+        -v samples="$samples" -v rate="$rate" -v channels="$channels" \
+        'BEGIN { exit !(samples * expected_rate == frames * expected_channels * rate && channels == expected_channels) }'; then
+        echo "bcr: decoded audio differs from native completion metadata; source preserved" >&2
+        failed=$((failed + 1))
+        for stage in "${revision_stage[audio]:-}" "${revision_stage[sidecar]:-}"; do
+          [ -z "$stage" ] || rm -- "$stage"
+        done
+        continue
+      fi
     fi
     dead=false
     if [ "$max" = "-inf" ]; then
@@ -1087,7 +1138,7 @@ drain_bcr_calls_adb() (
       if [ "$BCR_IDENTITY" != "${revision_source_identity[sidecar]}" ]; then
         failed=$((failed + 1)); continue
       fi
-      bcr_local_identity "$dest/debug/$log_name" || { failed=$((failed + 1)); continue; }
+      bcr_local_identity "$dest/$sidecar_target" || { failed=$((failed + 1)); continue; }
       if [ "$BCR_IDENTITY" != "${revision_archive_identity[sidecar]}" ]; then
         failed=$((failed + 1)); continue
       fi
@@ -1102,6 +1153,8 @@ drain_bcr_calls_adb() (
     [ "$dead" = false ] || silent=$((silent + 1))
 
     checked_at=$(date -u +%Y-%m-%dT%H:%M:%SZ) || return 1
+    staging_bytes=null
+    [ "$source_kind" != staging ] || staging_bytes="${remote_size:-0}"
     local audio_revision sidecar_revision
     audio_revision=$(bcr_revision_json audio) || return 1
     sidecar_revision=null
@@ -1110,14 +1163,14 @@ drain_bcr_calls_adb() (
     fi
     jq -nc \
       --arg file "$name" --argjson bytes "$(stat -c %s "$dest/$name")" \
-      --argjson staging_bytes "${remote_size:-0}" --arg export_bytes "${export_size:-}" \
+      --argjson staging_bytes "$staging_bytes" --arg export_bytes "${export_size:-}" --arg source_kind "$source_kind" \
       --arg duration "${duration:-}" --arg rate "${rate:-}" --arg channels "${channels:-}" \
       --arg mean "${mean:-}" --arg max "${max:-}" --argjson dead "$dead" \
       --argjson truncated_export "$truncated_export" \
       --arg checked_at "$checked_at" --argjson audio_revision "$audio_revision" \
       --argjson sidecar_revision "$sidecar_revision" --argjson metadata_missing "$metadata_missing" \
       --argjson previous_audio "$previous_audio" --argjson previous_sidecar "$previous_sidecar" \
-      '{file: $file, bytes: $bytes, staging_bytes: $staging_bytes,
+      '{file: $file, bytes: $bytes, source_kind: $source_kind, staging_bytes: $staging_bytes,
         export_bytes: ($export_bytes | tonumber? // null),
         duration_seconds: ($duration | tonumber? // null),
         sample_rate: ($rate | tonumber? // null),

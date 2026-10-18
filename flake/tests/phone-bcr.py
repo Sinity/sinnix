@@ -31,6 +31,9 @@ adb_any() {
   case "$1" in
     pull)
       source="$BCR_REMOTE_ROOT/${2#"$BCR_REMOTE_PREFIX"/}"
+      if [[ "$2" == /sdcard/sinnix-calls/* ]]; then
+        source="$BCR_EXPORT_ROOT/${2#/sdcard/sinnix-calls/}"
+      fi
       if [ "$BCR_MODE" = "failed" ]; then printf cut > "$3"; return 1; fi
       cp -- "$source" "$3"
       ;;
@@ -38,11 +41,12 @@ adb_any() {
       shift
       [ "$1" = -T ] && shift
       command=${1//"$BCR_REMOTE_PREFIX"/$BCR_REMOTE_ROOT}
+      command=${command//\/sdcard\/sinnix-calls/$BCR_EXPORT_ROOT}
       if [ "$BCR_MODE" = "inventory-failed" ] && [[ "$command" == find* ]]; then return 1; fi
       if [ "$BCR_MODE" = "bad-stat" ] && [[ "$command" == stat* ]]; then echo malformed; return 0; fi
       if [[ "$command" == *sha256sum* ]]; then printf x >> "$BCR_HASH_LOG"; fi
       if [[ "$command" == find* ]]; then
-        bash -c "$command" | python3 -c 'import os,sys; b=sys.stdin.buffer.read(); sys.stdout.buffer.write(b.replace(os.environ["BCR_REMOTE_ROOT"].encode(), os.environ["BCR_REMOTE_PREFIX"].encode()))'
+        bash -c "$command" | python3 -c 'import os,sys; b=sys.stdin.buffer.read(); sys.stdout.buffer.write(b.replace(os.environ["BCR_REMOTE_ROOT"].encode(), os.environ["BCR_REMOTE_PREFIX"].encode()).replace(os.environ["BCR_EXPORT_ROOT"].encode(), b"/sdcard/sinnix-calls"))'
         return
       fi
       if [ "$BCR_MODE" = "stdin-consuming" ] && [[ "$command" == test* ]]; then
@@ -58,6 +62,8 @@ with tempfile.TemporaryDirectory() as scratch:
     root = Path(scratch)
     remote_root = root / "remote"
     remote_root.mkdir()
+    export_root = root / "exports"
+    export_root.mkdir()
     subprocess.run(
         [
             "ffmpeg",
@@ -105,6 +111,7 @@ with tempfile.TemporaryDirectory() as scratch:
                 **os.environ,
                 "BCR_MODE": mode,
                 "BCR_REMOTE_ROOT": str(remote_root),
+                "BCR_EXPORT_ROOT": str(export_root),
                 "BCR_REMOTE_PREFIX": "/sdcard/Android/data/com.chiller3.bcr/files",
                 "LAKE_ROOT": str(lake),
                 "BCR_ENCODER": sys.argv[2],
@@ -113,6 +120,53 @@ with tempfile.TemporaryDirectory() as scratch:
             capture_output=True,
             text=True,
         )
+
+    # Successful BCR exports can outlive their removed staging copies.
+    exported = export_root / "completed export.oga"
+    exported.write_bytes((remote_root / "neutral call.oga").read_bytes())
+    native_metadata = export_root / "completed export.json"
+    native_metadata.write_text(json.dumps({"output": {"recording": {
+        "frames_encoded": 3200, "sample_rate": 16000, "channel_count": 1,
+        "duration_secs_encoded": 0.2,
+    }}}))
+    for path in (exported, native_metadata):
+        os.utime(path, (old, old))
+    export_lake = root / "export-lake"
+    result = run("normal", export_lake)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert (export_lake / "calls" / exported.name).exists(), "completed export was silently skipped"
+    assert (export_lake / "calls" / exported.name).read_bytes() == exported.read_bytes()
+    assert (export_lake / "calls" / "metadata" / native_metadata.name).read_bytes() == native_metadata.read_bytes()
+    before = (export_lake / "calls" / "levels.jsonl").read_bytes()
+    result = run("normal", export_lake)
+    assert result.returncode == 0 and (export_lake / "calls" / "levels.jsonl").read_bytes() == before
+    archived_audio = (export_lake / "calls" / exported.name).read_bytes()
+    archived_metadata = (export_lake / "calls" / "metadata" / native_metadata.name).read_bytes()
+    completion = json.loads(native_metadata.read_text())
+    completion["output"]["recording"]["frames_encoded"] += 16000
+    native_metadata.write_text(json.dumps(completion))
+    result = run("normal", export_lake)
+    assert result.returncode != 0 and "differs from native completion" in result.stderr
+    assert (export_lake / "calls" / "levels.jsonl").read_bytes() == before
+    assert (export_lake / "calls" / exported.name).read_bytes() == archived_audio
+    assert (export_lake / "calls" / "metadata" / native_metadata.name).read_bytes() == archived_metadata
+    native_metadata.unlink()
+    result = run("normal", export_lake)
+    assert result.returncode != 0 and "no native completion metadata" in result.stderr
+    assert (export_lake / "calls" / "levels.jsonl").read_bytes() == before
+    native_metadata.write_bytes(archived_metadata)
+    duplicate_export = export_root / "neutral call.oga"
+    duplicate_export.write_bytes(b"partial export must not replace staging")
+    os.utime(duplicate_export, (old, old))
+    staging_audio = remote_root / "neutral call.oga"
+    os.utime(staging_audio, None)
+    result = run("normal", export_lake)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert (export_lake / "calls" / staging_audio.name).read_bytes() == staging_audio.read_bytes()
+    duplicate_export.unlink()
+    os.utime(staging_audio, (old, old))
+    exported.unlink()
+    native_metadata.unlink()
 
     # ADB shell forwards stdin unless it is detached. A metadata existence
     # check must not consume the remaining NUL-delimited inventory.

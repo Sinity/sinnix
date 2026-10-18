@@ -304,8 +304,16 @@ revisions to the same destination.
 **The system log and BCR calls.** Reading the log needs `READ_LOGS`, which
 Android grants to system and privileged apps only; the Sinnix capture app
 cannot hold it at any appop scope. BCR is privileged but is a separate app,
-and its app-specific staging recording is the authoritative copy: the later
-document-provider export can be truncated. `sinnix.services.phone-logcat`
+and a retained app-specific staging recording is the authoritative copy: the
+later document-provider export can be truncated. Successful BCR exports can
+remove staging. The same synchronizer inventories both directories, always
+prefers retained staging (including active files), and accepts export-only
+audio only with native JSON completion metadata whose encoded frame duration
+and channel count match the decoded audio. The source sample rate is accounted
+for because Opus playback uses 48kHz. Native JSON is preserved in `calls/metadata`;
+legacy per-call debug sidecars remain in `calls/debug`. Receipts distinguish
+staging and export sources, leaving absent staging size null.
+`sinnix.services.phone-logcat`
 therefore keeps one 1800s adb pull for both foreign surfaces, with the useful
 property that USB still works when the network does not. Every newly preserved
 BCR call is decoded immediately; duration, sample rate and level are recorded
