@@ -15,7 +15,8 @@ and `docs/agent-gateway.md` for those contracts.
   profiles, and module factories.
 - `flake/`: host construction, data registries, script discovery, packages,
   and checks.
-- `pkgs/`: real packages, including agentctl and the agent gateway.
+- `pkgs/`: packages, including agentctl and the agent gateway; a directory
+  holding only `tests/` is the suite for the script of the same name.
 - `scripts/`: auto-discovered small tools with required frontmatter.
 - `dots/`: managed configuration sources, including live links for shared
   skills and agent instructions.
@@ -29,8 +30,8 @@ lanes use `mkCaptureLane`. A bypass needs a structural reason.
 `flake/data/agent-lanes.nix` defines CLI lanes;
 `flake/data/mcp-registry.nix` defines MCP profiles; `dots/_ai/skills/` is the
 source for shared skills and `modules/features/dev/agents/` renders client
-links. `claude` is the managed default launcher;
-the upstream installer owns the bare `~/.local/bin/claude`.
+links. `~/.local/bin/claude` is the Home Manager launcher wrapper; the
+upstream CLI it runs is installed under `~/.local/state/claude-code/npm/`.
 
 agentctl is in `pkgs/agentctl/`; the gateway is in
 `pkgs/sinnix-agent-gateway/`. Inspect `.agentctl/project.toml` and
@@ -38,14 +39,18 @@ agentctl is in `pkgs/agentctl/`; the gateway is in
 
 ## Verification and activation
 
-Use the declared operations for checks:
+Run the narrowest check that proves the change (`AGENTS.md`, "Workflow and
+verification"): an evaluated option or unit, one package's tests, one named
+check. The full declared operations are for integration milestones and
+concrete risks, not every commit:
 
 ```text
 agentctl job start sinnix lint
 agentctl job start sinnix check
 ```
 
-Rebuild only through the devshell `test-vm`, `switch`, or `boot` commands. From
+Rebuild only through the devshell `switch`, `boot`, `test-system`, or
+`test-vm` commands. From
 outside the shell use `nix develop --command switch`. Never invoke bare `nh os
 switch`, and do not preflight a switch with duplicate evaluation. After
 activation, compare `nixos-version --configuration-revision` with the intended

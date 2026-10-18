@@ -100,9 +100,10 @@ enough that neither has to reconstruct intent.
   that share files, evidence, or a verification boundary with
   `dispatch_group=<leader-id>` so one worker delivers them together; each keeps
   its own close. Remove the metadata when the leader closes.
-- Sequence wide refactors expand, migrate, contract: add the new form, move
-  callers in batches, then delete the old form, each step blocked by the one
-  before.
+- A wide refactor that cannot land in one change is split by callers, not by
+  keeping old and new forms side by side: each task moves a set of callers and
+  deletes the old form for them, and the last task deletes what remains. No
+  task leaves a compatibility path behind.
 - For a program too unclear to slice, file decision tasks: one sharp question
   each, ordered by `blocks` edges, closed by the recorded answer. A question
   you cannot yet state precisely stays a line in the parent epic until it

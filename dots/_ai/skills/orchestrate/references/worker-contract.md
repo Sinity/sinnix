@@ -27,11 +27,8 @@ names, and exits with one result document.
    committed. AgentCTL records paths outside the estimate for review, and
    landing detects conflicts with other workers' branches. You may add
    `scope_expansion` (paths, assigned Bead, reason) to explain extra paths.
-   Fix cheap, well-understood related or nearby defects while context is loaded,
-   with proportionate checks and a brief note, including likely sibling sites.
-   No separate ticket, plan, or review cycle for a small correction. Separate
-   only substantial investigation, new architectural dependencies, conflicting
-   ownership, or material delivery delay. Report remaining failures honestly.
+   Cheap nearby fixes follow the global instructions; report remaining
+   failures honestly.
 3. **Verify the change.** Reconcile the snapshot's `verification_commands` with
    the current project descriptor, instructions, and changed behavior. Task
    examples do not create an automatic full-suite gate; preserve required checks
@@ -68,7 +65,7 @@ names, and exits with one result document.
    after cheap nearby corrections in `unresolved` for the coordinator.
 7. **Run heavy work as declared operations.** Gates, broad type checks, test
    suites, and builds run through the project's declared AgentCTL operations
-   (Polylogue: `verify_quick`, `pytest_focused`), started with
+   (`agentctl project operations <project>` lists them), started with
    `agentctl job start <project> <operation> --workspace <worktree> -- <selector>`.
    Use `lane verify` only for a declared profile that needs no arguments.
    Keep heavy checks out of the worker's small memory scope. Bounded low-memory

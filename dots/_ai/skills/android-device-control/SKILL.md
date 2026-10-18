@@ -1,37 +1,47 @@
 ---
 name: android-device-control
-description: Control, configure, debloat, or capture from an unrooted Android phone through adb, Termux, tailnet access, and resilient UI automation, including Xiaomi power-management traps.
+description: Control, configure, debloat, or capture from the rooted Android phone (Evolution X, Magisk) through adb, root shell, Termux, tailnet access, and resilient UI automation.
 metadata:
-  short-description: Unrooted Android as a controllable peer
+  short-description: The rooted Android phone as a controllable peer
 ---
 
-# Android device control (unrooted)
+# Android device control
 
-Device-specific observations below came from one unrooted Xiaomi device.
-Verify the current device, OS, and connection before applying them. Device
-identity and retained evidence live in bead `sinnix-uyvt`.
+The phone is a Redmi Note 11 NFC running Evolution X (Android 16),
+bootloader-unlocked and rooted with Magisk. `docs/phone.md` in Sinnix covers
+the capture app and the `sinnix phone` commands; device history and evidence
+live in bead `sinnix-uyvt`. Verify the current device, OS and connection
+before applying anything below.
 
-## The two control surfaces
+## Control surfaces
 
-A phone worth controlling has **both**, because each covers the other's gaps:
+| Surface                         | Reach                    | Good for                                         |
+| ------------------------------- | ------------------------ | ------------------------------------------------ |
+| `adb` (USB or wireless debugging) | USB, trusted Wi-Fi, tailnet | packages, settings, input, screenshots, UI dumps |
+| root shell (`adb shell su -c ...`) | wherever adb reaches    | system files, services, Magisk hooks             |
+| Termux `sshd` (:8022)           | tailnet                  | a real shell for scripted work                   |
 
-| Surface                           | Reach            | Good for                                       | Dies when                       |
-| --------------------------------- | ---------------- | ---------------------------------------------- | ------------------------------- |
-| `adb` over TCP (`adb tcpip 5555`) | any tailnet peer | packages, settings, input, screencap, UI dumps | phone reboots (TCP mode resets) |
-| Termux `sshd` (:8022)             | any tailnet peer | real shell, rsync, scripted work               | Termux is killed or uninstalled |
+Use the existing USB or wireless-debugging connection; `sinnix phone
+adb-connect` finds it and `sinnix phone adb-restore` re-enables it over USB.
+Never enable legacy `adb tcpip 5555`: it listens on every network. Select the
+device with `ANDROID_SERIAL` or `adb -s` and check its identity before a
+change.
 
-Prefer the existing USB or authenticated wireless-debugging connection.
-Legacy `adb tcpip` listens beyond the tailnet: do not enable it without
-checking exposure on every connected network and obtaining authority for
-remote debugging. A tailnet connection alone does not restrict the listener.
-Disable temporary TCP debugging when finished; verify the listener is gone.
-Select the exact device with `ANDROID_SERIAL` or the caller's supported
-`adb -s` argument; verify its identity before a mutation.
+Root is available through Magisk (`su -c`). Prefer an unprivileged route when
+one exists, and say when a change needs root. Persistent root changes go in
+Sinnix-owned Magisk hooks under `/data/adb/service.d/` so they can be listed
+and removed; do not edit system partitions.
 
-## UI automation that actually works
+Never start Termux daemons through `adb shell run-as com.termux`: they land in
+an SELinux domain that cannot read `/storage` yet reports success. Restart the
+Termux app instead. Termux and its add-ons must all come from the same source
+(F-Droid or GitHub builds), since their signatures must match; the Play Store
+build cannot install Termux:API.
 
-Never tap fixed coordinates. Layouts shift with title wrapping, locale, and
-font scale — a hardcoded tap silently hits the wrong control.
+## UI automation that works
+
+Never tap fixed coordinates; layouts shift with locale, font scale and
+wrapping. Find the element in a UI dump:
 
 ```bash
 adb shell "uiautomator dump /sdcard/.ui.xml >/dev/null 2>&1"
@@ -41,109 +51,58 @@ adb shell cat /sdcard/.ui.xml | tr '>' '\n' \
   | awk -F'[][,]' '{print int(($2+$5)/2), int(($3+$6)/2)}'
 ```
 
-**The polling-tap trap** (cost real time to find): a loop that re-taps while
-waiting for an install to finish will _cancel_ it — the button under that
-coordinate becomes CANCEL once the dialog advances. Tap once, then poll with
-`pm list packages` only. Never tap inside a wait loop.
+Tap once, then poll state (`pm list packages`, a dump) without tapping: a loop
+that re-taps while waiting can hit the button that replaced the original, such
+as Cancel. Check which activity is in front before acting
+(`adb shell dumpsys window | grep mCurrentFocus`); an intent can be taken by a
+different app than intended.
 
-Read state before acting: `adb shell dumpsys window | grep mCurrentFocus`
-tells you which activity is actually foreground, which is how you notice that
-your intent was hijacked by a different app (a `VIEW` intent for an APK MIME
-type went to Termux, not the installer).
+## Background apps
 
-## MIUI / HyperOS traps
-
-**Installing apps.** There are _two_ independent blockers, and conflating them
-wastes hours:
-
-1. **Package verifier** can delay or block an installation. Inspect installer
-   output and package provenance first. Disabling verification changes a
-   security boundary and requires explicit authority; preserve the original
-   settings and restore them after a temporary diagnostic.
-2. **The MIUI gate proper** — `adb install` of a _genuinely new_ package
-   returns `INSTALL_FAILED_USER_RESTRICTED` regardless of the verifier.
-   Reinstalling an app that already exists succeeds. No user restriction is
-   set (`dumpsys user` shows none) — it is HyperOS's own Mi-account-gated
-   "Install via USB" developer toggle. **Ask the operator to flip it**; it is
-   60 seconds of their time and unblocks everything unattended.
-
-MIUI also interposes `com.miui.permcenter.privacymanager.SpecialPermissionInterceptActivity`
-("Danger / Install dangerous apps") _before_ the system installer. Expect a
-two-dialog sequence: MIUI OK → system INSTALL.
-
-**Background killing.** MIUI kills long-running apps aggressively. In escalating
-order of effectiveness:
+Android may stop long-running apps. Whitelist from Doze and keep the app in
+the active standby bucket:
 
 ```bash
-adb shell dumpsys deviceidle whitelist +<pkg>      # necessary, not sufficient
-adb shell am set-standby-bucket <pkg> active       # necessary, not sufficient
-adb shell settings put secure miui_optimization 0  # helps, wants a reboot
-adb shell settings put secure always_on_vpn_app com.tailscale.ipn   # THE fix for a VPN
+adb shell dumpsys deviceidle whitelist +<pkg>
+adb shell am set-standby-bucket <pkg> active
 ```
 
-Always-on VPN improved persistence on the observed device. Verify the current
-failure before changing power or VPN settings. Lockdown trades offline
-availability for preventing traffic outside the VPN; preserve the operator's
-choice rather than changing it as a background-process workaround.
+Tailscale stays connected through always-on VPN
+(`settings put global always_on_vpn_app com.tailscale.ipn`). Keep lockdown as
+the operator set it; it trades offline use for blocking traffic outside the
+VPN. `am force-stop` does not test background survival: Android never restarts
+a force-stopped app.
 
-**Play-store Termux is crippled**: it cannot install Termux:API
-(termux-play-store/termux-apps#29). `termux-battery-status` works from a
-bundled subset; `termux-sensor` and most of the 69-command API surface refuse.
-The F-Droid/GitHub build is required for the sensor plane — and the app and
-its addons must come from the _same_ source, since signatures must match.
+## Settings worth knowing
 
-## Settings levers worth knowing
+| Setting                                                        | Why it matters                                             |
+| -------------------------------------------------------------- | ---------------------------------------------------------- |
+| `global audio_safe_volume_state`                               | `3` = EU headphone volume cap active; `1` disables it.     |
+| `global bluetooth_disable_absolute_volume`                     | Common cause of very quiet Bluetooth headsets.             |
+| `system screen_off_timeout`, `global stay_on_while_plugged_in` | A phone kept awake on AC is reliably drivable.             |
+| `global window/transition/animator_*_scale`                    | `0.5` is snappy; `0` breaks some transitions.              |
+| `secure ui_night_mode 2` + `cmd uimode night yes`              | Both are needed.                                           |
+| `appops set <pkg> POST_NOTIFICATION ignore`                    | Silence one app's notifications.                           |
+| `appops set <pkg> GET_USAGE_STATS allow`                       | What usage-tracking apps need; often the missed step.      |
 
-| Setting                                                        | Why it matters                                                               |
-| -------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| `global audio_safe_volume_state`                               | `3` = EU headphone cap ACTIVE — max slider still sounds quiet. `1` disables. |
-| `global bluetooth_disable_absolute_volume`                     | Common cause of very quiet BT headsets.                                      |
-| `system screen_off_timeout`, `global stay_on_while_plugged_in` | Keeping a phone awake on AC is what makes it reliably drivable.              |
-| `global window/transition/animator_*_scale`                    | `0.5` is the snappiness sweet spot; `0` breaks some transitions.             |
-| `secure ui_night_mode 2` + `cmd uimode night yes`              | Both, not either.                                                            |
-| `appops set <pkg> POST_NOTIFICATION ignore`                    | Per-app notification kill without touching the app.                          |
-| `appops set <pkg> GET_USAGE_STATS allow`                       | What ActivityWatch-class apps actually need; usually the missed step.        |
+## Removing apps
 
-## Debloating without breaking things
-
-`pm uninstall -k --user 0 <pkg>` is the right verb: removes for the user,
-keeps the APK, reversible with `pm install-existing`. For genuine third-party
-apps `pm uninstall --user 0` is fine.
-
-Two rules learned the hard way:
-
-- **Spare the unlock stack.** On Xiaomi, keep `com.xiaomi.account`,
-  `com.xiaomi.finddevice`, and the cloud services — bootloader unlock requires
-  a linked Mi account and Find Device. Removing them forecloses rooting later.
-- **Prefer evidence over vibes.** Diff the _previous phone's_ package census
-  against the current device to find orphans; a device switch strands whole
-  vendor stacks.
-
-Device-specific candidates for inspection, not blanket removal:
-`com.miui.msa.global` (the ad engine),
-`com.miui.analytics`, `com.xiaomi.mipicks`, `com.mi.globalminusscreen`
-(App Vault), `com.miui.android.fashiongallery` (lockscreen ads),
-`com.xiaomi.ugd`, `com.miui.cleaner`, `com.miui.yellowpage`.
+`pm uninstall -k --user 0 <pkg>` removes an app for the user but keeps the
+APK, so `pm install-existing <pkg>` restores it. Compare package lists against
+an earlier census rather than guessing what is safe.
 
 ## Finding devices on the network
 
-`nmap -sn` misses IoT endpoints that do not answer ICMP while serving HTTP
-happily. **Read the router's DHCP lease table instead** (`ssh <router> cat /tmp/dhcp.leases`): it lists every
-device that ever connected, with MAC and hostname, including ones currently
-asleep. To tell "asleep" from "off-network", check association directly:
-`iwinfo <ap> assoclist` per AP — a device with a lease but no association is
-not on wifi at all.
-
-Pin IoT devices to static leases once found. A capture lane that targets an IP
-breaks silently when DHCP moves the device.
+`nmap -sn` misses devices that ignore ICMP. Read the router's DHCP leases
+(`ssh <router> cat /tmp/dhcp.leases`) for every device that has connected,
+and `iwinfo <ap> assoclist` to tell "asleep" from "off the network". Give
+devices that capture lanes target a static lease.
 
 ## Discipline
 
-- **Prove it with a round-trip.** Verify installation and operation separately
-  with a request, transfer, or observed state change on the current device.
-- **A dozing Android drops ICMP but accepts TCP.** Health-check a phone with a
-  TCP connect, never `ping` — otherwise you report a false outage on a working
-  link.
-- **Legal acceptances are the operator's.** Privacy-policy and EULA dialogs,
-  passkey enrollment, and account linking are identity acts; surface them
-  rather than tapping through.
+- Prove a change with a round trip: a request, transfer or observed state
+  change on the device, not just the command's exit status.
+- A dozing phone drops ICMP but accepts TCP; health-check with a TCP connect,
+  not `ping`.
+- Privacy policies, EULAs, passkeys and account linking are the operator's to
+  accept; surface them instead of tapping through.

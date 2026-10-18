@@ -26,7 +26,7 @@ next, not on supervising progress.
     silently run against the main checkout.
   - Use a fresh `general-purpose` agent only when a clean context is the
     point (an independent review, a self-contained packet that must not
-    inherit bias) or a different model is needed. Prefer Opus 5.5 to Fable 5.1.
+    inherit bias) or a different model is needed.
     Pass an explicit `model` on a non-fork dispatch when the role default
     is not what you want; a fork always inherits the parent model.
   - In Codex, native spawn takes `model`, `reasoning_effort`, and `fork_turns`
@@ -65,18 +65,21 @@ next, not on supervising progress.
 
 ## Models
 
-| Work                                                        | Codex                | Claude   |
-| ----------------------------------------------------------- | -------------------- | -------- |
-| Evidence collection, supervision, settled implementation    | `gpt-6-luna`, medium | `sonnet` |
-| Substantial implementation, investigation, candidate review | `gpt-6.1-sol`, medium | `opus` (5.5) |
-| Unresolved architecture, design-critical implementation     | `gpt-6.1-sol`, high   | `opus` (5.5) |
+| Work                                                        | Claude   | Codex           |
+| ----------------------------------------------------------- | -------- | --------------- |
+| Evidence collection, supervision, settled implementation    | `sonnet` | everyday, medium |
+| Substantial implementation, investigation, candidate review | `opus`   | strong, medium   |
+| Unresolved architecture, design-critical implementation     | `opus`   | strong, high     |
 
-These are starting points. Prefer Sol 6.1 to Astra 6 for workers; raise effort
-or tier for a named problem. `scripts/probe_agent_runtime.sh` checks a backend's
-availability and quota before a large dispatch, not before every small task.
-[model-landscape.md](references/model-landscape.md)
-covers verifying the model that actually ran, attributing outcomes, and
-running allocation trials.
+Codex model IDs are not repeated here: the everyday model is `model` and the
+strong one `default_subagent_model` in `dots/codex/config.toml`; AgentCTL's
+default worker model is `DEFAULT_MODEL` in
+`pkgs/agentctl/agentctl/prompts/__init__.py`. These are starting points; raise
+effort or tier for a named problem. `scripts/probe_agent_runtime.sh` checks a
+backend's availability and quota before a large dispatch, not before every
+small task. [model-landscape.md](references/model-landscape.md) covers
+verifying the model that actually ran, attributing outcomes, and running
+allocation trials.
 
 ## Run the fleet (Claude Code)
 
