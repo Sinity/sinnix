@@ -115,7 +115,7 @@ in
             }
             ''
               jq -e --arg root "$sentinelDataDir" '
-                index("d \($root)/inbox 0755 sinity users -") != null and
+                index("d \($root)/inbox 0700 sinity users -") != null and
                 (map(select(startswith("L+ \($root)/inbox/"))) | length) == 0
               ' <<<"$actualTmpfiles" >/dev/null
               touch "$out"
