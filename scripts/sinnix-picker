@@ -63,13 +63,20 @@ window); [clip] copies the entry back onto the clipboard (wl-copy);
 from __future__ import annotations
 
 import csv
+import errno
+import heapq
+import io
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 from sinnix_lib.layout import capture_lane_path
 
@@ -81,7 +88,10 @@ CHROME_BOOKMARKS = Path.home() / ".config/chrome-ws/Default/Bookmarks"
 CLIPBOARD_DIR = capture_lane_path(
     Path(os.environ.get("SINNIX_ACTIVITY_ROOT", "/realm/activity")), "clipboard"
 )
-READING_STACK_PATH = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "sinnix/reading-stack.json"
+READING_STACK_PATH = (
+    Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+    / "sinnix/reading-stack.json"
+)
 
 HISTORY_LIMIT = 4000
 RAINDROP_LIMIT = 4000
@@ -135,37 +145,74 @@ def load_history() -> list[Entry]:
 
 
 def load_raindrop() -> list[Entry]:
-    if not RAINDROP_CSV.exists():
-        return []
-    rows: list[tuple[str, str, str, str]] = []
     try:
-        with RAINDROP_CSV.open(encoding="utf-8", newline="") as f:
-            for row in csv.DictReader(f):
-                url = row.get("url", "")
-                if not url:
-                    continue
-                rows.append(
-                    (
-                        row.get("created", ""),
-                        row.get("title") or url,
-                        row.get("folder", ""),
-                        url,
-                    )
+        with (
+            _regular_input(RAINDROP_CSV) as binary,
+            io.TextIOWrapper(binary, encoding="utf-8", newline="") as source,
+        ):
+            candidates = (
+                (
+                    row.get("created") or "",
+                    row.get("title") or row["url"],
+                    row.get("folder") or "",
+                    row["url"],
                 )
-    except OSError:
+                for row in csv.DictReader(source)
+                if row.get("url")
+            )
+            rows = heapq.nlargest(RAINDROP_LIMIT, candidates, key=lambda row: row[0])
+    except FileNotFoundError:
         return []
-    # 27k+ raw entries -- too many to hand fuzzel wholesale (sluggish
-    # per-keystroke filtering). Same recency cut as history, for the same
-    # "convenient access" reasoning: older/one-off saves are what
-    # lynchpin's bookmark ingest is for, not a keybind picker.
-    rows.sort(key=lambda t: t[0], reverse=True)
+    except (OSError, UnicodeError, csv.Error) as error:
+        _unavailable("bookmarks", RAINDROP_CSV, error)
+        return []
+    # nlargest preserves full-sort tie order while retaining only the rows
+    # the menu will offer, rather than buffering the whole acquisition.
     out = []
-    for _created, title, folder, url in rows[:RAINDROP_LIMIT]:
+    for _created, title, folder, url in rows:
         label = title if title != url else ""
         if folder:
             label = f"{label} ({folder})".strip()
         out.append(Entry("mark", label, url))
     return out
+
+
+@contextmanager
+def _regular_input(path: Path) -> Iterator[BinaryIO]:
+    with open(
+        path, "rb", opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK)
+    ) as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+            raise OSError(errno.EINVAL, "picker input must be a regular file", path)
+        yield source
+
+
+def _unavailable(source: str, path: Path, error: Exception) -> None:
+    print(
+        f"sinnix-picker: {source} source unavailable: {path}: {error}", file=sys.stderr
+    )
+
+
+def _reverse_lines(source: BinaryIO) -> Iterator[bytes]:
+    """Read backwards in blocks, retaining one unfinished record.
+
+    Chunks stay separate until a newline is found so a large record is joined
+    once, without repeatedly copying its growing unfinished suffix.
+    """
+    position = source.seek(0, os.SEEK_END)
+    suffix: list[bytes] = []
+    while position:
+        size = min(position, 65536)
+        position -= size
+        source.seek(position)
+        pieces = source.read(size).split(b"\n")
+        suffix.append(pieces[-1])
+        if len(pieces) > 1:
+            yield b"".join(reversed(suffix))
+            yield from reversed(pieces[1:-1])
+            suffix = [pieces[0]]
+    if suffix:
+        yield b"".join(reversed(suffix))
 
 
 def _walk_chrome_bookmarks(node: dict, path: list[str], out: list[Entry]) -> None:
@@ -201,32 +248,51 @@ def load_chrome_bookmarks() -> list[Entry]:
 
 
 def load_clipboard() -> list[Entry]:
-    if not CLIPBOARD_DIR.exists():
+    try:
+        with os.scandir(CLIPBOARD_DIR) as source:
+            files = sorted(
+                (
+                    Path(entry.path)
+                    for entry in source
+                    if entry.name.startswith("clipboard-")
+                    and entry.name.endswith(".jsonl")
+                    and entry.name != "clipboard-index.jsonl"
+                ),
+                reverse=True,
+            )
+    except FileNotFoundError:
         return []
-    files = sorted(CLIPBOARD_DIR.glob("clipboard-*.jsonl"), reverse=True)
+    except OSError as error:
+        _unavailable("clipboard", CLIPBOARD_DIR, error)
+        return []
     out: list[Entry] = []
     for path in files:
         if len(out) >= CLIPBOARD_LIMIT:
             break
         try:
-            lines = path.read_text(encoding="utf-8").splitlines()
-        except OSError:
-            continue
-        for line in reversed(lines):
-            if len(out) >= CLIPBOARD_LIMIT:
-                break
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            payload = row.get("payload", {})
-            if payload.get("category") != "text":
-                continue
-            text = payload.get("text", "")
-            if not text.strip():
-                continue
-            snippet = re.sub(r"\s+", " ", text).strip()[:200]
-            out.append(Entry("clip", snippet, text))
+            with _regular_input(path) as source:
+                for line in _reverse_lines(source):
+                    try:
+                        row = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(row, dict):
+                        continue
+                    payload = row.get("payload", {})
+                    if (
+                        not isinstance(payload, dict)
+                        or payload.get("category") != "text"
+                    ):
+                        continue
+                    text = payload.get("text", "")
+                    if not isinstance(text, str) or not text.strip():
+                        continue
+                    snippet = re.sub(r"\s+", " ", text).strip()[:200]
+                    out.append(Entry("clip", snippet, text))
+                    if len(out) >= CLIPBOARD_LIMIT:
+                        return out
+        except (OSError, UnicodeError) as error:
+            _unavailable("clipboard", path, error)
     return out
 
 
