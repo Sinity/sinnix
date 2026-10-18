@@ -163,9 +163,10 @@
       ];
     };
     serviceConfig = {
-      # Namespace enumeration retains its existing deadline; content work is
-      # independently limited to 128 files and one GiB per successful pass.
-      TimeoutStartSec = "36h";
+      # A sampled pass takes minutes (each Borg child is capped at 300 s,
+      # content at 128 files and one GiB); the cap only frees the pinned
+      # snapshot if a pass hangs.
+      TimeoutStartSec = "2h";
       TimeoutStopSec = "15s";
     };
     timer = {
