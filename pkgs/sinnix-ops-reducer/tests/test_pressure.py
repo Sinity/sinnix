@@ -248,7 +248,7 @@ def test_the_lane_survives_the_sweeps_prune(lane) -> None:
     for _ in range(4):
         lane["sweep"](reading)
     stored = json.loads(lane["state"].read_text())
-    assert stored[pressure.SWAP_LANE_KEY] == {"status": "pre-freeze"}
+    assert stored[pressure.SWAP_LANE_KEY]["status"] == "pre-freeze"
     assert len(lane["recorder"].notifications) == 1
 
 

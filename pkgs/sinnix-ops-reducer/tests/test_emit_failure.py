@@ -28,6 +28,16 @@ INVENTORY: dict[str, Any] = {
 }
 
 
+def without_reminder_clock(document: dict) -> dict:
+    """The state file minus `notified_at`, the daily-reminder clock."""
+    return {
+        key: {k: v for k, v in value.items() if k != "notified_at"}
+        if isinstance(value, dict)
+        else value
+        for key, value in document.items()
+    }
+
+
 class UnixHTTPServer(socketserver.ThreadingUnixStreamServer):
     daemon_threads = True
 
@@ -85,7 +95,7 @@ def test_the_failure_reaches_the_running_reducer(reducer_socket) -> None:
     # inventory, so the key matches the one the sweep would use.
     assert events[0]["unit"] == "usersurf.service"
     assert events[0]["evidence"] == "manager=user;source=onfailure;result=oom-kill"
-    assert json.loads(reducer_socket["state"].read_text()) == {
+    assert without_reminder_clock(json.loads(reducer_socket["state"].read_text())) == {
         "service:user:usersurf.service": {"status": "failed"}
     }
 
@@ -120,7 +130,7 @@ def test_a_dead_reducer_does_not_swallow_the_failure(
     assert events[0]["unit"] == "usersurf.service"
     assert events[0]["schema"] == "sinnix-health-transition-v1"
     # Same key, same file, same shape as the socket path: one state store.
-    assert json.loads(state.read_text()) == {
+    assert without_reminder_clock(json.loads(state.read_text())) == {
         "service:user:usersurf.service": {"status": "failed"}
     }
 

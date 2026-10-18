@@ -29,12 +29,12 @@ Preserved exactly, because they are contracts other things read:
     state used to be reported as `stale`, which made a newly-declared lane and
     a dead one indistinguishable in both the ledger and the notification;
   * the state file shape at /run/sinnix/health-state.json --
-    `{key: {status, pending?, streak?}}`, keyed `service:<manager>:<unit>`,
+    `{key: {status, pending?, streak?, notified_at?}}`, keyed `service:<manager>:<unit>`,
     `socket:<manager>:<unit>`, `capture:<name>`, `payload:<name>`,
     `publisher:<name>`, `mount:<path>`, `pressure:<lane>`;
   * confirm-2 debounce, the prune that only the full sweep may run, and the
     notification rules (acknowledged silent, recovery only if the outage was
-    announced, everything else critical).
+    announced, everything else critical, an unresolved failure repeated daily).
 
 The one capability that changes hands is socket recovery: `reset-failed` +
 `start` on a *system* socket used to run as root and now runs as the operator,
@@ -83,6 +83,12 @@ CONFIRM_SAMPLES = 2
 # widening to budget-less lanes (2026-08-16) surface five simultaneous
 # criticals for a condition that had been true for weeks.
 CALM_STATUSES = frozenset({"unproduced"})
+
+# A failure that stays failed is announced again once a day. One notification
+# per outage let a backup fail nightly for a month unnoticed, and NixOS
+# activation runs `reset-failed` on every unit, so `systemctl --failed` cannot
+# be the reminder.
+REMIND_AFTER_SECONDS = 24 * 3600
 
 PAYLOAD_SAMPLE_SIZE = 50
 PAYLOAD_MIN_SAMPLES = 5
@@ -327,6 +333,23 @@ def describe(
 # --------------------------------------------------------------------------
 
 
+def _is_quiet(status: str, type_: str) -> bool:
+    """Statuses that never page: healthy, acknowledged, and the calm ones."""
+    return (
+        status in ("healthy", "acknowledged")
+        or status in CALM_STATUSES
+        or (type_ == "capture_stale" and status == "unknown")
+    )
+
+
+def _needs_reminder(status: str, type_: str, notified_at: Any) -> bool:
+    if _is_quiet(status, type_):
+        return False
+    if not isinstance(notified_at, (int, float)):
+        return False
+    return time.time() - notified_at >= REMIND_AFTER_SECONDS
+
+
 class Emitter:
     """Confirm-2 debounce, the transition ledger, and the notification rules.
 
@@ -377,6 +400,7 @@ class Emitter:
     ) -> None:
         self.emitted_keys.append(key)
         transition: tuple[str, str] | None = None
+        reminder = False
         with modify_json(self.state, {}, mode=0o664) as document:
             entry = document.get(key)
             # Older state files hold a bare status string; read both shapes.
@@ -389,50 +413,67 @@ class Emitter:
                 pending = ""
                 streak = 0
 
+            notified_at = entry.get("notified_at") if isinstance(entry, dict) else None
             if status == confirmed:
                 # Agrees with what we believe. Drop any half-accumulated
                 # candidate: a fault must be witnessed on CONSECUTIVE sweeps,
                 # not merely twice ever, or a lane that blips once an hour
                 # eventually pages anyway.
-                if pending:
-                    document[key] = {"status": status}
-                return
+                kept: dict[str, Any] = {"status": status}
+                if notified_at is not None:
+                    kept["notified_at"] = notified_at
+                elif not _is_quiet(status, type_):
+                    # Confirmed before reminders existed: start its clock.
+                    kept["notified_at"] = time.time()
+                if _needs_reminder(status, type_, notified_at):
+                    kept["notified_at"] = time.time()
+                    reminder = True
+                if pending or kept.get("notified_at") != notified_at:
+                    document[key] = kept
+                if not reminder:
+                    return
+            else:
+                streak = streak + 1 if status == pending else 1
+                # A key we have never seen settling into "healthy" is startup, not
+                # a recovery: believe it at once and say nothing.
+                if not confirmed and status == "healthy":
+                    streak = self.confirm_samples
+                if force_confirm:
+                    streak = self.confirm_samples
 
-            streak = streak + 1 if status == pending else 1
-            # A key we have never seen settling into "healthy" is startup, not
-            # a recovery: believe it at once and say nothing.
-            if not confirmed and status == "healthy":
-                streak = self.confirm_samples
-            if force_confirm:
-                streak = self.confirm_samples
+                if streak < self.confirm_samples:
+                    document[key] = {
+                        "status": confirmed,
+                        "pending": status,
+                        "streak": streak,
+                    }
+                    return
 
-            if streak < self.confirm_samples:
-                document[key] = {
-                    "status": confirmed,
-                    "pending": status,
-                    "streak": streak,
-                }
-                return
+                # Evidence first: an append failure must not confirm debounce, and
+                # a later cache-publish failure may duplicate the ledger line.
+                append_jsonl(
+                    self.ledger,
+                    {
+                        "schema": SCHEMA,
+                        "ts": utc_ts(),
+                        "type": type_,
+                        "unit": unit,
+                        "status": status,
+                        "ok": status == "healthy",
+                        "evidence": evidence,
+                        "confirmed_after_samples": self.confirm_samples,
+                    },
+                    mode=0o664,
+                )
+                document[key] = {"status": status}
+                if not _is_quiet(status, type_):
+                    document[key]["notified_at"] = time.time()
+                transition = (confirmed, status)
 
-            # Evidence first: an append failure must not confirm debounce, and
-            # a later cache-publish failure may duplicate the ledger line.
-            append_jsonl(
-                self.ledger,
-                {
-                    "schema": SCHEMA,
-                    "ts": utc_ts(),
-                    "type": type_,
-                    "unit": unit,
-                    "status": status,
-                    "ok": status == "healthy",
-                    "evidence": evidence,
-                    "confirmed_after_samples": self.confirm_samples,
-                },
-                mode=0o664,
-            )
-            document[key] = {"status": status}
-            transition = (confirmed, status)
-
+        if reminder:
+            title, body = describe(type_, unit, status, evidence, status)
+            self.notifier("critical", title, f"Still failing. {body}")
+            return
         if transition is None:
             return
         confirmed, status = transition

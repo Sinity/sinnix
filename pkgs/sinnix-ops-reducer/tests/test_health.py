@@ -102,6 +102,16 @@ UNIT_FIXTURES: dict[str, dict[str, str]] = {
 }
 
 
+def without_reminder_clock(document: dict) -> dict:
+    """The state file minus `notified_at`, the daily-reminder clock."""
+    return {
+        key: {k: v for k, v in value.items() if k != "notified_at"}
+        if isinstance(value, dict)
+        else value
+        for key, value in document.items()
+    }
+
+
 def prober(units, user: bool) -> dict[str, dict[str, str]]:
     # A user manager with no live session answers nothing at all, which must
     # read as "unknown" rather than as a silent pass or failure.
@@ -629,7 +639,7 @@ def test_the_failure_fast_path_shares_the_sweeps_key(world) -> None:
     emitter = health.Emitter(world["state"], world["ledger"], world["recorder"])
     health.emit_failure("fixture", "exit-code", world["inventory"], emitter)
     state = json.loads(world["state"].read_text())
-    assert state["service:system:fixture.service"] == {"status": "failed"}
+    assert state["service:system:fixture.service"]["status"] == "failed"
     events = [json.loads(line) for line in world["ledger"].read_text().splitlines()]
     # One event, on the first observation: an OnFailure hook fires exactly once,
     # so it must not wait for a second agreeing sample.
@@ -639,7 +649,7 @@ def test_the_failure_fast_path_shares_the_sweeps_key(world) -> None:
     # The sweep then agrees with it and says nothing further, and its prune
     # keeps the key rather than resetting the memory.
     world["run"]()
-    assert json.loads(world["state"].read_text())["service:system:fixture.service"] == {
+    assert without_reminder_clock(json.loads(world["state"].read_text()))["service:system:fixture.service"] == {
         "status": "failed"
     }
     assert (
@@ -667,7 +677,7 @@ def test_a_mid_transition_unit_keeps_its_previous_verdict(world) -> None:
     world["run"]()
     world["run"]()
     state = json.loads(world["state"].read_text())
-    assert state["service:system:midflight.service"] == {"status": "failed"}
+    assert state["service:system:midflight.service"]["status"] == "failed"
 
 
 def test_the_prune_drops_keys_the_sweep_no_longer_emits(world) -> None:
@@ -720,7 +730,7 @@ def test_append_failure_does_not_confirm_debounce(tmp_path, monkeypatch) -> None
         "result=exit",
         force_confirm=True,
     )
-    assert json.loads(state.read_text()) == {
+    assert without_reminder_clock(json.loads(state.read_text())) == {
         "service:system:x.service": {"status": "failed"}
     }
     assert ledger.read_text()
@@ -1021,3 +1031,45 @@ def test_reset_failure_does_not_erase_retained_process_outcome(
     assert recorder.events[0][1] == expected
     if expected == "failed":
         assert f"exec_main_status={exit_status}" in recorder.events[0][2]
+
+
+def test_an_unresolved_failure_is_repeated_daily(tmp_path: Path, monkeypatch) -> None:
+    notifications: list[tuple[str, str]] = []
+    emitter = health.Emitter(
+        tmp_path / "health-state.json",
+        tmp_path / "health-transitions.jsonl",
+        lambda urgency, title, body: notifications.append((urgency, body)),
+    )
+    now = [1_000_000.0]
+    monkeypatch.setattr(health.time, "time", lambda: now[0])
+
+    def fail() -> None:
+        emitter.emit(
+            "service:system:backup.service",
+            "service_failure",
+            "backup.service",
+            "failed",
+            "result=exit-code",
+            force_confirm=True,
+        )
+
+    fail()
+    assert len(notifications) == 1
+    now[0] += 3600
+    fail()
+    assert len(notifications) == 1
+    now[0] += health.REMIND_AFTER_SECONDS
+    fail()
+    assert len(notifications) == 2
+    assert notifications[1][1].startswith("Still failing.")
+    fail()
+    assert len(notifications) == 2
+    emitter.emit(
+        "service:system:backup.service",
+        "service_failure",
+        "backup.service",
+        "healthy",
+        "result=success",
+        force_confirm=True,
+    )
+    assert notifications[-1][0] == "normal"
