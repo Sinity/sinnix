@@ -1047,7 +1047,11 @@ class ProducerReceiptFixture(unittest.TestCase):
                     "command_line": command,
                     "name": archive,
                     "id": archive_id,
-                    "stats": {"original_size": 123},
+                    "stats": {
+                        "original_size": 123,
+                        "compressed_size": 80,
+                        "deduplicated_size": 17,
+                    },
                 }
             }
             details = (uuid_value, 17, 117)
@@ -1065,6 +1069,35 @@ class ProducerReceiptFixture(unittest.TestCase):
                 self.assertEqual(proof["source_hashed_bytes"], 0)
                 self.assertEqual(proof["archive_id"], archive_id)
                 self.assertEqual(proof["filesystem_uuid"], FS_UUID)
+                self.assertEqual(proof["created_epoch"], receipt["created_epoch"])
+                for name, expected in (
+                    ("original", 123), ("compressed", 80), ("deduplicated", 17)
+                ):
+                    self.assertEqual(receipt["create_" + name + "_bytes"], expected)
+                    self.assertEqual(proof["create_" + name + "_bytes"], expected)
+                legacy = {
+                    key: value for key, value in receipt.items()
+                    if key not in ("create_compressed_bytes", "create_deduplicated_bytes", "created_epoch")
+                }
+                receipt_path.write_text(json.dumps(legacy))
+                legacy_proof = COVERAGE.verify_created(source, archive, uuid_value, policy, receipt_path)
+                self.assertNotIn("create_deduplicated_bytes", legacy_proof)
+                self.assertNotIn("create_compressed_bytes", legacy_proof)
+                self.assertNotIn("created_epoch", legacy_proof)
+                for invalid in (-1, True, "17", 1.5, None):
+                    receipt_path.write_text(json.dumps(receipt | {"created_epoch": invalid}))
+                    with self.assertRaisesRegex(ValueError, "timestamp"):
+                        COVERAGE.verify_created(source, archive, uuid_value, policy, receipt_path)
+                for name in ("original", "compressed", "deduplicated"):
+                    for invalid in (-1, True, "17", 1.5, None):
+                        bad = json.loads(json.dumps(stats))
+                        bad["archive"]["stats"][name + "_size"] = invalid
+                        with self.subTest(name=name, invalid=invalid):
+                            with self.assertRaisesRegex(ValueError, "byte count"):
+                                COVERAGE.record_create(source, archive, policy, bad)
+                            receipt_path.write_text(json.dumps(receipt | {"create_" + name + "_bytes": invalid}))
+                            with self.assertRaisesRegex(ValueError, "byte count"):
+                                COVERAGE.verify_created(source, archive, uuid_value, policy, receipt_path)
                 for altered in (
                     receipt | {"filesystem_uuid": str(uuid.uuid4())},
                     {key: value for key, value in receipt.items() if key != "filesystem_uuid"},

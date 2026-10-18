@@ -369,6 +369,12 @@ def record_create(source, archive, policy_path, create_stats):
     archive_id = archive_identity(archive, uuid)
     if created["id"] != archive_id:
         raise ValueError("created archive identity changed")
+    byte_counts = {}
+    for name in ("original", "compressed", "deduplicated"):
+        value = created["stats"][name + "_size"]
+        if type(value) is not int or value < 0:
+            raise ValueError("invalid Borg creation byte count")
+        byte_counts["create_" + name + "_bytes"] = value
     return {
         "producer_contract": REALM_PRODUCER_CONTRACT,
         "filesystem_uuid": filesystem_identity(source),
@@ -380,7 +386,7 @@ def record_create(source, archive, policy_path, create_stats):
         "policy_sha256": policy_hash,
         "command_line": command,
         "command_sha256": hashlib.sha256(json.dumps(command).encode()).hexdigest(),
-        "create_original_bytes": created["stats"]["original_size"],
+        **byte_counts,
         "created_epoch": int(time.time()),
     }
 
@@ -413,6 +419,22 @@ def verify_created(source, archive, uuid, policy_path, receipt_path):
     archive_id = archive_identity(archive, uuid)
     if archive_id != receipt["archive_id"]:
         raise ValueError("creation receipt archive identity changed")
+    # Old receipts predate retention of these counts. Absence means unknown,
+    # never zero; later borg info reports current uniqueness, not create cost.
+    byte_counts = {}
+    for name in ("original", "compressed", "deduplicated"):
+        key = "create_" + name + "_bytes"
+        if key not in receipt and name != "original":
+            continue
+        value = receipt[key]
+        if type(value) is not int or value < 0:
+            raise ValueError("invalid Borg creation byte count")
+        byte_counts[key] = value
+    if "created_epoch" in receipt:
+        value = receipt["created_epoch"]
+        if type(value) is not int or value < 0:
+            raise ValueError("invalid Borg creation receipt timestamp")
+        byte_counts["created_epoch"] = value
     return {
         "archive": archive,
         "archive_id": archive_id,
@@ -426,7 +448,7 @@ def verify_created(source, archive, uuid, policy_path, receipt_path):
         "create_receipt_sha256": hashlib.sha256(
             Path(receipt_path).read_bytes()
         ).hexdigest(),
-        "create_original_bytes": receipt["create_original_bytes"],
+        **byte_counts,
         "create_seconds": receipt.get("create_seconds", 0),
         "source_hashed_bytes": 0,
         "archive_content_verified_bytes": 0,
