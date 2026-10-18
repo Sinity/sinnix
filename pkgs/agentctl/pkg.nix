@@ -15,11 +15,6 @@
   ...
 }:
 let
-  # AgentCTL removals must not sweep unrelated repository state.
-  # Remove this patch when upstream provides --no-internal-sweep.
-  scopedWorktrunk = worktrunk.overrideAttrs (old: {
-    patches = (old.patches or [ ]) ++ [ ./worktrunk-no-internal-sweep.patch ];
-  });
   # Shared by the CLI wrapper and in-process consumers such as the gateway.
   # Importing this Python package does not execute its command-line wrapper.
   runtimeDependencies = [
@@ -29,7 +24,7 @@ let
     git
     gh
     beads
-    scopedWorktrunk
+    worktrunk
     pueue
     nix
     systemd

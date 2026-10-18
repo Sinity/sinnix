@@ -280,7 +280,7 @@ def test_agentctl_remove_uses_scoped_worktrunk_remove_contract(
     worktrunk_remove(Path("/repo"), "feature/owned", reap=False)
 
     assert calls == [
-        ("remove", "feature/owned", "--foreground", "--no-internal-sweep", "-y", "--format", "json")
+        ("remove", "feature/owned", "--foreground", "-y", "--format", "json")
     ]
 
 
@@ -719,46 +719,3 @@ def test_an_index_lock_the_mutation_did_not_create_is_left_alone(
     worktrunk_remove(root, "feature/lane")
 
     assert index_lock.exists()
-
-
-def test_remove_preserves_unrelated_trash_but_operator_default_still_sweeps(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    home = tmp_path / "isolated-home"
-    home.mkdir()
-    for key, value in {
-        "HOME": str(home),
-        "XDG_CONFIG_HOME": str(home / ".config"),
-        "XDG_STATE_HOME": str(home / ".local/state"),
-        "GIT_CONFIG_GLOBAL": "/dev/null",
-        "GIT_CONFIG_SYSTEM": "/dev/null",
-    }.items():
-        monkeypatch.setenv(key, value)
-    root = _repository(tmp_path / "repo")
-    owned = tmp_path / "owned"
-    _worktree(root, "feature/owned", owned)
-    common = _git_absolute_path(root, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    stale = common / "wt/trash" / f"unrelated-stale-{int(time.time()) - 172800}"
-    stale.mkdir(parents=True)
-    marker = stale / "retained.txt"
-    marker.write_text("unrelated recoverable material\n")
-
-    worktrunk_remove(root, "feature/owned", reap=False)
-    assert not owned.exists()
-    # The default sweep is detached; give it time to expose the regression.
-    deadline = time.monotonic() + 1
-    while stale.exists() and time.monotonic() < deadline:
-        time.sleep(0.02)
-    assert marker.read_text() == "unrelated recoverable material\n"
-
-    operator = tmp_path / "operator"
-    _worktree(root, "feature/operator", operator)
-    result = subprocess.run(
-        ["wt", "-C", str(root), "remove", "feature/operator", "--foreground", "-y", "--format", "json"],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 0, result.stderr
-    deadline = time.monotonic() + 5
-    while stale.exists() and time.monotonic() < deadline:
-        time.sleep(0.02)
-    assert not stale.exists(), "fixture must be eligible for the real default sweep"
