@@ -205,11 +205,6 @@ mkServiceModule {
             # rather than running the whole unit as root.
             AmbientCapabilities = [ "CAP_NET_ADMIN" ];
             NoNewPrivileges = true;
-            ProtectSystem = "strict";
-            ProtectHome = "read-only";
-            ReadWritePaths = [ laneDir ];
-            Environment = [ "TMPDIR=/tmp" ];
-            PrivateTmp = true;
           };
         };
       };

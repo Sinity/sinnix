@@ -66,12 +66,10 @@ mkServiceModule (mkCaptureLane {
       default = "192.168.1.1";
       description = ''
         ssh target for the router: the address itself, not the operator's
-        `sinnix-gw` alias. The lane deliberately runs ssh with -F /dev/null
-        and an explicit identity, because under its ProtectHome sandbox ssh
-        refuses the Home-Manager ~/.ssh/config ("Bad owner or permissions",
-        exit 255) -- and because a capture lane should behave the same
-        whether a timer or a human invokes it. No new credential is
-        introduced; it reuses the operator's existing key.
+        `sinnix-gw` alias. The lane runs ssh with -F /dev/null and an
+        explicit identity so it behaves the same whether a timer or a human
+        invokes it, independent of ~/.ssh/config. It reuses the operator's
+        existing key.
       '';
     };
     intervalSec = lib.mkOption {
@@ -137,7 +135,6 @@ mkServiceModule (mkCaptureLane {
     "${remotePollScript}"
     "${remotePeriodsScript}"
   ];
-  privateTmp = true;
   timer = {
     intervalSec = cfg.intervalSec;
     onBootSec = "5min";

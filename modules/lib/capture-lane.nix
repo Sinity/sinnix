@@ -7,9 +7,8 @@
 #     (capture-notifications, capture-clipboard, capture-a11y, ...).
 #
 # Both shapes share: a tmpfiles-provisioned lane directory, a
-# `sinnix.runtime.surfaces.<name>` entry carrying `captures[]`, and the same
-# hardening set (NoNewPrivileges, ProtectSystem=strict, ProtectHome=read-only,
-# a narrow ReadWritePaths). mkCaptureLane encodes that shape once; callers
+# `sinnix.runtime.surfaces.<name>` entry carrying `captures[]`, and
+# NoNewPrivileges with a private UMask. mkCaptureLane encodes that shape once; callers
 # supply only what actually varies (the writer's ExecStart, cadence/staleness
 # budgets, and any lane-specific overrides) and get back the `{ name;
 # description; extraOptions; surface; configFn; }` attrset mkServiceModule
@@ -19,8 +18,7 @@
 #
 # Deliberately NOT covered here (see modules/services/*.nix for why each
 # stays hand-rolled): capture-audio (three cooperating units sharing one
-# --capture-root), capture-replay (mutually-exclusive with sandboxing --
-# gpu-screen-recorder's cap_sys_admin needs the initial namespace),
+# --capture-root), capture-replay (gpu-screen-recorder needs cap_sys_admin),
 # capture-netflow (system-manager unit with an ambient-capability
 # ExecStartPre root step), terminal-capture (no owning unit at all -- a
 # `sinnix.runtime.captures` lane, not a surface).
@@ -32,8 +30,8 @@
   # build it the same way job.execStart is built for mkServiceModule).
   execStart,
   # Directory this lane's writer needs. Drives the default tmpfiles rule and
-  # the default single-entry captures[] / ReadWritePaths -- override
-  # tmpfilesRules / captures / writablePaths for a multi-directory lane
+  # the default single-entry captures[] -- override
+  # tmpfilesRules / captures for a multi-directory lane
   # (see capture-clipboard's laneDir+blobDir+stateDir, capture-router's four
   # sub-lanes under one routerRoot).
   laneDir ? null,
@@ -61,7 +59,7 @@
   # Full override for multi-lane surfaces (capture-router's four sub-lanes).
   # When set, laneDir/cadenceSeconds/staleAfterSeconds/eventDriven/
   # requiredPayloadFields/livenessProbe above are ignored for captures[] --
-  # they may still drive the default tmpfiles rule / writablePaths.
+  # they may still drive the default tmpfiles rule.
   captures ? null,
   extraSurface ? { },
 
@@ -70,14 +68,11 @@
   # for laneDir at 0700: captures are private operator evidence.
   tmpfilesRules ? null,
 
-  # --- hardening / exec ---
-  # ReadWritePaths. Defaults to [ laneDir ].
-  writablePaths ? null,
+  # --- exec ---
   environment ? [ ],
   runtimeDirectory ? null,
   runtimeDirectoryPreserve ? null,
   umask ? "0077",
-  privateTmp ? false,
   # Merged last over the generated Service overrides -- escape hatch for a
   # lane-specific knob (capture-monitor's XDG_CACHE_HOME, capture-a11y's
   # GI_TYPELIB_PATH) that doesn't warrant its own factory parameter.
@@ -121,7 +116,6 @@ let
   unitName = "sinnix-${name}";
   unit = "${unitName}.service";
 
-  resolvedWritablePaths = if writablePaths != null then writablePaths else [ laneDir ];
   resolvedTmpfilesRules =
     if tmpfilesRules != null then tmpfilesRules else [ "d ${laneDir} 0700 ${username} users -" ];
 
@@ -151,30 +145,16 @@ let
   }
   // extraSurface;
 
-  # The user manager exports TMPDIR into every unit it starts, and that path
-  # is read-only inside ProtectSystem=strict, so every mktemp in the lane
-  # fails and the lane silently captures nothing. A lane with PrivateTmp has
-  # a writable /tmp of its own; point TMPDIR there unless the lane already
-  # said where its tmp lives.
-  lanePrivateTmpEnv = lib.optional (
-    privateTmp && !(lib.any (e: lib.hasPrefix "TMPDIR=" e) environment)
-  ) "TMPDIR=/tmp";
-  laneEnvironment = environment ++ lanePrivateTmpEnv;
-
   baseOverrides = {
     ExecStart = execStart;
     NoNewPrivileges = true;
-    ProtectSystem = "strict";
-    ProtectHome = "read-only";
-    ReadWritePaths = resolvedWritablePaths;
   }
-  // lib.optionalAttrs (laneEnvironment != [ ]) { Environment = laneEnvironment; }
+  // lib.optionalAttrs (environment != [ ]) { Environment = environment; }
   // lib.optionalAttrs (runtimeDirectory != null) { RuntimeDirectory = runtimeDirectory; }
   // lib.optionalAttrs (runtimeDirectoryPreserve != null) {
     RuntimeDirectoryPreserve = runtimeDirectoryPreserve;
   }
-  // lib.optionalAttrs (umask != null) { UMask = umask; }
-  // lib.optionalAttrs privateTmp { PrivateTmp = true; };
+  // lib.optionalAttrs (umask != null) { UMask = umask; };
 
   streamOverrides =
     baseOverrides
@@ -188,7 +168,7 @@ let
   # poll mode hands its unit+timer generation to mkServiceModule's `job`
   # mechanism (see modules/lib/features.nix's mkJobConfig) instead of
   # hand-writing home-manager systemd.user.{services,timers} -- this factory
-  # supplies only what's capture-specific (ExecStart, hardening, tmpfiles,
+  # supplies only what's capture-specific (ExecStart, tmpfiles,
   # captures[]/surface); job owns the OnFailure wiring, resource-class
   # resolution, and unit shape. That lands the poll lane at NixOS-level
   # `systemd.user.*` (/etc/systemd/user) rather than home-manager's per-user

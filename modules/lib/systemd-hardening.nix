@@ -1,22 +1,5 @@
 { lib }:
 {
-  # Write surface an agent CLI child needs. A hardened unit that fork/execs
-  # `claude`/`codex` passes its mount namespace to the child, so a narrow
-  # ReadWritePaths silently discards that agent's session transcript and hook
-  # spool. Any such unit must union this in and leave ProtectHome off.
-  agentRuntimeWritePaths =
-    {
-      home,
-      polylogueDataDir,
-    }:
-    [
-      "${home}/.claude"
-      "${home}/.codex"
-      "${home}/.cache/claude-cli-nodejs"
-      "${home}/.local/state/claude-code"
-      "${polylogueDataDir}/hooks"
-    ];
-
   mkRestartPolicy =
     {
       strategy ? "on-failure", # "always" | "on-failure" | "on-abnormal"

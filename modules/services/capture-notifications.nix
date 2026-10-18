@@ -46,7 +46,6 @@ mkServiceModule (mkCaptureLane {
   # today" budget false-positives routinely.
   staleAfterSeconds = 86400;
   tmpfilesRules = [ "d ${laneDir} 0700 ${userName} users -" ];
-  writablePaths = [ laneDir ];
   target = "default.target";
   partOf = false;
   execStart = "${listener}/bin/sinnix-capture-notifications-listener --capture-bin ${captureCli}/bin/sinnix-capture --capture-root ${config.sinnix.paths.activityRoot} --lane ${lane}";

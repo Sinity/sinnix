@@ -225,7 +225,6 @@ mkServiceModule {
           execStart = "${scriptPkgs.agentctl}/bin/agentctl backpressure tick";
           serviceConfig = {
             TimeoutStartSec = "30s";
-            ReadWritePaths = [ (builtins.dirOf eventSpool) ];
           };
           timer = {
             # Full-stall averages are 60-second means, so sampling faster reads

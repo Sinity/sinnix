@@ -99,18 +99,12 @@ mkServiceModule (mkCaptureLane {
     "d ${blobDir} 0700 ${username} users -"
     "d ${stateDir} 0700 ${username} users -"
   ];
-  writablePaths = [
-    laneDir
-    blobDir
-    stateDir
-  ];
   execStart = "${pkgs.wl-clipboard}/bin/wl-paste --primary --watch ${primaryWatch}/bin/sinnix-capture-primary-watch";
   environment = [
     "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.activityRoot}"
     "SINNIX_CAPTURE_PRIMARY_STATE_DIR=${stateDir}"
     "SINNIX_CAPTURE_PRIMARY_DEBOUNCE_MS=${toString cfg.debounceMs}"
   ];
-  privateTmp = true;
   umask = "0077";
   unitDescription = "Wayland PRIMARY-selection capture lane";
 }) args

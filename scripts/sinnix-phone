@@ -41,10 +41,8 @@ PHONE_HOST_CACHE="${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}/last-host
 PHONE_SSH_PORT="${SINNIX_PHONE_SSH_PORT:-8022}"
 PHONE_USER="${SINNIX_PHONE_USER:-u0_a460}"
 
-# -F /dev/null + explicit identity, not ~/.ssh/config: under a sandboxed
-# systemd unit's ProtectHome, ssh rejects the Home-Manager ~/.ssh/config
-# symlink outright ("Bad owner or permissions", exit 255). A script invoked
-# by both a human and a timer should not depend on interactive config.
+# -F /dev/null + explicit identity, not ~/.ssh/config: a script invoked by
+# both a human and a timer should not depend on interactive config.
 ssh_phone_opts=(
   # -o Port=, not -p: the array must stay safe for every OpenSSH tool --
   # scp's -p means "preserve file attributes" (a no-arg flag), not port, so

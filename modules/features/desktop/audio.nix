@@ -137,13 +137,6 @@ mkFeatureModule {
           strategy = "on-failure";
           delaySec = 2;
         })
-        {
-          # Audio-specific hardening
-          ProtectKernelModules = true;
-          ProtectKernelTunables = true;
-          RestrictNamespaces = true;
-          LockPersonality = true;
-        }
       ];
 
       # Same mod.rt behaviour in pipewire-pulse (see pipewire above).
@@ -152,16 +145,10 @@ mkFeatureModule {
         LimitNICE = -11;
       };
 
-      systemd.user.services.wireplumber.serviceConfig = lib.mkMerge [
-        (lib.sinnix.systemd.mkRestartPolicy {
-          strategy = "always";
-          delaySec = 2;
-        })
-        {
-          ProtectKernelModules = true;
-          RestrictNamespaces = true;
-        }
-      ];
+      systemd.user.services.wireplumber.serviceConfig = lib.sinnix.systemd.mkRestartPolicy {
+        strategy = "always";
+        delaySec = 2;
+      };
 
       # These reach the user manager (user@.service goes through PAM), which
       # is where the unit-level LimitNICE above gets its hard ceiling.

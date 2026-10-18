@@ -48,10 +48,6 @@ mkServiceModule (mkCaptureLane {
     "KITTY_SCROLLBACK_DIR=${scrollbackDir}"
     "KITTY_SCROLLBACK_PROGRESS_MARKER=${progressPath}"
   ];
-  writablePaths = [
-    scrollbackDir
-    progressDir
-  ];
   extraConfig = _: {
     systemd.tmpfiles.rules = [ "d ${progressDir} 0700 ${username} users -" ];
   };

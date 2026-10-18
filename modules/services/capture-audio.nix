@@ -58,8 +58,6 @@ let
 
   hardening = {
     NoNewPrivileges = true;
-    ProtectSystem = "strict";
-    ProtectHome = "read-only";
     UMask = "0077";
   };
 in
@@ -141,13 +139,7 @@ mkServiceModule {
           manager = "user";
           resourceClass = "capture";
           execStart = "${audioPkg}/bin/sinnix-audio-capture index --capture-root ${lakeRoot} --ffmpeg-bin ${ffmpegBin} --catalog /realm/report/catalog/catalog.json";
-          serviceConfig = {
-            ReadWritePaths = [
-              audioDir
-              indexDir
-            ];
-          }
-          // hardening;
+          serviceConfig = hardening;
           timer = {
             onCalendar = "hourly";
             persistent = true;
@@ -270,20 +262,12 @@ mkServiceModule {
                       ++ lib.optional (excludeArgs != "") excludeArgs
                       ++ lib.optionals (cfg.asrSourcePattern != null) [
                         "--asr-source ${lib.escapeShellArg cfg.asrSourcePattern}"
-                        # RuntimeDirectory gives the socket a writable %t path
-                        # under ProtectSystem=strict without widening
-                        # ReadWritePaths.
+                        # RuntimeDirectory below provides %t/sinnix/audio.
                         "--tee-socket %t/sinnix/audio/asr.pcm"
                       ]
                     );
                     Restart = "on-failure";
                     RestartSec = "5s";
-                    # The per-device channel directories are created at runtime,
-                    # so the writable path is the parent, not an enumerable list.
-                    ReadWritePaths = [
-                      audioDir
-                      devicesDir
-                    ];
                     RuntimeDirectory = "sinnix/audio";
                   }
                   // hardening;
@@ -311,7 +295,6 @@ mkServiceModule {
                     ExecStart = "${audioPkg}/bin/sinnix-audio-capture topology --capture-root ${lakeRoot} --pw-mon-bin ${pwMonBin}";
                     Restart = "on-failure";
                     RestartSec = "5s";
-                    ReadWritePaths = [ topologyDir ];
                   }
                   // hardening;
                 };

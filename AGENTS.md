@@ -49,6 +49,10 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
   capabilities and reject duplicate identities at evaluation; they do not copy
   effective systemd policy. Set a fixed service's resources on its own unit,
   and only where the service needs them.
+- Do not sandbox sinnix's own units (`ProtectSystem`, `ProtectHome`,
+  write-path lists, syscall filters): a refused write fails silently. Upstream
+  nixpkgs module hardening stays as shipped, and a root-run tool that deletes
+  files keeps a narrowed write scope.
 - Every generated file has one declared source and one renderer; change the
   source, not the output. Dotfiles are owned through module metadata and the
   dotfile sweep, never as hand-managed copies.

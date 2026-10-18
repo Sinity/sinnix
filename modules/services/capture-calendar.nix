@@ -103,15 +103,10 @@ mkServiceModule (mkCaptureLane {
   cadenceSeconds = cfg.intervalSec;
   staleAfterSeconds = 172800;
   execStart = "${syncer}/bin/capture-calendar-sync ${vdirsyncerConfig} ${laneDir}";
-  privateTmp = true;
   tmpfilesRules = [
     "d ${laneDir} 0700 ${username} users -"
     "d ${stateDir} 0700 ${username} users -"
     "d ${stateDir}/status 0700 ${username} users -"
-  ];
-  writablePaths = [
-    laneDir
-    stateDir
   ];
   timer = {
     intervalSec = cfg.intervalSec;

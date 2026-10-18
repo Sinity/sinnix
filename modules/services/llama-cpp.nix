@@ -103,39 +103,7 @@ mkServiceModule {
                 CacheDirectory = name;
                 WorkingDirectory = "/var/lib/${name}";
                 Environment = [ "LLAMA_CACHE=/var/cache/${name}" ];
-                AmbientCapabilities = [ "" ];
-                CapabilityBoundingSet = [ "" ];
-                LockPersonality = true;
-                MemoryDenyWriteExecute = true;
                 NoNewPrivileges = true;
-                PrivateMounts = true;
-                PrivateTmp = true;
-                PrivateUsers = true;
-                ProcSubset = "pid";
-                ProtectClock = true;
-                ProtectControlGroups = true;
-                ProtectHome = true;
-                ProtectHostname = true;
-                ProtectKernelLogs = true;
-                ProtectKernelModules = true;
-                ProtectKernelTunables = true;
-                ProtectProc = "invisible";
-                ProtectSystem = "strict";
-                RemoveIPC = true;
-                RestrictAddressFamilies = [
-                  "AF_INET"
-                  "AF_INET6"
-                  "AF_UNIX"
-                ];
-                RestrictNamespaces = true;
-                RestrictRealtime = true;
-                RestrictSUIDSGID = true;
-                SystemCallArchitectures = "native";
-                SystemCallErrorNumber = "EPERM";
-                SystemCallFilter = [
-                  "@system-service"
-                  "~@privileged"
-                ];
               }
             else
               {

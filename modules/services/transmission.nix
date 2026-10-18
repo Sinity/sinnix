@@ -117,46 +117,20 @@ mkServiceModule {
         wants = [ "network-online.target" ];
         serviceConfig = lib.mkMerge [
           {
-            PrivateTmp = true;
             NoNewPrivileges = true;
-            ProtectKernelTunables = true;
-            ProtectKernelModules = true;
-            ProtectControlGroups = true;
-            RestrictRealtime = true;
-            LockPersonality = true;
-            RestrictNamespaces = true;
-            RestrictSUIDSGID = true;
-            ProtectSystem = "strict";
-            ProtectHome = "read-only";
-            PrivateDevices = true;
-            ProtectKernelLogs = true;
-            ProtectProc = "invisible";
-            ProcSubset = "pid";
-            RestrictAddressFamilies = [
-              "AF_UNIX"
-              "AF_INET"
-              "AF_INET6"
-            ];
-            SystemCallFilter = [
-              "@system-service"
-              "~@privileged"
-            ];
             ReadWritePaths = [
               torrentInbox
               torrentMoveDir
               torrentPartialDir
               "/var/lib/transmission"
             ];
-            ReadOnlyPaths = [ ];
             # The upstream RootDirectory exposes only configured download
             # paths. RPC moves into the workstation inbox need this host bind.
             BindPaths = [ torrentMoveDir ];
           }
           {
             # Transmission 4.1.1 uses RPC/session-info paths that are killed by
-            # the generic syscall deny-list on this host. Keep filesystem,
-            # namespace, privilege, and localhost RPC hardening, but do not use
-            # seccomp as the failure mode for an interactive torrent daemon.
+            # the upstream module's syscall deny-list on this host.
             SystemCallFilter = lib.mkForce [ ];
             # Cold Btrfs metadata lookups across large torrents can keep
             # Transmission busy checking payload paths before it sends READY=1.

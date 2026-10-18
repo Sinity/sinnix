@@ -99,7 +99,6 @@ mkServiceModule (mkCaptureLane {
     "${parseBluez}"
     "${parseSolaar}"
   ];
-  privateTmp = true;
   timer = {
     intervalSec = cfg.intervalSec;
     onBootSec = "3min";

@@ -78,17 +78,11 @@ mkServiceModule (mkCaptureLane {
     "d ${blobDir} 0700 ${username} users -"
     "d ${stateDir} 0700 ${username} users -"
   ];
-  writablePaths = [
-    laneDir
-    blobDir
-    stateDir
-  ];
   execStart = "${pkgs.wl-clipboard}/bin/wl-paste --watch ${clipboardWatch}/bin/sinnix-capture-clipboard-watch";
   environment = [
     "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.activityRoot}"
     "SINNIX_CAPTURE_CLIPBOARD_STATE_DIR=${stateDir}"
   ];
-  privateTmp = true;
   umask = "0077";
   unitDescription = "Wayland clipboard capture lane";
 }) args

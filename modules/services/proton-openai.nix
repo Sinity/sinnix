@@ -289,8 +289,6 @@ mkServiceModule {
           DynamicUser = true;
           RuntimeDirectory = "proton-openai-proxy";
           NoNewPrivileges = true;
-          ProtectSystem = "strict";
-          ProtectHome = true;
           ExecStart = "${proxyStart}/bin/proton-openai-proxy-start";
           Restart = "on-failure";
           RestartSec = "3s";

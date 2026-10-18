@@ -1,8 +1,7 @@
 # Provably fails when: the lane's directory moves out from under the capture
-# root the unit is given (verified by repointing laneDir at stateRoot), the
-# unit loses write access to the lane it advertises, or the generated watch
-# script stops writing an envelope, deduplicating consecutive copies, or
-# spilling binary payloads to a blob.
+# root the unit is given, or the generated watch script stops writing an
+# envelope, deduplicating consecutive copies, or spilling binary payloads to a
+# blob.
 #
 # Clipboard capture lane: static service-shape checks plus a runtime
 # fixture that exercises the real generated watch script (fake wl-paste /
@@ -195,36 +194,10 @@ in
               .Unit.After == ["graphical-session.target"] and
               .Unit.PartOf == ["graphical-session.target"]
             ' unit.json >/dev/null
-            # The lane the sentinel watches and the directory the unit is
-            # actually allowed to write must be the same place: a lane
-            # advertised at a path no unit writes is a silent capture gap.
-            # Neither side is restated as a literal here.
+            # The lane the sentinel watches must sit under the capture root
+            # the unit is given; neither side is restated as a literal here.
             jq -e --slurpfile captures captures.json --arg lane "clipboard" \
-              -f ${./capture-write-paths.jq} unit.json >/dev/null
-            # Exercise the actual predicate against mutated evaluated units.
-            # False is jq exit1; a parse/runtime error must fail the check too.
-            capture_path=$(jq -er --arg lane "clipboard" '.[] | select(.name == $lane) | .path' captures.json)
-            for mode in exact parent trailing empty unrelated prefix empty-string; do
-              jq --arg path "$capture_path" --arg mode "$mode" '
-                .Service.ReadWritePaths = (
-                  if $mode == "exact" then [$path]
-                  elif $mode == "parent" then [($path | split("/") | .[:-1] | join("/"))]
-                  elif $mode == "trailing" then [$path + "/"]
-                  elif $mode == "empty" then []
-                  elif $mode == "unrelated" then ["/synthetic-unrelated"]
-                  elif $mode == "prefix" then [($path | .[:-1])]
-                  else [""] end)
-              ' unit.json > mutated-unit.json
-              set +e
-              jq -e --slurpfile captures captures.json --arg lane "clipboard" \
-                -f ${./capture-write-paths.jq} mutated-unit.json >/dev/null
-              result=$?
-              set -e
-              case "$mode" in
-                exact|parent|trailing) test "$result" -eq 0 ;;
-                *) test "$result" -eq 1 ;;
-              esac
-            done
+              -f ${./capture-root.jq} unit.json >/dev/null
             touch "$out"
           '';
 

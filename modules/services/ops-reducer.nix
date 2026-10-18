@@ -90,14 +90,7 @@ mkServiceModule {
             # probe the live host with; /run/current-system/sw/bin is where
             # they are, and the pages render on request rather than from a
             # timer's PATH.
-            Environment = [
-              "PATH=/run/wrappers/bin:/run/current-system/sw/bin"
-              # The user manager's TMPDIR points at the NVMe scratch root,
-              # which ProtectSystem=strict mounts read-only here. PrivateTmp
-              # gives mktemp somewhere to land without widening
-              # ReadWritePaths.
-              "TMPDIR=/tmp"
-            ];
+            Environment = [ "PATH=/run/wrappers/bin:/run/current-system/sw/bin" ];
             Restart = "on-failure";
             RestartSec = "2s";
             # The main loop supervises a serial refresh/sweep worker and
@@ -107,19 +100,6 @@ mkServiceModule {
             NotifyAccess = "main";
             WatchdogSec = "120s";
             NoNewPrivileges = true;
-            ProtectSystem = "strict";
-            ProtectHome = "read-only";
-            PrivateTmp = true;
-            ReadWritePaths = [
-              "%t/sinnix"
-              stateDir
-              # The annotation spool the /feedback route appends to. Nothing
-              # else under /realm is writable from here.
-              cfg.feedbackDir
-              # The health sweep's transition ledger and dedup state, shared
-              # with the root-run failure template (runtime.nix).
-              "/run/sinnix"
-            ];
             UMask = "0077";
           };
           Install.WantedBy = [ "default.target" ];

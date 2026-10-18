@@ -104,7 +104,6 @@ mkServiceModule (mkCaptureLane {
   cadenceSeconds = cfg.intervalSec;
   staleAfterSeconds = 7200;
   execStart = "${syncer}/bin/capture-mail-sync ${mbsyncrc} ${maildirDir}";
-  privateTmp = true;
   timer = {
     intervalSec = cfg.intervalSec;
     onBootSec = "3min";

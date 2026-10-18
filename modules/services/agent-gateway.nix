@@ -381,10 +381,6 @@ mkServiceModule {
                 LoadCredential = "runtime-key:${endpoint.runtimeKeyFile}";
                 Restart = "always";
                 RestartSec = "5s";
-                ProtectHome = false;
-                ReadWritePaths = [
-                  "-${endpoint.stateDir}"
-                ];
                 UMask = "0077";
                 # warn: at info the client logs its whole dependency graph on
                 # every start plus a line per dispatched call.
@@ -427,8 +423,6 @@ mkServiceModule {
                   '';
                   Restart = "always";
                   RestartSec = "5s";
-                  ProtectHome = false;
-                  ReadWritePaths = [ "-${endpoint.stateDir}" ];
                   UMask = "0077";
                   Environment = [
                     "PATH=${gatewayPath}"

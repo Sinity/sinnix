@@ -35,12 +35,9 @@ fi
 
 remote_cmd="sh -s -- $(sq "$prev_offset") $(sq "$prev_first_line")"
 
-# Do NOT inherit the operator's interactive ssh config: it is a Home-Manager
-# symlink into the nix store, and under this unit's ProtectHome sandbox ssh
-# rejects it outright ("Bad owner or permissions on ~/.ssh/config", exit 255).
-# A capture lane should not depend on interactive config anyway -- state the
-# identity and host key policy explicitly so the lane behaves identically
-# whether a human or a timer runs it.
+# Do NOT inherit the operator's interactive ssh config: a capture lane should
+# not depend on it. State the identity and host key policy explicitly so the
+# lane behaves identically whether a human or a timer runs it.
 # An array, not a string: an unquoted string expansion is what shellcheck
 # rightly rejects (SC2086), and quoting it would pass every flag as one
 # argument.
