@@ -1,12 +1,18 @@
 """Core helper contracts: atomic JSON, ledger, lock, systemd parser and notify."""
 
+import errno
 import json
 import os
 import socket
+import subprocess
+import sys
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
+from sinnix_lib import atomic_json
 from sinnix_lib.atomic_json import modify_json, read_json, write_json_atomic
 from sinnix_lib.ledger import append_jsonl, iter_jsonl, receipt, write_jsonl_atomic
 from sinnix_lib.lock import LockBusy, flock
@@ -36,6 +42,88 @@ def test_read_json_heals_torn_writes(tmp_path):
     p = tmp_path / "state.json"
     p.write_text("{not json")
     assert read_json(p, default={}) == {}
+
+
+def test_read_json_heals_absent_and_invalid_utf8_cache(tmp_path):
+    p = tmp_path / "state.json"
+    assert read_json(p, default={}) == {}
+    p.write_bytes(b"\xff")
+    assert read_json(p, default={}) == {}
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        PermissionError(errno.EACCES, "denied"),
+        OSError(errno.EIO, "read failure"),
+        IsADirectoryError(errno.EISDIR, "directory"),
+        NotADirectoryError(errno.ENOTDIR, "wrong parent type"),
+    ],
+)
+def test_json_read_failure_prevents_state_replacement(tmp_path, monkeypatch, error):
+    p = tmp_path / "state.json"
+    original = b'{"retained":1}\n'
+    p.write_bytes(original)
+
+    real_open = os.open
+
+    def fail_read(path, *args, **kwargs):
+        if path == p:
+            raise error
+        return real_open(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "open", fail_read)
+        with pytest.raises(type(error)):
+            read_json(p, default={})
+        with pytest.raises(type(error)):
+            with modify_json(p, default={}):
+                pytest.fail("unavailable state must not reach the mutator")
+    assert p.read_bytes() == original
+
+
+def test_read_json_refuses_fifo_without_waiting_for_a_writer(tmp_path):
+    p = tmp_path / "state.json"
+    os.mkfifo(p)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+from sinnix_lib.atomic_json import read_json
+try:
+    read_json(sys.argv[1], {})
+except OSError:
+    print('unavailable')
+else:
+    raise AssertionError('FIFO must not become empty state')
+""",
+            str(p),
+        ],
+        env={**os.environ, "PYTHONPATH": str(Path(atomic_json.__file__).parents[1])},
+        capture_output=True,
+        text=True,
+        timeout=2,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "unavailable"
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses file read permissions")
+def test_modify_json_preserves_read_denied_state(tmp_path):
+    p = tmp_path / "state.json"
+    original = b'{"retained":1}\n'
+    p.write_bytes(original)
+    p.chmod(0)
+    try:
+        with pytest.raises(PermissionError):
+            with modify_json(p, default={}) as document:
+                document["replacement"] = True
+        assert p.stat().st_mode & 0o777 == 0
+    finally:
+        p.chmod(0o600)
+    assert p.read_bytes() == original
 
 
 def test_modify_json_writes_on_clean_exit_only(tmp_path):
@@ -191,9 +279,14 @@ def test_sd_notify_reaches_an_abstract_namespace_socket(monkeypatch):
         assert listener.recv(64) == b"READY=1"
 
 
-def test_sd_notify_reaches_a_filesystem_socket(monkeypatch, tmp_path):
-    path = tmp_path / "notify.sock"
-    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as listener:
+def test_sd_notify_reaches_a_filesystem_socket(monkeypatch):
+    # Managed job scratch can exceed AF_UNIX's path limit. This directory
+    # contains only the short-lived socket, not build or fixture payloads.
+    with (
+        tempfile.TemporaryDirectory(dir="/tmp", prefix="notify-") as directory,
+        socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as listener,
+    ):
+        path = os.path.join(directory, "notify.sock")
         listener.bind(str(path))
         listener.settimeout(5)
         monkeypatch.setenv("NOTIFY_SOCKET", str(path))

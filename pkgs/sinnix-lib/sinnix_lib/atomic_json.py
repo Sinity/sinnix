@@ -10,7 +10,10 @@ across processes.
 
 from __future__ import annotations
 
+import errno
 import json
+import os
+import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -26,12 +29,30 @@ def read_json(path: Path | str, default: Any = None) -> Any:
     Unparseable-as-default is deliberate: state files are regenerable caches
     of their own history, and a torn write from a crashed producer should
     heal on the next cycle rather than wedge every future run.
+    Other filesystem errors propagate: an unavailable file is not an empty
+    cache, and a modifier must not replace state it could not read.
     """
     p = Path(path)
+    fd: int | None = None
     try:
-        return json.loads(p.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        # Inspect the opened object. Nonblocking open prevents a FIFO from
+        # hanging before its type can be rejected; regular-file reads are
+        # unaffected. Following a symlink to a regular state file is valid.
+        fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK)
+        kind = os.fstat(fd).st_mode
+        if stat.S_ISDIR(kind):
+            raise IsADirectoryError(errno.EISDIR, "JSON state is a directory", p)
+        if not stat.S_ISREG(kind):
+            raise OSError(errno.EINVAL, "JSON state must be a regular file", p)
+        stream = os.fdopen(fd, encoding="utf-8")
+        fd = None
+        with stream:
+            return json.load(stream)
+    except (FileNotFoundError, json.JSONDecodeError, UnicodeDecodeError):
         return default
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def write_json_atomic(
@@ -64,9 +85,9 @@ def modify_json(
     writes it back atomically on clean exit. The value yielded is written;
     mutate it in place. An exception inside the block writes nothing.
 
-    Durability: atomic only. A document this helper heals from ``default``
-    when it is unreadable is one whose loss to a crash is survivable; a
-    caller that needs otherwise publishes it itself.
+    Durability: atomic only. Missing or malformed cache content can heal from
+    ``default``; filesystem failures propagate without entering the block or
+    publishing. A caller requiring crash durability publishes it itself.
     """
     p = Path(path)
     with flock(p.with_name(p.name + ".lock")):
