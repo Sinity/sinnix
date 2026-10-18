@@ -33,7 +33,7 @@ let
     "zsh"
   ];
   panicLogCapture = pkgs.writeShellApplication {
-    name = "panic-log-capture";
+    name = "sinnix-capture-panic-log";
     runtimeInputs = [ pkgs.coreutils ];
     text = ''
       set -eu
@@ -253,14 +253,14 @@ in
           "ramoops.dump_oops=1"
         ];
 
-        systemd.services.panic-log-capture = {
+        systemd.services.sinnix-capture-panic-log = {
           description = "Capture previous-boot kernel panic/oops logs from pstore";
           wantedBy = [ "multi-user.target" ];
           after = [ "local-fs.target" ];
           serviceConfig = {
             Type = "oneshot";
             RemainAfterExit = true;
-            ExecStart = "${panicLogCapture}/bin/panic-log-capture";
+            ExecStart = "${panicLogCapture}/bin/sinnix-capture-panic-log";
           };
         };
 

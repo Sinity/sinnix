@@ -50,7 +50,7 @@ mkFeatureModule {
       # id Chrome computes and the id the policy pins identical by
       # construction; a hand-written id silently stops matching instead.
       navCaptureExtension =
-        pkgs.runCommand "sinnix-nav-capture-extension"
+        pkgs.runCommand "sinnix-capture-browser-nav-extension"
           {
             nativeBuildInputs = [
               pkgs.go-crx3
@@ -96,7 +96,7 @@ mkFeatureModule {
 
       # Chrome merges every JSON file in its managed policy directory, so the
       # generated extension policy lands beside chromium's own extra.json.
-      environment.etc."opt/chrome/policies/managed/sinnix-nav-capture.json".source =
+      environment.etc."opt/chrome/policies/managed/sinnix-capture-browser-nav.json".source =
         "${navCaptureExtension}/policy.json";
 
       systemd.tmpfiles.rules = [
@@ -105,8 +105,8 @@ mkFeatureModule {
       ];
 
       sinnix.runtime.surfaces = {
-        sinnix-nav-capture = {
-          unit = "sinnix-nav-capture.service";
+        sinnix-capture-browser-nav = {
+          unit = "sinnix-capture-browser-nav.service";
           manager = "user";
           resourceClass = "capture";
           observe = {
@@ -276,7 +276,7 @@ mkFeatureModule {
           };
 
           systemd.user.services = {
-            sinnix-nav-capture = {
+            sinnix-capture-browser-nav = {
               Unit = {
                 Description = "Sinnix browser provenance receiver";
                 After = [ "graphical-session-pre.target" ];
@@ -284,7 +284,7 @@ mkFeatureModule {
               };
               Service = {
                 UMask = "0077";
-                ExecStart = "${scriptPkgs.sinnix-nav-capture-daemon}/bin/sinnix-nav-capture-daemon";
+                ExecStart = "${scriptPkgs.sinnix-capture-browser-nav}/bin/sinnix-capture-browser-nav";
                 Environment = [
                   "SINNIX_NAV_CAPTURE_PORT=${toString navigationPort}"
                   "SINNIX_NAV_CAPTURE_EXTENSION_ID_FILE=${navCaptureExtension}/extension-id"

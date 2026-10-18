@@ -1,4 +1,4 @@
-// sinnix-nav-capture content script.
+// sinnix-capture-browser-nav content script.
 //
 // Two jobs, both firing on the SAME event class (a click on an <a>), because
 // they're really the same underlying event -- "the operator engaged with a

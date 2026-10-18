@@ -36,7 +36,7 @@ in
             # below checks the pinned id against the packed archive.
             policySource =
               toString
-                config.environment.etc."opt/chrome/policies/managed/sinnix-nav-capture.json".source;
+                config.environment.etc."opt/chrome/policies/managed/sinnix-capture-browser-nav.json".source;
           in
           [
             {
@@ -46,11 +46,11 @@ in
             {
               assertion = lib.elem (
                 "SINNIX_NAV_CAPTURE_EXTENSION_ID_FILE=${builtins.dirOf policySource}/extension-id"
-              ) hm.systemd.user.services.sinnix-nav-capture.Service.Environment;
+              ) hm.systemd.user.services.sinnix-capture-browser-nav.Service.Environment;
               message = "The receiver must trust the identity generated with Chrome's policy.";
             }
             {
-              assertion = builtins.hasAttr "sinnix-nav-capture" hm.systemd.user.services;
+              assertion = builtins.hasAttr "sinnix-capture-browser-nav" hm.systemd.user.services;
               message = "The browser provenance receiver must be supervised by the user manager.";
             }
             {
@@ -60,8 +60,8 @@ in
               message = "The reading stack must stay visible on the Noctalia bar.";
             }
             {
-              assertion = lib.hasInfix "sinnix-nav-capture-daemon" (
-                toString hm.systemd.user.services.sinnix-nav-capture.Service.ExecStart
+              assertion = lib.hasInfix "sinnix-capture-browser-nav" (
+                toString hm.systemd.user.services.sinnix-capture-browser-nav.Service.ExecStart
               );
               message = "The browser provenance receiver must execute the declared daemon package.";
             }
@@ -76,12 +76,12 @@ in
             {
               assertion = lib.any (
                 entry: lib.hasInfix "SINNIX_NAV_CAPTURE_PORT=${toString navigationPort}" (toString entry)
-              ) hm.systemd.user.services.sinnix-nav-capture.Service.Environment;
+              ) hm.systemd.user.services.sinnix-capture-browser-nav.Service.Environment;
               message = "The provenance receiver must bind the port declared in the ports registry.";
             }
             {
               assertion =
-                builtins.hasAttr "sinnix-nav-capture" inventory.surfaces
+                builtins.hasAttr "sinnix-capture-browser-nav" inventory.surfaces
                 && builtins.any (capture: capture.name == "browser-nav-edges") inventory.captures
                 && builtins.any (capture: capture.name == "reading-stack") inventory.captures;
               message = "The runtime inventory must declare the browser services and their capture lanes.";
@@ -93,7 +93,7 @@ in
       # this read in the derivation prevents a lazy check from passing when
       # the browser module stops contributing its policy or inventory.
       navCapturePolicy =
-        evaluated.config.environment.etc."opt/chrome/policies/managed/sinnix-nav-capture.json".source;
+        evaluated.config.environment.etc."opt/chrome/policies/managed/sinnix-capture-browser-nav.json".source;
       workflow = builtins.unsafeDiscardStringContext (
         builtins.toJSON {
           policy = evaluated.config.environment.etc."opt/chrome/policies/managed/extra.json".text;

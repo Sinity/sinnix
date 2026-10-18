@@ -224,7 +224,7 @@
           suiteDir = ../../pkgs/sinnix-reading-stack/tests;
           scripts = [
             "sinnix-reading-stack"
-            "sinnix-nav-capture-daemon"
+            "sinnix-capture-browser-nav"
           ];
           # The stack's state file is published through sinnix_lib.atomic_json;
           # the suite drives the real publish rather than a stub, so a change

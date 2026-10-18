@@ -1,12 +1,12 @@
-# WeeChat IRC log sealer
+# IRC log hashing
 #
 # Daily user timer that hashes "old enough" per-day IRC logs in the
 # captures archive and renames them to ``YYYY-MM-DD.b2-<12hex>.log``.
-# The script is packaged from ./weechat-log-sealer/seal_logs.py — the lake
-# holds data only (the in-lake scripts/ copy was retired 2026-08-24; the
+# The script is packaged from ./irc-log-hash/hash_logs.py; the /realm data tree
+# holds data only (the in-tree scripts/ copy was retired 2026-08-24; the
 # ad-hoc analysis siblings moved to sinity-lynchpin scripts/irc/).
 #
-# See the seal_logs.py header for the 2-day buffer rationale (avoids
+# See the hash_logs.py header for the 2-day buffer rationale (avoids
 # racing weechat fds across midnight on dormant channels).
 {
   mkServiceModule,
@@ -15,7 +15,7 @@
   ...
 }@args:
 mkServiceModule {
-  name = "weechat-log-sealer";
+  name = "irc-log-hash";
   defaultOnDesktop = true;
   description = "Daily content-hash sealing of WeeChat IRC logs";
   extraOptions = {
@@ -32,7 +32,7 @@ mkServiceModule {
   surface =
     { config, ... }:
     {
-      unit = "weechat-log-sealer.timer";
+      unit = "sinnix-irc-log-hash.timer";
       manager = "user";
       kind = "timer";
       observe = {
@@ -58,13 +58,13 @@ mkServiceModule {
     in
     {
       # Unit predates the sinnix- prefix; keep its name.
-      unitName = "weechat-log-sealer";
+      unitName = "sinnix-irc-log-hash";
       manager = "user";
       description = "Hash-seal weechat IRC logs older than 2 days";
       # The registered surface unit is the *timer*, so the service resolves
       # its class directly rather than by unit lookup.
       resourceClass = "background";
-      execStart = "${pkgs.python3}/bin/python3 ${./weechat-log-sealer/seal_logs.py} ${ircRoot}";
+      execStart = "${pkgs.python3}/bin/python3 ${./irc-log-hash/hash_logs.py} ${ircRoot}";
       serviceConfig = {
         # Bound runtime so a stuck mount doesn't pin a stale unit.
         TimeoutStartSec = "10min";

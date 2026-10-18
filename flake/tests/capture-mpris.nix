@@ -107,7 +107,7 @@
           }
           {
             assertion =
-              config.home-manager.users.${config.sinnix.user.name}.systemd.user.services.sinnix-nav-capture.Service.UMask
+              config.home-manager.users.${config.sinnix.user.name}.systemd.user.services.sinnix-capture-browser-nav.Service.UMask
               == "0077";
             message = "Browser capture must create owner-only output.";
           }

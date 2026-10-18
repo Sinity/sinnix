@@ -3,7 +3,7 @@
 # description: Local HTTP receiver for browser provenance and reading-stack pushes
 # runtimeInputs: @sinnix-capture @sinnix-reading-stack
 # pythonPackages: @sinnix-lib
-"""sinnix-nav-capture-daemon: the local endpoint the nav-capture WebExtension
+"""sinnix-capture-browser-nav: the local endpoint the nav-capture WebExtension
 POSTs to. Two routes:
 
   POST /v1/link-event         -- {source_url, source_title, target_url,
@@ -183,7 +183,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._respond(204)
         except subprocess.CalledProcessError as exc:
-            print(f"sinnix-nav-capture-daemon: write failed: {exc.stderr!r}", file=sys.stderr)
+            print(f"sinnix-capture-browser-nav: write failed: {exc.stderr!r}", file=sys.stderr)
             self._respond(500)
 
 
@@ -191,7 +191,7 @@ def main() -> int:
     origin = extension_origin()
     server = ThreadingHTTPServer((BIND_HOST, BIND_PORT), Handler)
     server.extension_origin = origin
-    print(f"sinnix-nav-capture-daemon: listening on {BIND_HOST}:{BIND_PORT}", file=sys.stderr)
+    print(f"sinnix-capture-browser-nav: listening on {BIND_HOST}:{BIND_PORT}", file=sys.stderr)
     server.serve_forever()
     return 0
 

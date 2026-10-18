@@ -29,7 +29,7 @@ let
   ];
 
   captureBootMetrics = pkgs.writeShellApplication {
-    name = "capture-boot-metrics";
+    name = "sinnix-capture-boot-metrics";
     runtimeInputs = with pkgs; [
       coreutils
       findutils
@@ -90,12 +90,12 @@ in
     (lib.sinnix.mkScheduledJob
       {
         inherit config;
-        unitName = "capture-boot-metrics";
+        unitName = "sinnix-capture-boot-metrics";
         description = "Capture boot metrics";
-        surface = config.sinnix.runtime.surfaces.capture-boot-metrics;
+        surface = config.sinnix.runtime.surfaces.sinnix-capture-boot-metrics;
       }
       {
-        execStart = "${captureBootMetrics}/bin/capture-boot-metrics";
+        execStart = "${captureBootMetrics}/bin/sinnix-capture-boot-metrics";
         unit = {
           # systemd-analyze needs FinishTimestampMonotonic != 0, only set
           # once every boot service has finished (2+ min with slow nofail
@@ -130,8 +130,8 @@ in
         "d ${journaldBaseDir}/index 0750 ${username} users -"
       ];
 
-      sinnix.runtime.surfaces.capture-boot-metrics = {
-        unit = "capture-boot-metrics.service";
+      sinnix.runtime.surfaces.sinnix-capture-boot-metrics = {
+        unit = "sinnix-capture-boot-metrics.service";
         resourceClass = "background";
         observe.enable = true;
       };

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from conftest import load_script
 
-daemon = load_script("sinnix-nav-capture-daemon")
+daemon = load_script("sinnix-capture-browser-nav")
 
 
 def test_large_capture_payload_uses_stdin(capture_writer):
