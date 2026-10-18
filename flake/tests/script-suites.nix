@@ -81,7 +81,14 @@
           name = "claude-hang-capture";
           suiteDir = ../../pkgs/claude-hang-capture/tests;
           scripts = [ "claude-hang-capture" ];
-          nativeBuildInputs = with pkgs; [ bash procps gawk gnugrep findutils jq ];
+          nativeBuildInputs = with pkgs; [
+            bash
+            procps
+            gawk
+            gnugrep
+            findutils
+            jq
+          ];
         };
         phone-score-suite = mkScriptSuite {
           name = "sinnix-score";
@@ -332,78 +339,18 @@
           scripts = [ "sinnix-quest-player" ];
           extraPythonPackages = [ sinnix-lib ];
         };
-        # Provably fails when: a binding's ranking identity starts tracking
-        # source order or its /nix/store action path, a usage prior stops
-        # distinguishing "never measured" from "measured zero", operator
-        # comparisons stop displacing that prior at the documented evidence
-        # threshold, a retired binding survives into the next manifest, or
-        # deck-forge stops taking its drill order from the manifest.
-        ollama-package-boundary =
-          pkgs.runCommand "ollama-package-boundary-check"
-            { serverPackage = inputs.self.nixosConfigurations.sinnix-prime.config.services.ollama.package; }
-            ''
-              test -x "$serverPackage/bin/ollama"
-              touch "$out"
-            '';
-        litellm-package-boundary =
-          pkgs.runCommand "litellm-package-boundary-check"
-            {
-              nativeBuildInputs = [ pkgs.python3 ];
-              LITELLM_PACKAGE = inputs.self.nixosConfigurations.sinnix-prime.config.services.litellm.package;
-              SINNIX_LITELLM_PORTS = "8123,8124";
-              LITELLM_CORS_ORIGINS = "http://127.0.0.1:8123,http://127.0.0.1:8124";
-              LITELLM_CORS_ALLOW_CREDENTIALS = "false";
-              LITELLM_LOCAL_MODEL_COST_MAP = "True";
-              SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
-            }
-            ''
-              export HOME="$TMPDIR/home"
-              mkdir -p "$HOME"
-              python3 ${../../pkgs/sinnix-litellm-boundary/tests/verify_package.py}
-              touch "$out"
-            '';
-        open-webui-package-boundary =
-          pkgs.runCommand "open-webui-package-boundary-check"
-            {
-              nativeBuildInputs = [ pkgs.python3 ];
-              OPEN_WEBUI_UNIT =
-                pkgs.writeText "open-webui-boundary.service"
-                  inputs.self.nixosConfigurations.sinnix-prime.config.systemd.units."open-webui.service".text;
-              OPEN_WEBUI_PACKAGE =
-                inputs.self.nixosConfigurations.sinnix-prime.config.services.open-webui.package;
-              SINNIX_WEBUI_PORTS =
-                inputs.self.nixosConfigurations.sinnix-prime.config.services.open-webui.environment.SINNIX_WEBUI_PORTS;
-              OFFLINE_MODE = "true";
-              HF_HUB_OFFLINE = "1";
-              WEBUI_SECRET_KEY = "synthetic-package-verification";
-              SINNIX_WEBUI_HOSTNAME = "neutral";
-              SINNIX_HUB_TAILNET_IP = "100.64.0.9";
-              SINNIX_HUB_DNS_NAME = "neutral.tailnet.invalid";
-            }
-            ''
-              export HOME="$TMPDIR/home" DATA_DIR="$TMPDIR/data"
-              mkdir -p "$HOME" "$DATA_DIR"
-              python3 ${../../pkgs/sinnix-litellm-boundary/tests/verify_webui_package.py}
-              touch "$out"
-            '';
-        litellm-boundary-suite = mkScriptSuite {
-          name = "sinnix-litellm-boundary";
-          suiteDir = ../../pkgs/sinnix-litellm-boundary/tests;
-          scripts = [ ];
-          packageFiles = [
-            "boundary.py"
-            "tts.py"
-            "kokoro.py"
-            "fastapi_admission.py"
-          ];
-          pythonPackages = [ "fastapi" ];
-        };
         cheatsheet-suite = mkScriptSuite {
           name = "sinnix-cheatsheet";
           suiteDir = ../../pkgs/sinnix-cheatsheet/tests;
           scripts = [ "sinnix-cheatsheet" ];
           extraPythonPackages = [ sinnix-lib ];
         };
+        # Provably fails when: a binding's ranking identity starts tracking
+        # source order or its /nix/store action path, a usage prior stops
+        # distinguishing "never measured" from "measured zero", operator
+        # comparisons stop displacing that prior at the documented evidence
+        # threshold, a retired binding survives into the next manifest, or
+        # deck-forge stops taking its drill order from the manifest.
         rank-keybinds-suite = mkScriptSuite {
           name = "sinnix-rank-keybinds";
           suiteDir = ../../pkgs/sinnix-rank-keybinds/tests;

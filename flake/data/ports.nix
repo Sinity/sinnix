@@ -46,7 +46,10 @@
     public = 8890; # OpenAI-compatible /v1/audio/speech (TTS)
     backend = 8891; # NB: the container listens on 8880 *inside* its namespace
   };
-  openWebui = 8080;
+  openWebui = {
+    public = 8080;
+    backend = 8079;
+  };
   # ComfyUI, TTS, MusicGen, and OCR are OCI containers (CDI GPU passthrough)
   # in the same public/backend socket-proxy shape as the native backends
   # above: the container publishes on the PRIVATE backend port only, and
@@ -68,18 +71,9 @@
     public = 8020;
     backend = 8021;
   };
-  llamaCpp = {
-    public = 8081; # reranker (/v1/rerank)
-    backend = 8082;
-  };
-  museGlimmer = {
-    public = 8083; # direct OpenAI-compatible Glimmer endpoint
-    backend = 8084;
-  };
-  qwen38Vram = {
-    public = 8085; # direct OpenAI-compatible VRAM-resident Qwen3.8 endpoint
-    backend = 8086;
-  };
+  llamaCpp.public = 8081; # reranker (/v1/rerank)
+  museGlimmer.public = 8083; # direct OpenAI-compatible Glimmer endpoint
+  qwen38Vram.public = 8085; # direct OpenAI-compatible VRAM-resident Qwen3.8 endpoint
 
   # ── Other ────────────────────────────────────────────────────────────────
   chromeDevtools = 9222; # live Chrome remote-debugging port

@@ -284,8 +284,12 @@ cmd_start() {
       # Clear any latched activation-trigger-limit failure and bring the
       # front door up first: a socket stuck failed refuses every connection
       # no matter how healthy the backend then becomes.
-      sudo systemctl reset-failed "${REG_NAME}-proxy.socket" "${REG_NAME}-proxy.service" 2>/dev/null || true
-      sudo systemctl start "${REG_NAME}-proxy.socket"
+      # The socket unit name carries a hash of its definition; the proxy
+      # service names it.
+      local socket
+      socket=$(systemctl show --property=Sockets --value "${REG_NAME}-proxy.service")
+      sudo systemctl reset-failed "$socket" "${REG_NAME}-proxy.service" 2>/dev/null || true
+      sudo systemctl start "$socket"
     fi
     ops_action start "$REG_UNIT" "sinnix-ai start $REG_NAME"
     local host="" port="" responding="no"

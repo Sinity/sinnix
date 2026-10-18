@@ -171,7 +171,7 @@ mkServiceModule {
         open-webui = {
           label = "Open WebUI";
           port = helpers.data.ports.hub.openWebui;
-          upstream = "127.0.0.1:${toString helpers.data.ports.openWebui}";
+          upstream = "127.0.0.1:${toString helpers.data.ports.openWebui.public}";
         };
         comfyui = {
           label = "ComfyUI";
@@ -234,8 +234,14 @@ mkServiceModule {
       browserGuard = label: allowOpaque: listenerPort: ''
         @${label}Origin {
           header Origin *
-          ${lib.concatMapStringsSep "\n" (host: "not header Origin http://${host}:${toString listenerPort}") acceptedHosts}
-          ${lib.optionalString allowOpaque (lib.concatMapStringsSep "\n" (host: "not header Origin http://${host}:${toString cfg.reportsPort}") acceptedHosts)}
+          ${lib.concatMapStringsSep "\n" (
+            host: "not header Origin http://${host}:${toString listenerPort}"
+          ) acceptedHosts}
+          ${lib.optionalString allowOpaque (
+            lib.concatMapStringsSep "\n" (
+              host: "not header Origin http://${host}:${toString cfg.reportsPort}"
+            ) acceptedHosts
+          )}
           ${lib.optionalString allowOpaque "not header Origin null"}
         }
         header @${label}Origin Connection close
@@ -252,7 +258,11 @@ mkServiceModule {
             header Sec-Fetch-User ?1
           }
           ${lib.optionalString allowOpaque "not header Origin null"}
-          ${lib.optionalString allowOpaque (lib.concatMapStringsSep "\n" (host: "not header Origin http://${host}:${toString cfg.reportsPort}") acceptedHosts)}
+          ${lib.optionalString allowOpaque (
+            lib.concatMapStringsSep "\n" (
+              host: "not header Origin http://${host}:${toString cfg.reportsPort}"
+            ) acceptedHosts
+          )}
         }
         header @${label}Fetch Connection close
         respond @${label}Fetch "cross-site request refused" 403
@@ -264,7 +274,13 @@ mkServiceModule {
       jsonGuard = label: paths: ''
         @${label}MediaType {
           method POST
-          expression path(${lib.concatMapStringsSep ", " (path: "'${path}'") paths})${lib.optionalString (label == "pages") " || path_regexp('^/terminals/v1/windows/[0-9]+/[0-9]+/send$')"}${lib.optionalString (label == "phone") " || path_regexp('^/(phone/)?(v1/)?(intent|job-answer)/*$')"}
+          expression path(${lib.concatMapStringsSep ", " (path: "'${path}'") paths})${
+            lib.optionalString (
+              label == "pages"
+            ) " || path_regexp('^/terminals/v1/windows/[0-9]+/[0-9]+/send$')"
+          }${
+            lib.optionalString (label == "phone") " || path_regexp('^/(phone/)?(v1/)?(intent|job-answer)/*$')"
+          }
           not expression {http.request.header.Content-Type}.matches('(?i)^[[:blank:]]*application/json[[:blank:]]*(;[^,]*)?$')
         }
         header @${label}MediaType Connection close
@@ -314,13 +330,13 @@ mkServiceModule {
       phoneSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/phone-dispatcher.sock";
 
       accessLog = ''
-          log {
-            output file ${cfg.stateDir}/access.log {
-              roll_size 10mb
-              roll_keep 5
-            }
-            level INFO
+        log {
+          output file ${cfg.stateDir}/access.log {
+            roll_size 10mb
+            roll_keep 5
           }
+          level INFO
+        }
       '';
 
       frontendSites = lib.concatStringsSep "\n" (
@@ -330,7 +346,17 @@ mkServiceModule {
             route {
               ${hostGuard "frontend${toString frontend.port}"}
               ${browserGuard "frontend${toString frontend.port}" false frontend.port}
-              reverse_proxy ${frontend.upstream}
+              # The guards above vetted the browser. Upstream AI front doors
+              # accept only loopback authorities, so forward as a native
+              # client of the upstream rather than replaying browser metadata.
+              reverse_proxy ${frontend.upstream} {
+                header_up Host {upstream_hostport}
+                header_up -Origin
+                header_up -Sec-Fetch-Site
+                header_up -Sec-Fetch-Mode
+                header_up -Sec-Fetch-Dest
+                header_up -Sec-Fetch-User
+              }
             }
           }
         '') activeFrontends
@@ -372,7 +398,11 @@ mkServiceModule {
           # boundary to its API and page/terminal routes, before proxying.
           handle_path /ops/* {
             ${browserGuard "ops" false cfg.port}
-            ${jsonGuard "ops" [ "/v1/actions" "/v1/actions/prepare" "/v1/health/failure" ]}
+            ${jsonGuard "ops" [
+              "/v1/actions"
+              "/v1/actions/prepare"
+              "/v1/health/failure"
+            ]}
             reverse_proxy unix/${opsSocket}
           }
 
@@ -391,19 +421,24 @@ mkServiceModule {
           # Native app and drain clients omit these headers.
           handle_path /phone/* {
             ${lib.concatStringsSep "\n" (
-              lib.imap0 (index: header: ''
-                @phoneBrowser${toString index} header ${header} *
-                header @phoneBrowser${toString index} Connection close
-                respond @phoneBrowser${toString index} "browser request refused" 403
-              '') [
-                "Origin"
-                "Sec-Fetch-Site"
-                "Sec-Fetch-Mode"
-                "Sec-Fetch-Dest"
-                "Sec-Fetch-User"
-              ]
+              lib.imap0
+                (index: header: ''
+                  @phoneBrowser${toString index} header ${header} *
+                  header @phoneBrowser${toString index} Connection close
+                  respond @phoneBrowser${toString index} "browser request refused" 403
+                '')
+                [
+                  "Origin"
+                  "Sec-Fetch-Site"
+                  "Sec-Fetch-Mode"
+                  "Sec-Fetch-Dest"
+                  "Sec-Fetch-User"
+                ]
             )}
-            ${jsonGuard "phone" [ "/v1/intent" "/v1/job-answer" ]}
+            ${jsonGuard "phone" [
+              "/v1/intent"
+              "/v1/job-answer"
+            ]}
             reverse_proxy unix/${phoneSocket}
           }
 
@@ -417,7 +452,11 @@ mkServiceModule {
 
           handle {
             ${browserGuard "pages" false cfg.port}
-            ${jsonGuard "pages" [ "/v1/actions" "/v1/actions/prepare" "/v1/health/failure" ]}
+            ${jsonGuard "pages" [
+              "/v1/actions"
+              "/v1/actions/prepare"
+              "/v1/health/failure"
+            ]}
             reverse_proxy unix/${opsSocket}
           }
           }
@@ -491,7 +530,11 @@ mkServiceModule {
         {
           assertion =
             let
-              ports = [ cfg.port cfg.reportsPort ] ++ (lib.mapAttrsToList (_: f: f.port) cfg.frontends);
+              ports = [
+                cfg.port
+                cfg.reportsPort
+              ]
+              ++ (lib.mapAttrsToList (_: f: f.port) cfg.frontends);
             in
             lib.length (lib.unique ports) == lib.length ports;
           message = "sinnix.services.hub: the hub port and every frontend port must be distinct.";

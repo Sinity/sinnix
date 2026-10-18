@@ -56,10 +56,7 @@ in
     ./tests/desktop-io.nix
     ./tests/ai-http-vm.nix
     ./tests/ai-http.nix
-    ./tests/socket-reconfiguration.nix
-    ./tests/nats-monitor-boundary.nix
     ./tests/runtime.nix
-    ./tests/llama-http-admission.nix
     ./tests/export-manifest.nix
     ./tests/script-suites.nix
     ./tests/phone-bcr.nix

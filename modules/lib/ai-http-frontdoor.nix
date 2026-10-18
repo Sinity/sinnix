@@ -8,24 +8,19 @@
 }:
 let
   publicPort = lib.last (lib.splitString ":" publicEndpoint);
-  backendPort = lib.last (lib.splitString ":" backendEndpoint);
+  # A Unix-socket backend has no TCP authority of its own.
+  backendPorts = lib.optional (!lib.hasPrefix "/" backendEndpoint) (
+    lib.last (lib.splitString ":" backendEndpoint)
+  );
   publicHost = lib.head (lib.splitString ":" publicEndpoint);
-  authorities =
-    lib.concatMap
-      (
-        port:
-        map (host: "${host}:${port}") [
-          "127.0.0.1"
-          "localhost"
-          "[::1]"
-        ]
-      )
-      (
-        lib.unique [
-          publicPort
-          backendPort
-        ]
-      );
+  authorities = lib.concatMap (
+    port:
+    map (host: "${host}:${port}") [
+      "127.0.0.1"
+      "localhost"
+      "[::1]"
+    ]
+  ) (lib.unique ([ publicPort ] ++ backendPorts));
   origins = map (authority: "http://${authority}") authorities;
   browserHeaders = [
     "Origin"

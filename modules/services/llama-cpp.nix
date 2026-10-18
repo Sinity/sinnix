@@ -51,6 +51,9 @@ mkServiceModule {
       modelRoot = config.sinnix.paths.modelsRoot;
       enabledProfiles = lib.filterAttrs (_: profile: profile.enable) cfg.profiles;
       portFor = profile: helpers.data.ports.${profile.portKey};
+      # The server listens only on a Unix socket (llama-server binds one when
+      # --host ends in .sock), so the Caddy front door is its sole TCP entrance.
+      backendSocket = name: "/run/${name}/llama.sock";
       mkSurface = name: profile: {
         unit = "${name}.service";
         resourceClass = "ordinary";
@@ -61,7 +64,7 @@ mkServiceModule {
         activation = {
           mode = "socket-proxy";
           publicEndpoint = "127.0.0.1:${toString (portFor profile).public}";
-          backendEndpoint = "127.0.0.1:${toString (portFor profile).backend}";
+          backendEndpoint = backendSocket name;
           inherit (profile) idleTimeout readinessTimeout;
           exclusiveResource = if profile.requiresCuda then "gpu-inference" else null;
           dependsOn = [ "${name}-proxy" ];
@@ -72,35 +75,16 @@ mkServiceModule {
         };
       };
       mkExecStart =
-        profile:
+        name: profile:
         lib.escapeShellArgs (
           [
             "${if profile.requiresCuda then pkgs.llama-cpp-cuda else pkgs.llama-cpp}/bin/llama-server"
             "--model"
             "${modelRoot}/gguf/${profile.model}"
             "--host"
-            "127.0.0.1"
-            "--port"
-            (toString (portFor profile).backend)
+            (backendSocket name)
           ]
           ++ profile.arguments
-        );
-      allowedOrigins =
-        profile:
-        lib.concatStringsSep "," (
-          lib.concatMap
-            (
-              host:
-              map (port: "http://${host}:${toString port}") [
-                (portFor profile).public
-                (portFor profile).backend
-              ]
-            )
-            [
-              "127.0.0.1"
-              "localhost"
-              "[::1]"
-            ]
         );
       mkService = name: profile: {
         description = profile.description;
@@ -108,8 +92,8 @@ mkServiceModule {
         after = [ "network.target" ];
         serviceConfig = lib.mkMerge [
           {
-            ExecStart = mkExecStart profile;
-            Environment = [ "SINNIX_LLAMA_ALLOWED_ORIGINS=${allowedOrigins profile}" ];
+            ExecStart = mkExecStart name profile;
+            RuntimeDirectory = name;
           }
           (
             if profile.dynamicUser then

@@ -270,25 +270,6 @@ in
               && lib.elem "--memory-swap=6g" config.virtualisation.oci-containers.containers.kokoro.extraOptions;
             message = "Kokoro needs bounds on its actual container, not just the Podman client unit";
           }
-          {
-            assertion =
-              let
-                kokoro = config.virtualisation.oci-containers.containers.kokoro;
-              in
-              kokoro.cmd == [
-                "python"
-                "/run/sinnix-kokoro/sinnix_kokoro.py"
-              ]
-              && kokoro.environment.SINNIX_KOKORO_PORTS == "8890,8891,8880"
-              && lib.any (volume: lib.hasSuffix ":/run/sinnix-kokoro/sinnix_kokoro.py:ro" volume) kokoro.volumes
-              && lib.any (
-                volume: lib.hasSuffix ":/run/sinnix-kokoro/sinnix_ai_browser_boundary.py:ro" volume
-              ) kokoro.volumes
-              && lib.any (
-                volume: lib.hasSuffix ":/run/sinnix-kokoro/sinnix_fastapi_admission.py:ro" volume
-              ) kokoro.volumes;
-            message = "Kokoro must retain guarded startup, registered host ports and its native internal interface";
-          }
         ];
       };
       cpuContainerEvaluated = evalTestSpec system cpuContainerSpec;
@@ -373,6 +354,13 @@ in
             proxyNames = map (proxy: proxy.name) proxies;
             declaredAiSocketBackends = lib.naturalSort (lib.attrNames proxyBackends);
             execStartOf = name: config.systemd.services.${name}.serviceConfig.ExecStart;
+            # The proxy service names its socket unit, whose name carries a
+            # hash of the socket definition.
+            socketOf =
+              proxyName:
+              config.systemd.sockets.${
+                lib.removeSuffix ".socket" (lib.head config.systemd.services.${proxyName}.serviceConfig.Sockets)
+              };
             backendUnitsOf =
               proxyName:
               lib.filter (unit: lib.elem "${proxyName}.service" (config.systemd.services.${unit}.partOf or [ ])) (
@@ -459,8 +447,12 @@ in
               # proxy to backend, so the mutual lifetime binding has no cycle.
               assertion = builtins.all (
                 proxyName:
-                lib.elem "${proxyName}.socket" (config.systemd.services.${proxyName}.bindsTo or [ ])
-                && config.systemd.services.${proxyName}.serviceConfig.Sockets == [ "${proxyName}.socket" ]
+                let
+                  sockets = config.systemd.services.${proxyName}.serviceConfig.Sockets;
+                in
+                lib.length sockets == 1
+                && config.systemd.sockets ? ${lib.removeSuffix ".socket" (lib.head sockets)}
+                && lib.elem (lib.head sockets) (config.systemd.services.${proxyName}.bindsTo or [ ])
                 && builtins.all (
                   backend:
                   lib.elem "${proxyName}.service" (config.systemd.services.${backend}.bindsTo or [ ])
@@ -484,8 +476,8 @@ in
               # everything.
               assertion = builtins.all (
                 proxyName:
-                (config.systemd.sockets.${proxyName}.socketConfig.TriggerLimitBurst or null) != null
-                && (config.systemd.sockets.${proxyName}.socketConfig.TriggerLimitIntervalSec or null) != null
+                ((socketOf proxyName).socketConfig.TriggerLimitBurst or null) != null
+                && ((socketOf proxyName).socketConfig.TriggerLimitIntervalSec or null) != null
               ) proxyNames;
               message = "Every socket-proxy front door must set an explicit activation trigger limit rather than inheriting systemd's short default window";
             }
@@ -496,9 +488,9 @@ in
               # here (which would only force a two-place edit).
               assertion = builtins.all (
                 proxy:
-                config.systemd.sockets.${proxy.name}.listenStreams == [ "/run/sinnix-ai/${proxy.name}.sock" ]
-                && config.systemd.sockets.${proxy.name}.socketConfig.SocketMode == "0660"
-                && config.systemd.sockets.${proxy.name}.socketConfig.SocketUser == config.sinnix.user.name
+                (socketOf proxy.name).listenStreams == [ "/run/sinnix-ai/${proxy.name}.sock" ]
+                && (socketOf proxy.name).socketConfig.SocketMode == "0660"
+                && (socketOf proxy.name).socketConfig.SocketUser == config.sinnix.user.name
                 && lib.hasInfix "http://:${lib.last (lib.splitString ":" proxy.activation.publicEndpoint)}" config.services.caddy.extraConfig
               ) proxies;
               message = "Each AI HTTP front door must guard the public endpoint before its operator/Caddy-only Unix activation socket";
@@ -587,26 +579,6 @@ in
                 lib.hasInfix "sinnix-stt" (execStartOf "sinnix-stt")
                 && lib.hasInfix "podman" (execStartOf "podman-openedai-speech");
               message = "The AI factory must leave the native and containerized launch commands visible in their units";
-            }
-            {
-              assertion =
-                let
-                  tts = config.virtualisation.oci-containers.containers.openedai-speech;
-                in
-                tts.cmd == [
-                  "python"
-                  "/run/sinnix-tts/tts.py"
-                  "start"
-                ]
-                && tts.environment.SINNIX_TTS_PORTS == "8000,8001"
-                && lib.any (volume: lib.hasSuffix ":/run/sinnix-tts/tts.py:ro" volume) tts.volumes
-                && lib.any (
-                  volume: lib.hasSuffix ":/run/sinnix-tts/sinnix_ai_browser_boundary.py:ro" volume
-                ) tts.volumes
-                && lib.any (
-                  volume: lib.hasSuffix ":/run/sinnix-tts/sinnix_fastapi_admission.py:ro" volume
-                ) tts.volumes;
-              message = "TTS must launch through the shared browser boundary with both declared ports and read-only code";
             }
             {
               # LiteLLM routes to several independently activated backends.

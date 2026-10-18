@@ -1,6 +1,7 @@
 # Open WebUI — ChatGPT-style web frontend for the local Ollama hub.
 #
-# Loopback upstream (127.0.0.1:8080), republished by the hub on its tailnet
+# Started on demand behind the socket-activated front door on 127.0.0.1:8080
+# (backend 8079) and stopped when idle; republished by the hub on its tailnet
 # frontend. Single-operator mode disables the login form. RAG/document
 # chat uses the Ollama embedding model; TTS read-aloud / voice-call points at the
 # enabled local speech provider. STT is left at Open WebUI's
@@ -14,7 +15,6 @@
 {
   mkAiService,
   lib,
-  pkgs,
   helpers,
   ...
 }@args:
@@ -23,7 +23,17 @@ mkAiService {
   description = "Open WebUI chat frontend for local models";
   docs = "docs/local-ai-activation.md";
   unit = "open-webui.service";
-  activation.publicEndpoint = "127.0.0.1:${toString helpers.data.ports.openWebui}";
+  activation = {
+    mode = "socket-proxy";
+    publicEndpoint = "127.0.0.1:${toString helpers.data.ports.openWebui.public}";
+    backendEndpoint = "127.0.0.1:${toString helpers.data.ports.openWebui.backend}";
+    # An open tab holds its websocket, which keeps the proxy active; the
+    # backend stops once no tab or client has used it for this long.
+    idleTimeout = "10min";
+    # Python startup and migrations; measured cold starts are well under this.
+    readinessTimeout = 180;
+    dependsOn = [ "open-webui-proxy" ];
+  };
   stateDirectories = [ "/var/lib/open-webui" ];
   requiresCuda = false;
   extraOptions = {
@@ -57,32 +67,6 @@ mkAiService {
           }
         else
           null;
-      resolveIdentity =
-        (import ../lib/tailnet-bind.nix {
-          inherit pkgs lib;
-          interface = config.sinnix.services.tailscale.interfaceName;
-        })
-          "open-webui-resolve-identity"
-          "SINNIX_HUB_TAILNET_IP"
-          "open-webui";
-      guardedPackage = pkgs.open-webui.overridePythonAttrs (old: {
-        postPatch = (old.postPatch or "") + ''
-          test -f backend/open_webui/main.py
-          cp ${../../pkgs/sinnix-litellm-boundary/boundary.py} backend/open_webui/sinnix_browser_boundary.py
-          cat >> backend/open_webui/main.py <<'PYTHON'
-
-          from .sinnix_browser_boundary import BrowserBoundary
-          app.add_middleware(
-              BrowserBoundary,
-              allowed_ports={int(port) for port in os.environ["SINNIX_WEBUI_PORTS"].split(",")},
-              allowed_hosts={
-                  "localhost", "127.0.0.1", "::1", os.environ["SINNIX_WEBUI_HOSTNAME"],
-                  os.environ["SINNIX_HUB_TAILNET_IP"], os.environ["SINNIX_HUB_DNS_NAME"],
-              },
-          )
-          PYTHON
-        '';
-      });
     in
     {
       sinnix.runtime.dataStores.open-webui-state = {
@@ -92,18 +76,11 @@ mkAiService {
 
       services.open-webui = {
         enable = true;
-        package = guardedPackage;
         host = "127.0.0.1";
-        port = helpers.data.ports.openWebui;
+        # The public port belongs to the on-demand front door.
+        port = helpers.data.ports.openWebui.backend;
         openFirewall = false;
         environment = {
-          SINNIX_WEBUI_HOSTNAME = config.networking.hostName;
-          SINNIX_WEBUI_PORTS = lib.concatStringsSep "," (
-            map toString [
-              helpers.data.ports.openWebui
-              config.sinnix.services.hub.frontends.open-webui.port
-            ]
-          );
           OLLAMA_BASE_URL = "http://127.0.0.1:${toString helpers.data.ports.ollama.public}";
           WEBUI_AUTH = "False"; # single-user localhost
           ANONYMIZED_TELEMETRY = "False";
@@ -143,10 +120,6 @@ mkAiService {
       };
       users.groups.open-webui = { };
       systemd.services.open-webui.serviceConfig = {
-        # The verified identity resolver reads interface addresses via rtnetlink.
-        RestrictAddressFamilies = lib.mkAfter [ "AF_NETLINK" ];
-        ExecStartPre = [ "${resolveIdentity} /run/open-webui/bind.env" ];
-        EnvironmentFile = [ "-/run/open-webui/bind.env" ];
         DynamicUser = lib.mkForce false;
         User = "open-webui";
         Group = "open-webui";

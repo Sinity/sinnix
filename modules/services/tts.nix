@@ -7,7 +7,6 @@
 {
   mkAiService,
   lib,
-  pkgs,
   helpers,
   ...
 }@args:
@@ -40,11 +39,6 @@ mkAiService {
       default = "ghcr.io/matatonic/openedai-speech@sha256:3ef4f857d5a757cfe8e9b61185df1bd3c52c45f950716a54e4399c27c3e91396";
       description = "Digest-pinned OpenedAI-Speech image. Use the -min image for Piper-only (no XTTS).";
     };
-    startupScript = args.lib.mkOption {
-      type = args.lib.types.str;
-      default = "/app/startup.sh";
-      description = "Vendor startup script in the selected image; select /app/startup.min.sh for images using the minimal launcher.";
-    };
   };
   configFn =
     {
@@ -68,18 +62,6 @@ mkAiService {
         inherit (cfg) image;
         inherit (cfg) autoStart;
         pull = "never";
-        cmd = [
-          "python"
-          "/run/sinnix-tts/tts.py"
-          "start"
-        ];
-        environment.SINNIX_TTS_PORTS = lib.concatStringsSep "," (
-          map toString [
-            helpers.data.ports.tts.public
-            helpers.data.ports.tts.backend
-          ]
-        );
-        environment.SINNIX_TTS_STARTUP = cfg.startupScript;
         # Published on the PRIVATE backend port only -- clients always speak
         # to the public port via tts-proxy (modules/services/ai-control.nix),
         # never to the container directly. The container-internal port (right
@@ -89,15 +71,16 @@ mkAiService {
         volumes = [
           "${ttsDir}/voices:/app/voices"
           "${ttsDir}/config:/app/config"
-          "${../../pkgs/sinnix-litellm-boundary/tts.py}:/run/sinnix-tts/tts.py:ro"
-          "${../../pkgs/sinnix-litellm-boundary/boundary.py}:/run/sinnix-tts/sinnix_ai_browser_boundary.py:ro"
-          "${../../pkgs/sinnix-litellm-boundary/fastapi_admission.py}:/run/sinnix-tts/sinnix_fastapi_admission.py:ro"
         ];
         extraOptions = [ "--device=nvidia.com/gpu=all" ];
       };
 
       systemd.services.podman-openedai-speech = {
-        serviceConfig.TimeoutStartSec = lib.mkForce "2min";
+        serviceConfig = {
+          TimeoutStartSec = lib.mkForce "2min";
+          # The idle stop ends podman with SIGTERM; that is not a failure.
+          SuccessExitStatus = [ 143 ];
+        };
         # Bound to the socket proxy's lifecycle: an idle proxy exit tears
         # down this container's cgroup. Conflicts= against every other
         # GPU-inference backend is computed centrally in ai-control.nix's

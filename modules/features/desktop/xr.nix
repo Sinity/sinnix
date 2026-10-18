@@ -120,6 +120,10 @@ mkFeatureModule {
             root_container = ".";
           };
         };
+        # On demand (`systemctl start minidlna`): every start rescans the
+        # whole media tree, which is gigabytes of reads for a server used
+        # only during a headset session.
+        systemd.services.minidlna.wantedBy = lib.mkForce [ ];
         systemd.user.services.sinnix-quest-player = {
           description = "Authenticated native Quest video playback session";
           path = [

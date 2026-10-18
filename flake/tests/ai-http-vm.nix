@@ -79,85 +79,90 @@
             ];
           };
         };
-        testScript = ''
-          start_all()
-          machine.wait_for_unit("caddy.service")
-          machine.wait_for_unit("fixture-one-proxy.socket")
-          machine.fail("systemctl is-active --quiet fixture-one.service")
-          machine.fail("test -e /run/fixture-one-starts")
-          # A connection by itself is harmless. An incomplete, foreign POST
-          # must return before it gets a body or starts the backend.
-          machine.succeed("python3 - <<'PY'\nimport socket\ns=socket.create_connection(('127.0.0.1',24821),timeout=2);s.close()\ns=socket.create_connection(('127.0.0.1',24821),timeout=2)\ns.sendall(b'POST / HTTP/1.1\\r\\nHost: 127.0.0.1:24821\\r\\nOrigin: https://foreign.invalid\\r\\nContent-Length: 1000000\\r\\n\\r\\n')\nassert b'403' in s.recv(4096);s.close()\nPY")
-          machine.fail("test -e /run/fixture-one-starts")
-          machine.fail("systemctl is-active --quiet fixture-one.service")
-          machine.succeed("test $(stat -c %a /run/sinnix-ai/fixture-one-proxy.sock) = 660")
-          machine.succeed("test $(stat -c %U /run/sinnix-ai/fixture-one-proxy.sock) = fixture")
-          assert not machine.succeed("ss -H -ltn 'sport = :2019'").strip()
-          machine.succeed("systemctl daemon-reexec")
-          # Manual backend startup must pull in an actual listening socket,
-          # not a socket-proxyd process with no inherited file descriptors.
-          machine.succeed("systemctl start fixture-one.service")
-          machine.wait_for_unit("fixture-one-proxy.service")
-          machine.succeed("test $(wc -l < /run/fixture-one-starts) = 1")
-          assert "native fixture response" in machine.succeed("curl --fail --max-time 15 -sS http://127.0.0.1:24821/")
-          machine.wait_until_fails("systemctl is-active --quiet fixture-one.service", timeout=15)
-          assert "native fixture response" in machine.succeed("curl --fail --max-time 15 -sS http://127.0.0.1:24821/")
-          machine.succeed("test $(wc -l < /run/fixture-one-starts) = 2")
-          machine.wait_until_fails("systemctl is-active --quiet fixture-one.service", timeout=15)
-          machine.fail("systemctl is-active --quiet fixture-one-proxy.service")
-          # Admission persists after idle-out and does not restart the model.
-          assert machine.succeed("curl -s -o /dev/null -w '%{http_code}' -H 'Origin: null' http://127.0.0.1:24821/").strip() == "403"
-          machine.succeed("test $(wc -l < /run/fixture-one-starts) = 2")
-          # The operator can deliberately hold the private socket. Its
-          # transient systemd lifetime releases the native pin automatically.
-          machine.succeed("systemd-run --unit=fixture-pin --property=User=fixture --property=RuntimeMaxSec=6s ${pkgs.python3}/bin/python3 ${pinSource}")
-          machine.wait_for_unit("fixture-one.service")
-          import time
-          time.sleep(4)
-          machine.succeed("systemctl is-active --quiet fixture-one.service")
-          machine.wait_until_fails("systemctl is-active --quiet fixture-pin.service", timeout=10)
-          machine.wait_until_fails("systemctl is-active --quiet fixture-one.service", timeout=15)
-          machine.succeed("test $(wc -l < /run/fixture-one-starts) = 3")
-          machine.succeed("curl --no-buffer -sS http://127.0.0.1:24821/hold </dev/null >/run/held-stream 2>/run/held-errors &")
-          machine.wait_until_succeeds("grep -q 'still running' /run/held-stream")
-          machine.succeed("systemctl is-active --quiet fixture-one.service")
-          assert "native fixture response" in machine.succeed("curl --fail --max-time 15 -sS http://127.0.0.1:24823/")
-          machine.fail("systemctl is-active --quiet fixture-one.service")
-          machine.fail("systemctl is-active --quiet fixture-one-proxy.service")
-          machine.succeed("test $(wc -l < /run/fixture-one-starts) = 4")
-          machine.succeed("test $(wc -l < /run/fixture-two-starts) = 1")
-          machine.wait_until_fails("systemctl is-active --quiet fixture-two.service", timeout=15)
-          machine.succeed("systemctl reload caddy.service")
-          assert machine.succeed("curl -s -o /dev/null -w '%{http_code}' -H 'Origin: null' http://127.0.0.1:24823/").strip() == "403"
-          machine.succeed("test $(wc -l < /run/fixture-two-starts) = 1")
-          machine.succeed("curl --no-buffer -sS http://127.0.0.1:24823/hold </dev/null >/run/held-two 2>/run/held-two-errors &")
-          machine.wait_until_succeeds("grep -q 'still running' /run/held-two")
-          previous_pid = machine.succeed("systemctl show fixture-two.service -p MainPID --value").strip()
-          machine.succeed("systemctl restart fixture-two-proxy.socket")
-          # A deliberate socket restart may restart its active dependent.
-          # It must release the old backend and serve through the new socket.
-          assert "native fixture response" in machine.succeed("curl --fail --max-time 15 -sS http://127.0.0.1:24823/")
-          current_pid = machine.succeed("systemctl show fixture-two.service -p MainPID --value").strip()
-          assert previous_pid != current_pid, (previous_pid, current_pid)
-          machine.succeed(f"test ! -e /proc/{previous_pid}")
-          machine.succeed("test $(wc -l < /run/fixture-two-starts) = 3")
-          machine.wait_until_fails("systemctl is-active --quiet fixture-two.service", timeout=15)
-          assert machine.succeed("curl -s -o /dev/null -w '%{http_code}' -H 'Origin: null' http://127.0.0.1:24823/").strip() == "403"
-          machine.succeed("test $(wc -l < /run/fixture-two-starts) = 3")
-          # Match the native-only STT receiver before starting its backend,
-          # including a nominally same-origin browser request.
-          assert machine.succeed("curl -s -o /dev/null -w '%{http_code}' -H 'Origin: http://127.0.0.1:24825' http://127.0.0.1:24825/").strip() == "403"
-          assert machine.succeed("curl -s -o /dev/null -w '%{http_code}' -H 'Sec-Fetch-Site: same-origin' http://127.0.0.1:24825/").strip() == "403"
-          machine.fail("test -e /run/fixture-native-starts")
-          assert "native fixture response" in machine.succeed("curl --fail --max-time 15 -sS http://127.0.0.1:24825/")
-          machine.succeed("test $(wc -l < /run/fixture-native-starts) = 1")
-          machine.wait_until_fails("systemctl is-active --quiet fixture-native.service", timeout=15)
-          machine.succeed("systemctl stop caddy.service")
-          machine.succeed("systemctl start fixture-consumer.service")
-          machine.succeed("systemctl is-active --quiet caddy.service")
-          machine.succeed("test $(wc -l < /run/fixture-native-starts) = 2")
-          machine.wait_until_fails("systemctl is-active --quiet fixture-native.service", timeout=15)
-        '';
+        testScript =
+          { nodes, ... }:
+          let
+            socketOf = proxy: lib.head nodes.machine.systemd.services.${proxy}.serviceConfig.Sockets;
+          in
+          ''
+            start_all()
+            machine.wait_for_unit("caddy.service")
+            machine.wait_for_unit("${socketOf "fixture-one-proxy"}")
+            machine.fail("systemctl is-active --quiet fixture-one.service")
+            machine.fail("test -e /run/fixture-one-starts")
+            # A connection by itself is harmless. An incomplete, foreign POST
+            # must return before it gets a body or starts the backend.
+            machine.succeed("python3 - <<'PY'\nimport socket\ns=socket.create_connection(('127.0.0.1',24821),timeout=2);s.close()\ns=socket.create_connection(('127.0.0.1',24821),timeout=2)\ns.sendall(b'POST / HTTP/1.1\\r\\nHost: 127.0.0.1:24821\\r\\nOrigin: https://foreign.invalid\\r\\nContent-Length: 1000000\\r\\n\\r\\n')\nassert b'403' in s.recv(4096);s.close()\nPY")
+            machine.fail("test -e /run/fixture-one-starts")
+            machine.fail("systemctl is-active --quiet fixture-one.service")
+            machine.succeed("test $(stat -c %a /run/sinnix-ai/fixture-one-proxy.sock) = 660")
+            machine.succeed("test $(stat -c %U /run/sinnix-ai/fixture-one-proxy.sock) = fixture")
+            assert not machine.succeed("ss -H -ltn 'sport = :2019'").strip()
+            machine.succeed("systemctl daemon-reexec")
+            # Manual backend startup must pull in an actual listening socket,
+            # not a socket-proxyd process with no inherited file descriptors.
+            machine.succeed("systemctl start fixture-one.service")
+            machine.wait_for_unit("fixture-one-proxy.service")
+            machine.succeed("test $(wc -l < /run/fixture-one-starts) = 1")
+            assert "native fixture response" in machine.succeed("curl --fail --max-time 15 -sS http://127.0.0.1:24821/")
+            machine.wait_until_fails("systemctl is-active --quiet fixture-one.service", timeout=15)
+            assert "native fixture response" in machine.succeed("curl --fail --max-time 15 -sS http://127.0.0.1:24821/")
+            machine.succeed("test $(wc -l < /run/fixture-one-starts) = 2")
+            machine.wait_until_fails("systemctl is-active --quiet fixture-one.service", timeout=15)
+            machine.fail("systemctl is-active --quiet fixture-one-proxy.service")
+            # Admission persists after idle-out and does not restart the model.
+            assert machine.succeed("curl -s -o /dev/null -w '%{http_code}' -H 'Origin: null' http://127.0.0.1:24821/").strip() == "403"
+            machine.succeed("test $(wc -l < /run/fixture-one-starts) = 2")
+            # The operator can deliberately hold the private socket. Its
+            # transient systemd lifetime releases the native pin automatically.
+            machine.succeed("systemd-run --unit=fixture-pin --property=User=fixture --property=RuntimeMaxSec=6s ${pkgs.python3}/bin/python3 ${pinSource}")
+            machine.wait_for_unit("fixture-one.service")
+            import time
+            time.sleep(4)
+            machine.succeed("systemctl is-active --quiet fixture-one.service")
+            machine.wait_until_fails("systemctl is-active --quiet fixture-pin.service", timeout=10)
+            machine.wait_until_fails("systemctl is-active --quiet fixture-one.service", timeout=15)
+            machine.succeed("test $(wc -l < /run/fixture-one-starts) = 3")
+            machine.succeed("curl --no-buffer -sS http://127.0.0.1:24821/hold </dev/null >/run/held-stream 2>/run/held-errors &")
+            machine.wait_until_succeeds("grep -q 'still running' /run/held-stream")
+            machine.succeed("systemctl is-active --quiet fixture-one.service")
+            assert "native fixture response" in machine.succeed("curl --fail --max-time 15 -sS http://127.0.0.1:24823/")
+            machine.fail("systemctl is-active --quiet fixture-one.service")
+            machine.fail("systemctl is-active --quiet fixture-one-proxy.service")
+            machine.succeed("test $(wc -l < /run/fixture-one-starts) = 4")
+            machine.succeed("test $(wc -l < /run/fixture-two-starts) = 1")
+            machine.wait_until_fails("systemctl is-active --quiet fixture-two.service", timeout=15)
+            machine.succeed("systemctl reload caddy.service")
+            assert machine.succeed("curl -s -o /dev/null -w '%{http_code}' -H 'Origin: null' http://127.0.0.1:24823/").strip() == "403"
+            machine.succeed("test $(wc -l < /run/fixture-two-starts) = 1")
+            machine.succeed("curl --no-buffer -sS http://127.0.0.1:24823/hold </dev/null >/run/held-two 2>/run/held-two-errors &")
+            machine.wait_until_succeeds("grep -q 'still running' /run/held-two")
+            previous_pid = machine.succeed("systemctl show fixture-two.service -p MainPID --value").strip()
+            machine.succeed("systemctl restart ${socketOf "fixture-two-proxy"}")
+            # A deliberate socket restart may restart its active dependent.
+            # It must release the old backend and serve through the new socket.
+            assert "native fixture response" in machine.succeed("curl --fail --max-time 15 -sS http://127.0.0.1:24823/")
+            current_pid = machine.succeed("systemctl show fixture-two.service -p MainPID --value").strip()
+            assert previous_pid != current_pid, (previous_pid, current_pid)
+            machine.succeed(f"test ! -e /proc/{previous_pid}")
+            machine.succeed("test $(wc -l < /run/fixture-two-starts) = 3")
+            machine.wait_until_fails("systemctl is-active --quiet fixture-two.service", timeout=15)
+            assert machine.succeed("curl -s -o /dev/null -w '%{http_code}' -H 'Origin: null' http://127.0.0.1:24823/").strip() == "403"
+            machine.succeed("test $(wc -l < /run/fixture-two-starts) = 3")
+            # Match the native-only STT receiver before starting its backend,
+            # including a nominally same-origin browser request.
+            assert machine.succeed("curl -s -o /dev/null -w '%{http_code}' -H 'Origin: http://127.0.0.1:24825' http://127.0.0.1:24825/").strip() == "403"
+            assert machine.succeed("curl -s -o /dev/null -w '%{http_code}' -H 'Sec-Fetch-Site: same-origin' http://127.0.0.1:24825/").strip() == "403"
+            machine.fail("test -e /run/fixture-native-starts")
+            assert "native fixture response" in machine.succeed("curl --fail --max-time 15 -sS http://127.0.0.1:24825/")
+            machine.succeed("test $(wc -l < /run/fixture-native-starts) = 1")
+            machine.wait_until_fails("systemctl is-active --quiet fixture-native.service", timeout=15)
+            machine.succeed("systemctl stop caddy.service")
+            machine.succeed("systemctl start fixture-consumer.service")
+            machine.succeed("systemctl is-active --quiet caddy.service")
+            machine.succeed("test $(wc -l < /run/fixture-native-starts) = 2")
+            machine.wait_until_fails("systemctl is-active --quiet fixture-native.service", timeout=15)
+          '';
       };
     };
 }

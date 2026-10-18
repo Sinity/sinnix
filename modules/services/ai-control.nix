@@ -30,9 +30,9 @@ let
   #
   # idleTimeout/readinessTimeout have no default: the right value differs per
   # backend. The proxy forwards as soon as ExecStart runs, but backends bind
-  # their port only after loading weights (~2s to ~105s) and it does not
-  # retry -- requires+after order unit starts, not port binds. waitForBackend
-  # gates ExecStart on a real TCP accept, so a cold request is slow, not
+  # their listener only after loading weights (~2s to ~105s) and it does not
+  # retry -- requires+after order unit starts, not binds. waitForBackend
+  # gates ExecStart on a real accept, so a cold request is slow, not
   # refused.
   mkProxy =
     name:
@@ -46,9 +46,15 @@ let
         readinessTimeout
         exclusiveResource
         ;
+      # A backend endpoint is host:port, or an absolute path for a backend
+      # that listens only on a Unix socket.
+      unixBackend = lib.hasPrefix "/" backendEndpoint;
       backendParts = lib.splitString ":" backendEndpoint;
-      backendHost = lib.elemAt backendParts 0;
-      backendPort = lib.elemAt backendParts 1;
+      listening =
+        if unixBackend then
+          "${pkgs.curl}/bin/curl --silent --output /dev/null --unix-socket ${backendEndpoint} http://localhost/"
+        else
+          ''(exec 3<>"/dev/tcp/${lib.elemAt backendParts 0}/${lib.elemAt backendParts 1}") 2>/dev/null'';
       proxy = "${name}-proxy";
       socketPath = "/run/sinnix-ai/${proxy}.sock";
       waitForBackend = pkgs.writeShellApplication {
@@ -56,7 +62,7 @@ let
         runtimeInputs = [ pkgs.coreutils ];
         text = ''
           deadline=$((SECONDS + ${toString readinessTimeout}))
-          until (exec 3<>"/dev/tcp/${backendHost}/${backendPort}") 2>/dev/null; do
+          until ${listening}; do
             if [ "$SECONDS" -ge "$deadline" ]; then
               echo "${proxy}: timed out after ${toString readinessTimeout}s waiting for ${backendUnit} to listen on ${backendEndpoint}" >&2
               exit 1
@@ -64,14 +70,6 @@ let
             sleep 0.2
           done
         '';
-      };
-    in
-    {
-      inherit proxy backendUnit exclusiveResource;
-      consumers = surface.activation.consumers or [ ];
-      httpConfig = httpFrontdoor {
-        inherit publicEndpoint backendEndpoint socketPath;
-        inherit (surface.ai) browserRequests;
       };
       socket = {
         description = "Private activation socket for ${backendUnit}";
@@ -92,7 +90,29 @@ let
           # exists to catch a genuine activation loop, not client impatience.
           TriggerLimitIntervalSec = "60s";
           TriggerLimitBurst = 2000;
+          Service = "${proxy}.service";
         };
+      };
+      # NixOS activation does not restart a changed .socket unit, so a changed
+      # definition would keep its old listener until reboot. Naming the unit
+      # after a hash of its definition makes a change a removed unit plus a
+      # new one, which activation stops and starts natively.
+      socketUnit = "${proxy}-${
+        builtins.substring 0 8 (builtins.hashString "sha256" (builtins.toJSON socket))
+      }";
+    in
+    {
+      inherit
+        proxy
+        backendUnit
+        exclusiveResource
+        socket
+        socketUnit
+        ;
+      consumers = surface.activation.consumers or [ ];
+      httpConfig = httpFrontdoor {
+        inherit publicEndpoint backendEndpoint socketPath;
+        inherit (surface.ai) browserRequests;
       };
       service = {
         description = "Idle-aware socket proxy for ${backendUnit}";
@@ -101,16 +121,16 @@ let
         # proxy's listen FD and backend, including during a host switch.
         bindsTo = [
           backendUnit
-          "${proxy}.socket"
+          "${socketUnit}.socket"
         ];
         after = [
           backendUnit
-          "${proxy}.socket"
+          "${socketUnit}.socket"
         ];
         serviceConfig = {
           # Preserve descriptor association across manager reloads and cold
           # manual starts, not only an earlier socket-triggered activation.
-          Sockets = [ "${proxy}.socket" ];
+          Sockets = [ "${socketUnit}.socket" ];
           ExecStartPre = "${waitForBackend}/bin/${proxy}-wait-backend";
           ExecStart = "${systemdSocketProxyd} --exit-idle-time=${idleTimeout} ${backendEndpoint}";
           Restart = "no";
@@ -188,13 +208,13 @@ in
     extraConfig = lib.concatMapStringsSep "\n" (name: proxies.${name}.httpConfig) backendNames;
   };
   systemd.sockets = forEachProxy (proxy: {
-    ${proxy.proxy} = proxy.socket;
+    ${proxy.socketUnit} = proxy.socket;
   });
   systemd.services = lib.mkMerge [
     {
       caddy = lib.mkIf (backendNames != [ ]) {
-        wants = map (name: "${proxies.${name}.proxy}.socket") backendNames;
-        after = map (name: "${proxies.${name}.proxy}.socket") backendNames;
+        wants = map (name: "${proxies.${name}.socketUnit}.socket") backendNames;
+        after = map (name: "${proxies.${name}.socketUnit}.socket") backendNames;
         serviceConfig = {
           RuntimeDirectory = "caddy";
           RuntimeDirectoryMode = "0700";

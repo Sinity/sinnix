@@ -1,6 +1,6 @@
 # Local AI activation
 
-Most local AI backends use on-demand socket activation. Caddy checks Host and browser provenance on the public HTTP entrance, then connects to a private systemd socket. Accepted requests start the backend; an idle systemd proxy stops it after its declared window. A TCP connection or refused HTTP request does not activate a model. Open WebUI is a direct, manually started frontend; its URL does not start the service. `sinnix ai list` distinguishes boot, on-demand and manual services from the runtime inventory and installed units.
+Most local AI backends use on-demand socket activation. Caddy checks Host and browser provenance on the public HTTP entrance, then connects to a private systemd socket. Accepted requests start the backend; an idle systemd proxy stops it after its declared window. A TCP connection or refused HTTP request does not activate a model. `sinnix ai list` distinguishes boot, on-demand and manual services from the runtime inventory and installed units.
 
 ## Service map
 
@@ -10,7 +10,7 @@ Most local AI backends use on-demand socket activation. Caddy checks Host and br
 | LiteLLM gateway        | `127.0.0.1:4000`  | OpenAI `/v1/chat/completions` and Anthropic `/v1/messages`                                                                                | on demand                        | translates agent clients to local backends           |
 | Muse Glimmer           | `127.0.0.1:8083`  | direct llama.cpp model `muse-glimmer` (abliterated Q4_K_M)                                                                                | on demand, 15 minute idle window | CUDA plus CPU/RAM hybrid, one GPU inference occupant |
 | Qwen VRAM profile      | `127.0.0.1:8085`  | direct llama.cpp fully resident Qwen profile                                                                                              | on demand, 15 minute idle window | CUDA, one GPU inference occupant                     |
-| Open WebUI             | `127.0.0.1:8080`  | browser chat over Ollama and LiteLLM                                                                                                       | manual start                     | frontend only; no idle socket proxy                  |
+| Open WebUI             | `127.0.0.1:8080`  | browser chat over Ollama and LiteLLM                                                                                                       | on demand, 10 min idle           | an open tab keeps it running                         |
 | llama.cpp reranker     | `127.0.0.1:8081`  | `/v1/rerank`                                                                                                                              | on demand                        | CPU resident by policy, outside GPU admission        |
 | Speech to text         | `127.0.0.1:8090`  | `/v1/audio/transcriptions` or `sinnix stt`                                                                                                | on demand                        | Parakeet CPU service                                 |
 | Kokoro TTS             | `127.0.0.1:8890`  | `/v1/audio/speech`                                                                                                                        | on demand                        | CPU service                                          |
@@ -27,46 +27,13 @@ speech defaults alone. Existing persisted audio settings take precedence over
 these defaults; switch those through Open WebUI's configuration API when changing
 providers, preserving unrelated settings.
 
-The llama.cpp profiles validate Host, Origin and Fetch Metadata in the HTTP
-pre-routing hook, before reading request bodies. Allowed loopback origins for
-each profile's public and backend ports come from the port registry through
-`SINNIX_LLAMA_ALLOWED_ORIGINS`. Native requests, the local llama UI and
-user-activated document navigation remain supported. Unknown authorities,
-foreign or opaque origins and duplicate browser headers are refused.
-Upstream CORS options still control response headers for admitted origins;
-they cannot broaden the request boundary. An unmanaged server invocation
-without that environment variable defaults to its own loopback listener.
-Router children also accept their parent loopback origins using upstream
-`LLAMA_SERVER_ROUTER_PORT`; private child listener ports remain usable by
-the native router proxy.
-The CPU and CUDA packages have separate source patches for their pinned
-versions. `llama-http-admission` checks both HTTP libraries without models;
-`llama-package-admission` checks both full binaries as empty offline routers.
-The public Caddy gate applies before socket activation. These receiver checks also protect direct backend entrances.
-
-OpenedAI Speech uses the shared Host/Origin admission policy before its vendor
-middleware reads request bodies. Native API clients and same-origin browser
-requests remain supported; wildcard CORS is removed. Its launcher retains the
-vendor environment, voice acquisition and preload arguments. Alternate images
-must retain the `speech.py` startup interface; select their vendor launcher with
-`sinnix.services.tts.startupScript` (for example `/app/startup.min.sh`). An
-incompatible launcher fails explicitly. The declared `verify_tts_boundary`
-operation accepts `--image DIGEST_PINNED_IMAGE --ports PUBLIC BACKEND` and checks
-an already retained image offline, without GPU access, models or production-state
-mounts. This check does not start the TTS service or qualify speech generation.
+The llama.cpp profiles listen only on a Unix socket under `/run/<profile>/`, so
+the Caddy front door is their only TCP entrance.
 
 Kokoro's RAM and swap bounds apply directly to its Podman container. Its model
 process is in a separate cgroup from the systemd client unit, whose memory
 counter does not describe the model's working set. These limits do not govern
 other AI containers.
-
-Kokoro also applies the shared Host/Origin policy before request-body processing,
-on both host interfaces and its native in-container health interface. Native
-OpenAI clients and its same-origin web player remain supported. The vendor
-entrypoint, model-download setting and uvicorn lifecycle are retained; an
-incompatible entrypoint fails explicitly. `verify_kokoro_boundary` checks the
-retained image offline with `--image DIGEST_PINNED_IMAGE --ports PUBLIC BACKEND 8880`.
-It uses no production state, network, GPU, synthesis or lifespan startup.
 
 The canonical model roster is `flake/data/local-models.nix`. The canonical port and front-door map is `flake/data/ports.nix`. Edit those sources when changing the platform. Do not add a model only to LiteLLM or only to an agent wrapper.
 
@@ -92,7 +59,7 @@ The GPU services share an exclusive `gpu-inference` resource. Ollama, the llama.
 
 ## Muse Glimmer
 
-Glimmer is served directly by llama.cpp because the packaged Ollama build does not load its architecture. The CUDA package is pinned to upstream llama.cpp `b10353` until nixpkgs-ai carries the support. The service loads the abliterated 30B Q4_K_M GGUF from `/realm/library/model/gguf/Muse-Glimmer-30B-Abliterated-Q4_K_M.gguf` with these fixed runtime settings:
+Glimmer is served directly by llama.cpp because the packaged Ollama build does not load its architecture. nixpkgs' llama.cpp supports it from v0.4.0. The service loads the abliterated 30B Q4_K_M GGUF from `/realm/library/model/gguf/Muse-Glimmer-30B-Abliterated-Q4_K_M.gguf` with these fixed runtime settings:
 
 - `--n-gpu-layers auto` and `--fit on` place as many layers as fit in the RTX 3080 and keep the rest in system RAM.
 - `--fit-target 1536` leaves approximately 1.5 GiB of VRAM for the desktop and transient buffers.
@@ -208,9 +175,9 @@ The same wrappers can select `local-coder`, `local-reasoner`, `local-thinker`, o
 
 ## Open WebUI
 
-Start it with `sinnix ai start open-webui`, then open `http://127.0.0.1:8080` or its hub frontend on port 8881. When the backend is stopped, the hub proxy returns 502; visiting the URL does not activate it. `sinnix ai stop open-webui` stops it explicitly, and pinning is unavailable because there is no idle proxy.
+Open `http://127.0.0.1:8080` or its hub frontend on port 8881; the first request starts it, which takes a while on a cold start. It stops after 10 minutes without connections; an open tab's websocket counts as a connection. `sinnix ai start|stop open-webui` controls it explicitly.
 
-Both the direct listener and hub frontend check browser provenance before request bodies or actions. Open WebUI accepts loopback and the machine's verified hostname/tailnet identities on its direct and frontend ports. Foreign and report-origin requests are refused; native clients, same-origin browser traffic and WebSockets remain supported. Startup resolves the same verified tailnet identity used by the hub and refuses unverifiable identity. The service stays manually started.
+The hub frontend applies the hub's own request checks and then forwards as a native client. There is no login (`WEBUI_AUTH=False`, single operator).
 
 The configuration provides Ollama models and LiteLLM lanes, including the direct llama.cpp profiles, through `OPENAI_API_BASE_URLS`. Document embeddings use the roster's Ollama embedding model. The actual model list still depends on those owners being reachable.
 
@@ -232,7 +199,7 @@ The reranker is the llama.cpp endpoint at `127.0.0.1:8081` and answers `/v1/rera
 ## Troubleshooting
 
 - A first Glimmer request can wait during model load. Check `sinnix ai logs muse-glimmer`; a 503 during the initial load is different from a persistent load failure.
-- `unknown model architecture: muse-glimmer` means an old llama.cpp package is running. The system package must report version `10353` or newer support for this model.
+- `unknown model architecture: muse-glimmer` means an old llama.cpp package is running. The installed llama.cpp must be v0.4.0 or newer.
 - Do not run `ollama pull muse-glimmer`. This deployment is intentionally not in the Ollama pull roster.
 - If a request returns `finish_reason: "length"` with no visible content, raise `max_tokens`; the reasoning trace consumed the budget.
 - If VRAM is tight, inspect `sinnix ai status` and stop the current GPU occupant before starting another. The services are designed to be mutually exclusive.
@@ -242,20 +209,12 @@ Container-backed AI services enable the shared Podman runtime through the AI ser
 
 The runtime inventory at `/etc/sinnix/runtime-inventory.json` records the declared endpoints, activation modes, resource class, idle windows, and GPU admission relationships for these services.
 
-### LiteLLM browser admission
+### Browser protection
 
-The direct LiteLLM HTTP application checks the loopback Host authority and browser Origin/Fetch Metadata before reading request bodies or dispatching work. Native API clients and same-origin UI requests remain supported. Foreign browser requests receive 403 without wildcard CORS; deliberate document navigation remains available. Public and backend listener ports come from the shared port registry.
-
-The public HTTP gate checks provenance before the private socket activates LiteLLM. Native API requests retain the existing cold-start behavior.
-
-### Ollama browser admission
-
-Ollama accepts HTTP browser origins only at its registry-declared public and backend loopback ports. Its configured origin list replaces upstream's unrestricted localhost defaults. Native app protocols remain supported. Fetch Metadata without an Origin must identify a same-origin context or deliberate document navigation; passive cross-site requests are refused before handlers read their bodies. Host checks also precede CORS preflight handling. Native API clients and model loading retain their existing routes.
-
-The `ollama-package-boundary` check builds the configured CUDA package, including its origin and browser-admission tests. The public HTTP gate refuses untrusted requests before socket activation.
+Browser pages are kept away from these services in two places. Caddy checks Host, Origin and Fetch Metadata on every public front door before a request can activate a backend. Chrome's Local Network Access gate (Chrome 142 and later) makes a public website ask for permission before it can reach `localhost` or `127.0.0.1` at all, including through DNS rebinding. Backends get no source patches: the llama.cpp profiles are reachable only through Caddy, and Ollama, LiteLLM and Open WebUI keep their upstream Host and CORS handling on their private loopback ports.
 
 ### HTTP activation boundary
 
-The system Caddy service fronts the registry-declared loopback ports independently of the tailnet hub. Each private activation socket is owned by the operator, with group access for Caddy and mode `0660`. The public raw TCP socket interface is removed. STT declares a native-only entrance matching its receiver, so even same-origin browser metadata is refused before it loads. The backend and proxy retain the readiness wait, idle timeout, native manual-start route and GPU conflict mesh. Their systemd lifetimes are bound so a natural proxy idle exit releases the backend. Manual prewarming acquires the listening socket before starting its proxy; idle timing starts after the first proxy connection. Declared public-API consumers (such as the Ollama model loader) require the HTTP gate before they start. Caddy does not pool upstream connections, so it cannot extend a backend's idle window after a request ends. Streaming and WebSocket connections remain active work until they close.
+The system Caddy service fronts the registry-declared loopback ports independently of the tailnet hub. Each private activation socket is owned by the operator, with group access for Caddy and mode `0660`. Its unit name carries a hash of its definition (`<name>-proxy-<hash>.socket`, named by the proxy service's `Sockets=`), because NixOS activation does not restart a changed socket unit; a changed definition becomes a new unit that activation starts. STT declares a native-only entrance matching its receiver, so even same-origin browser metadata is refused before it loads. The backend and proxy retain the readiness wait, idle timeout, native manual-start route and GPU conflict mesh. Their systemd lifetimes are bound so a natural proxy idle exit releases the backend. Manual prewarming acquires the listening socket before starting its proxy; idle timing starts after the first proxy connection. Declared public-API consumers (such as the Ollama model loader) require the HTTP gate before they start. Caddy does not pool upstream connections, so it cannot extend a backend's idle window after a request ends. Streaming and WebSocket connections remain active work until they close.
 
 Caddy's administration entrance is an owner-only Unix socket under `/run/caddy`; it does not expose an additional TCP control API. `ai-http-boundary` checks the generated request gate with no models. `ai-http-activation-vm` checks the actual systemd/Caddy lifecycle using lightweight fake backends, including zero starts for refused requests, idle release and exclusive-resource transitions.

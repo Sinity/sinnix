@@ -20,8 +20,6 @@
 # shared ml-containers.nix graphroot on /realm, not the wear-limited root SSD.
 {
   mkAiService,
-  lib,
-  pkgs,
   helpers,
   ...
 }@args:
@@ -59,15 +57,6 @@ mkAiService {
       virtualisation.oci-containers.containers.kokoro = {
         inherit (cfg) image autoStart;
         pull = "never";
-        cmd = [
-          "python"
-          "/run/sinnix-kokoro/sinnix_kokoro.py"
-        ];
-        volumes = [
-          "${../../pkgs/sinnix-litellm-boundary/kokoro.py}:/run/sinnix-kokoro/sinnix_kokoro.py:ro"
-          "${../../pkgs/sinnix-litellm-boundary/boundary.py}:/run/sinnix-kokoro/sinnix_ai_browser_boundary.py:ro"
-          "${../../pkgs/sinnix-litellm-boundary/fastapi_admission.py}:/run/sinnix-kokoro/sinnix_fastapi_admission.py:ro"
-        ];
         # Container listens on 8880 internally (not a host allocation, so not
         # in the port registry); mapped to the private backend port the
         # kokoro-proxy socket forwards to (the public port is the proxy's own
@@ -77,13 +66,6 @@ mkAiService {
           # Weights are already baked into the pinned image; skip the
           # runtime re-download check on every start.
           DOWNLOAD_MODEL = "false";
-          SINNIX_KOKORO_PORTS = lib.concatStringsSep "," (
-            map toString [
-              helpers.data.ports.kokoro.public
-              helpers.data.ports.kokoro.backend
-              8880 # Native in-container interface, not another host port.
-            ]
-          );
         };
         # Podman's model process lives outside the service wrapper's cgroup.
         # Bound the container itself: the retained startup/runtime peak was
@@ -95,10 +77,8 @@ mkAiService {
         ];
       };
 
-      # Bind the container to the proxy's lifecycle: a clean idle exit of
-      # kokoro-proxy tears this container down too, releasing its cgroup
-      # instead of idling resident.
-      systemd.services.podman-kokoro = {
-      };
+      # The idle stop (kokoro-proxy exiting idle) ends podman with SIGTERM;
+      # that is the normal on-demand lifecycle, not a failure.
+      systemd.services.podman-kokoro.serviceConfig.SuccessExitStatus = [ 143 ];
     };
 } args
