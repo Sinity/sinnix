@@ -150,6 +150,15 @@
           scripts = [ "audio" ];
           nativeBuildInputs = [ pkgs.jq ];
         };
+        # Provably fails when: the stack walk stops descending, drops a merge
+        # bound or a reused branch lifetime, loses a second page, passes a
+        # head it could not read, or rewrites an unchanged status. Verified by
+        # removing the merge-time bound, which fails the bound test.
+        stacked-review-threads-status-suite = mkScriptSuite {
+          name = "stacked-review-threads-status";
+          suiteDir = ../../scripts/tests/stacked-review-threads-status;
+          scripts = [ "stacked-review-threads-status" ];
+        };
         # The SQLite backup remains a standalone script package. Its regression
         # suite drives the source script through subprocess, while the
         # machine-telemetry package owns collector tests in its checkPhase.

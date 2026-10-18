@@ -1,6 +1,7 @@
 {
   mkFeatureModule,
   pkgs,
+  lib,
   ...
 }@args:
 mkFeatureModule {
@@ -11,9 +12,11 @@ mkFeatureModule {
   description = "Git and delta tooling";
   configFn =
     {
+      config,
       lib,
       pkgs,
       user,
+      helpers,
       ...
     }:
     let
@@ -25,8 +28,32 @@ mkFeatureModule {
       # `quit=1` ends the exchange so an unusable login fails immediately
       # instead, and it is scoped to GitHub: other hosts keep the prompt.
       githubHelper = ''!f(){ ${lib.getExe pkgs.gh} auth git-credential "$@" || { [ "$1" = get ] && echo quit=1; }; }; f'';
+      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
     in
     lib.mkMerge [
+      # Conversation resolution is enforced only on PRs into the default
+      # branch, so a PR merged into another PR's head escapes it. This pass
+      # posts `stacked-review-threads` on each open default-branch head:
+      # failure while anything stacked into it has an unresolved thread.
+      # Polylogue's branch protection requires this status, so it always runs.
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "stacked-review-threads-status";
+          description = "Publish the stacked-review-threads status on open PR heads";
+        }
+        {
+          manager = "user";
+          resourceClass = "background";
+          execStart = "${scriptPkgs.stacked-review-threads-status}/bin/stacked-review-threads-status Sinity/polylogue";
+          timer = {
+            onBootSec = "2min";
+            intervalSec = 120;
+            accuracySec = "15s";
+            description = "Refresh stacked-review-threads statuses every two minutes";
+          };
+        }
+      )
       {
         home-manager.users.${user} = _: {
           programs.git = {
