@@ -166,7 +166,7 @@ def render_services(
     groups: dict[str, list[str]] = {}
     counts = {"active": 0, "failed": 0, "restartable": 0}
     for entry in rows:
-        info = states.get(entry["unit"], {})
+        info = states.get((entry["manager"], entry["unit"]), {})
         socket_activated = entry["activation"].get("mode") == "socket-proxy"
         status, tone = unit_status(info, socket_activated)
         installed = info.get("LoadState") not in {"not-found", "", None}

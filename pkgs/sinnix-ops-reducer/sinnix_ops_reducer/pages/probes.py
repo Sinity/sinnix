@@ -23,7 +23,7 @@ def load_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
         return None, f"{path} does not exist"
     except OSError as error:
         return None, f"{path} unreadable: {error}"
-    except json.JSONDecodeError as error:
+    except (json.JSONDecodeError, UnicodeError) as error:
         return None, f"{path} is not valid JSON: {error}"
     if not isinstance(value, dict):
         return None, f"{path} is not a JSON object"
@@ -53,16 +53,18 @@ UNIT_PROPERTIES = (
 )
 
 
-def unit_states(units: list[tuple[str, str]]) -> dict[str, dict[str, str]]:
-    states: dict[str, dict[str, str]] = {}
+UnitStates = dict[tuple[str, str], dict[str, str]]
+
+
+def unit_states(units: list[tuple[str, str]]) -> UnitStates:
+    states: UnitStates = {}
     for manager in {manager for manager, _ in units}:
-        states.update(
-            show_units(
-                manager,
-                [unit for owner, unit in units if owner == manager],
-                UNIT_PROPERTIES,
-            )
-        )
+        for unit, info in show_units(
+            manager,
+            [unit for owner, unit in units if owner == manager],
+            UNIT_PROPERTIES,
+        ).items():
+            states[manager, unit] = info
     return states
 
 

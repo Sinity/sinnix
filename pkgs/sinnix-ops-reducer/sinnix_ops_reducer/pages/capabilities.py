@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..capabilities import VERDICT_TONES, coverage_lines, evidence_lines
-from .probes import unit_states
+from .probes import UnitStates, unit_states
 from .services import unit_status
 from .shell import badge, card, esc, page, row, tile
 
@@ -46,12 +46,12 @@ def enabled_badge(enabled: Any) -> str:
     return badge("enabled", "ok") if enabled else badge("off", "muted")
 
 
-def capability_row(entry: dict[str, Any], states: dict[str, dict[str, str]]) -> str:
+def capability_row(entry: dict[str, Any], states: UnitStates) -> str:
     name = str(entry.get("name", ""))
     meta: list[str] = []
     unit = entry.get("unit")
     if entry.get("kind") in UNIT_KINDS and unit:
-        info = states.get(str(unit), {})
+        info = states.get((str(entry.get("manager") or "system"), str(unit)), {})
         # A backend behind a public endpoint is socket-activated: "inactive" is
         # its resting state, not a fault, and unit_status already knows to say
         # "idle" for those rather than raising an eyebrow.

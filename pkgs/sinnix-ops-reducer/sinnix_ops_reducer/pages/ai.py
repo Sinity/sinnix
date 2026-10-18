@@ -452,7 +452,7 @@ def render_ai(
             )
             continue
         unit = str(service.get("unit", ""))
-        info = states.get(unit, {})
+        info = states.get((str(service.get("manager", "system")), unit), {})
         socket_activated = service.get("activationMode") == "socket-proxy"
         status, tone = unit_status(info, socket_activated)
         installed = info.get("LoadState") not in {"not-found", "", None}
