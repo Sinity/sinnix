@@ -103,9 +103,18 @@ in
       checks.machine-telemetry-cgroups =
         pkgs.runCommand "machine-telemetry-cgroups-check"
           {
-            nativeBuildInputs = [ pkgs.python3 ];
+            nativeBuildInputs = [
+              pkgs.python3
+              pkgs.bash
+              pkgs.jq
+              pkgs.util-linux
+            ];
           }
           ''
+            cat > rotate-owner <<'EOF_ROTATE_OWNER'
+            ${evaluated.config.systemd.services.machine-telemetry-sqlite-rotate.script}
+            EOF_ROTATE_OWNER
+            python3 ${./machine-telemetry-owner.py} rotate-owner
             cat > exec-start <<'EOF_EXEC_START'
             ${renderedExecStart}
             EOF_EXEC_START

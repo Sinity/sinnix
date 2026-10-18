@@ -27,7 +27,11 @@ let
   backupSnapshotRoot = "${realmRoot}/state/machine-telemetry-backup-snapshots";
   # Backup publication uses a bounded schema/header check. A full page walk
   # would keep a growing database from producing any current backup.
-  backupTimeoutMinutes = 30;
+  # The first immutable legacy handoff adds one compressed-artifact digest to
+  # an acquisition previously measured at about 29 minutes. Later runs reuse
+  # that receipt and publish only the small active file. No structural walk
+  # of legacy history belongs to this budget.
+  backupTimeoutMinutes = 40;
   manifestPath = "${dataDir}/manifest.json";
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
@@ -267,11 +271,18 @@ mkServiceModule {
             install -d -m 0700 -o ${lib.escapeShellArg username} -g users ${lib.escapeShellArg backupSnapshotRoot}
             exec 9>>${lib.escapeShellArg "${dbRoot}/.maintenance.lock"}
             flock -n 9 || { echo "telemetry maintenance is already active" >&2; exit 75; }
-            # Older installed invocations may not yet participate in this lock.
+            # A frozen-input job may still be compressing/checking after it
+            # releases the lock. Only older invocations without this protocol
+            # need to defer cutover for their whole lifetime.
             for unit in machine-telemetry-sqlite-backup machine-telemetry-sqlite-verify; do
               if systemctl is-active --quiet "$unit.service"; then
-                echo "telemetry cutover deferred while $unit is active" >&2
-                exit 75
+                owner_pid="$(systemctl show --property=MainPID --value "$unit.service")"
+                owner_lock="$(stat -Lc '%d:%i' "/proc/$owner_pid/fd/9" 2>/dev/null || true)"
+                expected_lock="$(stat -Lc '%d:%i' ${lib.escapeShellArg "${dbRoot}/.maintenance.lock"})"
+                if [ "$owner_lock" != "$expected_lock" ] && systemctl is-active --quiet "$unit.service"; then
+                  echo "telemetry cutover deferred for nonparticipating $unit" >&2
+                  exit 75
+                fi
               fi
             done
             writer_was_active=0
@@ -287,8 +298,10 @@ mkServiceModule {
               writer_was_active=1
               systemctl stop machine-telemetry.service
             fi
-            snapshot=${lib.escapeShellArg "${backupSnapshotRoot}/rotation-initial"}
-            if [ ! -e "$snapshot" ]; then
+            if [ -e ${lib.escapeShellArg "${dbPath}.rotation.json"} ]; then
+              snapshot="$(jq -er '.snapshot | select(type == "string" and length > 0)' ${lib.escapeShellArg "${dbPath}.rotation.json"})"
+            else
+              snapshot=${lib.escapeShellArg backupSnapshotRoot}/rotation-"$INVOCATION_ID"
               btrfs subvolume snapshot -r ${lib.escapeShellArg dbRoot} "$snapshot"
             fi
             machine-telemetry-rotate --db ${lib.escapeShellArg dbPath} --preimage "$snapshot"
@@ -298,6 +311,7 @@ mkServiceModule {
           path = [
             pkgs.coreutils
             pkgs.util-linux
+            pkgs.jq
             pkgs.btrfs-progs
             pkgs.e2fsprogs
             machineTelemetry

@@ -51,8 +51,7 @@ def _sync(directory: Path) -> None:
         os.close(descriptor)
 
 
-def validate_preimage(database: Path, snapshot: Path) -> None:
-    """Require the owner's read-only Btrfs package, including committed WAL."""
+def require_readonly(snapshot: Path) -> None:
     result = subprocess.run(
         ["btrfs", "property", "get", "-ts", str(snapshot), "ro"],
         capture_output=True,
@@ -62,6 +61,11 @@ def validate_preimage(database: Path, snapshot: Path) -> None:
     )
     if result.stdout.strip() != "ro=true":
         raise RuntimeError("cutover preimage is not a read-only Btrfs snapshot")
+
+
+def validate_preimage(database: Path, snapshot: Path) -> None:
+    """Require the owner's read-only Btrfs package, including committed WAL."""
+    require_readonly(snapshot)
     for suffix in ("", "-wal"):
         live = database.with_name(database.name + suffix)
         retained = snapshot / live.name
@@ -116,6 +120,7 @@ def rotate(
     *,
     initialize: Callable[[sqlite3.Connection], None],
     preimage_check: Callable[[Path, Path], None] = validate_preimage,
+    retained_check: Callable[[Path], None] = require_readonly,
     seal_member: Callable[[Path], None] = seal,
     check_holders: Callable[[int, int], list[int]] = _holders,
     fault: Callable[[str], None] = lambda phase: None,
@@ -132,6 +137,22 @@ def rotate(
     control = database.with_name(database.name + ".segments.json")
     journal = database.with_name(database.name + ".rotation.json")
     lock = database.with_name(database.name + ".segments.lock")
+
+    def snapshot_members() -> dict:
+        observations = {}
+        if not snapshot.is_dir():
+            raise RuntimeError("retained telemetry preimage is unavailable")
+        for suffix in ("", "-wal", "-shm"):
+            member = snapshot / (database.name + suffix)
+            if member.exists():
+                value: dict[str, int | str] = dict(_identity(member))
+                if suffix == "-wal":
+                    with member.open("rb") as stream:
+                        value["header_sha256"] = hashlib.sha256(
+                            stream.read(32)
+                        ).hexdigest()
+                observations[member.name] = value
+        return observations
 
     def require_closed() -> None:
         for suffix in ("", "-wal", "-shm"):
@@ -180,6 +201,11 @@ def rotate(
                 )
             ):
                 raise RuntimeError("invalid telemetry recovery state")
+            retained_check(snapshot)
+            if snapshot_members() != state.get("preimage_members"):
+                raise RuntimeError(
+                    "retained telemetry preimage changed before recovery"
+                )
         else:
             if control.exists():
                 raise RuntimeError(
@@ -189,17 +215,7 @@ def rotate(
             value = database.stat()
             require_closed()
             preimage_check(database, snapshot)
-            preimage_members = {}
-            for suffix in ("", "-wal", "-shm"):
-                member = database.with_name(database.name + suffix)
-                if member.exists():
-                    observation: dict[str, int | str] = dict(_identity(member))
-                    if suffix == "-wal":
-                        with member.open("rb") as stream:
-                            observation["header_sha256"] = hashlib.sha256(
-                                stream.read(32)
-                            ).hexdigest()
-                    preimage_members[member.name] = observation
+            preimage_members = snapshot_members()
             state = dict(
                 schema=SCHEMA,
                 database=str(database),

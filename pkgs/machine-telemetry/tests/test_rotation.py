@@ -52,6 +52,7 @@ def source(tmp_path):
     kwargs = dict(
         initialize=collector.init_db,
         preimage_check=lambda *args: None,
+        retained_check=lambda *args: None,
         seal_member=lambda path: None,
         check_holders=lambda *args: [],
     )
@@ -331,3 +332,20 @@ def test_interrupted_candidate_with_bad_frame_is_not_adopted(source, tmp_path):
         )
     assert not list(output.glob("*.sqlite.zst"))
     assert len(list(output.glob(".*.candidate"))) == 1
+
+
+def test_recovery_refuses_changed_retained_preimage_before_mutating_source(source):
+    _, rotation, database, snapshot, kwargs = source
+
+    def crash(phase):
+        if phase == "prepared":
+            raise RuntimeError("synthetic crash")
+
+    with pytest.raises(RuntimeError, match="synthetic"):
+        rotation.rotate(database, snapshot, fault=crash, **kwargs)
+    original = database.read_bytes()
+    (snapshot / database.name).write_bytes(b"changed preimage")
+    with pytest.raises(RuntimeError, match="preimage changed"):
+        rotation.rotate(database, snapshot, **kwargs)
+    assert database.read_bytes() == original
+    assert not database.with_name(database.name + ".segments.json").exists()
