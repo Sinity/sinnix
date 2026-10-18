@@ -6,15 +6,11 @@ shows the system as of a timestamp it prints, rather than an empty skeleton
 waiting on XHR. Only the *action* buttons need JavaScript, and they talk to the
 bounded action API this same process serves.
 
-Eight routes, one shell:
+Four routes, one shell:
 
   /              the three-second read: a verdict, a row of tiles, then detail
   /work/         what is *running* -- named workloads, not a process list
-  /pressure/     which pressure regime the machine is in, and what it costs to act
   /services/     every attested runtime surface, with lifecycle controls
-  /ai/           the local AI backends and their activation semantics
-  /shaders/      the Hyprland screen-shader library, and what is applied
-  /capabilities/ what this machine can do at all, and how to invoke it
   /reports/      served by Caddy off disk; the pages only link to it
 
 The route table itself lives in shell.PAGES, with a line of prose per route,
@@ -38,13 +34,9 @@ from pathlib import Path
 from typing import Any
 
 from .. import capabilities as capability_index
-from .ai import render_ai
-from .capabilities import render_capabilities
 from .dashboard import render_dashboard
-from .pressure import render_pressure
 from .probes import load_json
 from .services import render_services
-from .shaders import render_shaders
 from .shell import PAGES, esc
 from .work import render_work
 
@@ -53,11 +45,7 @@ MANIFEST_SCHEMA = "sinnix-hub-manifest-v1"
 ROUTES = (
     "/",
     "/work/",
-    "/pressure/",
     "/services/",
-    "/ai/",
-    "/shaders/",
-    "/capabilities/",
 )
 
 # Where the route table is declared, for the `owner` column of the hub-page
@@ -113,10 +101,8 @@ def hub_page_rows() -> list[dict[str, Any]]:
     ]
 
 
-def capability_view(
-    index_path: Path | None, census_path: Path | None
-) -> dict[str, Any]:
-    return capability_index.build(index_path, census_path, hub_page_rows())
+def capability_view(index_path: Path | None) -> dict[str, Any]:
+    return capability_index.build(index_path, hub_page_rows())
 
 
 def render(
@@ -125,8 +111,6 @@ def render(
     snapshot: dict[str, Any] | None,
     inventory: dict[str, Any] | None,
     snapshot_error: str | None = None,
-    capability_index_path: Path | None = capability_index.DEFAULT_INDEX,
-    usage_census_path: Path | None = capability_index.DEFAULT_CENSUS,
 ) -> str:
     generated = (
         dt.datetime.now(dt.timezone.utc).astimezone().isoformat(timespec="seconds")
@@ -134,20 +118,8 @@ def render(
     route = canonical(path)
     if route == "/work/":
         document = render_work(manifest, snapshot, inventory, generated)
-    elif route == "/pressure/":
-        document = render_pressure(manifest, snapshot, inventory, generated)
     elif route == "/services/":
         document = render_services(manifest, inventory, generated)
-    elif route == "/ai/":
-        document = render_ai(manifest, inventory, generated)
-    elif route == "/shaders/":
-        document = render_shaders(manifest, generated)
-    elif route == "/capabilities/":
-        document = render_capabilities(
-            manifest,
-            capability_view(capability_index_path, usage_census_path),
-            generated,
-        )
     else:
         document = render_dashboard(
             manifest, snapshot, snapshot_error, inventory, generated

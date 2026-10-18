@@ -212,7 +212,6 @@ local function render()
   table.insert(rows, ui.row({ gap = 6 }, {
     hubButton("hub", "/", "Open the hub dashboard"),
     hubButton("work", "/work/", "Named workloads running right now"),
-    hubButton("pressure", "/pressure/", "Pressure regime and memory holders"),
     hubButton("services", "/services/", "Runtime surfaces with lifecycle controls"),
   }))
   panel.render(ui.column({ gap = 12, padding = 16 }, rows))

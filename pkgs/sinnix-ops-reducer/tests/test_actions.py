@@ -970,13 +970,11 @@ def test_process_stop_admission_is_by_cgroup_membership_not_name(
 def test_process_admitted_slices_matches_the_action_services_own_admission(
     tmp_path: Path,
 ) -> None:
-    """The page-facing helper (`process_admitted_slices`, imported by
-    pages/pressure.py) must compute exactly what the resolver enforces, or
-    the hub can offer a button the API answers 403 to.
+    """`process_admitted_slices` must compute exactly what the resolver
+    enforces.
 
-    Mutation: let the two computations diverge (e.g. the page hardcodes a
-    slice list) and this equality fails the moment the inventory's
-    sacrificial markers change.
+    Mutation: hardcode a slice list and this equality fails the moment the
+    inventory's sacrificial markers change.
     """
     inventory_path = tmp_path / "inventory.json"
     inventory_with_sacrificial_slice(inventory_path)

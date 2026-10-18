@@ -66,6 +66,5 @@
     "borg-beads-drill"
     "url-ledger-state"
     "url-ledger-coverage"
-    "usage-census"
   ];
 }

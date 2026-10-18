@@ -3,7 +3,7 @@
 import json
 from html.parser import HTMLParser
 
-from sinnix_ops_reducer.pages import ai, capabilities, probes, services
+from sinnix_ops_reducer.pages import probes, services
 
 
 def test_invalid_utf8_json_is_an_explicit_input_error(tmp_path):
@@ -77,36 +77,3 @@ def test_services_controls_keep_their_manager_observation(monkeypatch):
         }
     }
     assert_targets(services.render_services({}, inventory, "2026-01-01T00:00:00Z"))
-
-
-def test_ai_controls_keep_their_manager_observation(monkeypatch):
-    monkeypatch.setattr(probes, "show_units", observed)
-    monkeypatch.setattr(ai, "gpu_summary", lambda: None)
-    monkeypatch.setattr(ai, "gpu_admission_card", lambda *args: "")
-    monkeypatch.setattr(
-        ai,
-        "resolve_ai_services",
-        lambda *args: [
-            {
-                "name": manager,
-                "unit": "shared.service",
-                "manager": manager,
-                "registered": True,
-                "restartable": True,
-            }
-            for manager in ("system", "user")
-        ],
-    )
-    assert_targets(ai.render_ai({}, {}, "2026-01-01T00:00:00Z"))
-
-
-def test_capability_status_keeps_its_manager_observation(monkeypatch):
-    monkeypatch.setattr(probes, "show_units", observed)
-    states = probes.unit_states(
-        [("system", "shared.service"), ("user", "shared.service")]
-    )
-    for manager, expected in [("system", "running"), ("user", "inactive")]:
-        html = capabilities.capability_row(
-            {"kind": "service", "unit": "shared.service", "manager": manager}, states
-        )
-        assert ">" + expected + "</span>" in html

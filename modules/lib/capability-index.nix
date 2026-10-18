@@ -275,8 +275,8 @@ let
 
       # ── services, and the AI backends among them ─────────────────────────
       # An AI backend is a service whose owning runtime surface carries `ai`.
-      # It gets its own kind rather than a duplicate row: the /ai/ page, the
-      # `sinnix ai` verbs and the admission mesh all treat it as its own thing.
+      # It gets its own kind rather than a duplicate row: the `sinnix ai` verbs
+      # and the admission mesh treat it as its own thing.
       serviceRows = mapAttrsToList (
         name: service:
         let
@@ -285,8 +285,7 @@ let
           surface = surfaceOf name owner;
           ai = if surface == null then null else surface.ai;
           endpoint = if surface == null then null else surface.activation.publicEndpoint or null;
-          # Every surface this module declared, for the live-state probe and
-          # for the usage census, which keys services by surface name.
+          # Every surface this module declared, for the live-state probe.
           surfaces = map (surfaceName: {
             name = surfaceName;
             inherit (config.sinnix.runtime.surfaces.${surfaceName}) unit manager;

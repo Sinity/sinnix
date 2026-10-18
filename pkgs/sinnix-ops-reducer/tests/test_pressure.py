@@ -1,41 +1,24 @@
-"""The /pressure/ observation layer: regimes, the swap lane, and the hog table.
+"""The swap-headroom lane and process admission.
 
-Every assertion here is a claim the 2026-08-18 incident clustering makes about
-this machine, not a restatement of the code. The four that carry the design:
+Claims the 2026-08-18 incident clustering makes about this machine, not
+restatements of the code:
 
-  1. **The regime boundaries are the measured ones.** 75% swap, PSI full 20/50,
-     2 GiB available, IO full 40 -- each came out of an episode inventory, and
-     a page that classifies differently sends the operator to the wrong action.
-  2. **The swap lane fires on a PAIR.** Swap saturated *while nothing is
+  1. **The swap lane fires on a PAIR.** Swap saturated *while nothing is
      stalling* is the ten-minute warning; swap saturated *while everything
      stalls* is the freeze itself. Collapsing them loses the only lead time
      this machine gets.
-  3. **Ordering counts swapped pages.** `bd list` was measured at 8.19 GiB
-     resident and 19.38 GiB swapped. Rank on RSS and it disappears.
-  4. **A button exists only where the bounded action API admits the target.**
-     Scope stop where the launcher's name shape matches, park where the runtime
-     inventory carries the unit, and nowhere else -- the page states the gap
-     instead of growing a private path to it.
+  2. **Process stop is admitted only where the action API admits it.**
 """
 
 from __future__ import annotations
 
 import json
-from dataclasses import replace
-from html import unescape
 from pathlib import Path
 from typing import Any
 
 import pytest
 from sinnix_ops_reducer import health, pressure, server
 from sinnix_ops_reducer.actions import process_admitted_slices
-from sinnix_ops_reducer.pages.pressure import (
-    hog_row,
-    hogs_card,
-    parkable_units,
-    render_pressure,
-    scheduled_card,
-)
 
 CALM = pressure.Sample(
     swap_used_mb=2000,
@@ -69,59 +52,6 @@ def swap_at(percent: float, **overrides: Any) -> pressure.Sample:
     return sample_with(
         swap_total_mb=total, swap_used_mb=int(total * percent / 100), **overrides
     )
-
-
-# --------------------------------------------------------------------------
-# regimes
-# --------------------------------------------------------------------------
-
-
-def test_regime_boundaries_are_the_measured_thresholds() -> None:
-    """Mutation: move any threshold (75 -> 90, 20 -> 50, 2048 -> 1024, 40 -> 60)
-    and the matching pair below stops straddling it."""
-    assert pressure.classify(swap_at(74.9)).name == "CALM"
-    assert pressure.classify(swap_at(75.0)).name == "SWAP-CRITICAL"
-
-    assert pressure.classify(sample_with(memory_psi_full=19.9)).name == "CALM"
-    stalling = pressure.classify(sample_with(memory_psi_full=20.0))
-    assert stalling.name == "SWAP-CRITICAL" and stalling.cluster == "C1"
-
-    assert pressure.classify(sample_with(mem_avail_mb=2048)).name == "CALM"
-    spike = pressure.classify(sample_with(mem_avail_mb=2047))
-    assert spike.name == "SPIKE" and spike.cluster == "C2"
-
-    assert pressure.classify(sample_with(io_psi_full=39.9)).name == "CALM"
-    saturated = pressure.classify(sample_with(io_psi_full=40.0))
-    assert saturated.name == "IO-SATURATED" and saturated.cluster == "C5"
-
-
-def test_the_freeze_regime_outranks_the_disks_and_the_spike() -> None:
-    """The 2026-08-14 shape: swap pegged, everything stalled, and the disks
-    saturated as a consequence. Reporting IO there points the operator at a
-    backup that is a symptom.
-
-    Mutation: check the IO or the mem_avail branch first and this reads
-    IO-SATURATED / SPIKE.
-    """
-    both = pressure.classify(
-        swap_at(99.0, memory_psi_full=80.0, io_psi_full=95.0, mem_avail_mb=900)
-    )
-    assert both.name == "SWAP-CRITICAL"
-    assert "freeze itself" in both.detail
-
-    # And the spike shape must NOT be dressed up as a freeze: PSI is what
-    # separates them, and during a spike PSI is ~3.
-    burst = pressure.classify(swap_at(60.0, memory_psi_full=3.0, mem_avail_mb=993))
-    assert burst.name == "SPIKE"
-    assert "two minutes" in burst.detail
-
-
-def test_unreadable_pressure_is_not_reported_as_calm() -> None:
-    """A page that says CALM because it could not read /proc is worse than one
-    that says nothing. Mutation: returning the CALM regime for an empty sample."""
-    regime = pressure.classify(pressure.Sample())
-    assert regime.name == "UNKNOWN"
-    assert "does not know" in regime.detail
 
 
 def test_sample_parses_real_proc_shapes(tmp_path: Path) -> None:
@@ -226,7 +156,7 @@ def test_the_lane_emits_on_the_threshold_pair_and_only_there(lane) -> None:
     urgency, title, body = lane["recorder"].notifications[-1]
     assert urgency == "critical"
     assert "nothing is stalling yet" in title
-    assert "/pressure/" in body
+    assert "ranking processes by swap" in body
 
     # Same saturation, but the machine is already stalling: that is the freeze,
     # not the warning, and it must not be reported as the warning.
@@ -298,241 +228,10 @@ def test_a_machine_without_swap_registers_the_lane_without_judging_it(lane) -> N
 
 
 # --------------------------------------------------------------------------
-# the hog table
-# --------------------------------------------------------------------------
-
-
-def write_process(
-    proc: Path, pid: int, name: str, rss_kb: int, swap_kb: int, cgroup: str, argv: str
-) -> None:
-    directory = proc / str(pid)
-    directory.mkdir(parents=True)
-    (directory / "status").write_text(
-        f"Name:\t{name}\nState:\tS (sleeping)\nVmRSS:\t{rss_kb} kB\n"
-        f"VmSwap:\t{swap_kb} kB\nThreads:\t1\n"
-    )
-    (directory / "cgroup").write_text(f"0::{cgroup}\n")
-    (directory / "cmdline").write_bytes(argv.replace(" ", "\0").encode() + b"\0")
-    (directory / "stat").write_text(
-        f"{pid} ({name}) S 1 1 0 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 987654 0 0\n"
-    )
-
-
-@pytest.fixture
-def fake_proc(tmp_path: Path) -> Path:
-    proc = tmp_path / "proc"
-    proc.mkdir()
-    agent_job = (
-        "/user.slice/user-1000.slice/user@1000.service/agent.slice/run-r1a2b3c4.scope"
-    )
-    # The measured C3 shape: modest resident set, enormous swap.
-    write_process(
-        proc, 101, "bd", 8_388_608, 20_316_160, agent_job, "bd list --limit 500"
-    )
-    # Bigger resident set, no swap at all -- what an RSS-ordered table calls
-    # the worst offender.
-    write_process(
-        proc,
-        102,
-        "chrome",
-        12_582_912,
-        0,
-        "/user.slice/user-1000.slice/user@1000.service/app.slice/app-chrome.scope",
-        "/run/current-system/sw/bin/chrome --type=renderer",
-    )
-    write_process(
-        proc,
-        103,
-        "rustc",
-        6_291_456,
-        1_048_576,
-        "/user.slice/user-1000.slice/user@1000.service/build.slice/run-r5d6e7f8.scope",
-        "rustc --edition 2021 src/main.rs",
-    )
-    # A tool invocation placed inside a build: cheap to re-run in isolation,
-    # but killing it costs the build, so the slice must win.
-    write_process(
-        proc,
-        104,
-        "git",
-        2_097_152,
-        0,
-        "/user.slice/user-1000.slice/user@1000.service/nix-build.slice/"
-        "run-r9a0b1c2.scope",
-        "git fetch --all",
-    )
-    # A kernel thread: no VmRSS at all, and it must not appear.
-    kernel = proc / "9"
-    kernel.mkdir()
-    (kernel / "status").write_text(
-        "Name:\tkworker/0:1\nState:\tI (idle)\nThreads:\t1\n"
-    )
-    return proc
-
-
-def test_ranking_counts_swapped_pages_not_just_resident_ones(fake_proc: Path) -> None:
-    """`bd list` at 8.2 G resident and 19.4 G swapped outranks a 12 G Chrome
-    renderer, because what it is holding is 27 G of anonymous memory.
-
-    Mutation: sort on rss alone and chrome leads, which is exactly the view
-    that hid this class of hog for months.
-    """
-    rows = pressure.scan_processes(limit=4, proc=fake_proc)
-    assert [row.comm for row in rows] == ["bd", "chrome", "rustc", "git"]
-    assert rows[0].swap_kb > rows[0].rss_kb
-    assert rows[0].footprint_kb > rows[1].footprint_kb
-    assert all(row.comm != "kworker/0:1" for row in rows)
-    # The PID-reuse pin a process-level action would need is carried, not
-    # invented later.
-    assert rows[0].start_ticks == 987654
-
-
-def test_cheapness_says_what_a_kill_costs_not_how_big_it_is(fake_proc: Path) -> None:
-    """Mutation: classify on size, or drop the slice precedence, and the
-    `git fetch` inside nix-build.slice becomes a free kill that in fact
-    destroys a build."""
-    rows = {row.comm: row for row in pressure.scan_processes(limit=4, proc=fake_proc)}
-    assert rows["bd"].cheapness == pressure.CHEAPNESS_RERUNNABLE
-    assert rows["rustc"].cheapness == pressure.CHEAPNESS_EXPENSIVE
-    assert rows["chrome"].cheapness == pressure.CHEAPNESS_SESSION
-    assert rows["git"].cheapness == pressure.CHEAPNESS_EXPENSIVE
-    assert rows["bd"].unit == "run-r1a2b3c4.scope"
-    assert rows["bd"].slice_unit == "agent.slice"
-    # Version-suffixed interpreters and prefix-named model servers are the two
-    # shapes an exact-name set silently misses; both are C2 victims on the
-    # measured record.
-    assert (
-        pressure.classify_cheapness({"python3.14"}, "system.slice")
-        == pressure.CHEAPNESS_EXPENSIVE
-    )
-    assert (
-        pressure.classify_cheapness({"sherpa-onnx-vad"}, "system.slice")
-        == pressure.CHEAPNESS_EXPENSIVE
-    )
-    # And an agent session stays unclassified on purpose: which lane is
-    # expendable is the operator's judgment, not a lookup.
-    assert (
-        pressure.classify_cheapness({"claude"}, "agent.slice")
-        == pressure.CHEAPNESS_UNKNOWN
-    )
-
-
-# --------------------------------------------------------------------------
 # actions: only where the bounded API admits the target
 # --------------------------------------------------------------------------
 
-INVENTORY: dict[str, Any] = {
-    "schema": "sinnix-runtime-inventory-v1",
-    "surfaces": {
-        "borgbackup-job-realm": {
-            "unit": "borgbackup-job-realm.service",
-            "manager": "system",
-            "kind": "service",
-            "resourceClass": "backup",
-            "observe": {"enable": True, "restartable": False},
-        },
-        "activitywatch": {
-            "unit": "activitywatch.service",
-            "manager": "user",
-            "kind": "service",
-            "resourceClass": "background-maintenance",
-            "observe": {"enable": True, "restartable": True},
-        },
-    },
-}
-
-
-def test_park_is_offered_exactly_where_the_action_api_resolves_the_unit() -> None:
-    """`park` resolves its target through the runtime inventory, and the
-    parkable set is the backup-class system services. The nixpkgs-generated
-    scrub timers are in neither, and an idle unit has no cgroup to freeze.
-
-    Mutations, each caught here:
-      * offer park for every scheduled row -> the scrub button 403s;
-      * offer it for none -> the highest-value existing capability stays hidden;
-      * ignore the live state -> the idle borg job gets a button whose receipt
-        says "accepted" having frozen nothing.
-    """
-    parkable = parkable_units(INVENTORY)
-    assert parkable == {"borgbackup-job-realm.service"}
-    running = pressure.ScheduledRun(
-        timer="borgbackup-job-realm.timer",
-        unit="borgbackup-job-realm.service",
-        next_seconds=540.0,
-        last_seconds=1200.0,
-        last_duration_seconds=4210.0,
-        active=True,
-    )
-    scrub = pressure.ScheduledRun(
-        timer="btrfs-scrub-realm.timer",
-        unit="btrfs-scrub-realm.service",
-        next_seconds=86400.0,
-        last_seconds=None,
-    )
-    html = scheduled_card([running, scrub], parkable)
-    assert 'parkUnit("borgbackup-job-realm.service"' in unescape(html)
-    assert "running now" in html
-    assert "btrfs-scrub-realm.service" in html
-    assert 'parkUnit("btrfs-scrub-realm.service"' not in unescape(html)
-    assert "no park verb" in html
-    # The historical duration is the reason the strip is worth reading.
-    assert "took 1h 10m" in html
-
-    idle = scheduled_card([replace(running, active=False)], parkable)
-    assert "parkUnit(" not in idle
-    assert "park freezes a running cgroup" in idle
-
-
-def test_the_hog_table_offers_admitted_process_stop_and_names_the_gap(
-    fake_proc: Path,
-) -> None:
-    """A process button exists only when the action API would admit it."""
-    rows = {row.comm: row for row in pressure.scan_processes(limit=4, proc=fake_proc)}
-    admitted = process_admitted_slices(INVENTORY)
-    # agent.slice and agenttool.slice are admitted unconditionally, with no
-    # "slices" key in INVENTORY at all -- proving the base set does not
-    # depend on the inventory carrying it.
-    assert admitted == {"agent.slice", "agenttool.slice"}
-
-    cheap = hog_row(rows["bd"], admitted)
-    # bd is re-runnable AND in agent.slice, which is admitted: it gets the
-    # process button, carrying exactly the pid/start_ticks this row observed.
-    assert (
-        f"act('stop','process',{{pid: {rows['bd'].pid}, "
-        f"start_ticks: {rows['bd'].start_ticks}}},this)" in cheap
-    )
-    assert "act('stop','process'" not in hog_row(rows["chrome"], admitted)
-    # rustc is classified EXPENSIVE (build.slice precedence over the command
-    # name), not RERUNNABLE, so it never gets a process-stop button.
-    assert "act('stop','process'" not in hog_row(rows["rustc"], admitted)
-    # A re-runnable command outside every admitted slice (a bare `git`
-    # running as some system.slice service, say) gets no button -- and the
-    # row says why, rather than silently withholding it.
-    outside_admission = replace(rows["bd"], slice_unit="system.slice", unit="")
-    assert outside_admission.cheapness == pressure.CHEAPNESS_RERUNNABLE
-    outside_row = hog_row(outside_admission, admitted)
-    assert "act('stop','process'" not in outside_row
-    assert "no process-stop button" in outside_row
-
-    html = render_pressure(
-        {"host": "fixture"},
-        None,
-        INVENTORY,
-        "2026-08-18T12:00:00+02:00",
-        reading=swap_at(80.0, memory_psi_full=2.0),
-        processes=list(rows.values()),
-        runs=[],
-    )
-    assert "Per-process stop" in html
-    assert "slices are not registered surfaces" in html
-    # The full render wires the same admission the direct hog_row call used
-    # above -- the bd row's process button is live end to end, not only when
-    # a test hand-supplies the admitted set.
-    assert (
-        f"act('stop','process',{{pid: {rows['bd'].pid}, "
-        f"start_ticks: {rows['bd'].start_ticks}}},this)" in html
-    )
-
+# --------------------------------------------------------------------------
 
 def test_process_admission_widens_with_a_sacrificial_slice_marker() -> None:
     """A slice outside agent.slice/agenttool.slice is admitted only if the live
@@ -555,145 +254,3 @@ def test_process_admission_widens_with_a_sacrificial_slice_marker() -> None:
     assert admitted == {"agent.slice", "agenttool.slice", "background.slice"}
     assert "gpu-runtime.slice" not in admitted
 
-
-def test_session_processes_are_summed_rather_than_given_rows(fake_proc: Path) -> None:
-    """C4, made structural. On a calm live host eight of the top ten processes
-    by footprint were Chrome renderers; a table that spends its rows on them
-    has none left for the hog an operator can do something about.
-
-    Mutation: render session processes as ordinary rows and the aggregate line
-    disappears while the individual renderer reappears — which is the naive
-    top-consumers view the evidence rejects.
-    """
-    rows = pressure.scan_processes(limit=4, proc=fake_proc)
-    html = hogs_card(rows, {})
-    assert "1 session processes" in html
-    assert "collapsed on purpose" in html
-    # The actionable rows survive, including the one an RSS ranking would have
-    # pushed below Chrome.
-    assert "bd list --limit 500" in html
-    assert "rustc --edition" in html
-    assert "--type=renderer" not in html
-
-
-def test_the_page_leads_with_swap_and_buries_available_memory() -> None:
-    """The whole point of the layout: the number that moves first is first, and
-    the number that lies during a freeze is last.
-
-    Mutation: put the availability card ahead of the headroom card (the
-    conventional layout) and this ordering assertion fails.
-    """
-    html = render_pressure(
-        {"host": "fixture"},
-        None,
-        INVENTORY,
-        "2026-08-18T12:00:00+02:00",
-        reading=swap_at(90.0, memory_psi_full=4.0, mem_avail_mb=12852),
-        processes=[],
-        runs=[],
-    )
-    assert html.index("Swap headroom") < html.index("Memory stall")
-    assert html.index("Memory stall") < html.index("Available memory")
-    assert "SWAP-CRITICAL" in html
-    # Availability is present and explicitly demoted, rather than removed: the
-    # finding is that it must be read after the other two, not that it is
-    # useless.
-    assert "12,852 MiB" in html
-    assert "de-emphasised, and that is the finding" in html
-
-
-def test_scheduled_selection_is_soonest_first_and_only_the_heavy_timers() -> None:
-    """Mutation: filter by runtime-inventory resource class instead of unit
-    name and the scrub timers -- 16.7 TiB over seven days, and in no sinnix
-    surface -- vanish from the strip."""
-    now_us = 1_787_052_000_000_000
-    runs = pressure.select_scheduled(
-        [
-            {
-                "unit": "sinnix-config-drift.timer",
-                "activates": "sinnix-config-drift.service",
-                "next": now_us + 60_000_000,
-                "last": now_us - 60_000_000,
-            },
-            {
-                "unit": "btrfs-scrub-realm.timer",
-                "activates": "btrfs-scrub-realm.service",
-                "next": now_us + 3_600_000_000,
-                "last": 0,
-            },
-            {
-                "unit": "borgbackup-job-realm.timer",
-                "activates": "borgbackup-job-realm.service",
-                "next": now_us + 600_000_000,
-                "last": now_us - 1_200_000_000,
-            },
-        ],
-        now_us,
-    )
-    assert [run.unit for run in runs] == [
-        "borgbackup-job-realm.service",
-        "btrfs-scrub-realm.service",
-    ]
-    assert runs[0].next_seconds == 600.0
-    assert runs[0].last_seconds == 1200.0
-    assert runs[1].last_seconds is None
-
-
-def test_run_facts_read_systemds_own_timestamps_and_live_state() -> None:
-    """Mutations: subtract the wrong pair (ActiveEnter/ActiveExit, both 0 for a
-    finished oneshot) and every duration disappears; drop `Id` from the
-    property list and `show_units` keys nothing at all, so the whole join comes
-    back empty."""
-    facts = pressure.unit_run_facts(
-        ["borgbackup-job-realm.service", "btrbk.service"],
-        show=lambda units, user, properties: {
-            "borgbackup-job-realm.service": {
-                "Id": "borgbackup-job-realm.service",
-                "ActiveState": "inactive",
-                "InactiveExitTimestampMonotonic": "333488126540",
-                "InactiveEnterTimestampMonotonic": "337488126540",
-            },
-            "btrbk.service": {
-                "Id": "btrbk.service",
-                "ActiveState": "active",
-                "InactiveExitTimestampMonotonic": "333488126540",
-                "InactiveEnterTimestampMonotonic": "0",
-            },
-        },
-    )
-    assert facts["borgbackup-job-realm.service"] == {
-        "last_duration_seconds": 4000.0,
-        "active": False,
-    }
-    # Still running: there is no completed duration yet, and it is the one that
-    # can actually be parked.
-    assert facts["btrbk.service"] == {"last_duration_seconds": None, "active": True}
-
-
-def test_pressure_page_uses_owner_observation_without_resampling(monkeypatch):
-    from sinnix_ops_reducer.pages.pressure import render_pressure
-
-    monkeypatch.setattr(
-        pressure, "sample", lambda: pytest.fail("duplicate live pressure probe")
-    )
-    snapshot = {
-        "state": {
-            "live_pressure": {
-                "meminfo_mb": {
-                    "SwapTotal": 100,
-                    "SwapFree": 10,
-                    "MemTotal": 200,
-                    "MemAvailable": 120,
-                },
-                "memory": {"full": {"avg10": 0}},
-                "io": {"full": {"avg10": 0}},
-            }
-        }
-    }
-    reading = pressure.from_observation(snapshot["state"]["live_pressure"])
-    assert reading.swap_used_mb == 90
-    assert reading.mem_avail_mb == 120
-    document = render_pressure(
-        {}, snapshot, {}, "2026-01-01T00:00:00Z", processes=[], runs=[]
-    )
-    assert "SWAP" in document

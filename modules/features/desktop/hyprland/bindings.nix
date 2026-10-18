@@ -59,9 +59,6 @@ let
       "uwsm app -- ${scriptPkgs.sinnix-picker}/bin/sinnix-picker"
     )
     (run "SUPER + Escape" "Lock the session" "noctalia msg session lock")
-    (run "SUPER + SHIFT + Slash" "Open the full sinnix cheatsheet"
-      "${script "sinnix-cheatsheet"} && ${script "sinnix-browser-app"} http://127.0.0.1:${toString sinnix.services.hub.reportsPort}/reports/cheatsheet.html"
-    )
     (run "SUPER + H" "Focus the window to the left" "${script "kitty-hypr-nav"} focus left")
     (run "SUPER + J" "Focus the window below" "${script "kitty-hypr-nav"} focus down")
     (run "SUPER + K" "Focus the window above" "${script "kitty-hypr-nav"} focus up")

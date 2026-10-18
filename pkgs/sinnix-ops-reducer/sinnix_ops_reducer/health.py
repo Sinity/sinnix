@@ -291,8 +291,8 @@ def describe(
             "This is the state that preceded every multi-hour freeze on this "
             "machine by about ten minutes, and available memory reads fine "
             "throughout it, so nothing else will warn you.\nDecide which lane "
-            "is expendable while the machine still responds: the hub's "
-            "/pressure/ page ranks them by swap, not by RSS.",
+            "is expendable while the machine still responds, ranking "
+            "processes by swap rather than RSS.",
         )
     if key == "swap_headroom:stalled":
         return (

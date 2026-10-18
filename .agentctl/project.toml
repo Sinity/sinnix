@@ -198,13 +198,6 @@ pool = "bulk"
 result = "exit"
 timeout_seconds = 7200
 
-[operations.census]
-description = "Run the evidence-joined usage census"
-exec = ["sinnix-census", "--window-days", "90"]
-pool = "normal"
-result = "exit"
-schedule = "weekly"
-
 [operations.transcribe]
 description = "Transcribe selected audio files with the local speech engine"
 exec = ["sinnix-stt", "transcribe"]

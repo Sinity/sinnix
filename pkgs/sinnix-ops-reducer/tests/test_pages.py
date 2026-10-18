@@ -43,7 +43,6 @@ MANIFEST: dict[str, Any] = {
     "host": "fixture",
     "port": 8880,
     "reportsPort": 8883,
-    "aiServices": ["read-only", "absent"],
     "reportsDir": "/nonexistent",
     "frontends": [],
     "links": [],
@@ -63,14 +62,13 @@ def test_every_route_renders_a_complete_document_without_a_snapshot() -> None:
         assert "</html>" in html, route
 
 
-def test_pages_degrade_rather_than_fail_and_name_unregistered_backends() -> None:
+def test_pages_degrade_rather_than_fail() -> None:
     services = pages.render("/services/", MANIFEST, None, INVENTORY)
     # systemd is not reachable from a hermetic build, so every unit reads as
     # not-installed; the button correspondence itself is asserted below against
     # the function that decides it.
     assert "'unit','read-only.service'" not in services
     assert "'unit','controllable.service'" not in services
-    assert "absent" in pages.render("/ai/", MANIFEST, None, INVENTORY)
     assert "unavailable" in pages.render("/", MANIFEST, None, INVENTORY, "absent")
 
 

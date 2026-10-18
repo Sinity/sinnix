@@ -7,7 +7,6 @@ import os
 import socket
 import sys
 from pathlib import Path
-from typing import Any
 
 from . import capabilities, feedback, health, pages
 from .actions import ActionService
@@ -103,10 +102,8 @@ def emit_failure_command(argv: list[str]) -> int:
 def capabilities_command(argv: list[str]) -> int:
     """`sinnix-ops-reducer capabilities` -- the merged capability index.
 
-    The same view the hub's /capabilities/ page renders, on stdout, so a
-    consumer that is not a browser (`sinnix cheatsheet`, an agent, a shell) gets
-    it from the process that owns the merge rather than re-implementing the join
-    against the raw files.
+    The Nix-generated declarations plus the hub's own routes, on stdout, from
+    the process that owns the merge rather than a reimplementation of it.
     """
     parser = argparse.ArgumentParser(prog="sinnix-ops-reducer capabilities")
     parser.add_argument(
@@ -114,12 +111,6 @@ def capabilities_command(argv: list[str]) -> int:
         type=Path,
         default=capabilities.DEFAULT_INDEX,
         help="capability index JSON",
-    )
-    parser.add_argument(
-        "--census",
-        type=Path,
-        default=capabilities.DEFAULT_CENSUS,
-        help="usage census JSONL joined onto the rows",
     )
     parser.add_argument(
         "--kind", action="append", help="restrict to one kind (repeatable)"
@@ -130,7 +121,7 @@ def capabilities_command(argv: list[str]) -> int:
         help="emit the merged view as JSON instead of a table",
     )
     args = parser.parse_args(argv)
-    view = pages.capability_view(args.index, args.census)
+    view = pages.capability_view(args.index)
     if args.kind:
         wanted = set(args.kind)
         view["groups"] = [group for group in view["groups"] if group["kind"] in wanted]
@@ -145,23 +136,13 @@ def capabilities_command(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
-    from .capabilities import coverage_lines, evidence_lines
     index_status = view.get("index_status") or {}
     print(f"Declaration index: {index_status.get('status', 'unavailable')}; {index_status.get('reason', '')}")
-    status = view.get("census_status") or {}
-    print(f"Census: {status.get('status', 'unavailable')}; collected at {status.get('ts', 'unknown')}; {len(status.get('coverage_gaps') or [])} coverage gaps")
-    for detail in coverage_lines(status):
-        print(f"  {detail}")
     for group in view["groups"]:
         print(f"\n{group['label']} ({len(group['rows'])}) — {group['note']}")
         for row in group["rows"]:
             invoke = row.get("invoke") or ""
-            verdict = (row.get("census") or {}).get("verdict") or ""
-            print(
-                f"  {row['name']:<34} {invoke:<34} {verdict:<18} {row['description']}"
-            )
-            for detail in evidence_lines(row.get("census")):
-                print(f"    {detail}")
+            print(f"  {row['name']:<34} {invoke:<34} {row['description']}")
     return 0
 
 
@@ -245,25 +226,6 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--capability-index",
-        type=Path,
-        default=capabilities.DEFAULT_INDEX,
-        help=(
-            "Nix-generated capability index the /capabilities/ page renders: "
-            "every declared feature, service, script, command, skill, lane, MCP "
-            "server and agent lane, with how to invoke it."
-        ),
-    )
-    parser.add_argument(
-        "--usage-census",
-        type=Path,
-        default=capabilities.DEFAULT_CENSUS,
-        help=(
-            "Weekly usage census JSONL (sinnix-census), joined onto the "
-            "capability rows so a capability nothing has ever used says so."
-        ),
-    )
-    parser.add_argument(
         "--agentctl",
         default=os.environ.get(
             "SINNIX_AGENTCTL",
@@ -321,6 +283,4 @@ def main() -> None:
         inventory_path=args.inventory,
         feedback=feedback_spool,
         elicit_model_dir=args.elicit_model_dir,
-        capability_index_path=args.capability_index,
-        usage_census_path=args.usage_census,
     )

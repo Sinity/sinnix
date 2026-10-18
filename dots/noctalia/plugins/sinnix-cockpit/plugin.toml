@@ -14,13 +14,6 @@ id = "probe"
 entry = "service.luau"
 
 [[setting]]
-key = "hub_url"
-type = "string"
-label_key = "settings.hub_url.label"
-description_key = "settings.hub_url.description"
-default = "http://127.0.0.1:8880"
-
-[[setting]]
 key = "index_path"
 type = "file"
 label_key = "settings.index_path.label"

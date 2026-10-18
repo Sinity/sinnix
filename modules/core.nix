@@ -73,7 +73,7 @@ in
         # The lake is the operator's, like every other root in this list.
         # These two were the outliers at root:root, which meant any capture
         # producer running as the operator could not create its own lane
-        # directory: sinnix-census, sinnix-url-ledger and sinnix-video-resolve
+        # directory: sinnix-url-ledger and sinnix-video-resolve
         # had each never written a single file while their timers reported
         # success. Root daemons that write here are unaffected -- root ignores
         # directory permissions.

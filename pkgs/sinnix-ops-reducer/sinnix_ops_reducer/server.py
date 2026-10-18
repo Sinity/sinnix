@@ -19,7 +19,7 @@ from sinnix_lib.http import RequestBodyError, read_json_object
 from sinnix_lib.lock import flock
 from sinnix_lib.systemd import sd_notify, watchdog_period
 
-from . import capabilities, health, pages, terminals
+from . import health, pages
 from .actions import ActionError, ActionService
 from .feedback import ELICIT_MODEL_DIR_DEFAULT, FeedbackSpool, resolve_elicit_model
 from .feedback import ELICIT_SCHEMA as FEEDBACK_ELICIT_SCHEMA
@@ -257,214 +257,6 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def _write_raw(self, status: int, body: bytes, content_type: str) -> None:
-        """Arbitrary bytes with a caller-chosen Content-Type -- unlike
-        `_write_html`, needed because the terminal routes serve proxied
-        asciinema player assets (JS, CSS) alongside their own HTML."""
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    # ── /terminals/* — absorbed from an earlier standalone terminal-viewing
-    # daemon (sinnix-859p); see terminals.py for the design doctrine. ──────
-
-    def _serve_terminal_get(self) -> None:
-        path = self.path
-        if path in ("/terminals", "/terminals/"):
-            self._write_raw(
-                HTTPStatus.OK, terminals.INDEX_HTML.encode(), "text/html; charset=utf-8"
-            )
-            return
-        if path == "/terminals/v1/windows":
-            self._write(HTTPStatus.OK, terminals.list_windows())
-            return
-        match = terminals.LIVE_RE.match(path)
-        if match:
-            self._serve_terminal_live(
-                int(match.group(1)), int(match.group(2)), match.group("rest")
-            )
-            return
-        match = terminals.CONTENT_RE.match(path)
-        if match:
-            self._serve_terminal_content(int(match.group(1)), int(match.group(2)))
-            return
-        match = terminals.HISTORY_FILE_RE.match(path)
-        if match:
-            self._serve_terminal_history_file(
-                int(match.group(1)), int(match.group(2)), match.group(3)
-            )
-            return
-        match = terminals.HISTORY_RE.match(path)
-        if match:
-            self._write(
-                HTTPStatus.OK,
-                terminals.history_for(
-                    terminals.HISTORY_DIR, int(match.group(1)), int(match.group(2))
-                ),
-            )
-            return
-        self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
-
-    def _serve_terminal_content(self, pid: int, win_id: int) -> None:
-        text = terminals.get_window_text(pid, win_id)
-        if text is None:
-            self._write(
-                HTTPStatus.NOT_FOUND, {"error": "window not found or kitty unreachable"}
-            )
-            return
-        self._write_raw(
-            HTTPStatus.OK,
-            terminals.ansi_to_html(text, f"kitty pid{pid} win{win_id}").encode(),
-            "text/html; charset=utf-8",
-        )
-
-    def _serve_terminal_history_file(self, pid: int, win_id: int, fname: str) -> None:
-        # Confirm the requested file is one this window's own history lists
-        # (belt-and-suspenders against path tricks even though the regex
-        # already forbids '/' and '..').
-        entries = terminals.history_for(terminals.HISTORY_DIR, pid, win_id)
-        if not any(e.get("ansi_file") == fname for e in entries):
-            self._write(HTTPStatus.NOT_FOUND, {"error": "not this window's history"})
-            return
-        target = terminals.HISTORY_DIR / fname
-        try:
-            ansi_text = target.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            self._write(HTTPStatus.NOT_FOUND, {"error": "capture file missing"})
-            return
-        self._write_raw(
-            HTTPStatus.OK,
-            terminals.ansi_to_html(ansi_text, fname).encode(),
-            "text/html; charset=utf-8",
-        )
-
-    def _serve_terminal_live(self, pid: int, win_id: int, rest: str | None) -> None:
-        """Proxy this window's own asciinema live stream: player page, its
-        assets, and the WebSocket the player reads the terminal from."""
-        port = terminals.live_streams().get((pid, win_id))
-        if port is None:
-            self._write(
-                HTTPStatus.NOT_FOUND, {"error": "no live stream for this window"}
-            )
-            return
-
-        if rest is None:
-            # Relative redirect: the browser resolves it against the URL it
-            # actually asked for (/terminals/v1/live/<pid>/<win>), which is
-            # the only place this window's id is still known here.
-            self.send_response(HTTPStatus.MOVED_PERMANENTLY)
-            self.send_header("Location", f"{win_id}/")
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
-
-        asset = rest.lstrip("/")
-
-        if asset == "ws":
-            self._relay_terminal_ws(port)
-            return
-
-        upstream = terminals.fetch_upstream(port, f"/{asset}")
-        if upstream is None:
-            self._write(HTTPStatus.BAD_GATEWAY, {"error": "live stream unreachable"})
-            return
-        status, content_type, body = upstream
-
-        if not asset:
-            page = body.decode("utf-8", "replace")
-            if terminals.PLAYER_WS_SRC not in page:
-                self._write(
-                    HTTPStatus.BAD_GATEWAY,
-                    {
-                        "error": "asciinema's player page no longer matches the expected shape; "
-                        "the stream URL rewrite in sinnix_ops_reducer.terminals needs updating"
-                    },
-                )
-                return
-            body = (
-                page.replace(terminals.PLAYER_WS_SRC, terminals.PLAYER_WS_PROXIED)
-                .replace(terminals.PLAYER_FONT_SRC, terminals.PLAYER_FONT_PROXIED)
-                .encode()
-            )
-
-        self._write_raw(status, body, content_type)
-
-    def _relay_terminal_ws(self, port: int) -> None:
-        """Splice this connection onto the recorder's /ws.
-
-        Nothing here interprets the stream: the player and asciinema speak
-        their own protocol (v1.alis) to each other and this only carries the
-        bytes, so a protocol change upstream needs no change here. This holds
-        the ThreadingHTTPServer's per-connection thread for the life of the
-        stream, plus one more thread for the upward pump -- two OS threads
-        per open live view, same cost the standalone daemon had.
-        """
-        self.close_connection = True
-        try:
-            upstream = terminals.connect_live_ws(port, self.headers)
-        except OSError:
-            self._write(HTTPStatus.BAD_GATEWAY, {"error": "live stream unreachable"})
-            return
-
-        client = self.connection
-
-        def pump(src: socket.socket, dst: socket.socket) -> None:
-            try:
-                while chunk := src.recv(65536):
-                    dst.sendall(chunk)
-            except OSError:
-                pass
-            finally:
-                for sock in (src, dst):
-                    try:
-                        sock.shutdown(socket.SHUT_RDWR)
-                    except OSError:
-                        pass
-
-        upward = threading.Thread(target=pump, args=(client, upstream), daemon=True)
-        upward.start()
-        pump(upstream, client)
-        upward.join(timeout=5)
-
-    def _serve_terminal_post(self) -> None:
-        match = terminals.SEND_RE.match(self.path)
-        if not match:
-            self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
-            return
-        pid, win_id = int(match.group(1)), int(match.group(2))
-        try:
-            body = read_json_object(
-                self.headers,
-                self.rfile,
-                max_bytes=terminals.MAX_BODY,
-                require_content_length=False,
-            )
-        except RequestBodyError as error:
-            if error.reason in BODY_LENGTH_ERRORS or error.reason == "body_too_large":
-                message = "missing or oversized body"
-            else:
-                message = "invalid json"
-            self._write(HTTPStatus.BAD_REQUEST, {"error": message})
-            return
-        text = body.get("text")
-        key = body.get("key")
-        if isinstance(text, str) and text:
-            ok = terminals.send_text(pid, win_id, text)
-        elif isinstance(key, str) and key:
-            ok = terminals.send_key(pid, win_id, key)
-        else:
-            self._write(HTTPStatus.BAD_REQUEST, {"error": "need 'text' or 'key'"})
-            return
-        if not ok:
-            self._write(
-                HTTPStatus.NOT_FOUND,
-                {"error": "window not found, kitty unreachable, or unknown key"},
-            )
-            return
-        self._write(HTTPStatus.OK, {"status": "sent"})
-
     @property
     def reducer(self) -> Reducer:
         return self.server.reducer  # type: ignore[attr-defined]
@@ -495,8 +287,6 @@ class Handler(BaseHTTPRequestHandler):
                 snapshot,
                 inventory,
                 error,
-                capability_index_path=self.server.capability_index_path,  # type: ignore[attr-defined]
-                usage_census_path=self.server.usage_census_path,  # type: ignore[attr-defined]
             ),
         )
 
@@ -522,8 +312,6 @@ class Handler(BaseHTTPRequestHandler):
         query = parse_qs(parts.query)
         if pages.is_page_route(self.path):
             self._serve_page(self.path)
-        elif terminals.is_terminal_route(self.path):
-            self._serve_terminal_get()
         elif self.path == FEEDBACK_PATH:
             # Health only. There is deliberately no way to read the spool back.
             self._write_feedback(
@@ -658,7 +446,7 @@ class Handler(BaseHTTPRequestHandler):
             FAILURE_PATH,
             "/v1/actions",
             "/v1/actions/prepare",
-        } or terminals.SEND_RE.match(self.path) is not None
+        }
         if json_route:
             content_types = self.headers.get_all("Content-Type", [])
             if len(content_types) != 1 or (
@@ -681,9 +469,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         if self.path == FAILURE_PATH:
             self._record_failure()
-            return
-        if terminals.is_terminal_route(self.path):
-            self._serve_terminal_post()
             return
         if self.path not in {"/v1/actions", "/v1/actions/prepare"}:
             self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
@@ -738,8 +523,6 @@ def serve(
     elicit_model_dir: Path = ELICIT_MODEL_DIR_DEFAULT,
     emitter_factory: Callable[[], health.Emitter] = health.Emitter,
     sweep_interval: float = health.SWEEP_INTERVAL_SECONDS,
-    capability_index_path: Path | None = capabilities.DEFAULT_INDEX,
-    usage_census_path: Path | None = capabilities.DEFAULT_CENSUS,
 ) -> None:
     def stamp(server: ThreadingHTTPServer, is_unix: bool) -> None:
         server.reducer = reducer  # type: ignore[attr-defined]
@@ -747,8 +530,6 @@ def serve(
         server.is_unix = is_unix  # type: ignore[attr-defined]
         server.hub_manifest = hub_manifest  # type: ignore[attr-defined]
         server.inventory_path = inventory_path  # type: ignore[attr-defined]
-        server.capability_index_path = capability_index_path  # type: ignore[attr-defined]
-        server.usage_census_path = usage_census_path  # type: ignore[attr-defined]
         server.feedback = feedback  # type: ignore[attr-defined]
         server.elicit_model_dir = elicit_model_dir  # type: ignore[attr-defined]
         server.emitter_factory = emitter_factory  # type: ignore[attr-defined]

@@ -2,16 +2,16 @@
 -- Capability index entry point: the whole declared surface one click away.
 -- Shows the row count from /etc/sinnix/capability-index.json (read by the
 -- probe service, refreshed on mtime change — the file only moves on switch),
--- per-kind counts in the tooltip, and a click opens the hub's /capabilities/
--- page, which joins the same index with live health and census usage.
+-- per-kind counts in the tooltip, and a click lists every capability with how
+-- to invoke it (`sinnix capabilities`) in a terminal.
 
-local HUB_URL = noctalia.getConfig("hub_url") or "http://127.0.0.1:8880"
+local LIST_COMMAND = "kitty --title 'Sinnix capabilities' sh -c 'sinnix capabilities | less -R'"
 
 local caps = noctalia.state.get("sinnix-cockpit.capabilities")
 
 local function tooltipText()
   if type(caps) ~= "table" or caps.total == nil then
-    return "Capability index unavailable\nclick: open the hub capabilities page"
+    return "Capability index unavailable\nclick: list capabilities in a terminal"
   end
   local lines = { tostring(caps.total) .. " declared capabilities" }
   local names = {}
@@ -22,7 +22,7 @@ local function tooltipText()
   for _, kind in ipairs(names) do
     table.insert(lines, "  " .. kind .. ": " .. tostring(caps.kinds[kind]))
   end
-  table.insert(lines, "click: open the hub capabilities page")
+  table.insert(lines, "click: list capabilities in a terminal")
   return table.concat(lines, "\n")
 end
 
@@ -38,8 +38,8 @@ local function render()
 end
 
 function onClick()
-  if not noctalia.runAsync("xdg-open '" .. HUB_URL .. "/capabilities/'") then
-    noctalia.notifyError("Could not open " .. HUB_URL .. "/capabilities/")
+  if not noctalia.runAsync(LIST_COMMAND) then
+    noctalia.notifyError("Could not open the capability list")
   end
 end
 

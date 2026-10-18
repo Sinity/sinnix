@@ -3,13 +3,6 @@
   python3Packages,
   sinnix-lib,
   nodejs,
-  # terminals.py shells out to these by bare name (`kitty @ ...`, `aha ...`);
-  # a buildPythonApplication has no writeShellApplication runtimeInputs
-  # wrapper of its own to carry them, so they go on the built console_script's
-  # PATH directly -- same pattern as sinnix-phone-dispatcher's
-  # scorePackage (pkgs/sinnix-phone-dispatcher/pkg.nix).
-  kittyPackage,
-  ahaPackage,
 }:
 
 python3Packages.buildPythonApplication {
@@ -22,18 +15,8 @@ python3Packages.buildPythonApplication {
   # notification, batched systemd probes) the health sweep and the action
   # receipts are written against, rather than private copies of each.
   dependencies = [ sinnix-lib ];
-  makeWrapperArgs = [
-    "--prefix"
-    "PATH"
-    ":"
-    (lib.makeBinPath [
-      kittyPackage
-      ahaPackage
-    ])
-  ];
   nativeCheckInputs = [ python3Packages.pytest nodejs ];
   SINNIX_CAPABILITIES_WRAPPER = ../../scripts/sinnix-capabilities;
-  SINNIX_CHEATSHEET_SOURCE = ../../scripts/sinnix-cheatsheet;
   checkPhase = ''
     runHook preCheck
     pytest -q

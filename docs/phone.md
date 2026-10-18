@@ -263,10 +263,8 @@ Whether KDE Connect should take over commodity continuity is open in
 
 ## Local models over the tailnet
 
-With Tailscale up, open the hub's AI page (`http://sinnix-prime:8880/ai/`),
-start Open WebUI there (or `sinnix ai start open-webui` on the desktop), and
-use `http://sinnix-prime:8881/`. A 502 means Open WebUI is stopped. Inference
-runs on the workstation; the phone is only a browser. See
+With Tailscale up, open `http://sinnix-prime:8881/`; Open WebUI starts on the
+first request. Inference runs on the workstation; the phone is only a browser. See
 [local AI activation](local-ai-activation.md#open-webui).
 
 ## Known limits

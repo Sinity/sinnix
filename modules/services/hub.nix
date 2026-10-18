@@ -32,19 +32,9 @@
 # to run, coalesced so a comparison session refits the model once rather than
 # once per tap.
 #
-# ── Where the terminal views come from ──────────────────────────────────────
-# `/terminals/*` is also a route family on that same reducer (sinnix-859p),
-# absorbed from an earlier standalone daemon dedicated to terminal views:
-# same URLs, same response shapes, same design doctrine (see the reducer's terminals.py
-# module docstring). It used to be its own Unix-socket process behind
-# `handle_path /terminals/*`; now it falls through the same catch-all
-# `handle` below as every page, so kitty's control sockets and the scrollback
-# capture files it reads are reached from the one process already running
-# under the operator's own uid, not a second one.
-#
-# Auth is unchanged by that move. The reducer treats its Unix socket as
-# authorized (it is 0600 in the operator's runtime dir) and still demands a
-# bearer token on its loopback TCP listener, so proxying the page paths through
+# Auth: the reducer treats its Unix socket as authorized (it is 0600 in the
+# operator's runtime dir) and still demands a bearer token on its loopback TCP
+# listener, so proxying the page paths through
 # the socket exposes exactly what the action API already exposed there and
 # nothing more: the same-origin gate below and the reducer's own
 # target identity check remain the admission checks for POSTs.
@@ -143,26 +133,6 @@ mkServiceModule {
       description = ''
         Spool directory for report annotations posted to /feedback. One
         append-only JSONL file per UTC day; agents read it directly.
-      '';
-    };
-
-    aiServices = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      # Derived from the runtime registry. The hand-written
-      # list this replaces had silently omitted kokoro and muse-glimmer since
-      # it was written -- the drift class dies with the second registry.
-      # Disabled services no longer appear at all: with nothing to drift, the
-      # old "renders as not-registered rather than disappearing" visibility
-      # hack has nothing left to reveal.
-      default = lib.naturalSort (
-        lib.attrNames (lib.filterAttrs (_: surface: surface.ai != null) config.sinnix.runtime.surfaces)
-      );
-      defaultText = lib.literalExpression "every runtime surface carrying ai metadata";
-      description = ''
-        Names of AI services the control panel offers. Names only: every unit,
-        endpoint, idle timeout, admission key, and restartable flag is resolved
-        at render time from /etc/sinnix/runtime-inventory.json, so the panel
-        cannot drift from the inventory the action API validates against.
       '';
     };
 
@@ -275,10 +245,6 @@ mkServiceModule {
         @${label}MediaType {
           method POST
           expression path(${lib.concatMapStringsSep ", " (path: "'${path}'") paths})${
-            lib.optionalString (
-              label == "pages"
-            ) " || path_regexp('^/terminals/v1/windows/[0-9]+/[0-9]+/send$')"
-          }${
             lib.optionalString (label == "phone") " || path_regexp('^/(phone/)?(v1/)?(intent|job-answer)/*$')"
           }
           not expression {http.request.header.Content-Type}.matches('(?i)^[[:blank:]]*application/json[[:blank:]]*(;[^,]*)?$')
@@ -296,10 +262,9 @@ mkServiceModule {
         builtins.toJSON {
           schema = "sinnix-hub-manifest-v1";
           host = config.networking.hostName;
-          inherit (cfg) port reportsPort aiServices;
+          inherit (cfg) port reportsPort;
           reportsDir = cfg.reportsDir;
           feedbackDir = cfg.feedbackDir;
-          shadersDir = "${config.sinnix.paths.dotsRoot}/hypr/shaders";
           frontends = lib.mapAttrsToList (name: frontend: {
             inherit name;
             inherit (frontend) label port upstream;
@@ -395,7 +360,7 @@ mkServiceModule {
             ${hostGuard "hub"}
 
           # The reducer trusts this Unix socket. Apply the same browser
-          # boundary to its API and page/terminal routes, before proxying.
+          # boundary to its API and page routes, before proxying.
           handle_path /ops/* {
             ${browserGuard "ops" false cfg.port}
             ${jsonGuard "ops" [
@@ -447,8 +412,6 @@ mkServiceModule {
           # /ops/* above: the reducer routes on the page path itself.
           redir /work /work/
           redir /services /services/
-          redir /ai /ai/
-          redir /shaders /shaders/
 
           handle {
             ${browserGuard "pages" false cfg.port}

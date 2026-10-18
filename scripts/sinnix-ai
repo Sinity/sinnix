@@ -73,8 +73,8 @@ idle-aware proxy (open-webui) don't idle-teardown in the first place, so
 pinning them is a no-op refused with an explanation.
 
 start/stop delegate the backend unit's own lifecycle to the ops-reducer's
-action API (%t/sinnix/ops.sock), the same admission path the hub's /ai/
-panel buttons use, so restartability and idempotency stay single-sourced.
+action API (%t/sinnix/ops.sock), so restartability and idempotency stay
+single-sourced.
 Bringing the socket proxy back from a latched trigger-limit (reset-failed
 + start) has no equivalent action-API verb and stays a direct systemctl
 call -- it is cleanup of the front door, not a lifecycle decision about

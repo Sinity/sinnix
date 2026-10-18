@@ -207,16 +207,6 @@
           extraPythonPackages = [ sinnix-lib ];
           nativeBuildInputs = [ pkgs.systemd ];
         };
-        # Provably fails when: the atuin word-boundary match regresses to a
-        # naive substring LIKE (false positives) or drops the trailing-token
-        # position again (false negatives), or the @-edge reachability loop
-        # stops iterating to a fixed point and so misses a two-hop dependency.
-        census-suite = mkScriptSuite {
-          name = "sinnix-census";
-          suiteDir = ../../pkgs/sinnix-census/tests;
-          scripts = [ "sinnix-census" ];
-          extraPythonPackages = [ sinnix-lib ];
-        };
         # Provably fails when: either direction of the /realm taxonomy
         # assertion is dropped, or a retired level-1 name is readmitted to the
         # manifest. Verified by all three mutations.
@@ -316,12 +306,6 @@
           name = "sinnix-quest-player";
           suiteDir = ../../pkgs/sinnix-quest-player/tests;
           scripts = [ "sinnix-quest-player" ];
-          extraPythonPackages = [ sinnix-lib ];
-        };
-        cheatsheet-suite = mkScriptSuite {
-          name = "sinnix-cheatsheet";
-          suiteDir = ../../pkgs/sinnix-cheatsheet/tests;
-          scripts = [ "sinnix-cheatsheet" ];
           extraPythonPackages = [ sinnix-lib ];
         };
         # Provably fails when: a binding's ranking identity starts tracking

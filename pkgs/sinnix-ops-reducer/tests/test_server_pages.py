@@ -22,7 +22,6 @@ import pytest
         "/v1/health/failure",
         "/v1/actions",
         "/v1/actions/prepare",
-        "/terminals/v1/windows/1/2/send",
     ],
 )
 @pytest.mark.parametrize(
@@ -35,7 +34,7 @@ def test_json_posts_refuse_media_types_before_body_or_owner(
     from sinnix_ops_reducer.server import Handler
 
     calls = []
-    for method in ("_spool_feedback", "_record_failure", "_serve_terminal_post"):
+    for method in ("_spool_feedback", "_record_failure"):
         monkeypatch.setattr(Handler, method, lambda self: calls.append("owner"))
 
     class Actions:
@@ -105,7 +104,7 @@ def hub_server(hub_server_factory, tmp_path: Path) -> str:
 
 @pytest.mark.parametrize(
     "route",
-    ["/", "/work/", "/pressure/", "/services/", "/ai/", "/shaders/", "/capabilities/"],
+    ["/", "/work/", "/services/"],
 )
 def test_every_page_route_answers_with_a_document(
     hub_server: str, http_get, route: str

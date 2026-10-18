@@ -5,10 +5,10 @@
 # from the declarations that already carry that information. The builder and
 # its source map live in modules/lib/capability-index.nix.
 #
-# Consumers: the hub's /capabilities/ page and `sinnix cheatsheet`, both through
-# `sinnix-ops-reducer capabilities`, which joins these rows with live unit state
-# and the usage census. Nothing polls it and nothing regenerates it — it is a
-# build product, current by definition for the running generation.
+# Consumers: `sinnix capabilities` (through `sinnix-ops-reducer capabilities`,
+# which adds the hub's own routes) and the Noctalia capability count. Nothing
+# polls it and nothing regenerates it — it is a build product, current by
+# definition for the running generation.
 {
   lib,
   config,

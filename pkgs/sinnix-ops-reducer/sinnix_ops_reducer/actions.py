@@ -86,9 +86,7 @@ def sacrificial_slices(inventory: dict[str, Any] | None) -> set[str]:
     Read from the live inventory rather than hardcoded, so a slice's
     admission tracks its own declared policy rather than a second list that
     can drift from it. Module-level and inventory-only (no I/O, no
-    ActionError) so /pressure/ can mirror the same boundary the action API
-    enforces, the same way `parkable_units` mirrors `park`'s admission,
-    without either raising on a missing inventory or duplicating the rule."""
+    ActionError), so it never raises on a missing inventory."""
     slices = inventory.get("slices") if isinstance(inventory, dict) else None
     found: set[str] = set()
     if not isinstance(slices, dict):
@@ -521,9 +519,8 @@ class ActionService:
 
     def _live_process_prober(self, pid: int) -> tuple[int, str, str] | None:
         """(start_ticks, unit, slice_unit) read straight from /proc, or None
-        if the pid does not currently exist. Reuses pressure.py's own
-        starttime-field parsing and cgroup parsing so the two places that
-        read a process's identity off this host agree by construction."""
+        if the pid does not currently exist. Reuses pressure.py's cgroup
+        parsing."""
         directory = pressure_model.PROC / str(pid)
         try:
             stat_text = (directory / "stat").read_text(encoding="utf-8")

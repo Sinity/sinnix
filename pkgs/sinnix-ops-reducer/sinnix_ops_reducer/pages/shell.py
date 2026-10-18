@@ -428,20 +428,6 @@ async function act(verb, kind, id, button, parameters){
     button.disabled = false;
   }
 }
-// park's deadline is part of the action, not a fixed default -- the
-// reducer rejects a park request with no deadline_seconds, because the
-// whole point of the verb is that a parked unit cannot be forgotten
-// frozen -- so the button asks rather than guessing one.
-function parkUnit(unit, button){
-  var minutes = prompt('Park ' + unit + ' for how many minutes (cgroup freeze, auto-thaws on its own)?', '10');
-  if (minutes === null) return;
-  var seconds = Math.round(parseFloat(minutes) * 60);
-  if (!(seconds >= 1 && seconds <= 86400)) {
-    hublog('park refused locally: minutes must be between 0 and 1440', 'bad');
-    return;
-  }
-  act('park', 'unit', unit, button, {deadline_seconds: seconds});
-}
 // set_policy targets a property the runtime inventory already declares for
 // this surface; reset_policy (a plain act() call, no prompt) restores the
 // inventory's own value, so this is reversible by construction.
@@ -466,25 +452,11 @@ PAGES = (
         "What is running right now, as named workloads rather than a process list",
     ),
     (
-        "/pressure/",
-        "pressure",
-        "Which pressure regime the machine is in, what is holding memory, and "
-        "what a kill would cost",
-    ),
-    (
         "/services/",
         "services",
         "Every attested runtime surface, with lifecycle controls",
     ),
-    ("/ai/", "ai", "Local AI backends, their endpoints and activation semantics"),
-    ("/shaders/", "shaders", "The Hyprland screen-shader library, and what is applied"),
-    (
-        "/capabilities/",
-        "capabilities",
-        "Everything this machine can do and how to invoke it, with usage verdicts",
-    ),
     ("/reports/", "reports", "Generated HTML reports, served off disk by Caddy"),
-    ("/terminals/", "terminals", "Live kitty windows and their captured scrollback"),
 )
 
 

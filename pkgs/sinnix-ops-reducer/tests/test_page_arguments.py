@@ -6,10 +6,9 @@ import subprocess
 import pytest
 from pathlib import Path
 from html.parser import HTMLParser
-from types import SimpleNamespace
 from urllib.parse import unquote, urlsplit
 
-from sinnix_ops_reducer.pages import dashboard, pressure, queue, services, shell
+from sinnix_ops_reducer.pages import dashboard, queue, services, shell
 
 
 class Attributes(HTMLParser):
@@ -31,7 +30,6 @@ def test_action_arguments_survive_browser_attribute_decoding():
         (services.lifecycle_controls(unit, True, True, False), [('act', ['start', 'unit', unit])]),
         (services.policy_controls(unit, {'MemoryHigh': value}), [('setPolicy', [unit, 'MemoryHigh', value]), ('act', ['reset_policy', 'unit', unit])]),
         (queue.job_row({'job_id': unit, 'terminal': False}, dt.datetime.now(dt.timezone.utc)), [('act', ['interrupt', 'job_id', unit])]),
-        (pressure.scheduled_card([SimpleNamespace(unit=unit,timer='neutral.timer',active=True,next_seconds=None,last_seconds=None,last_duration_seconds=None)], {unit}), [('parkUnit', [unit])]),
     ]
     cases = []
     for markup, expected in snippets:
@@ -45,7 +43,7 @@ for (const item of cases) {
  globalThis.injected = false;
  const calls = [], button = {};
  const spy = name => (...args) => { assert.equal(args.pop(), button); calls.push([name,args]); };
- new Function('act','setPolicy','parkUnit',item.handler).call(button,spy('act'),spy('setPolicy'),spy('parkUnit'));
+ new Function('act','setPolicy',item.handler).call(button,spy('act'),spy('setPolicy'));
  assert.equal(globalThis.injected,false);
  assert.deepEqual(calls,[item.expected]);
 }

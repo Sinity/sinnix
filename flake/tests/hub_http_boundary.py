@@ -138,7 +138,7 @@ with tempfile.TemporaryDirectory() as temporary:
                 assert response.status == expected, (path, headers, response.status)
                 assert len(Owner.calls) - before == (1 if expected in (200, 101) else 0), (path, headers, Owner.calls)
 
-            for path in ("/ops/v1/actions", "/terminals/not-a-terminal", "/v1/actions", "/feedback", "/phone/v1/ping", "/reports/missing"):
+            for path in ("/ops/v1/actions", "/work/", "/v1/actions", "/feedback", "/phone/v1/ping", "/reports/missing"):
                 request(path, {"Host": f"rebound.example.invalid:{port}"}, 403)
             for name in ("localhost", "127.0.0.1", "127.0.0.2", "neutral.tailnet.invalid"):
                 request("/v1/actions", {"Host": f"{name}:{port}", "Origin": f"http://{name}:{port}"}, 200)
@@ -154,7 +154,7 @@ with tempfile.TemporaryDirectory() as temporary:
                 request("/", {"Host": f"neutral.tailnet.invalid:{frontend_port}", "Origin": f"http://neutral.tailnet.invalid:{frontend_port}", "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "websocket", "Connection": "Upgrade", "Upgrade": "websocket"}, 101, method="GET", request_port=frontend_port)
                 request("/", {"Origin": "https://foreign.example.invalid"}, 403, send_body=False, request_port=frontend_port)
             before = len(Owner.calls)
-            for path in ('/ops/v1/actions', '/v1/actions', '/terminals/', '/phone/v1/ping', '/private/file-catalog'):
+            for path in ('/ops/v1/actions', '/v1/actions', '/work/', '/phone/v1/ping', '/private/file-catalog'):
                 request(path, {}, 404, request_port=report_port)
             assert len(Owner.calls) == before
             client = http.client.HTTPConnection('127.0.0.1', report_port, timeout=2)
@@ -170,23 +170,22 @@ with tempfile.TemporaryDirectory() as temporary:
             request('/ops/v1/actions', {'Origin': f'http://127.0.0.1:{report_port}'}, 403)
             request('/feedback', {'Origin': f'http://127.0.0.1:{report_port}', 'Sec-Fetch-Site': 'same-site'}, 200)
             same_origin = f"http://127.0.0.1:{port}"
-            for path in ("/ops/v1/actions", "/terminals/not-a-terminal", "/v1/actions", "/feedback"):
+            for path in ("/ops/v1/actions", "/work/", "/v1/actions", "/feedback"):
                 request(path, {"Origin": "https://example.invalid"}, 403)
                 request(path, {"Origin": same_origin, "Sec-Fetch-Site": "same-origin"}, 200)
                 request(path, {}, 200)
                 request(path, {"Sec-Fetch-Site": "cross-site"}, 403)
-            for path in ("/ops/v1/actions", "/terminals/not-a-terminal", "/v1/actions"):
+            for path in ("/ops/v1/actions", "/work/", "/v1/actions"):
                 request(path, {"Origin": "null"}, 403)
                 request(path, {"Sec-Fetch-Site": "same-site"}, 403)
             request("/feedback", {"Origin": "null", "Sec-Fetch-Site": "cross-site"}, 200)
             navigation = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document", "Sec-Fetch-User": "?1"}
-            request("/terminals/not-a-terminal", navigation, 200, method="GET")
-            request("/terminals/not-a-terminal", navigation, 403)
+            request("/work/", navigation, 200, method="GET")
+            request("/work/", navigation, 403)
             for header in ("Origin", "Sec-Fetch-Site", "Sec-Fetch-Mode", "Sec-Fetch-Dest", "Sec-Fetch-User"):
                 request("/phone/v1/intent", {header: "same-origin"}, 403)
-            request("/terminals/not-a-terminal", {"Origin": "https://example.invalid"}, 403, send_body=False)
-            request("/terminals/v1/windows/1/2/send", {"Origin": "https://example.invalid", "Content-Type": "text/plain"}, 403, send_body=False)
-            for path in ('/ops/v1/actions', '/ops/v1/actions/prepare', '/v1/health/failure', '/terminals/v1/windows/1/2/send', '/feedback', '/phone/v1/intent', '/phone/v1/job-answer/', '/phone/intent///'):
+            request("/work/", {"Origin": "https://example.invalid"}, 403, send_body=False)
+            for path in ('/ops/v1/actions', '/ops/v1/actions/prepare', '/v1/health/failure', '/feedback', '/phone/v1/intent', '/phone/v1/job-answer/', '/phone/intent///'):
                 for media in ([], 'text/plain', ['application/json', 'application/json']):
                     request(path, {'Content-Type': media}, 415, send_body=False)
                 request(path, {'Content-Type': 'Application/JSON; charset=utf-8'}, 200)

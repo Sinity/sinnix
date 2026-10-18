@@ -32,8 +32,6 @@ def hub_server_factory(tmp_path: Path) -> Iterator[Callable[..., str]]:
         sources: Callable[[], dict[str, Any]] = dict,
         inventory_path: Path | None = None,
         hub_manifest: Path | None = None,
-        capability_index_path: Path | None = None,
-        usage_census_path: Path | None = None,
         feedback: FeedbackSpool | None = None,
         elicit_model_dir: Path | None = None,
         actions: Any = None,
@@ -49,12 +47,6 @@ def hub_server_factory(tmp_path: Path) -> Iterator[Callable[..., str]]:
         server.is_unix = True
         server.hub_manifest = hub_manifest
         server.inventory_path = inventory_path or tmp_path / "missing-inventory.json"
-        server.capability_index_path = (
-            capability_index_path or tmp_path / "missing-capability-index.json"
-        )
-        server.usage_census_path = (
-            usage_census_path or tmp_path / "missing-usage-census.jsonl"
-        )
         server.feedback = feedback
         server.elicit_model_dir = elicit_model_dir or tmp_path / "missing-elicit"
         servers.append(server)
