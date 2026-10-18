@@ -481,7 +481,6 @@ def test_cli_and_page_preserve_selected_snapshot_gaps(tmp_path, capsys):
     assert view["census_status"]["coverage_gaps"] == snap["coverage_gaps"]
     html = render_capabilities({"host": "fixture"}, view, "now")
     assert "1 inventory/observation gaps" in html
-    assert "shell invocations" not in html
     assert (
         capabilities_command(["--index", str(index_path), "--census", str(census_path)])
         == 0

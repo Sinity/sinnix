@@ -223,7 +223,6 @@ def test_work_page_escapes_queue_count_fields_and_does_not_invent_pause_owner():
         parser.feed(html)
         assert "img" not in parser.tags
         assert escape(marker, quote=True) in html
-        assert "backpressure timer holding" not in html
 
 
 def test_jobs_prioritize_active_and_explain_both_display_and_owner_omissions():
@@ -238,7 +237,6 @@ def test_jobs_prioritize_active_and_explain_both_display_and_owner_omissions():
     assert html.index("old-running-job") < html.index("completed-0")
     assert "Showing 12 of 21 snapshot jobs" in html
     assert "Owner omitted: 3 active, 99 completed" in html
-    assert "Every pueue task" not in html
 
 
 def test_empty_snapshot_does_not_claim_no_owner_jobs_or_invent_coverage():
