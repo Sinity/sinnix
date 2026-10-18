@@ -1,807 +1,277 @@
 # The phone
 
-`dev.sinnix.phone` — sinnix's phone-side member. Ambient capture,
-instruments, ingress, and a remote for prime, on a Redmi Note 11 NFC running
-Android 16 (Evolution X). The app targets API 33; the device is bootloader-
-unlocked and rooted with Magisk.
+`dev.sinnix.phone` is the phone-side app: ambient capture, instruments, quick
+input, and a remote for prime. The phone is a Redmi Note 11 NFC running
+Evolution X (Android 16), bootloader-unlocked and rooted with Magisk. The app
+targets API 33.
 
-It began as an answer to one platform constraint and outgrew it. That history
-still matters in one place — the capture surfaces, where it is the reason they
-look the way they do — and nowhere else.
+## What it does
 
-## What it is for
+- **Remote:** prime's status, what agents are doing, answering an agent's
+  question, and the actions the hub's action API accepts.
+- **Capture:** ambient audio, light and motion, notifications, location,
+  Health Connect, power and thermal events.
+- **Instruments:** short measurement sessions (a "Check" of two to four
+  instruments, under three minutes) plus decks pushed from prime.
+- **Input:** share sheet, Mark (one tap, a timestamped word), hold-to-talk.
 
-Four things, and they are peers:
-
-- **The remote.** Prime's verdict, what agents are doing, answering an
-  agent's question, and the bounded actions the hub's action API accepts.
-- **Capture.** Ambient audio, ambient light and motion, notifications — the
-  lanes only a device in a pocket can produce.
-- **Instruments.** A Check of two to four measurements under three minutes,
-  plus a shelf, plus decks pushed from prime.
-- **Ingress.** Share-sheet, the Mark verb, hold-to-talk: getting something out
-  of the phone and into the lake in under three seconds.
-
-It is deliberately **not** a dashboard. The hub renders charts, logs and
-reports well and is already reachable over the tailnet; the Estate screen deep
-links out to it rather than repeating it.
+Charts and reports stay in the hub; the app links to it.
 
 ## Where it lives
 
-| Piece                          | Path                                                                          |
-| ------------------------------ | ----------------------------------------------------------------------------- |
-| App source                     | github:Sinity/sinnix-phone-app (`app/src/main/`)                              |
-| Build + install packaging      | phone-app repo `pkg.nix`, `deps.json`; flake input wired in flake/scripts.nix |
-| Desktop control surface        | `scripts/sinnix-phone`                                                        |
-| Prime's half of the transport  | `pkgs/sinnix-phone-dispatcher`                                                |
-| Transport routes + unit        | `modules/services/hub.nix` (`/phone/v1/*`)                                    |
-| System-log pull (the one pull) | `modules/services/phone-logcat.nix`                                           |
+| Piece                    | Path                                                                  |
+| ------------------------ | --------------------------------------------------------------------- |
+| App source and packaging | github:Sinity/sinnix-phone-app (`pkg.nix`, `deps.json`); flake input  |
+| Desktop CLI              | `scripts/sinnix-phone` (`sinnix phone ...`)                           |
+| Prime's receiving side   | `pkgs/sinnix-phone-dispatcher`, routes in `modules/services/hub.nix`  |
+| System-log and call pull | `modules/services/phone-logcat.nix`                                   |
 
-The phone and Quest scripts encode literal arguments before SSH or ADB joins
-them into a remote command. `sinnix-remote-command` uses POSIX shell quoting,
-including at both layers of `su -c` commands. Device shells must accept that
-syntax. Clipboard stdin preserves trailing newlines; NUL is rejected before
-sending because shell arguments cannot represent it. Capture and Quest media
-inventories use NUL separators to preserve filenames containing newlines.
-The explicit `shell` commands continue to accept operator-authored command text.
+## Build and install
 
-Phone SSH uses one pinned `sinnix-phone` host identity across tailnet, mDNS and
-LAN addresses. Enroll its public host key through an authenticated device
-connection in the owner-managed `known_hosts` file under the phone state home;
-`SINNIX_PHONE_KNOWN_HOSTS` may select another enrolled file. SSH discovery runs only when an operation actually needs SSH. ADB-only operations reuse an authenticated connection or discover Android wireless debugging through Avahi, checking the enrolled serial before selection. The phone state home’s private `adb-serial` file records the serial enrolled through authenticated USB; `SINNIX_PHONE_ADB_SERIAL` may override it and `SINNIX_PHONE_ADB_ENDPOINT` supplies an explicit endpoint. No SSH or LAN scan is needed. `adb-connect` follows changing TLS ports; `adb-restore` enables wireless debugging over authorized USB. It does not enable legacy port 5555. Android must keep Wireless debugging enabled on a trusted Wi-Fi network; host discovery cannot enable it after a phone reboot without another authenticated route. On a phone with an existing authorized Magisk root route,
-`adb-restore --persistent` installs the Sinnix-owned Magisk boot hook. After
-boot, that owner checks Wi-Fi association every ten seconds and requests
-wireless debugging on first association, observed reconnect, or BSSID change.
-It uses Android's normal trusted-network gate; pairing keys and network trust
-are unchanged. It neither opens legacy port 5555 nor holds a wakelock.
+A normal Kotlin/Compose/Gradle project; `gradle.fetchDeps` records every
+dependency into `deps.json`.
 
-The hook does not rewrite a manual disable during the same observed
-association. A later association enables debugging again; an unobserved brief
-disconnect cannot be distinguished from manual disable, so that case may need
-`adb-restore`. Remove `/data/adb/service.d/sinnix-wireless-adb.sh` to retire
-persistence; the running owner then exits. Updating the hook preserves its
-first preimage at `/data/adb/sinnix-wireless-adb/original.sh` with mode `0400`.
-Installation starts the owner immediately and restarts only an existing
-recorded owner whose PID, process start time and command match this hook.
-A kernel file lock prevents duplicate owners. Boot and reconnect behavior
-still require native verification. Discovery verifies
-both the host key and login before remembering an address. An open port is
-insufficient, and no scan automatically learns a key. An explicit address
-changes routing but retains strict SSH identity checks.
-
-## Root-authorized maintenance unlock
-
-`sinnix phone unlock [seconds]` opens a bounded maintenance window (60 seconds
-by default, maximum 600). It uses the installed LineageOS profile service on
-this rooted ROM, after authenticating the enrolled ADB device. It preserves the
-PIN and changes only the active profile's lock policy temporarily. The command
-stays in the foreground; run device checks through another terminal during the
-window. It verifies that the native keyguard actually dismissed.
-
-A separate root watchdog restores the original policy even if the caller or
-ADB connection disappears. Expiry puts the screen to sleep. The root-only
-recovery record and Sinnix-owned Magisk recovery hook retain restoration across
-reboots; reboot behavior still needs a normal-restart verification. The helper
-refuses overlapping leases and profiles that already disable locking. It does
-not overwrite later operator policy changes or select a different profile.
-
-User 0 must already have unlocked encrypted storage since boot. Root profile
-control does not supply that first credential or decrypt credential-encrypted
-storage. This command requires the native profile service and authorized
-Magisk root; it does not clear credentials, weaken pairing, or enable a network
-listener. Its helper and recovery record live beneath
-`/data/adb/sinnix-phone-keyguard/`; the boot hook is
-`/data/adb/service.d/sinnix-keyguard-recovery.sh`.
-
-## Build
-
-A normal Android project — Kotlin, Compose, AndroidX, Gradle — made
-reproducible the way nixpkgs supports: the Gradle setup hook drives the build
-and `gradle.fetchDeps` records every artifact fetch through `mitm-cache` into
-the committed `deps.json`.
-
-This replaced a deliberately Gradle-free build (aapt2 + javac + d8 called
-directly, zero dependencies, views constructed in code). That build was correct
-for an app with nothing to resolve, and wrong once the app needed an interface:
-hand-rolling framework views to avoid a dependency lock is a permanent
-interface cost paid to avoid a one-time build cost.
-
-```
-nix build .#sinnix-phone-app            # the unsigned APK
+```bash
+nix build .#sinnix-phone-app      # unsigned APK
 $(nix-build . -A packages.x86_64-linux.sinnix-phone-app.mitmCache.updateScript)
-                                        # regenerate deps.json after a dependency change
+                                  # regenerate deps.json (needs network)
 ```
 
-The update script needs network and runs outside the sandbox; the ordinary
-build does not and cannot reach it.
-
-Three version pins, each for a stated reason:
-
-- **`targetSdk = 33`.** API 34 forbids starting a microphone foreground service
-  from a boot receiver. Capture before first unlock is a standing acceptance
-  criterion, so raising the target requires another boot-safe launch mechanism.
-- **`compileSdk = 36`.** Current AndroidX refuses to be compiled against
-  anything older. Unrelated to `targetSdk`, which is a behaviour opt-in.
-- **`buildToolsVersion = "36.0.0"`.** Left unset, AGP picks
-  its own default and the sandbox fails with a missing-component error that
-  reads like a network problem.
-
-The APK is emitted **unsigned**; `sinnix-phone-app-install` signs it against a
-keystore at `~/.local/share/sinnix-phone-app/keystore.jks`, created once and
-persisted. A key regenerated on every source change would make each
-`adb install -r` fail with a signature mismatch and force an uninstall, which
-on Android also discards the app's runtime grants.
-
-R8 is off. Shrinking buys a few hundred KB on a sideloaded app and costs a
-class of reflection surprises that would only ever appear on the one device
-that matters.
+Pinned versions: `targetSdk = 33` (API 34 forbids starting a microphone
+foreground service at boot, and capture must start before first unlock),
+`compileSdk = 36` (required by current AndroidX), `buildToolsVersion =
+"36.0.0"` (unset, the sandbox build fails misleadingly). R8 is off.
+`sinnix-phone-app-install` signs with a persistent keystore at
+`~/.local/share/sinnix-phone-app/keystore.jks`; a new key per build would
+force uninstalls, which drop the app's grants.
 
 ## Operating it
 
+```text
+sinnix phone app-install     # build, sign, install, grant, start
+sinnix phone app-status      # is capture alive and producing?
+sinnix phone app-start       # restart after the app was stopped
+sinnix phone app-grants      # re-apply permissions and appops
+sinnix phone app-soak [s]    # watch screen/foreground/mute and measure chunks
+sinnix phone logcat          # pull the system log (what the timer runs)
+sinnix phone pull-ambient    # rescue chunks the app could not upload
+sinnix phone ambient-audit   # decode chunks and record their levels
+sinnix phone health-sync     # press Mi Fitness's Sync button (UI automation)
+sinnix phone unlock [s]      # temporary maintenance unlock (see below)
+sinnix phone adb-restore     # re-enable wireless debugging over USB
+sinnix phone adb-connect     # connect to wireless debugging
+sinnix phone nix-switch      # activate the Nix-on-Droid profile
+sinnix phone chroot [cmd]    # enter the Debian arm64 chroot
 ```
-sinnix phone app-install    # build, sign, sideload, grant, start
-sinnix phone app-status     # is capture alive AND producing?
-sinnix phone app-start      # relaunch after the app was stopped
-sinnix phone app-grants     # re-assert shell-uid grants
-sinnix phone app-soak [s]   # observe screen/foreground/mute and measure available chunks
-sinnix phone logcat         # pull the system log (adb; what the timer runs)
-sinnix phone pull-ambient   # rescue chunks the app's uploader could not ship
-sinnix phone health-sync    # drive Mi Fitness's Sync button on demand (UI automation)
-sinnix phone nix-switch     # activate the declared Nix-on-Droid profile
-sinnix phone chroot-verify  # verify the near-native Debian environment
-```
 
-When device control is unavailable, `app-status` reads at most the final 4 MiB of the retained event day and skips oversized or partial records. It reports the newest readable event and distinguishes missing, unreadable and empty sources; it cannot establish current capture state from an unavailable source.
+`app-install` needs ADB over USB or the tailnet, and Android still wants the
+phone unlocked for some package operations. When ADB is unavailable,
+`app-status` reads the newest uploaded events instead and says which source it
+used.
 
-`app-install` needs adb over USB or the tailnet. Android still requires the
-phone to be unlocked for some package and permission operations.
+`app-grants` applies `RECORD_AUDIO` and `POST_NOTIFICATIONS`,
+`MANAGE_EXTERNAL_STORAGE` as an appop at both package and uid scope, the Doze
+whitelist, and the notification-listener binding. `RECORD_AUDIO` is left at
+its default foreground mode, which a running microphone service satisfies.
 
-The event-upload resume cursor shares the append/repair lock and synchronizes retained bytes before replying. It cannot report an append that is still awaiting its durability check. The capture app source is the pinned `phone-app` flake input, not a directory beneath Sinnix’s `pkgs/`.
+Nix-on-Droid owns the routine CLI profile; the `sinnix_debian_chroot` Magisk
+module provides Debian Trixie arm64 for native toolchains (`chroot-build`,
+`chroot-install`, `chroot-bootstrap`, `chroot-verify`). Termux owns SSH and
+Android integrations.
 
-Logcat pulls publish only after ADB succeeds. Failed or interrupted output stays in owner-private `.logcat-pull.*` files beside the daily logs; the resume cursor stays unchanged. Those incomplete files are retained evidence, not daily-log input. Missing transport and failed pulls return nonzero, while a successful empty pull remains valid. Malformed or future UTC cursors trigger a full dump. A logcat failure still allows the independent BCR drain to run. New files from the standalone phone command are owner-private.
+### Connecting
 
-The scheduled `logcat` check also restarts a missing Tailscale process when
-Android's selected always-on VPN is Tailscale. It uses the rooted phone's
-service route and leaves VPN preferences unchanged. This recovery needs an
-available ADB connection; without one, uploads retain their device backlog.
-`health-sync` sends its final Health Connect sweep as root because the app's
-watchdog receiver is private. A successful shell broadcast is not delivery.
+SSH to the phone uses one pinned host key (the `known_hosts` file in the phone
+state directory, or `SINNIX_PHONE_KNOWN_HOSTS`) across the tailnet, mDNS and
+LAN addresses; discovery checks the host key and login before remembering an
+address. ADB uses the serial enrolled over USB (`adb-serial` in the phone
+state directory, or `SINNIX_PHONE_ADB_SERIAL`; `SINNIX_PHONE_ADB_ENDPOINT` for
+an explicit address) and finds wireless debugging through Avahi. Legacy port
+5555 is never opened.
 
-Nix-on-Droid owns the routine CLI profile. The separate
-`sinnix_debian_chroot` Magisk module provides Debian Trixie arm64 for native
-compilers and distro tooling. `sinnix phone chroot-build`,
-`chroot-install`, and `chroot-bootstrap` reproduce it; `chroot [cmd]`
-enters it in a private mount namespace. It starts no boot daemon. Termux
-continues to own SSH and Android integrations.
+`adb-restore --persistent` installs a Magisk boot hook that re-enables
+wireless debugging whenever the phone joins a trusted Wi-Fi network (it checks
+every ten seconds). Delete `/data/adb/service.d/sinnix-wireless-adb.sh` to
+remove it.
 
-Grants applied by `app-grants`: `RECORD_AUDIO` and `POST_NOTIFICATIONS` as
-runtime permissions, `MANAGE_EXTERNAL_STORAGE` as an appop at **both** package
-and uid scope, and the Doze whitelist. The two appop scopes are set separately
-because only one of them reverting is exactly what broke capture before.
+Tailscale stays up through Android's always-on VPN setting (lockdown off, so a
+broken VPN does not cut the network). The scheduled logcat pull also restarts
+Tailscale if it has died.
 
-`RECORD_AUDIO` is deliberately _not_ forced to appop `allow`. The default
-`MODE_FOREGROUND` is already satisfied while a microphone-typed foreground
-service is up — measured clean on 2026-08-13, uid mode `foreground` with the op
-reading `allow; running` and no package-scope override anywhere. Overriding it
-would mask a service regression rather than fix one.
+Do not start Termux daemons through `adb shell run-as com.termux`: they land in
+an SELinux domain that cannot read `/storage` but reports success. Restart the
+Termux app instead (`am force-stop com.termux`, then start
+`com.termux/com.termux.app.TermuxActivity`); its profile starts `sshd`.
 
-## One plane
+### Maintenance unlock
 
-Every verb the app offers is a **local write that the app then ships**, and
-the tailnet only removes the wait. That is the whole architecture, and it is
-why the app is usable on a device that spends most of its life unreachable.
+`sinnix phone unlock [seconds]` (default 60, maximum 600) temporarily disables
+the lock screen through the ROM's profile service, keeping the PIN. A root
+watchdog restores the lock policy when the window ends, even if the command or
+ADB connection dies, and a Magisk boot hook
+(`/data/adb/service.d/sinnix-keyguard-recovery.sh`) restores it after a
+reboot. The phone must already have been unlocked once since boot.
 
-There used to be two planes and a drain between them: the app wrote files, and
-a half-hourly wifi-gated timer on prime ssh'd into Termux and rsynced them off
-(and rsynced prime's half back down). The live HTTP path existed alongside it
-as an accelerator. That arrangement put durability on the wrong side — the
-phone held the only copy of the data and prime held the only mover, and the
-mover depended on Termux surviving a reboot, its sshd surviving MIUI, and the
-resulting process not landing in an SELinux domain that answers rsync with an
-empty listing and exit 0. Every one of those failed at least once, and each
-failure was silent on both ends.
+## Transport
 
-So the drain is gone, and there is one plane in both directions:
+Every action in the app is a local write that the app then uploads, so the app
+works offline and delivers everything when it next has a network. Files are
+deleted on the phone only after prime confirms the exact bytes (size and
+SHA-256). Uploads to `/phone/v1/*` go to `sinnix-phone-dispatcher` on port 8940,
+tailnet only; requests carrying browser `Origin` or Fetch-Metadata headers are
+refused.
 
-- **The app pushes.** Ambient chunks, event-log byte ranges, outbox intents,
-  blobs, and the camera/Downloads mirrors all go out over HTTP to
-  `/phone/v1/*`, spooled on the device and deleted locally only against a
-  verified acknowledgement.
-- **The app pulls.** `glance.json` and `steering.json` are built on request;
-  receipts, notifications and decks are files prime holds until the app lists,
-  fetches, verifies and confirms them.
+| File on the phone                         | Direction | Route and destination                                  |
+| ----------------------------------------- | --------- | ------------------------------------------------------ |
+| `ambient-*.m4a`                           | out       | `POST /chunk?lane=ambient` → capture store            |
+| `sensor-*.bin` + `.json`                  | out       | `POST /chunk?lane=outbox`                              |
+| `events/events-*.jsonl`                   | out       | `POST /events?day=&offset=` → that day's file          |
+| `outbox/intent-*.json`                    | out       | `POST /intent` → executed, receipt sent back           |
+| `outbox/{voice,trace,shared}-*` + `.json` | out       | `POST /chunk?lane=outbox`                              |
+| `/sdcard/DCIM`                            | out       | `POST /chunk?lane=camera` (`SINNIX_PHONE_CAMERA_DIR`)  |
+| `/sdcard/Download`                        | out       | `POST /chunk?lane=download`                            |
+| `inbox/glance.json`, `inbox/steering.json`| in        | built on request (`GET /inbox/file`)                   |
+| `inbox/receipts/*`, `inbox/notify/*`      | in        | fetched, confirmed, shown, then deleted                |
+| `inbox/decks/*`                           | in        | fetched and kept; adds instruments                     |
+| `status.json`                             | read      | over ADB by `app-status`                               |
+| logcat                                    | pulled    | `sinnix phone logcat` over ADB                         |
+| BCR call recordings                       | pulled    | scheduled ADB pull → `phone-calls` lane                |
 
-Durability is the app's spool plus retry, not prime's timer. A phone in a
-pocket in another city holds everything it has produced and delivers it, in
-order, when it next has a network.
+Retries are safe: an event batch is written at the offset it declares, a chunk
+prime already has is acknowledged again, and each intent carries a token so a
+repeated request returns the earlier receipt instead of acting twice. An
+intent whose outcome is unclear is kept for review, never replayed
+automatically. Unit actions (`start`/`stop`/`restart`) are never queued: if
+prime is unreachable, the app says so instead.
 
-Reachability is **measured, not assumed**: the app pings, renders the
-round-trip and its age ("live · 34 ms"), and every action reports the path it
-actually took. Intent requests show `sent · live` only for a typed completed
-outcome matching the requested action kind. Definitive failures show
-`queued · retrying` and retain the original content and token. Partial outcomes
-show `partially completed · retained`; uncertain, conflicting or malformed
-outcomes show `needs review · request retained`. These requests are saved as
-`.json.rejected` and stay outside automatic replay. Failed retention is shown
-explicitly, and unsaved answer text remains in the editor. Job answers use the
-same intent route and outcome rules.
+Two things are still pulled by prime over ADB, because the app cannot do them:
+the system log (needs `READ_LOGS`) and call recordings, which belong to the
+separate BCR app. The pull runs every 30 minutes and works over USB too. Each
+new call recording is decoded and its level recorded in
+`/realm/device/shared/phone/calls/levels.jsonl`; a silent recording fails the
+run. BCR's own staging copy is preferred over its export, which can be
+truncated. The same pull warns when finished ambient chunks pile up on the
+phone (capture works, upload does not).
 
-Notification, receipt and quick-settings tile requests use the same screen routes on a fresh launch and while the app is running. Repeating a route request after manual navigation opens that screen again. Unknown routes preserve the current screen, or fall back to Home on a fresh launch. Activity recreation preserves the initial navigation graph.
+`/sdcard/sinnix-ambient` is the upload queue: each chunk is deleted after a
+confirmed upload. `/sdcard/sinnix-phone` holds the app's own events, outbox,
+inbox and epoch; event files are never deleted, because they are also the
+app's history.
 
-Home, Capture, Grants and the instrument screens reduce historical events on an I/O worker. The event reader snapshots at most the final 4 MiB of each requested day file, decodes UTF-8, skips only an actual partial leading line and rejects lines over 1 MiB. Kind-specific reads retain only the requested records in memory. Original event files remain append-only.
+## Ambient capture
 
-Intent execution binds each `send_token` to canonical request content and serializes file and HTTP delivery through the same lock. An identical completed retry returns its prior receipt without acting again. A verified definitive failure remains retryable; partial or indeterminate effects are preserved and refused replay. Conflicting token reuse is refused. Terminal records whose result does not agree with the recorded outcome and action kind are treated as indeterminate, retained unchanged, and never acknowledged as completed or retried as definitive failures. Byte uploads use full SHA-256 identity.
+Mono 48 kHz AAC at 96 kbps in 300 s chunks (about 3.6 MB), the same grade as
+the desktop audio lanes, so the archive keeps the full band (speech
+recognition works from it on prime). A microphone foreground service with a
+persistent notification is the only way to record with the screen off, which is
+why this is an app.
 
-A chunk prime already holds answers ok rather than 409, because a phone that retried after losing an acknowledgement must be able to let go of the file. An event batch declares the offset it starts at and is written there, so re-sending one changes nothing. The sender accepts a chunk or event upload only when the returned byte count and full SHA-256 match the submitted payload. Missing or mismatched receipt identities are refusals, so local input and event progress remain available for retry. Inbox confirmation uses its separate control-response contract.
+Files are named `ambient-<UTC basic ISO time>.m4a` (the storage layer rejects
+colons). A chunk is written as `.m4a.part` in private storage and published only
+after the muxer closes it and its duration is checked; a `.part` left by a
+crashed recorder becomes `.m4a.orphan` and is still uploaded.
 
-Speech regions are metadata derived on prime from uploaded ambient chunks.
-The phone records one canonical audio stream; it does not run another recorder
-or an on-device VAD pipeline.
+The app checks that it is actually recording, because most past failures
+looked healthy: Termux-era truncated chunks, capture dying at reboot, digital
+silence at full bitrate. Every 20 s it checks amplitude (four exact-zero
+samples in a row mean the microphone is muted, so the recorder restarts) and
+file growth (no growth for 90 s, or under half the expected bitrate, also
+restarts it). Each closed chunk's encoded duration is compared with elapsed
+time. On prime, `sinnix phone ambient-audit` decodes every chunk into
+`ambient-levels.jsonl` and flags all-zero audio.
 
-**Actions are the one thing never queued.** `start`/`stop`/`restart` on a live
-unit is a decision about right now; executing it half an hour later against a
-machine nobody looked at is a different and worse action than the one that was
-asked for. The Estate screen says so instead of offering a button that would
-lie.
+Another app using the microphone does not stop capture (they use separate
+inputs); phone calls do, by Android policy. Capture restarts on app open, on a
+10-minute alarm, through `START_STICKY`, and at boot. Stopping capture in the
+app is remembered, so the watchdog does not undo it.
 
-### Contracts
+A direct-boot-aware service records into device-protected storage before the
+first unlock and moves the data after unlock (verified 2026-08-27). That buffer
+is capped, so a very long locked period drops its oldest audio.
 
-| File                                                 | Direction | Writer → route → reader                                     |
-| ---------------------------------------------------- | --------- | ----------------------------------------------------------- |
-| `ambient-*.m4a`                                      | out       | AmbientService → `POST /chunk?lane=ambient` → lake          |
-| `sensor-*.bin` + `.json`                             | out       | SensorChunkWriter → `POST /chunk?lane=outbox` → lake        |
-| `status.json`                                        | out       | app → `app-status`, tile, capture screen (adb, on demand)   |
-| `events/events-*.jsonl`                              | out       | every screen → `POST /events?day=&offset=` → lake day file  |
-| `outbox/intent-*.json`                               | out       | app → `POST /intent` → executed, receipt back               |
-| `outbox/{voice,trace,shared}-*` + `.json`            | out       | app → `POST /chunk?lane=outbox` → lake                      |
-| `/sdcard/DCIM` | out | MediaMirror → `POST /chunk?lane=camera` → `/realm/personal/photo/phone-dispatcher/DCIM` |
-| `/sdcard/Download` | out | MediaMirror → `POST /chunk?lane=download` → `/realm/device/shared/phone/download` |
-| `epoch.json`                                         | local     | instruments only                                            |
-| `inbox/glance.json`                                  | in        | built on request → `GET /inbox/file` → home + widget        |
-| `inbox/steering.json`                                | in        | built on request → `GET /inbox/file` → steering trio        |
-| `inbox/receipts/*.json`                              | in        | dispatcher → fetch + confirm → notification, then deleted   |
-| `inbox/notify/*.json`                                | in        | prime → fetch + confirm → notification, then deleted        |
-| `inbox/decks/*`                                      | in        | prime → fetch (retained, not consumed) → instrument shelf   |
-| logcat                                               | **in**    | `sinnix phone logcat` over adb → lake                       |
-| BCR staging `*.oga` (export: `/sdcard/sinnix-calls`) | out       | BCR → scheduled adb preservation/audit → `phone-calls` lake |
+The capture, grants and transport screens grade each source as **evidenced**,
+**unverified** or **broken**; nothing is shown as OK without a measurement
+behind it. The grants screen tests storage access by writing a real file.
 
-Inbox confirmation claims a one-shot file before its final digest check,
-then deletes only the claimed bytes matching the acknowledgement. A publication
-arriving at the original name stays intact. A conflicting claim or failed read
-is preserved as `.confirmation-*.json` in the private inbox root; the refusal
-returns `retained_at` and whether the original name was restored without
-overwriting another publication. These files are recovery evidence, outside the
-phone's normal inbox listing. An interrupted confirmation can also leave a
-claim there; retain it for owner reconciliation rather than deleting by age.
-
-The two device directories stay deliberately separate. `/sdcard/sinnix-ambient`
-is the uploader's: each closed chunk is POSTed, sha256-verified against what
-prime wrote, and deleted locally only on an ok, with `sinnix phone
-pull-ambient` as the by-hand rescue when uploads are failing.
-`/sdcard/sinnix-phone` is the app's own record and mailbox — events, outbox,
-inbox, epoch — and nothing deletes the event day files at all: they are also
-the app's own history, which the ribbon, the hole list and the offer policy
-are reductions of. Delete-after-transfer pointed at an event log is a data-loss bug waiting
-for its first run.
-
-The sensor lane keeps raw accelerometer and light callbacks in five-minute
-`sinnix.phone.sensor-binary/1` chunks. Each chunk carries wall-clock and
-elapsed-realtime anchors followed by timestamped float records using Android's
-`SensorEvent.timestamp`; its JSON sidecar records the anchors and per-sensor
-counts. The minute-level `ambient_context` event remains a derived convenience
-reduction. The listener requests the highest stable rate and stays registered
-continuously; Android may still choose the delivered rate.
-
-### What is still a pull, and why
-
-BCR archive sync holds a nonblocking destination lock across inventory,
-revision checks, publication, receipt append and rollback. A competing sync
-returns 75 with an explicit retry message before reading receipts or changing
-archive payloads. The lock is released when that sync returns or exits, so a
-manual invocation and the scheduled collector cannot publish competing
-revisions to the same destination.
-
-**The system log and BCR calls.** Reading the log needs `READ_LOGS`, which
-Android grants to system and privileged apps only; the Sinnix capture app
-cannot hold it at any appop scope. BCR is privileged but is a separate app,
-and a retained app-specific staging recording is the authoritative copy: the
-later document-provider export can be truncated. Successful BCR exports can
-remove staging. The same synchronizer inventories both directories, always
-prefers retained staging (including active files), and accepts export-only
-audio only with native JSON completion metadata whose encoded frame duration
-and channel count match the decoded audio. The check accounts for 48kHz Opus
-playback and Android packet-start timestamps with final packet padding. It
-requires the corresponding exact sample count, rather than a duration tolerance. Native JSON is preserved in `calls/metadata`;
-legacy per-call debug sidecars remain in `calls/debug`. Receipts distinguish
-staging and export sources, leaving absent staging size null.
-`sinnix.services.phone-logcat`
-therefore keeps one 1800s adb pull for both foreign surfaces, with the useful
-property that USB still works when the network does not. Every newly preserved
-BCR call is decoded immediately; duration, sample rate and level are recorded
-under `/realm/device/shared/phone/calls/levels.jsonl`, and a digital-silence
-recording fails that timer run instead of masquerading as a success. The same
-scheduled probe still warns when finished ambient chunks pile up on-device,
-which means capture is working and delivery is not.
-
-Each archived call row also records SHA-256 and native file identities for the
-staging audio, its canonical archive copy, and the paired BCR debug sidecar.
-Repeat polls reuse a receipt only while both source and archive identities
-match; changed bytes are staged and verified before publication. Replaced
-archive bytes remain under `calls/history/<sha256>/`, with their paths and
-digests linked from the new call row. If metadata is unavailable, verification
-fails, or either member cannot be published, the poll reports failure and does
-not record a successful revision. Phone originals remain in place.
-
-Capture destinations must be regular files. Event cursors report missing day files as zero bytes, but refuse directories, FIFOs and symlinks as storage errors. Upload reads and writes use nonblocking, no-follow handles; append verification and permissions apply to the same opened object. A replaced destination is not acknowledged. Every successful event append or exact upload retry syncs the retained file and its directory ancestry up to the filesystem boundary; a previous sync failure cannot turn readable bytes into a durable receipt on retry. Closed-day repair also rejects nonregular destinations and recovery copies, preserving their existing objects for investigation.
-
-**Media sync resumes from acknowledged source timestamps and relative paths.** Each bounded batch selects the oldest files across the full source traversal, including files sharing a timestamp. It never seeds from workstation upload times. Upgrading from the old scalar cursor reoffers existing files; the workstation verifies duplicate bytes before acknowledging them. Missing listings, changed files and retryable upload refusals stop cursor advancement. Four relative path segments are supported.
-
-Files arriving with an old timestamp behind an established cursor still require an explicit rescan. This remains a directory mirror with that limitation.
-
-## Capture
-
-Mono 48 kHz AAC at 96 kbps, 300s chunks (~3.6 MB), the same archive grade the
-desktop lane encodes at, so a phone chunk and a desktop chunk are the same
-class of evidence. This is an archive lane, not a speech-recognition feed:
-16 kHz caps audio bandwidth at 8 kHz and discards the room — music,
-environment, the timbre diarization and speaker identification depend on —
-before anything is written, and nothing downstream recovers a band that was
-never captured.
-
-`foregroundServiceType="microphone"` with a persistent notification is the only
-supported way to hold the microphone with the screen off on modern Android, and
-it can only be declared in an app's manifest. That single capability is why
-this is an app rather than the Termux script it replaced — a script that
-truncated chunks (mean 148s against an expected 300s) and never survived a
-reboot.
-
-Files are `ambient-<UTC ISO basic>.m4a`. The compact stamp is not a style
-choice: sdcardfs rejects colons outright, so an extended-ISO filename fails
-every open with EPERM while the recorder looks healthy. The file being written
-is `*.m4a.part` and is renamed only after the muxer closes it, because the
-uploader deletes each chunk once prime acknowledges it and must never ship an
-open file still waiting for its trailing `moov` atom.
-
-A `.part` found at service startup belongs to a recorder that died without
-closing its muxer; those are renamed to `*.m4a.orphan`, which the uploader
-_does_ ship. Renamed rather than deleted: an MP4 without its `moov` atom is not
-playable but the samples are still there, and discarding captured audio is not
-the device's call.
-
-### Failure impersonates success
-
-Every serious failure this program has hit had the same shape:
-
-| Failure               | What "healthy" looked like                                        |
-| --------------------- | ----------------------------------------------------------------- |
-| Termux truncation     | chunks landed every 5 min (148s of audio inside)                  |
-| Reboot death          | all visible policy state survived; capture didn't                 |
-| Arbitration mute      | perfect duration, full bitrate, valid container — digital silence |
-| MIUI grant revocation | no event, no error, discovered at the next failure                |
-
-Exception-driven error handling is structurally blind here: nothing throws. So
-the app judges itself by evidence of the product rather than health of the
-process, at three cadences:
-
-- **Amplitude, every 20s.** A live microphone in a silent room still reports
-  its own noise floor, so a run of _exact_ zeroes means muted rather than
-  quiet. Four consecutive zero samples (80s) cycles the recorder.
-- **File growth, every 20s.** A chunk file that has not grown for 90s means the
-  recorder stopped producing frames while still believing it is running.
-  After a 60-second startup allowance, production below half the configured
-  96 kbps AAC rate also triggers recovery, allowing ten seconds of buffering.
-- **Private recording spool.** The live encoder writes under the app's
-  `files/ambient-recording` directory. A background publisher copies closed
-  chunks to the shared upload directory, fsyncs and checks SHA-256 before
-  retiring the private copy. Failed copies remain queued; capture continues.
-  `status.json.recording_dir` identifies the live recording location.
-- **Encoded duration, at close.** The phone reads media duration before making
-  the file uploadable and compares it with monotonic elapsed time (two-second
-  tolerance). `chunk_closed.seconds` and `last_chunk_seconds` report encoded
-  duration; `elapsed_seconds`, `duration_verified`, and `complete` identify
-  gaps and verification failures. Incomplete chunks remain preserved and
-  cannot clear the failure alert. Nonempty failed recordings become orphans.
-  Android recording-configuration events report microphone silencing.
-  The hourly ribbon requires verified coverage; legacy unchecked chunks
-  remain unverified.
-- **Decoding, at intake.** `sinnix phone ambient-audit` decodes every chunk as
-  it lands into `ambient-levels.jsonl` with duration, rate, mean, peak,
-  decode status and a full content digest. Failed or unmeasured decodes stay
-  unknown and are excluded from sound-bearing duration. Reinspection appends
-  a new record for legacy unqualified rows or changed content, even at the
-  same size; original rows remain history. A missing source reports unavailable.
-  Successful measurements flag the −91 dB a stream of exact zeroes decodes to. Run against the
-  Termux-era lake it found 29 of 111 chunks had captured nothing and 14 more
-  did not decode at all.
-
-Detection is not prevention. If Android's concurrent-capture arbitration
-decides a foreground app wins, cycling the recorder may not take the microphone
-back. Measured 2026-08-13, though: another app using the microphone does **not**
-stop this one — the camera's `AUDIO_SOURCE_CAMCORDER` client took the back mic
-while this service held the bottom mic, both `State: Active` on separate input
-ports, amplitude unchanged. Phone calls remain a hard stop; Android has blocked
-third-party call-audio capture since Android 10.
-
-### Keepalive, cheapest first
-
-The 20s heartbeat detects stalls and silence, then retries capture after two seconds. Opening the app
-restarts a dead service immediately. A 10-minute inexact alarm covers process
-death. `START_STICKY` covers the platform's own low-memory path. `BootReceiver`
-covers reboots.
-
-Stopping capture from the capture screen flips the persisted intent bit, so the
-watchdog respects it — without that the button would be a lie, resurrecting
-capture ten minutes later.
-
-## Trust grading, and where it stops
-
-Three grades — **evidenced / unverified / broken** — with one rule: nothing
-reaches evidenced without a measurement to name, and anything unverifiable
-stays unverified rather than being rounded up to OK.
-
-They appear on the capture screen, the grants screen and the transport label,
-and nowhere else. That boundary is deliberate. Those are the surfaces where
-"measured OK" and "assumed OK" are genuinely different claims; putting
-reliability vocabulary on home, the bench, the remote or Talk would make
-dev-time incident history the subject of a tool whose subject is capture,
-measurement and action.
-
-The grants screen writes a real probe file rather than trusting
-`isExternalStorageManager()` — the API has returned true on this device while
-`/sdcard/sinnix-ambient` was not writable, and the difference between those two
-facts is every chunk recorded somewhere Termux cannot read. MIUI autostart has
-no API at all, so it renders as permanently unverifiable with two weaker things
-shown in place of a check: an operator attestation with its date, and an
-inference from the log (a boot with no chunk after it is evidence autostart is
-off).
+The sensor lane records raw accelerometer and light readings continuously in
+five-minute binary chunks (`sinnix.phone.sensor-binary/1`) with their
+timestamps; a minute-level `ambient_context` event summarizes them.
 
 ## Instruments
 
-The unit is the **Check** — two to four instruments, under three minutes,
-assembled by an offer policy rather than chosen from a menu. A flat catalogue
-of twenty is a compliance disaster: choosing is work, and work at the moment of
-measurement is what stops the measurement happening. The **shelf** exists
-behind it precisely so the policy can stay opinionated.
+A Check is chosen by policy, not from a menu: a PVT if none in the last twelve
+hours, then instruments for hours never sampled, then the stated energy level;
+auditory instruments only with headphones. Five engines (reaction, forced
+choice, staircase, hold-still, counting) run every instrument; a deck from
+prime names an engine and its settings, so new instruments need no app
+release. A deck for an unknown engine is shown as not runnable.
 
-Offer policy, in order of authority: the PVT if none in twelve hours; then
-instruments whose covariate cells are empty (a measurement at an hour never
-sampled is worth more than the fifth one at 21:00); then the declared energy
-state; and never an auditory instrument without headphones — it is not in the
-deck at all rather than offered and refused.
+Reaction timing uses the presented frame's timestamp and the touch event's
+hardware time, minus the calibrated touch latency when there is one. An
+"epoch" is the build fingerprint plus that calibration; results compare only
+within an epoch. Interrupted trials are discarded and repeated. Auditory
+staircases play both intervals from one audio buffer, so device latency
+cancels out.
 
-**Five engines cover everything**, and an instrument is a _configuration_ of
-one: reaction, forced choice, staircase, hold-still, counting. That is what
-makes decks possible — prime writes JSON into `inbox/decks/`, the shelf gains
-an instrument, and no app release happens. A deck names an engine and a version;
-an unknown one renders as present-but-not-runnable with the reason shown,
-because a deck that silently did something approximate would produce data that
-looks like the real instrument and is not.
+The phone timestamps and records raw signals; prime does the scoring
+(`scripts/sinnix-score`) and sends receipts back.
 
-Three timing decisions carry the reaction engine, and none is optional: the
-stimulus is timestamped in a `Choreographer` frame callback (when the frame was
-_presented_, not when composition asked); the response is
-`MotionEvent.getEventTime()` (the digitizer's clock, not the handler's); and
-the epoch's touch offset is subtracted only if calibrated, with the record
-saying which. Two fingers discard a trial. `onPause` mid-trial discards and
-re-presents at the same position — a call during a PVT is not a slow response —
-and the run carries an `interruptions` count.
+Deliberately not built: screen-based flicker fusion and contrast sensitivity
+(the display is not a calibrated light source), pupillometry and saccades
+(need a vision model), n-back and digit span (practice effects dominate).
+Torch-based flicker fusion first measures whether the torch can switch fast
+enough.
 
-The **apparatus epoch** is `Build.FINGERPRINT` plus the measured touch-latency
-calibration. Results are comparable only within an epoch; a fingerprint change
-opens a new one and never inherits the old offset, because the offset is
-exactly what a firmware change moves.
+## Input
 
-**Phone owns stimulus timing and raw signal; prime owns scoring.** Anything the
-phone can compute from its own event stream shows a number immediately;
-anything needing a model ships a trace and gets a receipt. That falls out of not
-shipping ML and is the right architecture anyway — a live heart-rate readout
-would invite exactly the realtime self-steering this design excludes.
+- **Share sheet:** URLs, text, images and PDFs go into the outbox. Shared
+  `content://` files are copied immediately, because the read grant expires.
+  This is also the way to send phone clipboard text to the desktop.
+- **Mark:** one tap from a tile, widget or sheet records a timestamped word.
+- **Talk:** hold to record on a second recorder; ambient capture keeps
+  running. Transcription happens on prime.
+- **Notifications:** a notification listener logs posted and removed
+  notifications, and its own binding changes, as events.
 
-Prime uses one validated sidecar snapshot for scoring and receipt correlation.
-Missing metadata retains the filename fallback; unreadable, wrongly typed or
-malformed metadata produces an explicit refusal while later files continue.
-New ledger entries bind the sidecar revision, so an unchanged refusal does not
-create repeated receipts and corrected metadata can be processed again.
-New scores also carry a full payload SHA-256. They use a private `0600` copy
-of the input, streamed through bounded buffers, so a mutable pathname cannot
-change the bytes being scored. Payload storage is unlinked while open; a
-private filename alias supports CSV and child audio readers without retaining
-the copied payload after process death. Same-name, same-size replacement content gets
-its own result. Unchanged files use a same-boot inode/size/ctime/mtime
-observation to avoid rereading old audio. Changed observations require a full
-hash; matching known content records an explicit `payload_observation` ledger
-entry, not another score or receipt. Such an observation must refer to an
-earlier content-bound score. Device numbers are cache observations, not durable
-identity. Reboot invalidates the cache guard.
-Historical ledger entries lack payload and sometimes sidecar bindings. They
-retain their old skip behavior without invented retrospective hashes or
-automatically launching new scoring; their byte continuity is unqualified.
-The scorer streams ledger rows and validates deduplication keys before scoring.
-Historical keys are loaded into a private temporary SQLite lookup with a 1 MiB
-page-cache setting and disk spill under the calling owner’s `TMPDIR`, rather than a
-Python set proportional to retained history. The temporary database is never
-published; its Unix spill file is unlinked while open and released on close or
-process exit. Failure to build the lookup stops processing before new scores
-or receipts.
-Malformed rows stop the run without new scores or receipts; preserve and repair
-the ledger before retrying instead of treating damaged history as unseen input.
-Only a missing ledger starts empty history. Access failures, dangling links and
-non-regular objects stop processing; regular-file links remain supported.
-CSV readers validate the opened descriptor without blocking on special files,
-including the direct `one` command. Raw pulse and accelerometer samples, and their exact median timing intervals,
-spill into private unlinked temporary storage. The scorers use lazy sample/axis
-views with a fixed-size read block instead of lists growing with raw trace
-length. Pulse timing variance streams in the same sorted order. All accepted
-samples and valid numerical results are retained. Derived grids and FFT buffers
-still use the existing million-point resampling limit. Pulse timing validity
-and grid admission precede jitter variance, so an enormous gap produces a
-refusal and later traces continue. The largest individual CSV record still
-grows with input size. Interoception streams recent event rows and
-retains only the nearest matching run, preserving file/line order on ties.
-Candidate and event-file inventories use private disk-backed lexical ordering;
-directory entries stream without Python's whole-directory `Path.iterdir` buffer.
-The full inventory is checked before processing, and a reached run limit stops
-before looking up the next file.
-Unavailable event homes/files fail explicitly; a genuinely missing or empty
-event home still has no matching run. Sources close when selection fails.
-The existing policy of skipping malformed JSON lines is unchanged.
-Unknown trace time does not participate in interoception pairing. A matching
-event without a valid timestamp is an explicit correlation error, rather than
-an invented epoch-zero instant. Genuine epoch-zero and historical compact
-timestamps remain valid; the phone continues to emit whole-second UTC.
-Interoception requires aligned numeric count/window arrays, nonnegative counts,
-positive windows and a finite positive pulse reference. Invalid windows are not
-silently dropped. Empty runs remain unmeasured; a genuine zero count can yield
-zero accuracy, and overcounts can still yield negative accuracy. A scaled mean
-avoids overflow from summing otherwise finite errors; no error list is retained.
-Non-finite sidecar numbers produce a refusal, allowing later files to continue.
-Both JSON output routes reject non-finite numbers anywhere in the result. A
-record is serialized before opening its score output, so serialization failure
-cannot publish a score, ledger entry or receipt for that record.
+## Other phone lanes
 
-An absent outbox reports that state without creating a score directory. An
-inaccessible or wrongly typed outbox fails explicitly. Discovery checks trace
-extensions before looking up file metadata; unavailable or non-regular trace
-entries stop the pass before processing, while unrelated payloads are ignored.
-Scoring runs share a kernel file lock in the score directory, acquired before
-reading history or loading traces and held through publication and receipts.
-Contenders wait, then re-read history; the dispatcher retains its existing
-subprocess deadline. The lock file stays in place, and process exit releases
-ownership without deleting history or requiring stale-lock cleanup.
+- **Location** from the framework fused provider, with geofence transitions.
+- **Health Connect**, read directly by the app.
+- **Power and thermal** events (`thermal_headroom` is null on this device,
+  which does not implement it).
+- **Sleep estimate** from motion, light, screen and charging.
+- **Xiaomi cloud** band data, independent of Health Connect: `sinnix
+  xiaomi-witness` syncs once; `sinnix xiaomi-witness-login` prints a
+  `LOGIN_URL` to confirm in a logged-in browser after the credential expires.
+  Runs overlap seven days; `agentctl job start sinnix xiaomi_witness_backfill`
+  covers 35 days after an outage.
 
-Cut, with reasons: **panel-based CFF and contrast sensitivity** (the display is
-not a photometric instrument, and a 120 Hz panel puts a 60 Hz ceiling exactly
-where foveal CFF sits); **pupillometry and saccades** (face landmarks means a
-model); **n-back and digit span** (practice effects dominate, so repeated
-measurement measures learning). Torch-driven CFF survives the panel objection
-and measures its own feasibility first — `setTorchMode` is a binder round trip,
-so the instrument records the switch cost and the achievable ceiling either way
-before any threshold is claimed.
+## Continuity
 
-Auditory staircases survive an uncalibrated device for a specific reason worth
-generalising: **both intervals are rendered into one PCM buffer and played
-once**, so the measurand is a difference internal to that buffer and every
-latency affects both identically and cancels. Prefer measurands that are
-internal differences.
+- **Desktop → phone clipboard:** `sinnix phone clip-push` sends the desktop
+  CLIPBOARD (text only) to the phone; `sinnix-phone-clip-watch.service` does it
+  on every change.
+- **Phone → desktop clipboard:** Android blocks background clipboard reads;
+  use the share sheet. Android has no PRIMARY selection.
+- **Phone → desktop notifications:** the dispatcher shows each newly uploaded
+  phone notification on the desktop, skipping ongoing ones.
+- **Desktop → phone notifications:** `sinnix-phone-dispatcher notify TITLE
+  BODY [--route R]` queues one; nothing sends them automatically yet.
 
-## Ingress
-
-- **Share sheet.** One manifest entry makes the app a target in every share
-  sheet: URLs, text, images, PDFs land in the outbox and ship like anything
-  else. It is also the sanctioned workaround for Android's
-  background-clipboard-read ban — sharing is push-shaped and always allowed,
-  which gets the phone→desktop direction without an AccessibilityService.
-  Shared `content://` URIs are _copied_, not referenced: the permission grant
-  dies with the Activity, and an upload a minute later would find nothing.
-- **Mark.** One tap, a timestamped word, three-second budget from a cold phone
-  — hence a sheet rather than a screen, a tile, and a widget button. The
-  cheapest capture in the design and the one that multiplies everything else at
-  join time: a reaction-time series is a curve, and the same series with
-  caffeine doses on it is a dose–response curve.
-- **Talk.** Hold to record, on a second `MediaRecorder` running concurrently
-  with ambient capture (measured: two clients, separate input ports, no loss).
-  Ambient is not paused, because a note is the moment you would least want a
-  hole. No on-device transcription — prime's engine is better and the receipt
-  pattern avoids realtime self-steering.
-- **Notifications.** A `NotificationListenerService` logs post and dismiss into
-  the events plane: the inbound comms timeline nothing else here can
-  produce. MIUI may revoke the binding silently, so connect and disconnect are
-  written as events and a gap explains itself. See "Continuity" below for the
-  grant that binds it and the desktop mirror built on top of it.
-
-## The lanes it now carries
-
-Beyond ambient audio and the passive light/motion sampler:
-
-- **Speech metadata** — prime derives speech regions from uploaded ambient
-  chunks. The source audio stays canonical and no second phone recorder runs.
-- **Location** — framework `LocationManager.FUSED_PROVIDER` with geofence
-  transitions. No Play Services: Android 12 promoted the fused provider into
-  the framework, which the design had assumed was a Google dependency.
-- **Health Connect**, read directly rather than through the scheduled export —
-  `captures/phone/health` had been an empty directory the whole time because
-  that export never lands.
-- **Power** — battery, charging and thermal as events rather than only a
-  `status.json` field. `thermal_headroom` comes back null on this device
-  because it does not implement `getThermalHeadroom`, and is recorded as null
-  rather than as a plausible number.
-- **Sleep inference** from motion, light, screen and charging — an estimate
-  independent of any band.
-
-The separate Xiaomi cloud witness reads band data independently of Health
-Connect. `sinnix xiaomi-witness` runs one sync; `sinnix xiaomi-witness-login`
-requests a login ticket. For login, open the printed `LOGIN_URL` in an
-authenticated Xiaomi browser session and confirm it. A successful login clears
-the `credential-expired` marker that otherwise makes the timer skip its runs.
-Both commands accept `--help` without contacting Xiaomi or changing captures.
-
-Scheduled collection overlaps seven days. After a credential outage,
-`agentctl job start sinnix xiaomi_witness_backfill` runs the same collector
-across the last 35 days. Both managed routes hold the same exclusive state lock.
-The recovery pass preserves existing raw revisions and uses the normal
-write-on-change ledger; a response reaching the raw endpoint's record limit
-is reported as incomplete instead of replacing a day with a truncated array.
-Raw reads start at UTC midnight and use individual UTC-day requests because
-the vendor can truncate multi-day responses below the requested record limit; the current day remains an observation as of the pass time.
-A successful recent pass does not establish older vendor coverage.
-
-**Direct Boot**: a `directBootAware` service buffers into device-protected
-storage and migrates on unlock, so a phone rebooted and left locked captures
-instead of waiting for a human. This completed the acceptance test on
-2026-08-27: the event log records `locked_boot`, a running
-`DirectBootService`, buffered chunks migrated before `BOOT_COMPLETED`, and a
-new canonical ambient chunk immediately after the unlock handoff. The app's
-watchdog is scheduled by `BootReceiver`; no Magisk boot wrapper is required.
-
-## Known limits
-
-- **Locked-boot capture is bounded by device-protected storage.** The buffer is
-  capped and oldest-first eviction applies during a long locked window; normal
-  operation migrates it after unlock.
-- **Phone calls stop capture.** Platform decision since Android 10, not a
-  configuration gap.
-- **The steering ready queue is approximated.** Until the steering store grows
-  its own queue table, the dispatcher's `build_steering` treats open
-  commitments whose window ends today as the ready set.
-
-## Continuity: clipboard and notifications
-
-The desktop already runs `sinnix-capture-clipboard` and `sinnix-capture-primary`
-(CLIPBOARD and PRIMARY, respectively). Phone continuity feeds those existing
-lanes and the events plane rather than opening a second writer to the lake.
-The current implementation uses a bespoke tailnet path. Its ownership is under
-review in `sinnix-z8iq.5`: evaluate KDE Connect for commodity continuity while
-retaining Sinnix's capture, rooted control and durable action protocols.
-`sinnix-uyvt.5` records the remaining continuity work; it does not establish a
-current decision to reject KDE Connect or authorize another clipboard writer.
-
-**Clipboard, desktop -> phone: live.** `sinnix-phone clip-push` reads the
-desktop CLIPBOARD (`wl-paste`, text/\* only) and sets it on the phone via
-`termux-clipboard-set`; `sinnix-phone clip-watch` (wired as
-`sinnix-phone-clip-watch.service`) does this on every change. Reading the
-desktop clipboard this way triggers no new lake write -- `wl-paste` is a read,
-not a write, so `sinnix-capture-clipboard` (which watches the same selection)
-is unaffected and there is no feedback loop to guard against.
-
-**Clipboard, phone -> desktop: structurally blocked, not merely undone.**
-Android has refused clipboard reads from a backgrounded app since Android 10;
-`termux-clipboard-get` measured live returns empty unless Termux is the
-foreground app. Closing this needs an `AccessibilityService` reader (see
-sinnix-uyvt.6, which already has a bound accessibility service to build on) or
-keeping Termux foregrounded, which is a UX regression this design rejects. The
-share sheet (docs/phone.md, "Ingress") is the sanctioned workaround for a
-_deliberate_ phone->desktop transfer -- share a URL or text and it lands in
-the outbox like anything else -- but that is push-shaped by the operator, not
-a live mirror of whatever sits in the clipboard.
-
-**PRIMARY has no Android equivalent.** Not a gap to close; Android's clipboard
-model has exactly one clipboard, selection-on-highlight is an X11/Wayland-only
-concept.
-
-**Notifications, phone -> desktop: grant live, mirror ships pending a restart.**
-`PhoneNotificationListener` has shipped in the app since 7h7o and logs
-`notification_posted`/`notification_removed`/`grant_transition` into the
-events plane, but Android never binds a `NotificationListenerService` just
-because it is declared -- it has to be named in
-`enabled_notification_listeners`, which `adb shell cmd notification
-allow_listener <component>` sets with no GUI dialog. That call is now inside
-`ensure_app_grants` in `scripts/sinnix-phone` (re-asserted on `app-install`,
-`app-grants`, and `adb-restore`, the same way every other grant here is,
-because MIUI can silently revoke a listener binding). On the arrival side,
-`sinnix_phone_dispatcher.uploads.append_events` -- the same arrival hook
-`external.trigger_score` uses for traces -- hands every newly-landed
-`notification_posted` line to a small consumer
-(`sinnix_phone_dispatcher.notifications.mirror_new_events`) that pops it as a
-desktop notification via the shared `sinnix_lib.notify.notify_desktop` helper,
-dropping `ongoing: true` posts first -- measured live 2026-08-18, 230 of 240
-`notification_posted` events that day were Termux's own persistent session
-notification reposting on every content tick, and an unfiltered relay would
-have buried the phone's real notifications (Gmail, SMS, Twitter, all
-`ongoing: false`) under that noise. No new daemon: this runs inline in the
-existing dispatcher process, on the existing write path. The grant itself is
-confirmed live on the device (`settings get secure
-enabled_notification_listeners` lists
-`dev.sinnix.phone/dev.sinnix.phone.ingress.PhoneNotificationListener`) and the
-lane is actively producing events; the mirror code ships in this change and
-takes effect on the next `sinnix-phone-dispatcher` restart (deferred -- see
-the mission report).
-
-**Notifications, desktop -> phone: the route exists; nothing calls it yet.**
-`sinnix-phone-dispatcher notify TITLE BODY [--route R]` queues a receipt in
-`inbox/notify/`; the app fetches, confirms, and shows it as an Android
-notification (`inbox/notify/*.json` in the contracts table above) -- this is
-already a complete, tested round trip, just not one anything invokes
-automatically. The parent bead's open question -- "is unfiltered mirroring of
-a desktop that runs agent fleets miserable" -- is still open; wiring a curated
-subset (agent-completion, build-failure, sentinel alarms) into this verb is
-follow-up work, not done here.
-
-## Keeping the phone reachable
-
-The tailnet had been failing because Tailscale simply was not running and
-nothing restarted it. Doze-whitelisting prevents it being _dozed_; it does not
-start it. Two things fix that and both are set: Android always-on VPN
-(`settings put global always_on_vpn_app com.tailscale.ipn`, lockdown
-deliberately off — with it a phone whose VPN is down has no network at all),
-and MIUI background autostart for Tailscale.
-
-`am force-stop` is not a test of either. Android deliberately never restarts a
-force-stopped app, so the case that matters — a reboot, or MIUI reclaiming the
-process — is not what force-stop reproduces.
-
-`sinnix phone adb-restore` requests authenticated wireless debugging through
-USB; its optional persistent hook handles later observed Wi-Fi associations
-as described above. Everything the app does is designed around transport
-failures: `status.json` is
-read over whichever adb transport is up, USB included, so liveness never
-depends on Termux, sshd, or the tailnet — precisely the layers that kept
-failing.
-
-**Never start Termux's supervisor through `adb shell run-as`.** A process
-tree started that way runs in the `runas_app` SELinux domain, which is denied
-`/storage` outright while carrying every group and permission that suggests
-otherwise — the resulting sshd answers rsync with empty listings and exit 0,
-and the drain reported success while moving nothing (four drains lost on
-2026-08-16, and one of the reasons the drain no longer exists). Termux is now
-a shell, not a data path, but the repair is still worth knowing. Restart the
-**app**:
-`am force-stop com.termux`, `am start -n com.termux/com.termux.app.TermuxActivity`
-— the session sources `~/.profile`, which starts `runsvdir` and raises `sshd`
-in the app's own `untrusted_app` domain. If an old blind tree still holds
-:8022, kill it first (`run-as com.termux kill <pids>` is fine for killing;
-it is only starting daemons that must not happen there).
-
-The dispatcher camera destination is configured with `SINNIX_PHONE_CAMERA_DIR`,
-independently of its telemetry and other upload roots. Syncthing's receive-only
-DCIM mirror remains at `/realm/personal/photo/phone-sync/DCIM`, including its
-version history. Neither mirror proves complete phone coverage. Device discovery, refused media
-and late arrivals still require independent coverage evidence. The retired
-server-mtime seeding route is absent. Live camera route verification can retry
-an existing retained file without creating a new object or changing its mtime.
-
-## Ambient recovery over ADB
-
-`pull-ambient` uses the normal SSH drain when available. Its ADB fallback
-verifies a full SHA-256 before and after transferring each closed chunk,
-then publishes the staged copy without overwriting another file. Identical
-copies are skipped by digest, rather than size. Different bytes at the same
-name remain separate: the incoming version is retained with a
-`.conflict-<full-sha256>` suffix. Failed or changing-source transfers retain
-their staging file and report failure. This recovery path never deletes phone
-chunks; normal unattended delivery uses the app's verified HTTP receipts.
-
-The Capture screen measures delivery from verified upload events, not the
-inbox context file. It refreshes the upload receipt, exported audio queue and
-closed recorder files awaiting publication on an I/O worker. Missing directory
-observations remain unavailable; a currently open recording is not queued.
-
-The native phone HTTP API rejects requests carrying `Origin` or browser Fetch Metadata headers before reading a body or reaching an upload, acknowledgement or intent owner. The hub rejects the same browser metadata before proxying, so a refusal does not wait for a body. The receiver also checks direct Unix-socket requests. Native app and drain clients omit these headers. This guard is browser-request protection; the socket permissions and tailnet binding remain the transport boundary.
-
+Whether KDE Connect should take over commodity continuity is open in
+`sinnix-z8iq.5`; remaining continuity work is `sinnix-uyvt.5`.
 
 ## Local models over the tailnet
 
-With Tailscale connected on the phone, open [the workstation AI panel](http://sinnix-prime:8880/ai/), start Open WebUI, and follow its [Open WebUI link](http://sinnix-prime:8881/). The desktop equivalent is `sinnix ai start open-webui`. Open WebUI is manually started: a 502 from its frontend while it is stopped means the frontend needs starting, rather than that the phone needs another proxy. Stop it through the same panel or `sinnix ai stop open-webui` when finished.
+With Tailscale up, open the hub's AI page (`http://sinnix-prime:8880/ai/`),
+start Open WebUI there (or `sinnix ai start open-webui` on the desktop), and
+use `http://sinnix-prime:8881/`. A 502 means Open WebUI is stopped. Inference
+runs on the workstation; the phone is only a browser. See
+[local AI activation](local-ai-activation.md#open-webui).
 
-The model picker includes the workstation's Ollama models and LiteLLM lanes. Selecting an owned local model runs inference on the workstation; the phone remains a browser client. Cloud models, if listed, remain separate choices. The frontend uses the existing loopback and tailnet listeners and per-interface firewall rules; raw model ports stay on loopback. No LAN-wide listener or second phone transfer/control daemon is needed.
+## Known limits
 
-The phone uses Open WebUI's normal session flow even when its single-operator mode disables the login form. API clients must obtain a session through the frontend's sign-in endpoint before listing models or sending completions; an unauthenticated API 401 does not contradict a successful frontend page load. See [local AI activation](local-ai-activation.md#open-webui) for lifecycle and backend details.
+- The steering ready queue is approximated as open commitments whose window
+  ends today.
+- Media mirroring resumes from the newest acknowledged file; files that appear
+  later with older timestamps need an explicit rescan.
