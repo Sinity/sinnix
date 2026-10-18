@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 from email.message import Message
 from types import SimpleNamespace
 
@@ -8,6 +9,15 @@ import pytest
 from conftest import load_script
 
 daemon = load_script("sinnix-nav-capture-daemon")
+
+
+def test_large_capture_payload_uses_stdin(capture_writer):
+    payload = {"title": "synthetic title " * 12000, "url": "https://example.test/"}
+    daemon.sinnix_capture_write("browser-nav-edges", payload)
+    observed = json.loads(capture_writer.read_text())
+    assert observed["payload"] == payload
+    assert "--payload" not in observed["argv"]
+    assert payload["title"] not in observed["argv"]
 
 
 def setup_handler(handler):

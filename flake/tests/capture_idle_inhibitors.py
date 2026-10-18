@@ -2,10 +2,13 @@
 
 import importlib.machinery
 import importlib.util
+import json
 import os
 import re
 import shlex
 import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -23,6 +26,29 @@ loader.exec_module(m)
 
 
 class Inhibitors(unittest.TestCase):
+    def test_large_publication_uses_stdin_without_payload_arguments(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            receipt = root / "observed.json"
+            writer = root / "writer"
+            writer.write_text(
+                f"#!{sys.executable}\nimport json,sys,pathlib\n"
+                f"pathlib.Path({str(receipt)!r}).write_text(json.dumps("
+                "{'argv':sys.argv[1:],'payload':json.loads(sys.stdin.read())}))\n"
+            )
+            writer.chmod(0o700)
+            state = {"title": "synthetic title " * 12000}
+            with (
+                patch.object(m, "snapshot", return_value=state),
+                patch.object(sys, "argv", ["inhibitors", "--capture-bin", str(writer),
+                                          "--capture-root", str(root), "--once"]),
+            ):
+                m.main()
+            observed = json.loads(receipt.read_text())
+            self.assertEqual(observed["payload"], {"event": "change", "provenance": state})
+            self.assertNotIn("--payload", observed["argv"])
+            self.assertNotIn(state["title"], observed["argv"])
+
     def state(self, clients, systemd):
         def query(cmd, expected):
             if cmd[1] == "clients":

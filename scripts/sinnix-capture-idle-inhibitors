@@ -116,9 +116,9 @@ def main():
                 args.capture_root,
                 "--lane",
                 "idle-inhibitors",
-                "--payload",
-                json.dumps(payload),
             ],
+            input=json.dumps(payload),
+            text=True,
             check=True,
         )
 

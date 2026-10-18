@@ -79,9 +79,9 @@ def _capture(event: str, payload: dict) -> None:
                 CAPTURE_ROOT,
                 "--lane",
                 "reading-stack",
-                "--payload",
-                json.dumps({"event": event, **payload}),
             ],
+            input=json.dumps({"event": event, **payload}),
+            text=True,
             check=False,
             capture_output=True,
         )

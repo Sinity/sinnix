@@ -71,9 +71,9 @@ def sinnix_capture_write(lane: str, payload: dict) -> None:
             CAPTURE_ROOT,
             "--lane",
             lane,
-            "--payload",
-            json.dumps(payload),
         ],
+        input=json.dumps(payload),
+        text=True,
         check=True,
         capture_output=True,
     )

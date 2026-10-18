@@ -10,6 +10,15 @@ from conftest import load_script
 reading_stack = load_script("sinnix-reading-stack")
 
 
+def test_large_capture_payload_uses_stdin(capture_writer):
+    payload = {"title": "synthetic title " * 12000, "url": "https://example.test/"}
+    reading_stack._capture("push", payload)
+    observed = json.loads(capture_writer.read_text())
+    assert observed["payload"] == {"event": "push", **payload}
+    assert "--payload" not in observed["argv"]
+    assert payload["title"] not in observed["argv"]
+
+
 def configure_state(monkeypatch, tmp_path):
     monkeypatch.setattr(reading_stack, "STATE_FILE", tmp_path / "reading-stack.json")
     monkeypatch.setattr(reading_stack, "_capture", lambda *_: None)
