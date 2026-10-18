@@ -1,5 +1,5 @@
 --!nonstrict
--- Cockpit probe. Owns the polling so the widgets stay render-only: every few
+-- Bar widget probe. Owns the polling so the widgets stay render-only: every few
 -- seconds it asks Hyprland which scratch or agent workspaces hold windows, and it
 -- rereads the capability index when the file's mtime moves. No daemon, no
 -- timer unit — this runs inside the shell the widgets already live in.
@@ -24,7 +24,7 @@ local function pollScratchpads()
   local accepted = noctalia.runAsync("hyprctl -j clients", function(result)
     polling = false
     if result.exitCode ~= 0 or result.timedOut then
-      noctalia.state.set("sinnix-cockpit.scratch", nil)
+      noctalia.state.set("sinnix-bar.scratch", nil)
       return
     end
     local clients = noctalia.json.decode(result.stdout)
@@ -39,7 +39,7 @@ local function pollScratchpads()
         if workspace == target then presence[name] = true end
       end
     end
-    noctalia.state.set("sinnix-cockpit.scratch", presence)
+    noctalia.state.set("sinnix-bar.scratch", presence)
   end, 5000)
   if not accepted then polling = false end
 end
@@ -53,12 +53,12 @@ local function readIndex()
   indexMtime = mtime
   local raw = noctalia.readFile(INDEX_PATH)
   if raw == nil then
-    noctalia.state.set("sinnix-cockpit.capabilities", nil)
+    noctalia.state.set("sinnix-bar.capabilities", nil)
     return
   end
   local index = noctalia.json.decode(raw)
   if type(index) ~= "table" or index.schema ~= "sinnix-capability-index-v1" or type(index.rows) ~= "table" then
-    noctalia.state.set("sinnix-cockpit.capabilities", { schema_mismatch = true })
+    noctalia.state.set("sinnix-bar.capabilities", { schema_mismatch = true })
     return
   end
   local kinds = {}
@@ -66,7 +66,7 @@ local function readIndex()
     local kind = type(row) == "table" and row.kind or nil
     if type(kind) == "string" then kinds[kind] = (kinds[kind] or 0) + 1 end
   end
-  noctalia.state.set("sinnix-cockpit.capabilities", {
+  noctalia.state.set("sinnix-bar.capabilities", {
     total = #index.rows,
     kinds = kinds,
     revision = index.revision,
@@ -83,12 +83,12 @@ local function readStack()
   local raw = noctalia.readFile(STACK_PATH)
   if raw == nil then
     -- No file yet means nothing was ever pushed: an empty stack, not an error.
-    noctalia.state.set("sinnix-cockpit.reading-stack", { total = 0, items = {} })
+    noctalia.state.set("sinnix-bar.reading-stack", { total = 0, items = {} })
     return
   end
   local items = noctalia.json.decode(raw)
   if type(items) ~= "table" then
-    noctalia.state.set("sinnix-cockpit.reading-stack", nil)
+    noctalia.state.set("sinnix-bar.reading-stack", nil)
     return
   end
   local head = {}
@@ -98,7 +98,7 @@ local function readStack()
       table.insert(head, { title = item.title, url = item.url })
     end
   end
-  noctalia.state.set("sinnix-cockpit.reading-stack", { total = #items, items = head })
+  noctalia.state.set("sinnix-bar.reading-stack", { total = #items, items = head })
 end
 
 noctalia.setUpdateInterval(5000)

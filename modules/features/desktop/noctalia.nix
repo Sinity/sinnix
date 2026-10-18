@@ -115,9 +115,9 @@ mkFeatureModule {
           home.file.".local/share/noctalia/pinned/official/timer".source = "${officialPlugins}/timer";
           home.file.".local/share/noctalia/local/sinnix-ops".source =
             ../../../dots/noctalia/plugins/sinnix-ops;
-          home.file.".local/share/noctalia/local/sinnix-cockpit".source =
-            ../../../dots/noctalia/plugins/sinnix-cockpit;
-          # The cockpit reading-stack widget dispatches the picker by a stable path.
+          home.file.".local/share/noctalia/local/sinnix-bar".source =
+            ../../../dots/noctalia/plugins/sinnix-bar;
+          # The bar reading-stack widget dispatches the picker by a stable path.
           home.file.".local/bin/sinnix-picker".source = "${scriptPkgs.sinnix-picker}/bin/sinnix-picker";
 
           home.packages = with pkgs; [

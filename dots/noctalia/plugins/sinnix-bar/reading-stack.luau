@@ -7,7 +7,7 @@
 local SOFT_CAP = 20
 local picker = noctalia.expandPath("~/.local/bin/sinnix-picker")
 
-local stack = noctalia.state.get("sinnix-cockpit.reading-stack")
+local stack = noctalia.state.get("sinnix-bar.reading-stack")
 
 local function tooltipText()
   if type(stack) ~= "table" or stack.items == nil then
@@ -55,7 +55,7 @@ function onClick()
   end
 end
 
-noctalia.state.watch("sinnix-cockpit.reading-stack", function(value)
+noctalia.state.watch("sinnix-bar.reading-stack", function(value)
   stack = value
   render()
 end)

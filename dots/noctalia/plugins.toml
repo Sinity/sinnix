@@ -2,7 +2,7 @@
 # Source locations are stable home paths backed by immutable Nix sources.
 [plugins]
 auto_update = "none"
-enabled = ["noctalia/timer", "sinity/sinnix-ops", "sinity/sinnix-cockpit"]
+enabled = ["noctalia/timer", "sinity/sinnix-ops", "sinity/sinnix-bar"]
 
 [[plugins.source]]
 name = "official"

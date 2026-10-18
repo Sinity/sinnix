@@ -1,5 +1,5 @@
-id = "sinity/sinnix-cockpit"
-name = "Sinnix Cockpit"
+id = "sinity/sinnix-bar"
+name = "Sinnix Bar"
 version = "0.1.0"
 plugin_api = 9
 author = "Sinity"

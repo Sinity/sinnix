@@ -64,8 +64,8 @@
                 ${pkgs.bash}/bin/bash ${../../flake/tests/noctalia-ops-bridge.sh}
               touch "$out"
             '';
-        noctalia-cockpit-lint =
-          pkgs.runCommand "noctalia-cockpit-lint-check"
+        noctalia-bar-lint =
+          pkgs.runCommand "noctalia-bar-lint-check"
             {
               nativeBuildInputs = [
                 noctalia
@@ -78,8 +78,8 @@
               # Manifest/settings cross-check, then a real parse of every entry:
               # `noctalia plugins lint` does not compile Luau, so a syntax error
               # would otherwise surface only at live shell load.
-              noctalia plugins lint ${../../dots/noctalia/plugins/sinnix-cockpit}
-              for entry in ${../../dots/noctalia/plugins/sinnix-cockpit}/*.luau; do
+              noctalia plugins lint ${../../dots/noctalia/plugins/sinnix-bar}
+              for entry in ${../../dots/noctalia/plugins/sinnix-bar}/*.luau; do
                 luau-compile --binary "$entry" > /dev/null
               done
               touch "$out"

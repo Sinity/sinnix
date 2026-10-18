@@ -7,7 +7,7 @@
 
 local LIST_COMMAND = "kitty --title 'Sinnix capabilities' sh -c 'sinnix capabilities | less -R'"
 
-local caps = noctalia.state.get("sinnix-cockpit.capabilities")
+local caps = noctalia.state.get("sinnix-bar.capabilities")
 
 local function tooltipText()
   if type(caps) ~= "table" or caps.total == nil then
@@ -43,7 +43,7 @@ function onClick()
   end
 end
 
-noctalia.state.watch("sinnix-cockpit.capabilities", function(value)
+noctalia.state.watch("sinnix-bar.capabilities", function(value)
   caps = value
   render()
 end)

@@ -95,9 +95,9 @@ widget_spacing = 15
 start = ["session", "wallpaper", "control-center", "volume", "audio_visualizer", "media", "launcher"]
 center = ["tray", "notifications", "clock", "workspaces"]
 end = [
-  "sinity/sinnix-cockpit:capture-strip",
-  "sinity/sinnix-cockpit:capabilities",
-  "sinity/sinnix-cockpit:reading-stack",
+  "sinity/sinnix-bar:capture-strip",
+  "sinity/sinnix-bar:capabilities",
+  "sinity/sinnix-bar:reading-stack",
   "sinity/sinnix-ops:capsule",
   "sysmon",
 ]

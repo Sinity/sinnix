@@ -54,7 +54,7 @@ in
               message = "The browser provenance receiver must be supervised by the user manager.";
             }
             {
-              assertion = lib.hasInfix "sinnix-cockpit:reading-stack" (
+              assertion = lib.hasInfix "sinnix-bar:reading-stack" (
                 builtins.readFile ../../dots/noctalia/config.toml
               );
               message = "The reading stack must stay visible on the Noctalia bar.";

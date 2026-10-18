@@ -28,7 +28,7 @@ local VERBS = {
   },
 }
 
-local presence = noctalia.state.get("sinnix-cockpit.scratch")
+local presence = noctalia.state.get("sinnix-bar.scratch")
 
 local function render()
   local buttons = {}
@@ -53,7 +53,7 @@ local function render()
   barWidget.render(ui.row({ gap = 2, align = "center" }, buttons))
 end
 
-noctalia.state.watch("sinnix-cockpit.scratch", function(value)
+noctalia.state.watch("sinnix-bar.scratch", function(value)
   presence = value
   render()
 end)

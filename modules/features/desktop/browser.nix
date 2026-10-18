@@ -124,7 +124,7 @@ mkFeatureModule {
               ];
             }
             # Written by the sinnix-reading-stack CLI on every push and pop;
-            # the bar shows the stack through the sinnix-cockpit plugin.
+            # the bar shows the stack through the sinnix-bar plugin.
             {
               name = "reading-stack";
               path = "${config.sinnix.paths.capturePaths.reading-stack}";
