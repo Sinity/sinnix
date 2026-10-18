@@ -146,10 +146,12 @@
     '';
   })
 
-  # The shared Borg lock keeps the selected acknowledged snapshot from being
-  # pruned by a drain while this independent full comparison runs.
+  # Routine source coverage is metadata plus a bounded content sample. The
+  # prior full-content receipt remains historical evidence, never overwritten
+  # by this weaker proof. Snapshot-directory flock pins custody while create
+  # and drain operations continue under their existing native Borg locks.
   (mkBackupJob "borgbackup-coverage-audit-realm" {
-    description = "Independently compare one acknowledged realm snapshot with Borg";
+    description = "Compare acknowledged Realm metadata and a bounded content sample";
     unit = {
       after = [
         "realm.mount"
@@ -161,14 +163,13 @@
       ];
     };
     serviceConfig = {
-      # A full canonical comparison can span archive windows under backup I/O
-      # limits. Keep a bounded budget and hold the pruning lock throughout.
+      # Namespace enumeration retains its existing deadline; content work is
+      # independently limited to 128 files and one GiB per successful pass.
       TimeoutStartSec = "36h";
       TimeoutStopSec = "15s";
     };
     timer = {
-      # A due comparison retries hourly. A current successful receipt makes
-      # later wakes no-ops until its seven-day age expires.
+      # Retry only while due; a successful coverage receipt lasts seven days.
       onCalendar = "*-*-* *:35:00";
       persistent = false;
     };
@@ -182,32 +183,47 @@
       set -euo pipefail
       ${mkBorgCommonScript borgRepoRealm}
       if ${snapshotCoverage} audit-status ${lib.escapeShellArg realmCoverageAuditReceipt} \
-        ${realmCoveragePolicy} 604800 >/dev/null 2>&1; then
+        ${realmCoveragePolicy} 604800 --mode sampled >/dev/null 2>&1; then
         exit 0
       fi
       install -d -m 0755 ${lib.escapeShellArg borgDrainStateRoot}
-      readiness="$(${snapshotCoverage} audit-ready ${lib.escapeShellArg "${borgDrainStateRoot}/realm.latest-archived"} ${realmCoveragePolicy})"
-      if [ "$(printf '%s' "$readiness" | ${pkgs.jq}/bin/jq -r '.ready')" != true ]; then
-        printf '%s' "$readiness" | ${pkgs.jq}/bin/jq --argjson epoch "$(date +%s)" '. + {status:"deferred",epoch:$epoch}' \
-          | publish_backup_marker ${lib.escapeShellArg "${borgDrainStateRoot}/realm.independent-full-audit-attempt.json"}
-        echo "backup_phase=independent_full_audit status=deferred reason=$(printf '%s' "$readiness" | ${pkgs.jq}/bin/jq -r '.reason') remains_due=true"
-        exit 0
-      fi
-      if ! acquire_borg_global_lock_or_fail "realm independent full audit"; then
+      if ! acquire_borg_global_lock_or_fail "realm coverage selection"; then
         printf '{"status":"deferred","reason":"borg-lock-contention","epoch":%s}\n' "$(date +%s)" \
-          | publish_backup_marker ${lib.escapeShellArg "${borgDrainStateRoot}/realm.independent-full-audit-attempt.json"}
-        echo "backup_phase=independent_full_audit status=deferred reason=borg-lock-contention remains_due=true"
+          | publish_backup_marker ${lib.escapeShellArg "${borgDrainStateRoot}/realm.independent-coverage-audit-attempt.json"}
+        echo "backup_phase=independent_coverage_audit status=deferred reason=borg-lock-contention remains_due=true"
         exit 0
       fi
-      # The full inventory can outgrow the source filesystem's remaining
-      # headroom. Keep this disposable index with Borg's cache on persist.
       export TMPDIR=${lib.escapeShellArg "${borgCacheDir}/coverage-scratch"}
       install -d -m 0700 "$TMPDIR"
-      audit="$(${snapshotCoverage} audit \
-        ${lib.escapeShellArg "${borgDrainStateRoot}/realm.latest-archived"} \
-        ${lib.escapeShellArg realmSnapshots} ${realmCoveragePolicy})"
+      selection="$(mktemp "$TMPDIR/selection.XXXXXXXX")"
+      trap 'rm -f -- "$selection"' EXIT
+      if [ -f ${lib.escapeShellArg "${borgDrainStateRoot}/realm.latest-archived"} ]; then
+        cp -- ${lib.escapeShellArg "${borgDrainStateRoot}/realm.latest-archived"} "$selection"
+      else
+        rm -f -- "$selection"
+      fi
+      readiness="$(${snapshotCoverage} audit-ready "$selection" ${realmCoveragePolicy})"
+      if [ "$(printf '%s' "$readiness" | ${pkgs.jq}/bin/jq -r '.ready')" != true ]; then
+        printf '%s' "$readiness" | ${pkgs.jq}/bin/jq --argjson epoch "$(date +%s)" '. + {status:"deferred",epoch:$epoch}' \
+          | publish_backup_marker ${lib.escapeShellArg "${borgDrainStateRoot}/realm.independent-coverage-audit-attempt.json"}
+        echo "backup_phase=independent_coverage_audit status=deferred remains_due=true"
+        exit 0
+      fi
+      snapshot="$(printf '%s' "$readiness" | ${pkgs.jq}/bin/jq -r '.snapshot')"
+      exec 8<${lib.escapeShellArg realmSnapshots}/"$snapshot"
+      if ! flock -n -s 8; then
+        echo "backup_phase=independent_coverage_audit status=deferred reason=snapshot-in-use remains_due=true"
+        exit 0
+      fi
+      # The selected marker is immutable for this operation. FD 8 protects
+      # its source from retirement; native Borg locking still protects archives.
+      exec 9>&-
+      audit="$(${snapshotCoverage} audit "$selection" \
+        ${lib.escapeShellArg realmSnapshots} ${realmCoveragePolicy} \
+        --mode sampled --sample-bytes 1073741824 --sample-files 128 \
+        --previous-receipt ${lib.escapeShellArg realmCoverageAuditReceipt})"
       printf '%s\n' "$audit" | publish_backup_marker ${lib.escapeShellArg realmCoverageAuditReceipt}
-      echo "backup_phase=independent_full_audit label=realm $(printf '%s' "$audit" | ${pkgs.jq}/bin/jq -r '"elapsed_seconds=\(.verification_seconds) source_hashed_bytes=\(.source_hashed_bytes) archive_content_verified_bytes=\(.archive_content_verified_bytes)"')"
+      echo "backup_phase=independent_coverage_audit label=realm $(printf '%s' "$audit" | ${pkgs.jq}/bin/jq -r '"elapsed_seconds=\(.verification_seconds) sampled_files=\(.sampled_files) source_hashed_bytes=\(.source_hashed_bytes) archive_content_verified_bytes=\(.archive_content_verified_bytes) content_coverage=\(.content_coverage)"')"
     '';
   })
 

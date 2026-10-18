@@ -2,6 +2,7 @@
 
 import argparse
 import errno
+import fcntl
 import importlib.util
 import io
 import json
@@ -416,6 +417,135 @@ class CoverageFixture(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "content mismatch"):
             COVERAGE.verify(self.source, "snapshot", [])
+
+    def test_routine_child_deadline_kills_and_reaps_blocked_reader(self):
+        token = COVERAGE._COMMAND_TIMEOUT.set(0.05)
+        started = time.monotonic()
+        try:
+            with self.assertRaisesRegex(ValueError, "exceeded.*budget"):
+                list(COVERAGE.command_items([sys.executable, "-c", "import time; time.sleep(10)"], lambda stream: iter(stream)))
+            self.assertLess(time.monotonic() - started, 2)
+        finally:
+            COVERAGE._COMMAND_TIMEOUT.reset(token)
+
+    def test_slow_metadata_parser_does_not_hold_native_repository_lock(self):
+        # Exceed the pipe capacity so the old streaming path keeps Borg alive
+        # while the consumer pauses. A second writer must still acquire it.
+        for i in range(1536):
+            (self.source / (f"record-{i:04d}-" + "x" * 100)).write_bytes(b"neutral")
+        self.archive()
+        commands = [
+            (["borg", "debug", "dump-archive", "::snapshot", "/dev/stdout"],
+             lambda stream: COVERAGE.JsonStream(stream).items()),
+            (["borg", "list", "--json-lines", "--format", "{path}{sha256}{health}{size}", "::snapshot"],
+             lambda stream: (json.loads(line) for line in stream)),
+        ]
+        for i, (command, parser) in enumerate(commands):
+            with self.subTest(command=command[1]):
+                items = COVERAGE.command_items(command, parser)
+                try:
+                    self.assertIsInstance(next(items), dict)
+                    self.archive(f"while-parser-paused-{i}", "--lock-wait", "1")
+                finally:
+                    items.close()
+
+    def test_metadata_coverage_does_not_hash_payloads_or_claim_content_equality(self):
+        self.archive()
+        original = COVERAGE.command_items
+        def metadata_only(command, parser):
+            self.assertNotIn("{path}{sha256}{health}{size}", command)
+            yield from original(command, parser)
+        with patch.object(COVERAGE, "command_items", new=metadata_only), \
+             patch.object(COVERAGE.hashlib, "file_digest", side_effect=AssertionError("payload read")):
+            result = COVERAGE.verify(self.source, "snapshot", [], content_mode="metadata")
+        self.assertEqual(result["content_verification"], "not_performed")
+        self.assertEqual(result["source_hashed_bytes"], 0)
+        self.assertNotIn("content_sha256", result)
+
+    def test_sample_has_exact_byte_file_bounds_and_continuation(self):
+        self.archive()
+        first = COVERAGE.verify(self.source, "snapshot", [], content_mode="sampled", sample_bytes=24, sample_files=1)
+        self.assertEqual(first["sampled_files"], 1)
+        self.assertEqual(first["source_hashed_bytes"], len("unique historical bytes"))
+        self.assertEqual(first["sample_next_after"], "old-only")
+        self.assertEqual(first["sample_objects"][0]["path"], "old-only")
+        second = COVERAGE.verify(self.source, "snapshot", [], content_mode="sampled", sample_bytes=24, sample_files=1, sample_after=first["sample_next_after"])
+        self.assertEqual(second["sample_next_after"], "same-name")
+        self.assertEqual(second["sample_start_after"], "old-only")
+        self.assertEqual(second["source_hashed_bytes"], len("old version"))
+        self.assertEqual(second["content_coverage"], "partial")
+        self.assertNotIn("content_sha256", second)
+        no_fit = COVERAGE.verify(self.source, "snapshot", [], content_mode="sampled", sample_bytes=1, sample_files=1)
+        self.assertEqual(no_fit["source_hashed_bytes"], 0)
+        self.assertEqual(no_fit["sampled_files"], 0)
+
+    def test_oversized_only_population_never_claims_sampled_content(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            inventory = COVERAGE.CoverageInventory(root / "inventory.sqlite")
+            try:
+                for name in ("large-a", "large-b"):
+                    path = root / name
+                    with path.open("wb") as stream:
+                        stream.truncate(1073741825)
+                    inventory.add(name, path.stat())
+                with patch.object(COVERAGE, "command_items", side_effect=AssertionError("no selected content")):
+                    result = COVERAGE.verify_content_sample(root, "unused", inventory,
+                        byte_budget=1073741824, file_budget=128)
+                self.assertEqual(result["sampled_files"], 0)
+                self.assertEqual(result["content_verification"], "not_performed")
+                self.assertEqual(result["sample_excluded_population"]["over_byte_budget_files"], 2)
+                self.assertIn("other_retained_archives", result["sample_excludes"])
+                self.assertNotIn("content_sha256", result)
+            finally:
+                inventory.db.close()
+
+    def test_sampling_wraps_eof_and_skips_oversized_prefix_without_stalling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            inventory = COVERAGE.CoverageInventory(root / "inventory.sqlite")
+            try:
+                for i in range(8):
+                    path = root / f"a-large-{i}"
+                    path.write_bytes(b"x" * 100)
+                    inventory.add(path.name, path.stat())
+                path = root / "z-small"
+                path.write_bytes(b"ok")
+                inventory.add(path.name, path.stat())
+                def items(command, parser):
+                    yield {"path":path.name, "size":2, "healthy":True,
+                           "sha256":COVERAGE.hashlib.sha256(b"ok").hexdigest()}
+                with patch.object(COVERAGE, "command_items", new=items):
+                    first = COVERAGE.verify_content_sample(root, "unused", inventory, byte_budget=2, file_budget=1)
+                    wrapped = COVERAGE.verify_content_sample(root, "unused", inventory, byte_budget=2, file_budget=1, after="z-small")
+                self.assertEqual(first["sampled_files"], 1)
+                self.assertEqual(first["sample_excluded_population"]["over_byte_budget_files"], 8)
+                self.assertTrue(wrapped["sample_cursor_wrapped"])
+                self.assertEqual(wrapped["sampled_files"], 1)
+            finally:
+                inventory.db.close()
+
+    def test_sample_matches_literal_glob_and_newline_names(self):
+        for name in ("a1", "a[1]", "b\n[1]ą"):
+            (self.source / name).write_text("neutral")
+        self.archive()
+        for after, expected in (("a1", "a[1]"), ("a[1]", "b\n[1]ą")):
+            result = COVERAGE.verify(self.source, "snapshot", [], content_mode="sampled", sample_bytes=100, sample_files=1, sample_after=after)
+            self.assertEqual(result["sampled_files"], 1)
+            self.assertEqual(result["sample_next_after"], expected)
+            self.assertEqual(result["sample_objects"][0]["path"], expected)
+            self.assertEqual(result["source_hashed_bytes"], 7)
+
+    def test_sample_refuses_changed_bytes_while_metadata_remains_weaker(self):
+        self.archive()
+        path = self.source / "same-name"
+        previous = path.stat()
+        path.write_text("new version")
+        os.utime(path, ns=(previous.st_atime_ns, previous.st_mtime_ns))
+        result = COVERAGE.verify(self.source, "snapshot", [], content_mode="metadata")
+        self.assertEqual(result["content_verification"], "not_performed")
+        with self.assertRaisesRegex(ValueError, "sampled archive content mismatch"):
+            COVERAGE.verify(self.source, "snapshot", [], content_mode="sampled")
 
     def test_created_proof_requires_current_full_anchor_and_borg_reads_changed_bytes(
         self,
@@ -1188,6 +1318,26 @@ class ProducerReceiptFixture(unittest.TestCase):
             self.assertEqual(audit["audit_mode"], "independent_full")
             self.assertEqual(audit["source_hashed_bytes"], 123)
             self.assertLessEqual(COVERAGE.audit_status(receipt, policy, 691200), 1)
+            sampled = dict(audit, audit_mode="independent_metadata_sampled",
+                content_coverage="partial", content_verification="bounded_sample",
+                sampled_files=1, sample_byte_budget=128, sample_file_budget=1,
+                sample_content_sha256=COVERAGE.hashlib.sha256(json.dumps(["neutral", "c" * 64], ensure_ascii=True).encode()).hexdigest(),
+                sample_objects=[{"path": "neutral", "sha256": "c" * 64, "size": 123}])
+            sampled.pop("content_sha256")
+            receipt.write_text(json.dumps(sampled))
+            with self.assertRaisesRegex(ValueError, "overdue"):
+                COVERAGE.audit_status(receipt, policy, 691200)
+            self.assertLessEqual(COVERAGE.audit_status(receipt, policy, 691200, mode="sampled"), 1)
+            zero = dict(sampled, sampled_files=0, source_hashed_bytes=0,
+                        archive_content_verified_bytes=0, content_verification="not_performed",
+                        sample_objects=[], sample_content_sha256=COVERAGE.hashlib.sha256().hexdigest())
+            receipt.write_text(json.dumps(zero))
+            with self.assertRaisesRegex(ValueError, "invalid bounded"):
+                COVERAGE.audit_status(receipt, policy, 691200, mode="sampled")
+            sampled["source_hashed_bytes"] = 129
+            receipt.write_text(json.dumps(sampled))
+            with self.assertRaisesRegex(ValueError, "invalid bounded"):
+                COVERAGE.audit_status(receipt, policy, 691200, mode="sampled")
             audit["audited_epoch"] -= 691201
             receipt.write_text(json.dumps(audit))
             with self.assertRaisesRegex(ValueError, "overdue"):
@@ -1436,6 +1586,17 @@ else: sys.exit(1)
                 },
             )
             self.assertFalse((root / "state/borg-drain/realm.latest-archived").exists())
+            # A shared directory lock pins only the old audit source. Fresh
+            # archive work still completes; retirement resumes after release.
+            pin = os.open(old, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                fcntl.flock(pin, fcntl.LOCK_SH)
+                result = run()
+                self.assertTrue(old.exists())
+                self.assertTrue(new.exists())
+                self.assertIn("held by an independent audit", result.stdout)
+            finally:
+                os.close(pin)
             run()
             self.assertFalse(old.exists())
             self.assertTrue(new.exists())

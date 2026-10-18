@@ -30,6 +30,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import stat
 import sqlite3
 import struct
@@ -37,6 +38,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import threading
+from contextvars import ContextVar
 from datetime import datetime
 from fnmatch import fnmatchcase
 from glob import escape as glob_escape
@@ -205,7 +208,7 @@ def verified_prune_plan(directory, glob, marker, prefix, replacement_suffix):
 
 
 def run(*args):
-    return subprocess.check_output(args, text=True)
+    return subprocess.check_output(args, text=True, timeout=300)
 
 
 def filesystem_identity(source):
@@ -464,10 +467,14 @@ def audit_readiness(marker, policy_path):
     proof = json.loads(fields["coverage"])
     if proof["policy_sha256"] != policy_hash:
         return {"ready": False, "reason": "awaiting-current-policy-archive"}
-    return {"ready": True, "policy_sha256": policy_hash}
+    snapshot = fields["snapshot"]
+    if Path(snapshot).name != snapshot:
+        raise ValueError("invalid audit snapshot name")
+    snapshot_epoch(snapshot)
+    return {"ready": True, "policy_sha256": policy_hash, "snapshot": snapshot}
 
 
-def audit_latest(marker, snapshot_directory, policy_path):
+def audit_latest(marker, snapshot_directory, policy_path, *, mode="full", sample_bytes=1073741824, sample_files=128, sample_after=None, previous_receipt=None):
     started = time.monotonic()
     marker_bytes = Path(marker).read_bytes()
     fields = read_marker_fields(marker)
@@ -493,7 +500,17 @@ def audit_latest(marker, snapshot_directory, policy_path):
     noncanonical, chrome_extension_caches = decode_policy(
         json.loads(Path(policy_path).read_text())
     )
-    result = verify(source, archive, noncanonical, chrome_extension_caches)
+    if sample_after is None and mode == "sampled" and previous_receipt and Path(previous_receipt).exists():
+        previous = json.loads(Path(previous_receipt).read_text())
+        if previous.get("audit_mode") == "independent_metadata_sampled" and previous.get("policy_sha256") == proof["policy_sha256"]:
+            sample_after = previous.get("sample_next_after")
+            if sample_after is not None and not isinstance(sample_after, str):
+                raise ValueError("invalid sampled-content cursor")
+    result = verify(source, archive, noncanonical, chrome_extension_caches,
+                    content_mode=mode, sample_bytes=sample_bytes,
+                    sample_files=sample_files, sample_after=sample_after)
+    if mode == "sampled" and result["sampled_files"] == 0:
+        raise ValueError("metadata compared but no content sampled; prior receipt retained")
     if (
         Path(marker).read_bytes() != marker_bytes
         or snapshot_details(source) != details
@@ -501,7 +518,7 @@ def audit_latest(marker, snapshot_directory, policy_path):
     ):
         raise ValueError("acknowledged archive changed during full audit")
     return result | {
-        "audit_mode": "independent_full",
+        "audit_mode": {"full": "independent_full", "metadata": "independent_metadata", "sampled": "independent_metadata_sampled"}[mode],
         "archive": archive,
         "archive_id": proof["archive_id"],
         "snapshot_uuid": details[0],
@@ -511,20 +528,50 @@ def audit_latest(marker, snapshot_directory, policy_path):
     }
 
 
-def audit_status(receipt, policy_path, max_age):
+def audit_status(receipt, policy_path, max_age, *, mode="full"):
     try:
         audit = json.loads(Path(receipt).read_text())
         age = int(time.time()) - audit["audited_epoch"]
         if (
-            audit["audit_mode"] != "independent_full"
+            audit["audit_mode"] != {"full": "independent_full", "metadata": "independent_metadata", "sampled": "independent_metadata_sampled"}[mode]
             or audit["policy_sha256"]
             != policy_identity(policy_path, require_borg_excludes=True)
             or age < 0
             or age > max_age
         ):
-            raise ValueError("independent full audit overdue")
+            raise ValueError(f"independent {mode} audit overdue")
     except FileNotFoundError as error:
-        raise ValueError("independent full audit has not completed") from error
+        raise ValueError(f"independent {mode} audit has not completed") from error
+    if mode == "sampled":
+        counts = ("sampled_files", "sample_byte_budget", "sample_file_budget", "source_hashed_bytes", "archive_content_verified_bytes")
+        if (any(type(audit.get(key)) is not int or audit[key] < 0 for key in counts)
+            or not 1 <= audit["sample_file_budget"] <= 128
+            or audit["sample_byte_budget"] <= 0
+            or audit["sampled_files"] == 0
+            or audit["sampled_files"] > audit["sample_file_budget"]
+            or audit["source_hashed_bytes"] > audit["sample_byte_budget"]
+            or audit["source_hashed_bytes"] != audit["archive_content_verified_bytes"]
+            or audit.get("content_coverage") != "partial"
+            or audit.get("content_verification") != ("bounded_sample" if audit["sampled_files"] else "not_performed")
+            or not re.fullmatch(r"[0-9a-f]{64}", str(audit.get("sample_content_sha256", "")))
+            or "content_sha256" in audit):
+            raise ValueError("invalid bounded content sample receipt")
+        objects = audit.get("sample_objects")
+        if not isinstance(objects, list) or len(objects) != audit["sampled_files"]:
+            raise ValueError("invalid sampled object evidence")
+        digest = hashlib.sha256()
+        paths = set()
+        total = 0
+        for item in objects:
+            if (not isinstance(item, dict) or not isinstance(item.get("path"), str)
+                or item["path"] in paths or type(item.get("size")) is not int or item["size"] <= 0
+                or not re.fullmatch(r"[0-9a-f]{64}", str(item.get("sha256", "")))):
+                raise ValueError("invalid sampled object evidence")
+            paths.add(item["path"])
+            total += item["size"]
+            digest.update(json.dumps([item["path"], item["sha256"]], ensure_ascii=True).encode())
+        if total != audit["source_hashed_bytes"] or digest.hexdigest() != audit["sample_content_sha256"]:
+            raise ValueError("sampled object evidence does not match receipt")
     return age
 
 
@@ -589,13 +636,45 @@ class JsonStream:
             raise ValueError("incomplete archive metadata")
 
 
+ROUTINE_BORG_CHILD_SECONDS = 300
+_COMMAND_TIMEOUT = ContextVar("borg_coverage_child_timeout", default=None)
+
+
 def command_items(command, parser):
     process = subprocess.Popen(command, stdout=subprocess.PIPE, text=True)
-    try:
-        yield from parser(process.stdout)
-        if process.wait() != 0:
+    expired = threading.Event()
+    def expire():
+        expired.set()
+        process.kill()
+    budget = _COMMAND_TIMEOUT.get()
+    timer = threading.Timer(budget, expire) if budget is not None else None
+    if timer is not None:
+        timer.start()
+    def finish():
+        status = process.wait()
+        if timer is not None:
+            timer.cancel()
+        if expired.is_set():
+            raise ValueError(f"archive child exceeded {budget}s budget: {command[1]}")
+        if status != 0:
             raise ValueError(f"archive read failed: {command[1]}")
+    try:
+        if tuple(command[1:3]) == ("debug", "dump-archive") or tuple(command[1:2]) == ("list",):
+            # Filesystem metadata validation can be much slower than reading
+            # archive headers. Drain and reap Borg first so parser backpressure
+            # cannot monopolize its native repository lock. The private spool
+            # is unlinked and bounded in memory, not an archive or a receipt.
+            with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as spool:
+                shutil.copyfileobj(process.stdout, spool, length=65536)
+                finish()
+                spool.seek(0)
+                yield from parser(spool)
+        else:
+            yield from parser(process.stdout)
+            finish()
     finally:
+        if timer is not None:
+            timer.cancel()
         process.stdout.close()
         if process.poll() is None:
             process.terminate()
@@ -805,7 +884,7 @@ class CoverageInventory:
             PRAGMA temp_store=FILE;
             CREATE TABLE entries (
                 path BLOB PRIMARY KEY, metadata TEXT NOT NULL,
-                root BLOB NOT NULL, regular INTEGER NOT NULL,
+                root BLOB NOT NULL, regular INTEGER NOT NULL, size INTEGER NOT NULL,
                 seen INTEGER NOT NULL DEFAULT 0,
                 hashed INTEGER NOT NULL DEFAULT 0,
                 lossy BLOB, hardlink BLOB, hardlink_order INTEGER
@@ -828,10 +907,10 @@ class CoverageInventory:
         metadata = json.dumps({"st_" + k: getattr(st, "st_" + k) for k in fields})
         lossy = lossy_borg_path(path)
         self.execute(
-            "INSERT INTO entries(path, metadata, root, regular, lossy) VALUES(?,?,?,?,?)",
+            "INSERT INTO entries(path, metadata, root, regular, size, lossy) VALUES(?,?,?,?,?,?)",
             (os.fsencode(path), metadata,
              os.fsencode("/".join(path.split("/", 2)[:2])),
-             int(stat.S_ISREG(st.st_mode)),
+             int(stat.S_ISREG(st.st_mode)), st.st_size,
              os.fsencode(lossy) if lossy != path else None),
         )
 
@@ -908,17 +987,29 @@ class CoverageInventory:
         return self.db.execute("SELECT count(*) FROM entries").fetchone()[0]
 
 
-def verify(source, archive, noncanonical, chrome_extension_caches=False):
+def verify(source, archive, noncanonical, chrome_extension_caches=False, **options):
+    token = _COMMAND_TIMEOUT.set(ROUTINE_BORG_CHILD_SECONDS if options.get("content_mode") in {"metadata", "sampled"} else None)
+    try:
+        return _verify_with_inventory(source, archive, noncanonical, chrome_extension_caches, **options)
+    finally:
+        _COMMAND_TIMEOUT.reset(token)
+
+
+def _verify_with_inventory(source, archive, noncanonical, chrome_extension_caches, **options):
     with tempfile.TemporaryDirectory(prefix="borg-coverage-") as scratch:
         inventory = CoverageInventory(Path(scratch) / "inventory.sqlite")
         try:
             return verify_inventory(source, archive, noncanonical,
-                                    chrome_extension_caches, inventory)
+                                    chrome_extension_caches, inventory, **options)
         finally:
             inventory.db.close()
 
 
-def verify_inventory(source, archive, noncanonical, chrome_extension_caches, expected):
+def verify_inventory(source, archive, noncanonical, chrome_extension_caches, expected, *, content_mode="full", sample_bytes=1073741824, sample_files=128, sample_after=None):
+    if content_mode not in {"full", "metadata", "sampled"}:
+        raise ValueError("unknown content verification mode")
+    if sample_bytes <= 0 or not 1 <= sample_files <= 128:
+        raise ValueError("sample needs positive byte budget and 1-128 files")
     source = Path(source)
     ignored = set(noncanonical)
     omitted_roots = []
@@ -1010,6 +1101,7 @@ def verify_inventory(source, archive, noncanonical, chrome_extension_caches, exp
                     target_st.st_ino, target_st.st_dev,
                 ):
                     raise ValueError(f"archive hardlink mismatch: {path!r}")
+                expected.defer_hardlink(path, target)
             elif item.get("size") != st.st_size:
                 raise ValueError(f"archive size mismatch: {path!r}")
         elif stat.S_ISFIFO(st.st_mode):
@@ -1026,6 +1118,18 @@ def verify_inventory(source, archive, noncanonical, chrome_extension_caches, exp
         elif not stat.S_ISDIR(st.st_mode):
             raise ValueError(f"unsupported canonical file type: {path!r}")
     expected.require_metadata()
+    metadata_result = {
+        "canonical_entries": expected.count(),
+        "noncanonical_roots": omitted_roots,
+        "unarchivable_entries": unarchivable,
+        "nested_subvolume_stubs": nested_stubs,
+    }
+    if content_mode == "metadata":
+        return metadata_result | {"content_verification": "not_performed",
+                                  "source_hashed_bytes": 0, "archive_content_verified_bytes": 0}
+    if content_mode == "sampled":
+        return metadata_result | verify_content_sample(source, archive, expected,
+            byte_budget=sample_bytes, file_budget=sample_files, after=sample_after)
 
     digest = hashlib.sha256()
     hashed_bytes = 0
@@ -1071,6 +1175,98 @@ def verify_inventory(source, archive, noncanonical, chrome_extension_caches, exp
         "unarchivable_entries": unarchivable,
         "nested_subvolume_stubs": nested_stubs,
     }
+
+
+def verify_content_sample(source, archive, inventory, *, byte_budget, file_budget, after=None):
+    """Compare a bounded subset; neither this digest nor its cursor is full proof."""
+    selected = {}
+    selected_bytes = 0
+    argument_bytes = 0
+    examined = 0
+    skipped = 0
+    skipped_reasons = {"unaddressable_name": 0, "empty": 0, "over_byte_budget": 0}
+    cursor = None
+    # Metadata eligibility excludes populations which a cursor can never hash.
+    # Otherwise a run of oversized names, or a cursor at EOF, can wedge every
+    # later retry once zero-content receipts correctly stop refreshing success.
+    query = ("SELECT path FROM entries WHERE regular=1 AND hardlink IS NULL "
+             "AND size>0 AND size<=? AND lossy IS NULL AND path>? ORDER BY path LIMIT ?")
+    def candidates(boundary):
+        return inventory.db.execute(query, (byte_budget, os.fsencode(boundary) if boundary else b"", file_budget * 4)).fetchall()
+    rows = candidates(after)
+    wrapped = bool(after and not rows)
+    if wrapped:
+        rows = candidates(None)
+    excluded_count, excluded_bytes, unaddressable, empty = inventory.db.execute(
+        "SELECT COALESCE(SUM(size>?),0), COALESCE(SUM(CASE WHEN size>? THEN size ELSE 0 END),0), "
+        "COALESCE(SUM(lossy IS NOT NULL),0), COALESCE(SUM(size=0),0) FROM entries WHERE regular=1",
+        (byte_budget, byte_budget)).fetchone()
+    for (raw_path,) in rows:
+        examined += 1
+        path = os.fsdecode(raw_path)
+        previous_cursor = cursor
+        cursor = path
+        st = inventory.get(path)
+        try:
+            encoded = path.encode("utf-8")
+        except UnicodeEncodeError:
+            skipped += 1
+            skipped_reasons["unaddressable_name"] += 1
+            continue
+        if st.st_size <= 0 or st.st_size > byte_budget:
+            skipped += 1
+            skipped_reasons["empty" if st.st_size <= 0 else "over_byte_budget"] += 1
+            continue
+        if st.st_size > byte_budget - selected_bytes or argument_bytes + len(encoded) > 65536:
+            cursor = previous_cursor
+            examined -= 1
+            break
+        selected[path] = st
+        selected_bytes += st.st_size
+        argument_bytes += len(encoded)
+        if len(selected) == file_budget:
+            break
+    patterns = [part for path in selected for part in ("--pattern", "+ pf:" + path)]
+    digest = hashlib.sha256()
+    hashed_bytes = 0
+    verified = set()
+    objects = []
+    if selected:
+        for item in command_items(
+            ["borg", "list", "--json-lines", "--format", "{path}{sha256}{health}{size}",
+             *patterns, "--pattern", "- re:.*", "::" + archive],
+            lambda stream: (json.loads(line) for line in stream)):
+            path = archive_path(item)
+            if path not in selected or path in verified or item.get("source"):
+                raise ValueError("unexpected or duplicate sampled archive member")
+            st = selected[path]
+            if not item.get("healthy") or item.get("size") != st.st_size:
+                raise ValueError(f"damaged sampled archive member: {path!r}")
+            with (source / path).open("rb") as stream:
+                checksum = hashlib.file_digest(stream, "sha256").hexdigest()
+            if checksum != item.get("sha256"):
+                raise ValueError(f"sampled archive content mismatch: {path!r}")
+            verified.add(path)
+            objects.append({"path": path, "sha256": checksum, "size": st.st_size})
+            hashed_bytes += st.st_size
+            digest.update(json.dumps([path, checksum], ensure_ascii=True).encode())
+        if verified != selected.keys():
+            raise ValueError("incomplete sampled content verification")
+    return {"content_verification": "bounded_sample" if verified else "not_performed", "content_coverage": "partial",
+            "sample_content_sha256": digest.hexdigest(), "sampled_files": len(verified),
+            "sample_examined_files": examined, "sample_skipped_files": skipped,
+            "sample_skipped_by_reason": skipped_reasons,
+            "sample_scope": "selected_acknowledged_snapshot",
+            "sample_cursor_wrapped": wrapped,
+            "sample_excluded_population": {"over_byte_budget_files": excluded_count,
+                "over_byte_budget_bytes": excluded_bytes, "unaddressable_files": unaddressable,
+                "empty_files": empty},
+            "sample_excludes": ["files_larger_than_byte_budget", "unaddressable_names",
+                                "other_retained_archives"],
+            "sample_start_after": after, "sample_next_after": cursor if examined else None,
+            "sample_objects": objects,
+            "sample_byte_budget": byte_budget, "sample_file_budget": file_budget,
+            "source_hashed_bytes": hashed_bytes, "archive_content_verified_bytes": hashed_bytes}
 
 
 def decode_policy(policy):
@@ -1121,10 +1317,16 @@ def main():
     audit.add_argument("latest_marker")
     audit.add_argument("snapshot_directory")
     audit.add_argument("policy")
+    audit.add_argument("--mode", choices=("full", "metadata", "sampled"), default="full")
+    audit.add_argument("--sample-bytes", type=int, default=1073741824)
+    audit.add_argument("--sample-files", type=int, default=128)
+    audit.add_argument("--sample-after")
+    audit.add_argument("--previous-receipt")
     status = sub.add_parser("audit-status")
     status.add_argument("receipt")
     status.add_argument("policy")
     status.add_argument("max_age", type=int)
+    status.add_argument("--mode", choices=("full", "metadata", "sampled"), default="full")
     ready = sub.add_parser("audit-ready")
     ready.add_argument("latest_marker")
     ready.add_argument("policy")
@@ -1227,14 +1429,17 @@ def main():
     elif args.command == "audit":
         print(
             json.dumps(
-                audit_latest(args.latest_marker, args.snapshot_directory, args.policy)
+                audit_latest(args.latest_marker, args.snapshot_directory, args.policy,
+                             mode=args.mode, sample_bytes=args.sample_bytes,
+                             sample_files=args.sample_files, sample_after=args.sample_after,
+                             previous_receipt=args.previous_receipt)
             )
         )
     elif args.command == "audit-ready":
         print(json.dumps(audit_readiness(args.latest_marker, args.policy)))
     elif args.command == "audit-status":
         print(
-            f"independent_full_audit_age_seconds={audit_status(args.receipt, args.policy, args.max_age)}"
+            f"independent_{args.mode}_audit_age_seconds={audit_status(args.receipt, args.policy, args.max_age, mode=args.mode)}"
         )
     else:
         started = time.monotonic()
@@ -1309,6 +1514,6 @@ def main():
 if __name__ == "__main__":
     try:
         sys.exit(main() or 0)
-    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
         print(f"Snapshot retained: {error}", file=sys.stderr)
         sys.exit(1)

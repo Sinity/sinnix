@@ -84,7 +84,7 @@ let
   borgRealmSnapshotBind = "${borgSnapshotBindRoot}/realm";
   borgDrainStateRoot = "/persist/root/.cache/borg-drain";
   borgIntegrityReceipt = "${borgDrainStateRoot}/integrity-check.json";
-  realmCoverageAuditReceipt = "${borgDrainStateRoot}/realm.independent-full-audit.json";
+  realmCoverageAuditReceipt = "${borgDrainStateRoot}/realm.independent-coverage-audit.json";
 
   # Borg Configuration
   borgRepoPersistPath = "${borgRepoRoot}/borg-persist-v1";
@@ -635,6 +635,14 @@ let
         while IFS=$'\t' read -r old expected_uuid expected_generation expected_id; do
           [ -n "$old" ] || continue
           old_path=${lib.escapeShellArg snapshotDir}/"$old"
+          # Independent audits pin only their selected immutable source, not
+          # the global create/drain gate. Never wait on that pin while draining.
+          exec 8<"$old_path"
+          if ! flock -n -x 8; then
+            echo "Retaining snapshot held by an independent audit: $old"
+            exec 8<&-
+            continue
+          fi
           actual_details="$(${snapshotCoverage} details "$old_path")"
           cutoff_filesystem="$(${pkgs.gnused}/bin/sed -n 's/^filesystem_uuid=//p' "$latest_marker")"
           if [ "$(${snapshotCoverage} filesystem-identity "$old_path")" != "$cutoff_filesystem" ]; then
@@ -646,6 +654,7 @@ let
             exit 1
           fi
           btrfs subvolume delete "$old_path"
+          exec 8<&-
         done <<< "$prune_plan"
       fi
     '';
@@ -1278,12 +1287,12 @@ in
               };
               captures = [
                 {
-                  name = "borg-realm-independent-full-audit";
+                  name = "borg-realm-independent-coverage-audit";
                   path = realmCoverageAuditReceipt;
                   eventDriven = true;
                   staleAfterSeconds = 691200;
                   livenessProbe = {
-                    command = "${snapshotCoverage} audit-status ${realmCoverageAuditReceipt} ${realmCoveragePolicy} 691200";
+                    command = "${snapshotCoverage} audit-status ${realmCoverageAuditReceipt} ${realmCoveragePolicy} 691200 --mode sampled";
                     timeoutSeconds = 10;
                   };
                   data = {

@@ -2,7 +2,7 @@
 
 The realm and persist drains retain each read-only Btrfs snapshot until a named Borg archive has been accepted. A successful create must have exit status zero; Borg warnings count as failure. Creation uses only declared static exclusions. Cache tags and `.nobackup` files cannot exclude a canonical directory.
 
-Each wake captures one finite queue, processing the newest pending snapshot first and then historical states. Every accepted snapshot has its own durable acknowledgement beneath the latest marker's `.by-snapshot` directory. A newer archive cannot authorize deletion of an older snapshot. Release checks that snapshot's archive ID, UUID comment, coverage receipt, subvolume UUID, creation generation, subvolume ID and Btrfs filesystem UUID, then rechecks physical identity before deletion. Missing or invalid proof retains the snapshot. Receipt publication precedes latest-marker advancement, so an interrupted marker update can recover without recreating the archive. The newest acknowledged local snapshot remains available for the independent full audit. Creation generations order freshness even after a clock rollback; historical backfill cannot move the latest marker backward.
+Each wake captures one finite queue, processing the newest pending snapshot first and then historical states. Every accepted snapshot has its own durable acknowledgement beneath the latest marker's `.by-snapshot` directory. A newer archive cannot authorize deletion of an older snapshot. Release checks that snapshot's archive ID, UUID comment, coverage receipt, subvolume UUID, creation generation, subvolume ID and Btrfs filesystem UUID, then rechecks physical identity before deletion. Missing or invalid proof retains the snapshot. Receipt publication precedes latest-marker advancement, so an interrupted marker update can recover without recreating the archive. The newest acknowledged local snapshot remains available for independent auditing. Creation generations order freshness even after a clock rollback; historical backfill cannot move the latest marker backward.
 
 The realm drain accepts a fresh, warning-free create as a producer-backed proof, including its first archive. Before acknowledgement, it binds the Btrfs filesystem UUID and read-only snapshot UUID, generation and subvolume ID to Borg's create result, the archive's UUID comment and immutable ID, the exact create command, and a hash of the coverage policy. The policy includes Borg exclusion patterns after their bind-path qualification. This proves which immutable snapshot Borg reported archiving successfully. It does not independently compare all source and archive bytes.
 
@@ -12,7 +12,52 @@ Realm creation receipts and their producer proofs retain Borg's original, compre
 
 Persist keeps an independent full proof on its first run, on policy changes, for preexisting archives and at least every seven days. Between those checks, a fresh successful create receives a producer-backed proof. Its full proof enumerates canonical source and archive paths, compares metadata, links, xattrs and ACL presence, checks archive health, and hashes regular file content on both sides. If a preexisting archive fails that comparison, persist creates a fresh `-coverage-vN` archive under the current policy and requires it to pass the full proof before acknowledgement. This lets old cache-tag exclusions fail closed without wedging the drain. The measured recent persist full proof took 43 minutes within its four-hour unit limit.
 
-Realm's independent full proof runs in `borgbackup-coverage-audit-realm.service` with a 36-hour limit. Its hourly :35 timer compares the latest acknowledged snapshot when the successful receipt is at least seven days old or its policy changed. Lock contention or a pending current-policy acknowledgement records a deferred attempt and leaves the audit due. The shared Borg lock protects the selected snapshot from pruning throughout the comparison, and snapshot and archive identities are checked before and after it. Archive windows do not cancel this full comparison: lock-busy drains retain their queued snapshots without publishing new acknowledgements. The btrbk job uses `--preserve-snapshots`. Success writes `realm.independent-full-audit.json`; failure preserves the previous receipt. Runtime readiness reports missing, changed-policy and overdue proof separately from deferred attempts. An audit failure does not invalidate producer-backed archives.
+Realm's routine independent audit runs in `borgbackup-coverage-audit-realm.service`.
+Its hourly :35 timer retries while the successful coverage receipt is at least
+seven days old or its policy changed. It checks the complete canonical metadata
+inventory, then compares at most 128 regular files and one GiB of source/archive
+content. Sample selection resumes after the previous receipt's path cursor;
+oversized, empty and unaddressable names are disclosed as skipped. Each batch
+binds its selected archive, snapshot and policy, retaining the selected file
+paths, sizes, SHA-256 values and cursor bounds in its private receipt. Changing archives does not turn
+these samples into a full-history content proof. A pass with no sampled content
+cannot refresh the sampled-content receipt; it retains the previous success and
+remains due. The receipt records skip reasons for the examined cursor window,
+and a metadata census of oversized, empty and unaddressable files. The cursor
+wraps at EOF; permanently ineligible files cannot prevent later eligible
+content from being sampled. Files above the byte budget and files retained
+only in older archives are outside this sample's content proof.
+
+Retained cold history remains governed by its exact archive ID and recovery
+manifest. Its recorded streamed-restore checks remain separate evidence; the
+latest-snapshot sample cannot renew them. Use the existing identity-bound
+`verify_snapshot_restore` operation for small retained objects and native
+`sinnix borg-drill --verify-data --within-days N` for deliberate archive content
+checks. Repository CRC scheduling below covers stored segments, including cold
+history, but is not content or restore proof. Large-file and cold-archive
+content verification not represented by an exact existing receipt remains
+pending; an oversized-file skip never becomes a successful deep check.
+
+The global Borg gate protects only selection and snapshot pin acquisition.
+The audit copies the acknowledged marker and holds a shared lock on that
+snapshot directory, then releases the global gate before enumeration or content
+reads. Drains continue creating archives and skip retirement of pinned snapshots
+without waiting. Native Borg repository locks remain in force. Archive metadata and bounded hash-list output are first
+spooled to private unlinked storage and the Borg child is reaped before slow
+filesystem metadata validation, preventing parser backpressure from holding
+the repository lock. Routine metadata/hash children each have a five-minute
+wall deadline and are killed and reaped on timeout; a timeout preserves the
+previous receipt. Same-repository creates still wait during each native Borg
+read. Releasing the application gate permits other repositories to proceed,
+not lock-free access to the repository being read. Identities are
+checked before and after the audit. Success writes
+`realm.independent-coverage-audit.json`; failure preserves the last successful
+receipt. The receipt explicitly distinguishes complete metadata coverage from
+partial sampled content verification. The prior `realm.independent-full-audit.json`
+is retained unchanged as historical full-content evidence. Full-mode comparison
+remains an explicit verifier operation; metadata or sample receipts cannot
+satisfy its status check. An audit failure does not invalidate producer-backed
+archives. The btrbk job continues using `--preserve-snapshots`.
 
 The independent Realm audit keeps its disposable inventory and SQLite sort files in a private `coverage-scratch` directory under Borg's cache on `/persist`. Its inventory can grow beyond the remaining space on the audited filesystem. Completed comparisons remove their temporary inventory; interrupted inventory may remain for owner recovery.
 
@@ -24,7 +69,7 @@ Manual archive-data verification fails with a diagnostic receipt when archive en
 
 `agentctl job start sinnix verify_snapshot_restore -- --target <private-receipt.json> --version old` checks one file of at most 1 MiB under the bulk resource limits. The private input binds its archive ID, snapshot UUID, relative path, complete byte count and SHA-256. The operation verifies archive identity before and after extraction, caps retained output, and allows five minutes for Borg's complete metadata traversal. Job output contains the verified identities and digest, never the restored content. Its credential reference and environment come from the installed archive owner. This is a targeted restore proof, separate from full archive integrity or a whole-snapshot restore.
 
-The realm repository had 2,635,872,968,704 bytes allocated on 2026-09-27. At the configured 40 MB/s read cap, its two weekly partial checks provide 9,000 seconds of progress, so a full CRC pass takes at least about 7.3 weeks. Lower throughput extends that cycle. The separate independent full realm audit compares an acknowledged snapshot with Borg content; the per-snapshot producer proof remains the gate for newly archived snapshots.
+The realm repository had 2,635,872,968,704 bytes allocated on 2026-09-27. At the configured 40 MB/s read cap, its two weekly partial checks provide 9,000 seconds of progress, so a full CRC pass takes at least about 7.3 weeks. Lower throughput extends that cycle. The separate independent Realm audit checks acknowledged metadata and a bounded content sample; the per-snapshot producer proof remains the gate for newly archived snapshots.
 
 The acknowledgement records `proof_mode`, `policy_sha256`, snapshot and archive IDs, and creation and verification metrics. A fresh create logs `backup_phase=create`; every successful proof logs `backup_phase=verify`. The marker records creation time and Borg's logical original archive bytes, plus verification time and bytes hashed. The independent audit logs its own elapsed time and bytes. Borg's logical size is not a physical disk-read counter.
 

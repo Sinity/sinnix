@@ -624,6 +624,10 @@ assert lib.assertMsg (
             && audit.serviceConfig.TimeoutStartSec == "36h"
             && auditTimer.timerConfig.OnCalendar == "*-*-* *:35:00"
             && lib.hasInfix "status=deferred reason=borg-lock-contention remains_due=true" audit.script
+            && lib.hasInfix "flock -n -s 8" audit.script
+            && lib.hasInfix "exec 9>&-" audit.script
+            && lib.hasInfix "--mode sampled --sample-bytes 1073741824 --sample-files 128" audit.script
+            && lib.hasInfix "flock -n -x 8" realmBorgDrainScript
           )
           "Weekly Borg verification must keep its CRC budgets and drill semantics while ending before the next archive window";
         assert lib.assertMsg (lib.all

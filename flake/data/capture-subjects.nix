@@ -39,7 +39,7 @@
     "steering"
   ];
   machine = [
-    "borg-realm-independent-full-audit"
+    "borg-realm-independent-coverage-audit"
     "borg-machine-telemetry-dumps"
     "borg-persist-archive"
     "borg-realm-archive"
