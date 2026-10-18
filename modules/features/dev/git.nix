@@ -1,7 +1,6 @@
 {
   mkFeatureModule,
   pkgs,
-  lib,
   ...
 }@args:
 mkFeatureModule {
@@ -10,25 +9,11 @@ mkFeatureModule {
     "git"
   ];
   description = "Git and delta tooling";
-  extraOptions = {
-    reviewStatusPollers = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      description = ''
-        Run the codex-review-status and stacked-review-threads-status pollers
-        against Polylogue's open PRs every two minutes. Only useful while the
-        Codex review gate is a required status; off by default.
-      '';
-    };
-  };
   configFn =
     {
-      config,
       lib,
       pkgs,
       user,
-      helpers,
-      cfg,
       ...
     }:
     let
@@ -40,59 +25,8 @@ mkFeatureModule {
       # `quit=1` ends the exchange so an unusable login fails immediately
       # instead, and it is scoped to GitHub: other hosts keep the prompt.
       githubHelper = ''!f(){ ${lib.getExe pkgs.gh} auth git-credential "$@" || { [ "$1" = get ] && echo quit=1; }; }; f'';
-      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
     in
     lib.mkMerge [
-      # Codex reviews PRs but publishes no status, so branch protection cannot
-      # wait for it. This pass turns its review summary into a `codex-review`
-      # status on each open head (gh's persistent login authenticates it).
-      # It re-requests a stalled head once; a Codex usage-limit notice on any
-      # open PR holds every request for three hours, then one probe request
-      # tests the quota. While `codex-review` is not a required context of the
-      # default branch, every head passes and nothing is requested (rules in
-      # the script's docstring).
-      (lib.sinnix.mkScheduledJob
-        {
-          inherit config;
-          unitName = "codex-review-status";
-          description = "Publish the codex-review status on open PR heads";
-        }
-        {
-          manager = "user";
-          resourceClass = "background";
-          execStart = "${scriptPkgs.codex-review-status}/bin/codex-review-status Sinity/polylogue";
-          timer = {
-            onBootSec = "2min";
-            intervalSec = 120;
-            accuracySec = "15s";
-            description = "Refresh codex-review statuses every two minutes";
-            enable = cfg.reviewStatusPollers;
-          };
-        }
-      )
-      # Conversation resolution is enforced only on PRs into the default
-      # branch, so a PR merged into another PR's head escapes it. This pass
-      # posts `stacked-review-threads` on each open default-branch head:
-      # failure while anything stacked into it has an unresolved thread.
-      (lib.sinnix.mkScheduledJob
-        {
-          inherit config;
-          unitName = "stacked-review-threads-status";
-          description = "Publish the stacked-review-threads status on open PR heads";
-        }
-        {
-          manager = "user";
-          resourceClass = "background";
-          execStart = "${scriptPkgs.stacked-review-threads-status}/bin/stacked-review-threads-status Sinity/polylogue";
-          timer = {
-            onBootSec = "2min";
-            intervalSec = 120;
-            accuracySec = "15s";
-            description = "Refresh stacked-review-threads statuses every two minutes";
-            enable = cfg.reviewStatusPollers;
-          };
-        }
-      )
       {
         home-manager.users.${user} = _: {
           programs.git = {

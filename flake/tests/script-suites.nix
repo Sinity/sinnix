@@ -167,30 +167,6 @@
           scripts = [ "audio" ];
           nativeBuildInputs = [ pkgs.jq ];
         };
-        # Provably fails when: the stack walk stops descending, drops a merge
-        # bound or a reused branch lifetime, loses a second page, passes a
-        # head it could not read, or rewrites an unchanged status. Verified by
-        # removing the merge-time bound, which fails the bound test.
-        stacked-review-threads-status-suite = mkScriptSuite {
-          name = "stacked-review-threads-status";
-          suiteDir = ../../scripts/tests/stacked-review-threads-status;
-          scripts = [ "stacked-review-threads-status" ];
-        };
-        # Provably fails when: the stall re-trigger fires before its
-        # threshold, on a draft, waived or already-reviewed head, twice for one
-        # head (marker on a later comments page included), never for a new
-        # head, in a dry run, or after a failed comment read on any PR; while
-        # a code-review usage-limit notice on any open PR is recent; more than
-        # once as the recovery probe, or never after the probe; at all while
-        # `codex-review` is not a required context, or after the protection
-        # read fails; or when a second page of open PRs or comments goes
-        # unread. Verified by deleting the marker check (fails the later-page
-        # marker test) and the age check (fails the below-threshold test).
-        codex-review-status-suite = mkScriptSuite {
-          name = "codex-review-status";
-          suiteDir = ../../scripts/tests/codex-review-status;
-          scripts = [ "codex-review-status" ];
-        };
         # The SQLite backup remains a standalone script package. Its regression
         # suite drives the source script through subprocess, while the
         # machine-telemetry package owns collector tests in its checkPhase.
