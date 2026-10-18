@@ -76,6 +76,18 @@ def _max_ts(path: Path, start: int, end: int) -> float:
     return high
 
 
+def _make_private_directory(path: Path) -> None:
+    """Create missing capture parents privately; leave existing homes intact."""
+    try:
+        path.mkdir(mode=0o700)
+    except FileNotFoundError:
+        _make_private_directory(path.parent)
+        path.mkdir(mode=0o700, exist_ok=True)
+    except FileExistsError:
+        if not path.is_dir():
+            raise
+
+
 class CaptureWriter:
     def __init__(
         self, capture_root: Path | str, lane: str, host: str | None = None
@@ -83,7 +95,7 @@ class CaptureWriter:
         self.lane = lane
         self.host = host or socket.gethostname()
         self.lane_dir = capture_lane_path(capture_root, lane)
-        self.lane_dir.mkdir(parents=True, exist_ok=True)
+        _make_private_directory(self.lane_dir)
         self._seq_path = self.lane_dir / f"{lane}.seq"
         self._seq_lock_path = self.lane_dir / f"{lane}.seq.lock"
         self._index_path = self.lane_dir / f"{lane}-index.jsonl"
@@ -250,7 +262,7 @@ class CaptureWriter:
                 # Finish reading and validating inputs before modifying the
                 # index. Duplicate sequences refuse ambiguous recovery.
                 for (entry,) in db.execute("SELECT entry FROM pending ORDER BY seq"):
-                    ledger.append_jsonl(self._index_path, json.loads(entry), fsync=True)
+                    ledger.append_jsonl(self._index_path, json.loads(entry), fsync=True, mode=0o600)
 
     def _record_path(self, ts: float) -> Path:
         day = time.strftime("%Y%m%d", time.gmtime(ts))
@@ -274,7 +286,7 @@ class CaptureWriter:
             record_path = self._record_path(ts)
             self._append_with_high_water(record_path, envelope, ts)
             index_entry = {"ts": ts, "seq": seq, "file": record_path.name}
-            ledger.append_jsonl(self._index_path, index_entry, fsync=True)
+            ledger.append_jsonl(self._index_path, index_entry, fsync=True, mode=0o600)
             return envelope
 
     def _append_with_high_water(self, path: Path, envelope: dict, ts: float) -> None:
@@ -288,16 +300,16 @@ class CaptureWriter:
             if last is None and before:
                 # The file predates its sidecar: an index starting here would
                 # misstate the unindexed prefix, so this day stays unindexed.
-                ledger.append_jsonl(path, envelope, fsync=True)
+                ledger.append_jsonl(path, envelope, fsync=True, mode=0o600)
                 return
             offset, high = last if last is not None else (0, float("-inf"))
             if offset < before:
                 # A record landed without its checkpoint (a crash between the
                 # two appends); fold its ts in before indexing past it.
                 high = max(high, _max_ts(path, offset, before))
-            ledger.append_jsonl(path, envelope, fsync=True)
+            ledger.append_jsonl(path, envelope, fsync=True, mode=0o600)
             end = path.stat().st_size
-            fd = os.open(sidecar, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+            fd = os.open(sidecar, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             try:
                 checkpoint = HW_FORMAT.format(end, max(high, ts)).encode()
                 written = 0

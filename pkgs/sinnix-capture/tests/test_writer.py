@@ -12,6 +12,21 @@ from sinnix_lib import ledger
 from sinnix_lib.atomic import atomic_publish
 
 
+def test_new_capture_data_is_private_even_with_permissive_umask(tmp_path):
+    previous = os.umask(0)
+    try:
+        writer = CaptureWriter(tmp_path / "new-root/nested", "private-fixture", host="fixture-host")
+        writer.write({"note": "synthetic private content"}, ts=1_700_000_000)
+    finally:
+        os.umask(previous)
+    assert writer.lane_dir.stat().st_mode & 0o777 == 0o700
+    assert writer.lane_dir.parent.stat().st_mode & 0o777 == 0o700
+    assert writer.lane_dir.parent.parent.stat().st_mode & 0o777 == 0o700
+    data_files = [p for p in writer.lane_dir.iterdir() if not p.name.endswith(".lock")]
+    assert data_files
+    assert all(p.stat().st_mode & 0o777 == 0o600 for p in data_files)
+
+
 def test_write_produces_envelope_and_daily_file(tmp_path: Path) -> None:
     writer = CaptureWriter(tmp_path, "test-lane", host="fixture-host")
     ts = 1_700_000_000.0
@@ -357,11 +372,12 @@ def test_pending_index_recovery_has_bounded_memory_and_sequence_order(tmp_path, 
     ))
     seen = 0
 
-    def append(path, entry, *, fsync):
+    def append(path, entry, *, fsync, mode):
         nonlocal seen
         seen += 1
         assert entry == {"seq": seen, "ts": seen, "file": "day.jsonl"}
         assert fsync
+        assert mode == 0o600
 
     monkeypatch.setattr(ledger, "append_jsonl", append)
     tracemalloc.start()
