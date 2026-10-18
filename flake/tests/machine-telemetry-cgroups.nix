@@ -52,12 +52,19 @@ in
       spec = mkFeatureTest {
         name = "machine-telemetry-cgroups";
         feature = "sinnix.services.machine-telemetry.enable";
+        extraModules = [ { sinnix.backup.enable = lib.mkForce false; } ];
         assertions =
           config:
           let
             rendered = toString config.systemd.services.machine-telemetry.serviceConfig.ExecStart;
           in
           [
+            {
+              assertion =
+                config.systemd.services.machine-telemetry-sqlite-verify.serviceConfig.Slice
+                == config.sinnix.runtime.inventory.classes.backup.serviceConfig.Slice;
+              message = "Standalone telemetry must retain the declared backup-class slice when the backup owner is disabled.";
+            }
             {
               assertion = poolSliceNames != [ ];
               message = "the runtime slice registry must declare agentctl pool slices for this check to mean anything";

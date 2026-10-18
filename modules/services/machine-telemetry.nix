@@ -423,6 +423,14 @@ mkServiceModule {
           serviceConfig = {
             Group = "users";
             TimeoutStartSec = "160min";
+            # Full structural walks need an independent working-set budget
+            # from the coverage audit in the shared background slice. Reuse
+            # the backup owner's bounded slice and retain per-unit limits.
+            Slice =
+              if config.sinnix.backup.enable then
+                "borgdrain.slice"
+              else
+                config.sinnix.runtime.inventory.classes.backup.serviceConfig.Slice;
             IOReadBandwidthMax = map (
               # Leave room for a repeated page walk inside the 150-minute check budget.
               limit: if lib.hasPrefix "${realmRoot} " limit then "${realmRoot} 100M" else limit

@@ -73,6 +73,21 @@ assert lib.assertMsg (
         ];
         assertions = config: [
           {
+            assertion =
+              let
+                unit = config.systemd.services.machine-telemetry-sqlite-verify;
+                policy = config.sinnix.runtime.inventory.classes.backup.serviceConfig;
+              in
+              unit.serviceConfig.Slice == "borgdrain.slice"
+              && unit.serviceConfig.MemoryHigh == policy.MemoryHigh
+              && unit.serviceConfig.MemoryMax == policy.MemoryMax
+              && unit.serviceConfig.IOSchedulingClass == policy.IOSchedulingClass
+              && unit.serviceConfig.IOWeight == policy.IOWeight
+              && builtins.elem "/realm 100M" unit.serviceConfig.IOReadBandwidthMax
+              && !unit.restartIfChanged;
+            message = "Independent telemetry verification must reuse the bounded backup slice while preserving its own limits, idle IO policy, read ceiling and active-run protection.";
+          }
+          {
             assertion = lib.hasInfix config.services.sinex.storage.blob.repositoryPath config.systemd.services.borgbackup-job-sinex-blobs.script;
             message = "Sinex blob Borg job must use the evaluated CAS repository path";
           }

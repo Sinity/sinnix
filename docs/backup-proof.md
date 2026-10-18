@@ -30,6 +30,8 @@ The machine telemetry SQLite dump is a separate producer for the realm drain. It
 
 The weekly `machine-telemetry-sqlite-verify` job freezes a fresh WAL-free snapshot and runs a bounded SQLite structural walk without blocking the daily producer. Its journal receipt states the check and result. `structural-verification.status` in the dump directory records the latest attempt as running, failed, or ok, so the Borg dump archive carries the independent result alongside the artifacts. The capture lane requires `state=ok` and flags the result stale after eight days. Structural walks disable SQLite file mapping to avoid read-ahead amplification across interleaved B-trees. The check has a 150-minute query budget, a 160-minute unit limit, and a 100 MB/s read limit on `/realm`. This result applies to the independently frozen database state, not retroactively to every daily compressed artifact. A failed or overdue check leaves daily snapshots publishable and must be treated separately from their freshness.
 
+With backups enabled, the verifier runs in the existing bounded `borgdrain.slice`, retaining its own 2 GiB memory pressure threshold and 4 GiB hard limit. This gives the structural walk working-set headroom alongside the independent coverage audit in `background.slice`. Idle I/O scheduling and device ceilings remain in effect; a ceiling does not guarantee throughput under competing load. Standalone telemetry installations without the backup owner retain the default backup-class slice.
+
 A full-size retained telemetry dump can be restored and structurally checked with
 `agentctl job start sinnix verify_telemetry_restore -- <exact-archive.sqlite.zst>`.
 Run it separately from the independent snapshot scan. It pins the input file,
