@@ -58,7 +58,7 @@ resolve_agent_bin() {
 
 if [[ -z ${model} ]]; then
   case "${agent}" in
-  codex) model="gpt-6-sol" ;;
+  codex) model="$(sed -n 's/^model *= *"\(.*\)"/\1/p' "${CODEX_HOME:-$HOME/.codex}/config.toml" | head -n 1)" ;;
   grok) model="grok-4.5" ;;
   antigravity) model="gemini-3.1-pro-high" ;;
   esac
