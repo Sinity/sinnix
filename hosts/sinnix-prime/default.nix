@@ -186,8 +186,6 @@
     steering.enable = true;
     # Disposable PostgreSQL for Polylogue and Sinex development (devkit).
     devkit-pg.enable = true;
-    # Thin declared-activity runtime.
-    activity.enable = true;
     # Pre-build + cachix-push sinex whenever its pinned input moves, off the
     # interactive switch critical path.
     sinex-cache-prebuild.enable = true;

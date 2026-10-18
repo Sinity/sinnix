@@ -115,12 +115,6 @@ let
     (run "F9" "Emergency stop for runaway builds and background work"
       "sudo -n ${scriptPkgs.nuke-builds}/bin/nuke-builds"
     )
-    (run "SUPER + F12" "Open declared activity and reconsideration controls"
-      "noctalia msg panel-toggle sinity/sinnix-cockpit:activity-panel"
-    )
-    (run "SUPER + SHIFT + F12" "Capture a thought without changing activity"
-      "noctalia msg panel-toggle sinity/sinnix-cockpit:capture-panel"
-    )
     (run "SUPER + C" "Open the code editor" "uwsm app -- ${script "open-code-editor"}")
     (run "SUPER + B" "Open a new Chrome window" "uwsm app -- sinnix-chrome --new-window")
     (simple "SUPER + G" "Group or ungroup the window" (call "group.toggle" ""))

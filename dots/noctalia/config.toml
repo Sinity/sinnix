@@ -98,7 +98,6 @@ end = [
   "sinity/sinnix-cockpit:capture-strip",
   "sinity/sinnix-cockpit:capabilities",
   "sinity/sinnix-cockpit:reading-stack",
-  "sinity/sinnix-cockpit:activity",
   "sinity/sinnix-ops:capsule",
   "sysmon",
 ]
@@ -147,17 +146,6 @@ scale = 1.0
 show_actions = true
 show_app_name = true
 background_opacity = 0.96
-
-# User-invoked workbenches: centrally placed, not anchored to a bar corner.
-[plugin_settings."sinity/sinnix-cockpit"]
-activity-panel_placement = "floating"
-activity-panel_position = "center"
-activity-panel_open_near_click = false
-activity-panel_layer = "overlay"
-capture-panel_placement = "floating"
-capture-panel_position = "center"
-capture-panel_open_near_click = false
-capture-panel_layer = "overlay"
 
 [plugin_settings."sinity/sinnix-ops"]
 now_placement = "floating"

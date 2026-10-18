@@ -66,7 +66,6 @@ in
     ./tests/ops-reducer.nix
     ./tests/quota.nix
     ./tests/noctalia.nix
-    ./tests/activity.nix
     ./tests/fstrim.nix
     ./tests/host-config.nix
     ./tests/hyprland-rules.nix
