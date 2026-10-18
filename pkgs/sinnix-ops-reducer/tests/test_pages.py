@@ -206,7 +206,7 @@ def test_work_page_renders_the_queue_jobs_and_lanes_and_interrupts_live_jobs() -
         "fixture",
         lanes_source=lambda: (lanes, ["polylogue: agentctl rejected the request"]),
     )
-    # The queue card is pueue's groups; a paused group is the backpressure freeze.
+    # The queue card shows pueue groups without assuming who paused them.
     assert "<code>agent</code>" in html and "paused" in html
     assert "1 running of 4" in html
     # Jobs are pueue tasks by label; only a live one can be interrupted.
@@ -224,3 +224,26 @@ def test_work_page_renders_without_a_lanes_source() -> None:
     html = pages.render("/work/", MANIFEST, {"state": {}}, INVENTORY, "fixture")
     assert "no worktree lanes" in html
     assert "no pueue tasks" in html
+
+
+def test_work_page_escapes_queue_count_fields_and_does_not_invent_pause_owner():
+    from html import escape
+    from html.parser import HTMLParser
+
+    marker = '<img src=x onerror="alert(1)">'
+    class Elements(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.tags = []
+        def handle_starttag(self, tag, attrs):
+            self.tags.append(tag)
+    for field in ("running", "parallel", "queued", "paused"):
+        detail = {"status": "Paused", "running": 1, "parallel": 4, "queued": 2, "paused": 1}
+        detail[field] = marker
+        html = pages.render_work(MANIFEST, {"state": {"agentctl": {"groups": {"fixture": detail}}}},
+                                 INVENTORY, "fixture", lanes_source=lambda: ([], []))
+        parser = Elements()
+        parser.feed(html)
+        assert "img" not in parser.tags
+        assert escape(marker, quote=True) in html
+        assert "backpressure timer holding" not in html

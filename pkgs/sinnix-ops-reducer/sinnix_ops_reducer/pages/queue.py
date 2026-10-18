@@ -63,16 +63,16 @@ def queue_card(state: dict[str, Any]) -> str:
         paused = status.lower() == "paused"
         meta = [
             badge(status.lower() or "unknown", "warn" if paused else "ok"),
-            f"{detail.get('running', 0)} running of {detail.get('parallel', 0)}",
-            f"{detail.get('queued', 0)} queued",
+            f"{esc(detail.get('running', 0))} running of {esc(detail.get('parallel', 0))}",
+            f"{esc(detail.get('queued', 0))} queued",
         ]
         if detail.get("paused"):
-            meta.append(f"{detail['paused']} paused")
+            meta.append(f"{esc(detail['paused'])} paused")
         blocks += row(f"<code>{esc(name)}</code>", meta, tone="warn" if paused else "")
     return (
         '<section class="card"><h2>Queue</h2>'
-        '<p class="sub">pueue\'s groups, one per pool; a paused group is the '
-        "backpressure timer holding new work while the host stalls.</p>"
+        '<p class="sub">pueue\'s groups, one per pool; a paused group '
+        "holds new work. The pause may be operator-requested or automatic.</p>"
         f"{blocks}</section>"
     )
 
