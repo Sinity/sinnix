@@ -29,7 +29,8 @@ in
           let
             hm = hmFor config;
             inventory = config.sinnix.runtime.inventory;
-            bindings = builtins.toJSON hm.wayland.windowManager.hyprland.settings.bind;
+            # Bindings render as hl.bind(...) calls in sinnix-startup.lua.
+            bindings = hm.xdg.configFile."hypr/sinnix-startup.lua".text;
             # The id is only known once the CRX is signed, so the policy is
             # generated with it rather than declared here; the derivation
             # below checks the pinned id against the packed archive.

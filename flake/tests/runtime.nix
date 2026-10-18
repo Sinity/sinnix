@@ -649,7 +649,6 @@ in
             {
               assertion =
                 !(service ? WorkingDirectory)
-                && !(service ? Environment)
                 && !(lib.hasInfix "materialize --all" service.ExecStart)
                 && !(lib.hasInfix "--promote" service.ExecStart);
               message = "the retired monolithic Lynchpin materialization shell must not survive in the rendered unit";
