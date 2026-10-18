@@ -6,17 +6,17 @@ set -euo pipefail
 scanner=${1:?scanner path}
 root=$(mktemp -d)
 trap 'rm -rf "$root"' EXIT
-mkdir -p "$root/local/.claude" "$root/global/.claude" "$root/suspicious/.claude" "$root/secret/.claude"
-cat >"$root/local/.claude/settings.json" <<EOF
-{"env":{"LOCAL":"$root/local/cache"}}
+mkdir -p "$root/local/repo/.claude" "$root/global/repo/.claude" "$root/suspicious/repo/.claude" "$root/secret/repo/.claude"
+cat >"$root/local/repo/.claude/settings.json" <<EOF
+{"env":{"LOCAL":"$root/local/repo/cache"}}
 EOF
-cat >"$root/global/.claude/settings.json" <<'EOF'
+cat >"$root/global/repo/.claude/settings.json" <<'EOF'
 {"env":{"CACHE":"/realm/shared-cache"}}
 EOF
-cat >"$root/suspicious/.claude/settings.json" <<'EOF'
+cat >"$root/suspicious/repo/.claude/settings.json" <<'EOF'
 {"env":{"CLOUD":"/tmp/cloud-only-path"}}
 EOF
-cat >"$root/secret/.claude/settings.json" <<'EOF'
+cat >"$root/secret/repo/.claude/settings.json" <<'EOF'
 {"env":{"API_TOKEN":"super-secret-value"}}
 EOF
 
