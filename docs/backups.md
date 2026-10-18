@@ -1,0 +1,102 @@
+# Backups
+
+Everything is backed up locally to Borg repositories on the HDD at
+`/outer-realm/backup/`. Nothing is stored off-site. Borg archives are never
+pruned automatically; the HDD's free space is the only limit.
+
+## What is backed up
+
+| Source | How | When | Repository |
+|---|---|---|---|
+| `/realm` | btrbk read-only snapshot, archived by the drain | snapshots 00/06/12/18:00, drain at :05 and :25 | `borg-realm-v2` |
+| `/persist` | btrbk read-only snapshot, archived by the drain | same as `/realm` | `borg-persist-v1` |
+| The ephemeral root | snapshot the initrd takes before each wipe | daily | `borg-root-snapshots-v1` |
+| Sinex blob store | direct | daily 05:40 | `borg-sinex-blobs-v1` |
+| Polylogue state | hooks sealed from a read-only cut of its subvolume | daily 04:15 | `borg-polylogue-state-v1` |
+| Telemetry database dumps | compressed copies, then archived directly | dumps 03:42, archive 06:15, seal Sunday | `borg-realm-v2` |
+| Btrfs metadata images | `btrfs-image` | Sunday 00:12 | `btrfs-images/` (see Known gaps) |
+
+Left out of the `/realm` archive (`realmExcludes` in `modules/backup.nix`):
+downloaded model weights, Steam libraries, `state/cache`, `state/containers`,
+`tmp`, worktrees, pytest caches and the trash. Root snapshots leave out
+`~/.cache`, `/root/.cache`, `/var/cache`, `/tmp` and every other mounted
+filesystem (`rootSnapshotExcludes` in `modules/lib/backup/acknowledgement.nix`).
+
+### Snapshots are kept until their archive is checked
+
+A snapshot is deleted only after its own archive exists and a coverage check
+confirms every path that should be in it is there. Paths deliberately excluded
+from the archive are listed for the check too, so an exclusion is never read
+as missing data. If the check fails, the snapshot stays and the job fails,
+which keeps local snapshots piling up rather than losing data. Backup failures
+are therefore also disk-space problems on `/realm`.
+
+### Telemetry
+
+The collector writes `/realm/state/machine-telemetry/telemetry.sqlite`. Every
+Sunday `machine-telemetry-seal` closes that file, makes it immutable under a
+dated name, and starts a new one; `telemetry.sqlite.segments.json` lists the
+sealed files and the active one, and Lynchpin reads that list. Each sealed file
+is then compressed into `/realm/state/db-dumps/machine-telemetry/` and checked
+with SQLite's structural check, both exactly once, with results kept under
+`verified/`. The daily backup compresses only the small active file. A separate
+job archives the dump directory into `borg-realm-v2` every day at 06:15; it is
+also part of the `/realm` snapshots.
+
+## Is it healthy?
+
+* **Notifications.** A failed backup unit raises a critical desktop
+  notification, repeated daily while it stays failed.
+* **Do not trust `systemctl --failed` alone.** Every NixOS switch resets the
+  failed state of all units. Use the hub's health view
+  (`sinnix-ops-reducer orient`) or the journal.
+* **Journal.** Drains log `backup_phase=create` and `backup_phase=verify`
+  lines: `journalctl -u borgbackup-job-realm -u borgbackup-job-persist`.
+* **Markers.** Per-repository state, including the latest archived snapshot
+  and coverage results, lives in `/persist/root/.cache/borg-drain/`.
+* **Snapshots piling up** in `/realm/.btrfs/snapshot/` or `/persist/.btrfs/snapshot/`
+  means archives are not being accepted.
+
+## Checks that run on their own
+
+| Check | Unit | When | What it shows |
+|---|---|---|---|
+| Repository integrity | `borgbackup-verify` | Sunday 13:00 | Borg's segment CRCs, advanced in time-limited partial passes |
+| `/realm` coverage sample | `borgbackup-coverage-audit-realm` | hourly while due, at most weekly | all paths and metadata match, plus up to 128 files / 1 GiB of contents compared |
+| Beads restore drill | `sinnix-borg-beads-drill` | Thursday 05:00 | a real restore of the Beads database from the latest archive |
+| Sealed telemetry | `machine-telemetry-seal` | Sunday 04:30 | each sealed SQLite file passes a structural check once |
+
+The coverage sample checks only the newest archive, so files that exist only
+in older archives are covered by the repository check, not by a content
+comparison.
+
+## Restoring
+
+The repositories use `repokey-blake2`. The passphrase is the agenix secret
+`borg-passphrase` (`/run/agenix/borg-passphrase`); `docs/key-recovery.md`
+covers recovering it without this machine.
+
+```sh
+export BORG_PASSCOMMAND='cat /run/agenix/borg-passphrase'
+borg list file:///outer-realm/backup/borg-realm-v2
+# Extract into an empty directory; paths are relative to the snapshot root.
+mkdir -p /realm/tmp/restore && cd /realm/tmp/restore
+borg extract file:///outer-realm/backup/borg-realm-v2::<archive> state/some/path
+# Or stream one file without writing a tree:
+borg extract --stdout file:///outer-realm/backup/borg-realm-v2::<archive> state/some/file > file
+```
+
+Run Borg as root. To test a restore of a small file against its recorded
+digest, use `agentctl job start sinnix verify_snapshot_restore -- …`; for a
+compressed telemetry dump, `agentctl job start sinnix verify_telemetry_restore
+-- <file.sqlite.zst>`.
+
+## Known gaps
+
+* **No off-site copy.** A failed HDD loses every backup.
+* **The HDD is close to full**, and archives are never pruned. When it fills,
+  new archives fail and snapshots accumulate on `/realm`.
+* **Btrfs metadata images do not work.** `btrfs-image` needs an unmounted
+  filesystem; run against mounted `/realm` and `/persist` it reads a tree that
+  changes underneath it, fails or times out, and has not produced an image
+  since 2026-09-03 (`/persist`) and 2026-08-23 (`/realm`).
