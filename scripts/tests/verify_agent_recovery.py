@@ -4,13 +4,14 @@
 import argparse
 import json
 import os
-from pathlib import Path
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import tarfile
 import tempfile
+from pathlib import Path
 
 
 def runtime_for(wrapper, package_name):
@@ -58,7 +59,43 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inputs", type=Path, required=True)
     args = parser.parse_args()
-    inputs = json.loads(args.inputs.read_text())
+    try:
+        with open(
+            args.inputs,
+            encoding="utf-8",
+            opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
+        ) as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                raise ValueError("recovery inputs must be a regular file")
+            inputs = json.load(handle)
+        if (
+            not isinstance(inputs, dict)
+            or not isinstance(inputs.get("sources"), dict)
+            or not inputs["sources"]
+        ):
+            raise ValueError("recovery inputs require a nonempty sources mapping")
+        if (
+            not isinstance(inputs.get("helper"), str)
+            or not inputs["helper"]
+            or not Path(inputs["helper"]).is_file()
+        ):
+            raise ValueError("recovery helper must name an available regular file")
+        for name, source in inputs["sources"].items():
+            if (
+                not isinstance(name, str)
+                or not name.strip()
+                or not isinstance(source, str)
+                or not source.strip()
+            ):
+                raise ValueError(
+                    "recovery sources require nonempty package names and file paths"
+                )
+            if not Path(source).is_file():
+                raise ValueError(
+                    f"recovery source is not an available regular file: {source}"
+                )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
     wrappers = Path.home() / ".local/bin"
     scratch = Path(tempfile.mkdtemp(prefix="agent-recovery-", dir=os.environ["TMPDIR"]))
     print(f"Recovery verification scratch: {scratch}", flush=True)
@@ -66,7 +103,10 @@ def main():
         for name, source in sorted(inputs["sources"].items()):
             with tarfile.open(source) as archive:
                 package = json.load(archive.extractfile("package/package.json"))
-            assert package["name"] == name
+            if package["name"] != name:
+                raise ValueError(
+                    f"Recovery archive package differs: expected {name}, got {package['name']}"
+                )
             bins = package["bin"]
             if isinstance(bins, str):
                 bins = {name.split("/")[-1]: bins}
@@ -80,42 +120,65 @@ def main():
                 except ValueError:
                     continue
             if len(candidates) != 1:
-                raise ValueError(f"Expected one managed recovery command for {name}: {candidates}")
+                raise ValueError(
+                    f"Expected one managed recovery command for {name}: {candidates}"
+                )
             binary, runtime = candidates[0]
             home = scratch / binary
             home.mkdir()
             temp = home / "tmp"
             temp.mkdir()
             env = {
-                "HOME": str(home), "TMPDIR": str(temp),
+                "HOME": str(home),
+                "TMPDIR": str(temp),
                 "PATH": runtime + os.pathsep + os.environ["PATH"],
                 "npm_config_cache": str(scratch / "npm-cache"),
                 "npm_config_update_notifier": "false",
-                "npm_config_audit": "false", "npm_config_fund": "false",
-                "DISABLE_AUTOUPDATER": "1", "CI": "true",
+                "npm_config_audit": "false",
+                "npm_config_fund": "false",
+                "DISABLE_AUTOUPDATER": "1",
+                "CI": "true",
             }
             print(f"Recovering {name}@{package['version']}", flush=True)
             subprocess.run(
                 ["bash", inputs["helper"], binary, name, binary, runtime, source],
-                env=env, check=True, timeout=240,
+                env=env,
+                check=True,
+                timeout=240,
             )
             installed = home / ".local/state" / binary / "npm/bin" / binary
             result = subprocess.run(
-                [str(installed), "--version"], env=env,
-                capture_output=True, text=True, timeout=30,
+                [str(installed), "--version"],
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
-            assert result.returncode == 0, result.stderr
-            assert re.search(r"(?<![\w.])" + re.escape(package["version"]) + r"(?![\w.])", result.stdout), result.stdout + result.stderr
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"{binary} --version exited {result.returncode}: {result.stderr}"
+                )
+            if not re.search(
+                r"(?<![\w.])" + re.escape(package["version"]) + r"(?![\w.])",
+                result.stdout,
+            ):
+                raise ValueError(
+                    f"{name} did not report expected version {package['version']}: {result.stdout}{result.stderr}"
+                )
             print(f"Verified {name}: {result.stdout.strip()}", flush=True)
     except BaseException:
-        print(f"Failed attempt retained for diagnosis: {scratch}", flush=True)
+        print(f"Failed attempt left in caller-managed scratch: {scratch}", flush=True)
         raise
     else:
+        summary = f"Verified native recovery versions: {len(inputs['sources'])}"
         if has_holder(scratch):
-            print(f"All five versions verified; outputs retained because a holder is active or uncertain: {scratch}", flush=True)
+            print(
+                f"{summary}; outputs left in caller-managed scratch because a holder is active or uncertain: {scratch}",
+                flush=True,
+            )
         else:
             shutil.rmtree(scratch)
-            print("All five native recovery versions verified; isolated outputs removed", flush=True)
+            print(f"{summary}; isolated outputs removed", flush=True)
 
 
 if __name__ == "__main__":

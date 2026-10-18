@@ -11,8 +11,8 @@
       clodex = sources."@bman654/clodex";
       nativeInputs = pkgs.writeText "agent-recovery-inputs.json" (
         builtins.toJSON {
-          helper = toString ../../scripts/sinnix-agent-npm-bootstrap;
-                sources = builtins.mapAttrs (_: toString) sources;
+          helper = "${../../scripts/sinnix-agent-npm-bootstrap}";
+          sources = builtins.mapAttrs (_: toString) sources;
         }
       );
     in
@@ -31,6 +31,7 @@
             ];
           }
           ''
+            RECOVERY_INPUTS=${nativeInputs} RECOVERY_BOOTSTRAP=${../../scripts/sinnix-agent-npm-bootstrap} RECOVERY_VERIFIER=${../../scripts/tests/verify_agent_recovery.py} python3 ${../../scripts/tests/test_agent_recovery_verification.py}
             python3 ${./dependency-recovery.py} ${claude.original} ${claude} ${codex.original} ${codex} ${gemini.original} ${gemini} ${clodex.original} ${clodex} ${../../scripts/sinnix-agent-npm-bootstrap}
             mkdir "$out"
             cp ${nativeInputs} "$out/native-inputs.json"
