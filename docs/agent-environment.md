@@ -96,7 +96,7 @@ Servers: context7, github, lynchpin, sinex.
 | --- | --- |
 | `agent-gateway` | Use when invoking, inspecting, or documenting Sinnix Agent Gateway actions through their typed MCP tools or the sinnix-agent-gateway CLI. |
 | `agent-runtime` | Run, watch, recover, or clean AgentCTL work — declared operations as pueue jobs, batches of isolated workers, landing tasks, results, events, and backpressure. |
-| `android-device-control` | Control, configure, debloat, or capture from an unrooted Android phone through adb, Termux, tailnet access, and resilient UI automation, including Xiaomi power-management traps. |
+| `android-device-control` | Control, configure, debloat, or capture from the rooted Android phone (Evolution X, Magisk) through adb, root shell, Termux, tailnet access, and resilient UI automation. |
 | `beads` | Read, claim, update, relate, close, or write Beads tasks with bd — ready work, notes, dependency edges, acceptance criteria, campaign epics, and follow-up filing. |
 | `chatgpt-conversations` | Read complete ChatGPT conversations and inspect or explicitly download generated files from already open Chrome tabs, without navigating or submitting messages. |
 | `claude-self-knowledge` | Verify what the installed Claude Code harness does — versions, models, dispatch and forks, hooks, permissions, compaction, notifications, local state — or diagnose a surprising harness behavior. |
