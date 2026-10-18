@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # @sinnix-package
 # description: Preference elicitation over arbitrary item domains via pairwise comparison (Bradley-Terry)
-# runtimeInputs: coreutils xdg-utils
+# runtimeInputs: coreutils xdg-utils @sinnix-image-features
 # pythonPackages: @sinnix-lib @sinnix-rank-core
 
 """Domain-general preference elicitation for the operator.
