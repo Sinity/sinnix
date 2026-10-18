@@ -206,6 +206,31 @@ def test_accessible_empty_root_has_no_lanes(tmp_path):
     assert discover_lanes(tmp_path) == []
 
 
+@pytest.mark.parametrize("operation", ["discover", "delta", "query", "explicit-query"])
+def test_broken_capture_root_is_not_empty_data(tmp_path, operation):
+    root = tmp_path / "capture"
+    root.symlink_to(tmp_path / "unavailable-target", target_is_directory=True)
+    with pytest.raises(FileNotFoundError):
+        if operation == "discover":
+            discover_lanes(root)
+        elif operation == "delta":
+            lane_delta(root, "clipboard")
+        else:
+            query(root, lanes=["clipboard"] if operation == "explicit-query" else None)
+
+
+def test_missing_and_working_link_roots_keep_their_meaning(tmp_path):
+    missing = tmp_path / "absent"
+    assert discover_lanes(missing) == []
+    assert lane_delta(missing, "clipboard")["records_since"] == 0
+    target = tmp_path / "retained"
+    CaptureWriter(target, "clipboard").write({"fixture": True}, ts=100)
+    root = tmp_path / "capture"
+    root.symlink_to(target, target_is_directory=True)
+    assert discover_lanes(root) == ["clipboard"]
+    assert query(root)[0]["records_since"] == 1
+
+
 @pytest.mark.parametrize("index_state", ["missing", "empty", "torn-first-record"])
 def test_retained_payload_without_complete_index_is_not_measured_zero(tmp_path, index_state):
     writer = CaptureWriter(tmp_path, "lane")

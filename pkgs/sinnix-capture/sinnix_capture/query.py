@@ -31,18 +31,14 @@ def _directory_present(path: Path, *, declared: bool = False) -> bool:
             raise
         return False
     if declared and not S_ISDIR(mode):
-        raise NotADirectoryError(f"declared capture lane is not a directory: {path}")
+        raise NotADirectoryError(f"declared capture source is not a directory: {path}")
     return S_ISDIR(mode)
 
 
 def discover_lanes(capture_root: Path | str) -> list[str]:
     root = Path(capture_root)
-    try:
-        mode = root.stat().st_mode
-    except FileNotFoundError:
+    if not _directory_present(root, declared=True):
         return []
-    if not S_ISDIR(mode):
-        raise NotADirectoryError(f"capture root is not a directory: {root}")
     # Known physical homes may be nested; do not expose medium containers as lanes.
     containers = {relative.split("/")[0] for relative in ACTIVITY_LANES.values()}
     known = {
@@ -94,6 +90,7 @@ def lane_delta(capture_root: Path | str, lane: str, since_ts: float = 0.0) -> di
     except FileNotFoundError:
         # An absent lane/index is legitimate. An existing broken entrance is
         # unavailable, and must not become a measured zero.
+        _directory_present(Path(capture_root), declared=True)
         _directory_present(index_path.parent, declared=True)
         try:
             index_path.lstat()
