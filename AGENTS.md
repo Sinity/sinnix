@@ -18,7 +18,8 @@ inputs.
 flake/data/   small declarative registries (runtime defaults, MCP, agent lanes)
 flake/tests/  evaluation and runtime contract checks
 modules/      features/ (default-on), services/ (default-off), lib/ (factories)
-pkgs/         agentctl/, sinnix-agent-gateway/, other real packages
+pkgs/         packages (agentctl/, sinnix-agent-gateway/, ...); a pkgs/<name>/
+              holding only tests/ is the test suite for scripts/<name>
 scripts/      small independently packaged utilities
 dots/         managed user configuration; dots/_ai/ holds the global agent
               instructions (AGENTS.md) and shared skills
@@ -27,11 +28,11 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
 - Nix modules own fixed services, packages, files, secrets, users, mounts, and
   activation. Systemd is the live process and service authority; do not
   duplicate its process tree, timeouts, or results in shell supervisors.
-- `agentctl` owns project descriptors, the packet compiled from a task, the
-  launch and result contract of a queued command, and the operator view
+- `agentctl` owns project descriptors, the worker prompt built from a task,
+  the launch and result contract of a queued command, and the operator view
   (`docs/agentctl.md`). It does not own product-domain concurrency; Sinex's
   byte, rate, and destructive-operation budgets stay in Sinex.
-- The gateway owns principal and capability policy and high-level machine and
+- The gateway owns who may call which tool, and the high-level machine and
   project tools (`docs/agent-gateway.md`). It calls agentctl's routes in
   process and never becomes a second job controller.
 
@@ -58,17 +59,19 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
 
 ## Resources and scheduling
 
-- Declared operations choose a pueue group (`interactive`, `normal`, `bulk`,
-  `pytest`, `agent`) whose width comes from `sinnix.services.agentctl.pools`
-  and is applied with `agentctl pools apply`, never by restarting pueued.
+- Declared operations choose a pueue group; the groups and their widths are
+  `sinnix.services.agentctl.pools` (`modules/services/agentctl.nix`), applied
+  with `agentctl pools apply`, never by restarting pueued.
   Backpressure pauses and releases groups through pueue.
 - Memory is bounded by the slice hierarchy and the resource classes in
   `flake/data/runtime-defaults.nix`. Hard `MemoryMax` is reserved for explicit
   safety boundaries such as a batch worker's unit. The `bulk` group admits
   large Nix operations; nothing wraps `nix` by basename.
-- Timers trigger declared operations: a descriptor's `schedule` becomes a
-  transient timer running `agentctl job fire`, and a service module's timer
-  runs `agentctl job start <project> <operation>`.
+- Two scheduling routes. A project descriptor's `schedule` becomes a
+  transient timer running `agentctl job fire`; use it for a project's own
+  operations. A module's `mkScheduledJob` timer runs host maintenance owned
+  by that module; when the work is a declared operation, its command is
+  `agentctl job fire <project> <operation>`.
 - Project MCP servers are launched from the generated client profiles
   (`flake/data/mcp-registry.nix`); do not configure them per client.
 
@@ -99,6 +102,8 @@ this repository. Worktrees remain the isolation for in-flight work.
   expression; for a registry, test duplicate rejection and source-to-output
   synchronization. Verify a deletion by evaluation, build, or runtime behavior
   plus a source census, never by a test that an old spelling is absent.
+- Each commit message has a body that says why. A commit that only bumps
+  `flake.lock` is titled `chore(inputs): ...`, never `fix(<area>)`.
 - Ordinary fixes get a brief delta review and a cheap static/import check or
   small discriminating test when useful. Broader regression belongs at
   integration milestones or a concrete risk, not after every patch. Report
@@ -108,8 +113,9 @@ this repository. Worktrees remain the isolation for in-flight work.
 ## Activation
 
 A switch changes the live machine. Rebuild only through the devshell `switch`,
-`boot`, or `test-vm` (`nix develop --command switch` from outside it), never a
-bare `nh os switch` or a duplicate preflight evaluation. State the units,
+`boot`, `test-system`, or `test-vm` (`nix develop --command switch` from
+outside it; `agentctl job start sinnix switch` queues the same command), never
+a bare `nh os switch` or a duplicate preflight evaluation. State the units,
 files, mounts, or packages affected first. Afterwards compare
 `nixos-version --configuration-revision` with the intended commit and check
 the direct live fact (unit generation, executable path, rendered file). Do not

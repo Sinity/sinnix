@@ -91,22 +91,12 @@ Heavy builds are treated differently from interactive agents and capture
 services. Rebuild commands share a lock and scheduling policy, so separate tools
 cannot start competing system builds by accident.
 
-### Temporary files live on NVMe, and something reclaims them
+### Temporary files live on NVMe
 
-`/tmp` is a small RAM-backed tmpfs, so the operator's temporary files go to
-`/realm/tmp/work` on NVMe instead: login sessions, the systemd user manager,
-and the self-hosted CI runner all export that `TMPDIR`, while system services
-keep the default. That is where every `nix develop` puts its `nix-shell.*`
-scratch tree, and a devshell killed rather than exited leaks one. A system timer
-runs `sinnix-tmp-sweep` every fifteen minutes over both that root and `/tmp`,
-removing each `nix-shell.*` or `nix-develop-*` directory that no live process holds — held meaning
-some process has it as cwd, root, executable, an open descriptor, or its
-`TMPDIR`. Environment paths resolve symlinks and relative spellings against
-the owning process's current directory. The scheduled scanner can read protected
-process records, then irreversibly drops to the directory owner before deletion.
-A denied observation retains candidates and reports failure. A recognized holder
-prevents removal.
-`nix-develop-*` also has a ten-minute minimum age to protect startup; age alone never authorizes removal.
+`/tmp` is a small RAM-backed tmpfs, so login sessions and the user manager set
+`TMPDIR=/realm/tmp/work` on NVMe; system services keep the default. Every
+fifteen minutes `sinnix-tmp-sweep` removes leftover `nix-shell.*` and
+`nix-develop-*` directories that no running process still uses.
 
 ### Each data system keeps its own authority
 
@@ -142,10 +132,8 @@ Snapshots and Borg jobs cover durable data. Rebuildable or nested subvolumes use
 explicit alternative handling. Restore drills exercise the recovery path rather
 than assuming that an archive is usable.
 
-Agent CLI recovery installs the versioned, hash-checked top-level tarballs in
-`flake/data/agent-cli-sources.nix`. Existing working installations and native
-updates remain owned by each CLI. npm dependency trees are not yet locked by
-this registry; the top-level tarball hash does not attest their contents.
+Agent CLI recovery installs the versioned, hash-checked tarballs listed in
+`flake/data/agent-cli-sources.nix`; updates stay with each CLI.
 
 ## Working with the repository
 
@@ -169,22 +157,10 @@ Common commands:
 | `test-system` | test activation without changing the boot default                              |
 | `test-vm`     | build the NixOS VM smoke test                                                  |
 
-Direct commands stay direct. Submit scheduled or heavy work as a named
-AgentCTL project operation; `switch` remains the supported activation command.
-
-The deployed AgentCTL, gateway, shared library, capture, accessibility and phone-dispatcher packages include runtime sources and cheap import checks. Their full suites remain separate named checks in `flake/tests/pkg-suites.nix` and import the exact runtime outputs. Focused source tests use a fixed third-party environment and retain their own source fingerprint. Run the affected suites before integration; activation does not rerun them merely because a test file changed. Gateway owner-schema verification reads only the three Polylogue files and one Lynchpin file consumed by its generator. A contract change still invalidates that check and stale generated contracts still fail it.
-
-AgentCTL caches the devshell from its declared package and wrapper inputs. Each
-entry captures the current checkout as an immutable source with its Git revision;
-`switch` keeps using that source if the caller later changes directory. A missing
-checkout is refused. Dirty-source and remote-currency checks still apply.
-
-Activation rebinds changed NixOS socket definitions even when their service is
-idle. Active listener holders follow their systemd stop/start policy; an
-explicit restart opt-out makes the transition fail visibly. Unchanged sockets
-and independent `Accept=yes` connection workers continue running. Failed
-replacements report failure and can be restored by activating the retained
-generation.
+Heavy or scheduled work runs as a named AgentCTL project operation
+(`agentctl project operations sinnix` lists them). Package test suites are
+separate checks in `flake/tests/pkg-suites.nix`, so changing a test does not
+rebuild the package it tests.
 
 ## Repository guide
 
@@ -196,7 +172,7 @@ generation.
 | `modules/`  | platform modules plus feature, service, profile, and library trees                          |
 | `dots/`     | Home Manager configuration and shared agent tooling                                         |
 | `scripts/`  | packaged operational tools with declared runtime dependencies                               |
-| `pkgs/`     | larger standalone packages maintained with the system                                       |
+| `pkgs/`     | larger packages, and test suites for scripts                                                |
 | `docs/`     | current subsystem and bootstrap documentation                                               |
 
 ## Further reading
