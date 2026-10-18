@@ -279,3 +279,35 @@ def test_discovery_keeps_working_declared_directory_link(tmp_path):
     path.parent.mkdir(parents=True)
     path.symlink_to(target, target_is_directory=True)
     assert "clipboard" in discover_lanes(root)
+
+
+@pytest.mark.parametrize("operation", ["discover", "delta", "query", "explicit-query"])
+@pytest.mark.parametrize("location", ["known-parent", "root-parent"])
+def test_broken_intermediate_capture_entrance_is_unavailable(tmp_path, operation, location):
+    root = tmp_path / "capture"
+    if location == "known-parent":
+        root.mkdir()
+        (root / "desktop").symlink_to(tmp_path / "unavailable", target_is_directory=True)
+    else:
+        root.symlink_to(tmp_path / "unavailable", target_is_directory=True)
+        root = root / "nested"
+    with pytest.raises(FileNotFoundError):
+        if operation == "discover":
+            discover_lanes(root)
+        elif operation == "delta":
+            lane_delta(root, "mpris")
+        else:
+            query(root, lanes=["mpris"] if operation == "explicit-query" else None)
+
+
+def test_missing_child_under_working_link_is_still_absent(tmp_path):
+    root = tmp_path / "capture"
+    root.mkdir()
+    target = tmp_path / "retained"
+    target.mkdir()
+    (root / "desktop").symlink_to(target, target_is_directory=True)
+    assert discover_lanes(root) == []
+    assert lane_delta(root, "mpris")["records_since"] == 0
+    CaptureWriter(root, "mpris").write({"retained": True}, ts=100)
+    assert "mpris" in discover_lanes(root)
+    assert lane_delta(root, "mpris")["records_since"] == 1

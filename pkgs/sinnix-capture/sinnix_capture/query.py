@@ -23,12 +23,20 @@ def _directory_present(path: Path, *, declared: bool = False) -> bool:
         mode = path.stat().st_mode
     except FileNotFoundError:
         if declared:
-            try:
-                path.lstat()
-            except FileNotFoundError:
-                return False
-            # A declared entrance exists but its target cannot be resolved.
-            raise
+            # lstat on the leaf also fails when an intermediate entrance is
+            # dangling. Walk only the missing suffix, then validate the first
+            # existing ancestor so unavailable storage cannot become zero.
+            entrance = path
+            while True:
+                try:
+                    entrance.lstat()
+                except FileNotFoundError:
+                    if entrance == entrance.parent:
+                        return False
+                    entrance = entrance.parent
+                else:
+                    entrance.stat()
+                    return False
         return False
     if declared and not S_ISDIR(mode):
         raise NotADirectoryError(f"declared capture source is not a directory: {path}")
