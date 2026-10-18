@@ -46,7 +46,10 @@ let
   polylogueStateRoot = config.sinnix.services.polylogue.dataDir;
   polylogueBackupRoot = "${realmRoot}/state/db-dumps/polylogue";
   machineTelemetryBackupRoot = "${realmRoot}/state/db-dumps/machine-telemetry";
-  machineTelemetryBackupMarker = "${borgDrainStateRoot}/machine-telemetry-dumps.last-success";
+  # A writable aside copy of Polylogue state from before the 2026-09 reindex.
+  # As a nested subvolume no realm snapshot reaches it; the Polylogue Borg
+  # job archives it.
+  polylogueAsideRoot = "${realmRoot}/state/polylogue-aside-20260926T182000Z";
   # The daemon's live SQLite databases at the top level of the state root.
   # index.db is deliberately NOT in this list: the symlink points into
   # .index-generations/ at a 40.5 GB derived rebuild-generation product --
@@ -710,7 +713,12 @@ let
     "home/sinity/.hermes/hermes-agent/venv"
     "home/sinity/.hermes/hermes-agent/.venv"
     "home/sinity/.local/share/uv"
-    "home/sinity/.local/state/claude-code/npm/.cargo/registry"
+    # Agent CLI installs: npm trees and source-built recovery copies are
+    # reinstalled by the bootstrap; the ledgers beside them stay covered.
+    "home/sinity/.local/state/claude-code/npm"
+    "home/sinity/.local/state/claude-code/npm-recovery"
+    "home/sinity/.codex/packages"
+    "home/sinity/.npm/_npx"
     "home/sinity/.local/share/nvim/mason"
     "home/sinity/.local/share/hyprland/logs"
     "var/lib/systemd/coredump"
@@ -800,6 +808,31 @@ let
     # pytest roots above are classified separately; nested names stay covered.
     # Freedesktop trash at the realm root is one such exact root.
     ".Trash-1000"
+    # Regenerable build and environment trees, each checked to hold only
+    # rebuildable content: Cargo targets (CACHEDIR.TAG), Python virtualenvs,
+    # Stash's analysis cache and generated media (tagged by sinnix), and
+    # downloaded embedding weights. Exact roots, because coverage waives only
+    # explicitly classified paths, never a tag or glob.
+    "project/polylogue/repo/target"
+    "project/polylogue-sinex-common/repo/target"
+    "project/sinex/repo/target"
+    "inbox/spec/target"
+    "inbox/spec/polylogue-spec/prototype/target"
+    "project/sinnix/repo/.venv"
+    "project/sinity-lynchpin/repo/.venv"
+    "project/yt-polisher/repo/.venv"
+    "state/stashbox/analysis-cache"
+    "state/stashbox/generated"
+    "state/stashbox/gpu-venv"
+    "state/comfyui/venv"
+    "library/model/embedding"
+    # Steam's runtimes and client package, re-downloaded by the client.
+    # userdata beside them stays covered.
+    "library/game/steam/ubuntu12_32"
+    "library/game/steam/ubuntu12_64"
+    "library/game/steam/steamrt32"
+    "library/game/steam/steamrt64"
+    "library/game/steam/package"
   ];
 
   # These named roots have an existing cache/scratch producer policy. Broad
@@ -831,7 +864,10 @@ let
       "home/sinity/.hermes/hermes-agent/venv"
       "home/sinity/.hermes/hermes-agent/.venv"
       "home/sinity/.local/share/uv"
-      "home/sinity/.local/state/claude-code/npm/.cargo/registry"
+      "home/sinity/.local/state/claude-code/npm"
+      "home/sinity/.local/state/claude-code/npm-recovery"
+      "home/sinity/.codex/packages"
+      "home/sinity/.npm/_npx"
       "home/sinity/.local/share/nvim/mason"
       "home/sinity/.local/share/hyprland/logs"
       "var/lib/systemd/coredump"
@@ -870,6 +906,31 @@ let
     # from 2026-09-14 and starved three other borg repositories behind its
     # lock. 23 GB / ~1.55M entries at the time of diagnosis.
     ".Trash-1000"
+    # Regenerable build and environment trees, each checked to hold only
+    # rebuildable content: Cargo targets (CACHEDIR.TAG), Python virtualenvs,
+    # Stash's analysis cache and generated media (tagged by sinnix), and
+    # downloaded embedding weights. Exact roots, because coverage waives only
+    # explicitly classified paths, never a tag or glob.
+    "project/polylogue/repo/target"
+    "project/polylogue-sinex-common/repo/target"
+    "project/sinex/repo/target"
+    "inbox/spec/target"
+    "inbox/spec/polylogue-spec/prototype/target"
+    "project/sinnix/repo/.venv"
+    "project/sinity-lynchpin/repo/.venv"
+    "project/yt-polisher/repo/.venv"
+    "state/stashbox/analysis-cache"
+    "state/stashbox/generated"
+    "state/stashbox/gpu-venv"
+    "state/comfyui/venv"
+    "library/model/embedding"
+    # Steam's runtimes and client package, re-downloaded by the client.
+    # userdata beside them stays covered.
+    "library/game/steam/ubuntu12_32"
+    "library/game/steam/ubuntu12_64"
+    "library/game/steam/steamrt32"
+    "library/game/steam/steamrt64"
+    "library/game/steam/package"
   ];
 
   realmExcludeMatchesProtectedPath = import ./lib/backup/protected-paths.nix {
@@ -1128,7 +1189,8 @@ in
               class = "exact-copy";
               source = "machine-telemetry";
               preservation = "indefinite";
-              backup = "direct";
+              # Realm snapshots archive the dump directory.
+              backup = "inherited";
             };
           };
 
@@ -1258,28 +1320,6 @@ in
                   data = {
                     class = "derived";
                     inputs = [ "borg-polylogue-state-archives" ];
-                  };
-                }
-              ];
-            };
-            borgbackup-job-machine-telemetry-dumps = {
-              unit = "borgbackup-job-machine-telemetry-dumps.service";
-              resourceClass = "backup";
-              observe = {
-                enable = true;
-                restartable = false;
-              };
-              captures = [
-                {
-                  name = "borg-machine-telemetry-dumps";
-                  path = machineTelemetryBackupMarker;
-                  eventDriven = true;
-                  # The direct-path job runs daily; a 3x cadence budget leaves
-                  # room for one delayed HDD run without masking a stalled job.
-                  staleAfterSeconds = borgDailyArchiveMaxAgeSec;
-                  data = {
-                    class = "derived";
-                    inputs = [ "machine-telemetry-dumps" ];
                   };
                 }
               ];
@@ -1420,8 +1460,7 @@ in
           username
           polylogueStateRoot
           polylogueBackupRoot
-          machineTelemetryBackupRoot
-          machineTelemetryBackupMarker
+          polylogueAsideRoot
           polylogueDbNames
           polylogueDbExcludes
           borgDrainStateRoot

@@ -39,7 +39,6 @@
   ];
   machine = [
     "borg-realm-independent-coverage-audit"
-    "borg-machine-telemetry-dumps"
     "borg-persist-archive"
     "borg-realm-archive"
     "borg-sinex-blobs-archive"

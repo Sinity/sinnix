@@ -8,8 +8,7 @@
   username,
   polylogueStateRoot,
   polylogueBackupRoot,
-  machineTelemetryBackupRoot,
-  machineTelemetryBackupMarker,
+  polylogueAsideRoot,
   polylogueDbNames,
   polylogueDbExcludes,
   borgDrainStateRoot,
@@ -216,6 +215,13 @@
       ${pkgs.python3}/bin/python3 ${./cut-polylogue-hooks.py} \
         ${lib.escapeShellArg polylogueStateRoot} "$stage_hooks" "$stage_root/cuts" \
         ${./seal-polylogue-hooks.py}
+      # The aside subvolume holds a pre-reindex copy of Polylogue state that
+      # no snapshot reaches: realm snapshots stop at nested subvolumes. It is
+      # archived here, beside the live state its blobs deduplicate against.
+      aside_sources=()
+      if [ -d ${lib.escapeShellArg polylogueAsideRoot} ]; then
+        aside_sources+=(${lib.escapeShellArg polylogueAsideRoot})
+      fi
       echo "polylogue state backup phase: creating archive"
       with_borg_lock borg create \
         --compression auto,zstd,1 \
@@ -226,7 +232,8 @@
         --exclude ${lib.escapeShellArg "${polylogueStateRoot}/hooks/**"} \
         "::$archive_name" \
         ${lib.escapeShellArg polylogueStateRoot} \
-        "$staged_hook_source"
+        "$staged_hook_source" \
+        "''${aside_sources[@]}"
       echo "polylogue state backup complete: $archive_name"
 
       install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
@@ -235,95 +242,6 @@
         printf 'archive=%s\n' "$archive_name"
         printf 'epoch=%s\n' "$(date +%s)"
       } | publish_backup_marker "$marker"
-    '';
-  })
-
-  # Direct-path Borg coverage for the machine telemetry SQLite dump stream.
-  # The live database is dumped by machine-telemetry-sqlite-backup; this job
-  # archives every resulting compressed dump without deleting or pruning any
-  # source snapshot. It also restores one archived dump through stdout and
-  # runs zstd's frame test before publishing the freshness marker, so a
-  # successful marker means both archive creation and a real restore probe
-  # succeeded.
-  (mkBackupJob "borgbackup-job-machine-telemetry-dumps" {
-    description = "Back up and restore-check machine telemetry SQLite dumps";
-    unit = {
-      after = [
-        "realm.mount"
-        outerRealmMountUnit
-      ];
-      requires = [
-        "realm.mount"
-        outerRealmMountUnit
-      ];
-      unitConfig.RequiresMountsFor = [ machineTelemetryBackupRoot ];
-    };
-    serviceConfig = {
-      # This is a Type=oneshot service, so TimeoutStartSec bounds the full
-      # Borg process lifetime. The dump set can be large on the HDD; keep
-      # the measured 12-hour allowance used by the weekly restore path.
-      TimeoutStartSec = "12h";
-      TimeoutStopSec = "15s";
-    };
-    environment = {
-      BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
-      BORG_CACHE_DIR = borgCacheDir;
-    };
-    path = with pkgs; [
-      borgbackup
-      coreutils
-      findutils
-      gnugrep
-      jq
-      util-linux
-      zstd
-    ];
-    timer = {
-      onCalendar = "*-*-* 06:15:00";
-      randomizedDelaySec = "30min";
-      persistent = true;
-    };
-    script = ''
-      set -euo pipefail
-
-      ${mkBorgCommonScript borgRepoRealm}
-      install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
-      recover_stale_borg_locks
-      if [ ! -e ${lib.escapeShellArg "${borgRepoRealmPath}/config"} ]; then
-        with_borg_lock borg init --encryption repokey-blake2 "$BORG_REPO"
-      fi
-
-      source_count="$(${pkgs.findutils}/bin/find ${lib.escapeShellArg machineTelemetryBackupRoot} -maxdepth 1 -type f -name 'telemetry-*.sqlite.zst' -printf 'x\n' | ${pkgs.coreutils}/bin/wc -l)"
-      if [ "$source_count" -eq 0 ]; then
-        echo "no machine telemetry SQLite dump is available; refusing a false-success marker" >&2
-        exit 1
-      fi
-
-      archive_name="machine-telemetry-dumps-$(date -u +%Y%m%dT%H%M%SZ)"
-      with_borg_lock borg create \
-        --compression auto,zstd,1 \
-        --lock-wait ${toString borgLockWaitSec} \
-        --exclude-caches \
-        --exclude-if-present .nobackup \
-        "::$archive_name" \
-        ${lib.escapeShellArg "${machineTelemetryBackupRoot}/./"}
-
-      # `borg list --short` prints directories without a trailing slash, so
-      # the archive root `.` would be sampled and its stdout extract is
-      # empty. Probe the newest dump by name.
-      sample_path="$(with_borg_lock borg list --short "::$archive_name" | ${pkgs.gnugrep}/bin/grep -E '\.sqlite\.zst$' | ${pkgs.coreutils}/bin/sort | ${pkgs.coreutils}/bin/tail -n 1)"
-      if [ -z "$sample_path" ]; then
-        echo "machine telemetry Borg archive contains no dump file" >&2
-        exit 1
-      fi
-      with_borg_lock borg extract --stdout "::$archive_name" "$sample_path" | ${pkgs.zstd}/bin/zstd -t
-
-      {
-        printf 'archive=%s\n' "$archive_name"
-        printf 'source_count=%s\n' "$source_count"
-        printf 'sample_path=%s\n' "$sample_path"
-        printf 'epoch=%s\n' "$(date +%s)"
-      } | publish_backup_marker ${lib.escapeShellArg machineTelemetryBackupMarker}
     '';
   })
 

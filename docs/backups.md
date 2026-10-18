@@ -12,12 +12,17 @@ pruned automatically; the HDD's free space is the only limit.
 | `/persist` | btrbk read-only snapshot, archived by the Borg job | same as `/realm` | `borg-persist-v1` |
 | The ephemeral root | snapshot the initrd takes before each wipe | daily | `borg-root-snapshots-v1` |
 | Sinex blob store | direct | daily 05:40 | `borg-sinex-blobs-v1` |
-| Polylogue state | hooks sealed from a read-only cut of its subvolume | daily 04:15 | `borg-polylogue-state-v1` |
-| Telemetry database dumps | compressed copies, then archived directly | dumps 03:42, archive 06:15, seal Sunday | `borg-realm-v2` |
+| Polylogue state | hooks sealed from a read-only cut of its subvolume, plus the `state/polylogue-aside-20260926T182000Z` subvolume | daily 04:15 | `borg-polylogue-state-v1` |
+| Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm` | dumps 03:42, seal Sunday | `borg-realm-v2` |
 
 Left out of the `/realm` archive (`realmExcludes` in `modules/backup.nix`):
-downloaded model weights, Steam libraries, `state/cache`, `state/containers`,
-`tmp`, worktrees, pytest caches and the trash. Root snapshots leave out
+downloaded model weights (including embeddings), Steam libraries and runtimes,
+`state/cache`, `state/containers`, `tmp`, worktrees, Cargo `target/` and
+project `.venv` directories, Stash's caches and generated media, the ComfyUI
+virtualenv, pytest caches and the trash. `/persist` leaves out user caches and
+agent CLI installs (npm, `~/.codex/packages`). Every exclusion is an exact path
+also listed for the coverage check; `--exclude-caches` and globs are not used,
+because coverage cannot waive what they drop. Root snapshots leave out
 `~/.cache`, `/root/.cache`, `/var/cache`, `/tmp` and every other mounted
 filesystem (`rootSnapshotExcludes` in `modules/lib/backup/acknowledgement.nix`).
 
@@ -38,9 +43,9 @@ dated name, and starts a new one; `telemetry.sqlite.segments.json` lists the
 sealed files and the active one, and Lynchpin reads that list. Each sealed file
 is then compressed into `/realm/state/db-dumps/machine-telemetry/` and checked
 with SQLite's structural check, both exactly once, with results kept under
-`verified/`. The daily backup compresses only the small active file. A separate
-job archives the dump directory into `borg-realm-v2` every day at 06:15; it is
-also part of the `/realm` snapshots.
+`verified/`. The daily backup compresses only the small active file. Dumps are written
+with `zstd --rsyncable`, so unchanged pages compress to identical bytes and
+Borg stores mostly new data; the `/realm` snapshots archive them.
 
 ## Is it healthy?
 

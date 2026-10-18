@@ -221,7 +221,11 @@ def check_immutable_snapshot(
 
 
 def compress(source_path: Path, compressed_path: Path) -> None:
-    run_command(["zstd", "-T1", "-q", "-f", str(source_path), "-o", str(compressed_path)])
+    # --rsyncable resets the compressor at content-defined points, so pages
+    # that did not change between dumps produce identical compressed bytes.
+    # Without it one changed header shifts the whole frame and Borg stores
+    # every daily dump as new data.
+    run_command(["zstd", "-T1", "--rsyncable", "-q", "-f", str(source_path), "-o", str(compressed_path)])
     if not compressed_path.is_file() or compressed_path.stat().st_size == 0:
         raise RuntimeError("SQLite compression produced no artifact")
     # zstd exiting zero only means it wrote a frame. Testing the frame decodes

@@ -120,24 +120,6 @@ assert lib.assertMsg (
             message = "Every Borg job's capture lane must point at a path its unit -- or a packaged script that unit runs -- actually writes";
           }
           {
-            assertion =
-              let
-                script = config.systemd.services.borgbackup-job-machine-telemetry-dumps.script;
-                service = config.systemd.services.borgbackup-job-machine-telemetry-dumps.serviceConfig;
-                timer = config.systemd.timers.borgbackup-job-machine-telemetry-dumps;
-              in
-              service.TimeoutStartSec == "12h"
-              && service.TimeoutStopSec == "15s"
-              && timer.timerConfig.OnCalendar == "*-*-* 06:15:00"
-              && timer.timerConfig.RandomizedDelaySec == "30min"
-              && timer.timerConfig.Persistent
-              && lib.hasInfix "/realm/state/db-dumps/machine-telemetry/./" script
-              && lib.hasInfix "borg extract --stdout" script
-              && lib.hasInfix "zstd -t" script
-              && lib.hasInfix "machine-telemetry-dumps.last-success" script;
-            message = "Machine telemetry dump Borg coverage must retain its finite bounds and schedule while archiving, restore-checking, and publishing its freshness marker";
-          }
-          {
             # A liveness probe that cannot run is worse than none: the lane
             # reads healthy because nothing contradicts it.
             assertion = lib.all (
@@ -715,7 +697,6 @@ assert lib.assertMsg (
           borgbackup-job-realm
           borgbackup-job-sinex-blobs
           borgbackup-job-polylogue-state
-          borgbackup-job-machine-telemetry-dumps
           borgbackup-verify
           ;
         allSurfaceNames = builtins.attrNames backupRuntimeEval.config.sinnix.runtime.surfaces;
