@@ -117,13 +117,14 @@ class Entry:
 
 
 def load_history() -> list[Entry]:
-    if not HISTORY_PATH.exists():
-        return []
     # Keep the newest visit per normalized URL; stream rather than sort
     # 932k rows in memory twice.
     seen: dict[str, tuple[str, str, str]] = {}
     try:
-        with HISTORY_PATH.open(encoding="utf-8") as f:
+        with (
+            _regular_input(HISTORY_PATH) as binary,
+            io.TextIOWrapper(binary, encoding="utf-8") as f,
+        ):
             for line in f:
                 try:
                     row = json.loads(line)
@@ -138,7 +139,10 @@ def load_history() -> list[Entry]:
                 prior = seen.get(norm)
                 if prior is None or iso_time > prior[0]:
                     seen[norm] = (iso_time, title, url)
-    except OSError:
+    except FileNotFoundError:
+        return []
+    except (OSError, UnicodeError) as error:
+        _unavailable("history", HISTORY_PATH, error)
         return []
     ranked = sorted(seen.values(), key=lambda t: t[0], reverse=True)[:HISTORY_LIMIT]
     return [Entry("hist", title, url) for _, title, url in ranked]
@@ -234,11 +238,16 @@ def _walk_chrome_bookmarks(node: dict, path: list[str], out: list[Entry]) -> Non
 
 
 def load_chrome_bookmarks() -> list[Entry]:
-    if not CHROME_BOOKMARKS.exists():
-        return []
     try:
-        data = json.loads(CHROME_BOOKMARKS.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        with (
+            _regular_input(CHROME_BOOKMARKS) as binary,
+            io.TextIOWrapper(binary, encoding="utf-8") as source,
+        ):
+            data = json.load(source)
+    except FileNotFoundError:
+        return []
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        _unavailable("Chrome bookmarks", CHROME_BOOKMARKS, error)
         return []
     out: list[Entry] = []
     for root in data.get("roots", {}).values():

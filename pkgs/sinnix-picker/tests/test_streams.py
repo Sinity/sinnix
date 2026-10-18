@@ -133,17 +133,25 @@ def test_bookmarks_do_not_retain_all_candidate_strings(monkeypatch, tmp_path):
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses read permissions")
-@pytest.mark.parametrize("lane", ["clipboard", "bookmarks"])
+@pytest.mark.parametrize("lane", ["clipboard", "bookmarks", "history", "chrome"])
 def test_denied_source_is_diagnosed(monkeypatch, tmp_path, capsys, lane):
     path = tmp_path / lane
     if lane == "clipboard":
         path.mkdir()
         monkeypatch.setattr(picker, "CLIPBOARD_DIR", path)
         loader = picker.load_clipboard
-    else:
+    elif lane == "bookmarks":
         path.touch()
         monkeypatch.setattr(picker, "RAINDROP_CSV", path)
         loader = picker.load_raindrop
+    else:
+        path.touch()
+        monkeypatch.setattr(
+            picker, "HISTORY_PATH" if lane == "history" else "CHROME_BOOKMARKS", path
+        )
+        loader = (
+            picker.load_history if lane == "history" else picker.load_chrome_bookmarks
+        )
     path.chmod(0)
     try:
         assert loader() == []
@@ -155,8 +163,29 @@ def test_denied_source_is_diagnosed(monkeypatch, tmp_path, capsys, lane):
 def test_absent_optional_sources_are_supported(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(picker, "CLIPBOARD_DIR", tmp_path / "absent")
     monkeypatch.setattr(picker, "RAINDROP_CSV", tmp_path / "absent.csv")
+    monkeypatch.setattr(picker, "HISTORY_PATH", tmp_path / "absent.ndjson")
+    monkeypatch.setattr(picker, "CHROME_BOOKMARKS", tmp_path / "absent.json")
     assert picker.load_clipboard() == picker.load_raindrop() == []
+    assert picker.load_history() == picker.load_chrome_bookmarks() == []
     assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("lane", ["history", "chrome"])
+@pytest.mark.parametrize("content", [None, b"\xff"])
+def test_history_and_chrome_invalid_inputs_are_diagnosed(
+    monkeypatch, tmp_path, capsys, lane, content
+):
+    path = tmp_path / "input"
+    if content is None:
+        path.mkdir()
+    else:
+        path.write_bytes(content)
+    monkeypatch.setattr(
+        picker, "HISTORY_PATH" if lane == "history" else "CHROME_BOOKMARKS", path
+    )
+    loader = picker.load_history if lane == "history" else picker.load_chrome_bookmarks
+    assert loader() == []
+    assert "unavailable" in capsys.readouterr().err
 
 
 def test_clipboard_wrong_root_type_is_diagnosed(monkeypatch, tmp_path, capsys):
@@ -167,7 +196,7 @@ def test_clipboard_wrong_root_type_is_diagnosed(monkeypatch, tmp_path, capsys):
     assert "unavailable" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("lane", ["clipboard", "bookmarks"])
+@pytest.mark.parametrize("lane", ["clipboard", "bookmarks", "history", "chrome"])
 def test_special_sources_do_not_block(tmp_path, lane):
     path = tmp_path / (
         "clipboard-20261018.jsonl" if lane == "clipboard" else "bookmarks.csv"
@@ -182,7 +211,9 @@ spec=importlib.util.spec_from_loader(loader.name,loader)
 module=importlib.util.module_from_spec(spec);sys.modules[loader.name]=module;loader.exec_module(module)
 path=Path(sys.argv[2])
 if sys.argv[3]=='clipboard': module.CLIPBOARD_DIR=path.parent; rows=module.load_clipboard()
-else: module.RAINDROP_CSV=path; rows=module.load_raindrop()
+elif sys.argv[3]=='bookmarks': module.RAINDROP_CSV=path; rows=module.load_raindrop()
+elif sys.argv[3]=='history': module.HISTORY_PATH=path; rows=module.load_history()
+else: module.CHROME_BOOKMARKS=path; rows=module.load_chrome_bookmarks()
 assert rows==[]
 """
     result = subprocess.run(
