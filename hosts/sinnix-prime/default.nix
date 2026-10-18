@@ -68,7 +68,7 @@
     # A capture lane, so it is on and stays on (the login token lives in
     # /realm/state/xiaomi-witness; re-login is agent-drivable through the
     # operator's browser session).
-    xiaomi-witness.enable = true;
+    capture-xiaomi-cloud.enable = true;
     # Receive phone photos and videos directly into the personal lake over
     # tailscale0. Peer/folder identities are promoted to declarative config
     # after the Android client generates its fresh device ID.

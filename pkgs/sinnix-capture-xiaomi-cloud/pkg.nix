@@ -1,9 +1,9 @@
-# Xiaomi cloud vendor witness (sinnix-ogll).
+# Xiaomi cloud capture (sinnix-ogll).
 #
 # The protocol client is upstream GPL-3 TypeScript (miband-bot), pinned and
 # fetched here rather than vendored into this repository -- the checkout
 # stays byte-auditable against upstream, and this public repo carries only
-# the thin orchestration entry (witness-sync.ts). Bun runs the TypeScript
+# the thin orchestration entry (xiaomi-sync.ts). Bun runs the TypeScript
 # directly; the client needs nothing beyond node builtins, so there is no
 # lockfile, no node_modules, and no build step.
 {
@@ -16,7 +16,7 @@
 }:
 
 stdenvNoCC.mkDerivation {
-  pname = "sinnix-xiaomi-witness";
+  pname = "sinnix-capture-xiaomi-cloud";
   version = "0.1.0";
 
   src = ./.;
@@ -43,24 +43,24 @@ stdenvNoCC.mkDerivation {
 
   installPhase = ''
     runHook preInstall
-    mkdir -p $out/share/sinnix-xiaomi-witness $out/bin
-    cp witness-sync.ts witness-login.ts $out/share/sinnix-xiaomi-witness/
-    cp -r $upstream $out/share/sinnix-xiaomi-witness/upstream
-    chmod -R u+w $out/share/sinnix-xiaomi-witness/upstream
-    substituteInPlace $out/share/sinnix-xiaomi-witness/upstream/src/xiaomi/client.ts \
+    mkdir -p $out/share/sinnix-capture-xiaomi-cloud $out/bin
+    cp xiaomi-sync.ts xiaomi-login.ts $out/share/sinnix-capture-xiaomi-cloud/
+    cp -r $upstream $out/share/sinnix-capture-xiaomi-cloud/upstream
+    chmod -R u+w $out/share/sinnix-capture-xiaomi-cloud/upstream
+    substituteInPlace $out/share/sinnix-capture-xiaomi-cloud/upstream/src/xiaomi/client.ts \
       --replace-fail \
         'const XIAOMI_REQUEST_TIMEOUT_MS = 30_000;' \
         'const XIAOMI_REQUEST_TIMEOUT_MS = 120_000;'
-    makeWrapper ${lib.getExe bun} $out/bin/sinnix-xiaomi-witness \
-      --add-flags "run $out/share/sinnix-xiaomi-witness/witness-sync.ts"
-    makeWrapper ${lib.getExe bun} $out/bin/sinnix-xiaomi-witness-login \
-      --add-flags "run $out/share/sinnix-xiaomi-witness/witness-login.ts"
+    makeWrapper ${lib.getExe bun} $out/bin/sinnix-capture-xiaomi-cloud \
+      --add-flags "run $out/share/sinnix-capture-xiaomi-cloud/xiaomi-sync.ts"
+    makeWrapper ${lib.getExe bun} $out/bin/sinnix-xiaomi-cloud-login \
+      --add-flags "run $out/share/sinnix-capture-xiaomi-cloud/xiaomi-login.ts"
     runHook postInstall
   '';
 
   meta = {
-    description = "Xiaomi cloud health witness: band data fetched from Xiaomi's servers into the lake (second witness beside Health Connect)";
-    mainProgram = "sinnix-xiaomi-witness";
+    description = "Xiaomi cloud health capture: band data fetched from Xiaomi's servers into the lake (second witness beside Health Connect)";
+    mainProgram = "sinnix-capture-xiaomi-cloud";
     # Combined work with the GPL-3 upstream client at runtime.
     license = lib.licenses.gpl3Plus;
   };

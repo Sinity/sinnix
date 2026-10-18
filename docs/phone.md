@@ -241,9 +241,9 @@ enough.
   which does not implement it).
 - **Sleep estimate** from motion, light, screen and charging.
 - **Xiaomi cloud** band data, independent of Health Connect: `sinnix
-  xiaomi-witness` syncs once; `sinnix xiaomi-witness-login` prints a
+  capture-xiaomi-cloud` syncs once; `sinnix xiaomi-cloud-login` prints a
   `LOGIN_URL` to confirm in a logged-in browser after the credential expires.
-  Runs overlap seven days; `agentctl job start sinnix xiaomi_witness_backfill`
+  Runs overlap seven days; `agentctl job start sinnix xiaomi_cloud_backfill`
   covers 35 days after an outage.
 
 ## Continuity

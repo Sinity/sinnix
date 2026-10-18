@@ -1,4 +1,4 @@
-# Xiaomi cloud vendor witness: the band's data read from Xiaomi's servers,
+# Xiaomi cloud capture: the band's data read from Xiaomi's servers,
 # beside (not through) the phone's Health Connect lane.
 #
 # Why it exists (sinnix-ogll, measured 2026-08-17): Mi Fitness writes to
@@ -27,8 +27,8 @@ let
   laneDir = "${config.sinnix.paths.healthRoot}/xiaomi-cloud";
 in
 mkServiceModule {
-  name = "xiaomi-witness";
-  description = "Xiaomi cloud health witness (band data via Xiaomi's servers)";
+  name = "capture-xiaomi-cloud";
+  description = "Xiaomi cloud health capture (band data via Xiaomi's servers)";
   extraOptions = {
     intervalSec = lib.mkOption {
       type = lib.types.ints.positive;
@@ -37,7 +37,7 @@ mkServiceModule {
     };
   };
   surface = {
-    unit = "sinnix-xiaomi-witness.service";
+    unit = "sinnix-capture-xiaomi-cloud.service";
     manager = "user";
     resourceClass = "capture";
     observe = {
@@ -64,18 +64,18 @@ mkServiceModule {
   job =
     { cfg, ... }:
     {
-      description = "Xiaomi cloud health witness sync pass";
+      description = "Xiaomi cloud health capture sync pass";
       manager = "user";
       serviceConfig.UMask = "0077";
       # Scheduled and recovery passes share the write-on-change state.
-      execStart = "${pkgs.util-linux}/bin/flock --exclusive ${stateDir}/sync.lock ${lib.getExe scriptPkgs.sinnix-xiaomi-witness}";
+      execStart = "${pkgs.util-linux}/bin/flock --exclusive ${stateDir}/sync.lock ${lib.getExe scriptPkgs.sinnix-capture-xiaomi-cloud}";
       # The module declares this lane to the runtime inventory and creates
       # its directory, so it must also be what the writer uses. It was
       # not: both sides carried the same literal independently, and when
       # the lane moved, the declaration followed and the writer did not.
       environment = {
-        XIAOMI_WITNESS_LANE = laneDir;
-        XIAOMI_WITNESS_STATE = stateDir;
+        XIAOMI_CLOUD_LANE = laneDir;
+        XIAOMI_CLOUD_STATE = stateDir;
       };
       timer = {
         onBootSec = "3min";

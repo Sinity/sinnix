@@ -1,4 +1,4 @@
-// Interactive login for the Xiaomi cloud witness: mints a QR ticket and
+// Interactive login for the Xiaomi cloud capture: mints a QR ticket and
 // waits for confirmation, then saves the token where the sync entry reads
 // it and probes the API once.
 //
@@ -8,7 +8,7 @@
 // renders a "Confirm sign-in" page whose button completes the login. That
 // makes re-login agent-drivable end to end:
 //
-//   sinnix xiaomi-witness-login          # prints LOGIN_URL, waits
+//   sinnix xiaomi-cloud-login          # prints LOGIN_URL, waits
 //   sinnix-chrome-control agent-window --url <LOGIN_URL>   # then click Sign in
 //
 // The Mi Fitness app's scanner refuses this QR (it is minted for the
@@ -19,7 +19,7 @@
 const args = process.argv.slice(2);
 if (args.length > 0) {
   const help = args.length === 1 && (args[0] === "--help" || args[0] === "-h");
-  const usage = "Usage: sinnix xiaomi-witness-login\n\nStart interactive Xiaomi login. Takes no arguments.";
+  const usage = "Usage: sinnix xiaomi-cloud-login\n\nStart interactive Xiaomi login. Takes no arguments.";
   if (help) console.log(usage);
   else console.error(usage);
   process.exit(help ? 0 : 2);
@@ -29,7 +29,7 @@ const { MiHealthClient, XiaomiAuth } = await import("./upstream/src/xiaomi/clien
 
 process.umask(0o077);
 
-const STATE_DIR = process.env.XIAOMI_WITNESS_STATE ?? "/realm/state/xiaomi-witness";
+const STATE_DIR = process.env.XIAOMI_CLOUD_STATE ?? "/realm/state/xiaomi-witness";
 const BASE = process.env.MI_HEALTH_BASE ?? "https://de.hlth.io.mi.com";
 const TOKEN_PATH = `${STATE_DIR}/auth-token.json`;
 

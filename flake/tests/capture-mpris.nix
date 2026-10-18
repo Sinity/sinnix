@@ -17,7 +17,7 @@
             sinnix.services.capture-mpris.enable = true;
             sinnix.services.capture-audio.enable = true;
             sinnix.services.capture-netflow.enable = true;
-            sinnix.services.xiaomi-witness.enable = true;
+            sinnix.services.capture-xiaomi-cloud.enable = true;
             sinnix.services.polylogue.enable = true;
             sinnix.services.machine-telemetry.enable = true;
             sinnix.services.below.enable = true;
@@ -82,7 +82,7 @@
           }
           {
             assertion =
-              config.systemd.user.services.sinnix-xiaomi-witness.environment.XIAOMI_WITNESS_LANE
+              config.systemd.user.services.sinnix-capture-xiaomi-cloud.environment.XIAOMI_CLOUD_LANE
               == "${config.sinnix.paths.healthRoot}/xiaomi-cloud";
             message = "The health witness writer must use the configured health root.";
           }
@@ -133,7 +133,7 @@
             message = "Video recovery writers must create owner-only output.";
           }
           {
-            assertion = config.systemd.user.services.sinnix-xiaomi-witness.serviceConfig.UMask == "0077";
+            assertion = config.systemd.user.services.sinnix-capture-xiaomi-cloud.serviceConfig.UMask == "0077";
             message = "Health witness writers must create owner-only output.";
           }
           {

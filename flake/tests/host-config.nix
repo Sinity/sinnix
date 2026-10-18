@@ -77,20 +77,20 @@
             touch "$out"
           '';
 
-      checks.xiaomi-witness-owner-lock =
+      checks.xiaomi-cloud-owner-lock =
         let
-          unit = host.systemd.user.services.sinnix-xiaomi-witness;
+          unit = host.systemd.user.services.sinnix-capture-xiaomi-cloud;
           recovery =
             (builtins.fromTOML (builtins.readFile ../../.agentctl/project.toml))
-            .operations.xiaomi_witness_backfill;
-          lock = "${unit.environment.XIAOMI_WITNESS_STATE}/sync.lock";
+            .operations.xiaomi_cloud_backfill;
+          lock = "${unit.environment.XIAOMI_CLOUD_STATE}/sync.lock";
         in
         assert inputs.nixpkgs.lib.hasInfix "flock --exclusive ${lock} " unit.serviceConfig.ExecStart;
         assert builtins.elemAt recovery.exec 2 == lock;
         assert builtins.elemAt recovery.exec 0 == "flock";
         assert builtins.elemAt recovery.exec 1 == "--exclusive";
-        assert builtins.elem "XIAOMI_WITNESS_WINDOW_DAYS=35" recovery.exec;
-        pkgs.runCommand "xiaomi-witness-owner-lock" { } "touch $out";
+        assert builtins.elem "XIAOMI_CLOUD_WINDOW_DAYS=35" recovery.exec;
+        pkgs.runCommand "xiaomi-cloud-owner-lock" { } "touch $out";
 
       checks.hub-http-boundary =
         let

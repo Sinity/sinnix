@@ -13,7 +13,7 @@ cases = [(["--help"], 0), (["-h"], 0), (["--unknown"], 2),
 results = []
 with tempfile.TemporaryDirectory(prefix="xiaomi-cli-") as temporary:
     root = Path(temporary)
-    for entry in ("witness-sync.ts", "witness-login.ts"):
+    for entry in ("xiaomi-sync.ts", "xiaomi-login.ts"):
         for index, (args, expected) in enumerate(cases):
             case = root / (entry + str(index))
             upstream = case / "upstream/src/xiaomi"
@@ -34,8 +34,8 @@ export class MiHealthClient {}
 ''')
             env = dict(os.environ, PROBE_IMPORT=str(case / "imported"),
                        PROBE_DISPATCH=str(case / "dispatched"),
-                       XIAOMI_WITNESS_STATE=str(case / "state"),
-                       XIAOMI_WITNESS_LANE=str(case / "lane"))
+                       XIAOMI_CLOUD_STATE=str(case / "state"),
+                       XIAOMI_CLOUD_LANE=str(case / "lane"))
             result = subprocess.run([bun, "run", str(case / entry), *args], env=env,
                                     capture_output=True, text=True, timeout=5)
             ok = result.returncode == expected

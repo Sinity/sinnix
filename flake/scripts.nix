@@ -54,19 +54,19 @@ let
   registry = discovered.registry // {
     # The witness and its login helper are packaged entry points, so script
     # discovery cannot expose their existing operator commands by itself.
-    sinnix-xiaomi-witness = {
+    sinnix-capture-xiaomi-cloud = {
       description = "Sync Xiaomi cloud band data";
-      package = externalPackages.sinnix-xiaomi-witness;
+      package = externalPackages.sinnix-capture-xiaomi-cloud;
       runtimeInputs = [ ];
       tier = "default";
       owner = "flake/scripts.nix";
       docs = "docs/phone.md";
     };
-    sinnix-xiaomi-witness-login = {
+    sinnix-xiaomi-cloud-login = {
       description = "Authenticate the Xiaomi cloud band witness";
-      package = externalPackages.sinnix-xiaomi-witness.overrideAttrs (old: {
+      package = externalPackages.sinnix-capture-xiaomi-cloud.overrideAttrs (old: {
         meta = old.meta // {
-          mainProgram = "sinnix-xiaomi-witness-login";
+          mainProgram = "sinnix-xiaomi-cloud-login";
         };
       });
       runtimeInputs = [ ];
@@ -490,8 +490,8 @@ let
     };
 
     # Xiaomi cloud health witness: pinned GPL-3 upstream client + our
-    # orchestration entry, run under Bun (pkgs/sinnix-xiaomi-witness).
-    sinnix-xiaomi-witness = pkgs.callPackage ../pkgs/sinnix-xiaomi-witness/pkg.nix { };
+    # orchestration entry, run under Bun (pkgs/sinnix-capture-xiaomi-cloud).
+    sinnix-capture-xiaomi-cloud = pkgs.callPackage ../pkgs/sinnix-capture-xiaomi-cloud/pkg.nix { };
 
     # The Android capture app. `sinnix-phone-app` is the unsigned APK;
     # `sinnix-phone-app-install` signs it with the host-local keystore and

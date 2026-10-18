@@ -13,7 +13,7 @@ with tempfile.TemporaryDirectory(prefix="xiaomi-recovery-") as tmp:
     root = Path(tmp)
     upstream = root / "upstream/src/xiaomi"
     upstream.mkdir(parents=True)
-    shutil.copy2(source / "witness-sync.ts", root / "witness-sync.ts")
+    shutil.copy2(source / "xiaomi-sync.ts", root / "xiaomi-sync.ts")
     (upstream / "client.ts").write_text('''
 import {writeFileSync, appendFileSync} from "node:fs";
 writeFileSync(process.env.IMPORTED!, "yes");
@@ -38,8 +38,8 @@ export class MiHealthClient {
 ''')
     for index, days in enumerate(["0", "-1", "36", "NaN", "Infinity", "1.5"]):
         marker = root / f"imported-{index}"
-        result = subprocess.run([bun, "run", str(root / "witness-sync.ts")],
-            env={**os.environ, "XIAOMI_WITNESS_WINDOW_DAYS": days, "IMPORTED": str(marker)},
+        result = subprocess.run([bun, "run", str(root / "xiaomi-sync.ts")],
+            env={**os.environ, "XIAOMI_CLOUD_WINDOW_DAYS": days, "IMPORTED": str(marker)},
             capture_output=True, text=True, timeout=5)
         assert result.returncode == 64 and not marker.exists(), result.stderr
     for rows in (2, 100000):
@@ -47,9 +47,9 @@ export class MiHealthClient {
         state.mkdir()
         (state / "seen-hashes.json").write_text('{"retained":"prior-digest"}')
         lane = root / f"lane-{rows}"
-        result = subprocess.run([bun, "run", str(root / "witness-sync.ts")], env={**os.environ,
-            "XIAOMI_WITNESS_WINDOW_DAYS": "35", "IMPORTED": str(root / "imported"),
-            "XIAOMI_WITNESS_STATE": str(state), "XIAOMI_WITNESS_LANE": str(lane), "ROWS": str(rows), "WINDOWS": str(root / f"windows-{rows}")},
+        result = subprocess.run([bun, "run", str(root / "xiaomi-sync.ts")], env={**os.environ,
+            "XIAOMI_CLOUD_WINDOW_DAYS": "35", "IMPORTED": str(root / "imported"),
+            "XIAOMI_CLOUD_STATE": str(state), "XIAOMI_CLOUD_LANE": str(lane), "ROWS": str(rows), "WINDOWS": str(root / f"windows-{rows}")},
             capture_output=True, text=True, timeout=10)
         data = [json.loads(line) for file in lane.glob("*.jsonl") for line in file.read_text().splitlines()]
         receipt = data[-1]

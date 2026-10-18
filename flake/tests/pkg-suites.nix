@@ -82,8 +82,8 @@
         inherit pkgs;
         lib = pkgs.lib;
         registry = pkgs.lib.getAttrs [
-          "sinnix-xiaomi-witness"
-          "sinnix-xiaomi-witness-login"
+          "sinnix-capture-xiaomi-cloud"
+          "sinnix-xiaomi-cloud-login"
         ] sinnixScriptRegistry.registry;
       };
     in
@@ -207,25 +207,25 @@
         # (subprocess.TimeoutExpired; 1 failed, 30 passed); reverted after
         # confirming red.
         sinnix-lib-suite = pythonSuite { name = "sinnix-lib"; };
-        xiaomi-witness-cli = sinnixScriptRegistry.packageSet.sinnix-xiaomi-witness;
-        xiaomi-witness-dispatch =
-          pkgs.runCommand "xiaomi-witness-dispatch-check"
+        xiaomi-cloud-cli = sinnixScriptRegistry.packageSet.sinnix-capture-xiaomi-cloud;
+        xiaomi-cloud-dispatch =
+          pkgs.runCommand "xiaomi-cloud-dispatch-check"
             {
               nativeBuildInputs = [ pkgs.gnugrep ];
               SINNIX_CLI = "${xiaomiDispatcher}/bin/sinnix";
-              LOGIN_APP = pkgs.lib.getExe sinnixScriptRegistry.packageSet.sinnix-xiaomi-witness-login;
+              LOGIN_APP = pkgs.lib.getExe sinnixScriptRegistry.packageSet.sinnix-xiaomi-cloud-login;
             }
             ''
-                export XIAOMI_WITNESS_STATE="$TMPDIR/uncreated-state"
-                export XIAOMI_WITNESS_LANE="$TMPDIR/uncreated-lane"
-                for command in xiaomi-witness xiaomi-witness-login; do
+                export XIAOMI_CLOUD_STATE="$TMPDIR/uncreated-state"
+                export XIAOMI_CLOUD_LANE="$TMPDIR/uncreated-lane"
+                for command in capture-xiaomi-cloud xiaomi-cloud-login; do
                   "$SINNIX_CLI" "$command" --help > help.txt
                   grep -q '^Usage:' help.txt
                 done
                 "$LOGIN_APP" --help > login-app-help.txt
-              grep -q '^Usage: sinnix xiaomi-witness-login' login-app-help.txt
-              test ! -e "$XIAOMI_WITNESS_STATE"
-                test ! -e "$XIAOMI_WITNESS_LANE"
+              grep -q '^Usage: sinnix xiaomi-cloud-login' login-app-help.txt
+              test ! -e "$XIAOMI_CLOUD_STATE"
+                test ! -e "$XIAOMI_CLOUD_LANE"
                 touch "$out"
             '';
 

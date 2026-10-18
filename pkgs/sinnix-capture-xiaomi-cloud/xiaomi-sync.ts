@@ -1,6 +1,6 @@
-// Xiaomi cloud vendor witness: one sync pass (sinnix-ogll).
+// Xiaomi cloud capture: one sync pass (sinnix-ogll).
 //
-// Second independent witness to the band's data, read from Xiaomi's cloud
+// A second, independent source for the band data, read from Xiaomi's cloud
 // instead of the phone -- no BLE contention, no Health Connect, no screen.
 // Measured 2026-08-17 before this service existed: the cloud held heart
 // rate two hours FRESHER than Health Connect, because Mi Fitness syncs the
@@ -55,16 +55,16 @@
 const args = process.argv.slice(2);
 if (args.length > 0) {
   const help = args.length === 1 && (args[0] === "--help" || args[0] === "-h");
-  const usage = "Usage: sinnix xiaomi-witness\n\nRun one cloud-witness sync pass. Takes no arguments.";
+  const usage = "Usage: sinnix capture-xiaomi-cloud\n\nRun one cloud sync pass. Takes no arguments.";
   if (help) console.log(usage);
   else console.error(usage);
   process.exit(help ? 0 : 2);
 }
 
 // Overlap delayed uploads normally; recovery may explicitly widen to 35 days.
-const WINDOW_DAYS = Number(process.env.XIAOMI_WITNESS_WINDOW_DAYS ?? "7");
+const WINDOW_DAYS = Number(process.env.XIAOMI_CLOUD_WINDOW_DAYS ?? "7");
 if (!Number.isInteger(WINDOW_DAYS) || WINDOW_DAYS < 1 || WINDOW_DAYS > 35) {
-  console.error("XIAOMI_WITNESS_WINDOW_DAYS must be an integer from 1 to 35");
+  console.error("XIAOMI_CLOUD_WINDOW_DAYS must be an integer from 1 to 35");
   process.exit(64);
 }
 
@@ -72,10 +72,10 @@ const { MiHealthClient, XiaomiAuth } = await import("./upstream/src/xiaomi/clien
 
 process.umask(0o077);
 
-const STATE_DIR = process.env.XIAOMI_WITNESS_STATE ?? "/realm/state/xiaomi-witness";
+const STATE_DIR = process.env.XIAOMI_CLOUD_STATE ?? "/realm/state/xiaomi-witness";
 // The service passes both of these; the defaults are for running this file by
 // hand and deliberately name the same places the module does.
-const LANE_DIR = process.env.XIAOMI_WITNESS_LANE ?? "/realm/health/xiaomi-cloud";
+const LANE_DIR = process.env.XIAOMI_CLOUD_LANE ?? "/realm/health/xiaomi-cloud";
 const BASE = process.env.MI_HEALTH_BASE ?? "https://de.hlth.io.mi.com";
 const PARSER_VERSION = 2;
 
@@ -245,7 +245,7 @@ for (const key of RAW_KEYS) {
         throw new Error("raw response reached its record limit; refusing an incomplete day revision");
       }
       if (WINDOW_DAYS > 7) {
-        console.log(`xiaomi-witness raw-window: key=${key} start=${start} end=${end} count=${items.length}`);
+        console.log(`capture-xiaomi-cloud raw-window: key=${key} start=${start} end=${end} count=${items.length}`);
       }
       for (const item of items as Array<{ sid?: string; time?: number; value?: unknown }>) {
         if (typeof item.sid === "string" && item.sid && !item.sid.startsWith("hlth.gen_")) bandSids.add(item.sid);
@@ -301,7 +301,7 @@ if (pending.length > 0) {
 await Bun.write(SEEN_PATH, JSON.stringify(seen, null, 2) + "\n");
 
 console.log(
-  `xiaomi-witness: appended=${appended} unchanged=${unchanged} failures=${failures} sids=${[...bandSids].join(",") || "-"} -> ${dayFile}`,
+  `capture-xiaomi-cloud: appended=${appended} unchanged=${unchanged} failures=${failures} sids=${[...bandSids].join(",") || "-"} -> ${dayFile}`,
 );
 // Partial failure still lands what it fetched; only a broadly failed pass
 // should alarm. An expired credential alarms once: the marker makes every
@@ -312,6 +312,6 @@ if (failures >= 5 && credentialFailures === failures) {
     EXPIRED_MARKER,
     JSON.stringify({ fetched_at: fetchedAt, failures, reason: "token refresh refused" }) + "\n",
   );
-  console.error(`xiaomi-witness: credential expired; run sinnix xiaomi-witness-login to resume`);
+  console.error(`capture-xiaomi-cloud: credential expired; run sinnix xiaomi-cloud-login to resume`);
 }
 process.exit(failures >= 5 ? 1 : 0);
