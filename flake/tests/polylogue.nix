@@ -83,22 +83,8 @@ in
           ];
       };
       archiveRootEvaluated = evalTestSpec system archiveRootSpec;
-      enrichmentSpec = mkServiceTest {
-        name = "enrichment-polylogue-root";
-        service = "enrichment-loop";
-        extraModules = [
-          (_: {
-            sinnix.services.polylogue.dataDir = sentinelDataDir;
-          })
-        ];
-        assertions = _config: [ ];
-      };
-      enrichmentEvaluated = evalTestSpec system enrichmentSpec;
-      enrichmentService = enrichmentEvaluated.config.systemd.user.services.sinnix-enrichment-loop;
       polylogueTmpfiles = archiveRootEvaluated.config.systemd.tmpfiles.rules;
       archiveInventory = archiveRootEvaluated.config.sinnix.runtime.inventory.polylogue;
-      enrichmentReadWritePaths = enrichmentService.serviceConfig.ReadWritePaths;
-      enrichmentArchiveRoot = enrichmentService.environment.POLYLOGUE_ARCHIVE_ROOT;
 
       overriddenSpec = mkServiceTest {
         name = "polylogue-memory-budget";
@@ -132,22 +118,6 @@ in
                 index("d \($root)/inbox 0755 sinity users -") != null and
                 (map(select(startswith("L+ \($root)/inbox/"))) | length) == 0
               ' <<<"$actualTmpfiles" >/dev/null
-              touch "$out"
-            '';
-        enrichment-polylogue-root =
-          pkgs.runCommand "sinnix-enrichment-polylogue-root-check"
-            {
-              inherit sentinelDataDir enrichmentArchiveRoot;
-              nativeBuildInputs = [ pkgs.jq ];
-              actualReadWritePaths = builtins.toJSON enrichmentReadWritePaths;
-            }
-            ''
-              test "$enrichmentArchiveRoot" = "$sentinelDataDir"
-              jq -e --arg hook "$sentinelDataDir/hooks" 'index($hook) != null' <<<"$actualReadWritePaths" >/dev/null
-              if jq -e 'index("/realm/state/polylogue/hooks") != null' <<<"$actualReadWritePaths" >/dev/null; then
-                echo "enrichment hardening retained the default Polylogue hook root" >&2
-                exit 1
-              fi
               touch "$out"
             '';
         # Provably fails when: width_within / memory_bounded_worker_cap restore

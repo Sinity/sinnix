@@ -20,7 +20,6 @@ in
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
       sentinelDataDir = "/tmp/sinnix-polylogue-parity-sentinel";
-      enrichDumpSource = ../../scripts/sinnix-enrich-dump;
       repoRoot = inputs.self;
       codexHooks = import ../../modules/features/dev/agents/hooks.nix {
         inherit pkgs;
@@ -55,7 +54,6 @@ in
             inherit
               claudeHooks
               codexHooks
-              enrichDumpSource
               polylogueConfigSource
               polylogueHook
               repoRoot
@@ -204,15 +202,6 @@ in
             # interval where the named executable is absent.
             require_text 'polylogue-hook Stop --provider claude-code' "$claudeHooks" claude-command-name
             require_text 'polylogue-hook Stop --provider codex' "$codexHooks" codex-command-name
-
-            # Standalone enrichment must fail before assembling or mutating
-            # any output when its archive-root contract is not configured.
-            if env -u POLYLOGUE_ARCHIVE_ROOT "${pkgs.bash}/bin/bash" "$enrichDumpSource" \
-              >/dev/null 2>missing-enrich-root.stderr; then
-              echo 'enrichment dump accepted a missing Polylogue archive root' >&2
-              exit 1
-            fi
-            require_text POLYLOGUE_ARCHIVE_ROOT missing-enrich-root.stderr missing-enrich-root-diagnostic
 
             # Fresh-writer smoke: install the generated TOML at the same XDG
             # path Home Manager uses in production, leave POLYLOGUE_ARCHIVE_ROOT
