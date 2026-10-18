@@ -93,6 +93,14 @@ mkFeatureModule {
     in
     {
       programs.chromium.enable = true;
+      # Memory Saver discards tabs left in the background, which reload on
+      # return. Over one 11-day uptime Chrome grew to 8.8 GB, one tab's
+      # renderer alone to 3.6 GB, most of it pushed into swap. Balanced
+      # savings discards a tab only after it has been inactive for a while.
+      programs.chromium.extraOpts = {
+        HighEfficiencyModeEnabled = true;
+        MemorySaverModeSavings = 1;
+      };
 
       # Chrome merges every JSON file in its managed policy directory, so the
       # generated extension policy lands beside chromium's own extra.json.

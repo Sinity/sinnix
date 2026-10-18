@@ -110,6 +110,17 @@ mkFeatureModule {
             RestartSec = "5s";
           };
         };
+        # minidlna keeps its media index in /var/cache, which the root wipe
+        # discards: every boot rebuilt it from scratch by reading the whole
+        # media tree (8.7 GB on the first hour after the 2026-10-18 boot).
+        sinnix.persistence.system.directories = [
+          {
+            directory = "/var/cache/minidlna";
+            user = "minidlna";
+            group = "minidlna";
+            mode = "0750";
+          }
+        ];
         services.minidlna = {
           enable = true;
           openFirewall = false;
