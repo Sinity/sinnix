@@ -1,6 +1,10 @@
-# Top-level recovery tarballs. Native CLI updates retain their own ownership.
-# Pi retains its publisher shrinkwrap with missing integrity hashes repaired.
-# Every other CLI has a reviewed complete recovery shrinkwrap.
+# Pinned recovery tarballs for the npm agent CLIs; the CLIs' own updaters
+# still manage the live installs. Pi keeps its publisher shrinkwrap with
+# missing integrity hashes repaired. Every other entry is locked by
+# flake/data/agent-cli-locks.json, rendered only by
+# `nix run .#sinnix-agent-cli-locks` (agentctl operation agent_cli_locks).
+# To bump one: `nix run .#sinnix-agent-cli-locks -- --set @openai/codex=0.163.0`
+# rewrites its URL and hash here and re-locks every entry.
 { pkgs }:
 {
   "@anthropic-ai/claude-code" = import ../../pkgs/agent-cli-recovery/dependency-source.nix {

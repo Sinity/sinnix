@@ -261,6 +261,13 @@ result = "exit"
 cache = "none"
 timeout_seconds = 1800
 
+[operations.agent_cli_locks]
+description = "Re-render agent CLI recovery locks from the pinned tarballs"
+exec = ["nix", "run", ".#sinnix-agent-cli-locks"]
+pool = "normal"
+result = "exit"
+timeout_seconds = 1800
+
 [operations.agent_environment_doc]
 description = "Render the declared agent environment reference"
 exec = ["nix", "run", ".#sinnix-agent-environment-doc", "--", "--output", "docs/agent-environment.md"]

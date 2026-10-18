@@ -39,13 +39,16 @@ def lock_archive(source, lock_path, native_archive, destination):
             if set(lock["packages"]) - {""} != expected:
                 raise ValueError("platform lock has unexpected transitive dependencies")
             native = lock["packages"]["node_modules/" + package["name"] + "-linux-x64"]
+            # npm records `name` only for an aliased package, e.g. codex's
+            # `npm:@openai/codex@<version>-linux-x64` platform payload.
+            native_name = native.get("name", package["name"] + "-linux-x64")
             with open(native_archive, "rb") as handle:
                 digest = base64.b64encode(hashlib.file_digest(handle, "sha512").digest()).decode()
             if native["integrity"] != "sha512-" + digest:
                 raise ValueError("native platform archive differs from reviewed acquisition")
             with tarfile.open(native_archive) as archive:
                 metadata = json.load(archive.extractfile("package/package.json"))
-            if metadata["name"] != native["name"] or metadata["version"] != native["version"]:
+            if metadata["name"] != native_name or metadata["version"] != native["version"]:
                 raise ValueError("native publisher identity differs from the lock")
             if metadata.get("dependencies") or metadata.get("optionalDependencies"):
                 raise ValueError("native platform package now has further dependencies")

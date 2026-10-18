@@ -562,13 +562,25 @@ let
       '';
       meta.description = "Render the generated Sinnix agent environment reference";
     };
+
+    sinnix-agent-cli-locks = pkgs.writeShellApplication {
+      name = "sinnix-agent-cli-locks";
+      runtimeInputs = [
+        pkgs.nodejs_22
+        pkgs.python3
+      ];
+      text = ''
+        exec python3 ${../pkgs/agent-cli-recovery/update-locks.py} "$@"
+      '';
+      meta.description = "Render the npm locks for pinned agent CLI recovery tarballs";
+    };
   };
 
   packageSet = scriptPackages // externalPackages;
 in
 {
   packages = scriptPackages // {
-    inherit (externalPackages) sinnix-agent-environment-doc;
+    inherit (externalPackages) sinnix-agent-environment-doc sinnix-agent-cli-locks;
   };
   inherit packageSet;
   inherit registry;
