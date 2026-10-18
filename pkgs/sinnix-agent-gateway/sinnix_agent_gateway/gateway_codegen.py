@@ -1,4 +1,9 @@
-"""Generate the reference, skill, fixtures and docs section from the actions."""
+"""Generate the agent skill and CLI fixtures from the actions; render the reference on demand.
+
+The full reference (every schema and example) is printed by `--reference`
+rather than tracked: `sinnix-agent-gateway catalog <action> --schema` serves
+the same contract live.
+"""
 
 from __future__ import annotations
 
@@ -11,12 +16,8 @@ from typing import Any
 from . import actions as action_set
 from .contracts import VerbFamily
 
-BEGIN_MARKER = "<!-- BEGIN GENERATED GATEWAY V2 REFERENCE -->"
-END_MARKER = "<!-- END GENERATED GATEWAY V2 REFERENCE -->"
-REFERENCE_PATH = Path("docs/generated/agent-gateway-reference.md")
 SKILL_PATH = Path("dots/_ai/skills/agent-gateway/SKILL.md")
 FIXTURE_PATH = Path("pkgs/sinnix-agent-gateway/fixtures/v2-examples.json")
-DOCS_PATH = Path("docs/agent-gateway.md")
 PRINCIPAL = "operator"
 
 
@@ -209,7 +210,7 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 
 {body}
 
-The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
+`sinnix-agent-gateway-generate --reference` prints every schema and example.
 
 Catalog revision: `{catalog["revision"]}`. Catalog SHA-256: `{catalog["action_catalog_hash"]}`.
 """
@@ -234,44 +235,10 @@ def render_fixtures() -> dict[str, Any]:
     }
 
 
-def render_docs_section() -> str:
-    catalog = catalog_payload()
-    lines = [
-        BEGIN_MARKER,
-        "",
-        "## Generated reference",
-        "",
-        f"This section is generated from the action set. Revision `{catalog['revision']}`, catalog SHA-256 `{catalog['action_catalog_hash']}`.",
-        "",
-        "The full schemas and examples are in [the generated gateway reference](generated/agent-gateway-reference.md). The matching agent skill is [agent-gateway](../dots/_ai/skills/agent-gateway/SKILL.md).",
-        "",
-        *_action_table(catalog["actions"]),
-        "",
-        END_MARKER,
-    ]
-    return "\n".join(lines) + "\n"
-
-
-def update_docs(text: str) -> str:
-    generated = render_docs_section().rstrip("\n")
-    if BEGIN_MARKER in text and END_MARKER in text:
-        before = text.split(BEGIN_MARKER, 1)[0].rstrip("\n")
-        after = text.split(END_MARKER, 1)[1].lstrip("\n")
-    else:
-        before, after = text.rstrip("\n"), ""
-    head = f"{before}\n\n" if before else ""
-    # A blank line separates the block from the heading after it, as the
-    # Markdown formatter requires; without it the two checks disagree.
-    tail = f"\n{after}" if after else ""
-    return f"{head}{generated}\n{tail}"
-
-
 def generated_files(root: Path) -> dict[Path, str]:
     return {
-        root / REFERENCE_PATH: render_reference(),
         root / SKILL_PATH: render_skill(),
         root / FIXTURE_PATH: _json(render_fixtures()) + "\n",
-        root / DOCS_PATH: update_docs((root / DOCS_PATH).read_text()),
     }
 
 
@@ -295,13 +262,17 @@ def check_artifacts(root: Path) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Generate gateway docs, skill, and fixtures"
+        description="Generate the gateway skill and fixtures, or print the reference"
     )
-    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--root", type=Path, default=Path("."))
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--write", action="store_true")
     mode.add_argument("--check", action="store_true")
+    mode.add_argument("--reference", action="store_true", help="print the full reference")
     args = parser.parse_args()
+    if args.reference:
+        print(render_reference(), end="")
+        return 0
     root = args.root.resolve()
     if args.write:
         write_artifacts(root)

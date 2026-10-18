@@ -185,6 +185,6 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 - `batches.resume` — backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.
 - `terminals.run` — wait=true appends a visible completion sentinel and waits for it (or for at_prompt when kitty reports it). Captured shells disable prompt marks, so the sentinel is the reliable completion signal. exit_status is parsed from that sentinel.
 
-The complete schemas and examples are in `docs/generated/agent-gateway-reference.md`.
+`sinnix-agent-gateway-generate --reference` prints every schema and example.
 
 Catalog revision: `v3-typed-actions`. Catalog SHA-256: `00859495e03ea04323acc855a75a5b0b7b2d802ad825d4cc2db5d1c8178acca1`.

@@ -124,7 +124,7 @@ def parser() -> argparse.ArgumentParser:
 
     call = subcommands.add_parser(
         "call",
-        help="invoke an action by name, e.g. call files.read --set path=/etc/os-release",
+        help='invoke an action by name, e.g. call files.read --set target=\'{"path":"/etc/os-release"}\'',
     )
     call.add_argument("action", help="action name, e.g. files.read")
     source = call.add_mutually_exclusive_group()
