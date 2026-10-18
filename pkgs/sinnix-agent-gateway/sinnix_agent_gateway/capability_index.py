@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .capabilities import Capability, Principal
+from .permissions import Permission, Principal
 from .config import GatewayConfig
 
 
@@ -96,7 +96,7 @@ class CapabilityIndexService:
         cursor: int = 0,
         limit: int = 100,
     ) -> dict[str, Any]:
-        self.principal.require(Capability.CAPABILITY_READ)
+        self.principal.require(Permission.CAPABILITY_READ)
         terms = self._query(query)
         if kind is not None and (not isinstance(kind, str) or not kind):
             raise CapabilityIndexError("kind must be a non-empty string")
@@ -144,7 +144,7 @@ class CapabilityIndexService:
         }
 
     def describe(self, name: str, kind: str | None = None) -> dict[str, Any]:
-        self.principal.require(Capability.CAPABILITY_READ)
+        self.principal.require(Permission.CAPABILITY_READ)
         if not isinstance(name, str) or not name or len(name) > 1_024:
             raise CapabilityIndexError(
                 "name must be a non-empty string up to 1024 characters"

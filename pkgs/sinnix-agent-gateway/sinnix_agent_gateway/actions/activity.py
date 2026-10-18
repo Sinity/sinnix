@@ -19,7 +19,7 @@ from ..action import (
     Example,
     RequestControls,
 )
-from ..capabilities import Capability, PolicyError
+from ..permissions import Permission, PolicyError
 from ..captures import CaptureLane
 from ..catalog import search_rows
 from ..contracts import VerbFamily
@@ -301,7 +301,7 @@ def _lane_files(lane: CaptureLane, since: float, until: float) -> list[Path]:
 
 
 def _activity(runtime: Runtime, inp: ActivityInput) -> Activity:
-    runtime.principal.require(Capability.CAPTURE_READ)
+    runtime.principal.require(Permission.CAPTURE_READ)
     until = inp.until if inp.until is not None else time.time()
     since = inp.since if inp.since is not None else until - 3_600
     if since > until:
@@ -441,7 +441,7 @@ class SessionsResult(GatewayModel):
 
 
 async def _sessions(runtime: Runtime, inp: SessionsInput) -> ActionResult:
-    runtime.principal.require(Capability.SESSION_READ)
+    runtime.principal.require(Permission.SESSION_READ)
     product = await owner_product(
         runtime,
         "polylogue",
@@ -472,7 +472,7 @@ class TimelineInput(RequestControls, session_owner.SessionTimeline):
 
 
 async def _timeline(runtime: Runtime, inp: TimelineInput) -> ActionResult:
-    runtime.principal.require(Capability.SESSION_READ)
+    runtime.principal.require(Permission.SESSION_READ)
     product = await owner_product(
         runtime,
         "polylogue",

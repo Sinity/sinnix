@@ -26,7 +26,7 @@ from ..action import (
     MutationControls,
     RequestControls,
 )
-from ..capabilities import Capability
+from ..permissions import Permission
 from ..contracts import VerbFamily
 from ..locators import (
     CheckoutLocator,
@@ -412,7 +412,7 @@ class JobPage(GatewayModel):
 
 
 def _list(runtime: Runtime, inp: ListInput) -> JobPage:
-    runtime.principal.require(Capability.JOB_READ)
+    runtime.principal.require(Permission.JOB_READ)
     arguments: dict[str, Any] = {"limit": inp.limit}
     if inp.cursor is not None:
         arguments["cursor"] = inp.cursor
@@ -520,7 +520,7 @@ def _log(
 
 
 def _get(runtime: Runtime, inp: GetInput) -> JobDetail:
-    runtime.principal.require(Capability.JOB_READ)
+    runtime.principal.require(Permission.JOB_READ)
     job_id, _, reference = inp.target.resolve()
     selectors = {}
     if inp.attempt is not None:
@@ -565,7 +565,7 @@ class LogsInput(RequestControls):
 
 
 def _logs(runtime: Runtime, inp: LogsInput) -> JobLog:
-    runtime.principal.require(Capability.JOB_READ)
+    runtime.principal.require(Permission.JOB_READ)
     job_id, _, reference = inp.target.resolve()
     return _log(runtime, job_id, inp.offset, inp.max_bytes, reference, inp.attempt)
 
@@ -606,7 +606,7 @@ class JobWait(GatewayModel):
 
 async def _wait(runtime: Runtime, inp: JobWaitInput) -> JobWait:
     """Block on pueue in a worker thread; a cancelled MCP request abandons it."""
-    runtime.principal.require(Capability.JOB_READ)
+    runtime.principal.require(Permission.JOB_READ)
     job_id, _, reference = inp.target.resolve()
     raw = await anyio.to_thread.run_sync(
         lambda: _job(
@@ -671,7 +671,7 @@ class QueuePage(GatewayModel):
 
 
 def _queues(runtime: Runtime, inp: QueuesInput) -> QueuePage:
-    runtime.principal.require(Capability.JOB_READ)
+    runtime.principal.require(Permission.JOB_READ)
     arguments: dict[str, Any] = {}
     if inp.groups is not None:
         if any(not group or len(group) > 128 for group in inp.groups):
@@ -729,7 +729,7 @@ class CancelResult(GatewayModel):
 
 
 def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
-    runtime.principal.require(Capability.JOB_CANCEL)
+    runtime.principal.require(Permission.JOB_CANCEL)
     job_id, ref, reference = inp.target.resolve()
     expected = inp.expected_phase
     if inp.preconditions:
@@ -800,7 +800,7 @@ class RetryInput(MutationControls):
 
 
 def _retry(runtime: Runtime, inp: RetryInput) -> JobView:
-    runtime.principal.require(Capability.JOB_START)
+    runtime.principal.require(Permission.JOB_START)
     job_id, _, reference = inp.target.resolve()
     return _job_view(_job(runtime, "job.retry", job_id, reference))
 
@@ -821,7 +821,7 @@ class CleanResult(GatewayModel):
 
 
 def _clean(runtime: Runtime, inp: CleanInput) -> CleanResult:
-    runtime.principal.require(Capability.JOB_CANCEL)
+    runtime.principal.require(Permission.JOB_CANCEL)
     job_id, _, reference = inp.target.resolve()
     raw = _job(runtime, "job.clean", job_id, reference)
     # The id the owner cleaned, which a reorder may have moved the job to.

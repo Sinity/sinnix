@@ -31,7 +31,7 @@ from mcp.shared.inbound import (
 )
 from sinnix_agent_gateway import calllog, serving, tooling
 from sinnix_agent_gateway import projects as projects_module
-from sinnix_agent_gateway.capabilities import Principal
+from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.projects import ProjectService
 from test_actions_jobs import DONE, make_server

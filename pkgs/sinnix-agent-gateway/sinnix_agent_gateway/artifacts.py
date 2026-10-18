@@ -12,7 +12,7 @@ from typing import Any
 
 from sinnix_lib.atomic import atomic_publish
 
-from .capabilities import Capability, Principal
+from .permissions import Permission, Principal
 from .config import GatewayConfig
 from .owner_execution import ExecutionResult
 from .payloads import retain_json
@@ -318,7 +318,7 @@ class ArtifactService:
         kind: str | None = None,
         owner_id: str | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Capability.ARTIFACT_READ)
+        self.principal.require(Permission.ARTIFACT_READ)
         rows = []
         paths = sorted(
             self.root.glob("*/metadata.json"),
@@ -354,7 +354,7 @@ class ArtifactService:
     def read(
         self, artifact_id: str, offset: int = 0, max_bytes: int = 64_000
     ) -> dict[str, Any]:
-        self.principal.require(Capability.ARTIFACT_READ)
+        self.principal.require(Permission.ARTIFACT_READ)
         if offset < 0:
             raise ArtifactError("offset must be non-negative")
         max_bytes = max(1, min(max_bytes, self.config.max_result_bytes))

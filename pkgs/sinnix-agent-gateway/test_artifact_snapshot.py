@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from sinnix_agent_gateway.artifacts import ArtifactService
-from sinnix_agent_gateway.capabilities import Principal
+from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig
 
 

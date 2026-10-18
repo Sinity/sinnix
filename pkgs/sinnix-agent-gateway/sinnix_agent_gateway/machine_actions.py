@@ -6,7 +6,7 @@ import socket
 from typing import Any, Callable
 from urllib.parse import quote
 
-from .capabilities import Capability, Principal
+from .permissions import Permission, Principal
 from .config import GatewayConfig
 
 
@@ -80,7 +80,7 @@ class MachineActionService:
 
     def snapshot(self) -> dict[str, Any]:
         """Read current reducer observation status."""
-        self.principal.require(Capability.MACHINE_READ)
+        self.principal.require(Permission.MACHINE_READ)
         payload = self._request("GET", "/v1/revision")
         if (
             payload.get("schema") != "sinnix-ops-v1"
@@ -107,7 +107,7 @@ class MachineActionService:
         target: dict[str, Any],
         parameters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Capability.MACHINE_READ)
+        self.principal.require(Permission.MACHINE_READ)
         request = {"action": action, "target": target, "parameters": parameters or {}}
         payload = self._request(
             "POST",
@@ -128,7 +128,7 @@ class MachineActionService:
 
     def lookup(self, idempotency_key: str) -> dict[str, Any] | None:
         """Read the retained owner outcome without submitting an action again."""
-        self.principal.require(Capability.MACHINE_ACTION)
+        self.principal.require(Permission.MACHINE_ACTION)
         return (
             self._request(
                 "GET", "/v1/actions/" + quote(idempotency_key, safe=""), missing_ok=True
@@ -145,7 +145,7 @@ class MachineActionService:
         operator_reason: str,
         parameters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Capability.MACHINE_ACTION)
+        self.principal.require(Permission.MACHINE_ACTION)
         request = {
             "action": action,
             "target": target,

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from sinnix_agent_gateway.capabilities import Principal
+from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.files import FileError, HostFileService
 

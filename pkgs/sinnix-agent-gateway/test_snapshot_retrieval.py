@@ -11,7 +11,7 @@ from pathlib import Path
 import anyio
 from conftest import error, ok
 from sinnix_agent_gateway.app import create_server
-from sinnix_agent_gateway.capabilities import Capability
+from sinnix_agent_gateway.permissions import Permission
 from test_actions_beads import commands, fixture
 from test_contexts import historical_context
 
@@ -200,6 +200,6 @@ def test_historical_context_read_requires_audit_capability(tmp_path: Path) -> No
     runtime = server._sinnix_revision_publisher.runtime
     runtime.principal = replace(
         runtime.principal,
-        capabilities=runtime.principal.capabilities - {Capability.AUDIT_READ},
+        permissions=runtime.principal.permissions - {Permission.AUDIT_READ},
     )
     assert error(server, "results.get", {"ref": reference}) == "policy_denied"

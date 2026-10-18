@@ -19,7 +19,7 @@ from ..action import (
     MutationControls,
     RequestControls,
 )
-from ..capabilities import Capability
+from ..permissions import Permission
 from ..contracts import VerbFamily
 from ..locators import (
     ProcessLocator,
@@ -152,7 +152,7 @@ class ProcessListing(GatewayModel):
 
 
 def _list(runtime: Runtime, inp: ListInput) -> ProcessListing:
-    runtime.principal.require(Capability.MACHINE_READ)
+    runtime.principal.require(Permission.MACHINE_READ)
     boot = _boot_time()
     unit = inp.unit.resolve()[0] if inp.unit else None
     rows = proc_snapshot()
@@ -323,7 +323,7 @@ def _environ(pid: int, limit: int) -> tuple[dict[str, str], bool]:
 
 
 def _get(runtime: Runtime, inp: GetInput) -> ProcessDetail:
-    runtime.principal.require(Capability.MACHINE_READ)
+    runtime.principal.require(Permission.MACHINE_READ)
     raw, ref = inp.target.resolve()
     pid = raw["pid"]
     boot = _boot_time()
@@ -407,7 +407,7 @@ class ProcessTree(GatewayModel):
 
 
 def _tree(runtime: Runtime, inp: TreeInput) -> ProcessTree:
-    runtime.principal.require(Capability.MACHINE_READ)
+    runtime.principal.require(Permission.MACHINE_READ)
     boot = _boot_time()
     rows = {row["pid"]: row for row in proc_snapshot()}
     by_parent: dict[int, list[dict[str, Any]]] = {}
@@ -483,7 +483,7 @@ class SignalResult(GatewayModel):
 
 
 def _signal(runtime: Runtime, inp: SignalInput) -> SignalResult:
-    runtime.principal.require(Capability.MACHINE_ACTION)
+    runtime.principal.require(Permission.MACHINE_ACTION)
     raw, ref = inp.target.resolve()
     if isinstance(inp.request, ReducerStop):
         receipt: OperateResult = _operate_via_reducer(
@@ -552,7 +552,7 @@ class WaitResult(GatewayModel):
 
 
 def _wait(runtime: Runtime, inp: WaitInput) -> WaitResult:
-    runtime.principal.require(Capability.MACHINE_READ)
+    runtime.principal.require(Permission.MACHINE_READ)
     raw, ref = inp.target.resolve()
     started = time.monotonic()
     deadline = started + inp.timeout_seconds

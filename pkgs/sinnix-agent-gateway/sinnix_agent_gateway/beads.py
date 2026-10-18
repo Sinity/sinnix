@@ -13,7 +13,7 @@ from difflib import unified_diff
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from .capabilities import Capability, Principal
+from .permissions import Permission, Principal
 from .config import GatewayConfig, ProjectConfig, TaskAuthorityConfig
 from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
 from .results import ProtocolError, ResultError, ResultService
@@ -107,7 +107,7 @@ class BeadsService:
         return f"{cls.project_ref(project_id)}/beads/{bead_id}"
 
     def _project(self, project_id: str, write: bool) -> ProjectConfig:
-        self.principal.require(Capability.TASK_WRITE if write else Capability.TASK_READ)
+        self.principal.require(Permission.TASK_WRITE if write else Permission.TASK_READ)
         try:
             project = self.config.projects[self._string(project_id, "project_id", 128)]
         except KeyError as exc:

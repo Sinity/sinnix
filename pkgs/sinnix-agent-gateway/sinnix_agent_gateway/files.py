@@ -12,7 +12,7 @@ from typing import Any
 
 from sinnix_lib.atomic import atomic_publish
 
-from .capabilities import Capability, Principal
+from .permissions import Permission, Principal
 from .config import GatewayConfig
 
 
@@ -141,7 +141,7 @@ class HostFileService:
         return self._resolve(path, existing=False)
 
     def stat(self, path: str) -> dict[str, Any]:
-        self.principal.require(Capability.FILE_READ)
+        self.principal.require(Permission.FILE_READ)
         target = self._resolve(path, existing=True)
         details = target.stat()
         return {
@@ -168,7 +168,7 @@ class HostFileService:
         destination: str | None = None,
         expected_sha256: str | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Capability.FILE_WRITE)
+        self.principal.require(Permission.FILE_WRITE)
         candidate = Path(path).expanduser()
         if not candidate.is_absolute():
             candidate = Path.home() / candidate

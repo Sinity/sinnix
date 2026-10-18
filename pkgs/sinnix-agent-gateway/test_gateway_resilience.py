@@ -7,7 +7,7 @@ import sys
 import anyio
 import pytest
 from sinnix_agent_gateway.audit import AuditService
-from sinnix_agent_gateway.capabilities import Principal
+from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.cli import build_manifest, verify_approval
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.results import RequestContext, ResultService
@@ -63,7 +63,7 @@ def test_crashed_pending_call_is_indeterminate_without_reexecution(
 import os, sys
 from pathlib import Path
 from sinnix_agent_gateway.audit import AuditService
-from sinnix_agent_gateway.capabilities import Principal
+from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig
 service = AuditService(GatewayConfig(projects={}, state_dir=Path(sys.argv[1])), Principal.for_name('operator'))
 assert service.claim_idempotency('fixture.change', 'key', 'a'*64)[0] == 'new'

@@ -6,7 +6,7 @@ import sqlite3
 
 import pytest
 from sinnix_agent_gateway.audit import AuditService
-from sinnix_agent_gateway.capabilities import Principal
+from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig
 
 

@@ -21,7 +21,7 @@ from typing import Any, BinaryIO, Callable, Iterator, Mapping, TextIO
 from sinnix_lib.atomic import atomic_publish_at
 from sinnix_lib.lock import flock
 
-from .capabilities import Capability, Principal
+from .permissions import Permission, Principal
 from .config import GatewayConfig, ProjectConfig
 from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
@@ -308,7 +308,7 @@ class ProjectService:
 
     def _project(self, project_id: str, *, write: bool = False) -> ProjectConfig:
         self.principal.require(
-            Capability.PROJECT_WRITE if write else Capability.PROJECT_READ
+            Permission.PROJECT_WRITE if write else Permission.PROJECT_READ
         )
         try:
             project = self.config.projects[project_id]
@@ -339,8 +339,8 @@ class ProjectService:
         return resolved
 
     def list(self) -> dict[str, Any]:
-        self.principal.require(Capability.PROJECT_READ)
-        can_write = Capability.PROJECT_WRITE in self.principal.capabilities
+        self.principal.require(Permission.PROJECT_READ)
+        can_write = Permission.PROJECT_WRITE in self.principal.permissions
         rows = []
         for project in self.config.projects.values():
             candidates: list[dict[str, Any]] = []

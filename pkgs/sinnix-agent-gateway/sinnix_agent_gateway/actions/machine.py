@@ -17,7 +17,7 @@ from ..action import (
     MutationControls,
     RequestControls,
 )
-from ..capabilities import Capability
+from ..permissions import Permission
 from ..contracts import VerbFamily
 from ..locators import UNIT_REF_PREFIX, UnitLocator, UnitScope
 from ..machine_actions import MachineActionError
@@ -330,7 +330,7 @@ def _incidents(runtime: Runtime, limit: int) -> SnapshotSection:
 
 
 def _snapshot(runtime: Runtime, inp: SnapshotInput) -> MachineSnapshot:
-    runtime.principal.require(Capability.MACHINE_READ)
+    runtime.principal.require(Permission.MACHINE_READ)
     pressure = _observe_section(runtime, "pressure", "live_pressure")
     units = _observe_section(runtime, "units")
     if units.available and isinstance(units.data, list):
@@ -435,7 +435,7 @@ def _scope_flag(scope: UnitScope) -> list[str]:
 
 
 def _units_list(runtime: Runtime, inp: UnitsListInput) -> UnitsListing:
-    runtime.principal.require(Capability.MACHINE_READ)
+    runtime.principal.require(Permission.MACHINE_READ)
     argv = [
         runtime.config.systemctl_command,
         *_scope_flag(inp.scope),
@@ -570,7 +570,7 @@ def _unit_show(
 
 
 def _units_get(runtime: Runtime, inp: UnitGetInput) -> UnitDetail:
-    runtime.principal.require(Capability.MACHINE_READ)
+    runtime.principal.require(Permission.MACHINE_READ)
     unit, scope, ref = inp.target.resolve()
     wanted = tuple(
         dict.fromkeys(
@@ -663,7 +663,7 @@ class UnitLogs(GatewayModel):
 
 
 def _units_logs(runtime: Runtime, inp: UnitLogsInput) -> UnitLogs:
-    runtime.principal.require(Capability.MACHINE_READ)
+    runtime.principal.require(Permission.MACHINE_READ)
     unit, scope, ref = inp.target.resolve()
     argv = [
         runtime.config.journalctl_command,

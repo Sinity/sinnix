@@ -17,7 +17,7 @@ from .artifacts import ArtifactService
 from .audit import AuditService
 from .beads import BeadsError, BeadsService
 from .browser import BrowserService
-from .capabilities import Capability, PolicyError, Principal
+from .permissions import Permission, PolicyError, Principal
 from .capability_index import CapabilityIndexService
 from .captures import CaptureService
 from .config import GatewayConfig
@@ -267,7 +267,7 @@ class Runtime:
             )
         )
         preflight = await anyio.to_thread.run_sync(self.route_preflight.run)
-        if Capability.MCP_READ in self.principal.capabilities:
+        if Permission.MCP_READ in self.principal.permissions:
             broker_catalog = await self.mcp_broker.catalog()
             broker_routes = []
             for server in broker_catalog["servers"]:
@@ -542,7 +542,7 @@ class Runtime:
         owner_request_key: str | None = None,
         request_digest: str | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Capability.SHELL_RUN)
+        self.principal.require(Permission.SHELL_RUN)
         if self.principal.name != "operator":
             raise PolicyError("operator shell jobs require the operator principal")
         if not isinstance(project_id, str) or not 1 <= len(project_id) <= 128:
@@ -605,7 +605,7 @@ class Runtime:
         parameters: Mapping[str, Any] | None,
         owner_request_key: str | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Capability.JOB_START)
+        self.principal.require(Permission.JOB_START)
         if not isinstance(project_id, str) or not 1 <= len(project_id) <= 128:
             raise ProtocolError("invalid_request", "project_id is malformed")
         if not isinstance(operation, str) or not 1 <= len(operation) <= 128:
@@ -653,7 +653,7 @@ class Runtime:
         return values
 
     def _recent_jobs(self, limit: int, cursor: str | None = None) -> dict[str, Any]:
-        self.principal.require(Capability.JOB_READ)
+        self.principal.require(Permission.JOB_READ)
         arguments: dict[str, Any] = {"limit": limit}
         if cursor:
             arguments["cursor"] = cursor
@@ -884,7 +884,7 @@ class Runtime:
                 raise ProtocolError(
                     "invalid_request", "job_terminal requires a canonical job reference"
                 )
-            self.principal.require(Capability.JOB_READ)
+            self.principal.require(Permission.JOB_READ)
             if cancelled is not None and cancelled():
                 return {
                     "schema": "sinnix.gateway-wait.v1",
@@ -1694,7 +1694,7 @@ def _principal_contract(principal_name: str) -> str:
     payload = {
         "principal": principal_name,
         "capabilities": sorted(
-            capability.value for capability in principal.capabilities
+            permission.value for permission in principal.permissions
         ),
     }
     return hashlib.sha256(

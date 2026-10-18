@@ -11,7 +11,7 @@ import anyio
 
 from . import actions as action_set
 from .app import canonical_manifest, create_server
-from .capabilities import PRINCIPAL_CAPABILITIES
+from .permissions import ROLE_PERMISSIONS
 from .cli_support import (
     CliInputError,
     build_request,
@@ -104,7 +104,7 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--config", type=Path, default=_default_config_path())
     result.add_argument(
-        "--principal", choices=sorted(PRINCIPAL_CAPABILITIES), default="operator"
+        "--principal", choices=sorted(ROLE_PERMISSIONS), default="operator"
     )
     subcommands = result.add_subparsers(dest="command")
     for name in (

@@ -14,7 +14,7 @@ from sinnix_agent_gateway.action import Action, MutationControls, RequestControl
 from sinnix_agent_gateway.actions import BY_NAME as ACTIONS
 from sinnix_agent_gateway.app import Runtime
 from sinnix_agent_gateway.audit import AuditService
-from sinnix_agent_gateway.capabilities import Principal
+from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.contracts import VerbFamily
 from sinnix_agent_gateway.results import (

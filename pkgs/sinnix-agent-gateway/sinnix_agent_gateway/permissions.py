@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 
-class Capability(StrEnum):
+class Permission(StrEnum):
     PROJECT_READ = "project.read"
     PROJECT_WRITE = "project.write"
     JOB_READ = "job.read"
@@ -32,13 +32,13 @@ class Capability(StrEnum):
     MCP_WRITE = "mcp.write"
 
 
-PRINCIPAL_CAPABILITIES: dict[str, frozenset[Capability]] = {
-    "operator": frozenset(Capability),
+ROLE_PERMISSIONS: dict[str, frozenset[Permission]] = {
+    "operator": frozenset(Permission),
 }
 
 
 # Holding CAPTURE_READ permits capture queries. The runtime inventory's lane
-# table carries resource-level authority beyond this capability.
+# table carries resource-level authority beyond this permission.
 PRINCIPAL_LANE_ACCESS: dict[str, frozenset[str] | None] = {
     "operator": None,
 }
@@ -51,13 +51,13 @@ class PolicyError(ValueError):
 @dataclass(frozen=True)
 class Principal:
     name: str
-    capabilities: frozenset[Capability]
+    permissions: frozenset[Permission]
     allowed_lanes: frozenset[str] | None
 
     @classmethod
     def for_name(cls, name: str) -> "Principal":
         try:
-            capabilities = PRINCIPAL_CAPABILITIES[name]
+            permissions = ROLE_PERMISSIONS[name]
         except KeyError as exc:
             raise PolicyError(f"unknown gateway principal: {name}") from exc
         if name not in PRINCIPAL_LANE_ACCESS:
@@ -67,18 +67,18 @@ class Principal:
             )
         return cls(
             name=name,
-            capabilities=capabilities,
+            permissions=permissions,
             allowed_lanes=PRINCIPAL_LANE_ACCESS[name],
         )
 
-    def require(self, capability: Capability) -> None:
-        if capability not in self.capabilities:
+    def require(self, permission: Permission) -> None:
+        if permission not in self.permissions:
             raise PolicyError(
-                f"principal {self.name} lacks capability {capability.value}"
+                f"principal {self.name} lacks permission {permission.value}"
             )
 
     def require_lane(self, lane: str) -> None:
-        self.require(Capability.CAPTURE_READ)
+        self.require(Permission.CAPTURE_READ)
         if self.allowed_lanes is not None and lane not in self.allowed_lanes:
             raise PolicyError(
                 f"principal {self.name} may not query capture lane {lane!r} "
@@ -89,7 +89,7 @@ class Principal:
         self, requested: list[str] | None, available: list[str]
     ) -> list[str]:
         """Resolve a requested lane list against principal authority."""
-        self.require(Capability.CAPTURE_READ)
+        self.require(Permission.CAPTURE_READ)
         if self.allowed_lanes is None:
             universe = available
         else:

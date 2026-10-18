@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 import pytest
-from sinnix_agent_gateway.capabilities import Capability, PolicyError, Principal
+from sinnix_agent_gateway.permissions import Permission, PolicyError, Principal
 from sinnix_agent_gateway.captures import CaptureService
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_lib.layout import ACTIVITY_LANES, capture_lane_path
@@ -324,17 +324,17 @@ def test_freshness_uses_declared_file_and_reports_missing_directory_progress(
 
 
 def test_capture_read_without_a_lane_access_entry_is_a_config_error() -> None:
-    from sinnix_agent_gateway import capabilities as caps
+    from sinnix_agent_gateway import permissions as caps
 
     original = dict(caps.PRINCIPAL_LANE_ACCESS)
-    caps.PRINCIPAL_CAPABILITIES["fixture-principal"] = frozenset(
-        {Capability.CAPTURE_READ}
+    caps.ROLE_PERMISSIONS["fixture-principal"] = frozenset(
+        {Permission.CAPTURE_READ}
     )
     try:
         with pytest.raises(PolicyError, match="no PRINCIPAL_LANE_ACCESS entry"):
             Principal.for_name("fixture-principal")
     finally:
-        del caps.PRINCIPAL_CAPABILITIES["fixture-principal"]
+        del caps.ROLE_PERMISSIONS["fixture-principal"]
         caps.PRINCIPAL_LANE_ACCESS.clear()
         caps.PRINCIPAL_LANE_ACCESS.update(original)
 

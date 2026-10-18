@@ -147,7 +147,7 @@ def test_the_cli_applies_the_configured_pools(
     fake_pueue.groups.clear()
     fake_pueue.groups.update({"pytest": 3})
     configuration = tmp_path / "agentctl.json"
-    configuration.write_text(json.dumps({"pools": {"pytest": 1}}))
+    configuration.write_text(json.dumps({"pools": {"pytest": {"parallel": 1}}}))
     monkeypatch.setenv("AGENTCTL_CONFIG", str(configuration))
 
     assert cli.main(["pools", "apply", "--json"]) == 0
@@ -274,7 +274,7 @@ def test_invalid_adaptive_declaration_is_rejected(adaptive):
 
 def test_project_landing_pool_with_underscore(live_pueue: str, tmp_path: Path) -> None:
     configuration = tmp_path / "agentctl.json"
-    configuration.write_text(json.dumps({"pools": {"yt_polisher-land": 1}}))
+    configuration.write_text(json.dumps({"pools": {"yt_polisher-land": {"parallel": 1}}}))
     policy = load_config(configuration).pools
     applied = pools.apply(policy)
     assert applied["created"] == [{"group": "yt_polisher-land", "parallel": 1}]

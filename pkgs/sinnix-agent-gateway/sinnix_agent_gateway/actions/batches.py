@@ -21,7 +21,7 @@ from ..action import (
     MutationControls,
     RequestControls,
 )
-from ..capabilities import Capability
+from ..permissions import Permission
 from ..contracts import VerbFamily
 from ..locators import (
     ProjectLocator,
@@ -276,7 +276,7 @@ class RunPage(GatewayModel):
 
 
 def _list(runtime: Runtime, inp: ListInput) -> RunPage:
-    runtime.principal.require(Capability.JOB_READ)
+    runtime.principal.require(Permission.JOB_READ)
     arguments: dict[str, Any] = {"limit": inp.limit}
     if inp.project is not None:
         arguments["project_id"] = inp.project.resolve(runtime)
@@ -300,7 +300,7 @@ class StatusInput(RequestControls):
 
 
 def _status(runtime: Runtime, inp: StatusInput) -> RunView:
-    runtime.principal.require(Capability.JOB_READ)
+    runtime.principal.require(Permission.JOB_READ)
     return _run_view(_owner(runtime, "batch.status", inp.target.resolve()))
 
 
@@ -339,7 +339,7 @@ class RunStarted(RunView):
 
 
 def _start(runtime: Runtime, inp: StartInput) -> RunStarted:
-    runtime.principal.require(Capability.JOB_START)
+    runtime.principal.require(Permission.JOB_START)
     arguments: dict[str, Any] = {
         "project_id": inp.project.resolve(runtime),
         "beads": inp.beads,
@@ -370,7 +370,7 @@ class LandQueued(RunView):
 
 
 def _land(runtime: Runtime, inp: LandInput) -> LandQueued:
-    runtime.principal.require(Capability.JOB_START)
+    runtime.principal.require(Permission.JOB_START)
     result = _owner(runtime, "batch.land", inp.target.resolve())
     queued = _job_id(result.get("landing_job_id"))
     if queued is None:
@@ -400,7 +400,7 @@ class ResumeQueued(RunView):
 
 
 def _resume(runtime: Runtime, inp: ResumeInput) -> ResumeQueued:
-    runtime.principal.require(Capability.JOB_START)
+    runtime.principal.require(Permission.JOB_START)
     result = _owner(
         runtime,
         "batch.resume",

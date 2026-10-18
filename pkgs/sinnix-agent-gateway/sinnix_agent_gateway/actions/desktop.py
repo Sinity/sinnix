@@ -442,9 +442,9 @@ def _walk(
 
 
 def _tree(runtime: Runtime, inp: TreeInput) -> AccessibleTree:
-    from ..capabilities import Capability
+    from ..permissions import Permission
 
-    runtime.principal.require(Capability.DESKTOP_READ)
+    runtime.principal.require(Permission.DESKTOP_READ)
     locator = inp.window or WindowLocator(active=True)
     client, ref = _owner_call(lambda: locator.resolve(runtime))
     pid = client.get("pid")

@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping
 
-from .capabilities import Capability, Principal
+from .permissions import Permission, Principal
 from .config import GatewayConfig
 from .redaction import redact_structure
 
@@ -284,7 +284,7 @@ class AuditService:
         rejected before admission can also be unknown. Reading never changes
         the row.
         """
-        self.principal.require(Capability.AUDIT_READ)
+        self.principal.require(Permission.AUDIT_READ)
         with self._connect() as connection:
             row = connection.execute(
                 "select request_sha256,state,response_json,receipt_id,created_at,updated_at from idempotency where principal = ? and action = ? and idempotency_key = ?",
@@ -316,7 +316,7 @@ class AuditService:
 
     def receipt(self, receipt_id: str) -> dict[str, Any]:
         """Return one principal-scoped audit event as a canonical receipt."""
-        self.principal.require(Capability.AUDIT_READ)
+        self.principal.require(Permission.AUDIT_READ)
         try:
             receipt_id = str(uuid.UUID(receipt_id))
         except ValueError as exc:
@@ -344,7 +344,7 @@ class AuditService:
         }
 
     def tail(self, limit: int = 100) -> dict[str, Any]:
-        self.principal.require(Capability.AUDIT_READ)
+        self.principal.require(Permission.AUDIT_READ)
         limit = max(1, min(limit, 1000))
         with self._connect() as connection:
             rows = connection.execute(
@@ -369,7 +369,7 @@ class AuditService:
 
     def events_since(self, sequence: int, limit: int = 100) -> list[dict[str, Any]]:
         """Read existing audit rows after an opaque sequence position."""
-        self.principal.require(Capability.AUDIT_READ)
+        self.principal.require(Permission.AUDIT_READ)
         if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
             raise ValueError("audit sequence must be non-negative")
         limit = max(1, min(limit, 1_000))
@@ -394,7 +394,7 @@ class AuditService:
         ]
 
     def verify(self) -> dict[str, Any]:
-        self.principal.require(Capability.AUDIT_READ)
+        self.principal.require(Permission.AUDIT_READ)
         previous_hash = GENESIS_HASH
         checked = 0
         with self._connect() as connection:

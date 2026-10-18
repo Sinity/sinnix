@@ -17,7 +17,7 @@ from typing import Any, Mapping, get_args
 from sinnix_lib.atomic import atomic_publish
 
 from .artifacts import ArtifactService
-from .capabilities import Capability, Principal
+from .permissions import Permission, Principal
 from .config import GatewayConfig
 from .payloads import canonical_chunks, canonical_size, retain_json
 from .schemas import StableErrorCode, V2ToolEnvelope
@@ -861,7 +861,7 @@ class ResultService:
         return {**metadata, "ref": self._result_ref(result_id), "rows": rows}
 
     def read(self, result_id: str) -> dict[str, Any]:
-        self.principal.require(Capability.AUDIT_READ)
+        self.principal.require(Permission.AUDIT_READ)
         result_id = self._normalized_id(result_id)
         path = self._path(result_id)
         try:

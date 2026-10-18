@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from .artifacts import ArtifactService
-from .capabilities import Capability, Principal
+from .permissions import Permission, Principal
 from .config import GatewayConfig
 from .owner_execution import (
     EnvironmentProfile,
@@ -207,7 +207,7 @@ class ObserveService:
     def machine_query(
         self, operation: str, cursor: int = 0, limit: int = 100
     ) -> dict[str, Any]:
-        self.principal.require(Capability.MACHINE_READ)
+        self.principal.require(Permission.MACHINE_READ)
         if cursor < 0:
             raise ValueError("cursor must be non-negative")
         if limit < 1 or limit > 500:
@@ -323,7 +323,7 @@ class ObserveService:
         catalog_revision: str,
         transport: str = "stdio",
     ) -> dict[str, Any]:
-        self.principal.require(Capability.MACHINE_READ)
+        self.principal.require(Permission.MACHINE_READ)
         inventory_available = self.config.runtime_inventory.is_file()
         approved_hash = (
             self.config.approved_manifest_hash

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from sinnix_agent_gateway.artifacts import ArtifactError, ArtifactService
-from sinnix_agent_gateway.capabilities import Principal
+from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.desktop import DesktopDiagnosticError, DesktopService
 from sinnix_agent_gateway.owner_execution import OwnerExecution

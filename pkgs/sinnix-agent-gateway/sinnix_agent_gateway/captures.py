@@ -8,7 +8,7 @@ from typing import Any
 
 from sinnix_lib.layout import ACTIVITY_LANES, capture_lane_path
 
-from .capabilities import Capability, PolicyError, Principal
+from .permissions import Permission, PolicyError, Principal
 from .config import GatewayConfig
 from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
 
@@ -155,7 +155,7 @@ class CaptureService:
 
     def lanes_visible(self) -> dict[str, Any]:
         """List runtime-declared native lane contracts visible to this principal."""
-        self.principal.require(Capability.CAPTURE_READ)
+        self.principal.require(Permission.CAPTURE_READ)
         lanes = self._available_lanes()
         available = sorted(lanes)
         visible = self.principal.filter_lanes(None, available)

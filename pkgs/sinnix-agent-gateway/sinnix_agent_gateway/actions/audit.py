@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import Field, model_validator
 
 from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
-from ..capabilities import Capability
+from ..permissions import Permission
 from ..capability_index import CapabilityIndexError
 from ..contexts import ContextSnapshotStore
 from ..contracts import VerbFamily
@@ -145,7 +145,7 @@ class ResultSnapshot(GatewayModel):
 
 
 def _result(runtime: Runtime, inp: ResultInput) -> ResultSnapshot:
-    runtime.principal.require(Capability.AUDIT_READ)
+    runtime.principal.require(Permission.AUDIT_READ)
     result_id = inp.result_id or (inp.ref or "").rsplit("/", 1)[1]
     try:
         if inp.ref and inp.ref.startswith("sinnix://contexts/"):

@@ -216,7 +216,7 @@ def test_an_abandoned_claim_reads_as_indeterminate_and_a_live_one_as_pending(
 ):
     """Fails if a claim whose caller died reads as still pending, or vice versa."""
     from sinnix_agent_gateway.audit import AuditService
-    from sinnix_agent_gateway.capabilities import Principal
+    from sinnix_agent_gateway.permissions import Principal
 
     config, _ = fixture(tmp_path)
     audit = AuditService(config, Principal.for_name("operator"))

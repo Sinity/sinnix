@@ -12,7 +12,7 @@ from pydantic import Field
 
 from ..action import ALL_PRINCIPALS, Action, ActionResult, Example, RequestControls
 from ..artifacts import ArtifactError
-from ..capabilities import Capability
+from ..permissions import Permission
 from ..content import IMAGE_TYPES, Artifact, attach, is_text
 from ..contracts import VerbFamily
 from ..locators import ARTIFACT_REF_PREFIX, ArtifactLocator
@@ -70,7 +70,7 @@ def _row(raw: dict[str, Any]) -> ArtifactRow:
 
 
 def _list(runtime: Runtime, inp: ListInput) -> ActionResult:
-    runtime.principal.require(Capability.ARTIFACT_READ)
+    runtime.principal.require(Permission.ARTIFACT_READ)
     query = {
         "action": "artifacts.list",
         "kind": inp.kind,
@@ -127,7 +127,7 @@ class Metadata(ArtifactRow):
 def _metadata(
     runtime: Runtime, locator: ArtifactLocator
 ) -> tuple[dict[str, Any], Path, str]:
-    runtime.principal.require(Capability.ARTIFACT_READ)
+    runtime.principal.require(Permission.ARTIFACT_READ)
     artifact_id, ref = locator.resolve()
     try:
         raw = runtime.artifacts._metadata(artifact_id)

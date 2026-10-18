@@ -25,7 +25,7 @@ from ..action import (
     MutationControls,
     RequestControls,
 )
-from ..capabilities import Capability
+from ..permissions import Permission
 from ..content import Artifact, attach, is_text, sha256_of, sniff_media_type
 from ..contracts import VerbFamily
 from ..files import FileError
@@ -143,7 +143,7 @@ class StatInput(RequestControls):
 
 
 def _stat(runtime: Runtime, inp: StatInput) -> FileStat:
-    runtime.principal.require(Capability.FILE_READ)
+    runtime.principal.require(Permission.FILE_READ)
     raw_path, _ = inp.target.resolve()
     candidate = Path(raw_path)
     if inp.follow_symlinks:
@@ -261,7 +261,7 @@ def _entry(runtime: Runtime, child: Path) -> FileEntry | None:
 
 
 def _list(runtime: Runtime, inp: ListInput) -> DirectoryListing:
-    runtime.principal.require(Capability.FILE_READ)
+    runtime.principal.require(Permission.FILE_READ)
     target = _authorized(runtime, inp.target, existing=True)
     if not target.is_dir():
         raise ProtocolError("invalid_request", "path is not a directory")
@@ -344,7 +344,7 @@ class FileContent(GatewayModel):
 
 
 def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
-    runtime.principal.require(Capability.FILE_READ)
+    runtime.principal.require(Permission.FILE_READ)
     target = _authorized(runtime, inp.target, existing=True)
     if not target.is_file():
         raise ProtocolError("invalid_request", "path is not a regular file")
@@ -658,7 +658,7 @@ def _raise_search_failure(argv: list[str], result: ExecutionResult) -> None:
 
 
 def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
-    runtime.principal.require(Capability.FILE_READ)
+    runtime.principal.require(Permission.FILE_READ)
     roots = [_authorized(runtime, root, existing=True) for root in inp.roots]
     root_refs = [encode_file_ref(str(root)) for root in roots]
     warnings: list[str] = []
@@ -1218,7 +1218,7 @@ def _git_apply_patch(
 
 
 def _patch(runtime: Runtime, inp: PatchInput) -> PatchResult:
-    runtime.principal.require(Capability.FILE_WRITE)
+    runtime.principal.require(Permission.FILE_WRITE)
     target = _authorized(runtime, inp.target, existing=True)
     if not target.is_file():
         raise ProtocolError("invalid_request", "path is not a regular file")
@@ -1369,7 +1369,7 @@ class ChangeResult(GatewayModel):
 
 
 def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
-    runtime.principal.require(Capability.FILE_WRITE)
+    runtime.principal.require(Permission.FILE_WRITE)
     path, ref = inp.target.resolve()
     expected = inp.expected_sha256
     if inp.preconditions:

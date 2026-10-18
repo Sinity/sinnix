@@ -16,7 +16,7 @@ import anyio
 from pydantic import Field
 
 from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
-from ..capabilities import Capability
+from ..permissions import Permission
 from ..contexts import source_revision
 from ..contracts import VerbFamily
 from ..locators import (
@@ -191,7 +191,7 @@ def _probe(
     runtime: Runtime, condition: FileExists | TerminalOutput
 ) -> tuple[bool, dict[str, Any], str]:
     if isinstance(condition, FileExists):
-        runtime.principal.require(Capability.FILE_READ)
+        runtime.principal.require(Permission.FILE_READ)
         path, _ = condition.target.resolve()
         present = Path(path).exists()
         return (
@@ -360,7 +360,7 @@ class EventPage(GatewayModel):
 
 
 def _events(runtime: Runtime, inp: EventsInput) -> EventPage:
-    runtime.principal.require(Capability.AUDIT_READ)
+    runtime.principal.require(Permission.AUDIT_READ)
     project_ids = (
         sorted({locator.resolve(runtime) for locator in inp.projects})
         if inp.projects

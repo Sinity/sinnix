@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from sinnix_agent_gateway.capabilities import PolicyError, Principal
+from sinnix_agent_gateway.permissions import PolicyError, Principal
 from sinnix_agent_gateway.capability_index import (
     CapabilityIndexError,
     CapabilityIndexService,

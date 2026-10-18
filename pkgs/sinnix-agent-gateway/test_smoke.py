@@ -14,7 +14,7 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from sinnix_agent_gateway import actions as action_set
 from sinnix_agent_gateway.app import Runtime, create_server
-from sinnix_agent_gateway.capabilities import PolicyError
+from sinnix_agent_gateway.permissions import PolicyError
 from sinnix_agent_gateway.cli import (
     build_manifest,
     semantic_canary,

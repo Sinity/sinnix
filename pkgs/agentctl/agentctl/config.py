@@ -144,49 +144,48 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
     for name, declaration in value.items():
         if not isinstance(name, str) or POOL_NAME.fullmatch(name) is None:
             raise ConfigError(f"pools has an invalid pueue group name: {name!r}")
-        if isinstance(declaration, Mapping):
-            unknown = set(declaration) - {
-                "parallel",
-                "adaptive",
-                "exclusive_with",
-                "promote_after_seconds",
-            }
-            if unknown:
-                raise ConfigError(
-                    f"pools.{name} declares unknown field(s): "
-                    + ", ".join(sorted(unknown))
-                )
-            excluded = declaration.get("exclusive_with", [])
-            if not isinstance(excluded, list) or any(
-                not isinstance(pool, str) or POOL_NAME.fullmatch(pool) is None
-                for pool in excluded
-            ):
-                raise ConfigError(f"pools.{name}.exclusive_with must name valid pools")
-            promote = declaration.get("promote_after_seconds")
-            if promote is not None and (
-                not isinstance(promote, int) or isinstance(promote, bool) or promote < 1
-            ):
-                raise ConfigError(
-                    f"pools.{name}.promote_after_seconds must be a positive integer"
-                )
-            adaptive = declaration.get("adaptive")
-            if adaptive is not None:
-                if not isinstance(adaptive, Mapping) or set(adaptive) != {"floor", "job_memory_bytes", "slice"}:
-                    raise ConfigError(f"pools.{name}.adaptive requires floor, job_memory_bytes and slice")
-                floor = _parallel(name, adaptive["floor"])
-                budget = _parallel(name, adaptive["job_memory_bytes"])
-                unit = adaptive["slice"]
-                if floor > _parallel(name, declaration.get("parallel")) or not isinstance(unit, str) or not re.fullmatch(r"[a-zA-Z0-9_-]+\.slice", unit):
-                    raise ConfigError(f"pools.{name}.adaptive has an invalid floor or slice")
-                adaptive = AdaptivePool(floor=floor, job_memory_bytes=budget, slice=unit)
-            parsed[name] = PoolPolicy(
-                parallel=_parallel(name, declaration.get("parallel")),
-                adaptive=adaptive,
-                exclusive_with=tuple(excluded),
-                promote_after_seconds=promote,
+        if not isinstance(declaration, Mapping):
+            raise ConfigError(f"pools.{name} must be an object with `parallel`")
+        unknown = set(declaration) - {
+            "parallel",
+            "adaptive",
+            "exclusive_with",
+            "promote_after_seconds",
+        }
+        if unknown:
+            raise ConfigError(
+                f"pools.{name} declares unknown field(s): "
+                + ", ".join(sorted(unknown))
             )
-        else:
-            parsed[name] = PoolPolicy(parallel=_parallel(name, declaration))
+        excluded = declaration.get("exclusive_with", [])
+        if not isinstance(excluded, list) or any(
+            not isinstance(pool, str) or POOL_NAME.fullmatch(pool) is None
+            for pool in excluded
+        ):
+            raise ConfigError(f"pools.{name}.exclusive_with must name valid pools")
+        promote = declaration.get("promote_after_seconds")
+        if promote is not None and (
+            not isinstance(promote, int) or isinstance(promote, bool) or promote < 1
+        ):
+            raise ConfigError(
+                f"pools.{name}.promote_after_seconds must be a positive integer"
+            )
+        adaptive = declaration.get("adaptive")
+        if adaptive is not None:
+            if not isinstance(adaptive, Mapping) or set(adaptive) != {"floor", "job_memory_bytes", "slice"}:
+                raise ConfigError(f"pools.{name}.adaptive requires floor, job_memory_bytes and slice")
+            floor = _parallel(name, adaptive["floor"])
+            budget = _parallel(name, adaptive["job_memory_bytes"])
+            unit = adaptive["slice"]
+            if floor > _parallel(name, declaration.get("parallel")) or not isinstance(unit, str) or not re.fullmatch(r"[a-zA-Z0-9_-]+\.slice", unit):
+                raise ConfigError(f"pools.{name}.adaptive has an invalid floor or slice")
+            adaptive = AdaptivePool(floor=floor, job_memory_bytes=budget, slice=unit)
+        parsed[name] = PoolPolicy(
+            parallel=_parallel(name, declaration.get("parallel")),
+            adaptive=adaptive,
+            exclusive_with=tuple(excluded),
+            promote_after_seconds=promote,
+        )
     for name, policy in parsed.items():
         unknown = set(policy.exclusive_with) - set(parsed)
         if unknown:

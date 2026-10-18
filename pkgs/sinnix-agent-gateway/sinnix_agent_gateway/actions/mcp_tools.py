@@ -19,7 +19,7 @@ from ..action import (
     MutationControls,
     RequestControls,
 )
-from ..capabilities import Capability
+from ..permissions import Permission
 from ..catalog import search_rows
 from ..contracts import EffectMode, VerbFamily
 from ..locators import ARTIFACT_REF_PREFIX, McpToolLocator
@@ -113,7 +113,7 @@ def _server_row(
 
 
 async def _servers(runtime: Runtime, inp: ServersInput) -> Servers:
-    runtime.principal.require(Capability.MCP_READ)
+    runtime.principal.require(Permission.MCP_READ)
     configured = runtime.config.mcp_broker_servers
     unknown = sorted(set(inp.servers) - set(configured))
     if unknown:

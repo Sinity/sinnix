@@ -9,7 +9,7 @@ import anyio
 from pydantic import Field, model_validator
 
 from ..action import OPERATOR_ONLY, Action, Example, RequestControls
-from ..capabilities import Capability, PolicyError
+from ..permissions import Permission, PolicyError
 from ..contracts import VerbFamily
 from ..generated_lynchpin_inputs import CampaignInput as OwnerCampaignInput
 from ..locators import ProjectLocator
@@ -234,7 +234,7 @@ class OrchestrationResult(GatewayModel):
 async def _orchestration(
     runtime: Runtime, inp: OrchestrationInput
 ) -> OrchestrationResult:
-    runtime.principal.require(Capability.SESSION_READ)
+    runtime.principal.require(Permission.SESSION_READ)
     sessions = []
     for reference in dict.fromkeys(inp.session_refs):
         if not reference.startswith("session:") or len(reference) > 8192:
@@ -298,7 +298,7 @@ async def _campaign(runtime: Runtime, inp: CampaignInput) -> CampaignResult:
     from .contexts import _resolve_project
 
     project = await anyio.to_thread.run_sync(_resolve_project, runtime, inp.project)
-    runtime.principal.require(Capability.TASK_READ)
+    runtime.principal.require(Permission.TASK_READ)
     product = await owner_product(
         runtime,
         "lynchpin",

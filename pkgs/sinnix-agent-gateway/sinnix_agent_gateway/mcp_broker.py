@@ -23,7 +23,7 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.types import PaginatedRequestParams
 
 from .artifacts import ArtifactService
-from .capabilities import Capability, Principal
+from .permissions import Permission, Principal
 from .config import (
     DEFAULT_MCP_CALL_TIMEOUT_SECONDS,
     GatewayConfig,
@@ -300,7 +300,7 @@ class McpBrokerService:
         self, *, server_names: set[str] | None = None, bounded: bool = True
     ) -> dict[str, Any]:
         """Return admitted upstream tool contracts from bounded handshakes."""
-        self.principal.require(Capability.MCP_READ)
+        self.principal.require(Permission.MCP_READ)
         rows = sorted(
             (name, row)
             for name, row in self.config.mcp_broker_servers.items()
@@ -995,7 +995,7 @@ class McpBrokerService:
         write: bool,
         deadline_at: float | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Capability.MCP_WRITE if write else Capability.MCP_READ)
+        self.principal.require(Permission.MCP_WRITE if write else Permission.MCP_READ)
         server_name = self._string(server_name, "server", 128)
         tool_name = self._string(tool_name, "tool", 256)
         if not isinstance(arguments, dict):

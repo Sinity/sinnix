@@ -174,13 +174,13 @@ python3Packages.buildPythonApplication {
     import tempfile
     from pathlib import Path
     import anyio
-    from sinnix_agent_gateway.capabilities import PRINCIPAL_CAPABILITIES
+    from sinnix_agent_gateway.permissions import ROLE_PERMISSIONS
     from sinnix_agent_gateway.cli import build_manifest
     from sinnix_agent_gateway.config import GatewayConfig
 
     with tempfile.TemporaryDirectory() as state:
         config = GatewayConfig(projects={}, state_dir=Path(state))
-        for principal in PRINCIPAL_CAPABILITIES:
+        for principal in ROLE_PERMISSIONS:
             artifact = {"principal": principal, "manifest": anyio.run(build_manifest, config, principal)}
             (Path(sys.argv[1]) / f"{principal}.json").write_text(json.dumps(artifact, sort_keys=True))
     PY

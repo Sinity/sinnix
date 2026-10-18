@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import ArtifactService
-from .capabilities import Capability, Principal
+from .permissions import Permission, Principal
 from .config import GatewayConfig
 from .owner_execution import (
     EnvironmentProfile,
@@ -92,7 +92,7 @@ class DesktopService:
         target: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Capture the focused output, one output, or a region into attested state."""
-        self.principal.require(Capability.DESKTOP_READ)
+        self.principal.require(Permission.DESKTOP_READ)
         if not isinstance(fix_hdr, bool):
             raise DesktopError("fix_hdr must be boolean")
         capture_dir = self.config.state_dir / "captures" / uuid.uuid4().hex
@@ -179,12 +179,12 @@ class DesktopService:
     ) -> Any:
         """Run one declared wrapper verb for a typed action; returns decoded output."""
         self.principal.require(
-            Capability.DESKTOP_ACTION if mutating else Capability.DESKTOP_READ
+            Permission.DESKTOP_ACTION if mutating else Permission.DESKTOP_READ
         )
         return self._run(owner, arguments, timeout=timeout)["result"]
 
     def read(self, operation: str) -> dict[str, Any]:
-        self.principal.require(Capability.DESKTOP_READ)
+        self.principal.require(Permission.DESKTOP_READ)
         try:
             owner, *arguments = self._READ_OPERATIONS[operation]
         except KeyError as exc:
@@ -195,7 +195,7 @@ class DesktopService:
         return {"operation": operation, **self._run(owner, arguments)}
 
     def action(self, operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        self.principal.require(Capability.DESKTOP_ACTION)
+        self.principal.require(Permission.DESKTOP_ACTION)
         if not isinstance(arguments, dict):
             raise DesktopError("arguments must be an object")
         if operation == "focus_window":

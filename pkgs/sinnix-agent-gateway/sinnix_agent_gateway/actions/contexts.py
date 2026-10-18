@@ -113,7 +113,7 @@ def _resolve_project(runtime: Runtime, locator: Any) -> str:
 
 
 async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
-    from ..capabilities import Capability
+    from ..permissions import Permission
     from ..contexts import source_revision
     from .products import (
         CampaignInput,
@@ -125,7 +125,7 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
     )
 
     if inp.job is not None:
-        runtime.principal.require(Capability.JOB_READ)
+        runtime.principal.require(Permission.JOB_READ)
         job_id, ref, launch_reference = inp.job.resolve()
         identity = {"job_id": job_id, "max_bytes": 64000}
         if launch_reference is not None:
@@ -209,7 +209,7 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
             },
         )
     elif inp.intent == "incident":
-        runtime.principal.require(Capability.MACHINE_READ)
+        runtime.principal.require(Permission.MACHINE_READ)
         value = await anyio.to_thread.run_sync(
             runtime.observe.machine_query, "overview"
         )
@@ -223,7 +223,7 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
             source_ref="sinnix://machine/overview",
         )
     else:
-        runtime.principal.require(Capability.TASK_READ)
+        runtime.principal.require(Permission.TASK_READ)
         product = await owner_product(
             runtime,
             "lynchpin",

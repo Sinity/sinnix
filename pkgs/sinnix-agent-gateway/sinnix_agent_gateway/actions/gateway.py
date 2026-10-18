@@ -11,7 +11,7 @@ import anyio
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..action import ALL_PRINCIPALS, Action, Example, MutationControls, RequestControls
-from ..capabilities import Capability
+from ..permissions import Permission
 from ..catalog import search_rows
 from ..contracts import VerbFamily
 from ..schemas import GatewayModel
@@ -240,7 +240,7 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
     if (
         inp.include_mcp_tools
         and (inp.query or "").strip()
-        and Capability.MCP_READ in runtime.principal.capabilities
+        and Permission.MCP_READ in runtime.principal.permissions
     ):
         try:
             broker = await runtime.mcp_broker.catalog(bounded=False)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from .artifacts import ArtifactService
-from .capabilities import Capability, Principal
+from .permissions import Permission, Principal
 from .config import GatewayConfig
 from .owner_execution import (
     EnvironmentProfile,
@@ -49,7 +49,7 @@ class TerminalService:
     ) -> Any:
         """Run one declared wrapper verb for a typed action; returns decoded output."""
         self.principal.require(
-            Capability.TERMINAL_ACTION if mutating else Capability.TERMINAL_READ
+            Permission.TERMINAL_ACTION if mutating else Permission.TERMINAL_READ
         )
         return self._run(arguments, timeout=timeout)["result"]
 
@@ -78,7 +78,7 @@ class TerminalService:
     def read(
         self, operation: str, arguments: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        self.principal.require(Capability.TERMINAL_READ)
+        self.principal.require(Permission.TERMINAL_READ)
         if arguments is None:
             arguments = {}
         if not isinstance(arguments, dict):
@@ -113,7 +113,7 @@ class TerminalService:
         )
 
     def action(self, operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        self.principal.require(Capability.TERMINAL_ACTION)
+        self.principal.require(Permission.TERMINAL_ACTION)
         if not isinstance(arguments, dict):
             raise TerminalError("arguments must be an object")
         if operation == "focus":

@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import Field
 
 from ..action import OPERATOR_ONLY, Action, Example, MutationControls, RequestControls
-from ..capabilities import Capability
+from ..permissions import Permission
 from ..contracts import VerbFamily
 from ..files import move_source_refusal
 from ..locators import FileLocator, encode_file_ref
@@ -340,7 +340,7 @@ def _plan_mkdir(runtime: Runtime, index: int, locator: FileLocator) -> PlannedMk
 
 
 def _plan(runtime: Runtime, inp: PlanInput) -> PlanResult:
-    runtime.principal.require(Capability.FILE_READ)
+    runtime.principal.require(Permission.FILE_READ)
     mkdirs = [
         _plan_mkdir(runtime, index, target) for index, target in enumerate(inp.mkdirs)
     ]
@@ -475,7 +475,7 @@ def _require_preconditions(runtime: Runtime, plan: dict[str, Any]) -> None:
 
 
 def _changeset(runtime: Runtime, inp: ChangesetInput) -> ChangesetResult:
-    runtime.principal.require(Capability.FILE_WRITE)
+    runtime.principal.require(Permission.FILE_WRITE)
     service = OrganizationService(runtime.files, runtime.artifacts)
     try:
         plan = service.load_plan(inp.plan_ref)
@@ -583,7 +583,7 @@ def _changeset(runtime: Runtime, inp: ChangesetInput) -> ChangesetResult:
 
 
 def _references(runtime: Runtime, inp: ReferencesInput) -> ReferencesResult:
-    runtime.principal.require(Capability.FILE_READ)
+    runtime.principal.require(Permission.FILE_READ)
     hits: list[ReferenceHit] = []
     truncated = False
     warnings: list[str] = []

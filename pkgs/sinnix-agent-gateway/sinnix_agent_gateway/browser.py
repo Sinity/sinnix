@@ -10,7 +10,7 @@ from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.lock import flock
 
 from .artifacts import ArtifactService
-from .capabilities import Capability, Principal
+from .permissions import Permission, Principal
 from .config import GatewayConfig
 from .owner_execution import (
     ExecutionProfile,
@@ -112,7 +112,7 @@ class BrowserService:
     def invoke(self, arguments: list[str], *, mutating: bool, timeout: int = 30) -> Any:
         """Run one declared wrapper verb for a typed action; returns decoded output."""
         self.principal.require(
-            Capability.BROWSER_ACTION if mutating else Capability.BROWSER_READ
+            Permission.BROWSER_ACTION if mutating else Permission.BROWSER_READ
         )
         return self._run(arguments, timeout)["result"]
 
@@ -126,7 +126,7 @@ class BrowserService:
 
     def describe_target(self, page_id: str) -> dict[str, Any]:
         """Read one registered agent target without widening to operator tabs."""
-        self.principal.require(Capability.BROWSER_READ)
+        self.principal.require(Permission.BROWSER_READ)
         page_id = self._require_owned_target(page_id)
         return self.read("info", page_id)
 
@@ -137,7 +137,7 @@ class BrowserService:
         full_page: bool = False,
         quality: int | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Capability.BROWSER_READ)
+        self.principal.require(Permission.BROWSER_READ)
         page_id = self._require_owned_target(page_id)
         if image_format not in {"png", "jpeg"}:
             raise BrowserError("image_format must be png or jpeg")
@@ -210,7 +210,7 @@ class BrowserService:
         page_id: str | None = None,
         selector: str | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Capability.BROWSER_READ)
+        self.principal.require(Permission.BROWSER_READ)
         if operation in {"status", "list", "list_tabs"}:
             if page_id is not None or selector is not None:
                 raise BrowserError(f"{operation} does not accept page_id or selector")
@@ -235,7 +235,7 @@ class BrowserService:
         return {"operation": operation, "page_id": page_id, **self._run(arguments)}
 
     def action(self, operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        self.principal.require(Capability.BROWSER_ACTION)
+        self.principal.require(Permission.BROWSER_ACTION)
         if not isinstance(arguments, dict):
             raise BrowserError("arguments must be an object")
         if operation == "agent_window":
