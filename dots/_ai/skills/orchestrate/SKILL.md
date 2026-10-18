@@ -25,7 +25,7 @@ next, not on supervising progress.
     between calls, so a worktree named only in the prompt lets checks
     silently run against the main checkout.
   - Use a fresh `general-purpose` agent only when a clean context is the
-    point (an independent review, a self-contained packet that must not
+    point (an independent review, a self-contained prompt that must not
     inherit bias) or a different model is needed.
     Pass an explicit `model` on a non-fork dispatch when the role default
     is not what you want; a fork always inherits the parent model.
@@ -51,7 +51,7 @@ next, not on supervising progress.
 - A dependency that governs integration or acceptance is not a prerequisite
   for writing the first patch. Start independent code now; serialize only
   what truly shares a contract, and give that seam one owner.
-- The packet names assigned outcomes, ownership, relevant source pointers,
+- The prompt names assigned outcomes, ownership, relevant source pointers,
   exclusions, and what to report. Include the base and a test selector when
   needed; avoid copied instructions, complete manifests, and unchanged history.
 - Ask the owner to read every assigned task, write the whole connected change
@@ -98,7 +98,7 @@ allocation trials.
 
 Review composition and changed seams, using worker evidence for unchanged
 parts. Check the requested outcome, affected invariants, and honest test scope;
-do not repeat the worker's review of an unchanged packet. Run broader regression
+do not repeat the worker's review of an unchanged prompt. Run broader regression
 at a useful integration milestone or for a concrete risk. Keep ordinary known
 failures visible without blocking independent progress. Preserve stronger
 evidence for actual deployment, reset, data loss, or paid vector preservation.

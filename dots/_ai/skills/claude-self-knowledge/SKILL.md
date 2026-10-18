@@ -45,7 +45,7 @@ before attributing a write failure to the declared layout.
 - Know whether a tool creates a fresh context or a fork, which model controls
   it takes, and how completion arrives. Another harness's subagent semantics
   do not carry over.
-- Agent definitions carry standing role and tool limits; dispatch packets
+- Agent definitions carry standing role and tool limits; dispatch prompts
   carry task scope. Read both before explaining an unexpected permission or
   model.
 - Wait on the harness's completion notifications or the runtime's event

@@ -188,7 +188,7 @@ def task_context(
     attempt: int | None = None,
     beads: Beads | None = None,
 ) -> dict[str, Any]:
-    """Read current owner tasks beside immutable dispatch facts, without writing."""
+    """Read current beads tasks beside immutable dispatch facts, without writing."""
     run = load(config, run_id)
     if project.project_id != run.project:
         raise BatchRefusal("project", "task reader project differs from dispatch")

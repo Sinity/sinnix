@@ -1,7 +1,7 @@
 # capture-mail: mbsync IMAP -> Maildir mirror into the capture lake
 # (sinnix-9dml).
 #
-# Native-format doctrine (per the bead's 2026-08-12 rigor-pass note and the
+# Native-format rule (per the bead's 2026-08-12 rigor-pass note and the
 # aw-rollup lesson on sinnix-olm2's close): a Maildir is already the durable
 # store IMAP clients understand, so this lane does NOT go through the
 # sinnix-capture envelope writer -- mbsync writes the Maildir directly under
@@ -12,7 +12,7 @@
 # oversight: this lane exists to survive server-side and client-side
 # deletes, so a message that disappears upstream (spam-folder purge, "empty
 # trash", account migration) stays mirrored here rather than being dropped
-# on the next sync -- the no-retention capture doctrine applied to mail.
+# on the next sync -- the no-retention rule applied to mail.
 #
 # Default-off (`sinnix.services.capture-mail.enable`) with a NAMED secret
 # slot: modules/secrets.nix declares `mail-app-password` as a runtime secret

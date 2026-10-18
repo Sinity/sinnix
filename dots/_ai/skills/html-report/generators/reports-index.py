@@ -174,7 +174,7 @@ def render_navigation(reports_dir: Path, out: Path, manifest: Path | None = None
             if served:
                 href = published.get(str(target.resolve()))
                 link = (f'<a href="{esc(href, quote=True)}">{esc(item["title"])}</a> '
-                        if href else f'<span>{esc(item["title"])} (local entrance; use Copy path)</span> ')
+                        if href else f'<span>{esc(item["title"])} (local file; use Copy path)</span> ')
             else:
                 link = f'<a class="{cls}" href="{esc(href, quote=True)}">{esc(item["title"])}</a> '
             items.append({**item, "status": status})

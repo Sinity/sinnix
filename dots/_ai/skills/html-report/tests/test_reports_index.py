@@ -148,7 +148,7 @@ def test_served_navigation_resolves_projection_and_labels_private_entrance(tmp_p
     out = site / "index.html"
     assert mod.build(site, out, served=True) == 0
     assert "file://" not in out.read_text()
-    assert "local entrance; use Copy path" in out.read_text()
+    assert "local file; use Copy path" in out.read_text()
     (site / "selected.md").symlink_to(source)
     assert mod.build(site, out, served=True) == 0
     assert 'href="selected.md"' in out.read_text()

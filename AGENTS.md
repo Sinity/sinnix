@@ -35,6 +35,10 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
 - The gateway owns who may call which tool, and the high-level machine and
   project tools (`docs/agent-gateway.md`). It calls agentctl's routes in
   process and never becomes a second job controller.
+- A *receipt* is the JSON record a job, action or backup writes about its own
+  outcome; tools read receipts instead of re-running the work. A *capture
+  lane* is one stream of captured data under `/realm` and the unit that
+  writes it.
 
 ## Modules
 

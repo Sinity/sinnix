@@ -55,7 +55,7 @@ purpose:
 - features describe user-facing capabilities and are normally part of the
   workstation character;
 - services describe long-running processes and are enabled deliberately;
-- profiles define workstation and cloud posture;
+- profiles define workstation and cloud defaults;
 - top-level modules own persistence, backups, networking, storage, and runtime
   policy;
 - host files remain the final place where roles and settings are chosen.

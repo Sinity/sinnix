@@ -333,7 +333,7 @@ def parser() -> argparse.ArgumentParser:
     _project_option(batch_queue)
     _output_arguments(batch_queue)
     batch_task = batch_verbs.add_parser(
-        "task", help="current owner tasks and changes from one worker's dispatch"
+        "task", help="current beads tasks and changes from one worker's dispatch"
     )
     batch_task.add_argument("--run", default=os.environ.get("AGENTCTL_RUN_ID"))
     batch_task.add_argument("--worker", default=os.environ.get("AGENTCTL_WORKER_ID"))
@@ -408,18 +408,18 @@ def parser() -> argparse.ArgumentParser:
     _output_arguments(batch_resume)
 
     native_evidence = verbs.add_parser(
-        "evidence", help="file and read immutable native-work evidence"
+        "evidence", help="file and read evidence of work done outside a batch"
     )
     evidence_verbs = native_evidence.add_subparsers(dest="evidence_verb", required=True)
     evidence_file = evidence_verbs.add_parser(
         "file",
-        help="validate and retain one native worker-result claim with observations",
+        help="validate and retain one worker-result claim, with observations, for work done outside a batch",
     )
     evidence_file.add_argument("path", type=Path)
     _project_option(evidence_file)
     _output_arguments(evidence_file)
     evidence_list = evidence_verbs.add_parser(
-        "list", help="retained native-work evidence for one project"
+        "list", help="retained evidence of work done outside a batch, for one project"
     )
     evidence_list.add_argument(
         "selector", nargs="?", metavar="project", help=PROJECT_HELP
@@ -429,7 +429,7 @@ def parser() -> argparse.ArgumentParser:
     _project_option(evidence_list)
     _output_arguments(evidence_list)
     evidence_get = evidence_verbs.add_parser(
-        "get", help="retrieve one complete native-work evidence artifact by id"
+        "get", help="retrieve one complete evidence record by id"
     )
     evidence_get.add_argument("evidence_id")
     _project_option(evidence_get)
@@ -853,7 +853,7 @@ def _evidence(arguments: argparse.Namespace, config: Config, out: Output) -> int
     if arguments.evidence_verb == "file":
         project = resolve_project(config, arguments.project)
         filed = evidence.file(config, project, arguments.path)
-        out.write(filed, f"recorded native evidence {filed['evidence_id']}")
+        out.write(filed, f"recorded evidence {filed['evidence_id']}")
         return EXIT_OK
     if arguments.evidence_verb == "list":
         project = _select_project(config, arguments.project, arguments.selector)

@@ -159,7 +159,7 @@ The report renderer accepts `--judgments` for authoritative current classificati
 ## Current navigation checks
 
 `sinnix-navigation-audit --manifest /path/navigation-audit.json` checks local
-Markdown links in explicitly selected current entrance documents. The JSON
+Markdown links in explicitly selected current index documents. The JSON
 manifest has `schema_version: 1`, an absolute-path `documents` list, and an
 optional absolute-path `external_roots` list. Targets below mounted external
 roots are checked; known offline external roots are reported as unprobed
@@ -173,11 +173,11 @@ and does not scan imported packages or historical reports.
 
 The workstation's private manifest is owned by the report catalog. Run its
 declared `navigation_audit` operation after moving managed collections or
-editing current entrances. `sinnix-realm-layout-check` separately verifies declared managed
+editing current index documents. `sinnix-realm-layout-check` separately verifies declared managed
 containers and rejects recreation of retired paths.
 
 Navigation audits report denied and inaccessible targets separately from missing
-paths. Unreadable, wrongly typed or invalidly encoded entrance documents and
+paths. Unreadable, wrongly typed or invalidly encoded index documents and
 malformed links are explicit failures; the audit continues through the remaining
 entrances. Documents and targets below offline external roots remain explicitly
 unprobed, without inspecting their placeholder paths.

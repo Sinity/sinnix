@@ -70,7 +70,7 @@ mkServiceModule {
       # path transition ... during canonicalization"), so its mode and
       # ownership silently stop being maintained.
       # Process history includes command lines and executable paths. Protect
-      # the entrance without rewriting native store modes or ownership.
+      # the directory without rewriting native store modes or ownership.
       systemd.tmpfiles.rules = [
         "d ${cfg.storeDir} 0700 ${config.sinnix.user.name} users -"
         "d ${cfg.storeDir}/store 0755 ${config.sinnix.user.name} users -"

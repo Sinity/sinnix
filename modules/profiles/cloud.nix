@@ -2,7 +2,7 @@
 #
 # Coarse aggregate for headless cloud or dedicated-server boxes (Hetzner AX,
 # VPS). Sets `sinnix.machine.isDesktop = false` and the matching networking,
-# console, and firewall posture. Per-host configs still pick the actual
+# console, and firewall settings. Per-host configs still pick the actual
 # services (sinex role, tailscale tags, backups, etc.).
 #
 # Inert until explicitly enabled per host.

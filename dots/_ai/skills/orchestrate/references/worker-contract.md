@@ -84,7 +84,7 @@ names, and exits with one result document.
 Validated against `dots/claude/agents/schemas/worker.schema.json`:
 
 The snapshot's `result_contract` names the shape and the attempt; a resume
-packet's contract replaces the original packet's. When its `schema_version` is
+prompt's contract replaces the original prompt's. When its `schema_version` is
 2 (every dispatched bead's `evidence_binding.v2_available` is `true`), use
 this v2 shape. Copy each criterion's text exactly from that snapshot. For a
 batch worker, AgentCTL fills the attempt, `bead_revision`,

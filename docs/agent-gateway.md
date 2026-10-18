@@ -148,7 +148,7 @@ returns only new log bytes.
 ## Beads, sessions and evidence
 
 - **Beads** actions use the typed contracts of the packaged `bd owner` command.
-  `beads.read` exposes owner queries and paging; `beads.query` pages through a
+  `beads.read` exposes beads queries and paging; `beads.query` pages through a
   pinned revision and stores the pages as an immutable result. `beads.create`,
   `beads.update`, `beads.close` and `beads.dependencies.add` are the specific
   writes. `beads.changeset` applies one project's ordered batch atomically.

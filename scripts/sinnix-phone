@@ -458,7 +458,7 @@ require_unlocked_phone() {
 # reboot. Ring buffers ship at 256 KiB (~4h on this phone); 64 MiB is the most
 # the shell can set without root. `persist.logd.size` would persist it but is
 # refused to the shell uid, so re-assert on every adb attach. Notification
-# history is Android's own second witness beside the app listener; it
+# history is Android's own second record beside the app listener; it
 # defaults off.
 ensure_device_capture_settings() {
   local buf
@@ -503,7 +503,7 @@ drain_logcat_adb() {
   fi
   stage="$(mktemp "$dest/.logcat-pull.XXXXXX")" || return 1
   # Interrupted or failed pulls retain their exact bytes outside the daily
-  # reader entrance. Never advance the cursor from incomplete output.
+  # reader path. Never advance the cursor from incomplete output.
   [ -z "$since" ] || logcat_args+=(-T "$since")
   if ! adb_any logcat "${logcat_args[@]}" >"$stage"; then
     if [ -s "$stage" ]; then
@@ -827,7 +827,7 @@ drain_bcr_calls_adb() (
     revision_prior[$kind]=""
   }
 
-  # Keep the exact old bytes before replacing the call entrance. The digest
+  # Keep the exact old bytes before replacing the call path. The digest
   # directory is create-only and the original basename remains recognizable.
   bcr_preserve_revision() {
     local kind="$1" target digest history_rel history_path

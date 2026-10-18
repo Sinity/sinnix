@@ -8,8 +8,8 @@ pruned automatically; the HDD's free space is the only limit.
 
 | Source | How | When | Repository |
 |---|---|---|---|
-| `/realm` | btrbk read-only snapshot, archived by the drain | snapshots 00/06/12/18:00, drain at :05 and :25 | `borg-realm-v2` |
-| `/persist` | btrbk read-only snapshot, archived by the drain | same as `/realm` | `borg-persist-v1` |
+| `/realm` | btrbk read-only snapshot, archived by the Borg job | snapshots 00/06/12/18:00, drain at :05 and :25 | `borg-realm-v2` |
+| `/persist` | btrbk read-only snapshot, archived by the Borg job | same as `/realm` | `borg-persist-v1` |
 | The ephemeral root | snapshot the initrd takes before each wipe | daily | `borg-root-snapshots-v1` |
 | Sinex blob store | direct | daily 05:40 | `borg-sinex-blobs-v1` |
 | Polylogue state | hooks sealed from a read-only cut of its subvolume | daily 04:15 | `borg-polylogue-state-v1` |

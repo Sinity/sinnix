@@ -111,7 +111,7 @@ Servers: context7, github, lynchpin, sinex.
 | `lynchpin` | Query or develop Lynchpin evidence sources, materialization, DuckDB substrate generations, graphs, analyses, Chisel reports, Polylogue boundaries, and MCP evidence products. |
 | `orchestrate` | Coordinate several agents on one goal — ownership groups, model choice, native agents, forks or AgentCTL batches, integration review, and landing the result. |
 | `polylogue` | Query past AI sessions through Polylogue, or develop Polylogue itself — ingestion, storage tiers, lineage, CLI, MCP, daemon convergence, devtools verification. |
-| `prompting` | Write, rewrite, or diagnose prompts — dispatch packets for subagents, handoffs to external or browser models, prompt portfolios, reusable agent definitions and templates, or enhancing the user's rough request. |
+| `prompting` | Write, rewrite, or diagnose prompts — dispatch prompts for subagents, handoffs to external or browser models, prompt portfolios, reusable agent definitions and templates, or enhancing the user's rough request. |
 | `quest-hmd-control` | Control and verify a Meta Quest HMD through ADB, app intents, media forwarding, and immersive-session evidence. Use for Quest setup, pairing, streaming, capture, or headset UI beyond ordinary Android automation. |
 | `rank-options` | Order several generated options by real operator preference — brainstorm shortlists, design alternatives, candidate plans — with a few pairwise comparisons, a fitted order, and a resumable domain. |
 | `reverse-engineering` | Analyze firmware, updater packages, native binaries, encryption routines, and undocumented device protocols with REA, Ghidra, Binwalk, and Unblob on NixOS. |

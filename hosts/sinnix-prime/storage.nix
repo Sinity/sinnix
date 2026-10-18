@@ -31,7 +31,7 @@ let
   swapSizeGiB = 8;
   swapPriority = 10;
 
-  # Overflow tier of the tiered swap posture: zram (priority 100,
+  # Overflow tier of the tiered swap setup: zram (priority 100,
   # modules/profiles/workstation.nix) absorbs bursts at RAM speed; this NVMe
   # file (priority 10) takes sustained overflow so cold anon leaves RAM
   # entirely. Lives on /realm NVMe, not the wear-limited root SATA SSD, so

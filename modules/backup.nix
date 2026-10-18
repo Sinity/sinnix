@@ -441,7 +441,7 @@ let
       acknowledgement_root="$latest_marker.by-snapshot"
       install -d -m 0700 -o root -g root "$acknowledgement_root"
       # Adopt only the same named, still-identified current-policy proof. This
-      # does not repeat a large comparison or transfer custody to another state.
+      # does not repeat a large comparison or hand the snapshot to another state.
       if [ -f "$latest_marker" ] && previous="$(${snapshotCoverage} acknowledged --policy ${coveragePolicy} -- ${lib.escapeShellArg snapshotDir} ${lib.escapeShellArg snapshotGlob} "$latest_marker" ${lib.escapeShellArg archivePrefix} ${lib.escapeShellArg replacementSuffix})"; then
         previous_acknowledgement="$acknowledgement_root/$previous"
         if [ ! -e "$previous_acknowledgement" ] && [ ! -L "$previous_acknowledgement" ]; then

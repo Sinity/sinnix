@@ -146,7 +146,7 @@
 
   # Routine source coverage is metadata plus a bounded content sample. The
   # prior full-content receipt remains historical evidence, never overwritten
-  # by this weaker proof. Snapshot-directory flock pins custody while create
+  # by this weaker proof. A snapshot-directory flock keeps the snapshot in place while create
   # and drain operations continue under their existing native Borg locks.
   (mkBackupJob "borgbackup-coverage-audit-realm" {
     description = "Compare acknowledged Realm metadata and a bounded content sample";

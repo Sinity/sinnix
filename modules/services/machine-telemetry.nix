@@ -434,7 +434,7 @@ mkServiceModule {
 
         systemd.services.machine-telemetry-db-scaffold = {
           description = "Create machine telemetry SQLite nodatacow subvolume";
-          # Existing entrances are repaired by tmpfiles without restarting capture.
+          # Existing directories are repaired by tmpfiles without restarting capture.
           restartIfChanged = false;
           requiredBy = [ "machine-telemetry.service" ];
           before = [ "machine-telemetry.service" ];

@@ -32,7 +32,7 @@ batch's run manifest, and the `view` screen.
 | `batch queue <run>`                                                         | queue the landing as a job instead of running it here                                                             |
 | `batch status <run>` / `batch list [p]`                                     | the manifest joined with pueue state and the landing PR                                                           |
 | `batch result <run> <worker> <result.json> [--attempt n]`                   | file a worker result produced by another harness                                                                  |
-| `batch resume <run> --worker <w>`                                           | queue a fresh agent into the worker's worktree with a resume packet                                               |
+| `batch resume <run> --worker <w>`                                           | queue a fresh agent into the worker's worktree with a resume prompt                                               |
 | `batch task [--run r --worker w --attempt n]`                               | a worker's current tasks beside its dispatch-time bindings; read-only                                             |
 | `batch scope-correct <run> <worker> <candidate> --authorize <bead>=<glob>…` | replace a malformed stored worker scope, keeping the correction history                                           |
 | `batch abandon <run> [--reason R]`                                          | release a run that will not land                                                                                  |
@@ -195,13 +195,13 @@ For each worker it then:
 
 1. Claims the tasks as `agentctl-batch-<run>`.
 2. Creates a worktree on `batch/<run>/<worker>` from the base.
-3. Writes the packet to `.agentctl/prompt.md`.
+3. Writes the worker prompt to `.agentctl/prompt.md`.
 4. Queues the worker in pool `agent`, with `MemoryMax` from
    `[workspace].agent_memory_max`.
 
 The landing task goes in `<p>-land`, behind every worker.
 
-A worker runs `agentctl-agent` with the packet and the worker result schema,
+A worker runs `agentctl-agent` with that prompt and the worker result schema,
 then `agentctl batch result`, which validates its last message and binds it to
 the worktree head. Backend, model and effort come from the flags, the task's
 `model_policy` metadata, or `[packets.defaults]`. Agents start with no MCP
@@ -215,7 +215,7 @@ Worker, resume and review units cannot publish or change tasks:
 - **Files:** the unit sees the project root read-only (with `.git` writable),
   and other workers' worktrees are hidden.
 
-`--workers external` makes the same manifest, claims, worktrees and packets but
+`--workers external` makes the same manifest, claims, worktrees and prompts but
 queues only the landing (stashed). Another harness runs the workers and files
 results with `batch result`. The last filed result releases the landing.
 Re-running `batch start` on an existing manifest completes missing steps.
@@ -481,5 +481,5 @@ pueued and the pool slices come from `modules/features/cli/core.nix` and
 pueued end to end.
 
 The worker tool `batch-worker` (`dots/_ai/skills/agent-runtime/scripts/batch-worker`) is what a
-queued worker uses inside its packet. `batch-worker task` shows the worker its current
+queued worker uses while it works. `batch-worker task` shows the worker its current
 tasks beside the dispatch-time snapshot, and `batch-worker done` files its result.

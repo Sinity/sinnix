@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Audit local links in explicitly selected current Markdown entrances
+# description: Audit local links in explicitly selected current Markdown index documents
 # runtimeInputs: python3
 # pythonPackages: @sinnix-lib
 

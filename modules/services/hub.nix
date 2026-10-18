@@ -28,7 +28,7 @@
 # `/feedback` is a route on that same hub server, writing the same append-only
 # JSONL an earlier standalone feedback daemon wrote (same envelope, same
 # file-per-UTC-day, same fsync per line -- agents read those files directly).
-# Arrival of a `sinnix-elicit-v1` record starts the drain that a 120s timer used
+# Arrival of a `sinnix-elicit-v1` record starts the ingest that a 120s timer used
 # to run, coalesced so a comparison session refits the model once rather than
 # once per tap.
 #
@@ -350,7 +350,7 @@ mkServiceModule {
         }
 
         (hub) {
-          # Usage evidence for sinnix's own audits (capture doctrine):
+          # Usage evidence for sinnix's own audits (capture rule):
           # the global logger above stays at ERROR for Caddy's own
           # diagnostics, so without a dedicated access logger page usage is
           # otherwise unmeasurable.
@@ -506,7 +506,7 @@ mkServiceModule {
 
       # The pages are rendered by the hub server, which needs the manifest this
       # module owns the content of; so is /feedback, which needs the spool
-      # directory. Elicit drain execution is the hub server's declared AgentCTL
+      # directory. Rank-pairs ingest execution is the hub server's declared AgentCTL
       # operation: the hub server requests and waits for it without acquiring
       # access to the elicit state itself.
       sinnix.services.hub-server = {

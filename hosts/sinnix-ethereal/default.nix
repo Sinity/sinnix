@@ -19,7 +19,7 @@
 
   networking.hostName = "sinnix-ethereal";
 
-  # Headless cloud-host posture: isDesktop=false, systemd-networkd, serial
+  # Headless cloud-host defaults: isDesktop=false, systemd-networkd, serial
   # console, firewall locked to ssh + tailscale0, xserver/qemuGuest disabled.
   sinnix.profiles.cloud.enable = true;
 

@@ -17,7 +17,7 @@ let
   # Mirrors environment.sessionVariables.TMPDIR in modules/profiles/workstation.nix;
   # the wrappers re-assert it because inheritance is not guaranteed.
   shellTmpRoot = "${sinnixCfg.paths.realmRoot}/tmp/work";
-  # Clodex binds credential custody to this spelling, not the resolved binary.
+  # Clodex ties its stored credentials to this spelling, not the resolved binary.
   clodexCredentialHelper = "/home/${user}/.local/bin/sinnix-clodex-credential-helper";
 
   # Shared npm bootstrap prelude — delegates state-dir setup and first-run npm

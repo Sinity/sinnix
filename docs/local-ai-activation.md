@@ -1,6 +1,6 @@
 # Local AI activation
 
-Most local AI backends use on-demand socket activation. Caddy checks Host and browser provenance on the public HTTP entrance, then connects to a private systemd socket. Accepted requests start the backend; an idle systemd proxy stops it after its declared window. A TCP connection or refused HTTP request does not activate a model. `sinnix ai list` distinguishes boot, on-demand and manual services from the runtime inventory and installed units.
+Most local AI backends use on-demand socket activation. Caddy checks Host and browser provenance on the public HTTP port, then connects to a private systemd socket. Accepted requests start the backend; an idle systemd proxy stops it after its declared window. A TCP connection or refused HTTP request does not activate a model. `sinnix ai list` distinguishes boot, on-demand and manual services from the runtime inventory and installed units.
 
 ## Service map
 
@@ -28,7 +28,7 @@ these defaults; switch those through Open WebUI's configuration API when changin
 providers, preserving unrelated settings.
 
 The llama.cpp profiles listen only on a Unix socket under `/run/<profile>/`, so
-the Caddy front door is their only TCP entrance.
+the Caddy front door is their only TCP entry point.
 
 Kokoro's RAM and swap bounds apply directly to its Podman container. Its model
 process is in a separate cgroup from the systemd client unit, whose memory
@@ -217,4 +217,4 @@ Browser pages are kept away from these services in two places. Caddy checks Host
 
 The system Caddy service fronts the registry-declared loopback ports independently of the tailnet hub. Each private activation socket is owned by the operator, with group access for Caddy and mode `0660`. Its unit name carries a hash of its definition (`<name>-proxy-<hash>.socket`, named by the proxy service's `Sockets=`), because NixOS activation does not restart a changed socket unit; a changed definition becomes a new unit that activation starts. STT declares a native-only entrance matching its receiver, so even same-origin browser metadata is refused before it loads. The backend and proxy retain the readiness wait, idle timeout, native manual-start route and GPU conflict mesh. Their systemd lifetimes are bound so a natural proxy idle exit releases the backend. Manual prewarming acquires the listening socket before starting its proxy; idle timing starts after the first proxy connection. Declared public-API consumers (such as the Ollama model loader) require the HTTP gate before they start. Caddy does not pool upstream connections, so it cannot extend a backend's idle window after a request ends. Streaming and WebSocket connections remain active work until they close.
 
-Caddy's administration entrance is an owner-only Unix socket under `/run/caddy`; it does not expose an additional TCP control API. `ai-http-boundary` checks the generated request gate with no models. `ai-http-activation-vm` checks the actual systemd/Caddy lifecycle using lightweight fake backends, including zero starts for refused requests, idle release and exclusive-resource transitions.
+Caddy's administration endpoint is an owner-only Unix socket under `/run/caddy`; it does not expose an additional TCP control API. `ai-http-boundary` checks the generated request gate with no models. `ai-http-activation-vm` checks the actual systemd/Caddy lifecycle using lightweight fake backends, including zero starts for refused requests, idle release and exclusive-resource transitions.

@@ -392,7 +392,7 @@ claude)
     resume_args=(--resume "$resume_session_id")
   fi
   # The prompt goes in on stdin: one argv string is capped at 128 KiB by the
-  # kernel and a resume packet with the bead bodies exceeds it.
+  # kernel and a resume prompt with the bead bodies exceeds it.
   claude_args=("${resume_args[@]}" --print --model "$model" --effort "$reasoning_effort")
   mcp_config="$(mktemp "${last_file}.mcp.XXXXXX")" || exit 1
   python3 -c '

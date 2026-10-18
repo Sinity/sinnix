@@ -1,7 +1,7 @@
 # capture-calendar: vdirsyncer daily CalDAV -> .ics snapshots into the
 # capture lake (sinnix-m0qt).
 #
-# Native-format doctrine, same as capture-mail.nix (same bead family,
+# Native-format rule, same as capture-mail.nix (same bead family,
 # 2026-08-12 rigor pass): calendars land as plain .ics files under one
 # directory tree, not sinnix-capture envelopes.
 #

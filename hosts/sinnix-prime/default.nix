@@ -83,7 +83,7 @@
     tailscale = {
       enable = true;
       tags = [ "tag:workstation" ];
-      # Zero-blast-radius posture: never touch DNS -- the router stays DNS
+      # Zero-blast-radius setup: never touch DNS -- the router stays DNS
       # authority -- and accept/advertise no routes, so the join adds only the
       # tailscale0 interface + 100.64/10 peer routes.
       enableMagicDNS = false;

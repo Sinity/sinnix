@@ -73,7 +73,7 @@ is not applied accidentally.
 | Path                                | Role                                                               |
 | ----------------------------------- | ------------------------------------------------------------------ |
 | `hosts/sinnix-ethereal/`            | Host composition, hardware, storage, boot, and networking.         |
-| `modules/profiles/cloud.nix`        | Headless defaults and remote-operability posture.                  |
+| `modules/profiles/cloud.nix`        | Headless defaults and remote-access settings.                      |
 | `modules/services/tailscale.nix`    | Tailnet service and enrollment contract.                           |
 | `modules/services/sinex/bridge.nix` | Translation from Sinnix role options to the upstream Sinex module. |
 | `flake/deploy.nix`                  | `deploy-ethereal` and `apply-all` command implementations.         |

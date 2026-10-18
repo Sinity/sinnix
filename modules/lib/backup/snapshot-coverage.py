@@ -197,7 +197,7 @@ def verified_prune_plan(directory, glob, marker, prefix, replacement_suffix):
         if receipt.is_symlink():
             raise ValueError("snapshot acknowledgement is a symlink")
         if not receipt.exists():
-            continue  # A different snapshot's proof never establishes custody.
+            continue  # A different snapshot's proof never covers this snapshot.
         acknowledged = verified_acknowledgement(directory, glob, receipt, prefix, replacement_suffix)
         if acknowledged is None or acknowledged[0] != name:
             raise ValueError("unqualified snapshot acknowledgement")

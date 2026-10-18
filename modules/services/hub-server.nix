@@ -136,7 +136,7 @@ mkServiceModule {
       description = ''
         AgentCTL argv run, coalesced, when a `sinnix-elicit-v1` record lands
         in the feedback spool. The default waits for the declared
-        `rank_pairs_ingest` operation, so completion means the drain and
+        `rank_pairs_ingest` operation, so completion means the ingest and
         model refit completed. Null disables arrival-triggered draining.
       '';
     };

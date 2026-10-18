@@ -1,6 +1,6 @@
 ---
 name: prompting
-description: Write, rewrite, or diagnose prompts — dispatch packets for subagents, handoffs to external or browser models, prompt portfolios, reusable agent definitions and templates, or enhancing the user's rough request.
+description: Write, rewrite, or diagnose prompts — dispatch prompts for subagents, handoffs to external or browser models, prompt portfolios, reusable agent definitions and templates, or enhancing the user's rough request.
 ---
 
 # Prompting

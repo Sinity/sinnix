@@ -170,7 +170,7 @@ in
           }
         ];
 
-        # Tiered swap posture: zram is the fast first tier absorbing bursts at
+        # Tiered swap: zram is the fast first tier absorbing bursts at
         # RAM speed; the NVMe swapfile (hosts/sinnix-prime/storage.nix, priority
         # 10) is the overflow tier for sustained pressure. Telemetry samples
         # zram/PSI/refaults so a thrash regression stays visible.

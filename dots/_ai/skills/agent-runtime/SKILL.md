@@ -10,7 +10,7 @@ worktrunk for batch worktrees, GitHub for publication, Beads for tasks, systemd
 for fixed services and timers. It holds no campaign state, so neither should
 you. `agentctl <verb> --help` gives the installed syntax and
 `/realm/project/sinnix/repo/docs/agentctl.md` the output and exit-code contract.
-A capability you need but cannot find is a task against the substrate; the
+A capability you need but cannot find is a task against agentctl itself; the
 extension point is a declared operation in the project's
 `.agentctl/project.toml`.
 
@@ -99,7 +99,7 @@ fast-forward), and closes the tasks its acceptance record satisfies.
 ## Worker toolbelt
 
 Batch workers have `batch-worker` on PATH. `batch-worker task` prints the original prompt and
-current owner task amendments for its bound attempt. Assess changed requirements
+current beads task amendments for its bound attempt. Assess changed requirements
 against retained work; unavailable comparisons stay explicit. `batch-worker
 verify` runs the descriptor's focused profile without arguments. For an
 operation requiring a selector, use `agentctl job start <project> <operation>

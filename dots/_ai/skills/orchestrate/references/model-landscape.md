@@ -24,7 +24,7 @@ specification is part of the work; count it when comparing choices.
 
 Revalidate any design or allocation judgment already recorded on the task
 against current code; note the evidence and open choices in a dated task note.
-A detailed packet does not make its design decisions settled. Name the
+A detailed prompt does not make its design decisions settled. Name the
 delivery the worker can finish with its authority, and keep every criterion,
 including operational proof another owner must supply. Give a bounded design
 task its own owner when its answer makes the implementation tractable; keep

@@ -213,12 +213,12 @@ printf 'named prompt\n' >"$root/named.md"
 task_output=$(cd "$repo" && AGENTCTL_JOB_PROMPT_FILE="$root/named.md" "$worker" task)
 test "$task_output" = 'named prompt'
 
-# The same bound reread keeps the packet and observes current owner amendments.
+# The same bound reread keeps the prompt and shows current beads task amendments.
 : >"$AGENTCTL_CALLS"
 task_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_RUN_ID=fixture-run AGENTCTL_WORKER_ID=w1 AGENTCTL_ATTEMPT=1 "$worker" task)
 grep -Fq 'launch snapshot' <<<"$task_output"
 if ! grep -Fq 'amended task' <<<"$task_output"; then
-  printf 'bound batch-worker task omitted the current owner amendment\n' >&2
+  printf 'bound batch-worker task omitted the current beads task amendment\n' >&2
   exit 1
 fi
 grep -Fxq 'batch task --run fixture-run --worker w1 --json --attempt 1' "$AGENTCTL_CALLS"

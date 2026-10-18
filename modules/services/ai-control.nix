@@ -203,7 +203,7 @@ in
   services.caddy = lib.mkIf (backendNames != [ ]) {
     enable = true;
     # The native reload route uses this owner-only Unix admin socket, never
-    # an additional loopback HTTP administration entrance.
+    # an additional loopback HTTP administration endpoint.
     globalConfig = "admin unix//run/caddy/admin.sock\nauto_https off\npersist_config off\ngrace_period 5s";
     extraConfig = lib.concatMapStringsSep "\n" (name: proxies.${name}.httpConfig) backendNames;
   };

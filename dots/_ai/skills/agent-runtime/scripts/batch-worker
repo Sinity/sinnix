@@ -5,7 +5,7 @@ set -euo pipefail
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  batch-worker task                       print dispatch plus current owner task amendments
+  batch-worker task                       print dispatch plus current beads task amendments
   batch-worker verify                     run the descriptor's focused verification as a job and wait
   batch-worker done <result.json>         validate with agentctl and print the result as the final message
 EOF
@@ -35,16 +35,16 @@ project_id() {
   awk -F'"' '/^\[project\]/ { in_project = 1; next } /^\[/ { in_project = 0 } in_project && /^[[:space:]]*id[[:space:]]*=/ { print $2; exit }' "$(project_file)"
 }
 
-lane_task() {
+worker_task() {
   local prompt
   prompt=${AGENTCTL_JOB_PROMPT_FILE:-$(repo_root)/.agentctl/prompt.md}
-  [[ -r $prompt ]] || die "dispatch packet is unavailable: $prompt"
+  [[ -r $prompt ]] || die "dispatch prompt is unavailable: $prompt"
   cat -- "$prompt"
   if [[ -z ${AGENTCTL_RUN_ID:-} || -z ${AGENTCTL_WORKER_ID:-} ]]; then
-    printf '\nlane: current owner tasks unavailable without a dispatch run/worker identity; packet is historical.\n' >&2
+    printf '\nbatch-worker: current beads tasks unavailable without a dispatch run/worker identity; prompt is historical.\n' >&2
     return 0
   fi
-  printf '\n## Current owner tasks (read-only)\n'
+  printf '\n## Current beads tasks (read-only)\n'
   local -a context=(agentctl batch task --run "$AGENTCTL_RUN_ID" --worker "$AGENTCTL_WORKER_ID" --json)
   if [[ -n ${AGENTCTL_ATTEMPT:-} ]]; then
     context+=(--attempt "$AGENTCTL_ATTEMPT")
@@ -67,7 +67,7 @@ focused_operation() {
   ' "$1"
 }
 
-lane_verify() {
+worker_verify() {
   local operation output job_id reference identity
   command -v agentctl >/dev/null 2>&1 || die "agentctl is unavailable for managed verification"
   operation=$(focused_operation "$(project_file)")
@@ -108,7 +108,7 @@ validate_result() {
   agentctl result validate-worker "$result" >&2 || die "result does not validate"
 }
 
-lane_done() (
+worker_done() (
   local result dirty head sha snapshot
   [[ $# -eq 1 ]] || {
     usage
@@ -151,15 +151,15 @@ main() {
   case ${1:-} in
     task)
       [[ $# -eq 1 ]] || { usage; exit 2; }
-      lane_task
+      worker_task
       ;;
     verify)
       [[ $# -eq 1 ]] || { usage; exit 2; }
-      lane_verify
+      worker_verify
       ;;
     done)
       shift
-      lane_done "$@"
+      worker_done "$@"
       ;;
     -h | --help)
       usage >&1
