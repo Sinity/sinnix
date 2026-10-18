@@ -3,12 +3,13 @@
 import os
 import json
 import re
+import shutil
 import runpy
 import subprocess
 import sys
 from pathlib import Path
 
-executable, config, helper = sys.argv[1:]
+executable, config, helper, health = sys.argv[1:]
 # A preview must work before staging or reading any secret.
 env = os.environ | {"TMPDIR": str(Path.cwd() / "uncreated-scratch")}
 for flag in ["--dry-run", "-n"]:
@@ -103,17 +104,40 @@ for name, value in [("wifi", "synthetic-password"), ("mac", "02:00:00:00:00:01")
     (root / name).write_text(value)
 mock = root / "transport"
 mock.write_text(f"#!{sys.executable}\n" + r"""
-import io, json, os, sys, tarfile
+import io, json, os, shlex, shutil, subprocess, sys, tarfile
 from pathlib import Path
+record = Path(os.environ["HOME"]) / "stage.txt"
 with open(os.environ["ROUTER_FIXTURE_LOG"], "a") as stream:
     stream.write(json.dumps(sys.argv) + "\n")
 if Path(sys.argv[0]).name == "ssh":
-    if sys.argv[-1] == "sh /tmp/health-check.sh":
-        sys.exit(int(os.environ.get("ROUTER_FIXTURE_HEALTH", "0")))
-    if "tar czf" in sys.argv[-1]:
+    command = sys.argv[-1]
+    if command == "umask 077; mktemp -d /tmp/sinnix-gw.XXXXXX":
+        if os.environ.get("ROUTER_FIXTURE_STAGE") == "invalid":
+            print("/tmp/sinnix-gw.bad;false")
+        elif os.environ.get("ROUTER_FIXTURE_STAGE") == "fail":
+            sys.exit(1)
+        else:
+            stage = subprocess.check_output(["mktemp", "-d", "/tmp/sinnix-gw.XXXXXX"], text=True).strip()
+            assert Path(stage).stat().st_mode & 0o777 == 0o700
+            record.write_text(stage)
+            print(stage)
+    elif command.startswith("sh "):
+        path = Path(shlex.split(command)[1])
+        assert path.parent == Path(record.read_text())
+        assert path.is_file()
+        if path.name == "health-check.sh":
+            sys.exit(int(os.environ.get("ROUTER_FIXTURE_HEALTH", "0")))
+    elif "tar czf" in command:
+        assert record.read_text() + "/backup.tar.gz" in command
         sys.exit(int(os.environ.get("ROUTER_FIXTURE_BACKUP", "0")))
+    elif command.startswith("rm -rf "):
+        path = Path(shlex.split(command)[2])
+        assert path == Path(record.read_text())
+        if os.environ.get("ROUTER_FIXTURE_CLEANUP") == "fail":
+            sys.exit(1)
+        shutil.rmtree(path)
 else:
-    if ":/tmp/sinnix-gw-backup.tar.gz" in sys.argv[-2]:
+    if sys.argv[-2].endswith("/backup.tar.gz"):
         if os.environ.get("ROUTER_FIXTURE_COPY") == "fail":
             sys.exit(1)
         target = Path(sys.argv[-1])
@@ -124,44 +148,69 @@ else:
                 info = tarfile.TarInfo("etc/config/dhcp")
                 info.size = 7
                 archive.addfile(info, io.BytesIO(b"fixture"))
+    else:
+        stage = Path(sys.argv[-1].split(":", 1)[1])
+        assert stage == Path(record.read_text())
+        for source in sys.argv[1:-1]:
+            if Path(source).is_file():
+                shutil.copyfile(source, stage / Path(source).name)
 """)
 mock.chmod(0o700)
 for name in ["ssh", "scp"]:
     (root / name).symlink_to(mock)
-body = Path(executable).read_text()
-body = re.sub(r"/nix/store/[^/]+/bin/(ssh|scp)\b", lambda m: str(root / m[1]), body)
-for original, name in [("wifi-psk", "wifi"), ("router-sinnix-prime-mac", "mac"),
-                       ("router-authorized-key", "key")]:
-    body = body.replace("/run/agenix/" + original, str(root / name))
-entry = root / "deploy"
-entry.write_text(body)
-entry.chmod(0o700)
-for name, overrides, expected in [
-    ("healthy", {}, 0),
-    ("unhealthy", {"ROUTER_FIXTURE_HEALTH": "1"}, 1),
-    ("disconnected", {"ROUTER_FIXTURE_HEALTH": "255"}, 255),
-    ("backup-failed", {"ROUTER_FIXTURE_BACKUP": "1"}, 1),
-    ("copy-failed", {"ROUTER_FIXTURE_COPY": "fail"}, 1),
-    ("invalid-backup", {"ROUTER_FIXTURE_COPY": "invalid"}, None),
+def relocate(program):
+    body = Path(program).read_text()
+    body = re.sub(r"/nix/store/[^/]+/bin/(ssh|scp)\b", lambda m: str(root / m[1]), body)
+    for original, name in [("wifi-psk", "wifi"), ("router-sinnix-prime-mac", "mac"),
+                           ("router-authorized-key", "key")]:
+        body = body.replace("/run/agenix/" + original, str(root / name))
+    entry = root / Path(program).name
+    entry.write_text(body)
+    entry.chmod(0o700)
+    return entry
+
+entry = relocate(executable)
+health_entry = relocate(health)
+stages = []
+for name, overrides, expected, command in [
+    ("healthy", {}, 0, entry),
+    ("unhealthy", {"ROUTER_FIXTURE_HEALTH": "1"}, 1, entry),
+    ("disconnected", {"ROUTER_FIXTURE_HEALTH": "255"}, 255, entry),
+    ("backup-failed", {"ROUTER_FIXTURE_BACKUP": "1"}, 1, entry),
+    ("copy-failed", {"ROUTER_FIXTURE_COPY": "fail"}, 1, entry),
+    ("invalid-backup", {"ROUTER_FIXTURE_COPY": "invalid"}, None, entry),
+    ("cleanup-failed", {"ROUTER_FIXTURE_CLEANUP": "fail"}, 1, entry),
+    ("invalid-stage", {"ROUTER_FIXTURE_STAGE": "invalid"}, 1, entry),
+    ("stage-failed", {"ROUTER_FIXTURE_STAGE": "fail"}, 1, entry),
+    ("health-only", {}, 0, health_entry),
+    ("health-only-failed", {"ROUTER_FIXTURE_HEALTH": "255"}, 255, health_entry),
 ]:
     home = root / name
     home.mkdir(mode=0o700)
     log = home / "transport.jsonl"
-    result = subprocess.run([str(entry)], env=os.environ | {
+    result = subprocess.run([str(command)], env=os.environ | {
         "HOME": str(home), "ROUTER_FIXTURE_LOG": str(log), **overrides,
     }, capture_output=True, text=True)
     if expected is None:
         assert result.returncode != 0, name
     else:
         assert result.returncode == expected, (name, result.returncode, result.stderr)
-    assert ("deployment complete!" in result.stdout) == (expected == 0), name
+    assert ("deployment complete!" in result.stdout) == (expected == 0 and command == entry), name
+    assert "/tmp/health-check.sh" not in result.stderr, name
     calls = [json.loads(line) for line in log.read_text().splitlines()]
-    if "backup" in name or name == "copy-failed":
-        assert not any(call[-1] == "sh /tmp/configure.sh" for call in calls), name
-    else:
-        assert any(call[-1] == "rm -f /tmp/install-packages.sh /tmp/configure.sh /tmp/health-check.sh" for call in calls), name
+    if "backup" in name or name == "copy-failed" or "stage" in name:
+        assert not any(call[-1].startswith("sh ") for call in calls), name
+    record = home / "stage.txt"
+    if record.exists():
+        stage = Path(record.read_text())
+        stages.append(stage)
+        assert stage.exists() == (name == "cleanup-failed"), name
+        if stage.exists():
+            shutil.rmtree(stage)  # Only this fixture's allocated, recorded directory.
+    if command == entry and name in ["healthy", "unhealthy", "disconnected"]:
         backups = list((home / ".cache/sinnix-gw-backups").iterdir())
         assert len(backups) == 1
         assert backups[0].stat().st_mode & 0o777 == 0o600
         assert backups[0].parent.stat().st_mode & 0o777 == 0o700
-print("router backup preconditions, private preimages and health-result controls passed")
+assert len(stages) == len(set(stages))
+print("router backup, private staging, cleanup and health-result controls passed")

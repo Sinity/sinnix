@@ -290,6 +290,17 @@ _: {
         echo "✓ Connecting with key-based auth..."
       '';
 
+      remoteStageFragment = ''
+        # Only paths returned by this exact private-directory allocation may
+        # reach remote shell interpolation or cleanup.
+        remote_candidate=$($SSH_CMD "$REMOTE" 'umask 077; mktemp -d /tmp/sinnix-gw.XXXXXX')
+        if [[ ! "$remote_candidate" =~ ^/tmp/sinnix-gw\.[A-Za-z0-9]{6}$ ]]; then
+          echo "Router returned an invalid staging path; refusing deployment" >&2
+          exit 1
+        fi
+        REMOTE_STAGE="$remote_candidate"
+      '';
+
       # ─────────────────────────────────────────────────────────────
       # deploy script: orchestrates the full SSH push
       # ─────────────────────────────────────────────────────────────
@@ -338,7 +349,22 @@ _: {
 
         # ── Inject WiFi PSK from agenix secret ──
         CONFIG_DIR=$(mktemp -d)
-        trap 'rm -rf "$CONFIG_DIR"' EXIT
+        REMOTE_STAGE=""
+        cleanup_deploy() {
+          deploy_status=$?
+          trap - EXIT
+          if [ -n "$REMOTE_STAGE" ]; then
+            if ! $SSH_CMD "$REMOTE" "rm -rf '$REMOTE_STAGE'"; then
+              echo "Router staging cleanup failed: $REMOTE_STAGE" >&2
+              [ "$deploy_status" -ne 0 ] || deploy_status=1
+            fi
+          fi
+          if [ -n "$CONFIG_DIR" ] && ! rm -rf "$CONFIG_DIR"; then
+            [ "$deploy_status" -ne 0 ] || deploy_status=1
+          fi
+          exit "$deploy_status"
+        }
+        trap cleanup_deploy EXIT
         cp "$ORIG_CONFIG_DIR"/* "$CONFIG_DIR/"
         chmod u+w "$CONFIG_DIR"/*
 
@@ -350,6 +376,8 @@ _: {
 
         REMOTE="''${ROUTER_USER}@''${ROUTER_ADDR}"
 
+        ${remoteStageFragment}
+
         # ── Step 0: Backup existing config ──
         echo ""
         echo "[ 0/4 ] Backing up router config..."
@@ -357,8 +385,8 @@ _: {
         mkdir -p "$BACKUP_DIR"
         chmod 0700 "$BACKUP_DIR"
         BACKUP_NAME="$(date +%Y%m%d-%H%M%S).tar.gz"
-        $SSH_CMD "$REMOTE" 'umask 077; tar czf /tmp/sinnix-gw-backup.tar.gz -C / etc/config'
-        if $SCP_CMD "$REMOTE:/tmp/sinnix-gw-backup.tar.gz" "$BACKUP_DIR/$BACKUP_NAME" 2>/dev/null; then
+        $SSH_CMD "$REMOTE" "umask 077; tar czf '$REMOTE_STAGE/backup.tar.gz' -C / etc/config"
+        if $SCP_CMD "$REMOTE:$REMOTE_STAGE/backup.tar.gz" "$BACKUP_DIR/$BACKUP_NAME" 2>/dev/null; then
           chmod 0600 "$BACKUP_DIR/$BACKUP_NAME"
           ${pkgs.gnutar}/bin/tar -tzf "$BACKUP_DIR/$BACKUP_NAME" >/dev/null
           echo "✓ Config backed up to $BACKUP_DIR/$BACKUP_NAME"
@@ -366,22 +394,21 @@ _: {
           echo "Router backup transfer failed; configuration was not applied" >&2
           exit 1
         fi
-        $SSH_CMD "$REMOTE" 'rm -f /tmp/sinnix-gw-backup.tar.gz' 2>/dev/null || true
 
         # ── Step 1: Upload scripts to router via SCP ──
         echo ""
         echo "[ 1/4 ] Uploading scripts to ''${ROUTER_ADDR}..."
-        $SCP_CMD "$CONFIG_DIR/install-packages.sh" "$CONFIG_DIR/configure.sh" "$CONFIG_DIR/health-check.sh" "$REMOTE:/tmp/"
+        $SCP_CMD "$CONFIG_DIR/install-packages.sh" "$CONFIG_DIR/configure.sh" "$CONFIG_DIR/health-check.sh" "$REMOTE:$REMOTE_STAGE/"
 
         # ── Step 2: Install packages ──
         echo ""
         echo "[ 2/4 ] Installing opkg packages..."
-        $SSH_CMD "$REMOTE" 'sh /tmp/install-packages.sh'
+        $SSH_CMD "$REMOTE" "sh '$REMOTE_STAGE/install-packages.sh'"
 
         # ── Step 3: Apply UCI + post-setup ──
         echo ""
         echo "[ 3/4 ] Applying router configuration..."
-        $SSH_CMD "$REMOTE" 'sh /tmp/configure.sh'
+        $SSH_CMD "$REMOTE" "sh '$REMOTE_STAGE/configure.sh'"
 
         # Give services a moment to settle after network reload
         echo ""
@@ -394,20 +421,22 @@ _: {
         # Reconnect fresh — network config may have changed during step 3
         health_status=0
         if ${pkgs.openssh}/bin/ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=yes \
-            ''${ROUTER_USER}@''${ROUTER_ADDR} 'sh /tmp/health-check.sh'; then
+            ''${ROUTER_USER}@''${ROUTER_ADDR} "sh '$REMOTE_STAGE/health-check.sh'"; then
           echo ""
           echo "✓ Health check passed."
         else
           health_status=$?
           echo "⚠  Health check failed or could not reconnect." >&2
-          echo "   Try manually: ssh root@''${ROUTER_ADDR} 'sh /tmp/health-check.sh'" >&2
+          echo "   Retry with: nix run .#router-health" >&2
         fi
 
-        # Cleanup temp scripts
-        $SSH_CMD "$REMOTE" 'rm -f /tmp/install-packages.sh /tmp/configure.sh /tmp/health-check.sh' 2>/dev/null || true
         if [ "$health_status" -ne 0 ]; then
           exit "$health_status"
         fi
+        $SSH_CMD "$REMOTE" "rm -rf '$REMOTE_STAGE'"
+        REMOTE_STAGE=""
+        rm -rf "$CONFIG_DIR"
+        CONFIG_DIR=""
 
         echo ""
         echo "╔══════════════════════════════════════════════════════╗"
@@ -430,10 +459,23 @@ _: {
 
         REMOTE="''${ROUTER_USER}@''${ROUTER_ADDR}"
 
+        REMOTE_STAGE=""
+        cleanup_health() {
+          health_status=$?
+          trap - EXIT
+          if [ -n "$REMOTE_STAGE" ]; then
+            if ! $SSH_CMD "$REMOTE" "rm -rf '$REMOTE_STAGE'"; then
+              echo "Router staging cleanup failed: $REMOTE_STAGE" >&2
+              [ "$health_status" -ne 0 ] || health_status=1
+            fi
+          fi
+          exit "$health_status"
+        }
+        trap cleanup_health EXIT
+        ${remoteStageFragment}
         echo "Uploading health check to ''${ROUTER_ADDR}..."
-        $SCP_CMD "$CONFIG_DIR/health-check.sh" "$REMOTE:/tmp/"
-        $SSH_CMD "$REMOTE" 'sh /tmp/health-check.sh'
-        $SSH_CMD "$REMOTE" 'rm -f /tmp/health-check.sh' 2>/dev/null || true
+        $SCP_CMD "$CONFIG_DIR/health-check.sh" "$REMOTE:$REMOTE_STAGE/"
+        $SSH_CMD "$REMOTE" "sh '$REMOTE_STAGE/health-check.sh'"
       '';
 
       # ─────────────────────────────────────────────────────────────
@@ -467,7 +509,7 @@ _: {
             nativeBuildInputs = [ pkgs.python3 ];
           }
           ''
-            python ${./tests/router_deploy.py} ${deployScript}/bin/router-deploy ${routerConfigDrv} ${./router-secrets.py}
+            python ${./tests/router_deploy.py} ${deployScript}/bin/router-deploy ${routerConfigDrv} ${./router-secrets.py} ${routerHealth}/bin/router-health
             touch "$out"
           '';
 
