@@ -103,7 +103,6 @@ Servers: context7, github, lynchpin, sinex.
 | `claude-sessions` | Extract readable prose from raw Claude Code session JSONL when Polylogue is unavailable, including bounded user and assistant text, optional thinking, and tool summaries. |
 | `codebase-design` | Design or restructure modules, interfaces, seams, and adapters; judge module depth; or decide whether apparently unused code should be completed or deleted. |
 | `desktop-control-plane` | Drive the operator's desktop from an agent — shared Chrome through CDP, Kitty remote input and capture, Hyprland windows and shortcuts, and HDR-safe screenshots. |
-| `enrichment-pass` | Process a Sinnix runtime, shell, session, Lynchpin, and journal state bundle into a versioned narrative and structured state delta for headless enrichment. |
 | `grilling` | Grill the user relentlessly about a plan or design. Use when the user wants to stress-test a plan before building, or uses any 'grill' trigger phrases. |
 | `grok` | Audit an entire codebase systematically by measuring and partitioning it, dispatching tiered review lanes, triaging recurring defect patterns, and filing concrete findings when one context cannot cover the target. |
 | `handoff` | Leave or resume a handoff when stopping mid-work, before compaction, passing work to another agent, or re-entering after one — job IDs, worktrees, Git and PR state, next action. |
