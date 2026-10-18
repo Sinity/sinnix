@@ -148,11 +148,6 @@ show_actions = true
 show_app_name = true
 background_opacity = 0.96
 
-# Notes are plain Markdown in the notes folder; the plugin is a view over them.
-[plugin_settings."noctalia/notes"]
-notes_dir = "/realm/personal/notes"
-extension = "md"
-
 # User-invoked workbenches: centrally placed, not anchored to a bar corner.
 [plugin_settings."sinity/sinnix-cockpit"]
 activity-panel_placement = "floating"

@@ -119,7 +119,6 @@ mkFeatureModule {
             };
 
           home.file.".local/share/noctalia/pinned/official/timer".source = "${officialPlugins}/timer";
-          home.file.".local/share/noctalia/pinned/official/notes".source = "${officialPlugins}/notes";
           home.file.".local/share/noctalia/pinned/community/keybind-cheatsheet".source =
             "${communityPlugins}/keybind-cheatsheet";
           home.file.".local/share/noctalia/local/sinnix-ops".source =
