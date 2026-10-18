@@ -5,11 +5,10 @@ items, wallpapers, keybindings, generated options, activities — is ranked by t
 same Plackett-Luce fit, selected by the same selector, over an append-only
 comparison log.
 
-Two store formats exist. `sinnix-rank` writes choice-set records and caches no
-fit; `sinnix-elicit` writes pairwise records, an `items.json` roster and the one
-cached fit. Unifying them is a migration over live domains and is tracked as
-`sinnix-z8iq.14`; until it happens, the format a domain uses is the format of
-the tool that created it.
+Two store formats exist. `sinnix-rank` domains hold choice-set records and
+never store a fit; `sinnix-elicit` domains hold pairwise records, an
+`items.json` roster, and a cached fit (`model.json`). Unifying them is tracked
+as `sinnix-z8iq.14`; a domain keeps the format of the tool that created it.
 
 ## The engine
 
@@ -34,19 +33,15 @@ the tool that created it.
 - `draw` — which item to hand over now: `top`, `softmax`, or Thompson
   sampling (the default).
 
-Raw comparisons live at `/realm/activity/shared/ranking/<domain>/` and are never
-pruned. Fits are always recomputed from them, never cached back into the
-domain directory. `SINNIX_RANK_ROOT` moves the root for fixtures. Missing ledgers represent a
-new domain, while denied access, broken ledger links and wrong object types
-fail explicitly. Readers consume JSONL records one physical line at a time;
-Unicode line separators inside a JSON string remain content. They retain all
-judgments and tombstones in the replay rather than imposing a history cap.
+`sinnix-rank` domains live at `/realm/activity/shared/ranking/<domain>/`
+(`SINNIX_RANK_ROOT` moves the root for fixtures). Comparisons are never pruned
+and the fit is recomputed from them on every read. A missing domain is new;
+unreadable or malformed files are errors.
 
 ## `sinnix-rank`
 
-Invoke the text frontend through `sinnix rank`. Domain paths must stay inside
-the configured capture root; absolute paths, parent traversal and links outside
-that root are refused. Nested domains inside the root remain supported.
+The text frontend. Domain names are paths under the ranking root (nested
+domains are fine); anything resolving outside it is refused.
 
 ```bash
 sinnix rank add <domain> --items items.jsonl   # register options
@@ -61,10 +56,9 @@ sinnix rank spin <domain> --commit             # draw one, into steering
 `next`/`record` exist for agents, which hold the conversation instead of a
 terminal; `compare` is the interactive loop.
 
-`add` refuses silent identity reuse. An id already carrying a different label
-is a changed option, not an update (`--revise` to relabel the same one); two
-options that read the same cannot be attributed after the operator answers
-(`--allow-duplicate-labels` to override).
+`add` refuses to reuse an id with a different label (`--revise` relabels the
+same option) and refuses two options with the same label
+(`--allow-duplicate-labels` overrides).
 
 `status --json` carries an `evidence` block — comparison counts, connected
 components, items with no comparisons, the stopping threshold, and
@@ -73,12 +67,10 @@ means anything is what `evidence` answers.
 
 ## Steering's activity menu
 
-`sinnix-steer activity menu` and both rituals order the activity registry by
-the fit over the `steering-activities` domain, so the morning shortlist is the
-head of the operator's own preference order at the energy tier he states. The
-fit runs over the whole registry, so the energy filter chooses what is shown
-and never what it is worth. With no comparisons recorded the order is the
-registry's own and the CLI says so.
+`sinnix-steer activity menu` orders the activity registry by the fit over
+the `steering-activities` domain. The energy filter only chooses what is shown,
+not the order. With no comparisons recorded the registry's own order is used,
+and the CLI says so.
 
 ## `sinnix-elicit`
 
@@ -105,35 +97,16 @@ next` would. Two things it does that the engine does not:
 - `explain` regresses standardised feature deltas on the operator's choices,
   which is a question about the items rather than about the ranking.
 
-`init` validates roster objects and unique IDs before extracting features or
-publishing. Numeric and string IDs that stringify identically are the same
-identity. An invalid `init --force` leaves the previous roster, judgments and
-model untouched. Labels may still change or repeat, and deleted roster items
-remain excluded from fitting.
+A domain is `items.json` (an editable JSON array), `comparisons.jsonl`
+(`{a, b, outcome}` records) and `model.json`, the cached fit that the hub
+serves mid-session at `GET /feedback/elicit/<domain>`. Domains live at
+`/realm/state/elicit/<domain>` (`SINNIX_ELICIT_DIR` for fixtures), with the
+same path confinement as `sinnix-rank`.
 
-Its domain format is its own: `items.json` (a JSON array, editable),
-`comparisons.jsonl` with `{a, b, outcome}` pairwise records, and `model.json`,
-the one cached fit in the estate — the hub serves it back mid-session at
-`GET /feedback/elicit/<domain>`. State lives at `/realm/state/elicit/<domain>` --
-mutable application state, in the state root, not in the prose tree;
-`SINNIX_ELICIT_DIR` selects an isolated root for fixtures. Domain paths use the
-same confinement as `sinnix-rank`: absolute paths, parent traversal and links
-outside the selected state root are refused. The retained
-`sinnix elicit-migrate` command moves domains from a legacy root only after a
-known-stopped drain response. It preflights source files and existing
-destinations, refuses unreadable inventories, links and special objects, then
-renames without replacement or copy fallback and verifies every size and
-SHA-256. Dry runs perform the same inventory checks. State already under the
-current root needs no migration replay.
-
-A tap posts to the hub's `/feedback` spool and `sinnix-elicit autoingest`
-drains it into the domain, coalesced per burst. The drain dedups against every
-comparison id the log has ever carried, tombstones included: a record the
-operator undid is still one this domain has seen. The cached fit records a
-digest of its roster and replayed comparisons. The drain refits when that
-digest changes, including an undo plus a replacement answer with the same
-comparison count. Missing, malformed and older caches are rebuilt; a failed
-refit is retried on the next drain. Unchanged inputs keep the existing cache.
+A tap posts to the hub's `/feedback` spool; `sinnix-elicit autoingest` moves
+it into the domain, skipping any comparison id the domain has ever seen
+(including undone ones). The cached fit stores a digest of the roster and
+comparisons and is rebuilt whenever that digest changes.
 
 ### `serve`
 
@@ -143,25 +116,12 @@ filling the screen, one keypress each (left/right pick, `d` draw, `s` skip,
 `u` undo, `q` quit), a refit after every answer, and the next pair chosen from
 what the operator just said. It ranks a 126-image roster in one sitting.
 
-It selects through `rank_core.Selector`, not this file's `pick_pairs`: a cold
-roster is one connected component per item, and only the Selector deliberately
-bridges components, without which thetas across the roster stay mutually
-meaningless however long the operator clicks. The status bar carries the
-evidence — comparison count, items seen, component count, and
-`top_k_stability` for the top ten, which is the answer to "am I done".
-
-Every judgment is appended to the domain's own log through the same store as
-every other surface, and `u` tombstones rather than rewriting. The server
-re-reads the log's full id set before each append, tombstones included, so a
-retried POST and a record the hub drain landed concurrently are both
-recognised as already seen.
-
-The port is ephemeral by default and the URL is printed: this is an
-operator-run foreground process, not a declared service, so it claims no
-number from `flake/data/ports.nix`. `--open` follows the URL with `xdg-open`.
-Images are read only from the paths `items.json` declares; a request naming
-anything else is a 404. Both the roster's image paths and the comparisons stay
-in local state.
+It picks pairs with `rank_core.Selector`, which links unconnected items so
+the whole roster ends up on one scale. The status bar shows comparison count,
+items seen, component count and `top_k_stability` for the top ten, which
+answers "am I done". `u` adds a tombstone instead of rewriting the log. The
+port is ephemeral and printed (`--open` opens it); only image paths declared in
+`items.json` are served.
 
 ## `rank-options` skill
 

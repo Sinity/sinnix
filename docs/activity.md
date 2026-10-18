@@ -1,87 +1,43 @@
 # Declared activity
 
-A thin local runtime for an activity declaration and its reconsideration boundary.
-It does not infer behavior, score activities, demand productivity, or block applications.
-Sinex remains the intended event/projection owner; this glue is replaceable.
+`sinnix-activity` records what you said you are doing and when you want to be
+asked again (the check-in time). It does not infer behavior, score it, or block
+applications.
 
 ## Desktop
 
-**Super+F12** opens the centered **Now** workbench: latest chosen activity,
-reconsideration boundary, and the next relevant actions. The high-contrast activity
-card is not a claim about observed behavior. Choose next reveals the free-text form;
-it accepts a duration (`30m`, `2h`), local clock (`00:00`), timezone-aware ISO time,
-or a blank boundary for open-ended activity. Open-ended is the default.
+**Super+F12** opens the **Now** panel: the current activity, its check-in
+time, and actions. "Choose next" takes free text plus an optional duration
+(`30m`, `2h`), a clock time (`00:00`), or an ISO time; leaving it blank means no
+check-in. "Continue 15m/60m" moves the check-in time to that far from now.
+"Mark reviewed" acknowledges a check-in without ending the activity. Pause and
+resume keep the original check-in time.
 
-Continue 15m/60m moves the boundary that far from **now**. Mark reviewed acknowledges
-reconsideration but not activity completion. Return to chat opens the configured
-continuation without acknowledgement. Pause/resume preserves the original boundary.
-Timer-specific controls disappear when they do not apply. Successful changes close
-the panel; failed commands retain the input and show an error.
+**Super+Shift+F12**, or right-clicking the Now chip, opens **Catch a thought**:
+Enter saves the text, Shift+Enter adds a line, Escape keeps the draft. A note
+never changes the activity or its check-in. From a shell:
+`sinnix-activity note -- 'text'` and `sinnix-activity notes --limit 8 --json`.
 
-**Super+Shift+F12**, or right-clicking the Now chip, opens **Catch a thought**.
-Enter saves a literal fragment and closes; Shift+Enter adds a line; Escape keeps the
-draft. Draft text is retained in the private activity directory across dismissal.
-The field is focused when opened. Capturing never changes the activity, boundary,
-acknowledgement, or notification budget.
+## State
 
-`sinnix-activity note -- 'a fragment'` writes an `observation_captured` event into
-the existing journal; `notes --limit 8 --json` reads recent fragments. Notes can be
-captured before any activity is declared. Text is not automatically classified or
-interpreted. Saved text, actor, recording time and declared activity context are
-exportable through the same event interface.
+State lives in `$XDG_STATE_HOME/sinnix/activity` (override with
+`SINNIX_ACTIVITY_STATE_DIR`; directory 0700, files 0600, persisted with
+`.local/state/sinnix`). `activity.sqlite3` holds the current state, the
+append-only event history and notification records; `current.json` is a copy
+of the current state for the panel. `export` prints all events as JSONL,
+`history --json` the recent ones. `import-checkpoint PATH` seeds an empty
+store and refuses to overwrite one. A corrupt store is reported as an error,
+never treated as empty.
 
-The bar currently retains the separate operations/capabilities widgets. The design
-calls for moving these to on-demand tools, but that presentation edit has not landed.
+## Check-in notifications
 
-## Authority and persistence
+`modules/services/activity.nix` runs `sinnix-activity tick --notify` every 30
+seconds. Each check-in notifies at most three times: when due, 30 minutes
+later, and 24 hours later. Missed times collapse into one, so booting after
+days away does not produce a burst. Pausing or checking in stops them.
 
-`sinnix-activity` is the write interface. `activity.sqlite3` holds a singleton state,
-append-only event history and notification receipts. `current.json` is a replaceable
-read projection, refreshed by status, mutations and timer ticks. Source timestamps and
-recording timestamps remain distinct. Actual behavior is not inferred from a declaration.
+## Tests
 
-The state root is `SINNIX_ACTIVITY_STATE_DIR`, or `$XDG_STATE_HOME/sinnix/activity`
-(default `~/.local/state/sinnix/activity`). The directory is 0700; files are 0600.
-Sinnix's existing persistence of `.local/state/sinnix` covers this child.
-Do not place real state, private continuation URLs or personal checkpoint contents in Git.
-
-`import-checkpoint PATH` imports an explicit prior declaration into an empty store,
-records path/hash provenance, and refuses to overwrite an existing allocation.
-Repeating the identical import cannot rewind subsequent changes.
-`export` emits JSONL events; `history --json` is a bounded recent view.
-A corrupt or unsupported store fails visibly rather than silently becoming an empty day.
-
-## Reconsideration delivery
-
-`modules/services/activity.nix` uses the existing scheduled-job factory and runtime
-surface registry. The user timer calls `tick --notify` every 30 seconds. Notification
-attempts are limited to the due slot, +30 minutes, and +24 hours per checkpoint.
-Missed slots coalesce: starting the machine after days does not produce three popups.
-A failed submission consumes that slot and is recorded; the later slots are bounded
-retry opportunities. Submission is not evidence of human notice. Check-in and pause
-suppress delivery. A file lock serializes mutations with submission to avoid stale prompts.
-Plain `tick` does not notify. No AI turn or continuously running custom daemon is needed.
-
-For one-off bootstrap activation, install the Nix-generated command and user units;
-do not maintain an independently handwritten timer. The workstation module owns the
-same paths at the next regular system activation.
-
-## Verification
-
-`python3 -m unittest flake.tests.test_activity_runtime` exercises runtime and failure cases.
-`LUAU_BIN=luau python3 -m unittest flake.tests.test_activity_desktop` executes synthetic
-plugin callbacks and checks shell quoting, input dispatch and passive rendering.
-`checks.<system>.activity-substrate` runs both plus Luau compilation. A real panel load
-and notification submission are separate smoke tests; they are not implied by unit tests.
-
-## Host observations
-
-A runtime inventory with malformed JSON or invalid UTF-8 is reported as unavailable with a malformed-input reason. It does not crash the observation report.
-
-`sinnix-observe --section storage` includes the monitored mount paths declared in the runtime inventory, alongside native system and service mounts. Repeated paths are probed once; an absent archive-root setting does not produce an empty-path probe. A stacked automount reports the visible mounted filesystem rather than combining its rows with the underlying autofs entrance. Mount metadata uses the provider’s JSON fields so spaces in target and source paths remain intact; failed or malformed probes remain unresolved. This includes backup and secondary-disk entrances without a second hardcoded workstation mapping.
-
-`sinnix-observe --section drift` reads the private host comparison report. The scheduled producer probes system state as root, then drops privileges to publish a `0600` report owned by the configured operator. Invalid report rows appear as an unavailable source.
-
-The ingestion section reads Polylogue's `ops.db` `ingest_attempts` relation from the exported runtime inventory. An empty current relation is available with zero rows. A missing, inaccessible or obsolete source remains unavailable. `SINNIX_OBSERVE_POLYLOGUE_DB` selects an explicit standalone source without fallback. Attempt timestamps are projected from milliseconds to UTC; parsed raw and materialized counts retain their meanings. Missing byte and resource measurements remain explicit gaps.
-
-The Sinex history reader uses the explicitly selected `SINEX_ROOT` checkout or `SINNIX_OBSERVE_SINEX_DB`. A missing selected checkout does not substitute another checkout's history. Missing required columns and failed queries remain unavailable; an empty valid invocation relation is available. Swap drift compares device and priority independently of enumeration order.
+`python3 -m unittest flake.tests.test_activity_runtime` and
+`LUAU_BIN=luau python3 -m unittest flake.tests.test_activity_desktop`;
+`checks.<system>.activity-substrate` runs both plus Luau compilation.

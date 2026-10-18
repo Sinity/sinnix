@@ -1,15 +1,10 @@
 # Firmware and binary analysis
 
 The development workbench installs REA 6.2.0, Ghidra, Binwalk, Unblob,
-binutils and 7-Zip through Nix. `rea` supplies the Ghidra/JDK and firmware
-extractor paths, including Nix's `prlimit` location. It uses locked npm
-dependencies and performs no agent setup or package-manager installation at
-runtime. Unblob uses a scoped Python 3.13 / setuptools 80 dependency repair.
-Its Partclone dependency omits the NILFS copier, which fails against the pinned
-headers; the `info` and `restore` tools used for extraction remain available.
-Btrfs-stream extraction is unverified on this host: its upstream integration
-test fails with `EXDEV` during a sandboxed directory rename. That single case
-is excluded from the package build; the sandbox remains enabled.
+binutils and 7-Zip through Nix; `rea` is wired to the Nix-provided Ghidra, JDK
+and extractors. Known gaps: Partclone is built without its NILFS copier, and
+Unblob's Btrfs-stream extraction is untested here (its upstream test fails in
+the build sandbox and is skipped).
 
 The `reverse-engineering` skill owns the investigation workflow. REA is
 registered in the `full` MCP profile; existing sessions can use its CLI.
