@@ -1,6 +1,8 @@
 """Exercise the generated deploy entrypoint without router access or credentials."""
 
 import os
+import json
+import re
 import runpy
 import subprocess
 import sys
@@ -91,3 +93,75 @@ else:
     raise AssertionError("changed template accepted")
 assert script.read_text() == saved
 print("router preview, argument and missing-secret controls passed")
+
+# Run the real rendered entrypoint with only SSH/SCP and credentials relocated.
+# No connection, real secret or router mutation is permitted by this fixture.
+root = Path.cwd() / "deploy-controls"
+root.mkdir(mode=0o700)
+for name, value in [("wifi", "synthetic-password"), ("mac", "02:00:00:00:00:01"),
+                    ("key", "ssh-ed25519 AAAAsynthetic fixture")]:
+    (root / name).write_text(value)
+mock = root / "transport"
+mock.write_text(f"#!{sys.executable}\n" + r"""
+import io, json, os, sys, tarfile
+from pathlib import Path
+with open(os.environ["ROUTER_FIXTURE_LOG"], "a") as stream:
+    stream.write(json.dumps(sys.argv) + "\n")
+if Path(sys.argv[0]).name == "ssh":
+    if sys.argv[-1] == "sh /tmp/health-check.sh":
+        sys.exit(int(os.environ.get("ROUTER_FIXTURE_HEALTH", "0")))
+    if "tar czf" in sys.argv[-1]:
+        sys.exit(int(os.environ.get("ROUTER_FIXTURE_BACKUP", "0")))
+else:
+    if ":/tmp/sinnix-gw-backup.tar.gz" in sys.argv[-2]:
+        if os.environ.get("ROUTER_FIXTURE_COPY") == "fail":
+            sys.exit(1)
+        target = Path(sys.argv[-1])
+        if os.environ.get("ROUTER_FIXTURE_COPY") == "invalid":
+            target.write_text("not an archive")
+        else:
+            with tarfile.open(target, "w:gz") as archive:
+                info = tarfile.TarInfo("etc/config/dhcp")
+                info.size = 7
+                archive.addfile(info, io.BytesIO(b"fixture"))
+""")
+mock.chmod(0o700)
+for name in ["ssh", "scp"]:
+    (root / name).symlink_to(mock)
+body = Path(executable).read_text()
+body = re.sub(r"/nix/store/[^/]+/bin/(ssh|scp)\b", lambda m: str(root / m[1]), body)
+for original, name in [("wifi-psk", "wifi"), ("router-sinnix-prime-mac", "mac"),
+                       ("router-authorized-key", "key")]:
+    body = body.replace("/run/agenix/" + original, str(root / name))
+entry = root / "deploy"
+entry.write_text(body)
+entry.chmod(0o700)
+for name, overrides, expected in [
+    ("healthy", {}, 0),
+    ("unhealthy", {"ROUTER_FIXTURE_HEALTH": "1"}, 1),
+    ("disconnected", {"ROUTER_FIXTURE_HEALTH": "255"}, 255),
+    ("backup-failed", {"ROUTER_FIXTURE_BACKUP": "1"}, 1),
+    ("copy-failed", {"ROUTER_FIXTURE_COPY": "fail"}, 1),
+    ("invalid-backup", {"ROUTER_FIXTURE_COPY": "invalid"}, None),
+]:
+    home = root / name
+    home.mkdir(mode=0o700)
+    log = home / "transport.jsonl"
+    result = subprocess.run([str(entry)], env=os.environ | {
+        "HOME": str(home), "ROUTER_FIXTURE_LOG": str(log), **overrides,
+    }, capture_output=True, text=True)
+    if expected is None:
+        assert result.returncode != 0, name
+    else:
+        assert result.returncode == expected, (name, result.returncode, result.stderr)
+    assert ("deployment complete!" in result.stdout) == (expected == 0), name
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    if "backup" in name or name == "copy-failed":
+        assert not any(call[-1] == "sh /tmp/configure.sh" for call in calls), name
+    else:
+        assert any(call[-1] == "rm -f /tmp/install-packages.sh /tmp/configure.sh /tmp/health-check.sh" for call in calls), name
+        backups = list((home / ".cache/sinnix-gw-backups").iterdir())
+        assert len(backups) == 1
+        assert backups[0].stat().st_mode & 0o777 == 0o600
+        assert backups[0].parent.stat().st_mode & 0o777 == 0o700
+print("router backup preconditions, private preimages and health-result controls passed")

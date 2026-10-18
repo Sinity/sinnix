@@ -295,6 +295,7 @@ _: {
       # ─────────────────────────────────────────────────────────────
       deployScript = pkgs.writeShellScriptBin "router-deploy" ''
         set -euo pipefail
+        umask 077
 
         ORIG_CONFIG_DIR="${routerConfigDrv}"
         DRY_RUN=0
@@ -354,12 +355,16 @@ _: {
         echo "[ 0/4 ] Backing up router config..."
         BACKUP_DIR="$HOME/.cache/sinnix-gw-backups"
         mkdir -p "$BACKUP_DIR"
+        chmod 0700 "$BACKUP_DIR"
         BACKUP_NAME="$(date +%Y%m%d-%H%M%S).tar.gz"
-        $SSH_CMD "$REMOTE" 'tar czf /tmp/sinnix-gw-backup.tar.gz -C / etc/config 2>/dev/null || echo "(no existing config to backup)"'
+        $SSH_CMD "$REMOTE" 'umask 077; tar czf /tmp/sinnix-gw-backup.tar.gz -C / etc/config'
         if $SCP_CMD "$REMOTE:/tmp/sinnix-gw-backup.tar.gz" "$BACKUP_DIR/$BACKUP_NAME" 2>/dev/null; then
+          chmod 0600 "$BACKUP_DIR/$BACKUP_NAME"
+          ${pkgs.gnutar}/bin/tar -tzf "$BACKUP_DIR/$BACKUP_NAME" >/dev/null
           echo "✓ Config backed up to $BACKUP_DIR/$BACKUP_NAME"
         else
-          echo "⚠  No existing config to backup (fresh install?)"
+          echo "Router backup transfer failed; configuration was not applied" >&2
+          exit 1
         fi
         $SSH_CMD "$REMOTE" 'rm -f /tmp/sinnix-gw-backup.tar.gz' 2>/dev/null || true
 
@@ -387,17 +392,22 @@ _: {
         echo ""
         echo "[ 4/4 ] Running health check..."
         # Reconnect fresh — network config may have changed during step 3
+        health_status=0
         if ${pkgs.openssh}/bin/ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=yes \
             ''${ROUTER_USER}@''${ROUTER_ADDR} 'sh /tmp/health-check.sh'; then
           echo ""
           echo "✓ Health check passed."
         else
-          echo "⚠  Health check failed or could not reconnect."
-          echo "   Try manually: ssh root@''${ROUTER_ADDR} 'sh /tmp/health-check.sh'"
+          health_status=$?
+          echo "⚠  Health check failed or could not reconnect." >&2
+          echo "   Try manually: ssh root@''${ROUTER_ADDR} 'sh /tmp/health-check.sh'" >&2
         fi
 
         # Cleanup temp scripts
         $SSH_CMD "$REMOTE" 'rm -f /tmp/install-packages.sh /tmp/configure.sh /tmp/health-check.sh' 2>/dev/null || true
+        if [ "$health_status" -ne 0 ]; then
+          exit "$health_status"
+        fi
 
         echo ""
         echo "╔══════════════════════════════════════════════════════╗"
