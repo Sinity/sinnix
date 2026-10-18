@@ -219,16 +219,30 @@ class MonitorTest(unittest.TestCase):
             self.assertEqual(len(writer.pending), 1)
             self.assertEqual(capture.call_count, 1)
 
+    def test_large_metadata_uses_stdin_and_preserves_payload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            stub = Path(directory) / "capture"
+            receipt = Path(directory) / "receipt.json"
+            stub.write_text(f"#!{sys.executable}\nimport json,sys\nopen({str(receipt)!r}, 'w').write(json.dumps({{'argv':sys.argv[1:],'payload':json.load(sys.stdin)}}))\n")
+            stub.chmod(0o700)
+            payload = {"event": "track", "title": "x" * 192000, "artist": "neutral\nUnicode: ą"}
+            MONITOR.write_envelope(str(stub), directory, "mpris", payload, 123.25)
+            result = json.loads(receipt.read_text())
+            self.assertEqual(result['payload'], payload)
+            self.assertEqual(result['argv'], ["write", "--capture-root", directory, "--lane", "mpris", "--ts", "123.25"])
+
     def test_write_waits_past_old_timeout_and_preserves_timestamp(self):
         with tempfile.TemporaryDirectory() as directory:
             stub = Path(directory) / "capture"
             receipt = Path(directory) / "receipt.json"
-            stub.write_text(f"#!{sys.executable}\nimport json,sys,time\ntime.sleep(10.2)\nopen({str(receipt)!r}, 'w').write(json.dumps(sys.argv[1:]))\n")
+            stub.write_text(f"#!{sys.executable}\nimport json,sys,time\ntime.sleep(10.2)\nopen({str(receipt)!r}, 'w').write(json.dumps({{'argv':sys.argv[1:],'payload':json.load(sys.stdin)}}))\n")
             stub.chmod(0o700)
             MONITOR.write_envelope(str(stub), directory, "mpris", {"event": "track", "title": "fixture"}, 123.25)
-            argv = json.loads(receipt.read_text())
+            result = json.loads(receipt.read_text())
+            argv = result["argv"]
             self.assertEqual(argv[-2:], ["--ts", "123.25"])
-            self.assertEqual(json.loads(argv[argv.index("--payload") + 1])["title"], "fixture")
+            self.assertNotIn("--payload", argv)
+            self.assertEqual(result["payload"]["title"], "fixture")
 
 
     def test_invalid_player_metadata_does_not_discard_the_event(self):
