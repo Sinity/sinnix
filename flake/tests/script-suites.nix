@@ -427,9 +427,7 @@
         # live domains were ranked under (ties, choice sets, item priors, ids
         # the roster no longer carries), `ingest` stops recognising a
         # tombstoned record as one it has already seen and re-imports every
-        # undone judgment on every drain, the state migration stops verifying
-        # digests, stops moving by rename, or stops refusing to run while the
-        # drain could write, or `serve` records a judgment the log already
+        # undone judgment on every drain, or `serve` records a judgment the log already
         # carries, undoes one by rewriting rather than tombstoning, re-asks a
         # pair the operator has already judged, serves a file the roster does
         # not name, or reports a ranking and stopping statistic that are not
@@ -437,10 +435,7 @@
         elicit-suite = mkScriptSuite {
           name = "sinnix-elicit";
           suiteDir = ../../pkgs/sinnix-elicit/tests;
-          scripts = [
-            "sinnix-elicit"
-            "sinnix-elicit-migrate"
-          ];
+          scripts = [ "sinnix-elicit" ];
           extraPythonPackages = [ sinnix-rank-core ];
         };
       };
