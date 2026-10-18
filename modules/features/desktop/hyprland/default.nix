@@ -78,7 +78,6 @@ let
     "rawlog"
     "toggle-scratch"
     "rawlog-capture"
-    "kitty-grid"
     "rawlog-loop"
     "weechat-scratchpad"
     "kitty-scrollback-capture"

@@ -131,10 +131,6 @@ let
     (run "SUPER + C" "Open the code editor" "uwsm app -- ${script "open-code-editor"}")
     (run "SUPER + B" "Open a new Chrome window" "uwsm app -- sinnix-chrome --new-window")
     (simple "SUPER + G" "Group or ungroup the window" (call "group.toggle" ""))
-    (run "SUPER + SHIFT + G" "Open a grid of terminals" "uwsm app -- ${script "kitty-grid"}")
-    (run "SUPER + CTRL + G" "Open a 3x3 grid of terminals"
-      "uwsm app -- ${script "kitty-grid"} --grid 3x3"
-    )
     (simple "SUPER + Tab" "Switch to the previous workspace" (
       call "focus" ''{ workspace = "previous" }''
     ))

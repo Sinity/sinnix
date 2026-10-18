@@ -34,13 +34,7 @@ scripts/screenshot-color-lab.sh probe
 scripts/screenshot-color-lab.sh capture-output --fix-hdr
 ```
 
-## 5) Arrange Kitty Windows as Grid (System Script)
-
-```bash
-/realm/project/sinnix/repo/scripts/kitty-grid --workspace 3 --grid 3x2
-```
-
-## 6) Paste a Command into a Native Wayland App
+## 5) Paste a Command into a Native Wayland App
 
 ```bash
 scripts/hypr-control.sh clients --grep 'Steam|kitty|obs'

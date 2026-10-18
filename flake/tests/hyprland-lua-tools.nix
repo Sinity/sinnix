@@ -23,15 +23,13 @@
             chrome="$TMPDIR/sinnix-chrome-control"
             hypr="$TMPDIR/sinnix-hypr-control"
             keyboard="$TMPDIR/sinnix-keyboard-control"
-            grid="$TMPDIR/kitty-grid"
             cp ${../../dots/_ai/skills/desktop-control-plane/scripts/chrome-control.sh} "$chrome"
             cp ${../../dots/_ai/skills/desktop-control-plane/scripts/hypr-control.sh} "$hypr"
             cp ${../../dots/_ai/skills/desktop-control-plane/scripts/keyboard-control.sh} "$keyboard"
-            cp ${../../scripts/kitty-grid} "$grid"
-            chmod +x "$chrome" "$hypr" "$keyboard" "$grid"
-            patchShebangs "$chrome" "$hypr" "$keyboard" "$grid"
+            chmod +x "$chrome" "$hypr" "$keyboard"
+            patchShebangs "$chrome" "$hypr" "$keyboard"
             shellcheck -S warning "$chrome" "$hypr" "$keyboard"
-            ${pkgs.bash}/bin/bash ${./hyprland-lua-tools.sh} "$chrome" "$hypr" "$keyboard" "$grid"
+            ${pkgs.bash}/bin/bash ${./hyprland-lua-tools.sh} "$chrome" "$hypr" "$keyboard"
             touch "$out"
           '';
     };

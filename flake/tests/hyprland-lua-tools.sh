@@ -4,7 +4,6 @@ set -euo pipefail
 chrome=$1
 hypr=$2
 keyboard=$3
-grid=$4
 fixture_bin=$TMPDIR/bin
 calls=$TMPDIR/hyprctl-calls
 mkdir -p "$fixture_bin"
@@ -43,22 +42,3 @@ eval hl.dispatch(hl.dsp.focus({ workspace = "name:agentbrowser" }))
 EOF
 cmp "$expected" "$calls"
 
-PYTHONDONTWRITEBYTECODE=1 python - "$grid" <<'PY'
-import importlib.machinery
-import importlib.util
-import sys
-
-loader = importlib.machinery.SourceFileLoader("kitty_grid", sys.argv[1])
-spec = importlib.util.spec_from_loader(loader.name, loader)
-module = importlib.util.module_from_spec(spec)
-loader.exec_module(module)
-calls = []
-module.run = lambda args, **kwargs: calls.append(list(args))
-module.apply_layout([({"address": "0xabc"}, 10, 20, 300, 400)], "work space")
-assert calls == [
-    ["hyprctl", "eval", 'hl.dispatch(hl.dsp.window.float({ action = "set", window = "address:0xabc" }))'],
-    ["hyprctl", "eval", 'hl.dispatch(hl.dsp.window.move({ workspace = "work space", follow = false, window = "address:0xabc" }))'],
-    ["hyprctl", "eval", 'hl.dispatch(hl.dsp.window.resize({ x = 300, y = 400, window = "address:0xabc" }))'],
-    ["hyprctl", "eval", 'hl.dispatch(hl.dsp.window.move({ x = 10, y = 20, window = "address:0xabc" }))'],
-]
-PY
