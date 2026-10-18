@@ -1158,16 +1158,18 @@ in
       # The launch route on this repository's own descriptor: the queued
       # command is the descriptor's exec inside its environment, in its pool,
       # under its label, with its timeout.
+      # agentctl streams large outcome files through ijson.
+      fixturePython = pkgs.python3.withPackages (ps: [ ps.ijson ]);
       agentctlOperationLaunchFixture =
         pkgs.runCommand "agentctl-operation-launch-fixture"
           {
-            nativeBuildInputs = [ pkgs.python3 ];
+            nativeBuildInputs = [ fixturePython ];
           }
           ''
             # agentctl imports sinnix_lib for its atomic publication helpers,
             # so a hand-built path needs both packages, not just agentctl.
             export PYTHONPATH="${sinnixScriptRegistry.packageSet.agentctl}/${pkgs.python3.sitePackages}:${sinnixScriptRegistry.packageSet.sinnix-lib}/${pkgs.python3.sitePackages}"
-            ${pkgs.python3}/bin/python - <<'PY'
+            ${fixturePython}/bin/python - <<'PY'
             import json
             from pathlib import Path
             from tempfile import TemporaryDirectory

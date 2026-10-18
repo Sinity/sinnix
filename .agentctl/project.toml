@@ -120,7 +120,7 @@ pool = "bulk"
 result = "exit"
 cache = "none"
 scratch = "nvme"
-timeout_seconds = 43200
+timeout_seconds = 28800
 admission = { memory_mib = 4096 }
 unit_properties = ["MemoryHigh=4G", "MemoryMax=5G"]
 
