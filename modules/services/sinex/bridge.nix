@@ -650,9 +650,14 @@ in
                 unit = "postgresql.service";
               };
             };
-            nats.serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
-              runtimeInventory = config.sinnix.runtime.inventory;
-              unit = "nats.service";
+            nats = {
+              # The shared manual-runtime policy must not leave an old broker
+              # executable serving after its configured package changes.
+              restartIfChanged = lib.mkForce true;
+              serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
+                runtimeInventory = config.sinnix.runtime.inventory;
+                unit = "nats.service";
+              };
             };
             # Bootstrap is a client of NATS, not the NATS daemon. It must use
             # the same narrowly-owned client credentials as sinexd rather than
