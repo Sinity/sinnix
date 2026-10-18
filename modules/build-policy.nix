@@ -70,7 +70,10 @@ in
       };
 
       daemonCPUSchedPolicy = "idle";
-      daemonIOSchedClass = "idle";
+      # Idle I/O can starve even metadata lookup and environment preparation
+      # while ordinary readers keep the root SSD busy. Keep daemon requests
+      # eligible; the build slice still supplies its low weight and ceilings.
+      daemonIOSchedClass = "best-effort";
       daemonIOSchedPriority = 6;
 
       extraOptions = ''

@@ -112,6 +112,13 @@ in
           [
             {
               assertion =
+                config.nix.daemonIOSchedClass == "best-effort"
+                && config.nix.daemonIOSchedPriority == 6
+                && config.systemd.services.nix-daemon.serviceConfig.Slice == "nix-build.slice";
+              message = "Nix metadata requests must remain eligible under sustained readers while retaining the bounded build slice.";
+            }
+            {
+              assertion =
                 let
                   captures = config.sinnix.runtime.inventory.captures;
                   capture = name: lib.findFirst (row: row.name == name) { producer = "missing"; } captures;
