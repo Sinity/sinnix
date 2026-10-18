@@ -353,7 +353,8 @@ mkServiceModule {
             stamp="$(date -u +%Y%m%dT%H%M%SZ)"
             final=${lib.escapeShellArg backupRoot}/telemetry-"$stamp".sqlite.zst
 
-            snapshot="${backupSnapshotRoot}/telemetry-$stamp"
+            snapshot="${backupSnapshotRoot}/telemetry-$stamp-$INVOCATION_ID"
+            snapshot_created=0
             writer_was_active=0
             resume_writer() {
               if [ "$writer_was_active" -eq 1 ]; then
@@ -363,8 +364,9 @@ mkServiceModule {
             }
             cleanup() {
               resume_writer
-              if [ -d "$snapshot" ]; then
+              if [ "$snapshot_created" -eq 1 ]; then
                 btrfs subvolume delete "$snapshot" >/dev/null
+                snapshot_created=0
               fi
             }
             trap cleanup EXIT
@@ -389,6 +391,7 @@ mkServiceModule {
               exit 1
             fi
             btrfs subvolume snapshot -r ${lib.escapeShellArg dbRoot} "$snapshot"
+            snapshot_created=1
             resume_writer
             flock -u 9
             sinnix-sqlite-backup \
@@ -458,7 +461,9 @@ mkServiceModule {
             umask 077
             install -d -m 0700 -o ${lib.escapeShellArg username} -g users ${lib.escapeShellArg backupRoot}
             stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-            snapshot="${backupSnapshotRoot}/verify-$stamp"
+            snapshot="${backupSnapshotRoot}/verify-$stamp-$INVOCATION_ID"
+            proof="${backupRoot}/structural-verification-$stamp-$INVOCATION_ID.json"
+            snapshot_created=0
             receipt=${lib.escapeShellArg backupRoot}/structural-verification.status
             writer_was_active=0
             write_state() {
@@ -476,7 +481,7 @@ mkServiceModule {
               rc="$?"
               trap - EXIT
               resume_writer || rc=1
-              if [ -d "$snapshot" ]; then
+              if [ "$snapshot_created" -eq 1 ]; then
                 btrfs subvolume delete "$snapshot" >/dev/null || rc=1
               fi
               if [ "$rc" -ne 0 ]; then write_state failed; fi
@@ -498,11 +503,14 @@ mkServiceModule {
               exit 1
             fi
             btrfs subvolume snapshot -r ${lib.escapeShellArg dbRoot} "$snapshot"
+            snapshot_created=1
             resume_writer
             flock -u 9
             sinnix-sqlite-backup --immutable-source --verify-only \
-              --check-budget-seconds 9000 "$snapshot/telemetry.sqlite"
+              --check-budget-seconds 9000 --verification-receipt "$proof" "$snapshot/telemetry.sqlite"
+            chown ${lib.escapeShellArg username}:users "$proof"
             btrfs subvolume delete "$snapshot" >/dev/null
+            snapshot_created=0
             write_state ok
           '';
           path = [

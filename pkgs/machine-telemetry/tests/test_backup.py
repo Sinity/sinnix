@@ -1019,3 +1019,123 @@ def test_unsupported_read_advice_does_not_hide_integrity_verdict(tmp_path, monke
     connection.close()
     assert "read advice unavailable" in capsys.readouterr().err
     assert main.read_bytes() == before
+
+
+def receipt_fixture(tmp_path):
+    import runpy
+
+    helper = runpy.run_path(str(SCRIPT_MODULE))
+    source = tmp_path / "source.sqlite"
+    with sqlite3.connect(source) as connection:
+        connection.execute("CREATE TABLE sample(value INTEGER)")
+    return helper, source, tmp_path / "proof.json"
+
+
+def test_verification_receipt_binds_exact_bytes_privately(tmp_path):
+    import hashlib
+    import json
+
+    helper, source, receipt = receipt_fixture(tmp_path)
+    before = source.read_bytes()
+    helper["verify_immutable_source"](source, 5, receipt)
+    proof = json.loads(receipt.read_text())
+    assert proof["schema"] == "sinnix-sqlite-verification-v1"
+    assert proof["source_sha256"] == hashlib.sha256(before).hexdigest()
+    assert proof["source_bytes"] == len(before)
+    assert proof["source_observation"]["ino"] == source.stat().st_ino
+    assert proof["check"] == "integrity_check"
+    assert proof["verdict"] == proof["structural_check"] == "ok"
+    assert receipt.stat().st_mode & 0o777 == 0o600
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("kind", ["source", "hardlink", "symlink", "directory"])
+def test_verification_receipt_refuses_source_alias_and_nonregular_output(tmp_path, kind):
+    helper, source, receipt = receipt_fixture(tmp_path)
+    before = source.read_bytes()
+    if kind == "source":
+        receipt = source
+    elif kind == "hardlink":
+        receipt.hardlink_to(source)
+    elif kind == "symlink":
+        receipt.symlink_to(source)
+    else:
+        receipt.mkdir()
+    with pytest.raises(RuntimeError, match="receipt must"):
+        helper["verify_immutable_source"](source, 5, receipt)
+    assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("failure", ["corruption", "mutation", "cancel", "deadline", "publish"])
+def test_verification_receipt_failure_preserves_previous(tmp_path, monkeypatch, failure):
+    helper, source, receipt = receipt_fixture(tmp_path)
+    receipt.write_text("previous verified proof\n")
+    scope = helper["verify_immutable_source"].__globals__
+    if failure == "corruption":
+        source.write_bytes(b"not a database")
+        expected = sqlite3.DatabaseError
+    elif failure == "publish":
+        def refuse(*args):
+            raise OSError("publication refused")
+        monkeypatch.setattr(os, "replace", refuse)
+        expected = OSError
+    else:
+        original = helper["check_immutable_snapshot"]
+        def after_check(*args, **kwargs):
+            result = original(*args, **kwargs)
+            if failure == "mutation":
+                with source.open("ab") as stream:
+                    stream.write(b"changed")
+            elif failure == "cancel":
+                scope["cancel_requested"] = True
+            else:
+                monkeypatch.setattr(time, "monotonic", lambda: float("inf"))
+            return result
+        monkeypatch.setitem(scope, "check_immutable_snapshot", after_check)
+        expected = helper["BackupCancelled"] if failure == "cancel" else RuntimeError
+    with pytest.raises(expected):
+        helper["verify_immutable_source"](source, 5, receipt)
+    assert receipt.read_text() == "previous verified proof\n"
+    assert not list(tmp_path.glob(".sqlite-verification-*"))
+
+
+def test_verification_receipt_cli_requires_raw_verify_mode(tmp_path):
+    helper, source, receipt = receipt_fixture(tmp_path)
+    result = subprocess.run([str(SCRIPT), str(source), str(tmp_path / "backup.zst"),
+        "--verification-receipt", str(receipt)], capture_output=True, text=True)
+    assert result.returncode == 2
+    assert "requires raw --verify-only" in result.stderr
+    assert not receipt.exists()
+
+
+@pytest.mark.parametrize("failure", ["cancel", "deadline"])
+def test_verification_receipt_interrupts_digest_without_publication(tmp_path, monkeypatch, failure):
+    helper, source, receipt = receipt_fixture(tmp_path)
+    scope = helper["verify_immutable_source"].__globals__
+    real_digest = scope["hashlib"].sha256
+    class InterruptingDigest:
+        def __init__(self):
+            self.digest = real_digest()
+        def update(self, block):
+            self.digest.update(block)
+            if failure == "cancel":
+                scope["cancel_requested"] = True
+            else:
+                monkeypatch.setattr(time, "monotonic", lambda: float("inf"))
+        def hexdigest(self):
+            return self.digest.hexdigest()
+    monkeypatch.setattr(scope["hashlib"], "sha256", InterruptingDigest)
+    expected = helper["BackupCancelled"] if failure == "cancel" else RuntimeError
+    with pytest.raises(expected):
+        helper["verify_immutable_source"](source, 5, receipt)
+    assert not receipt.exists()
+
+
+def test_verification_receipt_cli_publishes_success(tmp_path):
+    import json
+
+    _, source, receipt = receipt_fixture(tmp_path)
+    result = subprocess.run([str(SCRIPT), str(source), "--immutable-source", "--verify-only",
+        "--check-budget-seconds", "5", "--verification-receipt", str(receipt)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(receipt.read_text())["structural_check"] == "ok"

@@ -115,6 +115,14 @@ in
             ${evaluated.config.systemd.services.machine-telemetry-sqlite-rotate.script}
             EOF_ROTATE_OWNER
             python3 ${./machine-telemetry-owner.py} rotate-owner
+            cat > verify-owner <<'EOF_VERIFY_OWNER'
+            ${evaluated.config.systemd.services.machine-telemetry-sqlite-verify.script}
+            EOF_VERIFY_OWNER
+            python3 ${./machine-telemetry-verify-owner.py} verify-owner
+            cat > backup-owner <<'EOF_BACKUP_OWNER'
+            ${evaluated.config.systemd.services.machine-telemetry-sqlite-backup.script}
+            EOF_BACKUP_OWNER
+            python3 ${./machine-telemetry-verify-owner.py} backup-owner backup
             cat > exec-start <<'EOF_EXEC_START'
             ${renderedExecStart}
             EOF_EXEC_START

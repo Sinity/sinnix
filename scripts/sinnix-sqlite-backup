@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import math
 import os
 import select
@@ -369,22 +370,88 @@ def backup_database(
         scratch.cleanup()
 
 
-def verify_immutable_source(source_path: Path, check_budget_seconds: float) -> None:
+def source_observation(info: os.stat_result) -> dict[str, int]:
+    return {name: getattr(info, "st_" + name) for name in
+            ("dev", "ino", "size", "mtime_ns", "ctime_ns")}
+
+
+def validate_receipt_path(path: Path, source: Path) -> None:
+    if path.resolve() == source:
+        raise RuntimeError("verification receipt must not replace its source")
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    if not stat.S_ISREG(info.st_mode) or path.samefile(source):
+        raise RuntimeError("verification receipt must be a separate regular file")
+
+
+def publish_verification_receipt(path: Path, source: Path, receipt: dict) -> None:
+    validate_receipt_path(path, source)
+    descriptor, temporary = tempfile.mkstemp(prefix=".sqlite-verification-", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w") as stream:
+            json.dump(receipt, stream, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        validate_receipt_path(path, source)
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def verify_immutable_source(
+    source_path: Path, check_budget_seconds: float, receipt_path: Path | None = None
+) -> None:
     source_path = source_path.resolve(strict=True)
     check_regular_source(source_path)
     check_immutable_wal(source_path)
-    source_bytes = source_path.stat().st_size
+    before = source_observation(source_path.stat())
+    if receipt_path is not None:
+        validate_receipt_path(receipt_path, source_path)
     source = sqlite3.connect(
-        source_path.resolve(strict=True).as_uri() + "?mode=ro&immutable=1", uri=True, timeout=5.0
+        source_path.as_uri() + "?mode=ro&immutable=1", uri=True, timeout=5.0
     )
     try:
         started = time.monotonic()
-        check, verdict = check_immutable_snapshot(
-            source, started + check_budget_seconds, mode="structural"
-        )
+        deadline = started + check_budget_seconds
+        check, verdict = check_immutable_snapshot(source, deadline, mode="structural")
+        if receipt_path is not None:
+            digest = hashlib.sha256()
+            with source_path.open("rb") as stream:
+                if source_observation(os.fstat(stream.fileno())) != before:
+                    raise RuntimeError("immutable verification source changed")
+                while block := stream.read(1024 * 1024):
+                    if cancel_requested:
+                        raise BackupCancelled
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("verification digest exceeded its check budget")
+                    digest.update(block)
+                after = source_observation(os.fstat(stream.fileno()))
+            check_immutable_wal(source_path)
+            if after != before or source_observation(source_path.stat()) != before:
+                raise RuntimeError("immutable verification source changed")
+            if cancel_requested:
+                raise BackupCancelled
+            if time.monotonic() >= deadline:
+                raise RuntimeError("verification digest exceeded its check budget")
+            publish_verification_receipt(receipt_path, source_path, {
+                "schema": "sinnix-sqlite-verification-v1",
+                "source": str(source_path), "source_bytes": before["size"],
+                "source_sha256": digest.hexdigest(), "source_observation": before,
+                "check": check, "verdict": verdict, "structural_check": "ok",
+                "verified_at_ns": time.time_ns(),
+                "check_seconds": time.monotonic() - started,
+            })
         print(
             "sqlite-backup verification receipt:"
-            f" source={source_path} source_bytes={source_bytes}"
+            f" source={source_path} source_bytes={before['size']}"
             f" check={check} verdict={verdict}"
             f" check_seconds={time.monotonic() - started:.1f}"
             " structural_check=ok",
@@ -496,7 +563,10 @@ def main() -> int:
     )
     parser.add_argument("--compressed-source", action="store_true", help="restore a retained zstd frame before verify-only structural checking")
     parser.add_argument("--max-restore-bytes", type=int, default=0, help="required positive restored-byte ceiling for compressed sources")
+    parser.add_argument("--verification-receipt", type=Path, help="atomically retain a full-digest receipt for raw immutable verify-only input")
     args = parser.parse_args()
+    if args.verification_receipt is not None and (not args.verify_only or args.compressed_source):
+        parser.error("--verification-receipt requires raw --verify-only input")
     if not math.isfinite(args.acquire_budget_seconds) or args.acquire_budget_seconds <= 0:
         parser.error("--acquire-budget-seconds must be positive")
     if not math.isfinite(args.check_budget_seconds) or args.check_budget_seconds < 0:
@@ -524,7 +594,7 @@ def main() -> int:
             if args.compressed_source:
                 verify_compressed_source(args.source, args.max_restore_bytes, args.acquire_budget_seconds, args.check_budget_seconds)
             elif args.verify_only:
-                verify_immutable_source(args.source, args.check_budget_seconds)
+                verify_immutable_source(args.source, args.check_budget_seconds, args.verification_receipt)
             else:
                 backup_database(
                     args.source,
