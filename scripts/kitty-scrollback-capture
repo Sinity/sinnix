@@ -70,8 +70,11 @@ capture_window() {
     local size
     size=$(du -h "$filepath" | cut -f1)
 
-    # Write metadata sidecar
-    if ! cat > "${filepath%.ansi}.meta.json" <<EOF
+    # Stage the complete sidecar privately and refuse every existing target,
+    # including symlinks and FIFOs, just as for the captured ANSI bytes.
+    local metadata_output
+    metadata_output=$(mktemp "$CAPTURE_DIR/.capture-metadata.XXXXXX") || return 1
+    if ! cat > "$metadata_output" <<EOF
 {
   "window_id": $win_id,
   "kitty_pid": $pid,
@@ -83,8 +86,14 @@ capture_window() {
 }
 EOF
     then
+      echo "  ✗ win:$win_id - metadata write failed; retained $metadata_output" >&2
       return 1
     fi
+    if ! ln -T -- "$metadata_output" "${filepath%.ansi}.meta.json"; then
+      echo "  ✗ win:$win_id - metadata publication failed; retained $metadata_output" >&2
+      return 1
+    fi
+    rm -f -- "$metadata_output" || return 1
     # The health sweep stats this stable path when the archive's bounded
     # sample cannot reach the newest file. Write it only after real output.
     touch "$PROGRESS_MARKER" || return 1

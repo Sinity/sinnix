@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import socket
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -58,9 +59,17 @@ else:
         self.addCleanup(self.socket.close)
 
     def run_capture(self, mode, current=True):
-        return subprocess.run(["bash", os.environ["KITTY_CAPTURE_SCRIPT"], *(["--current"] if current else [])],
-                              env=dict(self.env, CAPTURE_TEST_MODE=mode),
-                              text=True, capture_output=True, timeout=10, umask=0)
+        command = ["bash", os.environ["KITTY_CAPTURE_SCRIPT"], *(["--current"] if current else [])]
+        with subprocess.Popen(command, env=dict(self.env, CAPTURE_TEST_MODE=mode),
+                              text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              start_new_session=True, umask=0) as process:
+            try:
+                stdout, stderr = process.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.communicate()
+                raise
+            return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
     def test_success_publishes_complete_bytes_and_metadata(self):
         result = self.run_capture("success")
@@ -128,6 +137,39 @@ else:
         self.assertEqual(output.read_text(), "previous capture")
         staged, = self.capture.glob(".capture-output.*")
         self.assertEqual(staged.read_text(), "complete scrollback")
+
+    def check_metadata_collision(self, kind):
+        self.capture.mkdir()
+        name = "20260101T010203Z-" + socket.gethostname() + "-pid123-win7-fixture.meta.json"
+        metadata = self.capture / name
+        target = self.root / "preserved"
+        target.write_text("prior evidence")
+        if kind == "symlink":
+            metadata.symlink_to(target)
+        elif kind == "fifo":
+            os.mkfifo(metadata)
+        else:
+            metadata.write_text("existing sidecar")
+        identity = metadata.lstat()
+        result = self.run_capture("success")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(target.read_text(), "prior evidence")
+        self.assertEqual(metadata.lstat(), identity)
+        if kind != "fifo":
+            self.assertEqual(metadata.read_text(), "prior evidence" if kind == "symlink" else "existing sidecar")
+        staged, = self.capture.glob(".capture-metadata.*")
+        self.assertEqual(json.loads(staged.read_text())["window_id"], 7)
+        self.assertEqual(staged.stat().st_mode & 0o777, 0o600)
+        self.assertFalse((self.root / "progress").exists())
+
+    def test_metadata_collision_preserves_existing_file(self):
+        self.check_metadata_collision("file")
+
+    def test_metadata_collision_preserves_symlink_target(self):
+        self.check_metadata_collision("symlink")
+
+    def test_metadata_fifo_is_refused_without_waiting_for_a_reader(self):
+        self.check_metadata_collision("fifo")
 
 
     def test_batch_refuses_malformed_inventory_without_capture(self):
