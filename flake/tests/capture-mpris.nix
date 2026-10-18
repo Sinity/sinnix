@@ -29,7 +29,6 @@
             sinnix.services.url-ledger.enable = true;
             sinnix.services.lynchpin.enable = true;
             sinnix.features.desktop.browser.enable = true;
-            sinnix.services.sandbox-audit.enable = true;
             sinnix.services.stt.enable = true;
             sinnix.services.hub.enable = true;
             sinnix.services.tailscale.enable = true;
@@ -168,7 +167,6 @@
                   config.sinnix.paths.capturePaths.url-ledger
                   config.sinnix.paths.capturePaths.irc
                   config.sinnix.paths.capturePaths.shell
-                  config.sinnix.paths.capturePaths.audit
                   config.sinnix.paths.capturePaths.activitywatch
                   "${config.sinnix.paths.capturePaths.activitywatch}/raw"
                   config.sinnix.paths.capturePaths.screenshot

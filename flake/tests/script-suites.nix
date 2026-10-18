@@ -107,17 +107,6 @@
             pkgs.util-linux
           ];
         };
-        sandbox-audit-suite = mkScriptSuite {
-          name = "sinnix-sandbox-audit";
-          suiteDir = ../../pkgs/sinnix-sandbox-audit/tests;
-          scripts = [ "sinnix-sandbox-audit" ];
-          nativeBuildInputs = [
-            pkgs.bash
-            pkgs.findutils
-            pkgs.gawk
-            pkgs.jq
-          ];
-        };
         memory-audit-suite = mkScriptSuite {
           name = "sinnix-memory-audit";
           suiteDir = ../../pkgs/sinnix-memory-audit/tests;
@@ -127,12 +116,6 @@
             pkgs.findutils
             pkgs.gawk
           ];
-        };
-        audit-drain-suite = mkScriptSuite {
-          name = "sinnix-audit-drain";
-          suiteDir = ../../pkgs/sinnix-audit-drain/tests;
-          scripts = [ "sinnix-audit-drain" ];
-          nativeBuildInputs = [ pkgs.bash ];
         };
         device-remote-command-suite = mkScriptSuite {
           name = "sinnix-device-control";

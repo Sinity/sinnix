@@ -62,7 +62,6 @@
     "machine-telemetry"
     "machine-telemetry-sqlite-structural-verification"
     "phone-logcat"
-    "audit-denials"
     "borg-beads-drill"
     "url-ledger-state"
     "url-ledger-coverage"

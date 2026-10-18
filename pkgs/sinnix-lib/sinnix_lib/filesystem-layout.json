@@ -71,8 +71,7 @@
     "activitywatch": "shared/activitywatch",
     "ranking": "shared/ranking",
     "steering": "shared/steering",
-    "spotify": "audio/spotify",
-    "audit": "shared/audit"
+    "spotify": "audio/spotify"
   },
   "machine_lanes": {
     "experiment": "experiment",
