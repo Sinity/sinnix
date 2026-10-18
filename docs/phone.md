@@ -309,8 +309,9 @@ later document-provider export can be truncated. Successful BCR exports can
 remove staging. The same synchronizer inventories both directories, always
 prefers retained staging (including active files), and accepts export-only
 audio only with native JSON completion metadata whose encoded frame duration
-and channel count match the decoded audio. The source sample rate is accounted
-for because Opus playback uses 48kHz. Native JSON is preserved in `calls/metadata`;
+and channel count match the decoded audio. The check accounts for 48kHz Opus
+playback and Android packet-start timestamps with final packet padding. It
+requires the corresponding exact sample count, rather than a duration tolerance. Native JSON is preserved in `calls/metadata`;
 legacy per-call debug sidecars remain in `calls/debug`. Receipts distinguish
 staging and export sources, leaving absent staging size null.
 `sinnix.services.phone-logcat`

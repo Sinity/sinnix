@@ -1037,11 +1037,29 @@ drain_bcr_calls_adb() (
         continue
       fi
       IFS=$'\t' read -r expected_frames expected_rate expected_channels <<< "$completion"
-      # Opus decodes at 48kHz even when BCR recorded at 16kHz. Compare the
-      # exact frame duration in both sample-rate domains, without rounding.
+      # Android's Ogg writer timestamps the first packet one packet before
+      # pre-skip and retains final packet padding. Standard muxers instead
+      # trim to the exact recording duration. Select by the actual packet
+      # convention, then require the exact corresponding sample count; a
+      # missing final packet must not pass as a duration tolerance.
+      local packet_info packet_pts packet_samples packet_skip
+      packet_info=$(ffprobe -v error -select_streams a:0 -read_intervals '%+#1' \
+        -show_packets -of json "$audio_candidate" 2>/dev/null) || packet_info='{}'
+      IFS=$'\t' read -r packet_pts packet_samples packet_skip < <(
+        jq -r '.packets[0] | [.pts // 0, .duration // 0,
+          ([.side_data_list[]? | select(.side_data_type=="Skip Samples") | .skip_samples][0] // 0)] | @tsv' <<< "$packet_info")
       if ! awk -v frames="$expected_frames" -v expected_rate="$expected_rate" -v expected_channels="$expected_channels" \
         -v samples="$samples" -v rate="$rate" -v channels="$channels" \
-        'BEGIN { exit !(samples * expected_rate == frames * expected_channels * rate && channels == expected_channels) }'; then
+        -v pts="$packet_pts" -v packet="$packet_samples" -v skip="$packet_skip" '
+        BEGIN {
+          expected = frames * rate / expected_rate
+          if (rate == 48000 && packet > 0 && skip > 0 && pts == -packet - skip) {
+            packets = int(expected / packet)
+            if (packets * packet < expected) packets++
+            expected = packets * packet - skip
+          }
+          exit !(samples == expected * expected_channels && channels == expected_channels)
+        }'; then
         echo "bcr: decoded audio differs from native completion metadata; source preserved" >&2
         failed=$((failed + 1))
         for stage in "${revision_stage[audio]:-}" "${revision_stage[sidecar]:-}"; do

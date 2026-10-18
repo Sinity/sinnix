@@ -168,6 +168,54 @@ with tempfile.TemporaryDirectory() as scratch:
     exported.unlink()
     native_metadata.unlink()
 
+    # Synthetic Android packet-start granules and untrimmed final packet.
+    # No personal recording is required to exercise this native convention.
+    packetized = root / "packetized.oga"
+    subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-f", "lavfi",
+                    "-i", "sine=frequency=440:duration=0.2", "-c:a", "libopus",
+                    "-page_duration", "20000", str(packetized)], check=True)
+    data = packetized.read_bytes()
+    pages = []
+    while data:
+        size = 27 + data[26] + sum(data[27:27 + data[26]])
+        pages.append(bytearray(data[:size]))
+        data = data[size:]
+
+    def checksum(page):
+        page[22:26] = bytes(4)
+        crc = 0
+        for byte in page:
+            crc ^= byte << 24
+            for _ in range(8):
+                crc = ((crc << 1) ^ (0x04C11DB7 if crc & 0x80000000 else 0)) & 0xffffffff
+        page[22:26] = crc.to_bytes(4, "little")
+        return bytes(page)
+
+    header = 27 + pages[0][26]
+    pages[0][header + 10:header + 12] = (104).to_bytes(2, "little")
+    # Ten complete packets for 3200 source frames; discard the encoder's
+    # additional standard end-trim packet, then use native start granules.
+    pages = pages[:12]
+    for index, page in enumerate(pages[2:]):
+        page[5] &= ~4
+        page[6:14] = (index * 960).to_bytes(8, "little")
+    encoded = [checksum(page) for page in pages]
+    exported.write_bytes(b"".join(encoded))
+    native_metadata.write_bytes(archived_metadata)
+    for path in (exported, native_metadata):
+        os.utime(path, (old, old))
+    padded_lake = root / "padded-lake"
+    result = run("normal", padded_lake)
+    assert result.returncode == 0, result.stderr + result.stdout
+    padded_receipt = (padded_lake / "calls" / "levels.jsonl").read_bytes()
+    exported.write_bytes(b"".join(encoded[:-1]))
+    os.utime(exported, (old, old))
+    result = run("normal", padded_lake)
+    assert result.returncode != 0 and "differs from native completion" in result.stderr
+    assert (padded_lake / "calls" / "levels.jsonl").read_bytes() == padded_receipt
+    exported.unlink()
+    native_metadata.unlink()
+
     # ADB shell forwards stdin unless it is detached. A metadata existence
     # check must not consume the remaining NUL-delimited inventory.
     second_audio = remote_root / "second neutral call.oga"
