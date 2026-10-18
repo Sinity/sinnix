@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from sinnix_lib.files import read_regular_text
+from sinnix_lib.files import NotRegularFile, read_regular_text
 from sinnix_lib.mounts import has_mounted_ancestor, read_mountpoints
 from sinnix_lib.note_links import prose_mask
 
@@ -91,6 +91,9 @@ def audit(manifest: dict) -> dict:
                 rows.append({"document": str(document), "status": "wrong-type-document"})
                 continue
             text = prose_mask(read_regular_text(document))
+        except NotRegularFile as exc:
+            rows.append({"document": str(document), "status": "wrong-type-document", "reason": str(exc)})
+            continue
         except (OSError, UnicodeError) as exc:
             rows.append({"document": str(document), "status": access_error(exc) + "-document", "reason": str(exc)})
             continue

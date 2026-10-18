@@ -156,12 +156,12 @@ def test_manifest_byte_budget_is_enforced_during_read(tmp_path, monkeypatch):
 
     source = tmp_path / "manifest.json"
     source.write_bytes(b"x" * 64)
-    original = files._regular_input
+    original = files.open_regular
     consumed = 0
 
     @contextmanager
-    def observed(path):
-        with original(path) as handle:
+    def observed(path, *args, **kwargs):
+        with original(path, *args, **kwargs) as handle:
             class Reader:
                 def read(self, size=-1):
                     nonlocal consumed
@@ -172,7 +172,7 @@ def test_manifest_byte_budget_is_enforced_during_read(tmp_path, monkeypatch):
                     return raw
             yield Reader()
 
-    monkeypatch.setattr(files, "_regular_input", observed)
+    monkeypatch.setattr(files, "open_regular", observed)
     with pytest.raises(ValueError, match="16 byte bound"):
         files.read_regular_bytes(source, max_bytes=16)
     assert consumed <= 17
