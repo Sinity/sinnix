@@ -23,6 +23,7 @@
           ''
             python ${./phone-bcr.py} ${../../scripts/sinnix-phone} ${../../scripts/sinnix-remote-command}
             python ${./phone-wireless.py} ${../../scripts/sinnix-phone} ${../../scripts/sinnix-remote-command}
+            python ${./phone-status.py} ${../../scripts/sinnix-phone}
             touch "$out"
           '';
     };
