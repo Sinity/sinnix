@@ -57,6 +57,7 @@ in
     ./tests/ai-http-vm.nix
     ./tests/ai-http.nix
     ./tests/socket-reconfiguration.nix
+    ./tests/nats-monitor-boundary.nix
     ./tests/runtime.nix
     ./tests/llama-http-admission.nix
     ./tests/export-manifest.nix
