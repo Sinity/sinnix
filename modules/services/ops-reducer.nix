@@ -34,7 +34,6 @@ mkServiceModule {
         reducer
         quota
         quota.passthru.codexbar
-        scriptPkgs.sinnix-pressure-park
         scriptPkgs.sinnix-rebuild-override
       ];
       systemd.tmpfiles.rules = [ "d /realm/state/sinnix-ops 0700 ${userName} users -" ];

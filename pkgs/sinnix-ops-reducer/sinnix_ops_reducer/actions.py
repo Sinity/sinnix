@@ -41,13 +41,14 @@ PROCESS_ACTIONS = {"stop"}
 
 # A `{"process": {"pid": N, "start_ticks": M}}` target is admitted for
 # `stop` only when the live cgroup it currently belongs to is one of these.
-# `agent.slice` / `build.slice` are named explicitly (not derived from the
+# `agent.slice` / `agenttool.slice` are named explicitly (not derived from the
 # inventory's ManagedOOMMemoryPressure marker) because an interactive agent
 # process is eligible for this bounded action even though agent.slice is
 # deliberately left uncapped and unmarked. A shared ceiling would throttle a
 # healthy agent behind a busy one, so the slice would not appear in the
 # sacrificial set below despite containing processes this verb may reach.
-PROCESS_ADMITTED_BASE_SLICES = frozenset({"agent.slice", "build.slice"})
+# agenttool.slice is where Claude's tool commands (rg, bd, git) run.
+PROCESS_ADMITTED_BASE_SLICES = frozenset({"agent.slice", "agenttool.slice"})
 
 # SIGTERM first, escalate to SIGKILL only if the same process (same
 # start_ticks) is still alive after this many seconds. Short and bounded on
@@ -80,8 +81,8 @@ POLICY_PROPERTIES = (
 
 def sacrificial_slices(inventory: dict[str, Any] | None) -> set[str]:
     """Slices the runtime inventory itself marks sacrificial: those carrying
-    `ManagedOOMMemoryPressure = "kill"` (runtime-defaults.nix's
-    background/build/nix-build slices, both the system and user variants).
+    `ManagedOOMMemoryPressure = "kill"` (runtime-defaults.nix's pytest and
+    bulk job pools).
     Read from the live inventory rather than hardcoded, so a slice's
     admission tracks its own declared policy rather than a second list that
     can drift from it. Module-level and inventory-only (no I/O, no
@@ -106,7 +107,7 @@ def sacrificial_slices(inventory: dict[str, Any] | None) -> set[str]:
 
 def process_admitted_slices(inventory: dict[str, Any] | None) -> set[str]:
     """The full admitted set for a process-stop target: agent.slice and
-    build.slice unconditionally, plus whatever the live inventory currently
+    agenttool.slice unconditionally, plus whatever the live inventory currently
     marks sacrificial."""
     return PROCESS_ADMITTED_BASE_SLICES | sacrificial_slices(inventory)
 
@@ -484,7 +485,7 @@ class ActionService:
         Admission is by live cgroup membership, not by process name or
         command-line heuristics: a name list is not a containment boundary
         (the taxonomy this verb was designed against is explicit about
-        that). Only `agent.slice` / `build.slice` and slices the inventory
+        that). Only `agent.slice` / `agenttool.slice` and slices the inventory
         itself marks sacrificial admit a stop. A process with no slice segment at
         all (a PID 1 direct child, e.g. `init.scope`) falls out of this
         check the same way anything else outside the admitted set does --
@@ -506,7 +507,7 @@ class ActionService:
         if slice_unit not in admitted:
             raise ActionError(
                 "process is not in an admitted cgroup (must be agent.slice, "
-                "build.slice, or a slice the runtime inventory marks "
+                "agenttool.slice, or a slice the runtime inventory marks "
                 f"sacrificial; this process is in {slice_unit or '(no slice)'})",
                 403,
             )
@@ -906,31 +907,22 @@ class ActionService:
                 surface["unit"],
             ]
         elif action in {"freeze", "thaw"}:
-            command = [
-                "sinnix-pressure-park",
-                action,
-                "--",
-                resolved["surface"]["unit"],
-            ]
+            command = ["systemctl", "--system", action, resolved["surface"]["unit"]]
         elif action == "park":
-            surface = resolved["surface"]
-            unit = surface["unit"]
+            unit = resolved["surface"]["unit"]
             suffix = hashlib.sha256(unit.encode()).hexdigest()[:16]
-            manager = surface["manager"]
-            prefix = ["systemd-run", "--quiet", "--collect"]
-            if manager == "user":
-                prefix.insert(1, "--user")
             command = [
-                *prefix,
+                "systemd-run",
+                "--quiet",
+                "--collect",
                 f"--unit=sinnix-ops-thaw-{suffix}",
                 f"--on-active={request['parameters']['deadline_seconds']}",
-                "sinnix-pressure-park",
+                "systemctl",
                 "thaw",
-                "--",
                 unit,
             ]
             subprocess.run(
-                ["sinnix-pressure-park", "freeze", "--", unit],
+                ["systemctl", "--system", "freeze", unit],
                 capture_output=True,
                 text=True,
                 timeout=10,

@@ -77,7 +77,7 @@ MISSING_VERBS_NOTE = (
     "is costless and correct, and it now reaches the one process rather than "
     "the parent workload. It is admitted by cgroup membership, not by name — only "
     "processes currently inside <code>agent.slice</code>, "
-    "<code>build.slice</code>, or a slice the runtime inventory marks "
+    "<code>agenttool.slice</code>, or a slice the runtime inventory marks "
     "sacrificial can be targeted — so the button is offered only where the "
     "action would actually be accepted. Two gaps remain, and the hub will not "
     "grow a private path around either of them. "
@@ -115,10 +115,9 @@ def scheduled_runs(now_us: int) -> list[pressure_model.ScheduledRun]:
 def parkable_units(inventory: dict[str, Any] | None) -> set[str]:
     """Units `park` will actually accept.
 
-    Mirrors the action API's own admission (`sinnix-pressure-park` derives its
-    parkable set from `backup-maintenance` system services in the runtime
-    inventory, and the action resolver refuses any unit the inventory does not
-    carry) so the page never offers a button that answers 403.
+    Backup-class system services: heavy, deferrable and safe to freeze. The
+    action resolver refuses any unit the inventory does not carry and any
+    non-system unit, so the page never offers a button that answers 403.
     """
     surfaces = inventory.get("surfaces") if isinstance(inventory, dict) else None
     if not isinstance(surfaces, dict):
@@ -128,7 +127,7 @@ def parkable_units(inventory: dict[str, Any] | None) -> set[str]:
         for surface in surfaces.values()
         if isinstance(surface, dict)
         and surface.get("unit")
-        and surface.get("resourceClass") == "backup-maintenance"
+        and surface.get("resourceClass") == "backup"
         and str(surface.get("manager") or "system") == "system"
         and str(surface.get("kind") or "service") == "service"
     }
@@ -272,7 +271,7 @@ def hog_row(
     elif rerunnable:
         # Re-runnable does not mean admitted: the boundary is cgroup
         # membership, and a re-runnable command outside agent.slice,
-        # build.slice, or a sacrificial slice answers 403. Say so rather than
+        # agenttool.slice, or a sacrificial slice answers 403. Say so rather than
         # silently withholding the button.
         meta.append(badge("no process-stop button (cgroup not admitted)", "muted"))
     tone = ""
@@ -371,7 +370,7 @@ def scheduled_card(runs: list[pressure_model.ScheduledRun], parkable: set[str]) 
         if run.unit in parkable and run.active:
             controls = (
                 f'<button class="act" data-manager="system" onclick="parkUnit('
-                f"{js_arg(run.unit)},this)\">park it</button>"
+                f'{js_arg(run.unit)},this)">park it</button>'
             )
         elif run.unit in parkable:
             # park writes cgroup.freeze, and an inactive unit has no cgroup to
@@ -447,4 +446,12 @@ def render_pressure(
     body += log_card()
 
     chips = [regime.name, f"rendered {generated[11:19]}"]
-    return page("pressure", host, chips, "/pressure/", body, tail=ACTION_SCRIPT, reports_port=manifest.get("reportsPort"))
+    return page(
+        "pressure",
+        host,
+        chips,
+        "/pressure/",
+        body,
+        tail=ACTION_SCRIPT,
+        reports_port=manifest.get("reportsPort"),
+    )

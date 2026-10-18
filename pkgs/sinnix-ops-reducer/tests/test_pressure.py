@@ -20,10 +20,9 @@ this machine, not a restatement of the code. The four that carry the design:
 
 from __future__ import annotations
 
-from html import unescape
-
 import json
 from dataclasses import replace
+from html import unescape
 from pathlib import Path
 from typing import Any
 
@@ -429,7 +428,7 @@ INVENTORY: dict[str, Any] = {
             "unit": "borgbackup-job-realm.service",
             "manager": "system",
             "kind": "service",
-            "resourceClass": "backup-maintenance",
+            "resourceClass": "backup",
             "observe": {"enable": True, "restartable": False},
         },
         "activitywatch": {
@@ -444,10 +443,9 @@ INVENTORY: dict[str, Any] = {
 
 
 def test_park_is_offered_exactly_where_the_action_api_resolves_the_unit() -> None:
-    """`park` resolves its target through the runtime inventory, and
-    sinnix-pressure-park's parkable set is the backup-maintenance system
-    services. The nixpkgs-generated scrub timers are in neither, and an idle
-    unit has no cgroup to freeze at all.
+    """`park` resolves its target through the runtime inventory, and the
+    parkable set is the backup-class system services. The nixpkgs-generated
+    scrub timers are in neither, and an idle unit has no cgroup to freeze.
 
     Mutations, each caught here:
       * offer park for every scheduled row -> the scrub button 403s;
@@ -472,10 +470,10 @@ def test_park_is_offered_exactly_where_the_action_api_resolves_the_unit() -> Non
         last_seconds=None,
     )
     html = scheduled_card([running, scrub], parkable)
-    assert 'parkUnit("borgbackup-job-realm.service"'  in unescape(html)
+    assert 'parkUnit("borgbackup-job-realm.service"' in unescape(html)
     assert "running now" in html
     assert "btrfs-scrub-realm.service" in html
-    assert 'parkUnit("btrfs-scrub-realm.service"'  not in unescape(html)
+    assert 'parkUnit("btrfs-scrub-realm.service"' not in unescape(html)
     assert "no park verb" in html
     # The historical duration is the reason the strip is worth reading.
     assert "took 1h 10m" in html
@@ -491,10 +489,10 @@ def test_the_hog_table_offers_admitted_process_stop_and_names_the_gap(
     """A process button exists only when the action API would admit it."""
     rows = {row.comm: row for row in pressure.scan_processes(limit=4, proc=fake_proc)}
     admitted = process_admitted_slices(INVENTORY)
-    # agent.slice and build.slice are admitted unconditionally, with no
+    # agent.slice and agenttool.slice are admitted unconditionally, with no
     # "slices" key in INVENTORY at all -- proving the base set does not
     # depend on the inventory carrying it.
-    assert admitted == {"agent.slice", "build.slice"}
+    assert admitted == {"agent.slice", "agenttool.slice"}
 
     cheap = hog_row(rows["bd"], admitted)
     # bd is re-runnable AND in agent.slice, which is admitted: it gets the
@@ -505,8 +503,7 @@ def test_the_hog_table_offers_admitted_process_stop_and_names_the_gap(
     )
     assert "act('stop','process'" not in hog_row(rows["chrome"], admitted)
     # rustc is classified EXPENSIVE (build.slice precedence over the command
-    # name), not RERUNNABLE, so it never gets a process-stop button even
-    # though build.slice is admitted.
+    # name), not RERUNNABLE, so it never gets a process-stop button.
     assert "act('stop','process'" not in hog_row(rows["rustc"], admitted)
     # A re-runnable command outside every admitted slice (a bare `git`
     # running as some system.slice service, say) gets no button -- and the
@@ -538,7 +535,7 @@ def test_the_hog_table_offers_admitted_process_stop_and_names_the_gap(
 
 
 def test_process_admission_widens_with_a_sacrificial_slice_marker() -> None:
-    """A slice outside agent.slice/build.slice is admitted only if the live
+    """A slice outside agent.slice/agenttool.slice is admitted only if the live
     inventory itself marks it sacrificial (ManagedOOMMemoryPressure=kill) --
     mirroring the action API's own boundary, not a second hardcoded list.
 
@@ -555,7 +552,7 @@ def test_process_admission_widens_with_a_sacrificial_slice_marker() -> None:
         },
     }
     admitted = process_admitted_slices(inventory)
-    assert admitted == {"agent.slice", "build.slice", "background.slice"}
+    assert admitted == {"agent.slice", "agenttool.slice", "background.slice"}
     assert "gpu-runtime.slice" not in admitted
 
 

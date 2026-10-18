@@ -918,7 +918,7 @@ def test_process_stop_refuses_a_start_ticks_mismatch_or_a_dead_pid(
 def test_process_stop_admission_is_by_cgroup_membership_not_name(
     tmp_path: Path,
 ) -> None:
-    """Every non-negotiable in the design: agent.slice and build.slice admit
+    """Every non-negotiable in the design: agent.slice and agenttool.slice admit
     unconditionally, a slice the inventory marks sacrificial (background,
     here) admits too, an unrelated slice (gpu-runtime, present in the
     inventory but never marked sacrificial) is refused, a process with no
@@ -931,7 +931,7 @@ def test_process_stop_admission_is_by_cgroup_membership_not_name(
     """
     slice_by_pid = {
         401: "agent.slice",
-        402: "build.slice",
+        402: "agenttool.slice",
         403: "background.slice",  # sacrificial per inventory_with_sacrificial_slice
         404: "gpu-runtime.slice",  # in the inventory, never marked sacrificial
         405: "",  # PID 1 direct child: no slice segment at all
@@ -953,8 +953,8 @@ def test_process_stop_admission_is_by_cgroup_membership_not_name(
     assert stop(401, "agent")["preconditions"]["resolved"]["slice_unit"] == (
         "agent.slice"
     )
-    assert stop(402, "build")["preconditions"]["resolved"]["slice_unit"] == (
-        "build.slice"
+    assert stop(402, "agenttool")["preconditions"]["resolved"]["slice_unit"] == (
+        "agenttool.slice"
     )
     assert stop(403, "sacrificial")["preconditions"]["resolved"]["slice_unit"] == (
         "background.slice"
@@ -983,7 +983,7 @@ def test_process_admitted_slices_matches_the_action_services_own_admission(
     inventory = json.loads(inventory_path.read_text())
     assert process_admitted_slices(inventory) == {
         "agent.slice",
-        "build.slice",
+        "agenttool.slice",
         "background.slice",
     }
 
