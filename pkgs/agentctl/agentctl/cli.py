@@ -1135,7 +1135,7 @@ def _result(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         if bool(arguments.run) != bool(arguments.worker):
             parser().error("--run and --worker name one batch worker together")
         if arguments.run:
-            # The filing contract, so `lane done` refuses what `batch result`
+            # The filing contract, so `batch-worker done` refuses what `batch result`
             # would refuse for this attempt, and fills the same identity.
             run = load(config, resolve_run_id(config, arguments.run))
             worker = run.worker(arguments.worker)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-lane=$1
+worker=$1
 schema=$2
 root=$(mktemp -d)
 origin=$root/origin.git
@@ -65,7 +65,7 @@ write_result "$head"
 # A dirty tree is refused; untracked files under `.agentctl/` are not counted.
 printf 'dirty\n' >"$repo/dirty.txt"
 set +e
-dirty_output=$(cd "$repo" && "$lane" "done" "$root/result.json" 2>&1)
+dirty_output=$(cd "$repo" && "$worker" "done" "$root/result.json" 2>&1)
 dirty_status=$?
 set -e
 test "$dirty_status" -eq 1
@@ -76,7 +76,7 @@ rm "$repo/dirty.txt"
 # A result that does not validate is refused.
 printf '{"candidate_sha": "%s", "beads": []}\n' "$head" >"$root/invalid.json"
 set +e
-invalid_output=$(cd "$repo" && "$lane" "done" "$root/invalid.json" 2>&1)
+invalid_output=$(cd "$repo" && "$worker" "done" "$root/invalid.json" 2>&1)
 invalid_status=$?
 set -e
 test "$invalid_status" -eq 1
@@ -86,7 +86,7 @@ grep -Fq 'unresolved' <<<"$invalid_output"
 # A result naming another commit is refused.
 write_result "$(printf '0%.0s' $(seq 1 40))"
 set +e
-mismatch_output=$(cd "$repo" && "$lane" "done" "$root/result.json" 2>&1)
+mismatch_output=$(cd "$repo" && "$worker" "done" "$root/result.json" 2>&1)
 mismatch_status=$?
 set -e
 test "$mismatch_status" -eq 1
@@ -95,7 +95,7 @@ grep -Fq 'is not HEAD' <<<"$mismatch_output"
 # A valid result at HEAD is printed verbatim and nothing is pushed.
 write_result "$head"
 captured=$root/captured.result
-(cd "$repo" && "$lane" "done" "$root/result.json") >"$captured"
+(cd "$repo" && "$worker" "done" "$root/result.json") >"$captured"
 test "$(cat "$captured")" = "$(cat "$root/result.json")"
 remote_head=$(git --git-dir="$origin" rev-parse refs/heads/batch/fixture/w1)
 test "$remote_head" != "$head"
@@ -112,7 +112,7 @@ exec "${REAL_GIT:?}" "$@"
 EOF
 chmod +x "$bin/git"
 set +e
-(cd "$repo" && REAL_GIT="$real_git" PATH="$bin:$PATH" "$lane" done "$root/result.json") >"$root/status-failed.out" 2>"$root/status-failed.err"
+(cd "$repo" && REAL_GIT="$real_git" PATH="$bin:$PATH" "$worker" done "$root/result.json") >"$root/status-failed.out" 2>"$root/status-failed.err"
 status_failed=$?
 set -e
 test "$status_failed" -eq 1
@@ -130,7 +130,7 @@ set -euo pipefail
 printf '{"candidate_sha":"%s","beads":"invalid replacement"}\n' "$RESULT_HEAD" >"$ORIGINAL_RESULT"
 EOF
 chmod +x "$bin/agentctl"
-(cd "$repo" && REAL_AGENTCTL="$real_agentctl" ORIGINAL_RESULT="$root/result.json" RESULT_HEAD="$head" PATH="$bin:$PATH" "$lane" done "$root/result.json") >"$root/replaced-result.json"
+(cd "$repo" && REAL_AGENTCTL="$real_agentctl" ORIGINAL_RESULT="$root/result.json" RESULT_HEAD="$head" PATH="$bin:$PATH" "$worker" done "$root/result.json") >"$root/replaced-result.json"
 cmp "$root/expected-result.json" "$root/replaced-result.json"
 cp "$root/expected-result.json" "$root/result.json"
 rm "$bin/agentctl"
@@ -182,21 +182,21 @@ esac
 EOF
 chmod +x "$bin/agentctl"
 export AGENTCTL_CALLS=$root/agentctl.calls
-verify_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_TIMEOUT_SECONDS=60 "$lane" verify)
+verify_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_TIMEOUT_SECONDS=60 "$worker" verify)
 grep -Fq 'succeeded' <<<"$verify_output"
 grep -Fxq "job start fixture verify_quick --workspace $repo" "$AGENTCTL_CALLS"
 grep -Fxq "job wait 7 --reference fixture-verify-launch --timeout-seconds 60" "$AGENTCTL_CALLS"
 
 # Zero is a valid owner queue id and still needs its launch reference.
 : >"$AGENTCTL_CALLS"
-zero_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_FIXTURE_JOB_ID=0 AGENTCTL_TIMEOUT_SECONDS=60 "$lane" verify)
+zero_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_FIXTURE_JOB_ID=0 AGENTCTL_TIMEOUT_SECONDS=60 "$worker" verify)
 grep -Fq 'succeeded' <<<"$zero_output"
 grep -Fxq 'job wait 0 --reference fixture-verify-launch --timeout-seconds 60' "$AGENTCTL_CALLS"
 
 # Missing owner identity must fail before observing a queue position.
 : >"$AGENTCTL_CALLS"
 set +e
-missing_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_FIXTURE_MISSING_REFERENCE=1 AGENTCTL_TIMEOUT_SECONDS=60 "$lane" verify 2>&1)
+missing_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_FIXTURE_MISSING_REFERENCE=1 AGENTCTL_TIMEOUT_SECONDS=60 "$worker" verify 2>&1)
 missing_status=$?
 set -e
 test "$missing_status" -eq 1
@@ -207,18 +207,18 @@ if grep -q '^job wait ' "$AGENTCTL_CALLS"; then
 fi
 
 printf 'launch snapshot\n' >"$repo/.agentctl/prompt.md"
-task_output=$(cd "$repo" && "$lane" task)
+task_output=$(cd "$repo" && "$worker" task)
 test "$task_output" = 'launch snapshot'
 printf 'named prompt\n' >"$root/named.md"
-task_output=$(cd "$repo" && AGENTCTL_JOB_PROMPT_FILE="$root/named.md" "$lane" task)
+task_output=$(cd "$repo" && AGENTCTL_JOB_PROMPT_FILE="$root/named.md" "$worker" task)
 test "$task_output" = 'named prompt'
 
 # The same bound reread keeps the packet and observes current owner amendments.
 : >"$AGENTCTL_CALLS"
-task_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_RUN_ID=fixture-run AGENTCTL_WORKER_ID=w1 AGENTCTL_ATTEMPT=1 "$lane" task)
+task_output=$(cd "$repo" && PATH="$bin:$PATH" AGENTCTL_RUN_ID=fixture-run AGENTCTL_WORKER_ID=w1 AGENTCTL_ATTEMPT=1 "$worker" task)
 grep -Fq 'launch snapshot' <<<"$task_output"
 if ! grep -Fq 'amended task' <<<"$task_output"; then
-  printf 'bound lane task omitted the current owner amendment\n' >&2
+  printf 'bound batch-worker task omitted the current owner amendment\n' >&2
   exit 1
 fi
 grep -Fxq 'batch task --run fixture-run --worker w1 --json --attempt 1' "$AGENTCTL_CALLS"
@@ -227,4 +227,4 @@ shopt -s nullglob dotglob
 scratch_entries=("$TMPDIR"/*)
 test "${#scratch_entries[@]}" -eq 0
 
-printf 'lane toolbelt fixture passed\n'
+printf 'batch-worker toolbelt fixture passed\n'

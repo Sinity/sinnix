@@ -79,7 +79,7 @@ multi_agent_v2 = true
 prevent_idle_sleep = true
 apps = true
 
-# Wrapper profiles are declared in flake/data/agent-lanes.nix. The settings
+# Wrapper profiles are declared in flake/data/agent-profiles.nix. The settings
 # below are fallbacks, not an allocation policy. Deliberate dispatch selects
 # model and effort explicitly; bounded role overrides live in agent files.
 [agents]

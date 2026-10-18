@@ -63,7 +63,7 @@ mkFeatureModule {
 
       jsonFormat = pkgs.formats.json { };
       yamlFormat = pkgs.formats.yaml { };
-      inherit (helpers.data) mcpRegistry agentLanes runtimeDefaults;
+      inherit (helpers.data) mcpRegistry agentProfiles runtimeDefaults;
       hermesMcpServersForProfile =
         mcpProfile:
         lib.mapAttrs mcpRegistry.renderHermesServer (
@@ -145,7 +145,7 @@ mkFeatureModule {
           # than left saying "whisper-1" about something that is not whisper.
           # api_key is a dummy literal: the hub is
           # unauthenticated loopback-only (the sk-local convention used by the
-          # other local OpenAI-compatible lanes in flake/data/agent-lanes.nix).
+          # other local OpenAI-compatible profiles in flake/data/agent-profiles.nix).
           stt = {
             enabled = voiceEnabled;
             provider = "openai";
@@ -174,12 +174,12 @@ mkFeatureModule {
             non_interactive_local_changes = "stash";
           };
         };
-      # Base (non-profile) `hermes` config — not a registry lane.
+      # Base (non-profile) `hermes` config — not a registry profile.
       hermesConfigFile = mkHermesConfig {
         name = "default";
         toolsets = [ "hermes-cli" ];
       };
-      # One mkHermesConfig call per flake/data/agent-lanes.nix hermesProfiles
+      # One mkHermesConfig call per flake/data/agent-profiles.nix hermesProfiles
       # entry, keyed by profile name (research/mirror/local/...).
       hermesProfileConfigFiles = lib.mapAttrs (
         name: profile:
@@ -194,7 +194,7 @@ mkFeatureModule {
           // lib.optionalAttrs (profile ? voiceEnabled) { inherit (profile) voiceEnabled; }
           // lib.optionalAttrs (profile ? model) { inherit (profile) model; }
         )
-      ) agentLanes.hermesProfiles;
+      ) agentProfiles.hermesProfiles;
       # Extra launch-time shell for hermes-<name> wrappers whose model uses a
       # custom endpoint: OPENAI_BASE_URL comes from the profile's own
       # `model.base_url`; OPENAI_API_KEY from a static loopback token
@@ -369,7 +369,7 @@ mkFeatureModule {
             '';
 
             # A single merged home.file set: static entries below plus one
-            # generated entry per flake/data/agent-lanes.nix lane
+            # generated entry per flake/data/agent-profiles.nix profile
             # (claude/codex/hermes). It must stay one `//`-merged
             # assignment: a direct `home.file = {...}` alongside sibling
             # `home.file."x" = ...` bindings in the same attrset literal is a
@@ -377,37 +377,37 @@ mkFeatureModule {
             home.file =
               # The single managed Claude launcher.
               (lib.mapAttrs' (
-                name: lane:
-                lib.nameValuePair ".local/bin/${lane.binName}" (
+                name: profile:
+                lib.nameValuePair ".local/bin/${profile.binName}" (
                   mkClaudeCodeWrapper (
                     {
                       mcpConfigName = "mcp";
                       profile = name;
                     }
-                    // lib.optionalAttrs (lane ? env) {
+                    // lib.optionalAttrs (profile ? env) {
                       extraEnv = mkClaudeBackendEnv {
                         inherit name;
-                        inherit (lane) model;
-                        inherit (lane.env) baseUrl authToken;
+                        inherit (profile) model;
+                        inherit (profile.env) baseUrl authToken;
                       };
                     }
                   )
                 )
-              ) agentLanes.claudeLanes)
-              # One entry per codexLanes lane. The layered <profile>.config.toml
+              ) agentProfiles.claudeProfiles)
+              # One entry per codexProfiles entry. The layered <profile>.config.toml
               # (client-profiles.nix) carries model + model_provider + the MCP
               # table; the wrapper only supplies the provider API key env.
               // (lib.mapAttrs' (
-                name: lane:
-                lib.nameValuePair ".local/bin/${lane.binName}" (
+                name: profile:
+                lib.nameValuePair ".local/bin/${profile.binName}" (
                   mkCodexWrapper (
-                    (lib.optionalAttrs (lane ? env) {
-                      profile = lane.mcpProfile;
+                    (lib.optionalAttrs (profile ? env) {
+                      profile = profile.mcpProfile;
                     })
                     // {
                       extraEnv =
-                        if lane ? env then
-                          mkCodexBackendEnv ({ inherit name; } // lane.env)
+                        if profile ? env then
+                          mkCodexBackendEnv ({ inherit name; } // profile.env)
                         else
                           ''
                             if [ -r /etc/sinnix/openai-proxy-url ]; then
@@ -421,22 +421,22 @@ mkFeatureModule {
                     }
                   )
                 )
-              ) agentLanes.codexLanes)
-              # One entry per hermesProfiles lane.
+              ) agentProfiles.codexProfiles)
+              # One entry per hermesProfiles entry.
               // (lib.mapAttrs' (
                 name: profile:
                 lib.nameValuePair ".local/bin/hermes-${name}" (mkHermesWrapper {
                   profile = name;
                   extraPrelude = hermesWrapperExtraPrelude name profile;
                 })
-              ) agentLanes.hermesProfiles)
+              ) agentProfiles.hermesProfiles)
               // {
                 # Subscription-authenticated Claude Code bridge. Proxy mode
                 # leaves native Anthropic requests untouched and routes only
                 # explicitly selected Clodex models through OpenAI OAuth.
                 ".local/bin/claude-clodex" = mkClodexWrapper { };
-                ".local/bin/lane" = {
-                  source = mkDotsFile "/_ai/skills/agent-runtime/scripts/lane";
+                ".local/bin/batch-worker" = {
+                  source = mkDotsFile "/_ai/skills/agent-runtime/scripts/batch-worker";
                   force = true;
                 };
                 ".local/bin/clodex-claude" = mkClodexChildWrapper;
@@ -511,7 +511,7 @@ mkFeatureModule {
                   source = mkDotsFile "/_ai/skills";
                   force = true;
                 };
-                # Base (non-profile) hermes command — not a registry lane.
+                # Base (non-profile) hermes command — not a registry profile.
                 ".local/bin/hermes" = mkHermesWrapper { };
                 ".local/bin/hermes-acp" = mkHermesWrapper {
                   entrypoint = "hermes-acp";

@@ -312,7 +312,7 @@ def check_result_contract(
 
     The one authority for the document-level contract: `batch result` applies
     it before binding the result to the worktree, and `result validate-worker`
-    applies it inside a batch worker, so `lane done` refuses exactly what
+    applies it inside a batch worker, so `batch-worker done` refuses exactly what
     filing refuses.
     """
     attempts = worker.get("attempts") or []
@@ -361,7 +361,7 @@ def load_dispatched_result(
 
     ``attempt`` is the dispatch attempt that is filing, named by the filing
     command itself (the one queued behind the worker, or a worker's own
-    ``lane done``). A filing for an earlier attempt is refused here: once the
+    ``batch-worker done``). A filing for an earlier attempt is refused here: once the
     identity comes from the dispatch record, this is what keeps a stale
     attempt's result from landing under the current one. Without it, the
     document's own attempt stands and `check_result_contract` compares it.

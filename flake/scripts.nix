@@ -82,7 +82,7 @@ let
     sinnix = import ./cli-dispatcher.nix { inherit lib pkgs registry; };
   };
   mcpRegistry = import ./data/mcp-registry.nix { inherit lib; };
-  agentLanes = import ./data/agent-lanes.nix;
+  agentProfiles = import ./data/agent-profiles.nix;
   agentEnvironmentSelections = [
     {
       name = "claude";
@@ -124,7 +124,7 @@ let
     name = "hermes-${name}";
     client = "hermes";
     selection = profile.mcpProfile or "evidence";
-  }) agentLanes.hermesProfiles;
+  }) agentProfiles.hermesProfiles;
   agentEnvironmentData = pkgs.writeText "sinnix-agent-environment-data.json" (
     builtins.toJSON {
       profiles = map (row: {
@@ -273,7 +273,7 @@ let
     # process-exclusive lock — under multi-agent fanouts that convoys for
     # minutes, and it pays ~2.3s engine startup per call vs ~65ms as a server
     # client. Keep the wrapper's PATH injection so every bd consumer (hooks,
-    # devshells, agent lanes) gets server capability unconditionally, while
+    # devshells, agent launcher profiles) gets server capability unconditionally, while
     # exposing the exact same Dolt package through passthru for the user PATH.
     beads =
       let

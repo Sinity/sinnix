@@ -15,7 +15,7 @@ inputs.
 ## Layout
 
 ```text
-flake/data/   small declarative registries (runtime defaults, MCP, agent lanes)
+flake/data/   small declarative registries (runtime defaults, MCP, agent launcher profiles)
 flake/tests/  evaluation and runtime contract checks
 modules/      features/ (default-on), services/ (default-off), lib/ (factories)
 pkgs/         packages (agentctl/, sinnix-agent-gateway/, ...); a pkgs/<name>/

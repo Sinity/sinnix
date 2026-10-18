@@ -93,10 +93,10 @@ let
   '';
 
   # Backend-switch env builder for the claude-deepseek/claude-local wrappers
-  # (flake/data/agent-lanes.nix claudeLanes): points Claude Code's native
+  # (flake/data/agent-profiles.nix claudeProfiles): points Claude Code's native
   # Anthropic-protocol client at a non-Anthropic endpoint and fans one model
   # name out across every ANTHROPIC_*MODEL var Claude Code reads. `name` is
-  # the lane name; it names the intermediate shell variable and the error
+  # the profile name; it names the intermediate shell variable and the error
   # caller, keeping error text wrapper-specific without extra data fields.
   mkClaudeBackendEnv =
     {
@@ -142,7 +142,7 @@ let
     '';
 
   # Shared backend-switch env builder for the codex-deepseek/codex-local
-  # wrappers (see flake/data/agent-lanes.nix codexLanes): the layered
+  # wrappers (see flake/data/agent-profiles.nix codexProfiles): the layered
   # `<profile>.config.toml` (mcp.nix's client-profiles.nix) already carries
   # model + model_provider + the full MCP table, so the wrapper only needs
   # to export the one env var that provider's `env_key` names.
@@ -151,7 +151,7 @@ let
       name,
       varName,
       # Either secretName (agenix, read-checked at launch) or literal (a
-      # static loopback dev token) — exactly one is set per lane.
+      # static loopback dev token) — exactly one is set per profile.
       secretName ? null,
       literal ? null,
     }:
@@ -271,7 +271,7 @@ let
   # Claude Code launched through Clodex's advertised selective proxy. Clodex
   # owns the ChatGPT/Codex-plan OAuth flow and local MITM CA; this wrapper
   # retains the normal managed Claude Code command shape so MCP, hooks, scratch
-  # and MCP setup remain identical to native lanes.
+  # and MCP setup remain identical to native profiles.
   mkClodexWrapper =
     {
       mcpConfigName ? "mcp",

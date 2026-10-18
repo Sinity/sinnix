@@ -8,7 +8,7 @@
   tomlFormat,
   jsonFormat,
   dotsRoot,
-  agentLanes,
+  agentProfiles,
 }:
 let
   inherit (mcpRegistry)
@@ -36,8 +36,8 @@ let
       // extra
     );
   codexEndpointProfileNames = lib.unique (
-    lib.mapAttrsToList (_: lane: lane.mcpProfile) (
-      lib.filterAttrs (_: lane: lane ? env) agentLanes.codexLanes
+    lib.mapAttrsToList (_: profile: profile.mcpProfile) (
+      lib.filterAttrs (_: profile: profile ? env) agentProfiles.codexProfiles
     )
   );
   codexEndpointFiles = lib.genAttrs codexEndpointProfileNames (

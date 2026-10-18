@@ -45,7 +45,7 @@ in
     ./tests/capture-mpris.nix
     ./tests/backup.nix
     ./tests/agent-environment.nix
-    ./tests/lane-toolbelt.nix
+    ./tests/batch-worker-toolbelt.nix
     ./tests/agent-parity.nix
     ./tests/observability.nix
     ./tests/cli.nix

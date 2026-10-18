@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: List every declared capability (features, services, scripts, commands, skills, capture lanes, MCP servers, agent lanes) with how to invoke it
+# description: List every declared capability (features, services, scripts, commands, skills, capture lanes, MCP servers, agent launcher profiles) with how to invoke it
 # runtimeInputs: bash @sinnix-hub-server
 set -euo pipefail
 

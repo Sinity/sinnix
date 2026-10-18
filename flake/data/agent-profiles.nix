@@ -1,4 +1,4 @@
-# Agent CLI lane registry. Renderers and wrapper mechanics live in
+# Agent launcher profile registry. Renderers and wrapper mechanics live in
 # modules/features/dev/agents/; this file owns only their variants.
 {
   # Profile config and matching `hermes-<name>` wrapper. The base `hermes`
@@ -92,7 +92,7 @@
   # Claude variants. The private npm prefix owns the upstream executable;
   # the managed `claude` command selects the default MCP set.
   # `mcpProfile`, `model`, and `env` feed the renderers.
-  claudeLanes = {
+  claudeProfiles = {
     default = {
       binName = "claude";
       mcpProfile = "default";
@@ -101,7 +101,7 @@
 
   # The default Codex command reads the generated system config. Only the
   # local and DeepSeek variants select native backend profiles.
-  codexLanes = {
+  codexProfiles = {
     default = {
       binName = "codex";
       mcpProfile = "default";

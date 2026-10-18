@@ -22,7 +22,7 @@ let
     mcpRegistry = import ./data/mcp-registry.nix { inherit lib; };
     runtimeDefaults = import ./data/runtime-defaults.nix { inherit lib; };
     localModels = import ./data/local-models.nix { inherit lib; };
-    agentLanes = import ./data/agent-lanes.nix;
+    agentProfiles = import ./data/agent-profiles.nix;
     # checkedPorts, not the raw table: consuming the data is what forces the
     # uniqueness assertion below, so a duplicate cannot slip through by being
     # lazily never evaluated.

@@ -156,8 +156,8 @@ let
       commandDocs,
       # helpers.data.mcpRegistry
       mcpRegistry,
-      # helpers.data.agentLanes
-      agentLanes,
+      # helpers.data.agentProfiles
+      agentProfiles,
       # dots/_ai/skills, the live root shared by native clients.
       skillsRoot,
     }:
@@ -472,13 +472,13 @@ let
           name = lane.binName;
           description = "Claude Code, ${lane.mcpProfile} MCP profile${laneBackend lane}";
           invoke = lane.binName;
-          owner = "flake/data/agent-lanes.nix";
+          owner = "flake/data/agent-profiles.nix";
           extra = {
             client = "claude";
             inherit (lane) mcpProfile;
           };
         }
-      ) agentLanes.claudeLanes;
+      ) agentProfiles.claudeProfiles;
 
       codexLaneRows = mapAttrsToList (
         _name: lane:
@@ -487,13 +487,13 @@ let
           name = lane.binName;
           description = "Codex CLI, ${lane.mcpProfile} profile${laneBackend lane}";
           invoke = lane.binName;
-          owner = "flake/data/agent-lanes.nix";
+          owner = "flake/data/agent-profiles.nix";
           extra = {
             client = "codex";
             inherit (lane) mcpProfile;
           };
         }
-      ) agentLanes.codexLanes;
+      ) agentProfiles.codexProfiles;
 
       hermesLaneRows = mapAttrsToList (
         name: profile:
@@ -504,13 +504,13 @@ let
             profile.reasoningEffort or "medium"
           } reasoning";
           invoke = "hermes-${name}";
-          owner = "flake/data/agent-lanes.nix";
+          owner = "flake/data/agent-profiles.nix";
           extra = {
             client = "hermes";
             mcpProfile = profile.mcpProfile or "evidence";
           };
         }
-      ) agentLanes.hermesProfiles;
+      ) agentProfiles.hermesProfiles;
 
       rows =
         featureRows

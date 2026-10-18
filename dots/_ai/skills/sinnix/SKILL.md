@@ -27,7 +27,7 @@ lanes use `mkCaptureLane`. A bypass needs a structural reason.
 
 ## Agent surfaces
 
-`flake/data/agent-lanes.nix` defines CLI lanes;
+`flake/data/agent-profiles.nix` defines agent launcher profiles;
 `flake/data/mcp-registry.nix` defines MCP profiles; `dots/_ai/skills/` is the
 source for shared skills and `modules/features/dev/agents/` renders client
 links. `~/.local/bin/claude` is the Home Manager launcher wrapper; the

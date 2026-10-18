@@ -5,14 +5,14 @@ set -euo pipefail
 usage() {
   cat >&2 <<'EOF'
 Usage:
-  lane task                       print dispatch plus current owner task amendments
-  lane verify                     run the descriptor's focused verification as a job and wait
-  lane done <result.json>         validate with agentctl and print the result as the final message
+  batch-worker task                       print dispatch plus current owner task amendments
+  batch-worker verify                     run the descriptor's focused verification as a job and wait
+  batch-worker done <result.json>         validate with agentctl and print the result as the final message
 EOF
 }
 
 die() {
-  printf 'lane: %s\n' "$*" >&2
+  printf 'batch-worker: %s\n' "$*" >&2
   exit 1
 }
 
@@ -72,7 +72,7 @@ lane_verify() {
   command -v agentctl >/dev/null 2>&1 || die "agentctl is unavailable for managed verification"
   operation=$(focused_operation "$(project_file)")
   if [[ -z $operation ]]; then
-    printf 'lane verify: no focused verification declared in %s\n' "$(project_file)"
+    printf 'batch-worker verify: no focused verification declared in %s\n' "$(project_file)"
     return 0
   fi
   if ! output=$(agentctl job start "$(project_id)" "$operation" --workspace "$(repo_root)"); then
@@ -118,7 +118,7 @@ lane_done() (
   [[ -f $result && -r $result ]] || die "result is not a readable file: $result"
   dirty=$(git_offenders) || die "cannot inspect checkout status"
   if [[ -n $dirty ]]; then
-    printf 'lane: refusing to finish with uncommitted changes. Offenders:\n%s\n' "$dirty" >&2
+    printf 'batch-worker: refusing to finish with uncommitted changes. Offenders:\n%s\n' "$dirty" >&2
     exit 1
   fi
   snapshot=$(mktemp "${TMPDIR:-/realm/tmp/work}/lane-result.XXXXXXXX") || die "cannot allocate result snapshot"

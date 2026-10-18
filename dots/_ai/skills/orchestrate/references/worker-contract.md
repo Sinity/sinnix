@@ -67,7 +67,7 @@ names, and exits with one result document.
    suites, and builds run through the project's declared AgentCTL operations
    (`agentctl project operations <project>` lists them), started with
    `agentctl job start <project> <operation> --workspace <worktree> -- <selector>`.
-   Use `lane verify` only for a declared profile that needs no arguments.
+   Use `batch-worker verify` only for a declared profile that needs no arguments.
    Keep heavy checks out of the worker's small memory scope. Bounded low-memory
    import/static probes and small diagnostics may run in the foreground;
    reading files, Git, and search run directly. Do not reconstruct a host

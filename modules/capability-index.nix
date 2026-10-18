@@ -42,7 +42,7 @@ let
     inherit config options;
     sourceRoot = toString inputs.self;
     inherit scriptRegistry commandDocs;
-    inherit (helpers.data) mcpRegistry agentLanes;
+    inherit (helpers.data) mcpRegistry agentProfiles;
     skillsRoot = "${inputs.self}/dots/_ai/skills";
   };
 in

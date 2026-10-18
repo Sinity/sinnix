@@ -31,7 +31,7 @@ Sinnix owns the sources: global instructions at `dots/_ai/AGENTS.md` (linked as
 `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.gemini/GEMINI.md`),
 agent definitions and hooks under `dots/claude/`, shared skills under
 `dots/_ai/skills/`, rendering under `modules/features/dev/agents/`, and
-launcher profiles in `flake/data/agent-lanes.nix`. Instructions and skills are
+launcher profiles in `flake/data/agent-profiles.nix`. Instructions and skills are
 live links, effective on the next read; generated settings and profiles
 change at activation. Resolve `~/.claude/` links before editing anything.
 

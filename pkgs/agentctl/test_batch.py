@@ -2709,7 +2709,7 @@ def validate_as_lane(
     *,
     attempt: int | None = None,
 ) -> int:
-    """`lane done`'s check: `agentctl result validate-worker` in the worker's env."""
+    """`batch-worker done`'s check: `agentctl result validate-worker` in the worker's env."""
     location = harness.config.state_dir / "agentctl.json"
     location.write_text(
         json.dumps(
@@ -2739,7 +2739,7 @@ def test_resumed_multi_bead_worker_files_its_attempt_under_one_contract(
 
     Before the fix the resume packet repeated the original packet's attempt 1
     and a strict Codex schema forced `schema_version: 2`, so a result that
-    `lane done` accepted as legacy was refused at filing.
+    `batch-worker done` accepted as legacy was refused at filing.
     """
     harness.beads.beads["fx-member"]["acceptance_criteria"] = ""
     run = harness.start("fx-lead")

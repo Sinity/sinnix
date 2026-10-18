@@ -123,7 +123,7 @@ of an active link. Rendering does not open or validate evidence payloads.
 Workers write separate observation lists. Import a reviewed batch atomically:
 
 ```sh
-sinnix-file-catalog --catalog /path/catalog.json import lane-a.json lane-b.json --on-conflict record
+sinnix-file-catalog --catalog /path/catalog.json import part-a.json part-b.json --on-conflict record
 sinnix-file-catalog --catalog /path/catalog.json coverage --kind collection
 sinnix-file-catalog --catalog /path/catalog.json search geology --kind collection --limit 20 --offset 0
 ```

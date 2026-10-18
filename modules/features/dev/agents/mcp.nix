@@ -71,7 +71,7 @@ mkFeatureModule {
       # Keep the NixOS-level live dots root in this lexical binding so nested
       # activation text cannot accidentally resolve the Home Manager config.
       dotsRoot = config.sinnix.paths.dotsRoot;
-      inherit (helpers.data) mcpRegistry agentLanes;
+      inherit (helpers.data) mcpRegistry agentProfiles;
       browser = import ./browser.nix {
         inherit
           lib
@@ -95,7 +95,7 @@ mkFeatureModule {
           pkgs
           inputs
           mcpRegistry
-          agentLanes
+          agentProfiles
           tomlFormat
           jsonFormat
           ;

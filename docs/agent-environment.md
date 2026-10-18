@@ -81,12 +81,12 @@ Servers: context7, github, lynchpin, sinex.
 
 | Name | Description | Model | Effort |
 | --- | --- | --- | --- |
+| `batch-reviewer` | Optional cross-family reviewer for a named unresolved risk on a pinned batch candidate. | `opus` | `high` |
+| `batch-worker` | External AgentCTL batch worker in an isolated worktree. Dispatch prompts carry task scope and conflict-planning estimates. | `sonnet` | `medium` |
 | `boilerplate-scribe` | Apply a supplied mechanical code or configuration pattern within an explicit file scope, then verify the affected behavior. | `haiku` | `` |
 | `implementer` | Implementation worker for one coherent ownership group in its own worktree — writes the whole change, verifies it, publishes it, and drives the PR through hosted review. Use instead of a fork when the work may exceed a fork's turn cap. | `` | `` |
 | `judge` | Headless structured judge with an explicit refutation attempt and honest unsupported path. | `sonnet` | `high` |
-| `lane` | External AgentCTL batch worker in an isolated worktree. Dispatch prompts carry task scope and conflict-planning estimates. | `sonnet` | `medium` |
 | `review` | Read-only adversarial reviewer that cites exact evidence and tests the strongest counterclaim. | `opus` | `high` |
-| `review-lane` | Optional cross-family reviewer for a named unresolved risk on a pinned batch candidate. | `opus` | `high` |
 | `test-coverage-sprint` | Strengthen tests for a bounded behavior or risk using the repository harness, with honest coverage and regression evidence. | `sonnet` | `` |
 | `triage` | Read-only evidence worker returning a closed structured verdict. | `haiku` | `medium` |
 

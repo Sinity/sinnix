@@ -235,7 +235,7 @@ def queue_agent(
     environment["AGENTCTL_PRINCIPAL"] = "agent-control"
     environment["AGENTCTL_PROJECT_ID"] = project.project_id
     if binding and binding.get("run_id") and binding.get("worker"):
-        # `lane done` validates against this worker's filing contract.
+        # `batch-worker done` validates against this worker's filing contract.
         environment["AGENTCTL_RUN_ID"] = str(binding["run_id"])
         environment["AGENTCTL_WORKER_ID"] = str(binding["worker"])
         if isinstance(binding.get("attempt"), int):

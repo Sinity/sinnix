@@ -480,6 +480,6 @@ pueued and the pool slices come from `modules/features/cli/core.nix` and
 `flake/data/runtime-defaults.nix`. The package's test suite drives a private
 pueued end to end.
 
-The worker tool `lane` (`dots/_ai/skills/agent-runtime/scripts/lane`) is what a
-queued worker uses inside its packet. `lane task` shows the worker its current
-tasks beside the dispatch-time snapshot, and `lane done` files its result.
+The worker tool `batch-worker` (`dots/_ai/skills/agent-runtime/scripts/batch-worker`) is what a
+queued worker uses inside its packet. `batch-worker task` shows the worker its current
+tasks beside the dispatch-time snapshot, and `batch-worker done` files its result.

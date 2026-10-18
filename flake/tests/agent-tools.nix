@@ -19,52 +19,52 @@ in
       polylogueSentinelDataDir = "/tmp/sinnix-polylogue-agent-tools-sentinel";
       runtimeDefaults = import ../data/runtime-defaults.nix { inherit lib; };
       mcpRegistry = import ../data/mcp-registry.nix { inherit lib; };
-      agentLanes = import ../data/agent-lanes.nix;
-      # Derived from the lane registry rather than hand-listed: every declared
-      # lane must produce an installed wrapper, and adding or retiring a lane
+      agentProfiles = import ../data/agent-profiles.nix;
+      # Derived from the profile registry rather than hand-listed: every declared
+      # profile must produce an installed wrapper, and adding or retiring a profile
       # must not require editing this file in several places.
       laneWrapperFiles = map (binName: ".local/bin/${binName}") (
-        (map (lane: lane.binName) (lib.attrValues agentLanes.claudeLanes))
-        ++ (map (lane: lane.binName) (lib.attrValues agentLanes.codexLanes))
-        ++ (map (name: "hermes-${name}") (lib.attrNames agentLanes.hermesProfiles))
+        (map (profile: profile.binName) (lib.attrValues agentProfiles.claudeProfiles))
+        ++ (map (profile: profile.binName) (lib.attrValues agentProfiles.codexProfiles))
+        ++ (map (name: "hermes-${name}") (lib.attrNames agentProfiles.hermesProfiles))
         ++ [ "pi" ]
       );
-      # Each lane's wrapper must honour the registry entry it was rendered
+      # Each profile's wrapper must honour the registry entry it was rendered
       # from: the MCP config file its profile selects, the profile marker the
-      # hooks branch on, and (for alternate backends) the endpoint the lane
-      # declares. Derived here so a lane rename or a new backend needs no
+      # hooks branch on, and (for alternate backends) the endpoint the profile
+      # declares. Derived here so a profile rename or a new backend needs no
       # edit in this file, and so a wrapper that stops following the registry
       # fails rather than a literal that only this test and the renderer know.
       claudeLaneWrapperChecks = lib.concatStringsSep "\n" (
         lib.mapAttrsToList (
-          _: lane:
+          _: profile:
           let
-            wrapper = ''"$HOME/.local/bin/${lane.binName}"'';
+            wrapper = ''"$HOME/.local/bin/${profile.binName}"'';
             mcpFile = "mcp";
           in
           ''
             grep -Fq 'MCP_CONFIG="$HOME/.config/claude/${mcpFile}.json"' ${wrapper}
-            grep -Fq 'export SINNIX_CLAUDE_PROFILE=${lane.mcpProfile}' ${wrapper}
+            grep -Fq 'export SINNIX_CLAUDE_PROFILE=${profile.mcpProfile}' ${wrapper}
             grep -Fq 'export CLAUDE_CONFIG_DIR="''${CLAUDE_CONFIG_DIR:-$HOME/.config/claude}"' ${wrapper}
           ''
-          + lib.optionalString (lane ? env) ''
-            grep -Fq 'ANTHROPIC_BASE_URL="${lane.env.baseUrl}"' ${wrapper}
-            ${pkgs.python3}/bin/python ${./claude-backend-model.py} ${wrapper} ${lib.escapeShellArg lane.model}
+          + lib.optionalString (profile ? env) ''
+            grep -Fq 'ANTHROPIC_BASE_URL="${profile.env.baseUrl}"' ${wrapper}
+            ${pkgs.python3}/bin/python ${./claude-backend-model.py} ${wrapper} ${lib.escapeShellArg profile.model}
           ''
-        ) agentLanes.claudeLanes
+        ) agentProfiles.claudeProfiles
       );
       codexLaneWrapperChecks = lib.concatStringsSep "\n" (
         lib.mapAttrsToList (
-          _: lane:
+          _: profile:
           let
-            wrapper = ''"$HOME/.local/bin/${lane.binName}"'';
+            wrapper = ''"$HOME/.local/bin/${profile.binName}"'';
           in
           ''
             ${
-              if lane ? env then
+              if profile ? env then
                 ''
-                  grep -Fq 'codex_args=(--profile ${lane.mcpProfile})' ${wrapper}
-                  grep -Fq 'export SINNIX_CODEX_PROFILE=${lane.mcpProfile}' ${wrapper}
+                  grep -Fq 'codex_args=(--profile ${profile.mcpProfile})' ${wrapper}
+                  grep -Fq 'export SINNIX_CODEX_PROFILE=${profile.mcpProfile}' ${wrapper}
                   grep -Fq 'codex_uses_profile()' ${wrapper}
                 ''
               else
@@ -74,7 +74,7 @@ in
                 ''
             }
           ''
-        ) agentLanes.codexLanes
+        ) agentProfiles.codexProfiles
       );
       expectedProfileServers =
         client: profiles:
@@ -234,7 +234,7 @@ in
                 ".local/bin/sinnix-keyboard-control"
                 ".local/bin/sinnix-kitty-control"
                 ".local/bin/sinnix-screenshot-control"
-                ".local/bin/lane"
+                ".local/bin/batch-worker"
               ];
               message = "Agent control helpers must be installed through Home Manager.";
             }
@@ -301,8 +301,8 @@ in
             executable = true;
           }
           {
-            target = ".local/bin/lane";
-            source = ../../dots/_ai/skills/agent-runtime/scripts/lane;
+            target = ".local/bin/batch-worker";
+            source = ../../dots/_ai/skills/agent-runtime/scripts/batch-worker;
             executable = true;
           }
         ];
@@ -605,13 +605,13 @@ in
             touch "$out"
           '';
 
-      # Provably fails when: the wrapper renderer stops following the lane
+      # Provably fails when: the wrapper renderer stops following the profile
       # registry (verified by hardcoding MCP_CONFIG to mcp.json in
-      # backends.nix, which breaks every non-full lane), a rendered MCP
+      # backends.nix, which breaks every non-full profile), a rendered MCP
       # profile's server set diverges from the registry's own selection, a
       # Hermes profile gains a toolset its capability boundary forbids.
       #
-      # Note: changing flake/data/agent-lanes.nix alone does NOT fail this
+      # Note: changing flake/data/agent-profiles.nix alone does NOT fail this
       # check, and should not -- both the renderer and these expectations
       # derive from that registry, which is the point.
       devAgentToolsRuntime = mkHmRuntimeCheck system (
@@ -783,8 +783,8 @@ in
             grep -Fq '.patchedSize' "$patch_check"
             grep -Fq 'run clodex patch' "$patch_check"
             SINNIX_CLODEX_MODULE=${../../modules/services/clodex.nix} python3 ${../../scripts/tests/test_clodex_patch_check.py}
-            test -x "$HOME/.local/bin/lane"
-            bash -n "$HOME/.local/bin/lane"
+            test -x "$HOME/.local/bin/batch-worker"
+            bash -n "$HOME/.local/bin/batch-worker"
             python3 - "$HOME/.hermes/config.yaml" <<'PYCODE'
             import pathlib, re, sys
             config = pathlib.Path(sys.argv[1]).read_text()
