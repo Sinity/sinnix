@@ -61,6 +61,15 @@ in
           [
             {
               assertion =
+                config.systemd.services.machine-telemetry-sqlite-rotate.unitConfig.X-OnlyManualStart
+                && lib.hasInfix ".maintenance.lock" config.systemd.services.machine-telemetry-sqlite-rotate.script
+                && lib.hasInfix ".maintenance.lock" config.systemd.services.machine-telemetry-sqlite-backup.script
+                && lib.hasInfix ".maintenance.lock" config.systemd.services.machine-telemetry-sqlite-verify.script
+                && lib.hasInfix "machine-telemetry-archive-legacy" config.systemd.services.machine-telemetry-sqlite-backup.script;
+              message = "Telemetry cutover must be manual, serialized with snapshot acquisition, and retain once-only legacy backup coverage.";
+            }
+            {
+              assertion =
                 config.systemd.services.machine-telemetry-sqlite-verify.unitConfig.X-OnlyManualStart
                 && config.systemd.timers.machine-telemetry-sqlite-verify.unitConfig.X-OnlyManualStart
                 && config.systemd.timers.machine-telemetry-sqlite-verify.wantedBy == [ ];

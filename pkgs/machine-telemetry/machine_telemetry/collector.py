@@ -3,16 +3,20 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import glob
+import fcntl
+from contextlib import contextmanager
 import json
 import os
 import pwd
 import re
 import sqlite3
+import stat
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
+from typing import Iterator
 
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.process import run, run_bounded
@@ -92,6 +96,55 @@ VMSTAT_FIELDS = (
     "allocstall_movable",
     "oom_kill",
 )
+
+
+@contextmanager
+def writer_guard(database: Path) -> Iterator[None]:
+    """Hold the owner's shared lock until every collector writer has exited.
+
+    Rotation takes the exclusive side after stopping the collector. A published
+    control file is authoritative: failure must never fall through to SQLite's
+    create-if-missing behavior.
+    """
+    database.parent.mkdir(parents=True, exist_ok=True)
+    lock = database.with_name(database.name + ".segments.lock")
+    descriptor = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise RuntimeError("telemetry source lock is not a regular file")
+        parent = database.parent.stat()
+        if os.geteuid() == 0:
+            os.fchown(descriptor, parent.st_uid, parent.st_gid)
+        fcntl.flock(descriptor, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        opened = os.fstat(descriptor)
+        entrance = lock.lstat()
+        if (opened.st_dev, opened.st_ino) != (entrance.st_dev, entrance.st_ino):
+            raise RuntimeError("telemetry source lock changed while opening")
+        control = database.with_name(database.name + ".segments.json")
+        try:
+            metadata = control.lstat()
+        except FileNotFoundError:
+            pass  # Initial installation and the original single-file source.
+        else:
+            if not stat.S_ISREG(metadata.st_mode):
+                raise RuntimeError("telemetry source manifest is not a regular file")
+            payload = json.loads(control.read_text(encoding="utf-8"))
+            if not isinstance(payload, dict) or payload.get("schema") != "sinnix-machine-sqlite-segments-v1":
+                raise RuntimeError("unsupported telemetry source manifest")
+            if payload.get("state") != "ready":
+                raise RuntimeError("telemetry source cutover is incomplete; owner recovery required")
+            current = payload.get("current")
+            if not isinstance(current, dict) or current.get("file") != database.name:
+                raise RuntimeError("telemetry source manifest has the wrong current entrance")
+            identity = current.get("identity")
+            if not isinstance(identity, dict) or type(identity.get("inode")) is not int:
+                raise RuntimeError("telemetry source manifest has an invalid current identity")
+            observed = database.lstat()
+            if not stat.S_ISREG(observed.st_mode) or observed.st_ino != identity["inode"]:
+                raise RuntimeError("telemetry current SQLite identity changed; owner recovery required")
+        yield
+    finally:
+        os.close(descriptor)
 
 
 def now_iso() -> str:
@@ -1040,6 +1093,17 @@ def wal_size_bytes(db_path: str) -> int:
 
 
 def gpu_sampler_thread(
+    db_path: str,
+    host: str,
+    boot_id: str | None,
+    interval: float,
+    stop: threading.Event,
+) -> None:
+    with writer_guard(Path(db_path)):
+        _gpu_sampler_thread(db_path, host, boot_id, interval, stop)
+
+
+def _gpu_sampler_thread(
     db_path: str,
     host: str,
     boot_id: str | None,
@@ -2157,6 +2221,12 @@ def main() -> int:
     parser.add_argument("--units", default="")
     parser.add_argument("--user-name", required=True)
     args = parser.parse_args()
+
+    with writer_guard(Path(args.db)):
+        return collect(args)
+
+
+def collect(args: argparse.Namespace) -> int:
 
     db = Path(args.db)
     db.parent.mkdir(parents=True, exist_ok=True)

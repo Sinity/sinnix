@@ -1,34 +1,30 @@
 {
   lib,
   python3Packages,
-  coreutils,
-  zstd,
   sinnix-lib,
 }:
 python3Packages.buildPythonApplication {
   pname = "machine-telemetry";
   version = "0.1.0";
   pyproject = true;
-  src = ./.;
+  src = lib.fileset.toSource {
+    root = ./.;
+    fileset = lib.fileset.unions [
+      ./pyproject.toml
+      ./machine_telemetry
+    ];
+  };
+  doCheck = false;
 
   build-system = [ python3Packages.setuptools ];
   dependencies = [
     python3Packages.nvidia-ml-py
     sinnix-lib
   ];
-  nativeCheckInputs = [
-    python3Packages.pytest
-    coreutils
-    zstd
+  pythonImportsCheck = [
+    "machine_telemetry.collector"
+    "machine_telemetry.rotation"
   ];
-
-  checkPhase = ''
-    runHook preCheck
-    pytest -q tests/test_collector_process_memory.py
-    runHook postCheck
-  '';
-
-  pythonImportsCheck = [ "machine_telemetry.collector" ];
 
   meta = {
     description = "Canonical host machine telemetry collector";

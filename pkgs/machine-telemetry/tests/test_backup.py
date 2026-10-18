@@ -13,7 +13,10 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).parents[3] / "scripts" / "sinnix-sqlite-backup"
+SCRIPT = Path(os.environ["SINNIX_SQLITE_BACKUP"]) if "SINNIX_SQLITE_BACKUP" in os.environ else Path(__file__).parents[3] / "scripts" / "sinnix-sqlite-backup"
+# The packaged wrapper fixes PATH. Dependency-fault injection executes its
+# exact declared Python payload, while ordinary CLI tests exercise the wrapper.
+SCRIPT_MODULE = Path(os.environ.get("SINNIX_SQLITE_BACKUP_MODULE", SCRIPT))
 
 
 def read_receipt(stdout: str) -> dict[str, str]:
@@ -470,7 +473,7 @@ def test_run_check_interrupts_a_native_sqlite_statement_on_sigterm(
     helper = tmp_path / "interrupt.py"
     helper.write_text(
         f"""import runpy, signal, sqlite3
-module = runpy.run_path({str(SCRIPT)!r})
+module = runpy.run_path({str(SCRIPT_MODULE)!r})
 signal.signal(signal.SIGTERM, module["request_cancel"])
 with module["cancellation_wakeup"]():
     connection = sqlite3.connect(":memory:")
@@ -530,7 +533,7 @@ def test_cancellation_during_compression_leaves_no_partial_artifact(
     zstd.chmod(0o755)
 
     process = subprocess.Popen(
-        [str(SCRIPT), "--immutable-source", str(source), str(output)],
+        [str(SCRIPT_MODULE), "--immutable-source", str(source), str(output)],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -581,7 +584,7 @@ def test_publication_requires_the_archive_to_decompress(tmp_path: Path) -> None:
     zstd.chmod(0o755)
 
     result = subprocess.run(
-        [str(SCRIPT), "--immutable-source", str(source), str(output)],
+        [str(SCRIPT_MODULE), "--immutable-source", str(source), str(output)],
         capture_output=True,
         text=True,
         env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
@@ -636,7 +639,7 @@ def test_immutable_snapshot_does_not_publish_when_compression_fails(
     output = tmp_path / "out.zst"
 
     result = subprocess.run(
-        [str(SCRIPT), "--immutable-source", str(source), str(output)],
+        [str(SCRIPT_MODULE), "--immutable-source", str(source), str(output)],
         capture_output=True,
         text=True,
         env={**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"},
@@ -648,7 +651,7 @@ def test_immutable_snapshot_does_not_publish_when_compression_fails(
 
 def test_live_backup_keeps_native_selected_cut(tmp_path: Path, monkeypatch) -> None:
     import runpy
-    helper = runpy.run_path(str(SCRIPT))
+    helper = runpy.run_path(str(SCRIPT_MODULE))
     source = tmp_path / "source.sqlite"
     writer = sqlite3.connect(source)
     writer.execute("PRAGMA journal_mode=WAL")
@@ -707,7 +710,7 @@ def test_immutable_uri_checks_the_actual_archived_object(tmp_path: Path) -> None
 
 def test_overlapping_backup_cleanup_keeps_outer_scratch(tmp_path: Path) -> None:
     import runpy
-    helper = runpy.run_path(str(SCRIPT))
+    helper = runpy.run_path(str(SCRIPT_MODULE))
     source = tmp_path / "source.sqlite"
     seed_database(source)
     output = tmp_path / "shared.sqlite.zst"
@@ -733,7 +736,7 @@ def test_overlapping_backup_cleanup_keeps_outer_scratch(tmp_path: Path) -> None:
 
 def test_acquisition_failure_preserves_selected_archive(tmp_path: Path) -> None:
     import runpy
-    helper = runpy.run_path(str(SCRIPT))
+    helper = runpy.run_path(str(SCRIPT_MODULE))
     source = tmp_path / "source.sqlite"
     seed_database(source)
     output = tmp_path / "archive.zst"
@@ -747,7 +750,7 @@ def test_acquisition_failure_preserves_selected_archive(tmp_path: Path) -> None:
 @pytest.mark.parametrize("budget", ["nan", "inf", "-inf", "-1"])
 @pytest.mark.parametrize("verify_only", [False, True])
 def test_invalid_check_budget_refused_before_source_access(tmp_path, budget, verify_only):
-    command = ["python3", str(SCRIPT), str(tmp_path / "absent.sqlite"),
+    command = [str(SCRIPT), str(tmp_path / "absent.sqlite"),
                "--immutable-source", f"--check-budget-seconds={budget}"]
     command += ["--verify-only"] if verify_only else [str(tmp_path / "output.zst")]
     result = subprocess.run(command, capture_output=True, text=True, timeout=5)
@@ -781,7 +784,7 @@ def test_compressed_restore_checks_real_frame_and_sqlite(tmp_path, failure):
     archive_before = archive.read_bytes()
     scratch = tmp_path / "scratch"
     scratch.mkdir()
-    result = subprocess.run(["python3", str(SCRIPT), str(archive), "--immutable-source",
+    result = subprocess.run([str(SCRIPT), str(archive), "--immutable-source",
         "--verify-only", "--compressed-source", "--max-restore-bytes",
         str(1 if failure == "limit" else 1024 * 1024), "--check-budget-seconds", "10"],
         env={**os.environ, "TMPDIR": str(scratch)}, capture_output=True, text=True, timeout=10)
@@ -816,7 +819,7 @@ def test_compressed_restore_stops_its_decoder(tmp_path, stop, close_stdout, igno
         + f"Path({str(pidfile)!r}).write_text(str(os.getpid()))\n"
         + "time.sleep(30)\n")
     decoder.chmod(0o700)
-    process = subprocess.Popen(["python3", str(SCRIPT), str(archive), "--immutable-source",
+    process = subprocess.Popen([str(SCRIPT_MODULE), str(archive), "--immutable-source",
         "--verify-only", "--compressed-source", "--max-restore-bytes", "1048576",
         "--acquire-budget-seconds", "0.5" if stop == "deadline" else "10",
         "--check-budget-seconds", "10"],
@@ -858,7 +861,7 @@ def test_compressed_restore_stops_its_decoder(tmp_path, stop, close_stdout, igno
 def test_structural_walk_disables_mmap_read_amplification(tmp_path, monkeypatch):
     import runpy
 
-    helper = runpy.run_path(str(SCRIPT))
+    helper = runpy.run_path(str(SCRIPT_MODULE))
     path = tmp_path / "scattered.sqlite"
     with sqlite3.connect(path) as connection:
         connection.execute("CREATE TABLE sample(value INTEGER)")
@@ -880,7 +883,7 @@ def test_structural_walk_disables_mmap_read_amplification(tmp_path, monkeypatch)
 def test_immutable_source_rejects_nonregular_wal(tmp_path, route, kind):
     import runpy
 
-    helper = runpy.run_path(str(SCRIPT))
+    helper = runpy.run_path(str(SCRIPT_MODULE))
     source = tmp_path / "source.sqlite"
     with sqlite3.connect(source) as connection:
         connection.execute("CREATE TABLE sample(value INTEGER)")
@@ -907,7 +910,7 @@ def test_immutable_source_rejects_nonregular_wal(tmp_path, route, kind):
 def test_immutable_source_reports_unavailable_wal(tmp_path, monkeypatch, route):
     import runpy
 
-    helper = runpy.run_path(str(SCRIPT))
+    helper = runpy.run_path(str(SCRIPT_MODULE))
     source = tmp_path / "source.sqlite"
     with sqlite3.connect(source) as connection:
         connection.execute("CREATE TABLE sample(value INTEGER)")
@@ -962,7 +965,7 @@ def test_backup_rejects_nonregular_source_before_open(tmp_path, route, kind):
 def test_walk_read_advice_is_scoped_to_open_main_database(tmp_path, monkeypatch, mode):
     import runpy
 
-    helper = runpy.run_path(str(SCRIPT))
+    helper = runpy.run_path(str(SCRIPT_MODULE))
     main = tmp_path / "sample.sqlite"
     other_dir = tmp_path / "other"
     other_dir.mkdir()
@@ -1000,7 +1003,7 @@ def test_unsupported_read_advice_does_not_hide_integrity_verdict(tmp_path, monke
     import errno
     import runpy
 
-    helper = runpy.run_path(str(SCRIPT))
+    helper = runpy.run_path(str(SCRIPT_MODULE))
     main = tmp_path / "sample.sqlite"
     with sqlite3.connect(main) as connection:
         connection.execute("CREATE TABLE sample(value TEXT)")

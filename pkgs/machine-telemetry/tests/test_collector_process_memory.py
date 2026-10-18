@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import fcntl
 import json
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -16,6 +18,98 @@ def _collector():
     assert spec.loader is not None
     spec.loader.exec_module(module)
     return module
+
+
+def _source_control(database):
+    return {
+        "schema": "sinnix-machine-sqlite-segments-v1",
+        "state": "ready",
+        "current": {"file": database.name, "identity": {"inode": database.stat().st_ino}},
+    }
+
+
+def test_writer_guard_preserves_lock_inode_and_excludes_rotation(tmp_path):
+    collector = _collector()
+    database = tmp_path / "telemetry.sqlite"
+    lock = database.with_name(database.name + ".segments.lock")
+    with collector.writer_guard(database):
+        inode = lock.stat().st_ino
+        with lock.open("rb") as owner:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(owner.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    with lock.open("rb") as owner:
+        fcntl.flock(owner.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(BlockingIOError):
+            with collector.writer_guard(database):
+                pytest.fail("collector entered an exclusive cutover")
+    with collector.writer_guard(database):
+        assert lock.stat().st_ino == inode
+        assert lock.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("defect", ["preparing", "malformed", "missing", "replacement", "wrong-file", "bool-inode", "symlink"])
+def test_writer_refuses_unexplained_current_before_opening_sqlite(tmp_path, monkeypatch, defect):
+    collector = _collector()
+    database = tmp_path / "telemetry.sqlite"
+    database.write_bytes(b"retained synthetic object")
+    control = database.with_name(database.name + ".segments.json")
+    payload = _source_control(database)
+    if defect == "preparing":
+        payload["state"] = "preparing"
+    elif defect == "missing":
+        database.unlink()
+    elif defect == "replacement":
+        replacement = tmp_path / "replacement"
+        replacement.write_bytes(database.read_bytes())
+        replacement.replace(database)
+    elif defect == "wrong-file":
+        payload["current"]["file"] = "elsewhere.sqlite"
+    elif defect == "bool-inode":
+        payload["current"]["identity"]["inode"] = True
+    elif defect == "symlink":
+        database.rename(tmp_path / "original")
+        database.symlink_to(tmp_path / "original")
+    control.write_text("invalid" if defect == "malformed" else json.dumps(payload))
+    monkeypatch.setattr(sys, "argv", ["machine-telemetry", "--db", str(database), "--manifest", str(tmp_path / "hardware.json"), "--host", "fixture", "--user-name", "fixture"])
+    monkeypatch.setattr(collector, "collect", lambda args: pytest.fail("SQLite opening must not be reached"))
+    with pytest.raises((RuntimeError, OSError, ValueError)):
+        collector.main()
+    if defect == "missing":
+        assert not database.exists()
+
+
+def test_writer_guard_releases_descriptor_after_failure_and_allows_active_growth(tmp_path):
+    collector = _collector()
+    database = tmp_path / "telemetry.sqlite"
+    database.write_bytes(b"current")
+    database.with_name(database.name + ".segments.json").write_text(json.dumps(_source_control(database)))
+    with pytest.raises(RuntimeError, match="synthetic"):
+        with collector.writer_guard(database):
+            with database.open("ab") as stream:
+                stream.write(b" append")
+            raise RuntimeError("synthetic writer failure")
+    with collector.writer_guard(database):
+        pass
+    with database.with_name(database.name + ".segments.lock").open("rb") as owner:
+        fcntl.flock(owner.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def test_gpu_writer_has_its_own_source_lock_until_exit(tmp_path, monkeypatch):
+    collector = _collector()
+    database = tmp_path / "telemetry.sqlite"
+    lock = database.with_name(database.name + ".segments.lock")
+
+    def sampling(*args):
+        with lock.open("rb") as owner:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(owner.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        raise RuntimeError("synthetic sampler exit")
+
+    monkeypatch.setattr(collector, "_gpu_sampler_thread", sampling)
+    with pytest.raises(RuntimeError, match="synthetic"):
+        collector.gpu_sampler_thread(str(database), "fixture", "boot", 1, None)
+    with lock.open("rb") as owner:
+        fcntl.flock(owner.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
 def test_systemd_unescape_fragment_decodes_hex_escapes() -> None:

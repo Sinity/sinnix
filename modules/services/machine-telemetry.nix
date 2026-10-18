@@ -253,6 +253,71 @@ mkServiceModule {
       );
     in
     lib.mkMerge [
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
+          unitName = "machine-telemetry-sqlite-rotate";
+          description = "Perform or recover the initial telemetry SQLite cutover";
+          surface = config.sinnix.runtime.surfaces.machine-telemetry-sqlite-rotate;
+        }
+        {
+          script = ''
+            set -euo pipefail
+            umask 077
+            install -d -m 0700 -o ${lib.escapeShellArg username} -g users ${lib.escapeShellArg backupSnapshotRoot}
+            exec 9>>${lib.escapeShellArg "${dbRoot}/.maintenance.lock"}
+            flock -n 9 || { echo "telemetry maintenance is already active" >&2; exit 75; }
+            # Older installed invocations may not yet participate in this lock.
+            for unit in machine-telemetry-sqlite-backup machine-telemetry-sqlite-verify; do
+              if systemctl is-active --quiet "$unit.service"; then
+                echo "telemetry cutover deferred while $unit is active" >&2
+                exit 75
+              fi
+            done
+            writer_was_active=0
+            resume_writer() {
+              if [ "$writer_was_active" -eq 1 ]; then
+                writer_was_active=0
+                systemctl start machine-telemetry.service
+              fi
+            }
+            trap resume_writer EXIT
+            trap 'exit 143' INT TERM
+            if systemctl is-active --quiet machine-telemetry.service; then
+              writer_was_active=1
+              systemctl stop machine-telemetry.service
+            fi
+            snapshot=${lib.escapeShellArg "${backupSnapshotRoot}/rotation-initial"}
+            if [ ! -e "$snapshot" ]; then
+              btrfs subvolume snapshot -r ${lib.escapeShellArg dbRoot} "$snapshot"
+            fi
+            machine-telemetry-rotate --db ${lib.escapeShellArg dbPath} --preimage "$snapshot"
+            # The native preimage and recovery journal are retained. Removing
+            # either is a separate custody decision, never an EXIT trap.
+          '';
+          path = [
+            pkgs.coreutils
+            pkgs.util-linux
+            pkgs.btrfs-progs
+            pkgs.e2fsprogs
+            machineTelemetry
+          ];
+          user = "root";
+          serviceConfig.TimeoutStartSec = "5min";
+          unit = {
+            requires = [ "realm.mount" ];
+            after = [ "realm.mount" ];
+            unitConfig = {
+              RequiresMountsFor = [
+                dbRoot
+                backupSnapshotRoot
+              ];
+              X-OnlyManualStart = true;
+            };
+            restartIfChanged = false;
+          };
+        }
+      )
       # Second unit pair (documented structural exception): the primary
       # surface above is machine-telemetry.service itself, so the sqlite
       # backup oneshot+timer gets a direct mkScheduledJob call rather than
@@ -297,6 +362,9 @@ mkServiceModule {
             # The database is NOCOW, so cloning its file is not a reliable
             # constant-time operation. A read-only subvolume snapshot freezes
             # the checkpointed input; the helper then compresses it directly.
+            exec 9>>${lib.escapeShellArg "${dbRoot}/.maintenance.lock"}
+            flock -n 9 || { echo "telemetry maintenance is already active" >&2; exit 75; }
+            machine-telemetry-rotate --db ${lib.escapeShellArg dbPath} --check-source
             if systemctl is-active --quiet machine-telemetry.service; then
               writer_was_active=1
               systemctl stop machine-telemetry.service
@@ -308,11 +376,15 @@ mkServiceModule {
             fi
             btrfs subvolume snapshot -r ${lib.escapeShellArg dbRoot} "$snapshot"
             resume_writer
+            flock -u 9
             sinnix-sqlite-backup \
               --immutable-source \
               --check-mode header \
               "$snapshot/telemetry.sqlite" "$final"
             chown ${lib.escapeShellArg username}:users "$final"
+            # The legacy file is immutable. Its receipt makes this acquisition
+            # once-only; active backup publication stays first on every run.
+            machine-telemetry-archive-legacy --db ${lib.escapeShellArg dbPath} --output ${lib.escapeShellArg backupRoot}
 
           '';
           path = [
@@ -321,6 +393,8 @@ mkServiceModule {
             pkgs.gawk
             pkgs.btrfs-progs
             pkgs.sqlite
+            pkgs.util-linux
+            machineTelemetry
             scriptPkgs.sinnix-sqlite-backup
           ];
           # Btrfs subvolume snapshots require CAP_SYS_ADMIN; the published
@@ -397,6 +471,9 @@ mkServiceModule {
             trap cleanup EXIT
             trap 'exit 143' INT TERM
             write_state running
+            exec 9>>${lib.escapeShellArg "${dbRoot}/.maintenance.lock"}
+            flock -n 9 || { echo "telemetry maintenance is already active" >&2; exit 75; }
+            machine-telemetry-rotate --db ${lib.escapeShellArg dbPath} --check-source
             if systemctl is-active --quiet machine-telemetry.service; then
               writer_was_active=1
               systemctl stop machine-telemetry.service
@@ -408,6 +485,7 @@ mkServiceModule {
             fi
             btrfs subvolume snapshot -r ${lib.escapeShellArg dbRoot} "$snapshot"
             resume_writer
+            flock -u 9
             sinnix-sqlite-backup --immutable-source --verify-only \
               --check-budget-seconds 9000 "$snapshot/telemetry.sqlite"
             btrfs subvolume delete "$snapshot" >/dev/null
@@ -417,6 +495,8 @@ mkServiceModule {
             pkgs.coreutils
             pkgs.btrfs-progs
             pkgs.sqlite
+            pkgs.util-linux
+            machineTelemetry
             scriptPkgs.sinnix-sqlite-backup
           ];
           user = "root";
@@ -580,6 +660,11 @@ mkServiceModule {
         sinnix.runtime.surfaces = {
           machine-telemetry-sqlite-backup = {
             unit = "machine-telemetry-sqlite-backup.service";
+            resourceClass = "backup";
+            observe.enable = true;
+          };
+          machine-telemetry-sqlite-rotate = {
+            unit = "machine-telemetry-sqlite-rotate.service";
             resourceClass = "backup";
             observe.enable = true;
           };

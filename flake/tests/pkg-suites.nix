@@ -27,19 +27,25 @@
           package ? sinnixScriptRegistry.packageSet.${name},
           extraInputs ? [ ],
           beforeTests ? "",
+          pytestArgs ? "",
+          testSource ? null,
         }:
         let
           module = builtins.replaceStrings [ "-" ] [ "_" ] name;
-          testSource = lib.sources.sourceByRegex (../../pkgs + "/${name}") [
-            "tests"
-            "tests/.*"
-            "test_.*[.]py"
-            "conftest[.]py"
-            "pyproject[.]toml"
-            "fixtures"
-            "fixtures/.*"
-            "generate_.*[.]py"
-          ];
+          selectedTests =
+            if testSource != null then
+              testSource
+            else
+              lib.sources.sourceByRegex (../../pkgs + "/${name}") [
+                "tests"
+                "tests/.*"
+                "test_.*[.]py"
+                "conftest[.]py"
+                "pyproject[.]toml"
+                "fixtures"
+                "fixtures/.*"
+                "generate_.*[.]py"
+              ];
           python = pkgs.python3.withPackages (ps: [
             package
             ps.pytest
@@ -57,14 +63,14 @@
             RUNTIME_MODULE = module;
           }
           ''
-            cp -R ${testSource} source
+            cp -R ${selectedTests} source
             chmod -R u+w source
             cd source
             ln -s ${package}/${pkgs.python3.sitePackages}/${module} ${module}
             python -c 'import importlib, os; from pathlib import Path; module = importlib.import_module(os.environ["RUNTIME_MODULE"]); assert Path(module.__file__).resolve().is_relative_to(Path(os.environ["RUNTIME_PACKAGE"]))'
             ${beforeTests}
             cp ${./python-runtime-imports.py} runtime_import_contract.py
-            python -m pytest -q -p runtime_import_contract
+            python -m pytest -q -p runtime_import_contract ${pytestArgs}
             mkdir "$out"
             cp runtime-import-before.json runtime-import-after.json "$out/"
             printf '%s\n' "$RUNTIME_PACKAGE" > "$out/runtime"
@@ -173,10 +179,52 @@
             python generate_beads_inputs.py "$TMPDIR/beads-owner-schema.json" --check
           '';
         };
-        # The deployed telemetry executable is now a real Python package;
-        # its checkPhase covers the collector code that service launches.
-        machine-telemetry-suite = sinnixScriptRegistry.packageSet.machine-telemetry;
+        machine-telemetry-suite = pythonSuite {
+          name = "machine-telemetry";
+          testSource = lib.fileset.toSource {
+            root = ../../pkgs/machine-telemetry;
+            fileset = lib.fileset.unions [
+              ../../pkgs/machine-telemetry/tests/test_collector_process_memory.py
+              ../../pkgs/machine-telemetry/tests/test_rotation.py
+            ];
+          };
+          extraInputs = [
+            pkgs.coreutils
+            pkgs.zstd
+          ];
+          pytestArgs = "tests/test_collector_process_memory.py tests/test_rotation.py";
+          beforeTests = ''
+            export SINNIX_SQLITE_BACKUP="${sinnixScriptRegistry.packageSet.sinnix-sqlite-backup}/bin/sinnix-sqlite-backup"
+          '';
+        };
         sqlite-backup-package = sinnixScriptRegistry.packageSet.sinnix-sqlite-backup;
+        sqlite-backup-suite =
+          pkgs.runCommand "sqlite-backup-suite"
+            {
+              nativeBuildInputs = [
+                (pkgs.python3.withPackages (ps: [ ps.pytest ]))
+                pkgs.zstd
+              ];
+              SINNIX_SQLITE_BACKUP = "${sinnixScriptRegistry.packageSet.sinnix-sqlite-backup}/bin/sinnix-sqlite-backup";
+            }
+            ''
+              cp ${../../pkgs/machine-telemetry/tests/test_backup.py} test_backup.py
+              # Inspect the exact wrapper's declared Python payload for the one
+              # in-process cancellation test. All CLI tests execute the wrapper.
+              export SINNIX_SQLITE_BACKUP_MODULE="$(python - <<'PY'
+              import os, shlex
+              from pathlib import Path
+              lines = Path(os.environ['SINNIX_SQLITE_BACKUP']).read_text().splitlines()
+              commands = [shlex.split(line) for line in lines if line.startswith('exec /nix/store/')]
+              assert len(commands) == 1
+              payload = Path(commands[0][1])
+              assert payload.is_file() and payload.read_text().startswith('#!')
+              print(payload)
+              PY
+              )"
+              python -m pytest -q test_backup.py
+              touch "$out"
+            '';
 
         # Shared-library verification is explicit, independent of consumers.
         #

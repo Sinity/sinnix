@@ -144,6 +144,14 @@ timeout_seconds = 13200
 admission = { memory_mib = 4096 }
 unit_properties = ["MemoryHigh=4G", "MemoryMax=5G", "IOWeight=10", "IOReadBandwidthMax=/realm 20M", "IOWriteBandwidthMax=/realm 40M"]
 
+[operations.rotate_telemetry]
+description = "Perform or recover the first native telemetry SQLite cutover with its retained preimage"
+exec = ["sudo", "-n", "--", "systemctl", "start", "--wait", "machine-telemetry-sqlite-rotate.service"]
+pool = "normal"
+result = "exit"
+cache = "none"
+timeout_seconds = 420
+
 [operations.verify_telemetry_structure]
 description = "Structurally verify one retained immutable telemetry SQLite image"
 exec = ["sinnix-sqlite-backup", "--immutable-source", "--verify-only", "--check-budget-seconds", "9000"]
