@@ -1146,9 +1146,9 @@ RELATIONS = {
 }
 
 
-def open_regular_text(path: Path):
+def open_regular_text(path: Path, mode: str = "r"):
     """Refuse streams after a nonblocking open, including path replacements."""
-    handle = open(path, "r", encoding="utf-8",
+    handle = open(path, mode, encoding="utf-8",
                   opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK))
     try:
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
@@ -1234,7 +1234,7 @@ def publish_generation(index_dir: Path, *, roots=None, retained_inputs: Path | N
     index_dir.mkdir(parents=True, exist_ok=True)
     generations = index_dir / "generations"
     generations.mkdir(mode=0o700, exist_ok=True)
-    with (index_dir / "publication.lock").open("a") as lock:
+    with open_regular_text(index_dir / "publication.lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         name = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:12]
         stage = generations / (".building-" + name)
@@ -1433,7 +1433,7 @@ def cmd_judgments(args: argparse.Namespace) -> int:
             raise ValueError(f"invalid incoming roles: {role_issues}; historical import requires explicit --allow-legacy-roles")
         path = args.index_dir / "judgments.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.with_name(path.name + ".lock").open("a+") as lock:
+        with open_regular_text(path.with_name(path.name + ".lock"), "a+") as lock:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
             existing = read_judgments(path) if path.exists() else {"valid": [], "records": 0}
             expected = getattr(args, "expected_sha256", None)
