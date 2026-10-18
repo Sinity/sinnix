@@ -299,6 +299,16 @@ let
     export BORG_REPO=${lib.escapeShellArg repo}
     export BORG_PASSCOMMAND=${lib.escapeShellArg "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}"}
     export BORG_CACHE_DIR=${lib.escapeShellArg borgCacheDir}
+    # Borg's uuid.getnode() fallback can change between invocations. A stable
+    # local identity lets its native reaper recognize its own abandoned locks.
+    if [ -z "''${BORG_HOST_ID:-}" ]; then
+      borg_machine_id="$(cat /etc/machine-id)"
+      if [[ ! "$borg_machine_id" =~ ^[0-9a-f]{32}$ ]]; then
+        echo "Invalid machine identity; refusing to start Borg" >&2
+        exit 1
+      fi
+      export BORG_HOST_ID="$(uname -n)@$borg_machine_id"
+    fi
 
     with_borg_lock() {
       if [ "''${SINNIX_BORG_GLOBAL_LOCK_HELD:-0}" = 1 ]; then

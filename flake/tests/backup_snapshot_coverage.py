@@ -33,6 +33,37 @@ COVERAGE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(COVERAGE)
 
 
+class BorgHostIdentityFixture(unittest.TestCase):
+    @unittest.skipUnless(ARGS.scripts, "requires rendered owner scripts")
+    def test_stable_identity_and_explicit_override(self):
+        script = json.loads(Path(ARGS.scripts).read_text())["realm"]
+        prefix = script.split("with_borg_lock()", 1)[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = Path(tmp) / "machine-id"
+            prefix = prefix.replace("/etc/machine-id", str(identity))
+            env = os.environ.copy()
+            env.pop("BORG_HOST_ID", None)
+
+            def run(extra=None):
+                return subprocess.run(
+                    ["bash", "-eu", "-c", prefix + '\nprintf "%s" "$BORG_HOST_ID"'],
+                    env=env | (extra or {}), capture_output=True, text=True,
+                )
+
+            identity.write_text("0123456789abcdef0123456789abcdef\n")
+            first, second = run(), run()
+            self.assertEqual(first.returncode, 0, first.stderr)
+            self.assertEqual(first.stdout, second.stdout)
+            self.assertTrue(first.stdout.endswith("@0123456789abcdef0123456789abcdef"))
+            identity.unlink()
+            explicit = run({"BORG_HOST_ID": "explicit-fixture@stable"})
+            self.assertEqual(explicit.returncode, 0, explicit.stderr)
+            self.assertEqual(explicit.stdout, "explicit-fixture@stable")
+            self.assertNotEqual(run().returncode, 0)
+            identity.write_text("invalid\n")
+            self.assertNotEqual(run().returncode, 0)
+
+
 class SnapshotInventoryFixture(unittest.TestCase):
     def test_empty_and_filtered_inventory(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2330,4 +2361,5 @@ else: sys.exit(1)
 
 
 if __name__ == "__main__":
+    os.environ.setdefault("BORG_HOST_ID", "backup-fixture@stable")
     unittest.main(argv=[sys.argv[0]])
