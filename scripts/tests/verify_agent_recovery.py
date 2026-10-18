@@ -34,6 +34,7 @@ def runtime_for(wrapper, package_name):
 
 def has_holder(root):
     prefix = str(root) + os.sep
+    mapped_root = os.fsencode(root).replace(b"\n", b"\\012")
     for process in Path("/proc").iterdir():
         if not process.name.isdigit():
             continue
@@ -48,9 +49,23 @@ def has_holder(root):
                         return True
                 except FileNotFoundError:
                     pass
-        except FileNotFoundError:
-            pass
-        except PermissionError:
+            # Mappings keep files in use after descriptors close. Proc escapes
+            # newlines in these names; bytes also preserve non-UTF8 paths.
+            for line in (process / "maps").read_bytes().split(b"\n"):
+                fields = line.split(None, 5)
+                if len(fields) == 6 and (
+                    fields[5] == mapped_root or fields[5].startswith(mapped_root + b"/")
+                ):
+                    return True
+        except (FileNotFoundError, ProcessLookupError):
+            try:
+                process.stat()
+            except (FileNotFoundError, ProcessLookupError):
+                continue
+            except OSError:
+                pass
+            return True  # A present process with missing metadata is uncertain.
+        except OSError:
             return True  # An inaccessible same-user process is uncertain.
     return False
 

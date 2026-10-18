@@ -1,6 +1,7 @@
 """The native recovery verifier must not certify an empty or partial test as five."""
 # @sinnix-package: skip
 
+import importlib.util
 import io
 import json
 import os
@@ -10,7 +11,9 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT = Path(
     os.environ.get(
@@ -20,6 +23,54 @@ SCRIPT = Path(
 
 
 class RecoveryVerification(unittest.TestCase):
+    def holder_fixture(self):
+        loader = SourceFileLoader("recovery_holder_fixture", str(SCRIPT))
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        module = importlib.util.module_from_spec(spec)
+        loader.exec_module(module)
+        proc = self.root / "proc"
+        process = proc / "123"
+        process.mkdir(parents=True)
+        (process / "cwd").symlink_to(self.root)
+        (process / "exe").symlink_to(sys.executable)
+        (process / "fd").mkdir()
+        real_path = module.Path
+        module.Path = lambda path: proc if path == "/proc" else real_path(path)
+        return module, process
+
+    def test_mappings_preserve_component_and_unusual_path_identity(self):
+        module, process = self.holder_fixture()
+        for name in ["scratch", "scratch\nline", "scratch-\udcff"]:
+            root = self.root / name
+            mapped = os.fsencode(root / "payload").replace(b"\n", b"\\012")
+            (process / "maps").write_bytes(b"0-1000 r--p 0 00:00 1 " + mapped + b"\n")
+            self.assertTrue(module.has_holder(root))
+            (process / "maps").write_bytes(
+                b"0-1000 r--p 0 00:00 1 "
+                + os.fsencode(str(root) + "-other/payload").replace(b"\n", b"\\012")
+                + b"\n"
+            )
+            self.assertFalse(module.has_holder(root))
+
+    def test_unavailable_mapping_inspection_keeps_scratch(self):
+        module, process = self.holder_fixture()
+        (process / "maps").write_bytes(b"")
+        original = Path.read_bytes
+
+        def unavailable(path):
+            if path == process / "maps":
+                raise PermissionError("fixture maps unavailable")
+            return original(path)
+
+        with patch.object(Path, "read_bytes", unavailable):
+            self.assertTrue(module.has_holder(self.scratch))
+
+    def test_missing_metadata_is_uncertain_until_process_disappears(self):
+        module, process = self.holder_fixture()
+        self.assertTrue(module.has_holder(self.scratch))
+        shutil.rmtree(process)
+        self.assertFalse(module.has_holder(self.scratch))
+
     @unittest.skipUnless(
         "RECOVERY_INPUTS" in os.environ, "requires the built input manifest"
     )
