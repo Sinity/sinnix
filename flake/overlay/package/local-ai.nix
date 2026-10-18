@@ -1,26 +1,16 @@
-# Local-AI inference engines built with CUDA.
+# CUDA builds: local-AI inference engines and the Sunshine game streamer.
 #
-# These are per-package overrides, NOT a global `nixpkgs.config.cudaSupport`
-# flip — that would rebuild the world. CUDA itself ships as downloaded
-# redistributables; only these named packages recompile. The
-# `cache.nixos-cuda.org` substituter (see flake.nix nixConfig) usually
-# turns even that recompile into a download.
+# These come from a CUDA-enabled instance of the separate `nixpkgs-ai` input,
+# not a global `nixpkgs.config.cudaSupport` flip, which would rebuild the
+# world. They are used exactly as nixpkgs defines them: cache.nixos-cuda.org
+# (see flake.nix nixConfig) builds the default CUDA configuration of
+# nixos-unstable, so any override, patch, source bump or narrowed
+# architecture set (`pkgsForCudaArch`) turns a download into an hours-long
+# local CUDA compile.
 #
-# Host has exactly one GPU (RTX 3080, compute capability 8.6). Building from
-# `aiPkgs.pkgsForCudaArch.sm_86` (nixpkgs' documented per-architecture package
-# set: pkgs/development/cuda-modules, config.cudaCapabilities = ["8.6"]) means
-# each ggml/CUDA derivation generates device code for that one architecture
-# instead of the ~9 architectures nixpkgs targets by default
-# (sm_75..sm_121a) — the difference between a multi-minute and a multi-hour
-# rebuild on this host. Do not use plain `<pkgs>.<pkg>.override` for these
-# without going through pkgsForCudaArch first.
-#
-# `aiPkgs` is instantiated from the separate `nixpkgs-ai` flake input (see
-# flake.nix), not from `prev`/the shared system `pkgs`: routine `nix flake
-# update` bumps the shared `nixpkgs` constantly, and any bump would
-# invalidate these derivation hashes and force a from-source CUDA recompile
-# with no possible cache hit. nixpkgs-ai is bumped only deliberately
-# (`sinnix update nixpkgs-ai`).
+# nixpkgs-ai is pinned separately from the shared `nixpkgs` so routine
+# `nix flake update` does not move these derivations; bump it deliberately
+# (`sinnix update nixpkgs-ai`) to a revision the CUDA cache has built.
 { inputs, ... }:
 final: _prev:
 let
@@ -35,37 +25,7 @@ let
   };
 in
 {
-  llama-cpp = _prev.llama-cpp.overrideAttrs (
-    old:
-    assert old.version == "0.4.0";
-    {
-      patches = (old.patches or [ ]) ++ [ ../../../pkgs/llama-http-admission/v0.4.0.patch ];
-      postPatch = (old.postPatch or "") + ''
-        cp ${../../../pkgs/llama-http-admission/admission.h} tools/server/sinnix-http-admission.h
-      '';
-    }
-  );
-  # Muse Glimmer support landed after the nixpkgs-ai package snapshot. Keep
-  # the existing CUDA package recipe and replace only its pinned upstream
-  # source until nixpkgs-ai carries b10353 or newer.
-  llama-cpp-cuda =
-    (aiPkgs.pkgsForCudaArch.sm_86.llama-cpp.override { cudaSupport = true; }).overrideAttrs
-      (old: {
-        # llama.cpp embeds this value as a C++ integer in build-info.cpp.
-        version = "10353";
-        src = final.fetchFromGitHub {
-          owner = "ggml-org";
-          repo = "llama.cpp";
-          rev = "b10353";
-          hash = "sha256-MQP91lL8zQLYcnYw5GlkMvH5sXiES+C6L4/1G3Y6TPY=";
-        };
-        npmDepsHash = "sha256-2Q7XhaLAArmviOLdQsNbYTfdyDE5pW9lR26cRHEVl9k=";
-        patches = (old.patches or [ ]) ++ [ ../../../pkgs/llama-http-admission/b10353.patch ];
-        postPatch = (old.postPatch or "") + ''
-          cp ${../../../pkgs/llama-http-admission/admission.h} tools/server/sinnix-http-admission.h
-        '';
-      });
-  # Prebuilt top-level attribute upstream; narrow it the same way so
-  # services/ollama.nix's `pkgs.ollama-cuda` references pick this up for free.
-  ollama-cuda = aiPkgs.pkgsForCudaArch.sm_86.ollama-cuda;
+  llama-cpp-cuda = aiPkgs.llama-cpp;
+  sunshine-cuda = aiPkgs.sunshine;
+  inherit (aiPkgs) ollama-cuda;
 }

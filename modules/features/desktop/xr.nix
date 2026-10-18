@@ -180,7 +180,8 @@ mkFeatureModule {
           openFirewall = false;
           # wlroots exports the desktop as DMA-BUF frames.  NVENC alone is
           # insufficient for that path: Sunshine needs its CUDA importer too.
-          package = pkgs.sunshine.override { cudaSupport = true; };
+          # The cached CUDA build (flake/overlay/package/local-ai.nix).
+          package = pkgs.sunshine-cuda;
           settings = {
             capture = "wlr";
             encoder = "nvenc";
