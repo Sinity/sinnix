@@ -38,8 +38,17 @@ ENTRY = re.compile(
 
 def registry_dist(name: str, version: str) -> tuple[str, str]:
     out = subprocess.run(
-        ["npm", "view", f"{name}@{version}", "dist.tarball", "dist.integrity", "--json"],
-        check=True, capture_output=True, text=True,
+        [
+            "npm",
+            "view",
+            f"{name}@{version}",
+            "dist.tarball",
+            "dist.integrity",
+            "--json",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout
     dist = json.loads(out)
     return dist["dist.tarball"], dist["dist.integrity"]
@@ -65,15 +74,41 @@ def lock_for(url: str, integrity: str) -> dict:
             package = json.load(archive.extractfile("package/package.json"))
         (root / "package.json").write_text(json.dumps(package))
         subprocess.run(
-            ["npm", "install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"],
-            cwd=root, check=True, stdout=subprocess.DEVNULL,
+            [
+                "npm",
+                "install",
+                "--package-lock-only",
+                "--ignore-scripts",
+                "--no-audit",
+                "--no-fund",
+            ],
+            cwd=root,
+            check=True,
+            stdout=subprocess.DEVNULL,
         )
         lock = json.loads((root / "package-lock.json").read_text())
-    return {key: lock[key] for key in ("name", "version", "lockfileVersion", "requires", "packages") if key in lock}
+    return {
+        key: lock[key]
+        for key in ("name", "version", "lockfileVersion", "requires", "packages")
+        if key in lock
+    }
+
+
+def pin(name: str, url: str, integrity: str):
+    """A substitution that rewrites only `name`'s tarball URL and hash."""
+
+    def replace(m: re.Match[str]) -> str:
+        if m.group("name") != name:
+            return m.group(0)
+        return f"{m.group('head')}{url}{m.group('mid')}{integrity}{m.group('tail')}"
+
+    return replace
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--set", action="append", default=[], metavar="NAME=VERSION")
     args = parser.parse_args()
     if not SOURCES.is_file():
@@ -82,17 +117,15 @@ def main() -> int:
     text = SOURCES.read_text()
     for item in args.set:
         name, _, version = item.rpartition("=")
-        url, integrity = registry_dist(name, version)
-        text, count = ENTRY.subn(
-            lambda m: m.group(0) if m.group("name") != name
-            else f'{m.group("head")}{url}{m.group("mid")}{integrity}{m.group("tail")}',
-            text,
-        )
         if name not in {m.group("name") for m in ENTRY.finditer(text)}:
             raise SystemExit(f"{name} is not a dependency-source entry in {SOURCES}")
+        text = ENTRY.sub(pin(name, *registry_dist(name, version)), text)
     SOURCES.write_text(text)
 
-    locks = {m.group("name"): lock_for(m.group("url"), m.group("hash")) for m in ENTRY.finditer(text)}
+    locks = {
+        m.group("name"): lock_for(m.group("url"), m.group("hash"))
+        for m in ENTRY.finditer(text)
+    }
     LOCKS.write_text(json.dumps(locks, indent=2) + "\n")
     for name, lock in locks.items():
         print(f"{name} {lock['version']}: {len(lock['packages']) - 1} locked packages")
