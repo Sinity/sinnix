@@ -92,10 +92,6 @@ let
   borgRepoRootSnapshotsPath = "${borgRepoRoot}/borg-root-snapshots-v1";
   borgRepoSinexBlobsPath = "${borgRepoRoot}/borg-sinex-blobs-v1";
   borgRepoPolylogueStatePath = "${borgRepoRoot}/borg-polylogue-state-v1";
-  btrfsImageRoot = "${borgRepoRoot}/btrfs-images";
-  # Real images run 0.8-3.9 GB. A floor three orders of magnitude below the
-  # smallest observed one only rejects a stub, never a small-but-real capture.
-  btrfsImageMinBytes = 64 * 1024 * 1024;
   borgRepoPersist = "file://${borgRepoPersistPath}";
   borgRepoRealm = "file://${borgRepoRealmPath}";
   borgRepoRootSnapshots = "file://${borgRepoRootSnapshotsPath}";
@@ -1364,20 +1360,6 @@ in
                 restartable = false;
               };
             };
-            btrfs-metadata-image-backup = {
-              unit = "btrfs-metadata-image-backup.service";
-              resourceClass = "backup";
-              # Was unset (default false), which meant the auto-attached OnFailure
-              # hook (modules/runtime.nix, gated on observe.enable) was NEVER
-              # wired for this unit -- it failed with status=1/FAILURE on
-              # 2026-08-16 and nothing surfaced it. Not a restart candidate: a
-              # failed capture is retried by the retry loop inside the script
-              # itself and by next Sunday's timer, not by systemd Restart=.
-              observe = {
-                enable = true;
-                restartable = false;
-              };
-            };
             borgbackup-root-snapshots = {
               unit = "borgbackup-root-snapshots.service";
               resourceClass = "backup";
@@ -1423,7 +1405,6 @@ in
           borgRepoRootSnapshotsPath
           borgRepoSinexBlobsPath
           borgRepoPolylogueStatePath
-          btrfsImageRoot
           borgCacheDir
           borgGlobalLock
           mkBackupJob
@@ -1502,8 +1483,6 @@ in
           borgDrainStateRoot
           borgIntegrityReceipt
           realmCoverageAuditReceipt
-          btrfsImageRoot
-          btrfsImageMinBytes
           borgRepoPersist
           borgRepoRealm
           realmSnapshots

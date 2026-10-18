@@ -14,7 +14,6 @@ pruned automatically; the HDD's free space is the only limit.
 | Sinex blob store | direct | daily 05:40 | `borg-sinex-blobs-v1` |
 | Polylogue state | hooks sealed from a read-only cut of its subvolume | daily 04:15 | `borg-polylogue-state-v1` |
 | Telemetry database dumps | compressed copies, then archived directly | dumps 03:42, archive 06:15, seal Sunday | `borg-realm-v2` |
-| Btrfs metadata images | `btrfs-image` | Sunday 00:12 | `btrfs-images/` (see Known gaps) |
 
 Left out of the `/realm` archive (`realmExcludes` in `modules/backup.nix`):
 downloaded model weights, Steam libraries, `state/cache`, `state/containers`,
@@ -96,7 +95,3 @@ compressed telemetry dump, `agentctl job start sinnix verify_telemetry_restore
 * **No off-site copy.** A failed HDD loses every backup.
 * **The HDD is close to full**, and archives are never pruned. When it fills,
   new archives fail and snapshots accumulate on `/realm`.
-* **Btrfs metadata images do not work.** `btrfs-image` needs an unmounted
-  filesystem; run against mounted `/realm` and `/persist` it reads a tree that
-  changes underneath it, fails or times out, and has not produced an image
-  since 2026-09-03 (`/persist`) and 2026-08-23 (`/realm`).

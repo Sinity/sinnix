@@ -15,7 +15,6 @@
   borgRepoRootSnapshotsPath,
   borgRepoSinexBlobsPath,
   borgRepoPolylogueStatePath,
-  btrfsImageRoot,
   borgCacheDir,
   borgGlobalLock,
   mkBackupJob,
@@ -29,7 +28,6 @@
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoRootSnapshotsPath}
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoSinexBlobsPath}
       ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${borgRepoPolylogueStatePath}
-      ${pkgs.coreutils}/bin/install -d -m 0700 -o root -g root ${btrfsImageRoot}
     '';
 
     # Borg chunk cache must survive reboots. / is ephemeral, so the default
@@ -48,7 +46,6 @@
       "d ${borgRealmSnapshotBind} 0700 root root -"
       "d ${borgRepoRoot} 0750 root users -"
       "d ${borgRepoRootSnapshotsPath} 0700 root root -"
-      "d ${btrfsImageRoot} 0700 root root -"
       "d ${borgCacheDir} 0700 root root -"
       "d ${borgDrainStateRoot} 0700 root root -"
       "f ${borgGlobalLock} 0600 root root -"
