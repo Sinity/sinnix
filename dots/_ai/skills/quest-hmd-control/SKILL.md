@@ -55,7 +55,6 @@ active video. Pause/resume are capability probes: they fail unless the
 requested state is observed. Do not substitute Android media keys: another
 app such as KDE Connect can own the active Android media session.
 
-`Super+P` opens the clipboard's local path or `file:` URI in a visible Kitty.
 The media play, next, and previous keys control an active Quest session; when
 none is active they retain their ordinary `playerctl` behavior. These controls
 require live headset verification because DeoVR must first have remote control

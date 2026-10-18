@@ -86,12 +86,6 @@ mkFeatureModule {
             rev = "6bd77f8f202941f44b24585fe563916563009a49";
             hash = "sha256-VtL2YhxxKNn+Mtj5vhWnnkEsOYS9zz+AUwS/mqiwwqs=";
           };
-          communityPlugins = pkgs.fetchFromGitHub {
-            owner = "noctalia-dev";
-            repo = "community-plugins";
-            rev = "0526e726e8b29f0ba1e9995a7dd1f11a40936fd1";
-            hash = "sha256-FlMoLzJvEPoCP3+rq+5Pq2ubkvN9qGQbJBmJClTx+W8=";
-          };
         in
         {
           imports = [ inputs.noctalia.homeModules.default ];
@@ -119,8 +113,6 @@ mkFeatureModule {
             };
 
           home.file.".local/share/noctalia/pinned/official/timer".source = "${officialPlugins}/timer";
-          home.file.".local/share/noctalia/pinned/community/keybind-cheatsheet".source =
-            "${communityPlugins}/keybind-cheatsheet";
           home.file.".local/share/noctalia/local/sinnix-ops".source =
             ../../../dots/noctalia/plugins/sinnix-ops;
           home.file.".local/share/noctalia/local/sinnix-cockpit".source =

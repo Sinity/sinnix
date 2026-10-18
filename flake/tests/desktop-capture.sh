@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Provably fails when: the OCR helper acts on a cancelled (empty) selection,
-# or the scratchpad dismisser toggles workspaces that are not visible.
+# or the scratchpad toggle stops showing/hiding or cold-launching its app.
 set -euo pipefail
 
 ocr_helper=$1
-dismiss_helper=$2
-toggle_helper=$3
+toggle_helper=$2
 fixture_bin=$TMPDIR/bin
 mkdir -p "$fixture_bin"
 
@@ -83,9 +82,6 @@ PATH="$fixture_bin:$PATH" "$ocr_helper"
 
 export HYPR_ACTIONS=$TMPDIR/actions
 export HYPR_SPECIAL_STATE=$TMPDIR/special-state
-printf 'special:scratch_term' >"$HYPR_SPECIAL_STATE"
-PATH="$fixture_bin:$PATH" "$dismiss_helper"
-[ "$(cat "$HYPR_ACTIONS")" = "hidden scratch_term" ]
 
 config_dir=$TMPDIR/scratchpads
 mkdir -p "$config_dir"

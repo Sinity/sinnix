@@ -1508,14 +1508,12 @@ in
           }
           ''
             ocr="$TMPDIR/hyprland-ocr"
-            dismiss="$TMPDIR/dismiss-scratchpads"
             toggle="$TMPDIR/toggle-scratch"
             cp ${../../scripts/hyprland-ocr} "$ocr"
-            cp ${../../scripts/dismiss-scratchpads} "$dismiss"
             cp ${../../scripts/toggle-scratch} "$toggle"
-            chmod +x "$ocr" "$dismiss" "$toggle"
-            patchShebangs "$ocr" "$dismiss" "$toggle"
-            ${pkgs.bash}/bin/bash ${../../flake/tests/desktop-capture.sh} "$ocr" "$dismiss" "$toggle"
+            chmod +x "$ocr" "$toggle"
+            patchShebangs "$ocr" "$toggle"
+            ${pkgs.bash}/bin/bash ${../../flake/tests/desktop-capture.sh} "$ocr" "$toggle"
             touch "$out"
           '';
       recoverySkillsFixture =

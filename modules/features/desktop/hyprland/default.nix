@@ -83,7 +83,6 @@ let
     "kitty-scrollback-capture"
     "kitty-scrollback-view"
     "hyprland-ocr"
-    "dismiss-scratchpads"
   ];
 in
 {

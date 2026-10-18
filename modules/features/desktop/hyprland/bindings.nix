@@ -43,13 +43,9 @@ let
     bind keys description dispatcher { mouse = true; };
 
   bindd = [
-    (run "SUPER + SHIFT + Return" "Launch Codex in focused Kitty directory"
-      "sinnix-kitty-control launch-agent-here --agent codex"
-    )
     (run "SUPER + SHIFT + O" "OCR selected region to clipboard" "hyprland-ocr")
     (run "SUPER + SHIFT + Z" "Increase cursor magnification" "hyprctl keyword cursor:zoom_factor 2.0")
     (run "SUPER + SHIFT + X" "Reset cursor magnification" "hyprctl keyword cursor:zoom_factor 1.0")
-    (run "SUPER + SHIFT + Escape" "Dismiss visible scratchpads" "dismiss-scratchpads")
     (simple "SUPER + SHIFT + F" "Smart fullscreen" (
       call "window.fullscreen" ''{ mode = "fullscreen", action = "toggle" }''
     ))
@@ -63,9 +59,6 @@ let
       "uwsm app -- ${scriptPkgs.sinnix-picker}/bin/sinnix-picker"
     )
     (run "SUPER + Escape" "Lock the session" "noctalia msg session lock")
-    (run "SUPER + Slash" "Show this keybind cheatsheet"
-      "noctalia msg panel-toggle kenn/keybind-cheatsheet:cheatsheet"
-    )
     (run "SUPER + SHIFT + Slash" "Open the full sinnix cheatsheet"
       "${script "sinnix-cheatsheet"} && ${script "sinnix-browser-app"} http://127.0.0.1:${toString sinnix.services.hub.reportsPort}/reports/cheatsheet.html"
     )
@@ -151,11 +144,6 @@ let
     (run "XF86AudioPrev" "Rewind active media" "sinnix quest video media-key previous")
     (run "XF86AudioRaiseVolume" "Raise the volume" "pamixer -i 2")
     (run "XF86AudioLowerVolume" "Lower the volume" "pamixer -d 2")
-    (run "SUPER + XF86AudioMute" "Mute or unmute the microphone" "${script "audio"} mic-toggle")
-    (run "SUPER + XF86AudioRaiseVolume" "Switch to the next audio output" "${script "audio"} toggle")
-    (run "SUPER + P" "Launch clipboard video on Quest"
-      "kitty --title 'Quest video' sinnix quest video open --clipboard"
-    )
   ] ++ lib.optionals sinnix.services.capture-replay.enable [
     (run "F10" "Save the screen replay ring" "sinnix-replay-save")
     (run "SHIFT + F10" "Stop the screen replay ring" "sinnix-replay-stop")
