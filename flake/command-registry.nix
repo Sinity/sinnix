@@ -164,6 +164,8 @@ let
   # continuation — systemd-run then silently gets zero command args.
   # concatStringsSep has no trailing separator, so it cannot reproduce that
   # however it is indented at the call site.
+  # Metadata evaluation shares this scope with the build. Keep its I/O
+  # eligible under continuous reads; the slice still bounds the whole job.
   rebuildContainmentFlags =
     lib.concatStringsSep " \\\n    " [
       ''--setenv=NIX_CONFIG="''${NIX_CONFIG:-}"''
@@ -171,7 +173,8 @@ let
       ''--setenv=SINNIX_SECRET_DECLARATIONS="$SINNIX_SECRET_DECLARATIONS"''
       "--slice=nix-build.slice"
       "-p CPUSchedulingPolicy=idle"
-      "-p IOSchedulingClass=idle"
+      "-p IOSchedulingClass=best-effort"
+      "-p IOSchedulingPriority=6"
     ]
     + " \\";
   # Nothing else populates sinity.cachix.org: the desktop compiles the sinex

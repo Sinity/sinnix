@@ -195,6 +195,8 @@
             grep -Fq "$expected_argv" "$ACTIVATION_LOG"
             grep -Fq -- '--override-input sinex /tmp/sinex' "$ACTIVATION_LOG"
             grep -Fq -- '--slice=nix-build.slice' "$ACTIVATION_LOG"
+            grep -Fq -- '-p IOSchedulingClass=best-effort' "$ACTIVATION_LOG"
+            grep -Fq -- '-p IOSchedulingPriority=6' "$ACTIVATION_LOG"
             if grep -q 'unexpected-nix\|cache-push' "$ACTIVATION_LOG"; then
               echo "$name failure attempted another execution route" >&2
               exit 1
