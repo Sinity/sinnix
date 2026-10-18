@@ -24,27 +24,20 @@ from typing import Any
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.ledger import utc_ts
 
-from .external import steer, trigger_score
+from .external import trigger_score
 from .state import LAKE_ROOT, TOKEN_RE, TOKENS_DIR, emit_receipt, ensure_dirs
 
 # Outcomes a token record can hold. `failed` is the only non-success a retry
 # may execute again: the effect definitively did not happen. `in_flight` on
 # disk, found by a caller that now holds the token's lock, means the process
 # that wrote it died mid-effect, which is `indeterminate` by another name.
-# `partial` is a batch where some actions landed and some did not; repeating
-# it would repeat the ones that landed.
 COMPLETED = "completed"
 FAILED = "failed"
 IN_FLIGHT = "in_flight"
 INDETERMINATE = "indeterminate"
-PARTIAL = "partial"
 # Answer-only outcomes, never recorded: the token is not this request's to use.
 CONFLICT = "conflict"
 REFUSED = "refused"
-
-# The steering ritual's forecast when the phone sends none (absent or null).
-# An explicit 0 is a forecast, not an absence, and is passed through as 0.
-DEFAULT_PROBABILITY = 0.5
 
 
 def _answer(kind: str, outcome: str, detail: str) -> dict:
@@ -98,7 +91,7 @@ def execute(intent: dict) -> dict:
     A send_token binds one request's content to one execution slot. A repeat
     of completed content returns the recorded answer, marked `duplicate`,
     without acting again; a repeat of failed content runs again; a repeat of
-    an indeterminate or partial effect is refused rather than guessed at; and
+    an indeterminate effect is refused rather than guessed at; and
     the same token on different content is refused as a conflict.
 
     An intent without a token (the live /job-answer route sends none) runs
@@ -129,7 +122,7 @@ def execute(intent: dict) -> dict:
                 return _answer(kind, INDETERMINATE, "token record is unreadable")
             if prior_digest != digest:
                 return _answer(kind, CONFLICT, "send_token belongs to other content")
-            if prior_outcome in (COMPLETED, PARTIAL, FAILED):
+            if prior_outcome in (COMPLETED, FAILED):
                 result = prior.get("result")
                 if (
                     not isinstance(result, dict)
@@ -143,10 +136,6 @@ def execute(intent: dict) -> dict:
                     return _answer(kind, INDETERMINATE, "token result is unreadable")
             if prior_outcome == COMPLETED:
                 return {**prior["result"], "duplicate": True}
-            if prior_outcome == PARTIAL:
-                # The recorded answer again, but never marked `duplicate`:
-                # the phone forgets anything so marked, and this is not done.
-                return prior["result"]
             if prior_outcome != FAILED:
                 return _answer(kind, INDETERMINATE, "a prior attempt may have acted")
         _record(token, digest, IN_FLIGHT)
@@ -165,97 +154,9 @@ def _finish(result: dict, kind: str) -> dict:
     return result
 
 
-def _probability(row: dict) -> str | None:
-    """The forecast to pass on, or None when the row's value is not one."""
-    value = row.get("probability")
-    if value is None:
-        return str(DEFAULT_PROBABILITY)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    if not 0 <= value <= 1:
-        return None
-    return str(value)
-
-
 def _perform(intent: dict, kind: str, token: str) -> dict:
     result: dict[str, Any]
-    if kind == "ready_send":
-        # The ready queue's SEND is a request, never a send. Prime performs the
-        # outward action; the phone only ever asked for it.
-        item = str(intent.get("id") or "")
-        code, out = steer("intent", "done", item) if item else (2, "no id")
-        result = {"ok": code == 0, "detail": out}
-        emit_receipt(
-            "ready_send",
-            "Sent" if code == 0 else "Could not send",
-            out or item,
-            token,
-            "ready",
-        )
-    elif kind == "steering_ritual":
-        intentions = intent.get("intentions")
-        if intentions is None:
-            intentions = []
-        if not isinstance(intentions, list):
-            return {"ok": False, "detail": "intentions must be a list"}
-        added = 0
-        detail = []
-        for row in intentions:
-            if not isinstance(row, dict):
-                detail.append("an intention is not an object")
-                continue
-            forecast = _probability(row)
-            if forecast is None:
-                detail.append(f"invalid probability {row.get('probability')!r}")
-                continue
-            code, out = steer(
-                "intent",
-                "add",
-                str(row.get("id") or row.get("title") or "intention"),
-                "--forecast",
-                forecast,
-            )
-            if code == 0:
-                added += 1
-            else:
-                detail.append(out)
-        total = len(intentions)
-        result = {
-            "ok": added == total,
-            "added": added,
-            "total": total,
-            "detail": detail,
-        }
-        if added and added < total:
-            result["outcome"] = PARTIAL
-        emit_receipt(
-            "steering_ritual",
-            "Intentions recorded"
-            if added == total
-            else "Intentions incomplete"
-            if added
-            else "Intentions not recorded",
-            f"{added} of {total} committed for today",
-            token,
-            "home",
-        )
-    elif kind == "steering_resolve":
-        item = str(intent.get("id") or "")
-        outcome = str(intent.get("outcome") or "")
-        verb = {"done": "done", "missed": "miss", "partly": "done"}.get(outcome)
-        if verb and item:
-            code, out = steer("intent", verb, item)
-        else:
-            code, out = 2, f"unknown outcome {outcome!r}"
-        result = {"ok": code == 0, "detail": out}
-        emit_receipt(
-            "steering_resolve",
-            "Resolved" if code == 0 else "Could not resolve",
-            f"{item}: {outcome}",
-            token,
-            "home",
-        )
-    elif kind == "job_answer":
+    if kind == "job_answer":
         result = deliver_job_answer(intent)
         emit_receipt(
             "job_answer",

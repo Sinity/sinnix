@@ -3,8 +3,8 @@
 Thin, read-only composition over sources that are already authoritative
 elsewhere: the reducer's own /v1/snapshot (which embeds the runtime
 inventory and the live systemd unit list), /v1/health/lanes (the sentinel
-sweep's believed status per key), and up to two Beads workspaces (this
-repo's, resolved from the caller's CWD, and personal steering). No new
+sweep's believed status per key), and this repo's Beads workspace, resolved
+from the caller's CWD. No new
 daemon and no new state -- every field here is a GET or a `bd ready`, and a
 source that is unreachable renders as one "unavailable" line rather than a
 traceback.
@@ -29,8 +29,6 @@ SOCKET_TIMEOUT = 3.0
 BD_TIMEOUT = 8.0
 BD_HEAD_LIMIT = 5
 TITLE_MAX = 88
-
-STEERING_BEADS_DIR = Path("/realm/project/steering/repo/.beads")
 
 
 def default_static_inventory_path() -> Path:
@@ -240,23 +238,6 @@ def bd_ready_head(
     return {"available": True, "total": len(items), "ready": head}
 
 
-def steering_ready_head(
-    *,
-    beads_dir: Path = STEERING_BEADS_DIR,
-    limit: int = BD_HEAD_LIMIT,
-    timeout: float = BD_TIMEOUT,
-    runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
-) -> dict[str, Any]:
-    """Same shape as `bd_ready_head`, pointed at the personal steering
-    workspace via BEADS_DIR -- silently absent when that workspace does not
-    exist on this host, matching sessionstart-steering.sh's own rule."""
-    if not beads_dir.is_dir():
-        return {"available": False}
-    env = dict(os.environ)
-    env["BEADS_DIR"] = str(beads_dir)
-    return bd_ready_head(limit=limit, timeout=timeout, env=env, runner=runner)
-
-
 def compose(
     *,
     socket_path: Path,
@@ -264,7 +245,6 @@ def compose(
     fetch: Callable[[Path, str], dict[str, Any] | None] = fetch_socket_json,
     read_static: Callable[[Path], dict[str, Any] | None] = read_static_inventory,
     bd_head: Callable[[], dict[str, Any]] = bd_ready_head,
-    steering_head: Callable[[], dict[str, Any]] = steering_ready_head,
 ) -> dict[str, Any]:
     if static_inventory_path is None:
         static_inventory_path = default_static_inventory_path()
@@ -301,7 +281,6 @@ def compose(
     result["acknowledged_outages"] = acknowledged_outages(inventory)
     result["capture_freshness"] = capture_freshness(lanes)
     result["beads"] = bd_head()
-    result["steering"] = steering_head()
     return result
 
 
@@ -352,15 +331,6 @@ def render_human(data: dict[str, Any]) -> str:
         lines.append("")
         lines.append(f"Beads ready ({len(beads['ready'])} of {beads['total']}):")
         for item in beads["ready"]:
-            lines.append(f"  - {item['id']}  {_truncate(item['title'])}")
-
-    steering = data.get("steering") or {}
-    if steering.get("available"):
-        lines.append("")
-        lines.append(
-            f"Steering ready ({len(steering['ready'])} of {steering['total']}):"
-        )
-        for item in steering["ready"]:
             lines.append(f"  - {item['id']}  {_truncate(item['title'])}")
 
     return "\n".join(lines) + "\n"

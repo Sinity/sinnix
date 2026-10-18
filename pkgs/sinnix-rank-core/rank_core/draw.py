@@ -6,7 +6,7 @@ Thompson sampling is the default per the design doc's argument: argmax
 overfits ranking noise and starves near-top items of data (statistical), and
 a system-drawn choice from a vetted top set carries no self-justification
 burden (the doc's operator-specific reasoning) -- the same precommitment
-value as steering's decide-once satisficing menus. `top` and `softmax` are
+value as a decide-once satisficing menu. `top` and `softmax` are
 offered explicitly for callers that want deterministic or temperature-tuned
 behavior instead.
 """

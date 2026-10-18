@@ -7,7 +7,7 @@
   # a buildPythonApplication has no writeShellApplication runtimeInputs
   # wrapper of its own to carry them, so they go on the built console_script's
   # PATH directly -- same pattern as sinnix-phone-dispatcher's
-  # steerPackage/scorePackage (pkgs/sinnix-phone-dispatcher/pkg.nix).
+  # scorePackage (pkgs/sinnix-phone-dispatcher/pkg.nix).
   kittyPackage,
   ahaPackage,
 }:

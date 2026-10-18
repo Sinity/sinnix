@@ -24,7 +24,7 @@ from sinnix_lib.ledger import utc_ts
 from sinnix_lib.systemd import sd_notify, watchdog_period
 
 from .execute import execute
-from .glance import build_glance, build_jobs, build_steering
+from .glance import build_glance, build_jobs
 from .inbox import InboxFile, confirm_inbox, list_inbox, open_inbox
 from .receiver import start_phone_stream_server
 from .state import MAX_BODY, MAX_EVENT_BATCH, MAX_UPLOAD, ensure_dirs
@@ -114,8 +114,6 @@ class Handler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.OK, {"ok": True, "at": utc_ts()})
         elif route == "/glance":
             self._send(HTTPStatus.OK, build_glance())
-        elif route == "/steering":
-            self._send(HTTPStatus.OK, build_steering())
         elif route == "/jobs":
             self._send(HTTPStatus.OK, build_jobs())
         elif route == "/inbox":

@@ -130,7 +130,7 @@ refused.
 | `outbox/{voice,trace,shared}-*` + `.json` | out       | `POST /chunk?lane=outbox`                              |
 | `/sdcard/DCIM`                            | out       | `POST /chunk?lane=camera` (`SINNIX_PHONE_CAMERA_DIR`)  |
 | `/sdcard/Download`                        | out       | `POST /chunk?lane=download`                            |
-| `inbox/glance.json`, `inbox/steering.json`| in        | built on request (`GET /inbox/file`)                   |
+| `inbox/glance.json`                       | in        | built on request (`GET /inbox/file`)                   |
 | `inbox/receipts/*`, `inbox/notify/*`      | in        | fetched, confirmed, shown, then deleted                |
 | `inbox/decks/*`                           | in        | fetched and kept; adds instruments                     |
 | `status.json`                             | read      | over ADB by `app-status`                               |
@@ -271,7 +271,5 @@ runs on the workstation; the phone is only a browser. See
 
 ## Known limits
 
-- The steering ready queue is approximated as open commitments whose window
-  ends today.
 - Media mirroring resumes from the newest acknowledged file; files that appear
   later with older timestamps need an explicit rescan.

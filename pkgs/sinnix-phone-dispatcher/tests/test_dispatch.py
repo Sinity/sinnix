@@ -72,18 +72,13 @@ def test_missing_outbox_is_a_quiet_no_op(tmp_path) -> None:
 
 
 def _resolve(token: str, item: str = "a") -> dict:
-    return {
-        "kind": "steering_resolve",
-        "id": item,
-        "outcome": "done",
-        "send_token": token,
-    }
+    return {"kind": "job_answer", "job_id": item, "answer": "yes", "send_token": token}
 
 
 def test_file_and_http_delivery_share_one_execution_slot(monkeypatch, tmp_path):
-    """The file route holds the token while steer blocks; the HTTP route must
-    wait and then answer the recorded outcome. Anti-vacuity: without the token
-    lock both routes see no record and steer is called twice. This asserts one
+    """The file route holds the token while the effect blocks; the HTTP route
+    must wait and then answer the recorded outcome. Anti-vacuity: without the
+    token lock both routes see no record and the effect runs twice. This asserts one
     owned transition, not an exactly-once external effect."""
     outbox = tmp_path / "outbox"
     outbox.mkdir()
@@ -94,13 +89,13 @@ def test_file_and_http_delivery_share_one_execution_slot(monkeypatch, tmp_path):
     release = threading.Event()
     calls = []
 
-    def steer(*args):
-        calls.append(args)
+    def deliver(intent):
+        calls.append(intent)
         entered.set()
         assert release.wait(5)
-        return 0, "ok"
+        return {"ok": True, "detail": "ok"}
 
-    monkeypatch.setattr(execute_mod, "steer", steer)
+    monkeypatch.setattr(execute_mod, "deliver_job_answer", deliver)
     codes = []
     file_thread = threading.Thread(
         target=lambda: codes.append(dispatch_mod.cmd_dispatch(_args(outbox)))
@@ -126,8 +121,14 @@ def test_file_and_http_delivery_share_one_execution_slot(monkeypatch, tmp_path):
 def test_file_route_keeps_conflicting_and_failed_intents(monkeypatch, tmp_path):
     """Anti-vacuity: deleting on `duplicate` or on any answer would remove a
     file whose request never completed."""
-    results = iter([(0, "ok"), (2, "store busy"), (0, "ok")])
-    monkeypatch.setattr(execute_mod, "steer", lambda *a: next(results))
+    results = iter(
+        [
+            {"ok": True, "detail": "ok"},
+            {"ok": False, "detail": "answer directory busy"},
+            {"ok": True, "detail": "ok"},
+        ]
+    )
+    monkeypatch.setattr(execute_mod, "deliver_job_answer", lambda i: next(results))
     assert execute_mod.execute(_resolve("file-conflict"))["ok"] is True
 
     outbox = tmp_path / "outbox"

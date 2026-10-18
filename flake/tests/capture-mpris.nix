@@ -29,7 +29,6 @@
             sinnix.services.url-ledger.enable = true;
             sinnix.services.lynchpin.enable = true;
             sinnix.features.desktop.browser.enable = true;
-            sinnix.services.steering.enable = true;
             sinnix.services.sandbox-audit.enable = true;
             sinnix.services.stt.enable = true;
             sinnix.services.hub.enable = true;
@@ -104,11 +103,6 @@
             message = "Raw ranking evidence must have an owner-only entrance.";
           }
           {
-            assertion =
-              config.systemd.user.services.sinnix-steering-export.serviceConfig.UMask == "0077";
-            message = "The steering export must create owner-only evidence.";
-          }
-          {
             assertion = config.systemd.services.sinnix-url-ledger.serviceConfig.UMask == "0077";
             message = "URL evidence jobs must create owner-only output.";
           }
@@ -174,7 +168,6 @@
                   config.sinnix.paths.capturePaths.url-ledger
                   config.sinnix.paths.capturePaths.irc
                   config.sinnix.paths.capturePaths.shell
-                  config.sinnix.paths.capturePaths.steering
                   config.sinnix.paths.capturePaths.audit
                   config.sinnix.paths.capturePaths.activitywatch
                   "${config.sinnix.paths.capturePaths.activitywatch}/raw"

@@ -17,14 +17,13 @@ confirms what it landed. Three routes:
   * `POST /inbox/confirm?name=&sha256=` -- "landed", which deletes the
     one-shots.
 
-Confirmation deletes receipts and notifications and does NOT delete glance,
-steering or decks, exactly matching what the drain's two rsync invocations
+Confirmation deletes receipts and notifications and does NOT delete glance
+or decks, exactly matching what the drain's two rsync invocations
 did (`--remove-source-files` for the first pair, a plain copy for the rest).
 A receipt is handed over; a deck is published.
 
-`glance.json` and `steering.json` are not files here at all any more -- they
-are built when asked for, from the same builders the live routes use. They
-were only ever files because a drain had to have something to copy, and a
+`glance.json` is not a file here at all any more -- it is built when asked
+for, from the same builder the live route uses. It was only ever a file because a drain had to have something to copy, and a
 snapshot written half an hour before it is read is a snapshot with a
 staleness problem that nothing downstream can see.
 """
@@ -44,13 +43,12 @@ from typing import BinaryIO, NamedTuple
 
 from sinnix_lib.ledger import utc_ts
 
-from .glance import build_glance, build_steering
+from .glance import build_glance
 from .state import INBOX_DIR
 
 #: Generated on demand rather than read from disk, keyed to their builder.
 GENERATED = {
     "glance.json": build_glance,
-    "steering.json": build_steering,
 }
 
 #: Directories under the inbox, and whether a confirmed fetch consumes them.
@@ -94,8 +92,8 @@ def _generated_bytes(name: str) -> bytes:
 def list_inbox() -> tuple[HTTPStatus, dict]:
     """Everything waiting, with a hash each and whether fetching consumes it.
 
-    The hash is what lets the app skip work: glance and steering are rebuilt
-    on every request and usually differ, while a deck that has not changed
+    The hash is what lets the app skip work: the glance is rebuilt
+    on every request and usually differs, while a deck that has not changed
     since the last fetch is a download that does not need to happen.
     """
     files: list[dict] = []

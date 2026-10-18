@@ -36,7 +36,6 @@
   ];
   self = [
     "phone-speech"
-    "steering"
   ];
   machine = [
     "borg-realm-independent-coverage-audit"

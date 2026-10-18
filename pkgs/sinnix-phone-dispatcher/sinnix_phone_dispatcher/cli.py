@@ -14,7 +14,7 @@ import os
 from pathlib import Path
 
 from .dispatch import cmd_dispatch, cmd_notify
-from .glance import build_glance, build_steering
+from .glance import build_glance
 from .server import cmd_serve
 from .state import LAKE_ROOT
 
@@ -66,13 +66,6 @@ def build_parser() -> argparse.ArgumentParser:
     glance = sub.add_parser("glance", help="print the phone's glance as JSON")
     glance.set_defaults(
         func=lambda _a: (print(json.dumps(build_glance(), indent=2)), 0)[1]
-    )
-
-    steering = sub.add_parser(
-        "steering", help="print the phone's steering view as JSON"
-    )
-    steering.set_defaults(
-        func=lambda _a: (print(json.dumps(build_steering(), indent=2)), 0)[1]
     )
 
     repair = sub.add_parser(

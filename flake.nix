@@ -94,15 +94,6 @@
       flake = false;
     };
 
-    # The personal steering workspace (its own git repo with its own beads).
-    # Source of the sinnix-steer CLI; sinnix carries only the packaging
-    # wrapper (flake/scripts.nix), so the whole steering concern lives in
-    # one place. Non-flake: it is a workspace, not a project with outputs.
-    steering = {
-      url = "git+file:///realm/project/steering/repo?ref=master";
-      flake = false;
-    };
-
     # Retain the existing package and service interfaces until a separate cutover.
     # The immutable revision also protects consumers during input updates.
     #

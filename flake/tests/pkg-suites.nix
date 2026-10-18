@@ -4,22 +4,11 @@
 {
   perSystem =
     {
-      system,
       pkgs,
       sinnixScriptRegistry,
       ...
     }:
     let
-      # The phone runtime's steering dependency carries unfree claude-code.
-      # Scope that permission to its existing package and suite.
-      unfreePkgs = import inputs.nixpkgs {
-        inherit system;
-        config.allowUnfree = true;
-      };
-      scriptRegistryUnfree = import ../scripts.nix {
-        inherit inputs;
-        pkgs = unfreePkgs;
-      };
       lib = pkgs.lib;
       pythonSuite =
         {
@@ -132,17 +121,8 @@
         # False in execute.py -- caught by
         # test_second_execution_with_same_token_is_a_noop_duplicate (1
         # failed, 46 passed); reverted after confirming red.
-        #
-        # Built with a locally-configured nixpkgs instance: this package's
-        # steerPackage dependency (sinnix-steer) carries pkgs.claude-code on
-        # its runtimeInputs, and claude-code is unfree -- plain legacyPackages
-        # (the unconfigured instance every other check here uses) refuses to
-        # even evaluate its drvPath. Same pattern as
-        # flake/overlay/package/local-ai.nix's aiPkgs, scoped to this one
-        # check rather than flipping allowUnfree tree-wide.
         sinnix-phone-dispatcher-suite = pythonSuite {
           name = "sinnix-phone-dispatcher";
-          package = scriptRegistryUnfree.packageSet.sinnix-phone-dispatcher;
         };
 
         # Provably fails when: the project-path sandbox stops rejecting a

@@ -3,13 +3,10 @@
   python3Packages,
   sinnix-capture-lib,
   sinnix-lib,
-  # sinnix-steer/sinnix-score, shelled out to (not imported) by
-  # sinnix_phone_dispatcher.external -- the retired scripts/ frontmatter
-  # named them as `runtimeInputs: coreutils @sinnix-steer @sinnix-score`,
-  # which a script-registry writeShellApplication wrapper turned into PATH
-  # entries. A buildPythonApplication has no such wrapper of its own, so
-  # they are put on the built console_script's PATH explicitly below.
-  steerPackage,
+  # sinnix-score, shelled out to (not imported) by
+  # sinnix_phone_dispatcher.external. A buildPythonApplication has no
+  # script-registry wrapper, so it is put on the built console_script's PATH
+  # explicitly below.
   scorePackage,
 }:
 
@@ -43,10 +40,7 @@ python3Packages.buildPythonApplication {
     "--prefix"
     "PATH"
     ":"
-    (lib.makeBinPath [
-      steerPackage
-      scorePackage
-    ])
+    (lib.makeBinPath [ scorePackage ])
   ];
   pythonImportsCheck = [ "sinnix_phone_dispatcher" ];
 

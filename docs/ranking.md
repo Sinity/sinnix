@@ -50,7 +50,7 @@ sinnix rank next <domain> --json               # one set, no TTY
 sinnix rank record <domain> --set A,B --winner A
 sinnix rank retract <domain> --comparison <id>
 sinnix rank status <domain> --json             # order + evidence
-sinnix rank spin <domain> --commit             # draw one, into steering
+sinnix rank spin <domain>                      # draw one
 ```
 
 `next`/`record` exist for agents, which hold the conversation instead of a
@@ -64,13 +64,6 @@ same option) and refuses two options with the same label
 components, items with no comparisons, the stopping threshold, and
 `settled` with the reasons it is not. A total order always exists; whether it
 means anything is what `evidence` answers.
-
-## Steering's activity menu
-
-`sinnix-steer activity menu` orders the activity registry by the fit over
-the `steering-activities` domain. The energy filter only chooses what is shown,
-not the order. With no comparisons recorded the registry's own order is used,
-and the CLI says so.
 
 ## `sinnix-elicit`
 

@@ -1353,7 +1353,6 @@
         "polylogue": "polylogue",
         "scribe-tap": "scribe-tap",
         "sinex": "sinex",
-        "steering": "steering",
         "stylix": "stylix",
         "treefmt-nix": "treefmt-nix_3",
         "yt-polisher": "yt-polisher"
@@ -1500,23 +1499,6 @@
         "rev": "dd21293728a9222d77bf53307844ddef9783c040",
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
-      }
-    },
-    "steering": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1792118945,
-        "narHash": "sha256-z5FICUP2lXKok/U2hx7lkHAjLOtx1GE831bRPm+Ao2U=",
-        "ref": "master",
-        "rev": "ccb94c519e025c164b463ef43acd60b4afd4fe6b",
-        "revCount": 7,
-        "type": "git",
-        "url": "file:///realm/project/steering/repo"
-      },
-      "original": {
-        "ref": "master",
-        "type": "git",
-        "url": "file:///realm/project/steering/repo"
       }
     },
     "stylix": {

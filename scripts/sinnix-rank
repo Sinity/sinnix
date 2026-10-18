@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 # @sinnix-package
 # description: Pairwise/choice-set preference ranking CLI (backlog, ideas, any list) over the shared rank-core engine
-# runtimeInputs: coreutils @sinnix-steer
+# runtimeInputs: coreutils
 # pythonPackages: @sinnix-rank-core
 # docs: docs/ranking.md
 
 """Text frontend for rank_core: register items into a domain, run resorter-
 style pairwise prompting sessions, check the fitted ranking + stopping
 statement, and draw one item per a configurable policy (Thompson sampling by
-default) -- optionally committing the draw into steering as a forecastable
-intention.
+default).
 
 Store convention (design doc section 2): raw comparisons/items are
 behavioral capture, kept forever under
@@ -25,7 +24,6 @@ import argparse
 import json
 import os
 import random
-import subprocess
 import sys
 from pathlib import Path
 
@@ -36,7 +34,6 @@ from rank_core.store import VALID_KINDS, domain_path
 CAPTURE_ROOT = Path(
     os.environ.get("SINNIX_RANK_ROOT", "/realm/activity/shared/ranking")
 )
-BACKLOG_ACTIVITY_NAME = "backlog session"
 
 #: Below this top-k stability the fitted order is a working hypothesis, not an
 #: answer. `status` refuses to call anything settled under it, and every
@@ -412,52 +409,6 @@ def cmd_spin(args: argparse.Namespace) -> int:
         return 1
     label = items[picked].label if picked in items else picked
     print(f"{label}  ({args.policy}, id={picked})")
-
-    if args.commit:
-        return _commit_to_steering(args.domain, picked, label, args.forecast, args.window_days)
-    return 0
-
-
-def _steer(*argv: str) -> tuple[int, str, str]:
-    proc = subprocess.run(["sinnix-steer", *argv], capture_output=True, text=True, timeout=30)
-    return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
-
-
-def _find_or_create_backlog_activity() -> str | None:
-    rc, out, err = _steer("activity", "menu", "--json")
-    if rc == 0:
-        for activity in json.loads(out):
-            if activity["name"] == BACKLOG_ACTIVITY_NAME:
-                return activity["id"]
-    rc, out, err = _steer(
-        "activity", "add", BACKLOG_ACTIVITY_NAME,
-        "--kind", "task", "--energy", "any",
-        "--notes", "standing activity for sinnix-rank spin --commit draws",
-    )
-    if rc != 0:
-        print(f"  could not create steering activity: {err}", file=sys.stderr)
-        return None
-    # cmd_activity_add prints "activity {aid}: {name} (...)"
-    return out.split(":", 1)[0].removeprefix("activity ").strip()
-
-
-def _commit_to_steering(domain: str, item_id: str, label: str, forecast: float, window_days: int) -> int:
-    import datetime as dt
-
-    activity_id = _find_or_create_backlog_activity()
-    window_start = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
-    window_end = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(days=window_days)).isoformat(timespec="seconds")
-    text = f"watch {domain} / act on {item_id}: {label}"
-    steer_args = ["intent", "add", text, "--window-start", window_start, "--window-end", window_end]
-    if forecast is not None:
-        steer_args += ["--forecast", str(forecast)]
-    if activity_id:
-        steer_args += ["--activity", activity_id]
-    rc, out, err = _steer(*steer_args)
-    if rc != 0:
-        print(f"  steering commit failed: {err}", file=sys.stderr)
-        return 1
-    print(f"  committed: {out}")
     return 0
 
 
@@ -530,9 +481,6 @@ def build_parser() -> argparse.ArgumentParser:
     policy_group.add_argument("--thompson", action="store_const", dest="policy", const="thompson")
     policy_group.add_argument("--softmax", type=float, dest="softmax_temperature", default=None)
     spin.set_defaults(policy="thompson")
-    spin.add_argument("--commit", action="store_true", help="insert the draw into steering as a commitment")
-    spin.add_argument("--forecast", type=float, default=None, help="follow-through probability (0-1) for the steering commitment")
-    spin.add_argument("--window-days", type=int, default=3, help="steering commitment validity window")
     spin.set_defaults(func=cmd_spin)
 
     return parser

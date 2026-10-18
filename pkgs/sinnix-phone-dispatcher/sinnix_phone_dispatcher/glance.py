@@ -1,13 +1,10 @@
-"""Prime's verdict, the phone's steering view, and the agent jobs list --
+"""Prime's verdict and the agent jobs list --
 everything the live JSON API and the `push` command render, as data."""
 
 from __future__ import annotations
 
-import json
-
 from sinnix_lib.ledger import utc_ts
 
-from .external import steer
 from .ops import ops_get
 
 
@@ -74,30 +71,6 @@ def build_glance() -> dict:
         "attention": attention,
         "tiles": tiles,
         "reducer_seen": bool(snapshot),
-    }
-
-
-def build_steering() -> dict:
-    """Today's steering, rendered for a phone.
-
-    Shaped by what the phone's three screens actually need — the standing menu,
-    what is open, and what is ready to go — rather than by the store's tables.
-    A phone that had to join tables to draw a card would be a second consumer
-    of the schema, and then the schema could not move.
-    """
-    code, out = steer("export-phone")
-    if code == 0:
-        try:
-            return json.loads(out)
-        except json.JSONDecodeError:
-            pass
-    return {
-        "schema": "sinnix.phone.steering/1",
-        "generated_at": utc_ts(),
-        "menu": [],
-        "commitments": [],
-        "ready_queue": [],
-        "error": out or "sinnix-steer export-phone failed",
     }
 
 

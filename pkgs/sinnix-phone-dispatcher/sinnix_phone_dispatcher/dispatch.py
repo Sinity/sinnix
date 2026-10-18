@@ -1,8 +1,8 @@
 """Executing intents that reached prime as files, and queuing an
 operator-initiated notification.
 
-The glance/steering writer that used to live here is gone with the drain that
-read it: both are built on request now, by the routes the app fetches (see
+The glance writer that used to live here is gone with the drain that
+read it: the glance is built on request now, by the route the app fetches (see
 inbox.py). `dispatch` stays as the repair verb for intents already sitting in
 the lake's outbox -- the app posts them to /intent itself."""
 

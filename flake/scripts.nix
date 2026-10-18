@@ -34,13 +34,9 @@ let
       # consumed by scripts/sinnix-rank the same way scripts import
       # @sinnix-lib.
       sinnix-rank-core = externalPackages.sinnix-rank-core;
-      # Source lives in the steering workspace input; scripts naming
-      # @sinnix-steer resolve to the wrapper below.
-      sinnix-steer = externalPackages.sinnix-steer;
       # sinnix-phone-dispatcher moved out of scripts/ into a real Python
       # package (sinnix-svvz); scripts/sinnix-phone still names
-      # @sinnix-phone-dispatcher in its own runtimeInputs and resolves here,
-      # same pattern as sinnix-steer above.
+      # @sinnix-phone-dispatcher in its own runtimeInputs and resolves here.
       sinnix-phone-dispatcher = externalPackages.sinnix-phone-dispatcher;
       sinnix-phone-keyguard = externalPackages.sinnix-phone-keyguard;
       # Sinnix's bd, not nixpkgs'. A script naming bare `beads` in its
@@ -77,17 +73,6 @@ let
       tier = "default";
       owner = "flake/scripts.nix";
       docs = "docs/phone.md";
-    };
-    # Same shape for the steering CLI: its source moved into the steering
-    # workspace, but it remains an operator verb — keep it in the registry so
-    # `sinnix help` lists it and `sinnix steer ...` dispatches.
-    sinnix-steer = {
-      description = "Personal steering store CLI — intentions with forecasts, activity menu, rituals";
-      package = externalPackages.sinnix-steer;
-      runtimeInputs = [ ];
-      tier = "default";
-      owner = "flake/scripts.nix";
-      docs = "docs/steering.md";
     };
   };
   scriptPackages = lib.mapAttrs (_: v: v.package) registry // {
@@ -475,28 +460,6 @@ let
     # policies. scripts/sinnix-rank is its text frontend.
     sinnix-rank-core = pkgs.callPackage ../pkgs/sinnix-rank-core/pkg.nix { inherit sinnix-lib; };
 
-    # Steering CLI: source lives in the steering workspace (a non-flake
-    # git+file input), packaging lives here — the same split as lynchpin's
-    # python. Runtime deps mirror the frontmatter the script carried while
-    # it lived under scripts/ (python3 claude-code libnotify), plus rank_core:
-    # the activity menu is ordered by the shared ranking engine, so a bare
-    # python3 here means `sinnix-steer activity menu` cannot start.
-    sinnix-steer = pkgs.writeShellApplication {
-      name = "sinnix-steer";
-      runtimeInputs = [
-        (pkgs.python3.withPackages (_: [ sinnix-rank-core ]))
-        pkgs.claude-code
-        pkgs.libnotify
-      ];
-      text = ''
-        export SINNIX_STEERING_STATE_DIR="''${SINNIX_STEERING_STATE_DIR:-/realm/project/steering/repo}"
-        export SINNIX_STEERING_EXPORT_DIR="''${SINNIX_STEERING_EXPORT_DIR:-/realm/activity/shared/steering}"
-        export SINNIX_RANK_ROOT="''${SINNIX_RANK_ROOT:-/realm/activity/shared/ranking}"
-        exec python3 ${inputs.steering}/sinnix-steer "$@"
-      '';
-      meta.description = "Steering store CLI — intentions, forecasts, activities, rituals";
-    };
-
     sinnix-quota = pkgs.callPackage ../pkgs/sinnix-quota/pkg.nix { inherit sinnix-lib; };
 
     sinnix-deslop = pkgs.callPackage ../pkgs/sinnix-deslop/pkg.nix { };
@@ -514,15 +477,13 @@ let
 
     # Prime's half of the phone's dual transport (docs/phone.md). Moved out
     # of scripts/ (sinnix-svvz) so it can depend on sinnix-capture's writer
-    # instead of carrying a private stdlib-only port of it. steerPackage/
-    # scorePackage replace the retired script frontmatter's `runtimeInputs:
-    # coreutils @sinnix-steer @sinnix-score` -- a buildPythonApplication has
-    # no writeShellApplication wrapper of its own to carry those, so pkg.nix
-    # puts them on the built console_script's PATH directly.
+    # instead of carrying a private stdlib-only port of it. scorePackage
+    # replaces the retired script frontmatter's `@sinnix-score` -- a
+    # buildPythonApplication has no writeShellApplication wrapper of its own
+    # to carry it, so pkg.nix puts it on the built console_script's PATH.
     sinnix-phone-dispatcher = pkgs.callPackage ../pkgs/sinnix-phone-dispatcher/pkg.nix {
       sinnix-capture-lib = sinnix-capture;
       inherit sinnix-lib;
-      steerPackage = sinnix-steer;
       scorePackage = discovered.registry.sinnix-score.package;
     };
 

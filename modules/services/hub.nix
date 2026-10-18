@@ -578,8 +578,8 @@ mkServiceModule {
         # cannot be un-lost.
         "d ${phoneLaneRoot}/phone/speech 0700 ${userName} users -"
         # What prime holds for the phone, moved here from the retired
-        # phone-drain module: what the app FETCHES (glance and steering are
-        # generated on request; receipts, notifications and decks are files)
+        # phone-drain module: what the app FETCHES (the glance is generated
+        # on request; receipts, notifications and decks are files)
         # and the executed-intent tokens that make a re-delivered intent a
         # no-op. On the NVMe volume rather than the wear-limited root, and
         # under /realm/state because losing the token set would let an
@@ -717,8 +717,8 @@ mkServiceModule {
           Unit.Description = "Prime's live half of the phone's dual transport, plus the always-on telemetry receiver";
           Service = {
             Type = "simple";
-            # sinnix-steer/sinnix-score are shelled out to (steering rituals,
-            # scoring on trace/voice_note arrival, sinnix-tjqi) via the
+            # sinnix-score is shelled out to (scoring on trace/voice_note
+            # arrival, sinnix-tjqi) via the
             # package's own wrapped PATH now (pkgs/sinnix-phone-dispatcher's
             # pkg.nix makeWrapperArgs), not this Environment -- packaging the
             # dispatcher (sinnix-svvz) traded the scripts/ registry's

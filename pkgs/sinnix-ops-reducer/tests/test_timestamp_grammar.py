@@ -139,7 +139,6 @@ def test_orient_stamps_the_same_grammar(tmp_path: Path) -> None:
         fetch=lambda _socket, _route: None,
         read_static=lambda _path: None,
         bd_head=lambda: {"available": False},
-        steering_head=lambda: {"available": False},
     )["generated_at"]
     assert UTC_TS.fullmatch(generated)
 

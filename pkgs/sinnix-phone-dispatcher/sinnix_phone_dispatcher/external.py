@@ -1,13 +1,8 @@
 """Shelling out to the sinnix CLIs this service dispatches through.
 
-Both `sinnix-steer` and `sinnix-score` are resolved off PATH rather than
-imported: this package owns transport, they own their own schemas, and a
-Python import coupling would pull the steering store's dependency tree
-(claude-code, libnotify) into every process that imports this module. The
-Nix package wires both onto the built wrapper's PATH explicitly (pkg.nix's
-makeWrapperArgs), replacing the runtimeInputs the script frontmatter used to
-declare (`@sinnix-steer @sinnix-score`) before this module had no wrapper of
-its own to carry them.
+`sinnix-score` is resolved off PATH rather than imported: this package owns
+transport, the scorer owns its own schema. The Nix package puts it on the
+built wrapper's PATH explicitly (pkg.nix's makeWrapperArgs).
 """
 
 from __future__ import annotations
@@ -16,15 +11,6 @@ import shutil
 import subprocess
 import sys
 import threading
-
-
-def steer(*args: str) -> tuple[int, str]:
-    """Run sinnix-steer. It owns the steering schema; this package owns transport."""
-    exe = shutil.which("sinnix-steer")
-    if exe is None:
-        return 127, "sinnix-steer is not on PATH"
-    proc = subprocess.run([exe, *args], capture_output=True, text=True, timeout=30)
-    return proc.returncode, (proc.stdout or proc.stderr).strip()
 
 
 def _score_worker() -> None:

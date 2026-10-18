@@ -27,15 +27,14 @@ import sinnix_phone_dispatcher.inbox as inbox_mod
 
 @pytest.fixture(autouse=True)
 def stub_generated(monkeypatch):
-    """The two generated entries are built from live host state (the ops
-    reducer's socket); this suite is about the inbox mechanics, so they are
-    replaced by builders with no dependencies."""
+    """The generated entry is built from live host state (the ops reducer's
+    socket); this suite is about the inbox mechanics, so it is replaced by a
+    builder with no dependencies."""
     monkeypatch.setattr(
         inbox_mod,
         "GENERATED",
         {
             "glance.json": lambda: {"attention": []},
-            "steering.json": lambda: {"ready": []},
         },
     )
 
@@ -126,7 +125,7 @@ def test_listing_hashes_large_entries_without_buffering_them(isolated_state_dirs
 def test_generated_state_is_served_without_a_file(isolated_state_dirs) -> None:
     _, payload = inbox_mod.list_inbox()
     names = [f["name"] for f in payload["files"]]
-    assert "glance.json" in names and "steering.json" in names
+    assert "glance.json" in names
 
     status, body = _download_bytes("glance.json")
     assert status == HTTPStatus.OK

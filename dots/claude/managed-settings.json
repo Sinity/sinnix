@@ -115,11 +115,6 @@
           },
           {
             "type": "command",
-            "command": "/realm/project/sinnix/repo/dots/claude/hooks/sessionstart-steering.sh",
-            "timeout": 8
-          },
-          {
-            "type": "command",
             "command": "polylogue-hook SessionStart --provider claude-code",
             "timeout": 5
           }

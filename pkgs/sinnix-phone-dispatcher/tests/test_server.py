@@ -191,17 +191,19 @@ def _post_json(path: str, payload: dict):
 def test_http_intent_outcomes_are_200_with_typed_refusals(monkeypatch):
     """The phone app treats any non-2xx as "unreachable" and re-posts the head
     of its outbox forever; refusals must arrive as 200 + ok:false so it can set
-    them aside. Anti-vacuity: the conflicting post must not reach steer."""
+    them aside. Anti-vacuity: the conflicting post must not reach the effect."""
     calls = []
     monkeypatch.setattr(
-        execute_mod, "steer", lambda *args: calls.append(args) or (0, "ok")
+        execute_mod,
+        "deliver_job_answer",
+        lambda intent: calls.append(intent) or {"ok": True, "detail": "ok"},
     )
 
     def resolve(item):
         return {
-            "kind": "steering_resolve",
-            "id": item,
-            "outcome": "done",
+            "kind": "job_answer",
+            "job_id": item,
+            "answer": "yes",
             "send_token": "http-token",
         }
 

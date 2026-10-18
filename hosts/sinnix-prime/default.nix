@@ -182,8 +182,6 @@
       # (sinnix-qh6s, sinnix-8f6y).
       daemon.autoStart = false;
     };
-    # Operator steering store and its nightly export.
-    steering.enable = true;
     # Disposable PostgreSQL for Polylogue and Sinex development (devkit).
     devkit-pg.enable = true;
     # Pre-build + cachix-push sinex whenever its pinned input moves, off the

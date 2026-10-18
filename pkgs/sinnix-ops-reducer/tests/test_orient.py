@@ -157,7 +157,7 @@ def test_capture_freshness_unavailable_when_lanes_missing() -> None:
 
 
 # --------------------------------------------------------------------------
-# bd/steering subprocess composition
+# bd subprocess composition
 # --------------------------------------------------------------------------
 
 
@@ -187,22 +187,6 @@ def test_bd_ready_head_absent_on_malformed_json() -> None:
     assert orient.bd_ready_head(runner=make_runner("not json")) == {"available": False}
 
 
-def test_steering_ready_head_absent_when_workspace_missing(tmp_path: Path) -> None:
-    missing = tmp_path / "no-such-beads"
-    result = orient.steering_ready_head(beads_dir=missing, runner=make_runner("[]"))
-    assert result == {"available": False}
-
-
-def test_steering_ready_head_present_when_workspace_exists(tmp_path: Path) -> None:
-    beads_dir = tmp_path / ".beads"
-    beads_dir.mkdir()
-    items = [{"id": "steer-1", "title": "morning check-in", "priority": 2}]
-    result = orient.steering_ready_head(
-        beads_dir=beads_dir, runner=make_runner(json.dumps(items))
-    )
-    assert result == {"available": True, "total": 1, "ready": items}
-
-
 # --------------------------------------------------------------------------
 # compose(): the three cases the team asked for
 # --------------------------------------------------------------------------
@@ -222,14 +206,12 @@ def test_compose_healthy_reducer_and_beads() -> None:
             "total": 1,
             "ready": [{"id": "x", "title": "y", "priority": 1}],
         },
-        steering_head=lambda: {"available": False},
     )
     assert data["schema"] == orient.SCHEMA
     assert data["system"]["status"] == "attention"
     assert data["acknowledged_outages"][0]["surface"] == "sinex"
     assert data["capture_freshness"]["healthy"] == 1
     assert data["beads"]["available"] is True
-    assert data["steering"] == {"available": False}
 
 
 def test_compose_degraded_reducer_falls_back_to_static_inventory(
@@ -248,7 +230,6 @@ def test_compose_degraded_reducer_falls_back_to_static_inventory(
         static_inventory_path=static_inventory,
         fetch=fetch,
         bd_head=lambda: {"available": False},
-        steering_head=lambda: {"available": False},
     )
     assert data["system"]["status"] == "unavailable"
     # Acknowledged outages still resolve from the static inventory even
@@ -267,14 +248,11 @@ def test_compose_no_beads_workspace() -> None:
         socket_path=Path("/nonexistent/ops.sock"),
         fetch=fetch,
         bd_head=lambda: {"available": False},
-        steering_head=lambda: {"available": False},
     )
     assert data["beads"] == {"available": False}
-    assert data["steering"] == {"available": False}
-    # Human rendering must not mention beads/steering sections at all.
+    # Human rendering must not mention the beads section at all.
     text = orient.render_human(data)
     assert "Beads ready" not in text
-    assert "Steering ready" not in text
 
 
 # --------------------------------------------------------------------------
@@ -294,7 +272,6 @@ def test_render_human_healthy_system_has_no_attention_rows() -> None:
             "non_healthy": [],
         },
         "beads": {"available": False},
-        "steering": {"available": False},
     }
     text = orient.render_human(data)
     assert "The system is healthy." in text
@@ -315,11 +292,6 @@ def test_render_human_includes_every_populated_section() -> None:
             "total": 2,
             "ready": [{"id": "a", "title": "t", "priority": 1}],
         },
-        steering_head=lambda: {
-            "available": True,
-            "total": 1,
-            "ready": [{"id": "s", "title": "u", "priority": 1}],
-        },
     )
     text = orient.render_human(data)
     assert "FAILED      sinnix-capture-kitty-scrollback.service (user)" in text
@@ -329,7 +301,6 @@ def test_render_human_includes_every_populated_section() -> None:
     assert "sinex (sinex.service)" in text
     assert "Capture/health lanes: 1/3 healthy" in text
     assert "Beads ready (1 of 2):" in text
-    assert "Steering ready (1 of 1):" in text
 
 
 def test_render_acknowledged_only_matches_hook_contract() -> None:
