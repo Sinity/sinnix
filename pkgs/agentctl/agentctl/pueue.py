@@ -32,10 +32,6 @@ class PueueError(RuntimeError):
     """pueue refused a request or published output this module cannot read."""
 
 
-class PueueOwnershipLost(PueueError):
-    """Native admission no longer belongs to the supplied pause token."""
-
-
 class PueueTimeout(PueueError):
     """A pueue call did not return within the deadline the caller allowed.
 
@@ -458,31 +454,3 @@ def pause(group: str) -> None:
 
 def resume(group: str) -> None:
     _run(["start", "--group", group])
-
-
-def pause_owned(group: str) -> str:
-    """Claim only currently running admission; existing operator pauses refuse."""
-    token = uuid.uuid4().hex
-    try:
-        acknowledged = _run(["group", "pause-owned", group, token])
-    except PueueError as error:
-        if "Admission ownership mismatch" in str(error):
-            raise PueueOwnershipLost(str(error)) from error
-        raise
-    if "Owned admission transition committed" not in acknowledged:
-        raise PueueError("Pueue did not acknowledge native admission ownership")
-    return token
-
-
-def resume_owned(group: str, token: str) -> None:
-    """Native compare-and-release; never starts individually paused tasks."""
-    if not isinstance(token, str) or not token:
-        raise PueueOwnershipLost("Admission pause has no ownership token")
-    try:
-        acknowledged = _run(["group", "resume-owned", group, token])
-    except PueueError as error:
-        if "Admission ownership mismatch" in str(error):
-            raise PueueOwnershipLost(str(error)) from error
-        raise
-    if "Owned admission transition committed" not in acknowledged:
-        raise PueueError("Pueue did not acknowledge native admission release")

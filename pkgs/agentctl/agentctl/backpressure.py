@@ -1,7 +1,8 @@
 """Pressure admission with an incremental, regenerable spool projection.
 
-Pueue owns dependencies and ordinary stashes. This module pauses a group with
-a native ownership token and releases only that exact admission pause.
+Pueue owns dependencies and ordinary stashes. This module pauses a group's
+admission under memory pressure, records that pause in its event spool, and
+reopens only groups whose last recorded pause is its own.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from sinnix_lib.ledger import append_jsonl
 
 from .config import PoolPolicy
 from . import pueue
-from .pueue import PueueError, PueueOwnershipLost
+from .pueue import PueueError
 
 MEMORY_FULL_FREEZE = 25.0
 RESUME_BELOW = 10.0
@@ -49,7 +50,6 @@ class SpoolState:
                 signal = event.get("signal")
                 self.pauses[group] = {
                     "owner": event.get("owner"),
-                    "pause_token": event.get("pause_token"),
                     "signals": signal.split("+") if isinstance(signal, str) else [],
                 }
             elif action in {"opened", "released", "ownership-lost"}:
@@ -68,8 +68,6 @@ class SpoolState:
             group
             for group, record in self.pauses.items()
             if record.get("owner") == OWNER
-            and isinstance(record.get("pause_token"), str)
-            and bool(record["pause_token"])
         }
 
 
@@ -423,12 +421,7 @@ def tick(
     if obsolete:
         target = obsolete[0]
         try:
-            pueue.resume_owned(target, state.pauses[target]["pause_token"])
-        except PueueOwnershipLost:
-            event = _append(spool, {"action": "ownership-lost", "group": target, "reason": "native pause ownership changed"})
-            state.apply(event)
-            _save_checkpoint(checkpoint_path, state)
-            return event
+            pueue.resume(target)
         except PueueError as error:
             return {
                 "action": "failed",
@@ -450,7 +443,7 @@ def tick(
         if running:
             target = running[0]
             try:
-                pause_token = pueue.pause_owned(target)
+                pueue.pause(target)
             except PueueError as error:
                 return {
                     "action": "failed",
@@ -460,7 +453,7 @@ def tick(
                 }
             event = _append(
                 spool,
-                {"action": "closed", "group": target, "pause_token": pause_token, "signal": signal, **pressure},
+                {"action": "closed", "group": target, "signal": signal, **pressure},
             )
             state.apply(event)
             _save_checkpoint(checkpoint_path, state)
