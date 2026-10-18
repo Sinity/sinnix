@@ -39,7 +39,7 @@ def test_retired_managed_child_fails_without_rejecting_native_package_names(tmp_
         (realm / 'device/sinnix-prime' / relative).mkdir(parents=True, exist_ok=True)
     (realm / 'library/model/native-package/embeddings').mkdir(parents=True)
     env = {**os.environ, 'LAKE_LINT_ROOT_PREFIX': str(tmp_path)}
-    script = SCRIPT.with_name('lake-lint')
+    script = SCRIPT.with_name('sinnix-realm-layout-check')
     assert subprocess.run([str(script)], env=env, capture_output=True).returncode == 0
     (realm / 'device/sinnix-prime/peripherals').mkdir()
     result = subprocess.run([str(script)], env=env, capture_output=True, text=True)

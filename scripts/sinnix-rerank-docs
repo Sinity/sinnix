@@ -20,7 +20,7 @@ docs_json=""
 
 usage() {
   cat >&2 <<'EOF'
-usage: sinnix-rerank [--backend local|jina] [--top-n N] [--model NAME] --query "..." [--docs-json '["...","..."]']
+usage: sinnix-rerank-docs [--backend local|jina] [--top-n N] [--model NAME] --query "..." [--docs-json '["...","..."]']
 Documents are read from stdin (one per line) unless --docs-json is given.
 Output: JSON array of {index, document, relevance_score}, best first.
 EOF
@@ -35,7 +35,7 @@ while [[ $# -gt 0 ]]; do
     --query) query="${2:?}"; shift 2 ;;
     --docs-json) docs_json="${2:?}"; shift 2 ;;
     -h | --help) usage ;;
-    *) echo "sinnix-rerank: unknown argument $1" >&2; usage ;;
+    *) echo "sinnix-rerank-docs: unknown argument $1" >&2; usage ;;
   esac
 done
 [[ -n $query ]] || usage
@@ -54,7 +54,7 @@ case "$backend" in
         '[.results[] | {index, document: $docs[.index], relevance_score}]'
     ;;
   jina)
-    : "${JINA_API_KEY:?sinnix-rerank: JINA_API_KEY not set (agenix jina-api-key)}"
+    : "${JINA_API_KEY:?sinnix-rerank-docs: JINA_API_KEY not set (agenix jina-api-key)}"
     body="$(jq -n --arg q "$query" --arg m "${model:-jina-reranker-v3}" \
       --argjson docs "$docs_json" --argjson n "$top_n" \
       '{model: $m, query: $q, documents: $docs, top_n: $n}')"
@@ -64,7 +64,7 @@ case "$backend" in
       jq '[.results[] | {index, document: (.document.text // .document), relevance_score}]'
     ;;
   *)
-    echo "sinnix-rerank: unknown backend $backend" >&2
+    echo "sinnix-rerank-docs: unknown backend $backend" >&2
     exit 2
     ;;
 esac

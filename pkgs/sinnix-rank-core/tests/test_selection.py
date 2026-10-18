@@ -58,7 +58,7 @@ def test_selector_no_bridge_when_single_component():
 
 
 def test_selector_bridges_a_disconnected_domain_on_its_first_pick():
-    # A single-question caller (`sinnix-rank next`, `sinnix-elicit ask`) builds
+    # A single-question caller (`sinnix-rank next`, `sinnix-rank-pairs ask`) builds
     # one selector and takes one pick from it, so a bridge that first comes due
     # on a later tick never happens at all: the components stay incomparable
     # however many questions the operator answers.

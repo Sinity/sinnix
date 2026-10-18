@@ -9,7 +9,7 @@ keep mutually meaningless thetas forever.
 
 A disconnected domain is therefore bridged on the first pick, and every
 `bridge_every`-th pick after it. The first pick matters because the
-single-question callers (`sinnix-rank next`, `sinnix-elicit ask`) build a
+single-question callers (`sinnix-rank next`, `sinnix-rank-pairs ask`) build a
 selector per invocation: a bridge that only came due on the fifth pick of a
 selector's life would never be reached, and the components the fit reports as
 incomparable would stay incomparable however long the operator kept

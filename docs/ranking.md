@@ -6,7 +6,7 @@ same Plackett-Luce fit, selected by the same selector, over an append-only
 comparison log.
 
 Two store formats exist. `sinnix-rank` domains hold choice-set records and
-never store a fit; `sinnix-elicit` domains hold pairwise records, an
+never store a fit; `sinnix-rank-pairs` domains hold pairwise records, an
 `items.json` roster, and a cached fit (`model.json`). Unifying them is tracked
 as `sinnix-z8iq.14`; a domain keeps the format of the tool that created it.
 
@@ -65,19 +65,19 @@ components, items with no comparisons, the stopping threshold, and
 `settled` with the reasons it is not. A total order always exists; whether it
 means anything is what `evidence` answers.
 
-## `sinnix-elicit`
+## `sinnix-rank-pairs`
 
 The image and phone-session frontend: a domain is a roster of items with
 optional images, descriptions, and feature vectors, compared by tapping
 through a generated HTML page served by the hub.
 
 ```bash
-sinnix elicit init wallpaper --items items.json --image-features
-sinnix elicit serve wallpaper --open         # side-by-side page on this machine
-sinnix elicit session wallpaper -n 20        # page on the hub, tap from the phone
-sinnix elicit ask wallpaper                  # terminal loop
-sinnix elicit rank wallpaper                 # fitted order + `explain`
-sinnix elicit explain wallpaper              # which features the choices track
+sinnix rank-pairs init wallpaper --items items.json --image-features
+sinnix rank-pairs serve wallpaper --open         # side-by-side page on this machine
+sinnix rank-pairs session wallpaper -n 20        # page on the hub, tap from the phone
+sinnix rank-pairs ask wallpaper                  # terminal loop
+sinnix rank-pairs rank wallpaper                 # fitted order + `explain`
+sinnix rank-pairs explain wallpaper              # which features the choices track
 ```
 
 It fits, selects and replays its log through `rank_core`, and owns only its own
@@ -96,7 +96,7 @@ serves mid-session at `GET /feedback/elicit/<domain>`. Domains live at
 `/realm/state/elicit/<domain>` (`SINNIX_ELICIT_DIR` for fixtures), with the
 same path confinement as `sinnix-rank`.
 
-A tap posts to the hub's `/feedback` spool; `sinnix-elicit autoingest` moves
+A tap posts to the hub's `/feedback` spool; `sinnix-rank-pairs autoingest` moves
 it into the domain, skipping any comparison id the domain has ever seen
 (including undone ones). The cached fit stores a digest of the roster and
 comparisons and is rebuilt whenever that digest changes.

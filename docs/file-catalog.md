@@ -173,7 +173,7 @@ and does not scan imported packages or historical reports.
 
 The workstation's private manifest is owned by the report catalog. Run its
 declared `navigation_audit` operation after moving managed collections or
-editing current entrances. `lake-lint` separately verifies declared managed
+editing current entrances. `sinnix-realm-layout-check` separately verifies declared managed
 containers and rejects recreation of retired paths.
 
 Navigation audits report denied and inaccessible targets separately from missing

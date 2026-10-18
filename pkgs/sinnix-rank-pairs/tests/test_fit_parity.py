@@ -1,4 +1,4 @@
-"""`sinnix-elicit`'s fit is `rank_core.fit`, and it fits what it used to.
+"""`sinnix-rank-pairs`'s fit is `rank_core.fit`, and it fits what it used to.
 
 `legacy_fit_bradley_terry` below is the fitter this file carried before the
 consolidation, kept verbatim as the reference the shared engine has to

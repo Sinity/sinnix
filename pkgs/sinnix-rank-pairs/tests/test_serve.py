@@ -152,7 +152,7 @@ def test_a_resubmitted_judgment_is_appended_once_even_after_it_was_undone(
 def test_a_judgment_another_writer_already_appended_is_not_appended_again(
     serving, image_domain
 ):
-    """`sinnix-elicit autoingest` drains the hub spool into the same log while
+    """`sinnix-rank-pairs autoingest` drains the hub spool into the same log while
     this loop runs, so the id set the dedup asks must be re-read from the log
     rather than frozen when the server started."""
     client, _state = serving

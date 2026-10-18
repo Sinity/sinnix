@@ -193,10 +193,10 @@
         # Provably fails when: either direction of the /realm taxonomy
         # assertion is dropped, or a retired level-1 name is readmitted to the
         # manifest. Verified by all three mutations.
-        lake-lint-suite = mkScriptSuite {
-          name = "lake-lint";
-          suiteDir = ../../pkgs/lake-lint/tests;
-          scripts = [ "lake-lint" ];
+        realm-layout-check-suite = mkScriptSuite {
+          name = "sinnix-realm-layout-check";
+          suiteDir = ../../pkgs/sinnix-realm-layout-check/tests;
+          scripts = [ "sinnix-realm-layout-check" ];
           extraPythonPackages = [ sinnix-lib ];
         };
         stt-lake-suite = mkScriptSuite {
@@ -258,17 +258,17 @@
           scripts = [ "sinnix-git-store-repair" ];
           nativeBuildInputs = [ pkgs.git ];
         };
-        lake-refs-suite = mkScriptSuite {
-          name = "sinnix-lake-refs";
-          suiteDir = ../../pkgs/sinnix-lake-refs/tests;
-          scripts = [ "sinnix-lake-refs" ];
+        realm-path-refs-suite = mkScriptSuite {
+          name = "sinnix-realm-path-refs";
+          suiteDir = ../../pkgs/sinnix-realm-path-refs/tests;
+          scripts = [ "sinnix-realm-path-refs" ];
           extraPythonPackages = [ sinnix-lib ];
           nativeBuildInputs = [ pkgs.ripgrep ];
         };
-        borg-drill-suite = mkScriptSuite {
-          name = "sinnix-borg-drill";
-          suiteDir = ../../pkgs/sinnix-borg-drill/tests;
-          scripts = [ "sinnix-borg-drill" ];
+        borg-check-suite = mkScriptSuite {
+          name = "sinnix-borg-check";
+          suiteDir = ../../pkgs/sinnix-borg-check/tests;
+          scripts = [ "sinnix-borg-check" ];
           nativeBuildInputs = [
             pkgs.bash
             pkgs.jq
@@ -325,10 +325,10 @@
         # pair the operator has already judged, serves a file the roster does
         # not name, or reports a ranking and stopping statistic that are not
         # the engine's own.
-        elicit-suite = mkScriptSuite {
-          name = "sinnix-elicit";
-          suiteDir = ../../pkgs/sinnix-elicit/tests;
-          scripts = [ "sinnix-elicit" ];
+        rank-pairs-suite = mkScriptSuite {
+          name = "sinnix-rank-pairs";
+          suiteDir = ../../pkgs/sinnix-rank-pairs/tests;
+          scripts = [ "sinnix-rank-pairs" ];
           extraPythonPackages = [ sinnix-rank-core ];
         };
       };

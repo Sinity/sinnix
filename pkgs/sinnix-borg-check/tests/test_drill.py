@@ -7,7 +7,7 @@ import sys
 import pytest
 
 
-SCRIPT = Path(__file__).parents[3] / "scripts/sinnix-borg-drill"
+SCRIPT = Path(__file__).parents[3] / "scripts/sinnix-borg-check"
 
 
 def run_drill(tmp_path, response, list_exit=0):

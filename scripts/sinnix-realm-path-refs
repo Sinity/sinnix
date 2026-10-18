@@ -179,7 +179,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     live = sum(1 for r in rows if r["kind"] == "live")
-    print(f"sinnix-lake-refs: {len(rows)} references ({live} live, "
+    print(f"sinnix-realm-path-refs: {len(rows)} references ({live} live, "
           f"{len(rows) - live} non-runtime) -> {out}")
     return 0
 
@@ -194,11 +194,11 @@ def cmd_check(args: argparse.Namespace) -> int:
             missing.append((path, existing_ancestor(path)))
 
     if not missing:
-        print(f"sinnix-lake-refs: OK -- {len(unique_paths)} distinct live "
+        print(f"sinnix-realm-path-refs: OK -- {len(unique_paths)} distinct live "
               f"paths across {len(live)} references, all exist")
         return 0
 
-    print(f"sinnix-lake-refs: {len(missing)} of {len(unique_paths)} live "
+    print(f"sinnix-realm-path-refs: {len(missing)} of {len(unique_paths)} live "
           f"paths do not exist:", file=sys.stderr)
     for path, ancestor in missing:
         sites = [r for r in live if r["path"] == path]
@@ -228,7 +228,7 @@ def main() -> int:
     try:
         return args.func(args)
     except (ScanError, OSError) as exc:
-        print(f"sinnix-lake-refs: {exc}", file=sys.stderr)
+        print(f"sinnix-realm-path-refs: {exc}", file=sys.stderr)
         return 2
 
 

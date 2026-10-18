@@ -91,7 +91,7 @@ assert lib.assertMsg (
             # as fresh while nothing produces the marker (and the reverse: a
             # marker nobody watches). The writer is the unit's own script plus
             # the sources of the packaged scripts that unit invokes -- the
-            # drill receipt, for one, is written by scripts/sinnix-borg-drill
+            # drill receipt, for one, is written by scripts/sinnix-borg-check
             # rather than inline. Both sides come from the evaluated config,
             # so neither is a restated literal.
             assertion =
@@ -598,7 +598,7 @@ assert lib.assertMsg (
               verify = backupRuntimeEval.config.systemd.services.borgbackup-verify;
               timer = backupRuntimeEval.config.systemd.timers.borgbackup-verify;
               script = verify.script;
-              drillScript = builtins.readFile ../../scripts/sinnix-borg-drill;
+              drillScript = builtins.readFile ../../scripts/sinnix-borg-check;
               audit = backupRuntimeEval.config.systemd.services.borgbackup-coverage-audit-realm;
               auditTimer = backupRuntimeEval.config.systemd.timers.borgbackup-coverage-audit-realm;
             in
@@ -608,7 +608,7 @@ assert lib.assertMsg (
             && lib.hasInfix "--max-duration 1800 file:///outer-realm/backup/borg-persist-v1" script
             && lib.hasInfix "--max-duration 7200 file:///outer-realm/backup/borg-realm-v2" script
             && lib.hasInfix "--max-duration 1800 file:///outer-realm/backup/borg-sinex-blobs-v1" script
-            && lib.hasInfix "/bin/sinnix-borg-drill\n" script
+            && lib.hasInfix "/bin/sinnix-borg-check\n" script
             && lib.hasInfix "MAX_DURATION=1800" drillScript
             && lib.hasInfix "VERIFY_DATA=0" drillScript
             && lib.hasInfix "file:///outer-realm/backup/borg-persist-v1" drillScript
@@ -679,7 +679,7 @@ assert lib.assertMsg (
           ];
           script = ''
             ${pkgs.python3}/bin/python3 ${./backup_native_restore_test.py} ${./backup_native_restore.py}
-            ${pkgs.python3}/bin/python3 ${./borg-drill-arguments.py} ${../../scripts/sinnix-borg-drill}
+            ${pkgs.python3}/bin/python3 ${./borg-check-arguments.py} ${../../scripts/sinnix-borg-check}
             ${pkgs.python3}/bin/python3 ${./backup_snapshot_coverage.py} \
               --verifier ${../../modules/lib/backup/snapshot-coverage.py} \
               --scripts ${

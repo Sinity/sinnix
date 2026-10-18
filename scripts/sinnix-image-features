@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Compute a richer classic-CV feature vector for one image, for sinnix-elicit item domains
+# description: Compute a richer classic-CV feature vector for one image, for sinnix-rank-pairs item domains
 # runtimeInputs: imagemagick
 
-"""Image feature extraction for sinnix-elicit domains (sinnix-eb9c).
+"""Image feature extraction for sinnix-rank-pairs domains (sinnix-eb9c).
 
-sinnix-elicit's core engine is domain-neutral by design -- it knows nothing
+sinnix-rank-pairs's core engine is domain-neutral by design -- it knows nothing
 about images. This is the piece that gives image domains (wallpaper today,
 anything else later) a real, reusable feature vector instead of hand-rolled
 one-off scripting each time. Classic CV via ImageMagick, not an embedding

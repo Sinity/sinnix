@@ -80,7 +80,7 @@ fi
 
 # Keep transient stderr together for this invocation. The JSONL trail below
 # is the retained receipt; no temporary Borg output belongs in TMPDIR.
-scratch="$(mktemp -d "${TMPDIR:-/tmp}/sinnix-borg-drill.XXXXXXXX")"
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/sinnix-borg-check.XXXXXXXX")"
 trap 'rm -rf -- "$scratch"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT

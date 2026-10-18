@@ -30,7 +30,7 @@ LOCKS = Path("flake/data/agent-cli-locks.json")
 # Entries rendered through dependency-source.nix, as opposed to pi-source.nix,
 # which keeps the publisher's own shrinkwrap.
 ENTRY = re.compile(
-    r'(?P<head>"(?P<name>[^"]+)" = import \.\./\.\./pkgs/agent-cli-recovery/dependency-source\.nix \{.*?'
+    r'(?P<head>"(?P<name>[^"]+)" = import \.\./\.\./pkgs/agent-cli-sources/dependency-source\.nix \{.*?'
     r'url = ")(?P<url>[^"]+)(?P<mid>";\s*hash = ")(?P<hash>[^"]+)(?P<tail>";)',
     re.S,
 )

@@ -1,4 +1,4 @@
-"""Load `scripts/sinnix-elicit` as a module (no .py suffix, shebang-packaged)."""
+"""Load `scripts/sinnix-rank-pairs` as a module (no .py suffix, shebang-packaged)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT_PATH = Path(__file__).resolve().parents[3] / "scripts" / "sinnix-elicit"
+SCRIPT_PATH = Path(__file__).resolve().parents[3] / "scripts" / "sinnix-rank-pairs"
 
 
 def _load():

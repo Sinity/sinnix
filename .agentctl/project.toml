@@ -222,9 +222,9 @@ result = "exit"
 cache = "none"
 timeout_seconds = 3600
 
-[operations.elicit_autoingest]
+[operations.rank_pairs_ingest]
 description = "Ingest queued comparison judgments and refit changed models"
-exec = ["sinnix-elicit", "autoingest"]
+exec = ["sinnix-rank-pairs", "autoingest"]
 pool = "normal"
 result = "exit"
 cache = "none"

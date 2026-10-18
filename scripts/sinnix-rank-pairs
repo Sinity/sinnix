@@ -321,7 +321,7 @@ def explain(items, comparisons, records):
 PAGE_TEMPLATE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>elicit: __DOMAIN__</title>
+<title>rank pairs: __DOMAIN__</title>
 <style>
  body{margin:0;background:#111;color:#ddd;font-family:system-ui,sans-serif;display:flex;flex-direction:column;min-height:100vh}
  #stage{flex:1;display:flex;gap:8px;padding:8px}
@@ -366,7 +366,7 @@ function render(){
     stage.style.display = "none";
     const d = document.getElementById("done");
     d.style.display = "block";
-    d.textContent = "Done — " + log.filter(r=>!r.undone).length + " judgments recorded. They'll be ingested and the ranking refit automatically a few seconds after you stop (sinnix-elicit-autoingest) — check with: sinnix elicit rank " + SESSION.domain;
+    d.textContent = "Done — " + log.filter(r=>!r.undone).length + " judgments recorded. They'll be ingested and the ranking refit automatically a few seconds after you stop — check with: sinnix rank-pairs rank " + SESSION.domain;
     document.getElementById("progress").textContent = "complete";
     return;
   }
@@ -452,7 +452,7 @@ def cmd_session(domain, args):
     rel = out.relative_to(REPORTS_DIR)
     print(f"session page: {out}")
     print(f"hub URL:      <report-origin>/reports/{rel}   ({len(pairs)} pairs)")
-    print(f"afterwards:   sinnix elicit ingest {domain.name}")
+    print(f"afterwards:   sinnix rank-pairs ingest {domain.name}")
 
 
 def cmd_ingest(domain, args):
@@ -584,7 +584,7 @@ def fit_and_save_model(domain, items, comparisons):
     records = fit_bradley_terry(items, comparisons)
     ordered = sorted(records.values(), key=lambda r: -r["theta"])
     model = {
-        "schema": "sinnix-elicit-model-v1",
+        "schema": "sinnix-rank-pairs-model-v1",
         "domain": domain.name,
         "fitted_at": utc_ts(),
         "n_comparisons": len(comparisons),
@@ -664,7 +664,7 @@ def cmd_autoingest(_domain, args):
             cached = {}
         # Counts miss balanced undo/additions and cannot retry a failed fit.
         if (not isinstance(cached, dict)
-                or cached.get("schema") != "sinnix-elicit-model-v1"
+                or cached.get("schema") != "sinnix-rank-pairs-model-v1"
                 or cached.get("inputs_sha256") != model_inputs_digest(after_items, after_comparisons)):
             fit_and_save_model(dom, after_items, after_comparisons)
             print(f"{dom.name}: model refit from {len(after_comparisons)} comparisons")
@@ -696,7 +696,7 @@ def cmd_domains(_domain, _args):
 # the roster stay mutually meaningless however long the operator clicks.
 SERVE_PAGE = """<!doctype html>
 <meta charset="utf-8">
-<title>elicit: __DOMAIN__</title>
+<title>rank pairs: __DOMAIN__</title>
 <style>
  html,body{margin:0;height:100%;background:#0b0b0b;color:#ddd;
            font-family:system-ui,sans-serif;overflow:hidden}
@@ -758,7 +758,7 @@ function finish(s){
   d.style.display = "flex";
   d.textContent = s.recorded_this_session + " judgments recorded this run, " +
     s.comparisons + " in the domain. The refit is saved and the server has stopped. " +
-    "Read it with: sinnix elicit rank " + CONFIG.domain;
+    "Read it with: sinnix rank-pairs rank " + CONFIG.domain;
 }
 function show(payload){
   if (payload.status) status(payload.status);
@@ -974,7 +974,7 @@ class ServeHandler(BaseHTTPRequestHandler):
     """Loopback-only JSON/image surface for SERVE_PAGE."""
 
     protocol_version = "HTTP/1.1"
-    server_version = "sinnix-elicit"
+    server_version = "sinnix-rank-pairs"
     sys_version = ""
     session_state = None
 
@@ -1190,7 +1190,7 @@ def main():
     except ValueError as exc:
         p.error(str(exc))
     if domain and args.cmd not in ("init",) and not domain.exists():
-        raise SystemExit(f"no such domain '{domain.name}' (run: sinnix elicit init {domain.name} --items ...)")
+        raise SystemExit(f"no such domain '{domain.name}' (run: sinnix rank-pairs init {domain.name} --items ...)")
     args.fn(domain, args)
 
 

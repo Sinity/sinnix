@@ -186,7 +186,7 @@
           # Declared AgentCTL operation body. It is intentionally available
           # by name in the project environment, never as a command shim.
           scriptPkgs.sinnix-sinex-cache-prebuild
-          scriptPkgs.sinnix-elicit
+          scriptPkgs.sinnix-rank-pairs
           scriptPkgs.sinnix-navigation-audit
           scriptPkgs.sinnix-url-ledger
           # Verification must use this checkout, not the installed CLI dispatcher.

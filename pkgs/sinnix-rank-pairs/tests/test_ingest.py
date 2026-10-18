@@ -1,6 +1,6 @@
 """`ingest` drains the hub spool into a domain exactly once per judgment.
 
-The drain runs on every arriving comparison (`sinnix-elicit-autoingest`), so a
+The drain runs on every arriving comparison (the `rank_pairs_ingest` operation), so a
 record it fails to recognise as already-seen is appended again on every burst.
 """
 

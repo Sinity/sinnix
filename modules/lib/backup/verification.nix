@@ -43,7 +43,7 @@
   # another partial check on persist and realm. The latter script retains its
   # historical "drill" name, but its scheduled default does not restore data.
   # These checks were merged into one unit from borgbackup-check.service and
-  # sinnix-borg-drill.service (the separate Wed 04:00 timer was retired).
+  # sinnix-borg-check.service (the separate Wed 04:00 timer was retired).
   (mkBackupJob "borgbackup-verify" {
     description = "Borg repository integrity checks with bounded partial passes";
     serviceConfig = {
@@ -128,7 +128,7 @@
       write_integrity_receipt completed
 
       # Additional partial repository checks (the historical
-      # sinnix-borg-drill.service, with its own weekly timer, was merged here).
+      # sinnix-borg-check.service, with its own weekly timer, was merged here).
       # The no-argument default runs repository-only checks for persist and
       # realm; it does not restore or pass --verify-data. It shares the same
       # receipt path as the manual `sinnix borg-drill [--verify-data]` verb.
@@ -140,7 +140,7 @@
       # skip -- a re-entrant flock is per-open-file-description, not
       # per-process-tree.
       exec 9>&-
-      ${scriptPkgs.sinnix-borg-drill}/bin/sinnix-borg-drill
+      ${scriptPkgs.sinnix-borg-check}/bin/sinnix-borg-check
     '';
   })
 

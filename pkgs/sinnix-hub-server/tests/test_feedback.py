@@ -1,6 +1,6 @@
 """The annotation spool's file contract, and the elicit drain arrival triggers.
 
-The spool file is read directly by agents and by `sinnix-elicit ingest`, so the
+The spool file is read directly by agents and by `sinnix-rank-pairs ingest`, so the
 envelope shape is asserted against the exact JSON text that lands on disk, not
 against a re-parsed dict.
 """
@@ -123,7 +123,7 @@ def test_resolve_elicit_model_rejects_traversal_and_odd_charsets(
 
 
 def test_the_elicit_model_root_default_is_the_owned_state_root() -> None:
-    """The hub reads the model from where sinnix-elicit writes it. Neither
+    """The hub reads the model from where sinnix-rank-pairs writes it. Neither
     side is configured, so the two defaults are the contract; a server built
     with no elicit argument at all has to resolve there."""
     assert ELICIT_MODEL_DIR_DEFAULT == Path("/realm/state/elicit")
@@ -214,7 +214,7 @@ def test_elicit_model_reads_the_domains_own_fit(hub_server, tmp_path: Path) -> N
     domain_dir = tmp_path / "preferences" / "wallpapers"
     domain_dir.mkdir(parents=True)
     (domain_dir / "model.json").write_text(
-        json.dumps({"schema": "sinnix-elicit-model-v1", "theta": {"a": 1.2}})
+        json.dumps({"schema": "sinnix-rank-pairs-model-v1", "theta": {"a": 1.2}})
     )
     with urllib.request.urlopen(
         base + "/feedback/elicit/wallpapers", timeout=10
@@ -224,7 +224,7 @@ def test_elicit_model_reads_the_domains_own_fit(hub_server, tmp_path: Path) -> N
         body = json.loads(response.read())
     assert body["schema"] == "sinnix-elicit-v1"
     assert body["domain"] == "wallpapers"
-    assert body["model"] == {"schema": "sinnix-elicit-model-v1", "theta": {"a": 1.2}}
+    assert body["model"] == {"schema": "sinnix-rank-pairs-model-v1", "theta": {"a": 1.2}}
 
 
 def test_elicit_model_404s_before_any_rank_has_run(hub_server) -> None:

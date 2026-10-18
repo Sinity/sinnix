@@ -31,7 +31,7 @@ about serving back *arbitrary posted payloads* -- the personal-analysis
 annotations an operator writes about a report, which the operator never
 asked to see echoed over the network. An elicit domain's `model.json` is
 not that: it is a derived Bradley-Terry fit over items the operator
-themselves defined (`sinnix elicit init`), on this same host, and the
+themselves defined (`sinnix rank-pairs init`), on this same host, and the
 in-session "learning so far" preview a comparison page wants to show is
 just that fit read back mid-session rather than after the next full page
 load. Bounded the same way the rest of the hub is bounded: domain names are
@@ -56,7 +56,7 @@ SCHEMA = "sinnix-hub-feedback-v1"
 ELICIT_SCHEMA = "sinnix-elicit-v1"
 MAX_BODY = 1 << 20  # 1 MiB: a generous annotated report, not a file upload
 
-# Mirrors sinnix-elicit's own BASE_DIR default (scripts/sinnix-elicit); a
+# Mirrors sinnix-rank-pairs's own BASE_DIR default (scripts/sinnix-rank-pairs); a
 # domain writes its model at <root>/<domain>/model.json.
 ELICIT_MODEL_DIR_DEFAULT = Path("/realm/state/elicit")
 ELICIT_DOMAIN_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")

@@ -130,13 +130,13 @@ mkServiceModule {
         "job"
         "start"
         "sinnix"
-        "elicit_autoingest"
+        "rank_pairs_ingest"
         "--wait"
       ];
       description = ''
         AgentCTL argv run, coalesced, when a `sinnix-elicit-v1` record lands
         in the feedback spool. The default waits for the declared
-        `elicit_autoingest` operation, so completion means the drain and
+        `rank_pairs_ingest` operation, so completion means the drain and
         model refit completed. Null disables arrival-triggered draining.
       '';
     };

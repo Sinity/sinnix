@@ -12,5 +12,5 @@
 # Silent when there is nothing acknowledged, and silent on any error: a
 # session must never fail to start because a status preamble could not render.
 
-command -v sinnix-orient >/dev/null 2>&1 || exit 0
-exec sinnix-orient --acknowledged-only
+command -v sinnix-status >/dev/null 2>&1 || exit 0
+exec sinnix-status --acknowledged-only

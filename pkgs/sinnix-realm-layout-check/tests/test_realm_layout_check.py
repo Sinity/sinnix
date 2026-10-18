@@ -14,7 +14,7 @@ from pathlib import Path
 from sinnix_lib.layout import ROOTS as LAYOUT_ROOTS
 
 ROOT = Path(__file__).parents[3]
-SCRIPT = ROOT / "scripts" / "lake-lint"
+SCRIPT = ROOT / "scripts" / "sinnix-realm-layout-check"
 
 ROOTS = tuple(root.lstrip("/") for root in LAYOUT_ROOTS)
 

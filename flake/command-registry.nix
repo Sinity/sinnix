@@ -672,8 +672,8 @@ in
         # reverse) fails at the commit that authors it. It reads the live
         # filesystem and so cannot be a flake check; it skips absent roots, so
         # it is a no-op wherever /realm is not mounted.
-        echo "Running lake-lint on the /realm taxonomy..."
-        ${scriptPkgs.lake-lint}/bin/lake-lint || lint_failed="$lint_failed lake-lint"
+        echo "Running sinnix-realm-layout-check on the /realm taxonomy..."
+        ${scriptPkgs.sinnix-realm-layout-check}/bin/sinnix-realm-layout-check || lint_failed="$lint_failed sinnix-realm-layout-check"
 
         if [ -n "$lint_failed" ]; then
           echo

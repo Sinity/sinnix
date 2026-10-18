@@ -43,7 +43,7 @@ let
       # frontmatter gets pkgs.beads (1.0.3), whose `export` has no -C flag --
       # which failed as a usage dump swallowed by `|| true`.
       beads = externalPackages.beads;
-      # sinnix-orient is a 3-line wrapper around `sinnix-hub-server orient`;
+      # sinnix-status is a 3-line wrapper around `sinnix-hub-server orient`;
       # the reducer itself lives in externalPackages (a real Python package,
       # not a discovered script), so it resolves here the same way.
       sinnix-hub-server = externalPackages.sinnix-hub-server;
@@ -529,7 +529,7 @@ let
         pkgs.python3
       ];
       text = ''
-        exec python3 ${../pkgs/agent-cli-recovery/update-locks.py} "$@"
+        exec python3 ${../pkgs/agent-cli-sources/update-locks.py} "$@"
       '';
       meta.description = "Render the npm locks for pinned agent CLI recovery tarballs";
     };

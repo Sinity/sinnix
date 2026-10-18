@@ -638,7 +638,7 @@ mkServiceModule {
 
       home-manager.users.${userName} = {
         home.packages = [
-          scriptPkgs.sinnix-elicit
+          scriptPkgs.sinnix-rank-pairs
         ];
 
         systemd.user.services.sinnix-hub = {

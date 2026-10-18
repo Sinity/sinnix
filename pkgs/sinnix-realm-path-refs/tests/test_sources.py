@@ -7,7 +7,7 @@ import sys
 import pytest
 
 
-SCRIPT = Path(__file__).parents[3] / "scripts/sinnix-lake-refs"
+SCRIPT = Path(__file__).parents[3] / "scripts/sinnix-realm-path-refs"
 
 
 def load_refs():
@@ -39,7 +39,7 @@ def test_unavailable_scan_fails_without_overwriting_ledger(tmp_path, monkeypatch
     monkeypatch.setattr(sys, "argv", [str(SCRIPT), command] + (["--out", str(out)] if command == "scan" else []))
     assert refs.main() == 2
     assert out.read_text() == "retained observations\n"
-    assert "sinnix-lake-refs:" in capsys.readouterr().err
+    assert "sinnix-realm-path-refs:" in capsys.readouterr().err
 
 
 def test_readable_empty_source_is_a_valid_empty_result(tmp_path):

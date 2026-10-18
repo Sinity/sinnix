@@ -199,7 +199,7 @@ def main() -> None:
         default=None,
         type=feedback.parse_command_argv,
         help=(
-            "Command run (coalesced) when a sinnix-elicit record lands in the "
+            "Command run (coalesced) when a sinnix-rank-pairs record lands in the "
             "feedback spool, replacing the periodic drain. Given as a JSON "
             "argv array; absent means nothing is triggered."
         ),
@@ -209,7 +209,7 @@ def main() -> None:
         type=Path,
         default=feedback.ELICIT_MODEL_DIR_DEFAULT,
         help=(
-            "sinnix-elicit's own preferences root (its --items/rank state, one "
+            "sinnix-rank-pairs's own preferences root (its --items/rank state, one "
             "directory per domain). Read-only: GET /feedback/elicit/<domain> "
             "serves that domain's latest model.json back, so an elicit "
             "comparison session can preview 'learning so far' mid-session."

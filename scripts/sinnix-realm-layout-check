@@ -42,16 +42,16 @@ def main() -> int:
         try:
             node = metadata(root)
             if node is None:
-                print(f"lake-lint: SKIP {root} (not present)", file=sys.stderr)
+                print(f"sinnix-realm-layout-check: SKIP {root} (not present)", file=sys.stderr)
                 skipped += 1
                 continue
             if not stat.S_ISDIR(node.st_mode):
-                print(f"lake-lint: INVALID root (expected directory without alias): {root}")
+                print(f"sinnix-realm-layout-check: INVALID root (expected directory without alias): {root}")
                 status = 1
                 continue
             children = sorted(root.iterdir())
         except OSError as error:
-            print(f"lake-lint: INACCESSIBLE root: {root}: {error}")
+            print(f"sinnix-realm-layout-check: INACCESSIBLE root: {root}: {error}")
             status = 1
             continue
         inspected += 1
@@ -61,27 +61,27 @@ def main() -> int:
         for path in children:
             try:
                 if path.name not in required | OPTIONAL[absolute] and not is_tool_cache(path):
-                    print(f"lake-lint: UNEXPECTED node: {path}")
+                    print(f"sinnix-realm-layout-check: UNEXPECTED node: {path}")
                     status = 1
             except OSError as error:
-                print(f"lake-lint: INACCESSIBLE node: {path}: {error}")
+                print(f"sinnix-realm-layout-check: INACCESSIBLE node: {path}: {error}")
                 status = 1
         for name in sorted(required):
             path = root / name
             try:
                 node = metadata(path)
             except OSError as error:
-                print(f"lake-lint: INACCESSIBLE required node: {path}: {error}")
+                print(f"sinnix-realm-layout-check: INACCESSIBLE required node: {path}: {error}")
                 status = 1
                 continue
             if node is None:
-                print(f"lake-lint: MISSING required node: {path}")
+                print(f"sinnix-realm-layout-check: MISSING required node: {path}")
             elif stat.S_ISLNK(node.st_mode):
-                print(f"lake-lint: SYMLINK at canonical node: {path}")
+                print(f"sinnix-realm-layout-check: SYMLINK at canonical node: {path}")
             elif name == "INVENTORY.md" and not stat.S_ISREG(node.st_mode):
-                print(f"lake-lint: WRONG TYPE (expected regular file): {path}")
+                print(f"sinnix-realm-layout-check: WRONG TYPE (expected regular file): {path}")
             elif name != "INVENTORY.md" and not stat.S_ISDIR(node.st_mode):
-                print(f"lake-lint: WRONG TYPE (expected directory): {path}")
+                print(f"sinnix-realm-layout-check: WRONG TYPE (expected directory): {path}")
             else:
                 continue
             status = 1
@@ -96,24 +96,24 @@ def main() -> int:
                 node = metadata(path)
                 if node is not None and stat.S_ISDIR(node.st_mode):
                     continue
-                print(f"lake-lint: INVALID managed directory: {path}")
+                print(f"sinnix-realm-layout-check: INVALID managed directory: {path}")
             except OSError as error:
-                print(f"lake-lint: INACCESSIBLE managed directory: {path}: {error}")
+                print(f"sinnix-realm-layout-check: INACCESSIBLE managed directory: {path}: {error}")
             status = 1
         for relative in RETIRED_PATHS:
             path = realm / relative
             try:
                 if metadata(path) is not None:
-                    print(f"lake-lint: RETIRED managed path recreated: {path}")
+                    print(f"sinnix-realm-layout-check: RETIRED managed path recreated: {path}")
                     status = 1
             except OSError as error:
-                print(f"lake-lint: INACCESSIBLE retired-path check: {path}: {error}")
+                print(f"sinnix-realm-layout-check: INACCESSIBLE retired-path check: {path}: {error}")
                 status = 1
     if status == 0:
         if skipped:
-            print(f"lake-lint: {inspected} present roots match taxonomy; {skipped} absent roots skipped")
+            print(f"sinnix-realm-layout-check: {inspected} present roots match taxonomy; {skipped} absent roots skipped")
         else:
-            print("lake-lint: all roots match taxonomy")
+            print("sinnix-realm-layout-check: all roots match taxonomy")
     return status
 
 
