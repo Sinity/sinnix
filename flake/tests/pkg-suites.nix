@@ -120,18 +120,6 @@
         # integration: 3 failed, 16 passed); reverted after confirming red.
         sinnix-capture-a11y-suite = pythonSuite { name = "sinnix-capture-a11y"; };
 
-        # Provably fails when: /today stops distinguishing open from closed
-        # commitments. Verified by changing store.py's open_commitments query
-        # from `status = 'open'` to `status = 'done'` -- caught by
-        # test_today_renders_open_commitment_with_forecast (1 failed, 3
-        # passed); reverted after confirming red. (Note: the sibling
-        # /calibration "actual rate" assertion in test_app.py is vacuous --
-        # its "100%" substring check also matches the page's unrelated
-        # `table { width: 100%; }` CSS rule -- a pre-existing test-quality
-        # defect, out of scope here since it isn't this task's reachability
-        # question.)
-        sinnix-cockpit-suite = sinnixScriptRegistry.packageSet.sinnix-cockpit;
-
         # Provably fails when: STRIP_SENTENCE rules stop dropping the
         # sentence they match (keep everything else). Verified by inverting
         # the `not pattern.search(s)` keep-predicate in filter.py -- caught

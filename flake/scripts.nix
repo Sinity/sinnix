@@ -497,8 +497,6 @@ let
       meta.description = "Steering store CLI — intentions, forecasts, activities, rituals";
     };
 
-    sinnix-cockpit = pkgs.callPackage ../pkgs/sinnix-cockpit/pkg.nix { };
-
     sinnix-quota = pkgs.callPackage ../pkgs/sinnix-quota/pkg.nix { inherit sinnix-lib; };
 
     sinnix-deslop = pkgs.callPackage ../pkgs/sinnix-deslop/pkg.nix { };

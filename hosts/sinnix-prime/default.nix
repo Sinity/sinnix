@@ -183,15 +183,12 @@
       # (sinnix-qh6s, sinnix-8f6y).
       daemon.autoStart = false;
     };
-    # Operator steering: store + rituals + read-only cockpit at
-    # http://127.0.0.1:8791.
+    # Operator steering store and its nightly export.
     steering.enable = true;
     # Disposable PostgreSQL for Polylogue and Sinex development (devkit).
     devkit-pg.enable = true;
-    # Thin declared-activity runtime; independent of the older daily rituals.
+    # Thin declared-activity runtime.
     activity.enable = true;
-    # Kernel audit capture plus the check that no unit is sandboxed out of
-    # writing its own declared output.
     # Pre-build + cachix-push sinex whenever its pinned input moves, off the
     # interactive switch critical path.
     sinex-cache-prebuild.enable = true;

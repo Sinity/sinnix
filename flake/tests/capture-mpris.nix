@@ -105,13 +105,8 @@
           }
           {
             assertion =
-              builtins.all (name: config.systemd.user.services.${name}.serviceConfig.UMask == "0077")
-                [
-                  "sinnix-steering-morning"
-                  "sinnix-steering-evening"
-                  "sinnix-steering-export"
-                ];
-            message = "Steering jobs must create owner-only evidence.";
+              config.systemd.user.services.sinnix-steering-export.serviceConfig.UMask == "0077";
+            message = "The steering export must create owner-only evidence.";
           }
           {
             assertion = config.systemd.services.sinnix-url-ledger.serviceConfig.UMask == "0077";
