@@ -83,7 +83,7 @@ curl --fail --silent --show-error \
   }' | jq .
 ```
 
-Reasoning tokens count against `max_tokens`. If a request ends with `finish_reason: "length"` and an empty visible answer, repeat it with `256` or `512` tokens. A successful smoke test has visible content `GLIMMER_OK`, `finish_reason: "stop"`, and a `system_fingerprint` beginning with `b10353-`.
+Reasoning tokens count against `max_tokens`. If a request ends with `finish_reason: "length"` and an empty visible answer, repeat it with `256` or `512` tokens. A successful smoke test has visible content `GLIMMER_OK`, `finish_reason: "stop"`, and a `system_fingerprint` naming the llama.cpp build.
 
 To inspect the hybrid placement and throughput while it is loaded:
 

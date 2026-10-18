@@ -21,11 +21,10 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     # Same branch as `nixpkgs`, but deliberately NOT `follows`-ed and excluded
-    # from routine `update` (flake/dev-shell.nix). Feeds the CUDA-narrowed AI
-    # package set (flake/overlay/package/local-ai.nix, pkgsForCudaArch.sm_86);
-    # any rev bump invalidates those derivation hashes with no possible cache
-    # hit and forces an hours-long from-source CUDA recompile. Bump
-    # deliberately and rarely: `sinnix update nixpkgs-ai`.
+    # from routine `update` (flake/dev-shell.nix). Feeds the CUDA package set
+    # (flake/overlay/package/local-ai.nix), so routine updates never move the
+    # CUDA derivations. Bump deliberately (`sinnix update nixpkgs-ai`) to a
+    # revision cache.nixos-cuda.org has built, or CUDA compiles locally.
     nixpkgs-ai.url = "github:NixOS/nixpkgs/nixos-unstable";
 
     flake-parts = {
