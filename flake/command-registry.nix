@@ -172,7 +172,7 @@ let
       "--setenv=SINNIX_REBUILD_ACTIVE=1"
       ''--setenv=SINNIX_SECRET_DECLARATIONS="$SINNIX_SECRET_DECLARATIONS"''
       "--slice=nix-build.slice"
-      "-p CPUSchedulingPolicy=idle"
+      "-p CPUSchedulingPolicy=batch"
       "-p IOSchedulingClass=best-effort"
       "-p IOSchedulingPriority=6"
     ]

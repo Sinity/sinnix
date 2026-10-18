@@ -69,10 +69,12 @@ in
         max-free = 53687091200;
       };
 
-      daemonCPUSchedPolicy = "idle";
-      # Idle I/O can starve even metadata lookup and environment preparation
-      # while ordinary readers keep the root SSD busy. Keep daemon requests
-      # eligible; the build slice still supplies its low weight and ceilings.
+      # Neither idle class: the daemon also serves store queries, devshells
+      # and switches, and idle scheduling starved those behind any steady
+      # load (multi-minute `nix develop`, store queries over two minutes).
+      # Batch CPU and a low best-effort IO priority keep it behind
+      # interactive work; the build slice supplies weights and ceilings.
+      daemonCPUSchedPolicy = "batch";
       daemonIOSchedClass = "best-effort";
       daemonIOSchedPriority = 6;
 
@@ -98,33 +100,14 @@ in
       optimise.automatic = false;
     };
 
-    # nix-gc is declared `background` in the runtime registry, but nothing
-    # applied that class: nixpkgs owns the unit, so it ran in system.slice at
-    # the default IOWeight of 100 -- a hundred times the declared share --
-    # while the correctly throttled realm backup starved behind it.
-    #
-    # Weights alone are not enough here. Store deletion is almost entirely
-    # btrfs metadata churn, and that writeback is issued by the filesystem's
-    # own transaction threads rather than this cgroup, so it escapes weight
-    # accounting. The absolute ceiling is what keeps the root device
-    # answering while the walk runs; / and /nix share one SATA SSD.
-    #
-    # Best-effort rather than the background class's idle IO: idle requests
-    # are served only when nothing else is queued, and agent work keeps the
-    # SSD busy around the clock. On 2026-09-28 deletion fell from ~9000 to
-    # ~900 paths/hour under agent load; the run was still going after four
-    # hours and no weekly run had finished in the journal's window. The low
-    # IOWeight and the ceilings below still keep it behind interactive work.
-    systemd.services.nix-gc.serviceConfig =
-      (lib.sinnix.mkRuntimeServiceConfig {
-        runtimeInventory = config.sinnix.runtime.inventory;
-        unit = "nix-gc.service";
-      })
-      // {
-        IOSchedulingClass = "best-effort";
-        IOReadBandwidthMax = "/nix 24M";
-        IOWriteBandwidthMax = "/nix 16M";
-      };
+    # nixpkgs owns the nix-gc unit, so the background class registered for it
+    # is applied here. No bandwidth caps: store deletion is btrfs metadata
+    # churn written back by the filesystem's own threads, and a capped
+    # deleter only stretched a weekly run past four hours.
+    systemd.services.nix-gc.serviceConfig = lib.sinnix.mkRuntimeServiceConfig {
+      runtimeInventory = config.sinnix.runtime.inventory;
+      unit = "nix-gc.service";
+    };
 
     # sccache is not wired as RUSTC_WRAPPER: it bypasses incremental
     # compilation, which every Rust consumer here relies on, and measured no

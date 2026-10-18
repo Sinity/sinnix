@@ -896,9 +896,12 @@ in
       };
 
       sinnix.runtime.surfaces = runtimeDefaults.baseSurfaces // {
+        # Critical, not background: its probes have 30 s timeouts, and in the
+        # background class one run took 97 s of wall time for 33 ms of CPU,
+        # long enough to misjudge a healthy manager as wedged.
         user-manager-watchdog = {
           unit = "sinnix-user-manager-watchdog.service";
-          resourceClass = "background";
+          resourceClass = "critical";
           observe.enable = true;
         };
         # The drift probe itself is governed like everything else it audits:

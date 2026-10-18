@@ -433,9 +433,8 @@ in
           (
             managedWork.CPUWeight < userSlices.app.CPUWeight
             && managedWork.IOWeight < userSlices.app.IOWeight
-            && managedWork.MemoryHigh == "20G"
-            && managedWork.MemoryMax == "20G"
-            && managedWork.MemorySwapMax == "0"
+            && sliceBytes managedWork.MemoryHigh < sliceBytes managedWork.MemoryMax
+            && managedWork ? MemorySwapMax
             && !(managedWork ? ManagedOOMSwap)
             && !(managedWork ? ManagedOOMMemoryPressure)
             && userSlices.app.MemoryLow == "6G"
@@ -455,7 +454,6 @@ in
             && !(poolSlices.agentctl-agent ? ManagedOOMMemoryPressure)
             && !(poolSlices.agentctl-agent ? ManagedOOMSwap)
             && poolSlices.agentctl-agent ? MemoryHigh
-            && poolSlices.agentctl-pytest.MemorySwapMax == "0"
             # The parent of the pytest leaves carries no pressure kill: its PSI
             # is their aggregate, so a busy sibling would kill the corpus.
             && !(poolSlices.agentctl-pytest ? ManagedOOMMemoryPressure)
@@ -490,13 +488,16 @@ in
               + sliceBytes poolSlices.agentctl-agent.MemoryHigh <= sliceBytes managedWork.MemoryHigh
             && sliceBytes poolSlices.agentctl-pytest-heavy.MemoryHigh >= 12 * 1024 * 1024 * 1024
             && poolSlices.agentctl-pytest-heavy.MemoryMax == "14G"
-            && poolSlices.agentctl-pytest-heavy.MemorySwapMax == "0"
             && poolSlices.agentctl-pytest-heavy.ManagedOOMMemoryPressure == "kill"
             && poolSlices.agentctl-pytest-heavy.CPUWeight == 200
             && poolSlices.agentctl-pytest-heavy.IOWeight == 200
-            && poolSlices.agentctl-bulk.MemoryHigh == "10G"
-            && poolSlices.agentctl-bulk.MemoryMax == "10G"
-            && poolSlices.agentctl-bulk.MemorySwapMax == "0"
+            # Bulk reclaims and swaps its own pages before its hard cap.
+            && sliceBytes poolSlices.agentctl-bulk.MemoryHigh < sliceBytes poolSlices.agentctl-bulk.MemoryMax
+            && !(poolSlices.agentctl-bulk ? IOReadBandwidthMax)
+            # Every pool's swap fits inside the plane's.
+            && lib.all (slice: sliceBytes slice.MemorySwapMax <= sliceBytes managedWork.MemorySwapMax) (
+              lib.attrValues poolSlices
+            )
             && poolSlices.agentctl-bulk.ManagedOOMMemoryPressure == "kill"
             && poolSlices.agentctl-bulk.CPUWeight == 20
             && poolSlices.agentctl-bulk.IOWeight == 10

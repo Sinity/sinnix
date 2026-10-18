@@ -91,10 +91,6 @@ mkAiService {
               "/realm 20M"
               "/nix 20M"
             ];
-            IOWriteBandwidthMax = [
-              "/realm 10M"
-              "/nix 10M"
-            ];
           };
           environment = {
             SINNIX_STT_MODEL_ROOT = modelDir;

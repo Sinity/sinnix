@@ -7,6 +7,11 @@
   ...
 }:
 let
+  scrubServiceConfig = {
+    Slice = "background.slice";
+    IOWeight = 10;
+    CPUWeight = 5;
+  };
   inherit (config.sinnix.paths)
     realmRoot
     outerRealm
@@ -122,11 +127,6 @@ let
       {
         resourceClass = "background";
         execStart = "${fstrimCanonical}/bin/sinnix-fstrim-canonical";
-        serviceConfig = {
-          Nice = 10;
-          IOSchedulingClass = "idle";
-          IOSchedulingPriority = 7;
-        };
         timer = {
           onCalendar = "weekly";
           randomizedDelaySec = "1h";
@@ -162,15 +162,6 @@ in
         "/outer-realm"
       ];
     };
-
-    # Preserve read responsiveness during buffered writes on both SSDs.
-    # Btrfs write ordering does not replace block-layer read-latency feedback;
-    # cgroup weights also cannot separate a download from its terminal scope.
-    # Keep the SSD default 2ms WBT target and the existing request-tag limits.
-    udev.extraRules = ''
-      ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_SERIAL_SHORT}=="2003E282E456", ATTR{queue/wbt_lat_usec}="2000", ATTR{queue/nr_requests}="256"
-      ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", ENV{ID_SERIAL_SHORT}=="2247E6897FB8", ATTR{queue/wbt_lat_usec}="2000", ATTR{queue/nr_requests}="64"
-    '';
   };
 
   fileSystems = {
@@ -345,23 +336,14 @@ in
 
     services.sinnix-fstrim = fstrimJob.systemd.services.sinnix-fstrim;
 
-    services."btrfs-scrub--".serviceConfig = {
-      Slice = "background.slice";
-      IOWeight = 1;
-      CPUWeight = 5;
-    };
-
-    services."btrfs-scrub-realm".serviceConfig = {
-      Slice = "background.slice";
-      IOWeight = 1;
-      CPUWeight = 5;
-    };
-
-    services."btrfs-scrub-outer\\x2drealm".serviceConfig = {
-      Slice = "background.slice";
-      IOWeight = 1;
-      CPUWeight = 5;
-    };
+    # One scrub a week rather than all three on the 1st at midnight, where they
+    # met the snapshot and the realm Borg run.
+    services."btrfs-scrub--".serviceConfig = scrubServiceConfig;
+    services."btrfs-scrub-realm".serviceConfig = scrubServiceConfig;
+    services."btrfs-scrub-outer\\x2drealm".serviceConfig = scrubServiceConfig;
+    timers."btrfs-scrub--".timerConfig.OnCalendar = lib.mkForce "*-*-01 02:30:00";
+    timers."btrfs-scrub-realm".timerConfig.OnCalendar = lib.mkForce "*-*-08 02:30:00";
+    timers."btrfs-scrub-outer\\x2drealm".timerConfig.OnCalendar = lib.mkForce "*-*-15 02:30:00";
 
     timers.sinnix-fstrim = fstrimJob.systemd.timers.sinnix-fstrim;
 

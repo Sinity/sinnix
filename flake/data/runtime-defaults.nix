@@ -12,15 +12,17 @@ let
     "/realm 20ms"
   ];
 
+  # Nix evaluation and builds: low weights so they yield, a memory ceiling
+  # sized for two parallel jobs on a 32 GB host, and no pressure kill. On
+  # 2026-10-18 oomd killed nix-daemon itself, with every connected client,
+  # at 50% pressure under the then 10G/12G ceiling. A build that outgrows
+  # MemoryMax loses its largest process to the kernel instead.
   buildSlicePolicy = {
     IOAccounting = true;
-    CPUWeight = 5;
-    IOWeight = 2;
-    MemoryHigh = "10G";
-    MemoryMax = "12G";
-    ManagedOOMMemoryPressure = "kill";
-    ManagedOOMMemoryPressureLimit = "50%";
-    ManagedOOMMemoryPressureDurationSec = "30s";
+    CPUWeight = 20;
+    IOWeight = 20;
+    MemoryHigh = "12G";
+    MemoryMax = "16G";
   };
 
   surfaceType = surface: if surface.manager == "user" then "user" else surface.kind;
@@ -193,38 +195,39 @@ rec {
       IOSchedulingClass = "best-effort";
       IOSchedulingPriority = 0;
     };
+    # Yielding classes use the lowest best-effort priority and low weights,
+    # never the idle IO class. Under mq-deadline an idle request waits up to
+    # 10 s whenever anything else is queued, and on this host something
+    # always is: idle-class jobs with deadlines (a 70 GB integrity scan, the
+    # speech pass, the filesystem index) ran at a few MB/s and timed out.
     background = mkClass "Maintenance that should yield to interaction" {
       Nice = 10;
-      IOSchedulingClass = "idle";
-      CPUWeight = 5;
-      IOWeight = 5;
+      IOSchedulingClass = "best-effort";
+      IOSchedulingPriority = 7;
+      CPUWeight = 20;
+      IOWeight = 20;
       MemoryHigh = "1G";
       MemoryMax = "3G";
     };
+    # Borg holds ~3 GB of chunk index and files cache for the realm
+    # repository; a 2G MemoryHigh pushed it into swap on every run.
+    # No device bandwidth caps: on btrfs a capped writer can hold a
+    # transaction that uncapped interactive writers then wait on.
     backup = mkClass "Snapshot and backup jobs" {
       Slice = "background.slice";
       Nice = 10;
-      CPUSchedulingPolicy = "idle";
-      IOSchedulingClass = "idle";
+      IOSchedulingClass = "best-effort";
+      IOSchedulingPriority = 7;
       CPUWeight = 20;
       IOWeight = 20;
-      MemoryHigh = "2G";
-      MemoryMax = "4G";
-      IOReadBandwidthMax = [
-        "/persist 40M"
-        "/realm 80M"
-        "/outer-realm 40M"
-      ];
-      IOWriteBandwidthMax = [
-        "/persist 20M"
-        "/realm 40M"
-        "/outer-realm 40M"
-      ];
+      MemoryHigh = "4G";
+      MemoryMax = "8G";
     };
     capture = mkClass "Long-running capture daemons" {
       Nice = 10;
-      IOSchedulingClass = "idle";
-      IOWeight = 10;
+      IOSchedulingClass = "best-effort";
+      IOSchedulingPriority = 7;
+      IOWeight = 20;
       MemoryHigh = "6G";
       MemoryMax = "8G";
     };
@@ -246,38 +249,21 @@ rec {
         IODeviceLatencyTargetSec = interactiveIoLatency;
         MemoryLow = "11776M";
       };
+      # Low weights, and per-unit memory limits from each unit's class. A
+      # shared 2G ceiling here made every scheduled job reclaim against the
+      # others, and IOWeight 1 on top of idle IO gave them nothing at all.
       background = {
-        CPUWeight = 3;
-        IOWeight = 1;
-        MemoryHigh = "2G";
-        MemoryMax = "4G";
-        # PSI-scoped oomd: kill sacrificial work at cgroup granularity when
-        # ITS OWN memory pressure stalls it, rather than letting global
-        # earlyoom pick victims. 50%/30s (not the 10%/5s defaults) so only a
-        # genuinely wedged scope dies, not a busy one.
-        ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "50%";
-        ManagedOOMMemoryPressureDurationSec = "30s";
+        CPUWeight = 20;
+        IOWeight = 20;
       };
-      nix-build = {
-        CPUWeight = 5;
-        IOWeight = 2;
-        # Store restores bypass build concurrency. Bound their device traffic
-        # as well as memory; scratch and the store share this device.
-        IOReadBandwidthMax = "/nix 80M";
-        IOWriteBandwidthMax = "/nix 40M";
-        # Daemon builds run outside the AgentCTL work budget. Bound this
-        # additional working set so concurrent jobs leave desktop headroom.
-        MemoryHigh = "10G";
-        MemoryMax = "12G";
-        # PSI-scoped oomd: kill sacrificial work at cgroup granularity when
-        # ITS OWN memory pressure stalls it, rather than letting global
-        # earlyoom pick victims. 50%/30s (not the 10%/5s defaults) so only a
-        # genuinely wedged scope dies, not a busy one.
-        ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "50%";
-        ManagedOOMMemoryPressureDurationSec = "30s";
+      # The daemon answers every store query, devshell and switch, not only
+      # builds, so its reads share the desktop's latency target at the root
+      # level instead of being throttled behind user.slice.
+      nix = {
+        IOAccounting = true;
+        IODeviceLatencyTargetSec = interactiveIoLatency;
       };
+      nix-build = buildSlicePolicy;
       system-critical = {
         IOAccounting = true;
         IODeviceLatencyTargetSec = interactiveIoLatency;
@@ -405,17 +391,8 @@ rec {
       };
       background = {
         IOAccounting = true;
-        CPUWeight = 3;
-        IOWeight = 1;
-        MemoryHigh = "2G";
-        MemoryMax = "4G";
-        # PSI-scoped oomd: kill sacrificial work at cgroup granularity when
-        # ITS OWN memory pressure stalls it, rather than letting global
-        # earlyoom pick victims. 50%/30s (not the 10%/5s defaults) so only a
-        # genuinely wedged scope dies, not a busy one.
-        ManagedOOMMemoryPressure = "kill";
-        ManagedOOMMemoryPressureLimit = "50%";
-        ManagedOOMMemoryPressureDurationSec = "30s";
+        CPUWeight = 20;
+        IOWeight = 20;
       };
       # Slice names encode hierarchy. This outer slice is the direct sibling
       # of app.slice and session.slice, so its weights govern host contention.
@@ -429,8 +406,13 @@ rec {
         # Desktop reservations are reclaim protection, not a substitute for
         # a hard limit on background allocations.
         MemoryHigh = "20G";
-        MemoryMax = "20G";
-        MemorySwapMax = "0";
+        MemoryMax = "22G";
+        # Bounded swap for the plane as a whole. With none, a job at its
+        # ceiling could only drop page cache (6 TiB of re-reads over one
+        # 11-day uptime), and global pressure from it swapped out the
+        # desktop instead: the browser held 5.9 GiB of swap. A job's own
+        # cold pages are the cheaper thing to page.
+        MemorySwapMax = "6G";
       };
       agentctl-work = {
         IOAccounting = true;
@@ -438,13 +420,13 @@ rec {
         IOWeight = 100;
       };
       # Each pueue task is a transient service in one of these slices. The
-      # outer agentctl.slice and the agent pool are never oomd or swap
-      # victims; the pytest leaf pools and bulk are killed at their own pressure. The
+      # outer agentctl.slice and the agent pool are never oomd victims; the
+      # pytest leaf pools and bulk are killed at their own pressure. The
       # reservations are fixed against the workstation's 32 GiB physical
       # memory: app 6 GiB, session 5 GiB, desktop shell 512 MiB, and the
       # remaining job plane is admitted by pool rather than free-RAM probes.
-      # Zero swap is deliberate for test/build pools: a hostile child must be
-      # killed at its own MemoryMax instead of making the desktop page.
+      # Each pool may swap a little of its own memory; MemoryMax still ends a
+      # runaway, and the plane's MemorySwapMax bounds the total.
       agentctl-agent = {
         IOAccounting = true;
         CPUWeight = 400;
@@ -453,7 +435,7 @@ rec {
         # (flake/tests/agent-tools.nix). Worker count, not this ceiling, is
         # the lever: see agent.parallel in modules/services/agentctl.nix.
         MemoryHigh = "8G";
-        MemorySwapMax = "0";
+        MemorySwapMax = "1G";
       };
       # The agents a landing owns. Same envelope as the agent pool: they are
       # the same kind of process, held apart only so the queue can pause new
@@ -469,14 +451,14 @@ rec {
         CPUWeight = 400;
         IOWeight = 300;
         MemoryHigh = "6G";
-        MemorySwapMax = "0";
+        MemorySwapMax = "1G";
       };
       agentctl-land-agent = {
         IOAccounting = true;
         CPUWeight = 400;
         IOWeight = 300;
         MemoryHigh = "4G";
-        MemorySwapMax = "0";
+        MemorySwapMax = "1G";
       };
       # Slice names encode hierarchy, so this is not just the `pytest` pool: it
       # is also the PARENT of agentctl-pytest-heavy and agentctl-pytest-quick.
@@ -514,7 +496,7 @@ rec {
         IOWeight = 200;
         MemoryHigh = "12G";
         MemoryMax = "14G";
-        MemorySwapMax = "0";
+        MemorySwapMax = "2G";
       };
       # The corpus gate (`verify_all`). Same envelope as its parent: this pool
       # is the reason the parent is 12G, and nothing else may run beside it at
@@ -528,7 +510,7 @@ rec {
         IOWeight = 200;
         MemoryHigh = "12G";
         MemoryMax = "14G";
-        MemorySwapMax = "0";
+        MemorySwapMax = "2G";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
@@ -545,32 +527,23 @@ rec {
         IOWeight = 200;
         MemoryHigh = "9G";
         MemoryMax = "10G";
-        MemorySwapMax = "0";
+        MemorySwapMax = "1G";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
       };
       # Bulk work yields to interactive readers and fails within its memory
-      # budget. Keeping the soft and hard limits equal avoids prolonged
-      # memory.high reclaim before an oversized workload reaches its cap.
+      # budget. MemoryHigh sits below MemoryMax so an oversized job reclaims
+      # and swaps its own pages before the hard cap; equal limits with no swap
+      # made bulk drop and re-read its page cache instead (4.86 TiB of
+      # refaults in one uptime), and an 80M read cap made each re-read slow.
       agentctl-bulk = {
         IOAccounting = true;
         CPUWeight = 20;
         IOWeight = 10;
-        # IOWeight arbitrates contention through io.cost but does not cap
-        # throughput. Share a device ceiling across concurrent bulk jobs,
-        # matching the backup class; stricter operation budgets still apply.
-        IOReadBandwidthMax = [
-          "/realm 80M"
-          "/nix 80M"
-        ];
-        IOWriteBandwidthMax = [
-          "/realm 40M"
-          "/nix 40M"
-        ];
-        MemoryHigh = "10G";
+        MemoryHigh = "8G";
         MemoryMax = "10G";
-        MemorySwapMax = "0";
+        MemorySwapMax = "2G";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
@@ -584,7 +557,7 @@ rec {
         # pressure, so each ran slower than two unthrottled ones would.
         MemoryHigh = "9G";
         MemoryMax = "10G";
-        MemorySwapMax = "0";
+        MemorySwapMax = "2G";
       };
       agentctl-interactive = {
         IOAccounting = true;
@@ -592,7 +565,7 @@ rec {
         IOWeight = 100;
         MemoryHigh = "2G";
         MemoryMax = "4G";
-        MemorySwapMax = "0";
+        MemorySwapMax = "512M";
       };
       # The gateway's shell lanes share this parent by slice-name hierarchy.
       # It hosts no pool; it measures both lanes and stays above the wider
@@ -602,7 +575,7 @@ rec {
         CPUWeight = 100;
         IOWeight = 100;
         MemoryHigh = "12G";
-        MemorySwapMax = "0";
+        MemorySwapMax = "2G";
       };
       # Quick reads (rg, sed, git status) come first for CPU and IO; a runaway
       # one is killed at its own ceiling, never paging the desktop.
@@ -612,7 +585,7 @@ rec {
         IOWeight = 200;
         MemoryHigh = "3G";
         MemoryMax = "4G";
-        MemorySwapMax = "0";
+        MemorySwapMax = "512M";
       };
       # Agent CLIs launched from ChatGPT: 2-3 GiB each, like agentctl-agent
       # workers, and like them throttled rather than killed.
@@ -621,9 +594,9 @@ rec {
         CPUWeight = 100;
         IOWeight = 100;
         MemoryHigh = "10G";
-        MemorySwapMax = "0";
+        MemorySwapMax = "2G";
       };
-      build = buildSlicePolicy;
+      # The switch commands place their evaluation scope here.
       nix-build = buildSlicePolicy;
     };
   };

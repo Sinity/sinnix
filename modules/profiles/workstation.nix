@@ -149,14 +149,8 @@ in
             # live process holds the directory, so a shorter interval reclaims
             # sooner and a longer one never spares a leaked tree.
             #
-            # Wall-clock, not unit-relative. OnUnitActiveSec anchors on the
-            # service's ActiveEnterTimestamp, which a Type=oneshot without
-            # RemainAfterExit never records: the next elapse resolves to
-            # infinity and the timer fires exactly once for the life of the
-            # user manager, however the run ended. A calendar schedule is
-            # anchored outside the unit, so no run outcome can end the
-            # cadence; Persistent catches an elapse missed while logged out.
-            onCalendar = "*:0/15";
+            # Persistent catches an elapse missed while logged out.
+            intervalSec = 900;
             persistent = true;
             description = "Periodic devshell scratch sweep";
           };
@@ -212,18 +206,20 @@ in
         '';
 
         boot.kernel.sysctl = {
-          # swappiness=10 keeps anon memory resident and lets a brief allocation
-          # burst spill to swap instead of triggering an immediate earlyoom kill;
-          # higher values cause sustained page-cache hoarding.
-          # min_free_kbytes/watermark_scale_factor hold a concrete free-page
-          # reserve against burst-alloc starvation.
-          "vm.swappiness" = 10;
+          # zram is the first swap tier, so swapping a cold anonymous page costs
+          # a compression, not a disk write. At swappiness 10 the kernel evicted
+          # file cache instead and re-read it: over one 11-day uptime file
+          # refaults reached 16.6 TiB against 1.4 TiB of swap-ins.
+          # The free-page reserve is a small fixed floor against allocation
+          # bursts; a 1 GiB reserve with a 2% watermark gap kept ~2 GB idle on a
+          # 32 GB host that was swapping.
+          "vm.swappiness" = 100;
           "vm.page-cluster" = 0;
           # Kernel default; do not raise. At 1000 dentries/inodes stay permanently
           # cold and PID1 alone re-reads hundreds of GiB/day of unit fragments.
           "vm.vfs_cache_pressure" = 100;
-          "vm.min_free_kbytes" = 1048576;
-          "vm.watermark_scale_factor" = 200;
+          "vm.min_free_kbytes" = 262144;
+          "vm.watermark_scale_factor" = 50;
           # Keep Btrfs/NVMe writeback from accumulating multi-GiB dirty bursts:
           # the Crucial P3 /realm drive shows 30s NVMe command timeouts under
           # mixed build/database writeback, and bounded dirty bytes push back
@@ -350,10 +346,6 @@ in
         # The root is declared once in core.nix. Claude Code's separate
         # CLAUDE_CODE_TMPDIR points to this same location.
 
-        # nix.slice has no explicit unit: it exists only as the implicit
-        # dash-hierarchy parent systemd creates for nix-build.slice, and with a
-        # single child its own CPUWeight/IOWeight would have no sibling to compete
-        # against.
         systemd.slices =
           (lib.mapAttrs (_: sliceConfig: {
             inherit sliceConfig;

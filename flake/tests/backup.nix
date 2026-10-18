@@ -83,9 +83,8 @@ assert lib.assertMsg (
               && unit.serviceConfig.MemoryMax == policy.MemoryMax
               && unit.serviceConfig.IOSchedulingClass == policy.IOSchedulingClass
               && unit.serviceConfig.IOWeight == policy.IOWeight
-              && builtins.elem "/realm 100M" unit.serviceConfig.IOReadBandwidthMax
               && !unit.restartIfChanged;
-            message = "Independent telemetry verification must reuse the bounded backup slice while preserving its own limits, idle IO policy, read ceiling and active-run protection.";
+            message = "Independent telemetry verification must reuse the bounded backup slice while preserving its own limits, IO policy and active-run protection.";
           }
           {
             assertion = lib.hasInfix config.services.sinex.storage.blob.repositoryPath config.systemd.services.borgbackup-job-sinex-blobs.script;

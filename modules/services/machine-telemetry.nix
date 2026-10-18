@@ -206,11 +206,6 @@ mkServiceModule {
           path = "${userSliceRoot}/agentctl.slice";
         }
         {
-          label = "user.build";
-          scope = "user";
-          path = "${userSliceRoot}/build.slice";
-        }
-        {
           label = "user.background";
           scope = "user";
           path = "${userSliceRoot}/background.slice";
@@ -420,10 +415,6 @@ mkServiceModule {
           serviceConfig = {
             Group = "users";
             TimeoutStartSec = "${toString backupTimeoutMinutes}min";
-            # Compression must finish within the fixed unit budget.
-            IOReadBandwidthMax = map (
-              limit: if lib.hasPrefix "${realmRoot} " limit then "${realmRoot} 100M" else limit
-            ) config.sinnix.runtime.inventory.classes.backup.serviceConfig.IOReadBandwidthMax;
           };
           unit = {
             after = [
@@ -533,10 +524,6 @@ mkServiceModule {
                 "borgdrain.slice"
               else
                 config.sinnix.runtime.inventory.classes.backup.serviceConfig.Slice;
-            IOReadBandwidthMax = map (
-              # Leave room for a repeated page walk inside the 150-minute check budget.
-              limit: if lib.hasPrefix "${realmRoot} " limit then "${realmRoot} 100M" else limit
-            ) config.sinnix.runtime.inventory.classes.backup.serviceConfig.IOReadBandwidthMax;
           };
           unit = {
             after = [
