@@ -37,6 +37,7 @@ adb_any() {
     "shell pm list packages "*) echo package:example.capture ;;
     "shell cat "*) printf '%s\n' "$STATUS_JSON" ;;
     "shell ls "*) echo ambient-19700101T001640.m4a ;;
+    "shell "*/sdcard/sinnix-ambient*) echo /sdcard/sinnix-ambient/ambient-19700101T001640.m4a ;;
     "pull "*) printf 'synthetic measurement audio' > "$3" ;;
     *) return 1 ;;
   esac
