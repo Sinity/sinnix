@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import errno
+import hashlib
 import json
+import os
 import signal
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from sinnix_ops_reducer import actions as actions_module
 from sinnix_ops_reducer.actions import (
+    RECEIPTS_MIGRATION_SCHEMA,
     ActionError,
     ActionService,
     process_admitted_slices,
@@ -15,6 +20,189 @@ from sinnix_ops_reducer.actions import (
 )
 from sinnix_ops_reducer.agent_jobs import AgentCtlError
 from sinnix_ops_reducer.reducer import Reducer
+
+
+def receipt_service(root: Path) -> ActionService:
+    return ActionService(
+        lambda: {},
+        root / "inventory.json",
+        root / "receipts.json",
+        adapter=lambda *_: pytest.fail("receipt loading must not dispatch actions"),
+    )
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses read permissions")
+@pytest.mark.parametrize("name", ["receipts.json", "receipts.jsonl"])
+def test_receipts_unreadable_history_is_not_empty(tmp_path, name):
+    path = tmp_path / name
+    original = (
+        b'{"prior":{"idempotency_key":"prior","status":"accepted"}}'
+        if path.suffix == ".json"
+        else b'{"idempotency_key":"prior","status":"accepted"}\n'
+    )
+    path.write_bytes(original)
+    path.chmod(0)
+    try:
+        with pytest.raises(ActionError) as error:
+            receipt_service(tmp_path)
+        assert error.value.status == 503
+        assert path.stat().st_mode & 0o777 == 0
+    finally:
+        path.chmod(0o600)
+    assert path.read_bytes() == original
+    if path.suffix == ".json":
+        assert not (tmp_path / "receipts.jsonl").exists()
+
+
+@pytest.mark.parametrize(
+    "name,body",
+    [
+        ("receipts.json", b"{invalid"),
+        ("receipts.json", b"[]"),
+        ("receipts.json", b'{"bad":"not a receipt"}'),
+        ("receipts.jsonl", b'{"idempotency_key":"prior"}\n{invalid\n'),
+    ],
+)
+def test_receipts_malformed_history_is_not_partial_success(tmp_path, name, body):
+    path = tmp_path / name
+    path.write_bytes(body)
+    with pytest.raises(ActionError) as error:
+        receipt_service(tmp_path)
+    assert error.value.status == 503
+    assert path.read_bytes() == body
+    if path.suffix == ".json":
+        assert not (tmp_path / "receipts.jsonl").exists()
+
+
+def test_receipts_migration_serialization_failure_publishes_nothing(
+    tmp_path, monkeypatch
+):
+    legacy = tmp_path / "receipts.json"
+    rows = {
+        "old-1": {"idempotency_key": "old-1", "status": "accepted"},
+        "old-2": {"idempotency_key": "old-2", "status": "rejected"},
+    }
+    legacy.write_text(json.dumps(rows))
+    before = legacy.read_bytes()
+    real_dumps = json.dumps
+    calls = 0
+
+    def fail_second(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("synthetic serialization interruption")
+        return real_dumps(*args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(json, "dumps", fail_second)
+        with pytest.raises(RuntimeError, match="synthetic serialization"):
+            receipt_service(tmp_path)
+    assert not (tmp_path / "receipts.jsonl").exists()
+    assert legacy.read_bytes() == before
+    resumed = receipt_service(tmp_path)
+    assert resumed.lookup("old-1") == rows["old-1"]
+    assert resumed.lookup("old-2") == rows["old-2"]
+    assert (tmp_path / "receipts.jsonl").stat().st_mode & 0o777 == 0o600
+    assert legacy.read_bytes() == before
+
+
+@pytest.mark.parametrize("name", ["receipts.json", "receipts.jsonl"])
+def test_receipts_io_failure_is_unavailable(tmp_path, monkeypatch, name):
+    path = tmp_path / name
+    path.write_text("{}\n")
+    before = path.read_bytes()
+    real_open = os.open
+
+    def unavailable(candidate, *args, **kwargs):
+        if os.fspath(candidate) == str(path):
+            raise OSError(errno.EIO, "synthetic read failure")
+        return real_open(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", unavailable)
+    with pytest.raises(ActionError) as error:
+        receipt_service(tmp_path)
+    assert error.value.status == 503
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("name", ["receipts.json", "receipts.jsonl"])
+def test_receipts_directory_is_unavailable(tmp_path, name):
+    (tmp_path / name).mkdir()
+    with pytest.raises(ActionError) as error:
+        receipt_service(tmp_path)
+    assert error.value.status == 503
+
+
+@pytest.mark.parametrize("name", ["receipts.json", "receipts.jsonl"])
+def test_receipts_fifo_refuses_without_waiting(tmp_path, name):
+    os.mkfifo(tmp_path / name)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+from pathlib import Path
+from sinnix_ops_reducer.actions import ActionService, ActionError
+root = Path(sys.argv[1])
+try:
+    ActionService(lambda: {}, root / 'inventory.json', root / 'receipts.json')
+except ActionError as error:
+    assert error.status == 503
+else:
+    raise AssertionError('FIFO must not become empty history')
+""",
+            str(tmp_path),
+        ],
+        env={
+            **os.environ,
+            "PYTHONPATH": str(Path(actions_module.__file__).parents[1])
+            + os.pathsep
+            + os.environ.get("PYTHONPATH", ""),
+        },
+        capture_output=True,
+        text=True,
+        timeout=3,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_receipts_regular_ledger_symlink_is_readable(tmp_path):
+    target = tmp_path / "retained.jsonl"
+    target.write_text('{"idempotency_key":"prior","status":"accepted"}\n')
+    (tmp_path / "receipts.jsonl").symlink_to(target)
+    assert receipt_service(tmp_path).lookup("prior")["status"] == "accepted"
+
+
+def test_receipts_existing_partial_migration_is_unavailable(tmp_path):
+    ledger = tmp_path / "receipts.jsonl"
+    content = json.dumps({"schema": RECEIPTS_MIGRATION_SCHEMA, "count": 2}) + "\n"
+    content += '{"idempotency_key":"only-one","status":"accepted"}\n'
+    ledger.write_text(content)
+    with pytest.raises(ActionError, match="incomplete") as error:
+        receipt_service(tmp_path)
+    assert error.value.status == 503
+    assert ledger.read_text() == content
+
+
+def test_receipts_torn_completion_keeps_pending_replay_refusal(tmp_path):
+    req = request("restart", {"unit": "safe"}, key="prior")
+    digest = hashlib.sha256(
+        json.dumps(
+            validate_request(req), sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
+    pending = {"idempotency_key": "prior", "status": "pending", "request_hash": digest}
+    ledger = tmp_path / "receipts.jsonl"
+    content = json.dumps(pending) + '\n{"torn":'
+    ledger.write_text(content)
+    service = receipt_service(tmp_path)
+    assert service.lookup("prior") == pending
+    with pytest.raises(ActionError, match="indeterminate") as error:
+        service.execute(req)
+    assert error.value.status == 409
+    assert ledger.read_text() == content
 
 
 def inventory(path: Path) -> None:
@@ -1216,13 +1404,17 @@ def test_pressure_actions_refuse_user_scope_before_dispatch(tmp_path):
 
 @pytest.mark.parametrize("manager", ["user", "system"])
 @pytest.mark.parametrize("action", ["set_policy", "reset_policy"])
-def test_policy_adapter_changes_are_runtime_only(tmp_path, monkeypatch, manager, action):
+def test_policy_adapter_changes_are_runtime_only(
+    tmp_path, monkeypatch, manager, action
+):
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
     data = json.loads(inventory_path.read_text())
     data["surfaces"]["safe"]["manager"] = manager
     inventory_path.write_text(json.dumps(data))
-    reducer = Reducer(tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []})
+    reducer = Reducer(
+        tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
+    )
     reducer.refresh()
     commands = []
 
@@ -1232,7 +1424,9 @@ def test_policy_adapter_changes_are_runtime_only(tmp_path, monkeypatch, manager,
 
     monkeypatch.setattr(subprocess, "run", run)
     actions = ActionService(
-        reducer.snapshot, inventory_path, tmp_path / "receipts.json",
+        reducer.snapshot,
+        inventory_path,
+        tmp_path / "receipts.json",
         unit_state_prober=fake_unit_state_prober,
     )
     payload = request(action, {"unit": "safe"}, key=f"runtime-{action}-{manager}")
@@ -1241,7 +1435,13 @@ def test_policy_adapter_changes_are_runtime_only(tmp_path, monkeypatch, manager,
         payload["parameters"] = {"property": "CPUWeight", "value": "10"}
     assert actions.execute(payload)["status"] == "confirmed"
     value = "10" if action == "set_policy" else "5"
-    assert commands == [[
-        "systemctl", f"--{manager}", "--runtime", "set-property",
-        "safe.service", f"CPUWeight={value}",
-    ]]
+    assert commands == [
+        [
+            "systemctl",
+            f"--{manager}",
+            "--runtime",
+            "set-property",
+            "safe.service",
+            f"CPUWeight={value}",
+        ]
+    ]

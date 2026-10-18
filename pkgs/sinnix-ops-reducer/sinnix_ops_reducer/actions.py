@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import signal
+import stat
 import subprocess
 import threading
 import time
@@ -11,7 +12,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from sinnix_lib.ledger import append_jsonl, iter_jsonl, utc_ts
+from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.files import read_regular_text
+from sinnix_lib.ledger import append_jsonl, utc_ts
+from sinnix_lib.lock import flock
 from sinnix_lib.procfs import parse_stat_start_time
 from sinnix_lib.systemd import show_units
 
@@ -295,46 +299,100 @@ class ActionService:
     def _migrate_legacy_receipts(self) -> None:
         """Fold the old whole-file receipts dict into the ledger once.
 
-        The ledger's mere existence is the marker: a first start with no
-        ledger yet creates one, writing a migration record even when there
-        was nothing to fold (so the marker itself proves this ran and is not
-        inferred from row count), and every later start sees the ledger
-        already there and does nothing. ``receipts_path`` is read here and
-        never touched again -- no deletion, no rewrite.
+        Publish the complete fold atomically under the append writer's lock.
+        Existence can then mark completion without exposing a partial fold.
+        The legacy source is never rewritten or removed. Only its genuine
+        absence permits a new, empty history.
         """
-        if self.receipts_ledger_path.exists():
-            return
-        try:
-            legacy = json.loads(self.receipts_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            legacy = None
-        folded = legacy if isinstance(legacy, dict) else {}
-        append_jsonl(
-            self.receipts_ledger_path,
-            {
+        ledger = self.receipts_ledger_path
+        with flock(ledger.with_name(ledger.name + ".lock")):
+            try:
+                ledger.lstat()
+            except FileNotFoundError:
+                pass
+            except OSError as error:
+                raise ActionError(
+                    f"action receipt ledger unavailable: {error}", 503
+                ) from error
+            else:
+                return
+            try:
+                legacy = json.loads(read_regular_text(self.receipts_path))
+            except FileNotFoundError:
+                legacy = {}
+            except (OSError, ValueError) as error:
+                raise ActionError(
+                    f"legacy action receipts unavailable: {error}", 503
+                ) from error
+            if not isinstance(legacy, dict):
+                raise ActionError("legacy action receipts must be an object", 503)
+            if not all(isinstance(record, dict) for record in legacy.values()):
+                raise ActionError("legacy action receipt rows must be objects", 503)
+            marker = {
                 "schema": RECEIPTS_MIGRATION_SCHEMA,
                 "migrated_from": str(self.receipts_path),
-                "count": len(folded),
+                "count": len(legacy),
                 "migrated_at": utc_ts(),
-            },
-        )
-        for record in folded.values():
-            if isinstance(record, dict):
-                append_jsonl(self.receipts_ledger_path, record)
+            }
+            records = [marker, *legacy.values()]
+            body = "".join(
+                json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
+                for record in records
+            )
+            atomic_publish(ledger, body.encode("utf-8"), mode=0o600, fsync=True)
 
     def _load_receipts(self) -> dict[str, dict[str, Any]]:
         self._migrate_legacy_receipts()
         receipts: dict[str, dict[str, Any]] = {}
-        for record in iter_jsonl(self.receipts_ledger_path):
-            if not isinstance(record, dict):
-                continue
-            if record.get("schema") == RECEIPTS_MIGRATION_SCHEMA:
-                continue
-            key = record.get("idempotency_key")
-            if isinstance(key, str):
-                # The last record completes or marks the pending dispatch.
-                # An interrupted dispatch remains pending and cannot replay.
-                receipts[key] = record
+        migration_remaining = 0
+        try:
+            with open(
+                self.receipts_ledger_path,
+                encoding="utf-8",
+                opener=lambda path, flags: os.open(path, flags | os.O_NONBLOCK),
+            ) as source:
+                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                    raise ActionError(
+                        "action receipt ledger must be a regular file", 503
+                    )
+                for line_number, line in enumerate(source, 1):
+                    if not line.strip():
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError as error:
+                        # A killed append may leave one unfinished tail. A
+                        # durable pending row precedes dispatch, so retain
+                        # that uncertainty instead of forgetting its key.
+                        # Complete malformed lines are never silently lost.
+                        if not line.endswith("\n"):
+                            break
+                        raise ActionError(
+                            f"invalid action receipt at line {line_number}", 503
+                        ) from error
+                    if not isinstance(record, dict):
+                        continue
+                    if record.get("schema") == RECEIPTS_MIGRATION_SCHEMA:
+                        count = record.get("count")
+                        if migration_remaining or type(count) is not int or count < 0:
+                            raise ActionError(
+                                "incomplete or invalid action receipt migration", 503
+                            )
+                        migration_remaining = count
+                        continue
+                    if migration_remaining:
+                        migration_remaining -= 1
+                    key = record.get("idempotency_key")
+                    if isinstance(key, str):
+                        # The last record completes or marks the pending dispatch.
+                        # An interrupted dispatch remains pending and cannot replay.
+                        receipts[key] = record
+        except (OSError, UnicodeError) as error:
+            raise ActionError(
+                f"action receipt ledger unavailable: {error}", 503
+            ) from error
+        if migration_remaining:
+            raise ActionError("incomplete action receipt migration", 503)
         return receipts
 
     def _inventory(self) -> dict[str, Any]:
