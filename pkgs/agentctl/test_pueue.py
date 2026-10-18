@@ -12,6 +12,7 @@ import os
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -919,3 +920,64 @@ def test_native_history_metadata_preserves_every_task_field_and_state(live_pueue
         for task_id in (running, paused):
             if pueue.task(task_id).status in {"Running", "Paused"}:
                 pueue.kill(task_id)
+
+
+def test_native_fixture_uses_short_socket_path_and_refuses_inherited_config(tmp_path, monkeypatch):
+    import conftest as fixtures
+
+    deep = tmp_path / ("nested-" * 20)
+    deep.mkdir()
+    monkeypatch.setenv("TMPDIR", str(deep))
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    override = tmp_path / "foreign.yml"
+    override.write_text("invalid: [")
+    monkeypatch.setenv("PUEUE_CONFIG_PATH", str(override))
+    monkeypatch.setenv("PUEUE_PROFILE", "foreign-fixture")
+    daemon = fixtures.live_pueue.__wrapped__(monkeypatch)
+    try:
+        home = Path(next(daemon))
+        assert home.parent.is_relative_to(deep)
+        assert "PUEUE_CONFIG_PATH" not in os.environ
+        assert "PUEUE_PROFILE" not in os.environ
+        config = (home / ".config/pueue/pueue.yml").read_text()
+        runtime = Path(next(line.split(": ", 1)[1] for line in config.splitlines()
+                            if line.strip().startswith("runtime_directory:")))
+        assert runtime.parent == Path("/tmp")
+        assert runtime.stat().st_mode & 0o777 == 0o700
+        sockets = list(runtime.glob("*.socket"))
+        assert sockets and all(len(str(path).encode()) < 108 for path in sockets)
+        task_id = pueue.add(group="default", label="fixture:isolated", command=("true",), working_directory=tmp_path)
+        assert pueue.wait(task_id, timeout_seconds=5).succeeded
+    finally:
+        daemon.close()
+    assert not home.parent.exists()
+    assert not runtime.exists()
+
+
+def test_native_fixture_cleans_allocations_when_startup_fails(monkeypatch):
+    import conftest as fixtures
+
+    allocated = []
+    original = tempfile.mkdtemp
+
+    def allocate(*args, **kwargs):
+        path = original(*args, **kwargs)
+        allocated.append(Path(path))
+        return path
+
+    calls = []
+
+    def run(arguments, **kwargs):
+        calls.append(arguments)
+        if arguments[0] == "pueued":
+            raise subprocess.CalledProcessError(1, arguments)
+        return subprocess.CompletedProcess(arguments, 1)
+
+    monkeypatch.setattr(fixtures.tempfile, "mkdtemp", allocate)
+    monkeypatch.setattr(fixtures.subprocess, "run", run)
+    daemon = fixtures.live_pueue.__wrapped__(monkeypatch)
+    with pytest.raises(subprocess.CalledProcessError):
+        next(daemon)
+    assert len(allocated) == 2
+    assert all(not path.exists() for path in allocated)
+    assert calls[-1] == ["pueue", "shutdown"]

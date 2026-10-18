@@ -2518,10 +2518,13 @@ def wait(
         reference = launch_reference(_task(task_id))
 
     def observe() -> tuple[Task, dict[str, Any]]:
+        nonlocal task_id
         task = (
             _read_task(config, task_id, reference)
             if config is not None else addressed(task_id, reference)
         )
+        # Keep the current hint; every lookup still checks the launch reference.
+        task_id = task.task_id
         if config is not None and task.status == "Archived":
             view = _job_detail(config, task, None)
             if not view.get("terminal"):

@@ -1634,6 +1634,51 @@ def test_a_wait_finds_the_job_the_queue_moved_before_the_wait_began(
     assert fake_pueue.waited == []
 
 
+@pytest.mark.parametrize("move_again", [False, True])
+def test_wait_keeps_relocated_hint_without_repeating_reference_scans(
+    fake_pueue: FakePueue, config: Config, project_root: Path,
+    monkeypatch: pytest.MonkeyPatch, move_again: bool,
+) -> None:
+    project = load_project_adapter(project_root)
+    first = launch.start_operation(config, project, project.operation("check"))
+    second = launch.start_operation(config, project, project.operation("check"))
+    own = launch.start_operation(config, project, project.operation("check"))
+    for job in (first, second, own):
+        fake_pueue.queue(job["job_id"])
+    fake_pueue.switch(first["job_id"], own["job_id"])
+    scans = []
+
+    def lookup(fragment):
+        scans.append(fragment)
+        return fake_pueue.tasks_by_command(fragment)
+
+    monkeypatch.setattr(pueue, "tasks_by_command", lookup)
+    current = first["job_id"]
+    rounds = 0
+
+    def advance(fake):
+        nonlocal current, rounds
+        rounds += 1
+        if rounds == 1 and move_again:
+            fake.switch(current, second["job_id"])
+            current = second["job_id"]
+        if rounds == 3:
+            fake.succeed(current)
+        else:
+            fake.finish_when_waited(current, advance)
+
+    fake_pueue.finish_when_waited(current, advance)
+    result = launch.wait(own["job_id"], reference=own["reference"], timeout_seconds=60)
+    assert result["reference"] == own["reference"]
+    assert (result["job_id"], result["phase"]) == (current, "succeeded")
+    assert len(scans) == (2 if move_again else 1)
+    assert set(scans) == {own["reference"] + ".json"}
+    assert len(fake_pueue.waited) == 3
+    for stranger in (first, second):
+        task = launch.find_task(fake_pueue.tasks(), stranger["job_id"], stranger["reference"])
+        assert task is not None and task.status == "Queued"
+
+
 def test_every_read_by_task_id_answers_about_the_job_that_id_now_holds(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:
