@@ -40,6 +40,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -357,26 +358,42 @@ def ledger_seen() -> set[tuple[str, str, int]]:
     file, and its old transcript describes audio that was never fully there.
     """
     seen: set[tuple[str, str, int]] = set()
-    if not LEDGER.is_file():
-        return seen
-    for line in LEDGER.read_text(encoding="utf-8", errors="replace").splitlines():
+    try:
+        fd = os.open(LEDGER, os.O_RDONLY | os.O_NONBLOCK)
+    except FileNotFoundError:
+        # A genuinely absent ledger is new history; a dangling pointer is
+        # unusable retained history and must not trigger duplicate work.
         try:
-            o = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(o, dict):
-            continue
-        lane, name, size = o.get("lane"), o.get("file"), o.get("bytes")
-        # Older rows without a lane cannot identify which source was processed.
-        if (
-            isinstance(lane, str)
-            and lane
-            and isinstance(name, str)
-            and name
-            and type(size) is int
-            and size >= 0
-        ):
-            seen.add((lane, name, size))
+            LEDGER.lstat()
+        except FileNotFoundError:
+            return seen
+        raise
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"transcript history is not a regular file: {LEDGER}")
+        stream = os.fdopen(fd, encoding="utf-8", errors="replace")
+    except BaseException:
+        os.close(fd)
+        raise
+    with stream:
+        for line in stream:
+            try:
+                o = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(o, dict):
+                continue
+            lane, name, size = o.get("lane"), o.get("file"), o.get("bytes")
+            # Older rows without a lane cannot identify which source was processed.
+            if (
+                isinstance(lane, str)
+                and lane
+                and isinstance(name, str)
+                and name
+                and type(size) is int
+                and size >= 0
+            ):
+                seen.add((lane, name, size))
     return seen
 
 

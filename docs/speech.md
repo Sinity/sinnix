@@ -96,6 +96,11 @@ no business holding. The idle window is 300 s rather than the GPU services'
 30 s, because nothing scarce is being held and reloading the encoder between
 the turns of one conversation would be the only real cost.
 
+The lake pass reads its completion ledger incrementally. A missing ledger starts
+new history; an inaccessible ledger, dangling link or non-regular object refuses
+the pass before transcription. Existing malformed-row and legacy-row handling
+is unchanged. The deduplication key set still grows with completed recordings.
+
 ## Review transcription
 
 For selected recordings that need a more detailed transcript, `scripts/sinnix-stt-review` calls ElevenLabs Scribe v2 with an explicit language (`pol` by default), speaker diarization and word timestamps. This uploads the named audio files to ElevenLabs and uses the account's transcription credits. It processes the full recordings without the local VAD gate. The automatic local capture pass keeps its existing engine.

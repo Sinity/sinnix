@@ -58,6 +58,49 @@ def test_cli_creates_private_transcripts_under_a_permissive_parent_umask(lake):
     assert all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in outputs)
 
 
+@pytest.mark.parametrize("kind", ["directory", "fifo", "broken-link"])
+def test_unusable_history_refuses_before_transcription(lake, kind):
+    module, calls, phone, mic = lake
+    module.TRANSCRIPT_DIR.mkdir()
+    if kind == "directory":
+        module.LEDGER.mkdir()
+    elif kind == "fifo":
+        os.mkfifo(module.LEDGER)
+    else:
+        module.LEDGER.symlink_to("absent-ledger")
+    with pytest.raises(OSError):
+        run_lake(module)
+    assert calls == []
+    assert not list(module.TRANSCRIPT_DIR.glob("20*.jsonl"))
+
+
+def test_denied_history_is_not_empty(lake, monkeypatch):
+    module, calls, phone, mic = lake
+    module.TRANSCRIPT_DIR.mkdir()
+    module.LEDGER.write_text('{}\n')
+    original = os.open
+    def denied(path, flags, *args, **kwargs):
+        if Path(path) == module.LEDGER:
+            raise PermissionError("synthetic denied ledger")
+        return original(path, flags, *args, **kwargs)
+    monkeypatch.setattr(module.os, "open", denied)
+    with pytest.raises(PermissionError, match="synthetic denied ledger"):
+        run_lake(module)
+    assert calls == []
+
+
+def test_history_streams_and_accepts_regular_symlink(lake, monkeypatch):
+    module, calls, phone, mic = lake
+    module.TRANSCRIPT_DIR.mkdir()
+    target = module.TRANSCRIPT_DIR / "retained-ledger"
+    target.write_text(json.dumps({"lane": "phone", "file": phone.name, "bytes": 4}) + '\n')
+    module.LEDGER.symlink_to(target.name)
+    def no_whole_file(*args, **kwargs):
+        raise AssertionError("ledger must be read incrementally")
+    monkeypatch.setattr(Path, "read_text", no_whole_file)
+    assert module.ledger_seen() == {("phone", phone.name, 4)}
+
+
 def test_same_name_and_size_in_different_lanes_transcribe_once_each(lake):
     module, calls, phone, mic = lake
     run_lake(module)
