@@ -81,8 +81,7 @@ mkServiceModule {
       # would force it during the module system's generic config-merge pass,
       # which is a genuine self-referential blackhole for a same-module
       # option (see modules/lib/scheduled-job.nix's `timer.enable` doc
-      # comment, and sinnix-oracle's job function for the same failure mode
-      # confirmed empirically). mkIf is the recognized marker the merge pass
+      # comment). mkIf is the recognized marker the merge pass
       # defers instead of forcing eagerly.
       (lib.mkIf cfg.kernelAudit (
         lib.sinnix.mkScheduledJob

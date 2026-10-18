@@ -39,8 +39,7 @@
 #                         blackhole in the module system (the generic
 #                         config-merge pass must visit this module's own
 #                         `.config` shape to resolve the very cfg option
-#                         being forced -- confirmed empirically on
-#                         sinnix-oracle's job function, 2026-08-18).
+#                         being forced).
 #                         `enable` keeps the `timer` key statically present
 #                         (safe: no forcing needed for shape) and instead
 #                         wraps the rendered timer unit's VALUE in
