@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 from email.message import Message
 from types import SimpleNamespace
 
@@ -18,6 +19,25 @@ def test_large_capture_payload_uses_stdin(capture_writer):
     assert observed["payload"] == payload
     assert "--payload" not in observed["argv"]
     assert payload["title"] not in observed["argv"]
+
+
+def test_large_browser_push_reaches_stack_and_capture(tmp_path, monkeypatch, capture_writer):
+    owner = load_script("sinnix-reading-stack")
+    runner = tmp_path / "bin" / "sinnix-reading-stack"
+    runner.write_text(
+        f"#!{sys.executable}\nimport os,sys\n"
+        f"os.execv(sys.executable, [sys.executable, {owner.__file__!r}, *sys.argv[1:]])\n"
+    )
+    runner.chmod(0o700)
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    payload = {"target_url": "https://example.test/", "target_title": "synthetic title " * 12000,
+               "note": "Unicode Łódź 🙂\nwith quotes \" and spaces"}
+    daemon.reading_stack_push(payload)
+    entry, = json.loads((tmp_path / "state/sinnix/reading-stack.json").read_text())
+    assert entry["title"] == payload["target_title"]
+    assert entry["note"] == payload["note"]
+    capture = json.loads(capture_writer.read_text())["payload"]
+    assert capture == {"event": "push", **entry}
 
 
 def setup_handler(handler):
@@ -97,27 +117,15 @@ def test_reading_stack_push_passes_provenance_and_note(monkeypatch):
         }
     )
 
-    assert calls == [
-        (
-            [
-                "sinnix-reading-stack",
-                "push",
-                "--url",
-                "https://target.example/article",
-                "--title",
-                "Target article",
-                "--source-url",
-                "https://source.example/list",
-                "--source-title",
-                "Source list",
-                "--anchor-text",
-                "Read this next",
-                "--note",
-                "Compare with the earlier report",
-            ],
-            {"check": True, "capture_output": True},
-        )
-    ]
+    assert len(calls) == 1
+    command, options = calls[0]
+    assert command == ["sinnix-reading-stack", "push", "--json-stdin"]
+    assert json.loads(options.pop("input")) == {
+        "url": "https://target.example/article", "title": "Target article",
+        "source_url": "https://source.example/list", "source_title": "Source list",
+        "anchor_text": "Read this next", "note": "Compare with the earlier report",
+    }
+    assert options == {"text": True, "check": True, "capture_output": True}
 
 
 @pytest.mark.parametrize("framing", [

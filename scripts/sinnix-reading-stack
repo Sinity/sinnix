@@ -35,6 +35,11 @@ SOFT CAP: default 20. Pushing past the cap still succeeds (never block the
 click that triggered it) but `list`/the widget surface a loud warning --
 the cap existing at all is the point: if it's regularly hit, that's a
 signal to actually review/prune, not silently raise the number.
+
+`push --json-stdin` accepts an object with url and optional title,
+source_url, source_title, anchor_text and note strings (or null optional
+fields). Native dispatch uses this route to keep content out of argv and
+avoid the process argument limit. It cannot be mixed with field flags.
 """
 
 from __future__ import annotations
@@ -186,7 +191,9 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("push")
-    p.add_argument("--url", required=True)
+    source = p.add_mutually_exclusive_group(required=True)
+    source.add_argument("--url")
+    source.add_argument("--json-stdin", action="store_true", help="Read push fields as JSON from stdin")
     p.add_argument("--title", default=None)
     p.add_argument("--source-url", default=None)
     p.add_argument("--source-title", default=None)
@@ -217,6 +224,24 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_open)
 
     args = parser.parse_args(argv)
+    if args.command == "push" and args.json_stdin:
+        optional = ("title", "source_url", "source_title", "anchor_text", "note")
+        if any(getattr(args, key) is not None for key in optional):
+            parser.error("--json-stdin cannot be mixed with push field flags")
+        try:
+            value = json.load(sys.stdin)
+        except (ValueError, UnicodeError, OSError):
+            parser.error("push stdin must contain a JSON object")
+        if (
+            not isinstance(value, dict)
+            or set(value) - {"url", *optional}
+            or not isinstance(value.get("url"), str)
+            or not value["url"]
+            or any(value.get(key) is not None and not isinstance(value[key], str) for key in optional)
+        ):
+            parser.error("push JSON requires a nonempty url string and optional string or null fields")
+        for key in ("url", *optional):
+            setattr(args, key, value.get(key))
     return args.func(args)
 
 

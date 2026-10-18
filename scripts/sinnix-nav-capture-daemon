@@ -80,18 +80,21 @@ def sinnix_capture_write(lane: str, payload: dict) -> None:
 
 
 def reading_stack_push(payload: dict) -> None:
-    command = ["sinnix-reading-stack", "push", "--url", payload.get("target_url", "")]
-    for option, field in (
-        ("--title", "target_title"),
-        ("--source-url", "source_url"),
-        ("--source-title", "source_title"),
-        ("--anchor-text", "anchor_text"),
-        ("--note", "note"),
+    fields = {"url": payload.get("target_url", "")}
+    for key, field in (
+        ("title", "target_title"),
+        ("source_url", "source_url"),
+        ("source_title", "source_title"),
+        ("anchor_text", "anchor_text"),
+        ("note", "note"),
     ):
         value = payload.get(field)
         if value:
-            command.extend([option, value])
-    subprocess.run(command, check=True, capture_output=True)
+            fields[key] = value
+    subprocess.run(
+        ["sinnix-reading-stack", "push", "--json-stdin"],
+        input=json.dumps(fields), text=True, check=True, capture_output=True,
+    )
 
 
 class Handler(BaseHTTPRequestHandler):
