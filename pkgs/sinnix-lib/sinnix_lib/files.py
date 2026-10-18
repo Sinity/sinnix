@@ -2,28 +2,45 @@
 
 from __future__ import annotations
 
-import io
+import errno
 import os
 import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import BinaryIO
+from typing import IO
+
+
+class NotRegularFile(OSError, ValueError):
+    """The opened path is a FIFO, device, socket or directory."""
+
+    def __init__(self, path: Path | str):
+        super().__init__(errno.EINVAL, "not a regular file", str(path))
 
 
 @contextmanager
-def _regular_input(path: Path) -> Iterator[BinaryIO]:
+def open_regular(
+    path: Path | str, mode: str = "rb", *, encoding: str | None = None, errors: str | None = None,
+) -> Iterator[IO]:
+    """Open without blocking on a FIFO and refuse anything but a regular file.
+
+    The type is checked on the opened descriptor, so a path replaced between
+    lookup and open cannot pass the check with different bytes.
+    """
+    if "b" not in mode and encoding is None:
+        encoding = "utf-8"
     with open(
-        path, "rb", opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
+        path, mode, encoding=encoding, errors=errors,
+        opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
     ) as handle:
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-            raise ValueError(f"expected a regular file: {path}")
+            raise NotRegularFile(path)
         yield handle
 
 
 def read_regular_text(path: Path, *, encoding: str = "utf-8") -> str:
     """Follow ordinary file links, checking the opened descriptor before reading."""
-    with _regular_input(path) as binary, io.TextIOWrapper(binary, encoding=encoding) as text:
+    with open_regular(path, "r", encoding=encoding) as text:
         return text.read()
 
 
@@ -31,7 +48,7 @@ def read_regular_bytes(path: Path, *, max_bytes: int | None = None) -> bytes:
     """Read at most the requested byte budget plus one byte to detect overflow."""
     if max_bytes is not None and max_bytes < 0:
         raise ValueError("file read bound must be nonnegative")
-    with _regular_input(path) as handle:
+    with open_regular(path) as handle:
         raw = handle.read() if max_bytes is None else handle.read(max_bytes + 1)
     if max_bytes is not None and len(raw) > max_bytes:
         raise ValueError(f"file exceeds {max_bytes} byte bound: {path}")

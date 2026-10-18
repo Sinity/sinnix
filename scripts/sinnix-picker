@@ -70,15 +70,15 @@ import json
 import os
 import re
 import sqlite3
-import stat
 import subprocess
 import sys
 from collections.abc import Iterator
-from contextlib import closing, contextmanager
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
+from sinnix_lib.files import open_regular
 from sinnix_lib.layout import capture_lane_path
 
 HISTORY_PATH = Path(
@@ -120,7 +120,7 @@ class Entry:
 def load_history() -> list[Entry]:
     try:
         with (
-            _regular_input(HISTORY_PATH) as binary,
+            open_regular(HISTORY_PATH) as binary,
             closing(sqlite3.connect("")) as database,
         ):
             before = os.fstat(binary.fileno())
@@ -199,7 +199,7 @@ def load_history() -> list[Entry]:
 def load_raindrop() -> list[Entry]:
     try:
         with (
-            _regular_input(RAINDROP_CSV) as binary,
+            open_regular(RAINDROP_CSV) as binary,
             io.TextIOWrapper(binary, encoding="utf-8", newline="") as source,
         ):
             candidates = (
@@ -228,15 +228,6 @@ def load_raindrop() -> list[Entry]:
         out.append(Entry("mark", label, url))
     return out
 
-
-@contextmanager
-def _regular_input(path: Path) -> Iterator[BinaryIO]:
-    with open(
-        path, "rb", opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK)
-    ) as source:
-        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-            raise OSError(errno.EINVAL, "picker input must be a regular file", path)
-        yield source
 
 
 def _unavailable(source: str, path: Path, error: Exception) -> None:
@@ -288,7 +279,7 @@ def _walk_chrome_bookmarks(node: dict, path: list[str], out: list[Entry]) -> Non
 def load_chrome_bookmarks() -> list[Entry]:
     try:
         with (
-            _regular_input(CHROME_BOOKMARKS) as binary,
+            open_regular(CHROME_BOOKMARKS) as binary,
             io.TextIOWrapper(binary, encoding="utf-8") as source,
         ):
             data = json.load(source)
@@ -327,7 +318,7 @@ def load_clipboard() -> list[Entry]:
         if len(out) >= CLIPBOARD_LIMIT:
             break
         try:
-            with _regular_input(path) as source:
+            with open_regular(path) as source:
                 for line in _reverse_lines(source):
                     try:
                         row = json.loads(line)

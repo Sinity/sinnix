@@ -50,7 +50,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Iterator, NamedTuple, Sequence
 
-from sinnix_lib.files import read_regular_bytes
+from sinnix_lib.files import NotRegularFile, open_regular, read_regular_bytes
 from sinnix_lib.ledger import append_jsonl, utc_ts
 from sinnix_lib.phone_inbox import emit_receipt
 
@@ -274,21 +274,19 @@ def stdev(xs: Sequence[float]) -> float:
 @contextmanager
 def csv_rows(path: Path) -> Iterator[Iterator[list[str]]]:
     """Stream data rows and close the source even if scoring refuses a row."""
-    with open(
-        path, encoding="utf-8", errors="replace",
-        opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
-    ) as fh:
-        if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
-            raise UnscorableTrace("trace source must be a regular file")
-        next(fh, None)  # The instrument's header is not a signal sample.
+    try:
+        with open_regular(path, "r", errors="replace") as fh:
+            next(fh, None)  # The instrument's header is not a signal sample.
 
-        def rows() -> Iterator[list[str]]:
-            for line in fh:
-                parts = line.rstrip("\n").split(",")
-                if parts and parts[0]:
-                    yield parts
+            def rows() -> Iterator[list[str]]:
+                for line in fh:
+                    parts = line.rstrip("\n").split(",")
+                    if parts and parts[0]:
+                        yield parts
 
-        yield rows()
+            yield rows()
+    except NotRegularFile as error:
+        raise UnscorableTrace("trace source must be a regular file") from error
 
 
 def score_ppg(path: Path) -> dict:
@@ -516,12 +514,7 @@ def iter_recent_events(days: int = 3) -> Iterator[dict]:
     for path in paths:
         if dt.datetime.fromtimestamp(path.stat().st_mtime, dt.timezone.utc) < cutoff:
             continue
-        with open(
-            path, encoding="utf-8", errors="replace",
-            opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
-        ) as source:
-            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                raise ValueError("score event source must be a regular file")
+        with open_regular(path, "r", encoding="utf-8") as source:
             for number, line in enumerate(source, 1):
                 try:
                     record = json.loads(line)
@@ -648,10 +641,35 @@ def transcribe(path: Path) -> dict | None:
 
 def _ledger_keys() -> Iterator[tuple[str, int, str | None, str | None, str | None, str | None]]:
     try:
-        ledger_input = open(
-            LEDGER, encoding="utf-8",
-            opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
-        )
+        with open_regular(LEDGER, "r") as ledger:
+            for number, line in enumerate(ledger, 1):
+                try:
+                    row = json.loads(line)
+                    if not isinstance(row, dict):
+                        raise ValueError("record must be an object")
+                    name, size = row.get("file"), row.get("bytes")
+                    signature = row.get("sidecar_signature")
+                    payload = row.get("payload_sha256")
+                    observation = row.get("payload_observation")
+                    kind = row.get("kind")
+                    if not isinstance(name, str) or not name:
+                        raise ValueError("file must be nonempty text")
+                    if type(size) is not int or size < 0:
+                        raise ValueError("bytes must be a nonnegative integer")
+                    if signature is not None and not isinstance(signature, str):
+                        raise ValueError("sidecar_signature must be text or null")
+                    for value in (payload, observation):
+                        if value is not None and (not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None):
+                            raise ValueError("payload bindings must be full SHA-256 digests")
+                    if observation is not None and payload is None:
+                        raise ValueError("a payload observation requires a content digest")
+                    if kind not in (None, "payload_observation"):
+                        raise ValueError("unknown score ledger record kind")
+                    if kind == "payload_observation" and (payload is None or observation is None or signature is None):
+                        raise ValueError("an observation requires complete payload and sidecar bindings")
+                except (ValueError, TypeError) as error:
+                    raise ValueError(f"score ledger record {number} is invalid; preserve and repair it before retrying") from error
+                yield name, size, signature, payload, observation, kind
     except FileNotFoundError:
         # A dangling link is unavailable history, not a new empty ledger.
         try:
@@ -659,37 +677,6 @@ def _ledger_keys() -> Iterator[tuple[str, int, str | None, str | None, str | Non
         except FileNotFoundError:
             return
         raise
-    with ledger_input as ledger:
-        if not stat.S_ISREG(os.fstat(ledger.fileno()).st_mode):
-            raise ValueError("score ledger must be a regular file")
-        for number, line in enumerate(ledger, 1):
-            try:
-                row = json.loads(line)
-                if not isinstance(row, dict):
-                    raise ValueError("record must be an object")
-                name, size = row.get("file"), row.get("bytes")
-                signature = row.get("sidecar_signature")
-                payload = row.get("payload_sha256")
-                observation = row.get("payload_observation")
-                kind = row.get("kind")
-                if not isinstance(name, str) or not name:
-                    raise ValueError("file must be nonempty text")
-                if type(size) is not int or size < 0:
-                    raise ValueError("bytes must be a nonnegative integer")
-                if signature is not None and not isinstance(signature, str):
-                    raise ValueError("sidecar_signature must be text or null")
-                for value in (payload, observation):
-                    if value is not None and (not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None):
-                        raise ValueError("payload bindings must be full SHA-256 digests")
-                if observation is not None and payload is None:
-                    raise ValueError("a payload observation requires a content digest")
-                if kind not in (None, "payload_observation"):
-                    raise ValueError("unknown score ledger record kind")
-                if kind == "payload_observation" and (payload is None or observation is None or signature is None):
-                    raise ValueError("an observation requires complete payload and sidecar bindings")
-            except (ValueError, TypeError) as error:
-                raise ValueError(f"score ledger record {number} is invalid; preserve and repair it before retrying") from error
-            yield name, size, signature, payload, observation, kind
 
 
 HistoryKey = tuple[str, int, str | None]
@@ -759,10 +746,8 @@ class PayloadInput(NamedTuple):
 
 @contextmanager
 def _score_input(path: Path, signature: str, seen: ScoreHistory, boot: str) -> Iterator[PayloadInput | None]:
-    with open(path, "rb", opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK)) as source:
+    with open_regular(path) as source:
         info = os.fstat(source.fileno())
-        if not stat.S_ISREG(info.st_mode):
-            raise ValueError("score payload must be a regular file")
         key = (path.name, info.st_size, signature)
         observation = _payload_observation(info, boot)
         if seen.observed_payload(key, observation):

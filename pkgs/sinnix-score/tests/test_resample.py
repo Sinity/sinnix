@@ -4,6 +4,7 @@ import runpy
 from pathlib import Path
 
 import pytest
+import sinnix_lib.files as sinnix_files
 
 
 @pytest.fixture
@@ -307,7 +308,7 @@ def test_ledger_open_denial_propagates(score, tmp_path, monkeypatch):
     score['cmd_run'].__globals__['LEDGER'] = ledger
     def deny(*args, **kwargs):
         raise PermissionError('synthetic denied ledger')
-    monkeypatch.setitem(score['cmd_run'].__globals__, 'open', deny)
+    monkeypatch.setattr(sinnix_files, 'open', deny, raising=False)
     with pytest.raises(PermissionError, match='synthetic denied ledger'):
         score['ledger_seen']()
 
@@ -491,7 +492,7 @@ def test_event_source_closes_when_candidate_timestamp_fails(score, tmp_path, mon
         return handle
     glob = score['cmd_run'].__globals__
     glob['EVENTS'] = events
-    monkeypatch.setitem(glob, 'open', tracked)
+    monkeypatch.setattr(sinnix_files, 'open', tracked, raising=False)
     with pytest.raises(ValueError, match='timestamp'):
         score['score_interoception'](tmp_path / 'trace.csv', {'ok': True, 'trustworthy': True, 'hr_bpm': 60}, 0)
     assert opened and all(handle.closed for handle in opened)
@@ -535,7 +536,7 @@ def test_csv_source_closes_when_consumer_raises(score, tmp_path, monkeypatch):
         handle = builtins.open(*args, **kwargs)
         opened.append(handle)
         return handle
-    monkeypatch.setitem(score['cmd_run'].__globals__, 'open', tracked)
+    monkeypatch.setattr(sinnix_files, 'open', tracked, raising=False)
     with pytest.raises(RuntimeError, match='synthetic consumer failure'):
         with score['csv_rows'](path) as rows:
             assert next(rows) == ['0', '1']

@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 import re
-import stat
 from collections import Counter
 from pathlib import Path
 
@@ -17,6 +16,7 @@ JUDGMENT_LIMIT_BYTES = 8 << 20
 # A small controlled role is distinct from the original descriptive wording.
 # The ledger retains detail and attributed source decisions; categories never
 # grant deletion permission or establish backup, lifecycle, or claim validity.
+from .files import open_regular
 from .taxonomy import ROLE_VOCABULARY, ROLE_VOCABULARY_VERSION, LEGACY_ROLES
 
 
@@ -70,11 +70,7 @@ def judgment_target(target: str) -> tuple[str, str]:
 
 
 def read_judgments(path: Path) -> dict:
-    # Opening nonblocking before inspecting the descriptor also handles a
-    # regular path replaced by a FIFO between lookup and open.
-    with open(path, "rb", opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK)) as handle:
-        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-            raise ValueError("judgment ledger must be a regular file")
+    with open_regular(path) as handle:
         raw = handle.read(JUDGMENT_LIMIT_BYTES + 1)
     if len(raw) > JUDGMENT_LIMIT_BYTES:
         raise ValueError("judgment ledger exceeds the 8 MiB read bound")

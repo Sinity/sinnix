@@ -40,8 +40,8 @@ for mode in ("rewrite", "replace", "fifo", "before-open-fifo"):
         try:
             try:
                 runpy.run_path(source, run_name="__main__")
-            except RuntimeError as error:
-                expected = "not a regular export file" if mode == "before-open-fifo" else "changed while hashing"
+            except (RuntimeError, OSError) as error:
+                expected = "not a regular file" if mode == "before-open-fifo" else "changed while hashing"
                 assert expected in str(error), str(error)
             else:
                 raise AssertionError(f"{mode}: changed payload published as a complete observation")

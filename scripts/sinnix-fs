@@ -16,11 +16,11 @@ or append authored definitions directly without scanning payloads.
 from __future__ import annotations
 
 from sinnix_lib.atomic import atomic_text_writer
+from sinnix_lib.files import open_regular
 
 import argparse
 import datetime as dt
 import fcntl
-import errno
 import hashlib
 import json
 import os
@@ -1146,21 +1146,8 @@ RELATIONS = {
 }
 
 
-def open_regular_text(path: Path, mode: str = "r"):
-    """Refuse streams after a nonblocking open, including path replacements."""
-    handle = open(path, mode, encoding="utf-8",
-                  opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK))
-    try:
-        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-            raise OSError(errno.EINVAL, "not a regular file", str(path))
-    except BaseException:
-        handle.close()
-        raise
-    return handle
-
-
 def read_json_metadata(path: Path):
-    with open_regular_text(path) as handle:
+    with open_regular(path, "r") as handle:
         return json.load(handle)
 
 
@@ -1234,7 +1221,7 @@ def publish_generation(index_dir: Path, *, roots=None, retained_inputs: Path | N
     index_dir.mkdir(parents=True, exist_ok=True)
     generations = index_dir / "generations"
     generations.mkdir(mode=0o700, exist_ok=True)
-    with open_regular_text(index_dir / "publication.lock", "a") as lock:
+    with open_regular(index_dir / "publication.lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         name = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:12]
         stage = generations / (".building-" + name)
@@ -1367,7 +1354,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     lock = args.index_dir / "publication.lock"
     result["publication_in_progress"] = False
     try:
-        with open_regular_text(lock) as handle:
+        with open_regular(lock, "r") as handle:
             try:
                 fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
             except BlockingIOError:
@@ -1433,7 +1420,7 @@ def cmd_judgments(args: argparse.Namespace) -> int:
             raise ValueError(f"invalid incoming roles: {role_issues}; historical import requires explicit --allow-legacy-roles")
         path = args.index_dir / "judgments.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
-        with open_regular_text(path.with_name(path.name + ".lock"), "a+") as lock:
+        with open_regular(path.with_name(path.name + ".lock"), "a+") as lock:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
             existing = read_judgments(path) if path.exists() else {"valid": [], "records": 0}
             expected = getattr(args, "expected_sha256", None)

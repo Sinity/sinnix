@@ -15,6 +15,7 @@ import hashlib
 import json
 import os
 from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.files import open_regular
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,10 +50,8 @@ for path in sorted(paths):
     rel = path.relative_to(root).as_posix()
     # A path can change after enumeration. Observe metadata and bytes through
     # one open file, and refuse a changed source before replacing the manifest.
-    with open(path, "rb", opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK)) as handle:
+    with open_regular(path) as handle:
         info = os.fstat(handle.fileno())
-        if not S_ISREG(info.st_mode):
-            raise RuntimeError(f"not a regular export file: {path}")
         digest = hashlib.sha256()
         for block in iter(lambda: handle.read(1 << 20), b""):
             digest.update(block)

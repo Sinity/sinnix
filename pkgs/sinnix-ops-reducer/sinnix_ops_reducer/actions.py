@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 import signal
-import stat
 import subprocess
 import threading
 import time
@@ -13,7 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from sinnix_lib.atomic import atomic_publish
-from sinnix_lib.files import read_regular_text
+from sinnix_lib.files import open_regular, read_regular_text
 from sinnix_lib.ledger import append_jsonl, utc_ts
 from sinnix_lib.lock import flock
 from sinnix_lib.procfs import parse_stat_start_time
@@ -346,15 +345,7 @@ class ActionService:
         receipts: dict[str, dict[str, Any]] = {}
         migration_remaining = 0
         try:
-            with open(
-                self.receipts_ledger_path,
-                encoding="utf-8",
-                opener=lambda path, flags: os.open(path, flags | os.O_NONBLOCK),
-            ) as source:
-                if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
-                    raise ActionError(
-                        "action receipt ledger must be a regular file", 503
-                    )
+            with open_regular(self.receipts_ledger_path, "r") as source:
                 for line_number, line in enumerate(source, 1):
                     if not line.strip():
                         continue

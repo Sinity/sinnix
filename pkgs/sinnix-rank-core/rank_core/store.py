@@ -15,12 +15,11 @@ is always reproducible.
 from __future__ import annotations
 
 import json
-import os
-import stat
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from sinnix_lib.files import open_regular
 from sinnix_lib.ledger import append_jsonl, utc_ts
 
 VALID_KINDS = {"pair", "choice-set", "skip", "incomparable"}
@@ -56,10 +55,10 @@ class LogReplay:
 def _read_records(path: Path):
     """Read strict JSONL; only an absent ledger denotes no evidence yet."""
     try:
-        handle = open(
-            path, encoding="utf-8",
-            opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
-        )
+        with open_regular(path, "r") as handle:
+            for line in handle:
+                if line.strip():
+                    yield json.loads(line)
     except FileNotFoundError:
         try:
             path.lstat()
@@ -67,12 +66,6 @@ def _read_records(path: Path):
             return
         # A retained link with an absent target is unavailable, not empty.
         raise
-    with handle:
-        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-            raise ValueError(f"ranking ledger is not a regular file: {path}")
-        for line in handle:
-            if line.strip():
-                yield json.loads(line)
 
 
 def read_log(path: str | Path) -> LogReplay:
