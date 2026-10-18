@@ -339,10 +339,6 @@ class ProjectAdapter:
     operations: tuple[ProjectOperation, ...]
     packets: PacketsPolicy = field(default_factory=PacketsPolicy)
 
-    @property
-    def agent_capable(self) -> bool:
-        return self.workspace is not None
-
     def operation(self, name: str) -> ProjectOperation:
         for operation in self.operations:
             if operation.name == name:

@@ -362,28 +362,6 @@ class Runtime:
             "task_authority": task_authority,
         }
 
-    def _project_reference(
-        self, reference: str, *, allow_checkout: bool
-    ) -> tuple[str, str | None, str]:
-        if not isinstance(reference, str) or not 1 <= len(reference) <= 2_048:
-            raise ProtocolError("invalid_request", "project ref is malformed")
-        try:
-            resource, values = REGISTRY.resolve(reference)
-        except RegistryError as exc:
-            raise ProtocolError(
-                "not_found", "canonical project resource was not found"
-            ) from exc
-        allowed = {"project", "checkout"} if allow_checkout else {"project"}
-        if resource.kind not in allowed:
-            raise ProtocolError(
-                "invalid_request", "ref does not identify the required project resource"
-            )
-        return (
-            values["project_id"],
-            values.get("checkout_id"),
-            str(resource.ref_template.format(values)),
-        )
-
     def _job(
         self,
         operation: str,

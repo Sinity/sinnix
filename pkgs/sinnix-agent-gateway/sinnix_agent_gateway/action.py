@@ -248,10 +248,6 @@ class Action:
     def input_schema(self) -> dict[str, Any]:
         return json.loads(_input_schema_text(self.Input))
 
-    def envelope_model(self) -> type[V2ToolEnvelope]:
-        """The typed response envelope: ``data`` is this action's Output."""
-        return _envelope_model(self.Output)
-
     def output_schema(self) -> dict[str, Any]:
         return json.loads(_output_schema_text(self.Output))
 

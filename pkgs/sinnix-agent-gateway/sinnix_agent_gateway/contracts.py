@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Callable, Mapping
-from urllib.parse import quote
 
 from .refs import RefTemplate
 
@@ -96,7 +95,3 @@ class ResourceSpec:
             raise ValueError(
                 f"resource {self.kind!r} names unknown principals: {sorted(unknown_principals)}"
             )
-
-    @property
-    def contract_ref(self) -> str:
-        return f"sinnix://gateway/v2/resources/{quote(self.kind, safe='')}"

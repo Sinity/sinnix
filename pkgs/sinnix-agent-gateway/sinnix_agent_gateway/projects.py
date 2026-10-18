@@ -1275,56 +1275,6 @@ class ProjectService:
             "truncated": False,
         }
 
-    def commit_range(
-        self,
-        project_id: str,
-        checkout_id: str,
-        base_revision: str,
-        head_revision: str,
-    ) -> dict[str, Any]:
-        """Read one exact, immutable Git range through the selected checkout."""
-        project = self.code_checkout(
-            project_id, checkout_id, write=False, require_explicit=True
-        )
-
-        def resolve(revision: str) -> str:
-            if not re.fullmatch(r"[0-9a-f]{40,64}", revision):
-                raise ProjectError("commit revision is malformed")
-            resolved = self._run_spooled(
-                [
-                    "git",
-                    "rev-parse",
-                    "--verify",
-                    "--end-of-options",
-                    f"{revision}^{{commit}}",
-                ],
-                project.path,
-            ).strip()
-            if not re.fullmatch(r"[0-9a-f]{40,64}", resolved):
-                raise ProjectError("commit revision did not resolve to a commit")
-            return resolved
-
-        base = resolve(base_revision)
-        head = resolve(head_revision)
-        merge_base = self._run_spooled(
-            ["git", "merge-base", base, head], project.path
-        ).strip()
-        if not re.fullmatch(r"[0-9a-f]{40,64}", merge_base):
-            raise ProjectError("commit range has no merge base")
-        content = self._run_spooled(
-            ["git", "diff", "--no-ext-diff", "--no-textconv", f"{base}..{head}", "--"],
-            project.path,
-        )
-        return {
-            "base_revision": base,
-            "head_revision": head,
-            "range": f"{base}..{head}",
-            "relation": "base_is_ancestor" if merge_base == base else "diverged",
-            "merge_base": merge_base,
-            "diff": content,
-            "truncated": False,
-        }
-
     def summary(
         self, project_id: str, checkout_id: str | None = None
     ) -> dict[str, Any]:

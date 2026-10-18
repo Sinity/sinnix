@@ -808,40 +808,6 @@ class ResultService:
             "metadata": metadata.get("metadata", {}),
         }
 
-    def record_snapshot(
-        self,
-        *,
-        action: str,
-        owner: str,
-        route: str,
-        writer: ResultSnapshotWriter,
-        receipt: Mapping[str, Any],
-        request: RequestContext,
-    ) -> dict[str, Any]:
-        page = self.finish_snapshot(writer)
-        return self.record(
-            action=action,
-            owner=owner,
-            route=route,
-            outcome="ok",
-            payload={"rows": page["rows"], "row_count": page["row_count"]},
-            receipt=receipt,
-            request=request,
-            page={
-                "kind": "snapshot",
-                "cursor": None,
-                "next_cursor": page["next_cursor"],
-                "total": page["row_count"],
-                "expires_at": page["expires_at"],
-                "snapshot_ref": page["snapshot_ref"],
-            },
-            meta={
-                "source": {"owner": owner, "route": route},
-                "source_revisions": {"owner": writer.source_revision},
-                "artifact_refs": [page["snapshot_ref"]],
-            },
-        )
-
     def _read_snapshot(self, result_id: str) -> dict[str, Any]:
         metadata, directory = self._snapshot_metadata(result_id)
         rows = []

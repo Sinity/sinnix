@@ -287,7 +287,7 @@ Changed paths are compared with the workers' `write_scope` globs. Paths outside
 the scope are recorded for the reviewer, not refused. A worker may explain them
 with `scope_expansion`.
 
-### Refusal codes
+### Refusals
 
 A batch verb that cannot proceed exits 1 with `<code>: <detail>`. A landing
 also records the code in `landing.failure`.
