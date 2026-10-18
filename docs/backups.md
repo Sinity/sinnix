@@ -48,7 +48,7 @@ also part of the `/realm` snapshots.
   notification, repeated daily while it stays failed.
 * **Do not trust `systemctl --failed` alone.** Every NixOS switch resets the
   failed state of all units. Use the hub's health view
-  (`sinnix-ops-reducer orient`) or the journal.
+  (`sinnix-hub-server orient`) or the journal.
 * **Journal.** Drains log `backup_phase=create` and `backup_phase=verify`
   lines: `journalctl -u borgbackup-job-realm -u borgbackup-job-persist`.
 * **Markers.** Per-repository state, including the latest archived snapshot

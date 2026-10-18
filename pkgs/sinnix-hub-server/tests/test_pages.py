@@ -1,0 +1,245 @@
+"""Behaviour checks for the hub pages the reducer renders.
+
+The control surface mirrors the action API's admission rule: a lifecycle
+button may exist only where the runtime inventory declares
+`observe.restartable`. If these two ever disagree the hub starts offering
+buttons the action API answers with 403.
+"""
+
+from __future__ import annotations
+
+from html import unescape
+
+from typing import Any
+
+from sinnix_hub_server import pages
+from sinnix_hub_server.pages.probes import project_of
+from sinnix_hub_server.pages.services import lifecycle_controls, policy_controls
+
+INVENTORY: dict[str, Any] = {
+    "schema": "sinnix-runtime-inventory-v1",
+    "surfaces": {
+        "controllable": {
+            "unit": "controllable.service",
+            "manager": "user",
+            "kind": "service",
+            "resourceClass": "background-maintenance",
+            "observe": {"enable": True, "restartable": True},
+            "activation": {"mode": "direct"},
+        },
+        "read-only": {
+            "unit": "read-only.service",
+            "manager": "system",
+            "kind": "service",
+            "resourceClass": "system",
+            "observe": {"enable": True, "restartable": False},
+            "activation": {"mode": "direct"},
+        },
+    },
+}
+
+MANIFEST: dict[str, Any] = {
+    "schema": "sinnix-hub-manifest-v1",
+    "host": "fixture",
+    "port": 8880,
+    "reportsPort": 8883,
+    "reportsDir": "/nonexistent",
+    "frontends": [],
+    "links": [],
+}
+
+
+def test_project_of_names_checkouts_and_worktrees() -> None:
+    assert project_of("/realm/project/sinex/crates") == "sinex"
+    assert project_of("/realm/worktree/agent-123/src") == "agent-123"
+    assert project_of("/var/tmp") is None
+
+
+def test_every_route_renders_a_complete_document_without_a_snapshot() -> None:
+    for route in pages.ROUTES:
+        html = pages.render(route, MANIFEST, None, INVENTORY, "snapshot absent")
+        assert "<title>" in html, route
+        assert "</html>" in html, route
+
+
+def test_pages_degrade_rather_than_fail() -> None:
+    services = pages.render("/services/", MANIFEST, None, INVENTORY)
+    # systemd is not reachable from a hermetic build, so every unit reads as
+    # not-installed; the button correspondence itself is asserted below against
+    # the function that decides it.
+    assert "'unit','read-only.service'" not in services
+    assert "'unit','controllable.service'" not in services
+    assert "unavailable" in pages.render("/", MANIFEST, None, INVENTORY, "absent")
+
+
+def test_route_aliases_and_non_routes() -> None:
+    assert pages.is_page_route("/work")
+    assert pages.canonical("/work") == "/work/"
+    assert not pages.is_page_route("/v1/snapshot")
+    assert not pages.is_page_route("/reports/")
+
+
+def test_manifest_of_the_wrong_schema_is_treated_as_absent(tmp_path) -> None:
+    good = tmp_path / "manifest.json"
+    good.write_text('{"schema": "sinnix-hub-manifest-v1", "host": "fixture"}')
+    bad = tmp_path / "other.json"
+    bad.write_text('{"schema": "something-else", "host": "fixture"}')
+    assert pages.load_manifest(good)["host"] == "fixture"
+    assert pages.load_manifest(bad) == {}
+    assert pages.load_manifest(tmp_path / "missing.json") == {}
+    assert pages.load_manifest(None) == {}
+
+
+def test_lifecycle_controls_mirror_the_action_api_admission_rule() -> None:
+    assert "act(" not in lifecycle_controls(
+        "x.service", restartable=False, installed=True, active=True
+    )
+    assert "<button" not in lifecycle_controls(
+        "x.service", restartable=True, installed=False, active=False
+    )
+    active = lifecycle_controls(
+        "x.service", restartable=True, installed=True, active=True
+    )
+    assert active.count("<button") == 2
+    assert "'start'" not in active
+    inactive = lifecycle_controls(
+        "x.service", restartable=True, installed=True, active=False
+    )
+    assert inactive.count("<button") == 1
+    assert "'stop'" not in inactive
+
+
+def test_policy_controls_only_offer_declared_properties() -> None:
+    assert policy_controls("x.service", {}) == ""
+    assert policy_controls("x.service", {"Slice": "app.slice"}) == ""
+    controls = policy_controls(
+        "x.service", {"CPUWeight": 5, "MemoryHigh": "8G", "Slice": "app.slice"}
+    )
+    assert controls.count("setPolicy(") == 2
+    assert '"CPUWeight", "5"' in unescape(controls)
+    assert '"MemoryHigh", "8G"' in unescape(controls)
+    assert "Slice" not in controls
+    assert 'act(\'reset_policy\',\'unit\',"x.service"' in unescape(controls)
+
+
+def test_work_page_renders_queue_jobs_and_interrupts_live_jobs() -> None:
+    snapshot = {
+        "state": {
+            "agentctl": {
+                "groups": {
+                    "agent": {
+                        "status": "Paused",
+                        "parallel": 4,
+                        "running": 1,
+                        "queued": 1,
+                        "paused": 0,
+                    },
+                    "pytest": {
+                        "status": "Running",
+                        "parallel": 1,
+                        "running": 0,
+                        "queued": 0,
+                        "paused": 0,
+                    },
+                },
+                "jobs": [
+                    {
+                        "job_id": 7,
+                        "label": "sinnix:lane:sinnix-1",
+                        "kind": "attested-agent",
+                        "project": "sinnix",
+                        "operation": "lane:sinnix-1",
+                        "group": "agent",
+                        "phase": "running",
+                        "terminal": False,
+                        "exit_code": None,
+                        "path": "/realm/worktree/sinnix-feature-packet-sinnix-1",
+                        "enqueued_at": "2026-08-23T10:00:00+00:00",
+                        "started_at": "2026-08-23T10:00:05+00:00",
+                        "ended_at": None,
+                    },
+                    {
+                        "job_id": 8,
+                        "label": "sinex:cache_prebuild",
+                        "kind": "declared-operation",
+                        "project": "sinex",
+                        "operation": "cache_prebuild",
+                        "group": "bulk",
+                        "phase": "failed",
+                        "terminal": True,
+                        "exit_code": 2,
+                        "path": "/realm/project/sinex",
+                        "enqueued_at": "2026-08-23T09:00:00+00:00",
+                        "started_at": "2026-08-23T09:00:05+00:00",
+                        "ended_at": "2026-08-23T09:10:05+00:00",
+                    },
+                ],
+                "truncated": False,
+            }
+        }
+    }
+    html = pages.render(
+        "/work/",
+        MANIFEST,
+        snapshot,
+        INVENTORY,
+        "fixture",
+    )
+    # The queue card shows pueue groups without assuming who paused them.
+    assert "<code>agent</code>" in html and "paused" in html
+    assert "1 running of 4" in html
+    # Jobs are pueue tasks by label; only a live one can be interrupted.
+    assert "sinnix:lane:sinnix-1" in html
+    assert "sinex:cache_prebuild" in html and "exit 2" in unescape(html)
+    assert 'act(\'interrupt\',\'job_id\',"7"'  in unescape(html)
+    assert 'act(\'interrupt\',\'job_id\',"8"'  not in unescape(html)
+    assert "1" in html and "jobs queued or running" in html
+
+
+def test_work_page_renders_without_jobs() -> None:
+    html = pages.render("/work/", MANIFEST, {"state": {}}, INVENTORY, "fixture")
+    assert "no jobs in this snapshot" in html
+
+
+def test_work_page_escapes_queue_count_fields_and_does_not_invent_pause_owner():
+    from html import escape
+    from html.parser import HTMLParser
+
+    marker = '<img src=x onerror="alert(1)">'
+    class Elements(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.tags = []
+        def handle_starttag(self, tag, attrs):
+            self.tags.append(tag)
+    for field in ("running", "parallel", "queued", "paused"):
+        detail = {"status": "Paused", "running": 1, "parallel": 4, "queued": 2, "paused": 1}
+        detail[field] = marker
+        html = pages.render_work(MANIFEST, {"state": {"agentctl": {"groups": {"fixture": detail}}}},
+                                 INVENTORY, "fixture")
+        parser = Elements()
+        parser.feed(html)
+        assert "img" not in parser.tags
+        assert escape(marker, quote=True) in html
+
+
+def test_jobs_prioritize_active_and_explain_both_display_and_owner_omissions():
+    import datetime as dt
+    from sinnix_hub_server.pages.queue import jobs_card
+    jobs = [{"job_id": i, "label": f"completed-{i}", "terminal": True,
+             "phase": "succeeded", "enqueued_at": "2026-10-18T06:00:00Z"} for i in range(20)]
+    jobs.append({"job_id": 100, "label": "old-running-job", "terminal": False,
+                 "phase": "running", "enqueued_at": "2026-10-17T06:00:00Z"})
+    html = jobs_card({"agentctl": {"jobs": jobs, "omitted": {"active": 3, "terminal": 99}}}, dt.datetime.now(dt.timezone.utc))
+    assert "old-running-job" in html
+    assert html.index("old-running-job") < html.index("completed-0")
+    assert "Showing 12 of 21 snapshot jobs" in html
+    assert "Owner omitted: 3 active, 99 completed" in html
+
+
+def test_empty_snapshot_does_not_claim_no_owner_jobs_or_invent_coverage():
+    import datetime as dt
+    from sinnix_hub_server.pages.queue import jobs_card
+    html = jobs_card({"agentctl": {"jobs": []}}, dt.datetime.now(dt.timezone.utc))
+    assert "no jobs in this snapshot" in html
+    assert "unknown active, unknown completed" in html

@@ -1,0 +1,17 @@
+[project]
+name = "sinnix-hub-server"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[project.scripts]
+sinnix-hub-server = "sinnix_hub_server.cli:main"
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+# Explicit, because the pages subpackage must ship with the module: flat-layout
+# auto-discovery would find it today, but silently dropping the renderer if that
+# ever changes is a failure that only shows up as a 500 on the hub.
+[tool.setuptools.packages.find]
+include = ["sinnix_hub_server*"]

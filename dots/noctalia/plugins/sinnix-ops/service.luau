@@ -1,12 +1,12 @@
 --!nonstrict
--- Authenticated SSE bridge for the read-only Sinnix operations reducer.
+-- Authenticated SSE bridge for the read-only Sinnix the hub server.
 
 local ENDPOINT = noctalia.getConfig("endpoint") or "http://127.0.0.1:3090"
 local TOKEN_PATH = noctalia.getConfig("token_path") or "$XDG_RUNTIME_DIR/sinnix/ops.token"
 local STALE_SECONDS = tonumber(noctalia.getConfig("stale_seconds")) or 30
 local STREAM_PATH = ENDPOINT .. "/v1/events"
 -- Every async callback runs under Noctalia's 25 ms CPU budget, decode
--- included. Ask the reducer for just the state keys panel.luau reads instead
+-- included. Ask the hub server for just the state keys panel.luau reads instead
 -- of the full snapshot (hundreds of KB of inventory and unit rows), and for
 -- the few receipts the panel summarises.
 local SNAPSHOT_STATE_KEYS = table.concat({
@@ -124,7 +124,7 @@ requestSnapshot = function()
     end
     local decoded = decodeJson(response.body)
     if type(decoded) ~= "table" or decoded.schema ~= "sinnix-ops-v1" then
-      fallback("newer or unsupported reducer schema")
+      fallback("newer or unsupported hub server schema")
       finishSnapshot()
       return
     end
@@ -138,7 +138,7 @@ requestSnapshot = function()
     elseif type(source) == "table" and source.status == "healthy" then
       publish("connected", "sse", decoded, nil, request)
     else
-      publish("source-stale", "sse", decoded, source and source.degradation or "reducer source unavailable", request)
+      publish("source-stale", "sse", decoded, source and source.degradation or "hub server source unavailable", request)
     end
     noctalia.http({ url = RECEIPTS_PATH, headers = { "Authorization: Bearer " .. value, "Accept: " .. "application/json" } }, function(receipts)
       local current = noctalia.state.get("sinity-ops.view") or {}

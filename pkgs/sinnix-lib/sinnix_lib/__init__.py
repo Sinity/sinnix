@@ -8,7 +8,7 @@ common path resolution, and the spool (durable inbox with exactly-once
 processing).
 
 Library only, by contract: no daemons, no CLIs of its own. Consumers are
-sinnix's Python tools and packages (sinnix-ops-reducer, sinnix-observe,
+sinnix's Python tools and packages (sinnix-hub-server, sinnix-observe,
 migrated scripts), which depend on this package rather than copying its
 bodies.
 """

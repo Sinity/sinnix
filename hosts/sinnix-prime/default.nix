@@ -105,7 +105,7 @@
   ];
 
   sinnix.services = {
-    # Browser front door to the system: reports, the reducer's current-state
+    # Browser front door to the system: reports, the hub server's current-state
     # dashboard, and the AI control panel. Binds loopback plus the tailscale0
     # address only, and its ports are opened on tailscale0 alone -- the LAN
     # never sees it. Depends on tailscale above (asserted in the module).

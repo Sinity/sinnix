@@ -32,7 +32,7 @@ Select `/model luna` for bounded work or `/model sol` for substantial implementa
 
 The `clodex` command is the managed Clodex CLI. It bootstraps the pinned runtime under `~/.local/state/clodex` and runs in the same agent resource class as the other agent CLIs. Use it for provider status, inspecting aliases with `clodex models --json`, and explicit repair with `clodex patch`. `sinnix-clodex.service` owns the long-running local proxy and starts automatically after later logins. The service has a condition on the OAuth provider registry, so its first start after authorization is explicit. Do not start a second `clodex server` manually for this workflow.
 
-Routed accounting is published by the ops reducer from Clodex's bounded `~/.clodex/logs/inference-requests.jsonl` response-usage records. It reports aggregate request and token counters with source freshness; missing accounting is unavailable, never zero. Request bodies, credentials, and raw logs are not copied into reducer state.
+Routed accounting is published by the hub server from Clodex's bounded `~/.clodex/logs/inference-requests.jsonl` response-usage records. It reports aggregate request and token counters with source freshness; missing accounting is unavailable, never zero. Request bodies, credentials, and raw logs are not copied into hub server state.
 
 Orchestrated lanes use the AgentCTL Codex backend directly, for example `agentctl batch start sinnix <bead> --backend codex --model gpt-6-sol --effort high`. Clodex is a Claude Code subscription bridge, not a second job scheduler.
 

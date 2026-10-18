@@ -6,9 +6,9 @@
 #
 { pkgs, ... }:
 let
-  # Record the start of a long AFK interval for the operations reducer.
+  # Record the start of a long AFK interval for the hub server.
   # Plain-text timestamp, not JSON -- afk-resume below is the only file the
-  # reducer actually parses (sinnix_ops_reducer.cli: --anchor-events
+  # hub server actually parses (sinnix_hub_server.cli: --anchor-events
   # defaults to %t/sinnix/afk-resume.json).
   afkStart = pkgs.writeShellScript "sinnix-ops-afk-start" ''
     set -euo pipefail
@@ -16,8 +16,8 @@ let
     mkdir -p "$dir"
     date -u +%Y-%m-%dT%H:%M:%SZ > "$dir/afk-start"
   '';
-  # Record an AFK resume event for the operations reducer. Exact file paths
-  # and JSON shape are load-bearing: the reducer's anchor.reduce_anchor_event
+  # Record an AFK resume event for the hub server. Exact file paths
+  # and JSON shape are load-bearing: the hub server's anchor.reduce_anchor_event
   # reads started_at/resumed_at off this file at %t/sinnix/afk-resume.json.
   afkResume = pkgs.writeShellScript "sinnix-ops-afk-resume" ''
     set -euo pipefail

@@ -1,14 +1,14 @@
 --!nonstrict
--- Sinnix operations panel: the glanceable read of the reducer snapshot.
+-- Sinnix operations panel: the glanceable read of the hub server snapshot.
 --
 -- Every rendered line is a real number or state from the live snapshot;
--- anything the reducer cannot provide says so with its reason instead of a
+-- anything the hub server cannot provide says so with its reason instead of a
 -- placeholder. Deep views belong to the hub pages -- the link row at the
 -- bottom opens them -- so this panel stays a summary, not a second hub.
 --
 -- State access rule: snapshot state is read only through stateValue with a
 -- literal key name. The noctalia-ops-bridge flake check parses those
--- literals and fails when a bound key is not published by the reducer's
+-- literals and fails when a bound key is not published by the hub server's
 -- snapshot-building code, so a schema drift cannot silently render junk.
 
 local HUB_URL = noctalia.getConfig("hub_url") or "http://127.0.0.1:8880"
@@ -145,7 +145,7 @@ end
 local function anchorText()
   local anchor = stateValue("session_anchor")
   if type(anchor) ~= "table" then
-    -- The reducer publishes an anchor only for 1h after an AFK gap of 30min
+    -- The hub server publishes an anchor only for 1h after an AFK gap of 30min
     -- or more, so nil is the normal steady state, not a failure.
     return "AFK return: no recent AFK interval"
   end

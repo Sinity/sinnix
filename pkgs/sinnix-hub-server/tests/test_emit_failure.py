@@ -1,0 +1,235 @@
+"""`sinnix-hub-server emit-failure`: what systemd's OnFailure= actually runs.
+
+Both halves matter. The socket path is the normal one and is what keeps a
+single process owning the dedup state; the fallback is what stops a failure
+from being lost precisely when the recorder is the thing that failed.
+"""
+
+from __future__ import annotations
+
+import json
+import socketserver
+import threading
+from http.client import HTTPConnection
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
+
+import pytest
+from sinnix_hub_server import cli, health
+from sinnix_hub_server.reducer import Reducer
+from sinnix_hub_server.server import Handler
+
+INVENTORY: dict[str, Any] = {
+    "schema": "sinnix-runtime-inventory-v1",
+    "observedServices": [
+        {"kind": "service", "manager": "user", "unit": "usersurf.service"},
+    ],
+}
+
+
+def without_reminder_clock(document: dict) -> dict:
+    """The state file minus `notified_at`, the daily-reminder clock."""
+    return {
+        key: {k: v for k, v in value.items() if k != "notified_at"}
+        if isinstance(value, dict)
+        else value
+        for key, value in document.items()
+    }
+
+
+class UnixHTTPServer(socketserver.ThreadingUnixStreamServer):
+    daemon_threads = True
+
+    def get_request(self):
+        connection, _ = super().get_request()
+        return connection, ("unix", 0)
+
+
+@pytest.fixture
+def reducer_socket(tmp_path: Path):
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(json.dumps(INVENTORY))
+    state = tmp_path / "state.json"
+    ledger = tmp_path / "events.jsonl"
+    reducer = Reducer(tmp_path / "status.json", tmp_path / "token", lambda: {})
+    reducer.refresh()
+    path = tmp_path / "ops.sock"
+    server = UnixHTTPServer(str(path), Handler)
+    server.reducer = reducer
+    server.token = "fixture-token"
+    server.is_unix = True
+    server.hub_manifest = None
+    server.inventory_path = inventory
+    server.feedback = None
+    server.emitter_factory = lambda: health.Emitter(state, ledger, lambda *_: None)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield {"socket": path, "state": state, "ledger": ledger, "inventory": inventory}
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def transitions(ledger: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in ledger.read_text().splitlines()]
+
+
+def test_the_failure_reaches_the_running_reducer(reducer_socket) -> None:
+    exit_code = cli.emit_failure_command(
+        [
+            "--unit",
+            "usersurf",
+            "--result",
+            "oom-kill",
+            "--socket",
+            str(reducer_socket["socket"]),
+            "--inventory",
+            str(reducer_socket["inventory"]),
+        ]
+    )
+    assert exit_code == 0
+    events = transitions(reducer_socket["ledger"])
+    assert len(events) == 1
+    # The bare unit name is completed, and the manager comes from the
+    # inventory, so the key matches the one the sweep would use.
+    assert events[0]["unit"] == "usersurf.service"
+    assert events[0]["evidence"] == "manager=user;source=onfailure;result=oom-kill"
+    assert without_reminder_clock(json.loads(reducer_socket["state"].read_text())) == {
+        "service:user:usersurf.service": {"status": "failed"}
+    }
+
+
+def test_a_dead_reducer_does_not_swallow_the_failure(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    state = tmp_path / "state.json"
+    ledger = tmp_path / "events.jsonl"
+    monkeypatch.setattr(health, "state_path", lambda: state)
+    monkeypatch.setattr(health, "ledger_path", lambda: ledger)
+    monkeypatch.setattr(health, "notify_desktop", lambda *args, **kwargs: True)
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(json.dumps(INVENTORY))
+
+    exit_code = cli.emit_failure_command(
+        [
+            "--unit",
+            "usersurf.service",
+            "--result",
+            "exit-code",
+            "--socket",
+            str(tmp_path / "nothing-listening.sock"),
+            "--inventory",
+            str(inventory),
+        ]
+    )
+    assert exit_code == 0
+    assert "the reducer was unreachable" in capsys.readouterr().err
+    events = transitions(ledger)
+    assert len(events) == 1
+    assert events[0]["unit"] == "usersurf.service"
+    assert events[0]["schema"] == "sinnix-health-transition-v1"
+    # Same key, same file, same shape as the socket path: one state store.
+    assert without_reminder_clock(json.loads(state.read_text())) == {
+        "service:user:usersurf.service": {"status": "failed"}
+    }
+
+
+def test_explicit_manager_survives_inventory_order_on_http_and_fallback(
+    tmp_path: Path, monkeypatch, capsys, reducer_socket
+) -> None:
+    mixed = {
+        "schema": "sinnix-runtime-inventory-v1",
+        "observedServices": [
+            {"kind": "service", "manager": "system", "unit": "dup.service"},
+            {"kind": "service", "manager": "user", "unit": "dup.service"},
+        ],
+    }
+    reducer_socket["inventory"].write_text(json.dumps(mixed))
+    assert (
+        cli.emit_failure_command(
+            [
+                "--unit",
+                "dup",
+                "--result",
+                "exit-code",
+                "--manager",
+                "user",
+                "--socket",
+                str(reducer_socket["socket"]),
+                "--inventory",
+                str(reducer_socket["inventory"]),
+            ]
+        )
+        == 0
+    )
+    events = transitions(reducer_socket["ledger"])
+    assert events[-1]["evidence"].startswith("manager=user;")
+    state = tmp_path / "state.json"
+    ledger = tmp_path / "events.jsonl"
+    monkeypatch.setattr(health, "state_path", lambda: state)
+    monkeypatch.setattr(health, "ledger_path", lambda: ledger)
+    monkeypatch.setattr(health, "notify_desktop", lambda *args, **kwargs: True)
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(json.dumps(mixed))
+    assert (
+        cli.emit_failure_command(
+            [
+                "--unit",
+                "dup.service",
+                "--result",
+                "exit-code",
+                "--manager",
+                "system",
+                "--socket",
+                str(tmp_path / "nothing-listening.sock"),
+                "--inventory",
+                str(inventory),
+            ]
+        )
+        == 0
+    )
+    assert "the reducer was unreachable" in capsys.readouterr().err
+    fallback = transitions(ledger)
+    assert fallback[-1]["evidence"].startswith("manager=system;")
+
+
+def test_invalid_manager_is_refused_before_emission(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="manager must be"):
+        health.emit_failure(
+            "x.service",
+            "exit-code",
+            {},
+            health.Emitter(tmp_path / "s.json", tmp_path / "l.jsonl", lambda *_: None),
+            manager="root",
+        )
+    assert not (tmp_path / "l.jsonl").exists()
+
+
+def test_failure_rejects_invalid_content_length_before_emitting(
+    hub_server_factory, tmp_path: Path, monkeypatch
+) -> None:
+    inventory = tmp_path / "inventory.json"
+    inventory.write_text(json.dumps(INVENTORY))
+    calls = []
+    monkeypatch.setattr(
+        health,
+        "emit_failure",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    base = hub_server_factory(inventory_path=inventory)
+    parsed = urlsplit(base)
+    connection = HTTPConnection(parsed.hostname, parsed.port, timeout=5)
+    try:
+        connection.putrequest("POST", "/v1/health/failure")
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", "not-a-number")
+        connection.endheaders(b'{"unit":"must-not-emit.service"}')
+        response = connection.getresponse()
+        body = json.loads(response.read())
+    finally:
+        connection.close()
+
+    assert response.status == 400
+    assert body == {"error": "request body is missing or too large"}
+    assert calls == []

@@ -6,37 +6,37 @@
 #   sinnix-hub.service          Caddy: static serving + reverse proxying
 #
 # Everything the hub serves that is not a file on disk -- the pages, the action
-# API, the annotation spool -- comes from the ops-reducer over its Unix socket.
+# API, the annotation spool -- comes from the hub-server over its Unix socket.
 #
 # ── Why the user manager ────────────────────────────────────────────────────
-# The dashboard's whole value is the ops-reducer's current-state snapshot, and
-# the reducer is a *user* service whose Unix socket is 0600-owned by the
+# The dashboard's whole value is the hub-server's current-state snapshot, and
+# the hub server is a *user* service whose Unix socket is 0600-owned by the
 # operator. Running the hub in the same manager lets it reach that socket, the
-# operator-owned reports tree, and the reducer's bounded action API without
+# operator-owned reports tree, and the hub server's bounded action API without
 # loosening a single permission. Nothing here needs a privileged port.
 #
 # ── Where the pages come from ───────────────────────────────────────────────
 # Caddy serves no HTML of its own beyond /reports/. Every page is rendered on
-# request by the ops-reducer, which already holds the state the pages show, and
-# Caddy reverse-proxies the page paths to the reducer's Unix socket. Rendering
+# request by the hub-server, which already holds the state the pages show, and
+# Caddy reverse-proxies the page paths to the hub server's Unix socket. Rendering
 # on request replaced an earlier design that wrote the same pages to static
 # files on a 60-second timer; a page is now as current as the moment it was
 # asked for, and there is no window in which the hub describes a system that
 # has since moved on.
 #
 # ── Where annotations go ────────────────────────────────────────────────────
-# `/feedback` is a route on that same reducer, writing the same append-only
+# `/feedback` is a route on that same hub server, writing the same append-only
 # JSONL an earlier standalone feedback daemon wrote (same envelope, same
 # file-per-UTC-day, same fsync per line -- agents read those files directly).
 # Arrival of a `sinnix-elicit-v1` record starts the drain that a 120s timer used
 # to run, coalesced so a comparison session refits the model once rather than
 # once per tap.
 #
-# Auth: the reducer treats its Unix socket as authorized (it is 0600 in the
+# Auth: the hub server treats its Unix socket as authorized (it is 0600 in the
 # operator's runtime dir) and still demands a bearer token on its loopback TCP
 # listener, so proxying the page paths through
 # the socket exposes exactly what the action API already exposed there and
-# nothing more: the same-origin gate below and the reducer's own
+# nothing more: the same-origin gate below and the hub server's own
 # target identity check remain the admission checks for POSTs.
 #
 # ── Why it cannot be seen from the LAN ──────────────────────────────────────
@@ -58,7 +58,7 @@
 #     firewall before it reaches a socket that was never bound for it anyway.
 #
 # ── Why there is no second control plane ────────────────────────────────────
-# Every button on every page posts to the ops-reducer's existing action API
+# Every button on every page posts to the hub-server's existing action API
 # through a reverse-proxied path. That API owns admission (targets must be
 # attested runtime-inventory units, queued jobs, or admitted
 # processes), target identity checks (expected_target), idempotency keys, and
@@ -275,7 +275,7 @@ mkServiceModule {
             {
               label = "Ops snapshot (JSON)";
               href = "/ops/v1/snapshot";
-              note = "the reducer's current-state document";
+              note = "the hub server's current-state document";
             }
             {
               label = "Action receipts (JSON)";
@@ -359,7 +359,7 @@ mkServiceModule {
           route {
             ${hostGuard "hub"}
 
-          # The reducer trusts this Unix socket. Apply the same browser
+          # The hub server trusts this Unix socket. Apply the same browser
           # boundary to its API and page routes, before proxying.
           handle_path /ops/* {
             ${browserGuard "ops" false cfg.port}
@@ -371,7 +371,7 @@ mkServiceModule {
             reverse_proxy unix/${opsSocket}
           }
 
-          # Not handle_path: the reducer routes on `/feedback` itself, and
+          # Not handle_path: the hub server routes on `/feedback` itself, and
           # the CORS answer it gives this route (reports are opened off disk
           # as file://, Origin null) is deliberately not given to /ops/*.
           handle /feedback* {
@@ -407,9 +407,9 @@ mkServiceModule {
             reverse_proxy unix/${phoneSocket}
           }
 
-          # The pages themselves. Rendered on request by the ops-reducer from
+          # The pages themselves. Rendered on request by the hub-server from
           # the state it already holds -- no prefix stripping here, unlike
-          # /ops/* above: the reducer routes on the page path itself.
+          # /ops/* above: the hub server routes on the page path itself.
           redir /work /work/
           redir /services /services/
 
@@ -482,10 +482,10 @@ mkServiceModule {
           '';
         }
         {
-          assertion = config.sinnix.services.ops-reducer.enable;
+          assertion = config.sinnix.services.hub-server.enable;
           message = ''
-            sinnix.services.hub requires sinnix.services.ops-reducer.enable —
-            every page except /reports/ is rendered by the reducer on request,
+            sinnix.services.hub requires sinnix.services.hub-server.enable —
+            every page except /reports/ is rendered by the hub server on request,
             and every button posts to its action API. Without it the hub is a
             proxy to nothing.
           '';
@@ -504,12 +504,12 @@ mkServiceModule {
         }
       ];
 
-      # The pages are rendered by the reducer, which needs the manifest this
+      # The pages are rendered by the hub server, which needs the manifest this
       # module owns the content of; so is /feedback, which needs the spool
-      # directory. Elicit drain execution is the reducer's declared AgentCTL
-      # operation: the reducer requests and waits for it without acquiring
+      # directory. Elicit drain execution is the hub server's declared AgentCTL
+      # operation: the hub server requests and waits for it without acquiring
       # access to the elicit state itself.
-      sinnix.services.ops-reducer = {
+      sinnix.services.hub-server = {
         hubManifest = manifest;
         feedbackDir = cfg.feedbackDir;
       };
@@ -644,11 +644,11 @@ mkServiceModule {
         systemd.user.services.sinnix-hub = {
           Unit = {
             Description = "Sinnix tailnet hub (Caddy)";
-            After = [ "sinnix-ops-reducer.socket" ];
-            # The reducer renders every page Caddy does not serve off disk and
+            After = [ "sinnix-hub-server.socket" ];
+            # The hub server renders every page Caddy does not serve off disk and
             # takes the annotation posts, so its socket has to exist before the
             # proxy takes a request.
-            Wants = [ "sinnix-ops-reducer.socket" ];
+            Wants = [ "sinnix-hub-server.socket" ];
           };
           Service = {
             Type = "simple";
@@ -713,11 +713,11 @@ mkServiceModule {
             Restart = "on-failure";
             RestartSec = "5s";
             # sd_notify from the serve loop's own thread (server.py), same
-            # qokz/ops-reducer pattern: this detects a stalled main loop,
+            # qokz/hub-server pattern: this detects a stalled main loop,
             # not an independently blocked HTTP worker or stream receiver.
             # Type stays simple rather than notify --
             # READY does not gate start ordering here any more than it does
-            # for the reducer, and the value wanted is the crash detection
+            # for the hub server, and the value wanted is the crash detection
             # WatchdogSec buys, not a start-order dependency on it.
             NotifyAccess = "main";
             WatchdogSec = "60s";

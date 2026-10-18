@@ -16,7 +16,7 @@
 # WHY NOT UNIX SOCKETS EVERYWHERE. Where a service is genuinely local-only and
 # speaks a protocol we control, a unix socket IS better -- filesystem
 # permissions instead of "anything on loopback", no port space, no collisions
-# at all. The ops-reducer already does this (%t/sinnix/ops.sock). TCP survives
+# at all. The hub-server already does this (%t/sinnix/ops.sock). TCP survives
 # here for the cases that need it: OpenAI-compatible HTTP clients, containers
 # with their own network namespace, and anything reached across the tailnet.
 {
@@ -27,7 +27,7 @@
     openWebui = 8881; # tailnet republish of the Open WebUI frontend
     comfyui = 8882; # tailnet republish of the ComfyUI frontend
   };
-  opsReducer = 3090; # read-only current-state reducer (also a unix socket)
+  hubServer = 3090; # hub server: current machine state and actions (also a unix socket)
 
   # ── Local AI backends (public front door / private backend) ──────────────
   ollama = {

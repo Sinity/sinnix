@@ -39,7 +39,7 @@ def observe_report_keys(observe_root: Path) -> set[str]:
 
 def reducer_state_keys(reducer_root: Path) -> set[str]:
     """Keys the reducer adds on top of the observe report in refresh()."""
-    tree = ast.parse((reducer_root / "sinnix_ops_reducer/reducer.py").read_text())
+    tree = ast.parse((reducer_root / "sinnix_hub_server/reducer.py").read_text())
     keys: set[str] = set()
     for node in ast.walk(tree):
         # `report["attention"] = ...` style additions.

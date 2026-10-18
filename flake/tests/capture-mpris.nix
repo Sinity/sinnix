@@ -32,7 +32,7 @@
             sinnix.services.stt.enable = true;
             sinnix.services.hub.enable = true;
             sinnix.services.tailscale.enable = true;
-            sinnix.services.ops-reducer.enable = true;
+            sinnix.services.hub-server.enable = true;
           }
         ];
         assertions = config: [

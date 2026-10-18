@@ -3,7 +3,7 @@
 `sinnix.services.hub` is the browser front door to the workstation: a
 dashboard, generated reports, and the phone's receiver. It is
 reachable from the desktop and over Tailscale (the phone), and from nowhere
-else. It runs as a Caddy user service in front of `sinnix-ops-reducer`, the
+else. It runs as a Caddy user service in front of `sinnix-hub-server`, the
 user service that collects machine state and executes actions.
 
 ## Routes
@@ -18,12 +18,12 @@ a sub-path).
 | `/work/`         | What is running: project commands, pueue groups, jobs, budgets |
 | `/services/`     | Declared services grouped by resource class                    |
 | `/reports/`      | Generated reports (report port only)                           |
-| `/ops/v1/*`      | The ops-reducer's read and action API                          |
+| `/ops/v1/*`      | The hub-server's read and action API                          |
 | `/feedback`      | Write-only inbox for report annotations                        |
 
 ## Actions
 
-Every button posts to `/ops/v1/actions`, the ops-reducer's action API; the hub
+Every button posts to `/ops/v1/actions`, the hub-server's action API; the hub
 itself runs no commands. The API only accepts:
 
 - `start`, `stop`, `restart` on a unit listed in
@@ -54,7 +54,7 @@ devshell command, skill, capture lane, MCP server and agent CLI, with its
 description, how to run it, whether it is enabled, and the file that declares
 it. `/etc/sinnix/capability-index.json` is built at evaluation time
 (`modules/capability-index.nix`) from the descriptions those declarations
-already require, so nothing is written twice; the ops-reducer adds the hub's
+already require, so nothing is written twice; the hub-server adds the hub's
 own routes.
 
 ```bash
@@ -83,7 +83,7 @@ sinnix capabilities --kind script
 - **Firewall.** The ports are opened on `tailscale0` only
   (`networking.firewall.interfaces.tailscale0.allowedTCPPorts`).
 
-The hub runs in the user manager because the ops-reducer's socket and the
+The hub runs in the user manager because the hub-server's socket and the
 reports tree are operator-owned; no privileged port or extra permission is
 needed.
 

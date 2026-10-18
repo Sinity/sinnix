@@ -10,7 +10,7 @@ sinnix-phone-dispatcher = "sinnix_phone_dispatcher.cli:main"
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
-# Explicit, same reasoning as sinnix-ops-reducer's pyproject: flat-layout
+# Explicit, same reasoning as sinnix-hub-server's pyproject: flat-layout
 # auto-discovery would find every submodule today, but silently dropping one
 # later is a failure that only shows up as a missing route or a dead lane at
 # runtime, not a build error.

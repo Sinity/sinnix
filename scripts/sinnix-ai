@@ -47,7 +47,7 @@ commands:
   list                 All AI services: state, endpoint, autostart, admission key
   status [name]        Detail for one service (or GPU + active summary)
   start <name>...      Start service(s) (proxy reset-failed direct; backend via the
-                       ops-reducer action API, same admission path the hub uses)
+                       hub-server action API, same admission path the hub uses)
   stop <name>...       Stop service(s) and free VRAM
   pin <name> [dur]     Keep service resident past its idle timeout (default: 2h)
   unpin <name>         Release a pin early (idempotent; ok if not pinned)
@@ -72,7 +72,7 @@ or a number with s/m/h suffix (e.g. 30m, 2h). Services without an
 idle-aware proxy (open-webui) don't idle-teardown in the first place, so
 pinning them is a no-op refused with an explanation.
 
-start/stop delegate the backend unit's own lifecycle to the ops-reducer's
+start/stop delegate the backend unit's own lifecycle to the hub-server's
 action API (%t/sinnix/ops.sock), so restartability and idempotency stay
 single-sourced.
 Bringing the socket proxy back from a latched trigger-limit (reset-failed
@@ -248,7 +248,7 @@ ops_get() {
   curl -fsS -m 3 --unix-socket "$OPS_SOCKET" "http://localhost$1" 2>/dev/null
 }
 
-# All backend lifecycle actions use the reducer's admission and receipts.
+# All backend lifecycle actions use the hub server's admission and receipts.
 ops_action() {
   local action="$1" unit="$2" reason="$3"
   local body prepared resp http_code err

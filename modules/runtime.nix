@@ -16,16 +16,16 @@ let
   resourceClassNames = builtins.attrNames runtimeDefaults.classes;
 
   # Sinnix's single failure-report path: a unit that enters `failed`
-  # reports itself, so nothing has to poll it. It routes into the ops-reducer,
+  # reports itself, so nothing has to poll it. It routes into the hub-server,
   # which owns the health sweep, rather than appending to the ledger directly:
   # one schema and one dedup state for both the OnFailure path and the sweep.
   # When they kept separate keys the same unit re-notified on every failure and
   # its recovery never paired with the outage (2026-08-14, on
-  # borgbackup-status.service). `emit-failure` posts to the running reducer and
-  # falls back to writing the same transition itself when the reducer is down,
+  # borgbackup-status.service). `emit-failure` posts to the running hub server and
+  # falls back to writing the same transition itself when the hub server is down,
   # which is exactly a moment when units fail.
   #
-  # umask 0002 because this runs as root while the reducer runs as the
+  # umask 0002 because this runs as root while the hub server runs as the
   # operator: both write the same two files in /run/sinnix, which is setgid
   # `users` for that reason.
   #
@@ -35,7 +35,7 @@ let
     name = "sinnix-unit-failure-notify";
     runtimeInputs = [
       pkgs.systemd
-      scriptPkgs.sinnix-ops-reducer
+      scriptPkgs.sinnix-hub-server
     ];
     text = ''
       umask 0002
@@ -47,7 +47,7 @@ let
         manager=system
         result="$(systemctl show "$unit" -p Result --value 2>/dev/null || true)"
       fi
-      sinnix-ops-reducer emit-failure --unit "$unit" --result "''${result:-unknown}" --manager "$manager"
+      sinnix-hub-server emit-failure --unit "$unit" --result "''${result:-unknown}" --manager "$manager"
     '';
   };
 
@@ -302,7 +302,7 @@ let
         ];
         description = ''
           Dotted paths into a sinnix-capture-v1 record's `payload`
-          that this lane claims to populate. The reducer's health sweep
+          that this lane claims to populate. The hub server's health sweep
           samples the lane's most recent records and flags the lane
           `degenerate` when a declared field is null/empty in EVERY
           sampled record -- the "alive and writing at full cadence,
@@ -930,13 +930,13 @@ in
         scriptPkgs.sinnix-preflight
       ];
       # setgid: the health transition ledger and its dedup state are written by
-      # the ops-reducer (as the operator) and, when the reducer is down, by the
+      # the hub-server (as the operator) and, when the hub server is down, by the
       # root-run failure template. Group `users` inherited by both is what keeps
       # the second writer from locking the first out of its own state file.
       systemd.tmpfiles.rules = [
         "d /run/sinnix 2775 root users -"
         # The two shared files, made group-writable wherever they came from:
-        # the root-run failure template can create them before the reducer ever
+        # the root-run failure template can create them before the hub server ever
         # does, and a live switch inherits whatever the previous generation
         # left. `z` is a no-op when the path does not exist.
         "z /run/sinnix/health-transitions.jsonl 0664 root users -"

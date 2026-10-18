@@ -63,7 +63,7 @@ in
     ./tests/file-catalog.nix
     ./tests/report-navigation.nix
     ./tests/pkg-suites.nix
-    ./tests/ops-reducer.nix
+    ./tests/hub-server.nix
     ./tests/quota.nix
     ./tests/noctalia.nix
     ./tests/fstrim.nix

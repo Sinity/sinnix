@@ -19,7 +19,7 @@
 # Row shape:
 #   kind         feature | service | ai-backend | script | command | skill
 #                | capture-lane | mcp-server | agent-lane
-#                (hub-page rows are added at render time by the ops-reducer,
+#                (hub-page rows are added at render time by the hub-server,
 #                which owns the route table)
 #   name         the identifier the operator would use
 #   description  one line, from the declaration

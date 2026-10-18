@@ -287,7 +287,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     # thread that is itself inside serve_forever() would deadlock, which is
     # why the retired script-era version spawned a one-shot thread per signal
     # instead; one long-lived server thread plus a main-thread loop is the
-    # same shape sinnix-ops-reducer's serve() uses.
+    # same shape sinnix-hub-server's serve() uses.
     shutdown_event = threading.Event()
 
     def request_shutdown(_signum: int, _frame: Any) -> None:

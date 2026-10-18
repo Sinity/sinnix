@@ -163,7 +163,7 @@ returns only new log bytes.
   `campaign.progress` delegate to Lynchpin.
 - **Machine.** `machine.snapshot` and `machine.query` delegate to
   `sinnix-observe`. `machine.prepare` and `machine.operate` send typed requests
-  to the ops reducer.
+  to the hub server.
 
 The checked-in Beads, Polylogue and Lynchpin input models are generated from the
 owners' published contracts (`generate_beads_inputs.py`,

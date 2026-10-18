@@ -57,7 +57,7 @@
             }
             ''
               NOCTALIA_OPS_PLUGIN=${../../dots/noctalia/plugins/sinnix-ops} \
-              NOCTALIA_OPS_REDUCER=${../../pkgs/sinnix-ops-reducer} \
+              NOCTALIA_OPS_REDUCER=${../../pkgs/sinnix-hub-server} \
               NOCTALIA_OPS_OBSERVE=${../../pkgs/sinnix-observe} \
               NOCTALIA_OPS_CONTRACT=${../../flake/tests/noctalia-state-contract.py} \
               NOCTALIA_OPS_ORDERING=${./noctalia-ops-ordering.py} \

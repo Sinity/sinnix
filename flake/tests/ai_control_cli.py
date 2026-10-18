@@ -74,7 +74,7 @@ sys.exit(1)
     detail = run('status', 'direct-ai')
     assert detail.returncode == 0 and 'manual' in detail.stdout, detail
     assert 'backend is not running' in detail.stdout
-    assert not any('sinnix-ops-reducer.service' in json.loads(line) for line in calls.read_text().splitlines())
+    assert not any('sinnix-hub-server.service' in json.loads(line) for line in calls.read_text().splitlines())
     before = calls.read_bytes()
     for name in ('--help', '--version', '-e'):
         result = run('start', name)
