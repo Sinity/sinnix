@@ -1,123 +1,105 @@
-# Filesystem index: scope and integrity
+# Filesystem index
 
-`sinnix-fs` owns a directory inventory, bounded content observations, and materialized views of separately authored judgments. It is not a storage owner, an application-archive replacement, or an automatic deduplicator. On the installed workstation, invoke it through `sinnix fs`; service units use the `sinnix-fs` package binary.
+`sinnix fs` (package `sinnix-fs`) keeps an inventory of directories, bounded
+content fingerprints, and views of the authored file judgments. It does not own
+any storage and never deletes or deduplicates anything. The weekly
+`sinnix-fs-index.service` runs `sinnix-fs run --out-dir /realm/state/fs-index`.
 
-Generation maintenance requires regular ledger and database inputs. Missing paths, unavailable inputs (including permission and I/O errors), and wrong object types are reported separately before reading the ledger or opening a database. These failures refuse maintenance and leave the selected generation intact.
+## Commands
 
-Every DuckDB session starts with a 512 MiB buffer limit, two workers, and insertion-order preservation disabled so larger operations can spill beside their databases. Read-only queries enable safe mode after these settings and before caller SQL. The scheduled scan also bounds disk traffic per device: 40 MB/s reads and 10 MB/s writes on the managed realm device, and 20 MB/s reads and 10 MB/s writes on the store and external archive devices. These limits complement the service memory boundary and low scheduling weight. They do not change scan coverage or publication validation.
-
-## Content identity
-
-Content schema v2 separates full-file `sha256` from `sample_sha256`. Files at or below the 8 MiB full-hash bound receive `fingerprint_kind: sha256-full`; larger files receive `sha256-head-tail-size-v1`, calculated from the first MiB, last MiB, and decimal file size. `fingerprint_bytes` states the payload bytes read. Matching samples are candidates, not evidence of byte equality.
-
-The legacy v1 scanner put both algorithms in a column named `sha256`. Importing a v1 observation must interpret that field using the recorded size: above 8 MiB it is a sample and is demoted to `sample_sha256`. Unknown schemas, errors and malformed digest values do not become content IDs. The raw input remains a versioned observation; clients must not reinterpret legacy columns without the schema.
-
-`duplicates` contains only full-file digest groups. `sampled_duplicate_candidates` is separate and carries an explicit limitation. Even a full-hash match is not deletion authorization: source acquisitions, application ownership, independently retained replicas and preservation obligations still matter.
-
-Before and after each fingerprint, lstat/fstat identity and modification metadata are compared. Symlinks and nonregular files are not opened as payloads; nonblocking, no-follow reads prevent ordinary stream substitution from hanging fingerprinting. Empty files remain represented. Content excerpts have their own bounded-read budget. These checks detect ordinary races; they are not cryptographic claims about a hostile filesystem or guarantees that data has not changed since a historical observation.
-
-## Coherent generations
-
-`run --out-dir INDEX` builds fresh scan artifacts in a private generation directory. `ledger --index-dir INDEX` reuses unchanged scan artifacts and refreshes classifications. Neither command mutates a published generation. All databases, Parquet files and promised relations are validated after reopening before one atomic `current` pointer is published. A failed attempt retains its private candidate and the previous complete generation.
-
-Authored `judgments.jsonl` and `lake_refs.jsonl` remain in the owner directory, outside derived generations. Recovery explicitly selects retained scan artifacts with `ledger --retained-inputs PATH`; the resulting manifest records their original dates and does not claim a fresh scan. The manifest records exclusions for fresh scans, ledger identity and invalid historical definitions. Historical invalid definitions remain unchanged in the authored ledger and are excluded from effective results.
-
-`sinnix lake-refs` scans literal source-code references. An unavailable configured repository or failed source search returns exit 2 and preserves the existing reference ledger. Ledger writes use private atomic staging, preserving the previous file if staging or replacement fails. A readable source with no references is an empty result, not a source failure. `check` returns exit 1 for missing referenced paths and exit 0 when all observed references resolve.
-
-Use `status --index-dir INDEX` to inspect validity, classification freshness, scan dates and the last publication attempt. Scan coverage includes directory errors/pruning and content error/boundary observations. An unreadable content file or a configured native collection boundary makes `coverage.incomplete` true even when directory enumeration succeeded. Older content databases without a boundary-record column report `content_boundaries: null` and incomplete coverage, rather than an invented zero. These counts describe retained observations, not the number of hidden descendants. Validity describes usable published artifacts and remains separate from coverage. Current-pointer access failures and wrong object types retain their own diagnoses. If the publication lock cannot be inspected, status reports `publication_in_progress: null` with `publication_state_error` and exits nonzero while retaining the separate generation diagnosis. Unreadable or malformed last-attempt receipts also make status exit nonzero. Receipt, lock and generation-manifest readers reject nonregular files using nonblocking opens and descriptor type checks, so a substituted FIFO cannot make those observations wait for a writer. Failed candidate enumeration reports `unpublished_candidates: null` and `candidate_inventory_error`; it never substitutes an empty inventory for inaccessible storage.
-
-The shared judgment reader rejects nonregular ledger inputs without waiting for a FIFO writer; regular-file symlinks and the existing byte/record limits retain their behavior. A malformed current ledger reports stale classifications and its input error while preserving the published generation’s validity. Status lists retained unpublished candidates and uses the publication lock to distinguish an active writer from leftover work, including abrupt interruptions without a failure receipt. Use `query --index-dir INDEX 'SELECT * FROM coverage'` for read-only SQL. Each query resolves the pointer once and opens that generation read-only in CLI safe mode, with user init scripts disabled. SQL cannot write external files or re-enable external access. `files` is a persistent local relation in the inventory database. No relation requires a writer-session attachment. Superseded generations remain retained; cleanup requires owner review of active readers.
-
-The former independent `inventory`, `content` and `content-views` output commands are retired. Database and Parquet publication is part of the generation lifecycle.
-
-## Collection boundaries, not invisible data
-
-The content scanner stops at configured native or temporary collection boundaries, including temporary work, Polylogue's live and retired native archive, and Stashbox's store. It emits a `kind: collection_boundary` row with `exclusion_reason`, no digest and no invented descendant count. A boundary does not mean empty, deleted, unimportant, unbacked, or disposable. Native owner queries and the directory inventory remain distinct access paths.
-
-Relative and dot-segment directory roots resolve to their physical absolute location before exclusion checks and enumeration. Fresh manifests record absolute root addresses so their scope remains interpretable outside the caller’s working directory. Parent-directory aliases therefore cannot bypass a native collection boundary. Repeated spellings of the same resolved directory root are inspected once. Direct symlink roots remain explicit error observations; skipped directory aliases within a scope leave boundary observations.
-
-Pruning happens before entering the excluded child directory. Exclusions match path components, so a rule for one directory cannot swallow a similarly prefixed sibling. Build/dependency-directory exclusions also leave explicit boundary records. Missing roots, non-directory roots, and unreadable directories produce error observations, rather than an indistinguishable empty result. Directory inventory traversal uses a deque while preserving breadth-first ordering.
-
-This remains bounded generic content inspection, not a claim that every native record or filesystem byte was indexed. Do not enable deeper traversal merely to make a missing native adapter appear to work.
-
-## Judgments and publication
-
-Authored judgment and reference ledgers are not regenerable simply because they share a directory with derived indexes. Ledger materialization uses the JSON readers already supplied by the declared DuckDB runtime; it does not install extensions or require a per-user extension cache at runtime. Prefix inheritance matches the named path or descendants separated by `/`, not lexical lookalikes. Content-addressed judgment joins use only full-file digests, never legacy large-file samples.
-
-Classification coverage counts each exact location once, including directories represented in both inventory and content-boundary observations. A file's full digest survives overlap with metadata-only observations. Conflicting full digests at one location suppress its content-specific classification; raw observations remain retained. Ledger refresh corrects existing coverage without a fresh scan.
-
-Materialization uses explicit nullable schema columns. A readable scope with no selected content files publishes validated zero-row content artifacts; unavailable roots still produce explicit error observations. Malformed JSON fails staged publication rather than being silently skipped. A generation publishes as one pointer after staging and validation. Existing generations remain in place on failure.
-
-The focused tests under `pkgs/sinnix-fs/tests` use synthetic small files and isolated real DuckDB databases. Counterexamples include equal head/tail/size with a different middle, legacy sample demotion, in-flight changes, missing roots, FIFOs, aliases, malformed JSON, quoted filesystem paths, non-traversed collections, and prefix siblings. Test dependencies belong to the existing Nix script-suite declaration, not an undeclared host installation.
-
-## Direct authored classifications
-
-The `judgments` actions read the existing `judgments.jsonl` without opening DuckDB, rescanning directories or reading the classified payload:
-
-```sh
-PYTHONPATH=pkgs/sinnix-lib python3 scripts/sinnix-fs judgments --index-dir /path/to/index explain /absolute/path
-PYTHONPATH=pkgs/sinnix-lib python3 scripts/sinnix-fs judgments --index-dir /path/to/index audit
-PYTHONPATH=pkgs/sinnix-lib python3 scripts/sinnix-fs judgments --index-dir /path/to/index report
+```text
+sinnix fs run --out-dir INDEX         # fresh scan into a new generation
+sinnix fs ledger --index-dir INDEX    # reuse the last scan, refresh classifications
+sinnix fs status --index-dir INDEX    # validity, freshness, coverage, last attempt
+sinnix fs query --index-dir INDEX 'SELECT * FROM coverage'   # read-only SQL
+sinnix fs judgments explain|audit|report|import|vocabulary
+sinnix fs note-links --root DIR [--reference-root DIR]       # plan wiki-link repairs
+sinnix lake-refs                      # literal path references in source code
 ```
 
-`explain` separates topic, role, maintenance_owner and preservation facets from legacy fields. Resolution uses operator precedence within a target, then decision time, followed by the most-specific matching path for each field. An explicit unknown child rule masks broader assumptions. Equal-ranked disagreements are returned as ambiguous rather than selected by row order. SQL uses the same validation, timestamp ordering and equal-rank ambiguity semantics. Existing materializations are not refreshed by direct lookup.
+## Generations
 
-The reply includes source lines, full decisions, record hashes and ledger identity. Lexical resolution deliberately does not dereference aliases, assert path existence, hash contents, or match content-addressed decisions from a guessed digest. `audit --check-paths` explicitly opts into location metadata checks, without enumerating descendants. Absent historical paths remain history; they are not automatically rewritten to similarly named current directories.
+Each `run` or `ledger` builds a complete generation in a private directory,
+reopens and validates every database and Parquet file, then switches one
+`current` pointer. A failed attempt leaves the previous generation in place and
+keeps its own candidate for inspection; `status` lists such leftovers and says
+whether a writer is still active. Older generations are kept until reviewed.
+`ledger --retained-inputs PATH` rebuilds from a retained scan and records that
+the scan was not fresh.
 
-Reads are bounded to 8 MiB and 25,000 records. Malformed JSON fails the command without a partial result. Invalid definitions, including filename-shaped sha256 targets and timezone-free timestamps, are reported and excluded from lookup while remaining untouched on disk. Exit 2 indicates input/access failure; exit 1 indicates audit findings or ambiguous explanation.
+DuckDB sessions use a 512 MiB buffer and two workers and spill to disk beside
+the database. Read-only queries run in DuckDB's safe mode and cannot write
+files.
 
-`report` emits a rebuildable Markdown collection-facet projection; the JSONL remains its only source of truth. Preserve original rows and actor attribution when adding fresh observations. A maintenance owner is not the topic of all data it stores, and a preservation constraint is not a backup certificate or deletion permission.
+## Content fingerprints
 
-`judgments import observations.jsonl` validates an entire incoming batch, locks the ledger, and atomically appends previously unseen definitions. Existing historical rows, including invalid historical definitions, remain intact; invalid incoming definitions refuse the whole batch. Retries of identical records are idempotent. Methods, actors, timestamps and evidence are supplied explicitly by the caller; importing an agent observation does not turn it into an operator decision. The combined ledger must stay within the reader's size and record bounds. Import does not refresh DuckDB or reports.
+Files up to 8 MiB get a full SHA-256 (`fingerprint_kind: sha256-full`). Larger
+files get `sample_sha256` from the first MiB, the last MiB and the size
+(`sha256-head-tail-size-v1`). Matching samples are candidates only; the
+`duplicates` view uses full digests, and `sampled_duplicate_candidates` is
+separate. Even a full-digest match does not mean a copy may be deleted.
 
-The SQL `coverage` table summarizes inherited legacy `subject` decisions over indexed path rows. It does not measure content inspection or the current four collection facets. Use the file catalog's explicit inspection coverage for survey progress, and retain the scan's own completeness and exclusion information separately.
+Each file's identity and modification time are checked before and after it is
+read; symlinks and special files are never opened. Version-1 scans stored both
+kinds of digest in one `sha256` column; on import, values for files over 8 MiB
+are treated as samples.
 
-## Portable note references
+## Coverage and boundaries
 
-`note-links` is a read-only repair planner for legacy wiki-style Markdown references. It reads only explicitly selected current roots and reference-only roots:
+The scanner stops at configured boundaries (temporary work trees, Polylogue's
+archive, Stashbox's store, build and dependency directories) and records a
+`collection_boundary` row with the reason, never a guessed file count. A
+boundary does not mean empty or unimportant. Missing roots, unreadable
+directories and files that fail to read are recorded as errors, and
+`status` reports coverage as incomplete when any exist. Directory totals above
+an error are marked incomplete too. Roots are resolved to absolute paths
+before matching exclusions, so an alias cannot bypass a boundary.
 
-```sh
-PYTHONPATH=pkgs/sinnix-lib python3 scripts/sinnix-fs note-links \
-  --root /path/to/current-notes \
-  --reference-root /path/to/historical-references \
-  --exclude-component native-workspace
-```
+## Judgments
 
-Bare references resolve by a unique retained frontmatter ID, explicit alias, or exact scoped filename. Current roots precede historical roots. Path-qualified references require an exact scoped path; there is no basename fallback. Self-references, ambiguous names, unknown pipe syntax, and heading anchors are left unchanged. Frontmatter, code, comments, embeds and escaped references are not rewritten. The parser supports a narrow string-only frontmatter subset and never evaluates YAML tags or anchors.
+`judgments.jsonl` (and `lake_refs.jsonl`) in the index directory are authored
+records, not derived data. `judgments` reads them directly, without DuckDB or
+a rescan:
 
-The output lists source hashes, target hashes and exact character-span proposals. It performs no writes. Reference-only roots supply targets but never source edits; native Git workspaces and declared exclusions remain explicit boundaries. File, byte, directory and depth budgets bound work. An incomplete or malformed scope emits no applicable changes rather than making uniqueness claims over a partial scan. Exit 2 means incomplete input/coverage, exit 1 means references were observed, and exit 0 means none were found.
+- `explain PATH`: the winning value for each facet (topic, role,
+  maintenance_owner, preservation) with its source line. Operator decisions
+  win, then the latest, then the most specific path. Equal-ranked
+  disagreements are reported as ambiguous. An explicit `unknown` on a child
+  masks a parent's value.
+- `audit [--check-paths]`: invalid, ambiguous and noncanonical records; with
+  `--check-paths`, also paths that no longer exist (history is kept as is).
+- `report [--group-by role] [--role R] [--current-only]`: a Markdown
+  projection of the ledger.
+- `import FILE [--expected-sha256 HASH] [--allow-legacy-roles]`: validates the
+  whole batch, locks the ledger and appends new records atomically; repeating
+  an import is a no-op.
+- `vocabulary`: the role codes (`collection-role-v2`). A role is a broad
+  function; `detail` keeps the original wording.
 
-Applying a chosen proposal remains a separate operation: revalidate every identity-resolution input, preserve source preimages, reject concurrent changes, and check that all intended link destinations still resolve. Preserve newline encoding, original note IDs, and all non-link text. A historical reference remains a historical snapshot even after it becomes clickable; restoring a Git blob does not promote its plans or conclusions into current authority.
+Reads are capped at 8 MiB and 25,000 records. Exit 2 means an input or access
+failure; exit 1 means audit findings or an ambiguous answer. A role,
+maintenance owner or preservation note is never deletion permission or a
+backup guarantee. The SQL `coverage` table summarizes legacy `subject`
+decisions; inspection progress lives in the [file catalog](file-catalog.md).
 
-## Controlled role categories and retained detail
+## Note links
 
-The role facet uses `collection-role-v2`, declared in `ROLE_VOCABULARY` by the filesystem owner. `judgments vocabulary` returns the codes and definitions without opening a ledger or a classified path. Topics remain open-ended; maintenance ownership and preservation constraints retain their own semantics. A role code is never a deletion policy, freshness claim, backup certificate or validation of source assertions.
+`note-links` plans repairs for wiki-style Markdown links in the chosen roots,
+using unique front-matter IDs, aliases or exact filenames; `--reference-root`
+directories provide targets but are never edited. It prints proposals with
+source and target hashes and writes nothing. Ambiguous, self-referencing or
+anchored links are left alone, and an incomplete scan yields no proposals.
+Exit 2 means incomplete input, 1 that links were found, 0 none.
 
-A category describes the broad function; `detail` retains the original descriptive wording. Normalizing a role is a new attributed rule observation referencing its source decisions, not a claim that all original descriptions are synonymous or freshly inspected. Preserve all prior records, actor attribution and source dates. The direct resolver exposes retained details and full winning evidence. Unknown child classifications continue to mask inherited values; operator precedence and ambiguous equal-ranked decisions are unchanged.
+## Literal references
 
-New imports reject unknown known-role codes and non-text details before modifying the ledger. The explicit `--allow-legacy-roles` option admits historical source definitions without pretending they are normalized. Effective noncanonical roles and ambiguity remain audit findings; superseded historical wording is not treated as an active error merely because its bytes remain in the ledger. `--expected-sha256` refuses a reviewed import if the current ledger identity changed.
+`sinnix lake-refs` lists literal `/realm` paths in source code; `check` exits 1
+when a referenced path is missing. Test fixtures and docstrings are marked
+`fixture` and `cosmetic`, so a missing example is not a broken consumer.
+An unreachable repository exits 2 and keeps the previous reference ledger.
 
-```sh
-python3 scripts/sinnix-fs judgments vocabulary
-python3 scripts/sinnix-fs judgments report --group-by role
-python3 scripts/sinnix-fs judgments report --role capture
-python3 scripts/sinnix-fs judgments import reviewed.jsonl --expected-sha256 HASH
-```
+## Tests
 
-Path and role reports are projections of the same ledger, including source detail. They do not require native-store traversal or rebuilding large SQL materializations. Existing older binaries can still read the additive records, but do not acquire new validation or grouping behavior until their source/package is updated.
-
-Literal-reference checks retain test-suite observations as `kind: fixture` and Python documentation strings as `kind: cosmetic`. Assigned multiline command strings remain live. Unparsed Python source remains eligible for live checks. A missing fixture or documentation example does not establish a broken current consumer.
-
-This is a literal-candidate audit. Missing live literals still need caller review for optional outputs, examples stored in metadata and deliberate retirement guards. The repository-relative scan includes extensionless scripts and reports absolute source locations.
-
-
-Judgment reports resolve selected facets in one prefix sweep using the same
-winning-rule semantics as direct explanations. Long facet values and role
-details appear once in a shared section linked from their table cells. This
-keeps inherited prose from multiplying the report size; the full text remains
-available, and the authored ledger is unchanged. Direct `judgments explain`
-continues to include winning evidence for an individual path. With
-`--current-only`, inaccessible locations fail explicitly instead of silently
-disappearing from the report.
-
-Directory totals are incomplete when either listing the directory or inspecting an individual entry fails. The inventory retains observed counts and bytes, records a bounded error summary, and propagates incompleteness to ancestor totals. A file disappearing during a scan is an observation gap, not evidence that the directory was completely measured.
+`pkgs/sinnix-fs/tests` uses small synthetic files and real DuckDB databases,
+including same-sample-different-middle files, legacy digest demotion, files
+changing during a scan, FIFOs, aliases and malformed JSON.
