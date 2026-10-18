@@ -1,7 +1,0 @@
-# Idle-inhibitor provenance
-
-The desktop-default `capture-idle-inhibitors` service writes `sinnix-capture-v1` envelopes to the registry-selected `idle-inhibitors` lane (`desktop/idle-inhibitor`). It polls every 30 seconds, emits changed snapshots, and repeats unchanged state only after five minutes. These observations explain idle inhibition; they do not establish human presence. Transitions shorter than the polling interval can be missed.
-
-Payload `event` is `change` or `heartbeat`. `provenance.hyprland_clients` records inhibiting clients with address, PID, class, title and workspace; `systemd_logind` records the native inhibitor inventory with who, what, why, mode, PID and UID. Logind inventories come through systemd's D-Bus-backed inhibitor interface. `active_window` carries contemporaneous Hyprland context. Each source has an explicit `status`; an available empty inventory differs from an unavailable or malformed source. Other session D-Bus inhibitor protocols are explicitly unsupported because they expose no common enumerable provenance interface. Their absence is never asserted.
-
-Daily envelopes, sequence identities and timestamps use the normal capture writer. Consumers can query the registered lane directly and retain source status when interpreting AFK/attention evidence. At most 2,880 snapshots are emitted per day at the default polling interval; a stable day has about 288 heartbeats. Actual bytes depend on the native inventory and window titles. A failed write is not acknowledged: the service fails and its normal owner restarts it.

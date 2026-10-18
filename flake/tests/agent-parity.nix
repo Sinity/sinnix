@@ -1,9 +1,8 @@
-# Claude/Codex hook parity: the rows docs/agent-hook-parity.md records as
-# "Enforced" on both clients are checked against the two real hook sources
-# (dots/claude/managed-settings.json and the generated Codex hooks), not
-# restated as a list of expected names here. Both clients invoke the installed
-# upstream `polylogue-hook`; its archive root comes from generated
-# `polylogue.toml`.
+# Claude/Codex hook parity: the hooks both clients must run are checked
+# against the two real hook sources (dots/claude/managed-settings.json and the
+# generated Codex hooks), not restated as a list of expected names here.
+# Both clients invoke the installed upstream `polylogue-hook`; its archive
+# root comes from generated `polylogue.toml`.
 #
 # Provably fails when: a `polylogue-hook <Event>` lane present in Claude's
 # settings is dropped from the generated Codex hooks, when a writer bakes a

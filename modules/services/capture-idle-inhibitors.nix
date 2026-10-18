@@ -1,4 +1,9 @@
-# Native inhibitor inventories are diagnostic provenance, not human presence.
+# Records what is inhibiting idle/display sleep: Hyprland inhibiting clients
+# and the logind inhibitor inventory, plus the active window. Polls every 30 s,
+# writes on change and a heartbeat every 5 min. Each source carries its own
+# status, so an empty inventory differs from an unavailable one. This explains
+# idle inhibition; it is not evidence of human presence, and transitions
+# shorter than the poll interval can be missed.
 {
   mkServiceModule,
   mkCaptureLane,
