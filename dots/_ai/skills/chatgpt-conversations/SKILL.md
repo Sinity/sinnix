@@ -1,6 +1,6 @@
 ---
 name: chatgpt-conversations
-description: Read complete ChatGPT conversations and inspect or explicitly download generated files from already open Chrome tabs, without navigating or submitting messages.
+description: Read complete ChatGPT conversations and retrieve explicitly requested linked files or input attachments from already open Chrome tabs, without navigating or submitting messages.
 ---
 
 # ChatGPT conversations
@@ -92,18 +92,34 @@ are ambiguous and fail; filenames alone cannot distinguish a simultaneous
 download of the same name. For repeated names, select one with `--occurrence N`,
 using its zero-based position among matching controls from `artifacts`.
 Generated-file inventory describes rendered controls, not unseen branches.
+It includes inline file references and file cards, with `mode: preview` or
+`mode: download`, message IDs and roles where the current UI exposes them.
+Duplicate controls may refer to the same file; use their message context and
+`--occurrence`. Downloads support both viewer controls and direct file links.
+Completion waits up to 120 seconds; set `SINNIX_CHATGPT_DOWNLOAD_TIMEOUT_SEC`
+for a known larger transfer. A timed-out transfer may still finish in Downloads;
+inspect it before starting another download.
 Sandbox-file links in old assistant turns are frequently
 expired on ChatGPT's side; a null `href` plus a button control is normal.
+For files in unrendered turns and explicitly requested complete archives, use
+[`references/native-files.md`](references/native-files.md). This covers native
+link and upload retrieval, byte-count checks, and bundle-to-link manifests.
 
 Before considering a download of an uploaded file, run
 `scripts/sinnix-chatgpt-conversations locate "<attachment label>"`. Uploaded
-files always originated on this machine and generated bundles are often
+files may still exist on this machine and generated bundles are often
 already downloaded, so the file is usually findable locally — the command
 strips kind words from the label, tries the exact name, collision-suffix
 variants (" (1)" added or removed), and a de-parenthesized core substring
 across the inbox, scratch, exports, trash, and home roots (extendable with
 `--root`). Trash hits include the `.trashinfo` sidecar, which records the
 original path.
+
+Native reads allow a longer bounded CDP response than DOM reads. Each `full`
+fetches a fresh native snapshot and serializes it once across chunks. Explicit
+`SINNIX_CDP_TIMEOUT_SEC` overrides remain available. DOM reads understand both
+legacy role attributes and the current search-unit containers; their rendered
+counts still do not establish complete history.
 
 Canvas documents ("writing blocks") are captured completely: a canvas body is
 part of the containing turn's `text` exactly as rendered, and each turn also

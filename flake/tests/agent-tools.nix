@@ -1477,7 +1477,9 @@ in
             nativeBuildInputs = [
               pkgs.bash
               pkgs.coreutils
+              pkgs.curl
               pkgs.findutils
+              pkgs.fd
               pkgs.gnugrep
               pkgs.gnused
               pkgs.jq
@@ -1488,6 +1490,7 @@ in
             skill="$TMPDIR/chatgpt-conversations"
             mkdir -p "$skill/scripts"
             cp ${../../dots/_ai/skills/chatgpt-conversations/scripts/sinnix-chatgpt-conversations} "$skill/scripts/sinnix-chatgpt-conversations"
+            cp ${../../dots/_ai/skills/chatgpt-conversations/scripts/download-native.mjs} "$skill/scripts/download-native.mjs"
             cp ${../../dots/_ai/skills/chatgpt-conversations/tests.sh} "$skill/tests.sh"
             chmod -R u+w "$skill"
             ${pkgs.bash}/bin/bash "$skill/tests.sh"

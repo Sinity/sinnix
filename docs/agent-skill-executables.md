@@ -6,7 +6,8 @@ This audit records every executable beneath `dots/_ai/skills`. pueue, through `a
 | ------------------------------------------------------------ | --------------------------------------------- | ---------------------------------------------------------- |
 | `orchestrate/scripts/probe_agent_runtime.sh`                 | `orchestrate` skill                           | Direct vendor and quota availability probe.                |
 | `agentctl-agent` (from the AgentCTL package)                 | `agentctl batch start`                        | Private backend argv translator for a worker's agent job.  |
-| `chatgpt-conversations/scripts/sinnix-chatgpt-conversations` | `chatgpt-conversations` skill                 | Read-only conversation extraction from the shared browser. |
+| `chatgpt-conversations/scripts/sinnix-chatgpt-conversations` | `chatgpt-conversations` skill                 | Conversation extraction and explicitly requested file retrieval. |
+| `chatgpt-conversations/scripts/download-native.mjs`         | `sinnix-chatgpt-conversations download-native` | Retrieve selected native file references and verify local copies. |
 | `desktop-control-plane/scripts/chrome-control.sh`            | Agent module and desktop-control-plane skill  | Visible browser UI helper.                                 |
 | `desktop-control-plane/scripts/hypr-control.sh`              | Agent module and desktop-control-plane skill  | Visible window-manager UI helper.                          |
 | `desktop-control-plane/scripts/keyboard-control.sh`          | Agent module                                  | Explicit keyboard UI helper.                               |

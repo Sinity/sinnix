@@ -12,8 +12,8 @@ usage() {
 Usage: sinnix-chatgpt-conversations <command> [options]
 
 Read structured transcripts from ChatGPT conversation tabs already open in the
-operator's Chrome. Every read addresses an explicit CDP page ID. The download
-command only operates on a generated-file control in that tab.
+operator's Chrome. Reads and downloads address an explicit CDP page ID.
+Downloads require an explicit request to obtain the selected files.
 
 Commands:
   list
@@ -41,7 +41,7 @@ Commands:
 
   locate <attachment-label> [--root DIR ...]
       Find a conversation attachment's file on the local machine. Uploaded
-      files always originated here, and generated bundles are often already
+      files may remain locally, and generated bundles are often already
       downloaded, so search local disks before considering a browser
       download. Strips trailing kind words (File, Document, Zip Archive, ...)
       from the label, then searches exact name, the name with collision
@@ -58,6 +58,10 @@ Commands:
       verify the newly downloaded file in the user's Downloads directory.
       A repeated filename requires its zero-based occurrence from artifacts.
       Requires an explicit operator request to obtain the file.
+
+  download-native <page-id> REQUESTS_JSON DESTINATION
+      Retrieve explicitly selected native links or uploaded attachments,
+      including files in unrendered turns. See references/native-files.md.
 
 Examples:
   sinnix-chatgpt-conversations list
@@ -100,16 +104,45 @@ chatgpt_targets() {
   '
 }
 
+read -r -d '' DOM_HELPERS_JS <<'JS' || true
+(() => {
+  const role = turn => turn.dataset.messageAuthorRole ||
+    turn.dataset.contentSearchUnitKey?.match(/(?:^|:)(user|assistant|system|tool)$/)?.[1] || 'unknown';
+  const turns = () => {
+    const legacy = [...document.querySelectorAll('[data-message-author-role]')];
+    return legacy.length ? legacy : [...document.querySelectorAll('[data-content-search-unit-key]')]
+      .filter(turn => role(turn) !== 'unknown');
+  };
+  const id = turn => turn?.dataset.messageId || turn?.dataset.chatgptSearchMessageIds?.split(/\s+/)[0] ||
+    turn?.querySelector?.('[data-chatgpt-selection-message-id]')?.dataset.chatgptSelectionMessageId || null;
+  const controls = () => [...document.querySelectorAll('[aria-label^="Open preview of "], [data-file-reference][aria-label^="Download "]')];
+  const downloadControl = button => {
+    if (button.getAttribute('aria-label').startsWith('Download ')) {
+      button.click(); return 'download';
+    }
+    for (let card = button.parentElement, depth = 0; card && depth < 4; depth++, card = card.parentElement) {
+      const direct = card.querySelector('button[aria-label="Download file"]');
+      if (direct && card.querySelectorAll('[aria-label^="Open preview of "]').length === 1) {
+        direct.click(); return 'download';
+      }
+    }
+    button.click();
+    return button.getAttribute('aria-label').startsWith('Download ') ? 'download' : 'preview';
+  };
+  return { role, turns, id, controls, downloadControl };
+})()
+JS
+
 read -r -d '' SUMMARY_JS <<'JS' || true
 (() => {
   const compact = value => (value || '').replace(/\s+/g, ' ').trim();
-  const turns = [...document.querySelectorAll('[data-message-author-role]')];
+  const turns = chatgptDom.turns();
   return {
     schema: 'sinnix-chatgpt-conversation-summary-v1',
     url: location.href,
     title: document.title,
     message_count: turns.length,
-    roles: turns.map(turn => turn.dataset.messageAuthorRole || 'unknown'),
+    roles: turns.map(chatgptDom.role),
     message_characters: turns.map(turn => (turn.innerText || '').trim().length),
     attachment_turns: turns.flatMap((turn, index) =>
       turn.querySelector('[data-testid*="file"], [data-testid*="attachment"], [data-testid*="library"]')
@@ -131,7 +164,7 @@ read -r -d '' NATIVE_SUMMARY_JS <<'JS' || true
   const result = { native_status: 'unavailable', native_message_count: null, native_mapping_count: null };
   if (!conversationId) return result;
   try {
-    const session = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store' });
+    const session = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(15000) });
     if (!session.ok) { result.native_status = `session_http_${session.status}`; return result; }
     const sessionPayload = await session.json();
     const token = sessionPayload?.accessToken || sessionPayload?.access_token || sessionPayload?.session?.accessToken || sessionPayload?.session?.access_token;
@@ -139,7 +172,7 @@ read -r -d '' NATIVE_SUMMARY_JS <<'JS' || true
     if (!token) { result.native_status = 'session_missing_access_token'; return result; }
     const headers = { Authorization: `Bearer ${token}` };
     if (accountId) headers['ChatGPT-Account-Id'] = accountId;
-    const response = await fetch(`/backend-api/conversation/${encodeURIComponent(conversationId)}`, { credentials: 'include', cache: 'no-store', headers });
+    const response = await fetch(`/backend-api/conversation/${encodeURIComponent(conversationId)}`, { credentials: 'include', cache: 'no-store', headers, signal: AbortSignal.timeout(25000) });
     if (!response.ok) { result.native_status = `conversation_http_${response.status}`; return result; }
     const payload = await response.json();
     if (!payload?.mapping || typeof payload.mapping !== 'object') { result.native_status = 'native_missing_mapping'; return result; }
@@ -158,17 +191,17 @@ read -r -d '' NATIVE_TRANSCRIPT_JS <<'JS' || true
 (async () => {
   const conversationId = new URL(location.href).pathname.match(/^\/c\/([^/?#]+)/)?.[1] || null;
   const dom = () => {
-    const turns = [...document.querySelectorAll('[data-message-author-role]')];
+    const turns = chatgptDom.turns();
     return {
       schema: 'sinnix-chatgpt-conversation-v2', fidelity: 'dom_degraded', provenance: { source: 'rendered_dom', complete: false },
       url: location.href, title: document.title, conversation_id: conversationId,
-      messages: turns.map((turn, index) => ({ index, provider_id: turn.dataset.messageId || null,
-        role: turn.dataset.messageAuthorRole || 'unknown', text: (turn.innerText || '').trim(),
+      messages: turns.map((turn, index) => ({ index, provider_id: chatgptDom.id(turn),
+        role: chatgptDom.role(turn), text: (turn.innerText || '').trim(),
         timestamp: null, attachments: [], provenance: { source: 'rendered_dom', complete: false } }))
     };
   };
   const degraded = (reason) => { const value = dom(); value.native_error = reason; return value; };
-  const session = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store' }).catch(() => null);
+  const session = await fetch('/api/auth/session', { credentials: 'include', cache: 'no-store', signal: AbortSignal.timeout(15000) }).catch(() => null);
   if (!session?.ok || !conversationId) return degraded(!conversationId ? 'conversation_id_unavailable' : `session_http_${session?.status || 'error'}`);
   const sessionPayload = await session.json().catch(() => null);
   const token = sessionPayload?.accessToken || sessionPayload?.access_token || sessionPayload?.session?.accessToken || sessionPayload?.session?.access_token;
@@ -176,7 +209,7 @@ read -r -d '' NATIVE_TRANSCRIPT_JS <<'JS' || true
   if (!token) return degraded('session_missing_access_token');
   const headers = { Authorization: `Bearer ${token}` };
   if (accountId) headers['ChatGPT-Account-Id'] = accountId;
-  const response = await fetch(`/backend-api/conversation/${encodeURIComponent(conversationId)}`, { credentials: 'include', cache: 'no-store', headers }).catch(() => null);
+  const response = await fetch(`/backend-api/conversation/${encodeURIComponent(conversationId)}`, { credentials: 'include', cache: 'no-store', headers, signal: AbortSignal.timeout(25000) }).catch(() => null);
   if (!response?.ok) return degraded(`conversation_http_${response?.status || 'error'}`);
   const payload = await response.json().catch(() => null);
   if (!payload?.mapping || typeof payload.mapping !== 'object') return degraded('native_missing_mapping');
@@ -259,7 +292,7 @@ transcript_js() {
           : null,
     };
   };
-  const turns = [...document.querySelectorAll('[data-message-author-role]')];
+  const turns = chatgptDom.turns();
   const selected = messageLimit === null
     ? turns.slice(messageStart)
     : turns.slice(messageStart, messageStart + messageLimit);
@@ -298,8 +331,8 @@ transcript_js() {
       });
       return {
         index: messageStart + offset,
-        message_id: turn.dataset.messageId || turn.closest('[data-turn-id]')?.dataset.turnId || null,
-        role: turn.dataset.messageAuthorRole || 'unknown',
+        message_id: chatgptDom.id(turn) || turn.closest('[data-turn-id]')?.dataset.turnId || null,
+        role: chatgptDom.role(turn),
         text_characters: text.length,
         text_offset: Math.min(textStart, text.length),
         text: text.slice(textStart, textEnd),
@@ -315,19 +348,26 @@ JS
 }
 
 evaluate() {
-  "$CHROME_CONTROL" evaluate "$1" --js "$2"
+  env SINNIX_CDP_TIMEOUT_SEC="${SINNIX_CDP_TIMEOUT_SEC:-15}" "$CHROME_CONTROL" evaluate "$1" \
+    --js "(() => { const chatgptDom = $DOM_HELPERS_JS; return ($2); })()"
+}
+
+evaluate_native() {
+  SINNIX_CDP_TIMEOUT_SEC="${SINNIX_CDP_TIMEOUT_SEC:-45}" evaluate "$@"
 }
 
 generated_artifacts() {
   local page_id="$1" base
   base=$(evaluate "$page_id" '(() => {
-    const turns = [...document.querySelectorAll("[data-message-author-role]")];
-    const files = [...document.querySelectorAll("button[aria-label^=\"Open preview of \"]")]
+    const turns = chatgptDom.turns();
+    const files = chatgptDom.controls()
       .map((button, control_index) => {
-        const name = button.getAttribute("aria-label").slice("Open preview of ".length);
-        const turn = button.closest("[data-message-author-role]");
+        const label = button.getAttribute("aria-label");
+        const mode = label.startsWith("Download ") ? "download" : "preview";
+        const name = label.slice(mode === "download" ? "Download ".length : "Open preview of ".length);
+        const turn = turns.find(turn => turn.contains(button));
         return { name, control_index, message_index: turn ? turns.indexOf(turn) : null,
-          message_id: turn?.dataset.messageId || null };
+          message_id: chatgptDom.id(turn), role: turn ? chatgptDom.role(turn) : null, mode };
       });
     return { schema: "sinnix-chatgpt-generated-artifacts-v1", url: location.href,
       fidelity: "rendered_dom", files };
@@ -355,6 +395,8 @@ close_generated_viewer() {
 
 download_generated() {
   local page_id="$1" name="$2" occurrence="$3" directory workspace before after changes opened clicked candidate deadline record
+  local timeout_sec="${SINNIX_CHATGPT_DOWNLOAD_TIMEOUT_SEC:-120}"
+  [[ $timeout_sec =~ ^[1-9][0-9]*$ ]] || { printf 'SINNIX_CHATGPT_DOWNLOAD_TIMEOUT_SEC must be a positive integer\n' >&2; exit 2; }
   local -a candidates
 
   [[ $name == "$(basename -- "$name")" && $name != . && $name != .. ]] || {
@@ -381,24 +423,29 @@ download_generated() {
   quoted=$(jq -Rn --arg value "$name" '$value')
   opened=$(evaluate "$page_id" "(() => {
     document.querySelector('button[aria-label=\"Close viewer\"]')?.click();
-    const buttons = [...document.querySelectorAll('button[aria-label^=\"Open preview of \"]')];
-    const button = buttons.filter(item => item.getAttribute('aria-label') === 'Open preview of ' + $quoted)[${occurrence}];
+    const buttons = chatgptDom.controls();
+    const button = buttons.filter(item => ['Open preview of ' + $quoted, 'Download ' + $quoted].includes(item.getAttribute('aria-label')))[${occurrence}];
     if (!button) return false;
-    button.click(); return true;
+    return chatgptDom.downloadControl(button);
   })()")
-  [[ $opened == true ]] || { printf 'generated preview did not open\n' >&2; exit 1; }
+  [[ $opened == preview || $opened == download ]] || { printf 'generated file control unavailable\n' >&2; exit 1; }
   clicked=false
-  for _ in 1 2 3 4 5; do
-    clicked=$(evaluate "$page_id" '(() => {
-      const button = document.querySelector("button[aria-label=\"Download\"]");
-      if (!button) return false;
-      button.click(); return true;
-    })()')
-    [[ $clicked == true ]] && break
-    sleep 1
-  done
-  [[ $clicked == true ]] || { printf 'generated preview had no Download control\n' >&2; exit 1; }
-  deadline=$((SECONDS + 30))
+  if [[ $opened == preview ]]; then
+    opened=true
+    for _ in 1 2 3 4 5; do
+      clicked=$(evaluate "$page_id" '(() => {
+        const button = document.querySelector("button[aria-label=\"Download\"]");
+        if (!button) return false;
+        button.click(); return true;
+      })()')
+      [[ $clicked == true ]] && break
+      sleep 1
+    done
+    [[ $clicked == true ]] || { printf 'generated preview had no Download control\n' >&2; exit 1; }
+  else
+    opened=false
+  fi
+  deadline=$((SECONDS + timeout_sec))
   while (( SECONDS <= deadline )); do
     find "$directory" -maxdepth 1 -type f -printf '%i %f\0' | sort -z >"$after"
     comm -z -13 "$before" "$after" >"$changes"
@@ -416,7 +463,7 @@ download_generated() {
     candidate="${candidates[0]:-}"
     if [[ -n $candidate && -f $directory/$candidate ]]; then
       # Chrome first creates a .crdownload file; only a completed filename passes.
-      close_generated_viewer "$page_id"
+      if [[ $opened == true ]]; then close_generated_viewer "$page_id"; fi
       opened=false
       jq -cn --arg path "$directory/$candidate" --arg sha256 "$(sha256sum <"$directory/$candidate" | cut -d' ' -f1)" \
         --argjson bytes "$(stat -c %s "$directory/$candidate")" \
@@ -425,7 +472,7 @@ download_generated() {
     fi
     sleep 1
   done
-  printf 'generated download did not finish within 30 seconds\n' >&2
+  printf 'generated download did not finish within %s seconds\n' "$timeout_sec" >&2
   exit 1
 }
 
@@ -437,7 +484,7 @@ summary() {
 
 native_summary() {
   local page_id="$1" base
-  base=$(evaluate "$page_id" "$NATIVE_SUMMARY_JS")
+  base=$(evaluate_native "$page_id" "$NATIVE_SUMMARY_JS")
   jq --arg page_id "$page_id" '. + {page_id: $page_id}' <<<"$base"
 }
 
@@ -445,9 +492,10 @@ native_chunk_js() {
   local start="$1" size="$2"
   cat <<JS
 (async () => {
-  window.__sinnixNativeTranscriptPromiseV2 = window.__sinnixNativeTranscriptPromiseV2 || ($NATIVE_TRANSCRIPT_JS);
-  const value = await window.__sinnixNativeTranscriptPromiseV2;
-  const serialized = JSON.stringify(value);
+  window.__sinnixNativeTranscriptV3 = window.__sinnixNativeTranscriptV3 || { promise: ($NATIVE_TRANSCRIPT_JS) };
+  const snapshot = window.__sinnixNativeTranscriptV3;
+  snapshot.serialized = snapshot.serialized || JSON.stringify(await snapshot.promise);
+  const serialized = snapshot.serialized;
   const end = Math.min(serialized.length, ${start} + ${size});
   return { total: serialized.length, next_start: end, chunk: serialized.slice(${start}, end) };
 })()
@@ -472,8 +520,9 @@ read_full_native_chunked() (
   assembled=$(mktemp /realm/tmp/work/sinnix-chatgpt-native.XXXXXX.json)
   trap 'rm -f -- "$assembled" "$assembled.checked"' EXIT
   : >"$assembled"
+  evaluate "$page_id" '(() => { delete window.__sinnixNativeTranscriptV3; return true; })()' >/dev/null
   while :; do
-    part=$(evaluate "$page_id" "$(native_chunk_js "$start" "$chunk_size")")
+    part=$(evaluate_native "$page_id" "$(native_chunk_js "$start" "$chunk_size")")
     total=$(jq -r '.total' <<<"$part")
     next_start=$(jq -r '.next_start' <<<"$part")
     chunk=$(jq -r '.chunk' <<<"$part")
@@ -625,11 +674,11 @@ locate_attachment() {
   }
   {
     emit_matches exact "$name" fixed
-    [[ $core != "$name" && -n $core ]] && emit_matches collision-variant "$core" fixed
-    [[ -n $stem && $stem != "$name" && ${#stem} -ge 6 ]] && emit_matches core-substring "$stem" fixed
-  } | jq -s 'unique_by(.path)
+    if [[ $core != "$name" && -n $core ]]; then emit_matches collision-variant "$core" fixed; fi
+    if [[ -n $stem && $stem != "$name" && ${#stem} -ge 6 ]]; then emit_matches core-substring "$stem" fixed; fi
+  } | jq -s --arg query "$label" 'unique_by(.path)
       | sort_by((if .match == "exact" then 0 elif .match == "collision-variant" then 1 else 2 end), .path)
-      | {schema: "sinnix-chatgpt-attachment-locate-v1", query: "'"$(sed 's/"/\\"/g' <<<"$label")"'", matches: .}'
+      | {schema: "sinnix-chatgpt-attachment-locate-v1", query: $query, matches: .}'
 }
 
 need_cmd curl
@@ -708,6 +757,11 @@ case "$command_name" in
     fi
     need_cmd xdg-user-dir
     download_generated "$page_id" "$name" "$occurrence"
+    ;;
+  download-native)
+    [[ $# -eq 3 ]] || { printf 'download-native requires a page ID, request file and destination\n' >&2; exit 2; }
+    need_cmd node
+    exec node "$(dirname -- "${BASH_SOURCE[0]}")/download-native.mjs" "$@"
     ;;
   read-open)
     parse_read_options "$@"
