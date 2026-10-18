@@ -1,4 +1,4 @@
-"""Unit tests for the notifications-capture listener's pure transform logic.
+"""Notification transforms and synthetic subprocess lifecycle checks.
 
 `scripts/sinnix-capture-notifications-listener` has no `.py` suffix (it is a
 frontmatter-packaged sinnix script, executed by the shebang), so it is
@@ -11,12 +11,17 @@ non-recursive and filters to `kind == "regular"` at the top level of
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
+import signal
+import subprocess
 import sys
+import time
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 SCRIPT_PATH = (
-    Path(__file__).resolve().parent.parent / "sinnix-capture-notifications-listener"
+    Path(os.environ.get("NOTIFICATIONS_LISTENER_SCRIPT", Path(__file__).resolve().parent.parent / "sinnix-capture-notifications-listener"))
 )
 
 # The script has no `.py` suffix (it is a frontmatter-packaged sinnix
@@ -108,3 +113,68 @@ def test_hint_value_handles_missing_and_present_hints():
     assert listener._hint_value(hints, "urgency") == 2
     assert listener._hint_value(hints, "missing") is None
     assert listener._hint_value({}, "urgency") is None
+
+
+def run_monitor_fixture(tmp_path, mode):
+    monitor = tmp_path / "monitor"
+    monitor.write_text(f"#!{sys.executable}\n" + '''import json,os,signal,sys
+mode=os.environ["MONITOR_MODE"]
+if mode == "killed":
+    os.kill(os.getpid(), signal.SIGKILL)
+if mode in ("diagnostics", "stop"):
+    if mode == "diagnostics":
+        sys.stderr.write("synthetic monitor diagnostic\\n" * 10000)
+        sys.stderr.flush()
+    print(os.environ["NOTIFY_RECORD"], flush=True)
+if mode == "stop":
+    signal.pause()
+sys.exit(0)
+''')
+    monitor.chmod(0o700)
+    writer = tmp_path / "writer"
+    marker = tmp_path / "forwarded.json"
+    writer.write_text(f"#!{sys.executable}\nimport os,sys,pathlib\npathlib.Path(os.environ['FORWARDED']).write_text(sys.stdin.read())\n")
+    writer.chmod(0o700)
+    command = [sys.executable, str(SCRIPT_PATH), "--busctl-bin", str(monitor),
+               "--capture-bin", str(writer), "--capture-root", str(tmp_path)]
+    with subprocess.Popen(command, env=dict(os.environ, MONITOR_MODE=mode,
+                          NOTIFY_RECORD=json.dumps(REAL_NOTIFY_RECORD), FORWARDED=str(marker)),
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                          start_new_session=True) as process:
+        try:
+            if mode == "stop":
+                deadline = time.monotonic() + 3
+                while not marker.exists():
+                    if time.monotonic() >= deadline:
+                        raise subprocess.TimeoutExpired(command, 3)
+                    time.sleep(0.01)
+                process.send_signal(signal.SIGTERM)
+            stdout, stderr = process.communicate(timeout=3)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.communicate()
+            raise
+        return process.returncode, stdout, stderr, marker
+
+
+def test_unexpected_clean_monitor_exit_requests_service_restart(tmp_path):
+    status, _, _, _ = run_monitor_fixture(tmp_path, "clean")
+    assert status == 1
+
+
+def test_unexpected_monitor_signal_requests_service_restart(tmp_path):
+    status, _, _, _ = run_monitor_fixture(tmp_path, "killed")
+    assert status == 1
+
+
+def test_monitor_diagnostics_cannot_block_notification_forwarding(tmp_path):
+    status, _, stderr, marker = run_monitor_fixture(tmp_path, "diagnostics")
+    assert status == 1
+    assert "synthetic monitor diagnostic" in stderr
+    assert json.loads(marker.read_text())["summary"] == REAL_NOTIFY_RECORD["payload"]["data"][3]
+
+
+def test_requested_listener_shutdown_is_successful(tmp_path):
+    status, _, _, marker = run_monitor_fixture(tmp_path, "stop")
+    assert status == 0
+    assert marker.exists()

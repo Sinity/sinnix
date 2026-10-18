@@ -105,12 +105,18 @@ def run(capture_bin: str, capture_root: str, lane: str, busctl_bin: str) -> int:
     monitor = subprocess.Popen(
         [busctl_bin, "--user", "monitor", "--json=short", "org.freedesktop.Notifications"],
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        # Diagnostics belong to the service journal. An unread stderr pipe
+        # eventually blocks busctl and stops otherwise healthy capture.
+        stderr=None,
         text=True,
         bufsize=1,
     )
 
+    stopping = False
+
     def _terminate(*_args: object) -> None:
+        nonlocal stopping
+        stopping = True
         monitor.terminate()
 
     signal.signal(signal.SIGTERM, _terminate)
@@ -130,15 +136,27 @@ def run(capture_bin: str, capture_root: str, lane: str, busctl_bin: str) -> int:
             if payload is not None:
                 _forward(capture_bin, capture_root, lane, payload)
     finally:
-        monitor.wait()
+        if monitor.poll() is None:
+            monitor.terminate()
+        try:
+            monitor.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            monitor.kill()
+            monitor.wait()
+        monitor.stdout.close()
 
     # busctl monitor exiting (bus restart, daemon crash) is not a clean
     # shutdown path for a supposedly-continuous listener -- exit non-zero so
     # systemd's Restart=on-failure reconnects, except when we asked for the
-    # termination ourselves via SIGTERM/SIGINT (returncode is negative then).
-    if monitor.returncode is not None and monitor.returncode < 0:
+    # termination ourselves via SIGTERM/SIGINT. A signal killing only the
+    # monitor or an unexpected zero exit still requires reconnection.
+    if stopping:
         return 0
-    return 1 if monitor.returncode else 0
+    print(
+        f"sinnix-capture-notifications-listener: monitor exited unexpectedly ({monitor.returncode})",
+        file=sys.stderr,
+    )
+    return 1
 
 
 def main(argv: list[str] | None = None) -> int:

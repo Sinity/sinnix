@@ -261,6 +261,16 @@
             python3 ${../../scripts/tests/test_kitty_scrollback_capture.py}
             touch "$out"
           '';
+      checks.capture-notifications =
+        pkgs.runCommand "capture-notifications-check"
+          {
+            nativeBuildInputs = [ (pkgs.python3.withPackages (p: [ p.pytest ])) ];
+            NOTIFICATIONS_LISTENER_SCRIPT = ../../scripts/sinnix-capture-notifications-listener;
+          }
+          ''
+            pytest -q ${../../scripts/tests/test_capture_notifications_listener.py}
+            touch "$out"
+          '';
       checks.capture-mpris =
         pkgs.runCommand "capture-mpris-check"
           {
