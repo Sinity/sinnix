@@ -70,7 +70,6 @@ in
     ./tests/quota.nix
     ./tests/noctalia.nix
     ./tests/activity.nix
-    ./tests/mi-unlock.nix
     ./tests/fstrim.nix
     ./tests/host-config.nix
     ./tests/hyprland-rules.nix

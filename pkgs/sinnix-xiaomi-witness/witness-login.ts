@@ -4,7 +4,7 @@
 //
 // No scanning required, despite the QR: the printed LOGIN_URL, opened in
 // any browser holding an authenticated Xiaomi web session (the operator's
-// Chrome qualifies -- the mi-unlock automation lives off the same session),
+// Chrome qualifies),
 // renders a "Confirm sign-in" page whose button completes the login. That
 // makes re-login agent-drivable end to end:
 //
