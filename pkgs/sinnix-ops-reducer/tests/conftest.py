@@ -55,7 +55,6 @@ def hub_server_factory(tmp_path: Path) -> Iterator[Callable[..., str]]:
         server.usage_census_path = (
             usage_census_path or tmp_path / "missing-usage-census.jsonl"
         )
-        server.lanes_source = None
         server.feedback = feedback
         server.elicit_model_dir = elicit_model_dir or tmp_path / "missing-elicit"
         servers.append(server)

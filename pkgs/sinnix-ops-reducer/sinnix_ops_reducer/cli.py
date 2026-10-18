@@ -11,7 +11,7 @@ from typing import Any
 
 from . import capabilities, feedback, health, pages
 from .actions import ActionService
-from .agent_jobs import AgentCtlClient, AgentCtlError
+from .agent_jobs import AgentCtlClient
 from .ambient import product_source
 from .clodex_usage import clodex_usage
 from .feedback import CoalescingTrigger, FeedbackSpool
@@ -32,24 +32,6 @@ class UnixConnection(http.client.HTTPConnection):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.settimeout(self.timeout)
         self.sock.connect(self.path)
-
-
-def lane_views(
-    agentctl: AgentCtlClient,
-) -> tuple[list[dict[str, Any]], list[str]]:
-    """Every project's `agentctl view`, with the projects that refused named."""
-    views: list[dict[str, Any]] = []
-    errors: list[str] = []
-    try:
-        projects = agentctl.projects()
-    except AgentCtlError as error:
-        return views, [str(error)]
-    for project in projects:
-        try:
-            views.append(agentctl.view(project))
-        except AgentCtlError as error:
-            errors.append(f"{project}: {error}")
-    return views, errors
 
 
 def post_failure(
@@ -341,5 +323,4 @@ def main() -> None:
         elicit_model_dir=args.elicit_model_dir,
         capability_index_path=args.capability_index,
         usage_census_path=args.usage_census,
-        lanes_source=lambda: lane_views(agentctl),
     )

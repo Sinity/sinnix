@@ -47,8 +47,10 @@ process list. It can, because sinnix already names its own work:
   interrupt on any task that is not yet terminal. Reducer probes terminate
   their entire process group on timeout or response-size overflow before
   closing output pipes; nested native clients are not left running.
-- **Lanes** are `agentctl view` per project, read when the page is
-  requested: each worktree with its bead, stage, agent and pull request.
+  The card shows active jobs first and states both its displayed count and the
+  owner's omitted active/completed counts. Run and worker details remain in
+  the current native `agentctl view <project>`; rendering the page does not
+  query every project or load the retired worktree-lane projection.
 - **Slice budgets** show the resource policy carried by declared services and
   queued jobs.
 

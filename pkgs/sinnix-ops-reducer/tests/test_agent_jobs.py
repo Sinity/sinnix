@@ -137,28 +137,6 @@ def test_get_and_cancel_require_a_job_object_with_an_id() -> None:
         bare.get(3)
 
 
-def test_projects_and_view_read_the_operator_screen_per_project() -> None:
-    calls: list[tuple[list[str], float]] = []
-
-    def runner(command, **kwargs):
-        calls.append((command, kwargs["timeout"]))
-        if command[-2:] == ["project", "list"]:
-            return response({"projects": [{"id": "sinnix"}, {"id": "polylogue"}, {}]})
-        return response(
-            {"schema": "sinnix.agentctl.view.v2", "lanes": [], "errors": []}
-        )
-
-    client = AgentCtlClient("fixture-agentctl", runner=runner)
-    assert client.projects() == ["sinnix", "polylogue"]
-    assert client.view("sinnix")["lanes"] == []
-    # The view calls wt, gh and bd; it gets the long budget, the rest the short one.
-    assert calls[0][1] < calls[1][1]
-    assert calls[1][0] == ["fixture-agentctl", "--json", "view", "sinnix"]
-    flat = AgentCtlClient(runner=lambda *_a, **_k: response({"schema": "x"}))
-    with pytest.raises(AgentCtlError, match="lane document"):
-        flat.view("sinnix")
-
-
 def test_oversized_rejected_or_malformed_responses_are_typed_failures() -> None:
     oversized = subprocess.CompletedProcess(
         ["agentctl"], 0, stdout="x" * (MAX_RESPONSE_BYTES + 1)

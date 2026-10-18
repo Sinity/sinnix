@@ -124,7 +124,7 @@ def test_policy_controls_only_offer_declared_properties() -> None:
     assert 'act(\'reset_policy\',\'unit\',"x.service"' in unescape(controls)
 
 
-def test_work_page_renders_the_queue_jobs_and_lanes_and_interrupts_live_jobs() -> None:
+def test_work_page_renders_queue_jobs_and_interrupts_live_jobs() -> None:
     snapshot = {
         "state": {
             "agentctl": {
@@ -180,31 +180,12 @@ def test_work_page_renders_the_queue_jobs_and_lanes_and_interrupts_live_jobs() -
             }
         }
     }
-    lanes = [
-        {
-            "project": "sinnix",
-            "lanes": [
-                {
-                    "lane": "sinnix-feature-packet-sinnix-1",
-                    "branch": "feature/packet/sinnix-1",
-                    "bead": "sinnix-1",
-                    "stage": "agent running",
-                    "next": "the agent publishes",
-                    "elapsed": "5m",
-                    "dirty": False,
-                    "pr": None,
-                }
-            ],
-            "errors": [],
-        }
-    ]
     html = pages.render(
         "/work/",
         MANIFEST,
         snapshot,
         INVENTORY,
         "fixture",
-        lanes_source=lambda: (lanes, ["polylogue: agentctl rejected the request"]),
     )
     # The queue card shows pueue groups without assuming who paused them.
     assert "<code>agent</code>" in html and "paused" in html
@@ -214,16 +195,12 @@ def test_work_page_renders_the_queue_jobs_and_lanes_and_interrupts_live_jobs() -
     assert "sinex:cache_prebuild" in html and "exit 2" in unescape(html)
     assert 'act(\'interrupt\',\'job_id\',"7"'  in unescape(html)
     assert 'act(\'interrupt\',\'job_id\',"8"'  not in unescape(html)
-    # Lanes come from agentctl view; a project that refused is named, not hidden.
-    assert "sinnix-feature-packet-sinnix-1" in html and "agent running" in html
-    assert "polylogue: agentctl rejected the request" in html
     assert "1" in html and "jobs queued or running" in html
 
 
-def test_work_page_renders_without_a_lanes_source() -> None:
+def test_work_page_renders_without_jobs() -> None:
     html = pages.render("/work/", MANIFEST, {"state": {}}, INVENTORY, "fixture")
-    assert "no worktree lanes" in html
-    assert "no pueue tasks" in html
+    assert "no jobs in this snapshot" in html
 
 
 def test_work_page_escapes_queue_count_fields_and_does_not_invent_pause_owner():
@@ -241,9 +218,32 @@ def test_work_page_escapes_queue_count_fields_and_does_not_invent_pause_owner():
         detail = {"status": "Paused", "running": 1, "parallel": 4, "queued": 2, "paused": 1}
         detail[field] = marker
         html = pages.render_work(MANIFEST, {"state": {"agentctl": {"groups": {"fixture": detail}}}},
-                                 INVENTORY, "fixture", lanes_source=lambda: ([], []))
+                                 INVENTORY, "fixture")
         parser = Elements()
         parser.feed(html)
         assert "img" not in parser.tags
         assert escape(marker, quote=True) in html
         assert "backpressure timer holding" not in html
+
+
+def test_jobs_prioritize_active_and_explain_both_display_and_owner_omissions():
+    import datetime as dt
+    from sinnix_ops_reducer.pages.queue import jobs_card
+    jobs = [{"job_id": i, "label": f"completed-{i}", "terminal": True,
+             "phase": "succeeded", "enqueued_at": "2026-10-18T06:00:00Z"} for i in range(20)]
+    jobs.append({"job_id": 100, "label": "old-running-job", "terminal": False,
+                 "phase": "running", "enqueued_at": "2026-10-17T06:00:00Z"})
+    html = jobs_card({"agentctl": {"jobs": jobs, "omitted": {"active": 3, "terminal": 99}}}, dt.datetime.now(dt.timezone.utc))
+    assert "old-running-job" in html
+    assert html.index("old-running-job") < html.index("completed-0")
+    assert "Showing 12 of 21 snapshot jobs" in html
+    assert "Owner omitted: 3 active, 99 completed" in html
+    assert "Every pueue task" not in html
+
+
+def test_empty_snapshot_does_not_claim_no_owner_jobs_or_invent_coverage():
+    import datetime as dt
+    from sinnix_ops_reducer.pages.queue import jobs_card
+    html = jobs_card({"agentctl": {"jobs": []}}, dt.datetime.now(dt.timezone.utc))
+    assert "no jobs in this snapshot" in html
+    assert "unknown active, unknown completed" in html

@@ -108,67 +108,20 @@ def job_row(job: dict[str, Any], now: dt.datetime) -> str:
 def jobs_card(state: dict[str, Any], now: dt.datetime) -> str:
     jobs = sorted(
         jobs_of(state),
-        key=lambda job: str(job.get("enqueued_at") or ""),
+        key=lambda job: (job.get("terminal") is not True, str(job.get("enqueued_at") or "")),
         reverse=True,
     )
-    if not jobs:
-        return card(
-            "Jobs", empty("no pueue tasks"), "declared operations and lane agents"
-        )
-    blocks = "".join(job_row(job, now) for job in jobs[:12])
-    truncated = job_plane(state).get("truncated") is True
+    blocks = "".join(job_row(job, now) for job in jobs[:12]) if jobs else empty("no jobs in this snapshot")
+    omitted = job_plane(state).get("omitted")
+    omitted = omitted if isinstance(omitted, dict) else {}
     return (
         '<section class="card wide"><h2>Jobs</h2>'
-        '<p class="sub">Every pueue task, newest first: declared operations and '
-        "lane agents, labelled <code>project:operation</code>. An interrupt is "
-        "<code>agentctl job cancel</code>."
-        + (" The snapshot holds the newest hundred." if truncated else "")
-        + f"</p>{blocks}</section>"
-    )
-
-
-def lane_row(lane: dict[str, Any]) -> str:
-    stage = str(lane.get("stage") or "")
-    pr = lane.get("pr") if isinstance(lane.get("pr"), dict) else {}
-    meta = [badge(stage or "unknown", "info" if stage else "muted")]
-    if lane.get("bead"):
-        meta.append(f"<code>{esc(str(lane['bead']))}</code>")
-    if lane.get("elapsed"):
-        meta.append(esc(str(lane["elapsed"])))
-    if pr.get("number"):
-        meta.append(
-            f"PR #{esc(str(pr['number']))} {esc(str(pr.get('state') or ''))}".strip()
-        )
-    if lane.get("next"):
-        meta.append(esc(str(lane["next"])))
-    tone = "warn" if lane.get("dirty") else ""
-    return row(
-        f"<strong>{esc(str(lane.get('lane') or lane.get('branch') or '?'))}</strong>",
-        meta,
-        "",
-        tone,
-    )
-
-
-def lanes_card(views: list[dict[str, Any]], errors: list[str]) -> str:
-    blocks = ""
-    for view in views:
-        lanes = [lane for lane in view.get("lanes", []) if isinstance(lane, dict)]
-        if not lanes and not view.get("errors"):
-            continue
-        blocks += f'<div class="group"><h3>{esc(str(view.get("project") or "?"))}</h3>'
-        blocks += "".join(lane_row(lane) for lane in lanes)
-        for error in view.get("errors") or []:
-            blocks += row(esc(str(error)), [badge("source error", "bad")], "", "bad")
-        blocks += "</div>"
-    for error in errors:
-        blocks += row(esc(error), [badge("unavailable", "bad")], "", "bad")
-    if not blocks:
-        return card("Lanes", empty("no worktree lanes"), "agentctl view, per project")
-    return (
-        '<section class="card wide"><h2>Lanes</h2>'
-        '<p class="sub"><code>agentctl view</code> per project: each worktree with '
-        "its bead, stage, agent and pull request, read when this page is "
-        "requested.</p>"
-        f"{blocks}</section>"
+        '<p class="sub">Active jobs first, then recent completed jobs, labelled '
+        '<code>project:operation</code>. An interrupt is '
+        '<code>agentctl job cancel</code>. '
+        f'Showing {min(len(jobs), 12)} of {len(jobs)} snapshot jobs. '
+        f'Owner omitted: {esc(omitted.get("active", "unknown"))} active, '
+        f'{esc(omitted.get("terminal", "unknown"))} completed. '
+        'Project run and worker details: <code>agentctl view &lt;project&gt;</code>.'
+        f'</p>{blocks}</section>'
     )

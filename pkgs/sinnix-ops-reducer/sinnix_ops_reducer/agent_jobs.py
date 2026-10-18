@@ -12,8 +12,6 @@ from sinnix_lib.process import run_bounded
 MAX_RESPONSE_BYTES = 1_048_576
 MAX_SNAPSHOT_JOBS = 100
 DEFAULT_TIMEOUT_SECONDS = 5.0
-# The view calls wt, gh and bd for one project; a forge round trip is inside it.
-VIEW_TIMEOUT_SECONDS = 60.0
 
 
 class AgentCtlError(RuntimeError):
@@ -99,25 +97,6 @@ class AgentCtlClient:
                 ),
             )
         )
-
-    def projects(self) -> list[str]:
-        value = self._call((self.command, "--json", "project", "list"))
-        rows = value.get("projects") if isinstance(value, dict) else None
-        if not isinstance(rows, list):
-            raise AgentCtlError("agentctl project list did not print projects")
-        return [
-            str(row["id"])
-            for row in rows
-            if isinstance(row, dict) and isinstance(row.get("id"), str)
-        ]
-
-    def view(self, project: str) -> dict[str, Any]:
-        value = self._call(
-            (self.command, "--json", "view", project), timeout=VIEW_TIMEOUT_SECONDS
-        )
-        if not isinstance(value, dict) or not isinstance(value.get("lanes"), list):
-            raise AgentCtlError("agentctl view did not print a lane document")
-        return value
 
     def _job_response(self, arguments: Sequence[str]) -> dict[str, Any]:
         value = self._call((self.command, "--json", *arguments))

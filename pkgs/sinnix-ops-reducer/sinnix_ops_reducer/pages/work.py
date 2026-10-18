@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import datetime as dt
-from collections.abc import Callable
 from typing import Any
 
-from .queue import active_jobs, jobs_card, lanes_card, queue_card
+from .queue import active_jobs, jobs_card, queue_card
 from .shell import (
     ACTION_SCRIPT,
     age_since,
@@ -24,9 +23,6 @@ from .shell import (
     row,
     tile,
 )
-
-LanesSource = Callable[[], tuple[list[dict[str, Any]], list[str]]]
-
 
 def slice_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
     slices = state.get("resource_slices")
@@ -204,7 +200,6 @@ def render_work(
     snapshot: dict[str, Any] | None,
     inventory: dict[str, Any] | None,
     generated: str,
-    lanes_source: LanesSource | None = None,
 ) -> str:
     host = str(manifest.get("host", "sinnix"))
     now = dt.datetime.now(dt.timezone.utc)
@@ -233,8 +228,6 @@ def render_work(
     body += queue_card(state)
     body += slices_card(state)
     body += jobs_card(state, now)
-    views, errors = lanes_source() if lanes_source is not None else ([], [])
-    body += lanes_card(views, errors)
     body += ledger_card(state, now)
     body += log_card()
     if snapshot is None:
