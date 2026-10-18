@@ -1,109 +1,84 @@
 # Speech
 
-Sinnix's speech-to-text stack: one engine, one hub, three lanes into it.
-
-## What it is
-
-**Parakeet TDT 0.6B v3** (int8 ONNX) through **sherpa-onnx**, with **Silero
-VAD v6** in front and sherpa's **pyannote-segmentation** diarizer beside it.
-All of it runs on the CPU. `modules/services/stt.nix` serves the hub;
-`scripts/sinnix-stt` is the engine, the batch pass and the CLI.
-
-This replaced whisper.cpp, which is deleted rather than kept as a fallback —
-the operator's decision, recorded in `sinnix-mke` on 2026-08-11 and repeated in
-`sinnix-uyvt.1`, whose title is literally "the good engine (**not whisper**)".
-
-## Why not whisper
-
-Three reasons, all measured on this host rather than taken from a model card.
-
-**Quality.** 6.32 WER across 25 European languages including Polish, against
-whisper `base.en`'s English-only. Verified on the operator's own ambient
-capture, not on a fixture: a Polish utterance in an overnight chunk came back
-correct. `base.en` could not have produced it at all.
-
-**No silence hallucination.** whisper famously invents "Thank you." over a
-quiet room. Over a lane that records all night, that does not produce a bad
-transcript — it produces a diary of things nobody said, indistinguishable from
-a real one. Of 40 consecutive ambient chunks, exactly one contained speech
-(5.4 seconds); the other 39 produced nothing at all.
-
-**Speed, and what it changed.** RTF 0.113 on dense speech; RTF 0.002 over a
-VAD-gated 300 s ambient chunk — 0.74 seconds to process five minutes of audio,
-and about ten seconds for an hour. Forty real chunks, 3.3 hours of audio, took
-70 seconds wall.
-
-That last number changed a design decision rather than merely being pleasant.
-`sinnix-mke` budgeted ~1.5 GB of VRAM and put the engine in the shared
-`gpu-inference` admission mesh, where a transcription and a resident LLM
-exclude each other. The measurement says the engine needs no GPU at all, so it
-sits **outside** that mesh: transcription is always available, and never queues
-behind the model tier. The runtime test that used to assert mutual exclusion
-now asserts the opposite, because staying out of the mesh is the property worth
-protecting.
-
-## The VAD gate
-
-Silero finds the speech regions and only those reach the recogniser. That is
-what makes an always-on lane affordable — a mostly-silent day costs seconds
-instead of hours — and it is why the archive lane is worth keeping at all.
-
-Every record carries `speech_seconds` against `audio_seconds`, so **silence is
-measured rather than assumed**. "Nobody said anything in this hour" is a
-finding with a number behind it, not a gap where a transcript should be.
-
-And the number is worth stating plainly, because it settles what this corpus
-is. The first full pass covered **57.5 hours of audio and found 28 seconds of
-speech across 12 files — 0.013% of everything recorded.** The archive is a
-recording of empty rooms and sleeping, which is exactly what the operator said
-it would be before any of this ran.
-
-That is not an argument against the lane; it is the argument for the gate. A
-corpus that is 99.987% silence is cheap to keep and cheap to search precisely
-because nothing decodes the silence, and an engine that hallucinated over it
-would have produced 57 hours of invented conversation. What it does mean is
-that the value here is forward-looking: the always-on speech lane and the
-voice notes, not archaeology on the backlog.
+Speech-to-text is **Parakeet TDT 0.6B v3** (int8 ONNX) through **sherpa-onnx**,
+with **Silero VAD v6** in front and sherpa's pyannote diarizer beside it, all on
+the CPU. `scripts/sinnix-stt` is the engine and CLI; `modules/services/stt.nix`
+serves it. Whisper was removed (bead `sinnix-mke`): Parakeet handles Polish,
+does not invent text over silence, and is fast enough (an hour of mostly quiet
+audio in about ten seconds) that it needs no GPU and never waits behind the
+local LLMs.
 
 ## Using it
 
-```
-sinnix stt lanes                 # which audio lanes this host has, and which a pass takes
-sinnix stt transcribe FILE...    # one or more files to JSON
-sinnix stt lake [--lane N]       # transcribe whatever landed and has not been seen
+```text
+sinnix stt lanes                 # audio lanes on this host, and which a pass takes
+sinnix stt transcribe FILE...    # files to JSON
+sinnix stt lake [--lane N]       # transcribe new recordings in the capture lanes
 sinnix stt diarize FILE          # who spoke when
-sinnix stt models                # fetch or verify the model set
+sinnix stt models                # fetch or verify the models
 ```
 
-The hub answers the OpenAI audio API on `127.0.0.1:8090`, which is the same
-interface and the same port whisper.cpp served. No client changed when the
-engine did:
+The service speaks the OpenAI audio API on `127.0.0.1:8090`:
 
-```
+```bash
 curl -F file=@clip.wav -F model=parakeet-tdt-0.6b-v3 \
      http://127.0.0.1:8090/v1/audio/transcriptions
 ```
 
-The STT HTTP receiver serves native clients. It refuses supplied Origin or
-Fetch Metadata before reading audio, and validates Host against its listener
-and the declared proxy endpoint. Native multipart uploads retain the OpenAI
-audio protocol; no wildcard CORS is offered. This receiver check does not
-prevent the TCP socket proxy from starting the service on connection.
+It starts on the first connection and exits after 300 s idle, so the 650 MB
+encoder is not held by an idle service. Browser requests (an `Origin` or
+Fetch-Metadata header) are refused.
 
-It is socket-activated behind `stt-proxy`, and still is even without a GPU to
-release: the encoder is 650 MB of resident RSS that a mostly-idle service has
-no business holding. The idle window is 300 s rather than the GPU services'
-30 s, because nothing scarce is being held and reloading the encoder between
-the turns of one conversation would be the only real cost.
+The VAD passes only speech to the recogniser, and every record carries
+`speech_seconds` next to `audio_seconds`, so silence is measured, not
+assumed. Files with no decodable stream are recorded as `undecodable: true`
+with a reason instead of failing the pass.
 
-The lake pass reads its completion ledger incrementally. A missing ledger starts
-new history; an inaccessible ledger, dangling link or non-regular object refuses
-the pass before transcription. Existing malformed-row and legacy-row handling
-is unchanged. The deduplication key set still grows with completed recordings.
+## Lanes
+
+Found on disk, not hard-coded:
+
+| Lane    | Path                                             | In a default pass |
+| ------- | ------------------------------------------------ | ----------------- |
+| `phone` | `captures/phone/ambient`                         | yes               |
+| `voice` | `captures/phone/outbox`                          | yes               |
+| `src-*` | `captures/audio/src-…` (microphones)             | yes               |
+| `snk-*` | `captures/audio/snk-…` (what the machine played) | no                |
+
+Sink lanes are skipped by default because they hold whatever the machine
+played (videos, calls); they can be named explicitly.
+
+## The always-on speech lane
+
+The phone's VAD streams speech segments to `sinnix-phone-dispatcher` (port 8940,
+tailnet only) on any network. The dispatcher writes the audio to the capture
+store first, then transcribes it through the hub, then writes the transcript as
+a capture envelope, so a failed transcription never loses the recording. The
+lane is on by default and restarts with the phone app.
+
+It never dispatches agents: an always-on microphone would take commands from
+anyone in the room or on a TV. Commands go through the phone's push-to-talk
+action. A speaker-match filter could later decide whether an utterance is
+meant as a command at all (a noise filter, not authentication).
+`scripts/sinnix-speaker-verify` (`enroll`, `score`, `calibrate`, `list`) is
+that filter's groundwork; `calibrate` needs separate labelled
+same-speaker and other-speaker recordings, which do not exist yet, so the lane
+stays unconnected.
+
+## Diarization
+
+`sinnix stt diarize` produces speaker turns (`spk0`, `spk1`), not names. It
+also reports whether the result is believable: the speaker count must be
+supported by the amount of speech the VAD found (roughly three seconds per
+voice). Without that check, a mostly silent chunk can come back as seventeen
+"speakers".
 
 ## Review transcription
 
-For selected recordings that need a more detailed transcript, `scripts/sinnix-stt-review` calls ElevenLabs Scribe v2 with an explicit language (`pol` by default), speaker diarization and word timestamps. This uploads the named audio files to ElevenLabs and uses the account's transcription credits. It processes the full recordings without the local VAD gate. The automatic local capture pass keeps its existing engine.
+For recordings that need a careful transcript, `scripts/sinnix-stt-review`
+sends the named files to ElevenLabs Scribe v2 with an explicit language
+(`pol` by default), speaker diarization and word timestamps. This uploads the
+audio and spends account credits.
 
 ```bash
 agentctl job start sinnix transcribe_review -- \
@@ -111,125 +86,17 @@ agentctl job start sinnix transcribe_review -- \
   --output-dir /path/to/private/transcription-output recording.m4a
 ```
 
-The operation runs the source script from the selected checkout, so it is usable without host activation. Direct invocation also accepts `ELEVENLABS_API_KEY`. Keep credentials outside the checkout and pass only their file path to queued jobs.
-
-The source digest and uploaded audio come from the same captured byte sequence, so replacing or editing the source path during a request cannot mislabel the response. This does not validate the source hashes of previously generated responses.
-
-Each output directory holds the unedited API responses, source paths and SHA-256 hashes, request settings, a readable `transcript.md`, `review-spans.json`, and `alignment-review.json`. The score review selects spans containing a word with log probability below -1 as a review heuristic. The alignment review flags words lasting over two seconds, which can expose timestamps stretched over quiet intervals. Scores are not calibrated correctness probabilities, and a confident error can escape the list. Speaker IDs are local to each input file. Filenames containing a UTC recording timestamp are displayed in Warsaw time; other inputs use relative seconds. Rerunning the same command reuses completed responses; changed audio or settings require a new output directory.
-
-Scribe v2 supports Polish conditioning together with word evidence. Voxtral Mini Transcribe 2's published language list does not include Polish, and Mistral currently documents language conditioning and timestamps as incompatible. This makes Scribe the supported choice for this review path, without establishing a universal accuracy ranking. Keep inferred wording in a separate review document with source times and alternatives; do not rewrite raw recognizer evidence.
-
-References: [Scribe languages](https://elevenlabs.io/docs/overview/capabilities/speech-to-text), [Scribe API](https://elevenlabs.io/docs/api-reference/speech-to-text/convert), [Voxtral languages](https://mistral.ai/news/voxtral-transcribe-2/), [Voxtral timestamp constraints](https://docs.mistral.ai/studio/audio/speech_to_text/offline_transcription).
-
-## Lanes
-
-Discovered from disk, not hard-coded — the desktop capture root holds three
-generations at once and only one is live:
-
-| Lane    | Path                                             | In a default pass  |
-| ------- | ------------------------------------------------ | ------------------ |
-| `phone` | `captures/phone/ambient`                         | yes                |
-| `voice` | `captures/phone/outbox`                          | yes                |
-| `src-*` | `captures/audio/src-…` (microphones)             | yes                |
-| `snk-*` | `captures/audio/snk-…` (what the machine played) | no                 |
-| —       | `captures/audio/{mic,sink-monitor}`              | retired 2026-08-13 |
-| —       | `captures/audio/legacy`                          | retired 2026-05-21 |
-
-Sinks are excluded by default deliberately. A source lane is a recording of a
-room, which is what this program is about; a sink lane is everything the
-machine _played_, so transcribing it by default would fill the corpus with the
-scripts of every video watched. They remain available by name.
-
-**Undecodable files are carried as findings, not errors.** 27 of 464 lake
-chunks have no stream at all — recorders killed before their muxer wrote a
-header — and a batch that raised on the first one would never reach the rest.
-They are recorded with `undecodable: true` and a reason.
-
-## The always-on speech lane
-
-`sinnix-phone-dispatcher` (which absorbed the retired receiver; port 8940 on
-the tailnet only) accepts newline-delimited JSON from the phone. A `speech`
-line carries base64 PCM, and three things happen to it in an order that is
-the design:
-
-1. **The audio is written to the lake first.** Raw audio can be re-transcribed
-   by a better engine, re-diarized, or attributed to a speaker once enrollment
-   is trustworthy. A transcript cannot be un-lost. If the later steps fail, the
-   recording survives them.
-2. **It is transcribed inline** through the hub, not by a later batch pass,
-   because the point of this lane is that speaking reaches prime _now_.
-3. **The transcript is written to the capture lane** as an envelope joinable
-   with everything else the phone sends.
-
-The phone's VAD decides what is speech and streams only that — on **any**
-network, with no wifi or charging gate. Those gates belong to the bulk archive
-drain, where the concern is metered data for gigabytes of audio; an utterance
-is kilobytes and the whole point is that it works when you walk away.
-
-**The lane is on by default and is meant to stay on**, on the same terms as
-every other capture on this system: started at boot, revived by the watchdog,
-restarted when the app is opened. An earlier version shipped it
-off-by-default on the theory that streaming speech was a categorically
-different thing to switch on. That was the wrong posture here and the operator
-corrected it — a capture lane that has to be switched on is a capture lane with
-gaps in it, and a lane that quietly stops after a reboot is not always-on, it is
-intermittent and nobody has noticed yet.
-
-## What this lane deliberately does not do
-
-**It does not dispatch agents.** An always-on microphone that can drive agents
-is an open command channel for anyone in the room, on a speakerphone, or on a
-television — `sinnix-7oly`'s problem statement, and the operator's own framing:
-a random person nearby suddenly saying something should not be treated as the
-operator issuing a command.
-
-The mechanism that would filter that is speaker conditioning, and the
-distinction matters: this is a **noise filter, not an authenticator**. Voice is
-not a strong authenticator and sinnix can synthesise the operator's own
-voice locally, so treating a voiceprint as authorisation would be theatre. The
-question it answers is only _whether an utterance is a command at all_.
-
-`scripts/sinnix-speaker-verify` supports enrollment, raw scoring, and a held-out `calibrate` command. Its SpeechBrain ECAPA model is pinned to revision `0f99f2d0ebe89ac095bcc5903c4dd8f72b367286`, including configuration and checkpoints; existing cache links are resolved against that revision. Enrollment rejects zero or non-finite centroids before replacing stored state. Calibration requires disjoint enrollment, same-speaker, different-speaker, and unrelated cohort directories, rejecting reused file identities even through hard links; it reports symmetric AS-norm scores, EER, and Brier calibration error. The report's `supports_attribution` field is true only when EER is at most 5% (override with `--max-eer`). Version 2 reports bind the exact normalized enrollment centroid, pinned model and preprocessing method, and retain trial scores so scoring can recompute the reported metrics and support decision. Enrollment and calibration use the same centroid calculation. Unreadable corpus subtrees abort calibration before model loading, preserving the previous report. Scoring refuses a mismatched or malformed report before loading the model; the display flag cannot enable attribution. Old reports must be regenerated, and legacy enrollments must be re-enrolled before using calibration. Existing records remain unchanged; raw cosine scoring still accepts legacy enrollments. This consistency check does not authenticate corpus labels or establish the report's author. A calibrated score remains only a friction signal and never authorizes an action.
-
-The available archive does not contain speaker-labelled impostor or cohort
-provenance, so it cannot produce a defensible calibration report. The voice
-lane therefore remains unintegrated and the phone's deliberate push-to-talk
-verb remains the way to actually ask for something. Do not manufacture an
-impostor set by treating unlabeled ambient or historical clips as a different
-speaker.
-
-Shipping the channel ungated because the gate is nearly ready is how a system
-acquires a voice-activated foot-gun.
-
-## Diarization
-
-`sherpa-onnx-offline-speaker-diarization` — pyannote segmentation plus a
-titanet speaker embedding, both ONNX, both CPU. It produces speaker _turns_
-(`spk0`, `spk1`), not names.
-
-**It carries a trustworthiness verdict, because clustering always returns an
-answer.** Run over a 300 s ambient chunk holding 5.4 seconds of speech, it
-reported seventeen speakers — it had clustered room noise into confident
-structure. The check that separates that from a real two-speaker recording is
-not the diarizer's own numbers, since it believes itself in both cases, but its
-numbers against the VAD's: a voice needs roughly three seconds to be separable,
-so the speaker count must be supportable by the speech the VAD actually found,
-and the diarizer's total must not wildly exceed it.
-
-A first attempt tested total diarized time and median turn length instead.
-Both passed the noise and failed the genuine recording — a plausible threshold
-on the wrong quantity is not a weaker check, it is an inverted one.
-
-Enrollment — "is this the operator?" — is deliberately kept separate rather
-than fused into the transcript. The raw audio is retained, so identity can be
-recomputed at any time, and a labelling mistake baked into a transcript would
-be much harder to undo than one recomputed on demand.
+The output directory keeps the raw API responses, source hashes, settings,
+`transcript.md`, and two review lists: words with log probability below -1,
+and words lasting over two seconds (often stretched timestamps). These are
+heuristics, not calibrated error rates. Rerunning the same command reuses
+finished responses. Scribe was chosen because it supports Polish together with
+word timestamps; Voxtral Transcribe 2 does not list Polish.
 
 ## Models
 
-~690 MB under `/realm/library/model/sherpa`, fetched by `sinnix stt models` and
-verified on every service start. Weights are not source and do not belong in
-the Nix store; sinnix already keeps model files under `/realm/library/model`.
+About 690 MB under `/realm/library/model/sherpa`, fetched and verified by
+`sinnix stt models` and checked at every service start.
 
 | Model                                        | Size   | Role                 |
 | -------------------------------------------- | ------ | -------------------- |
@@ -238,21 +105,11 @@ the Nix store; sinnix already keeps model files under `/realm/library/model`.
 | `sherpa-onnx-pyannote-segmentation-3-0`      | 7 MB   | speaker segmentation |
 | `silero_vad.onnx`                            | 2 MB   | voice activity       |
 
-An earlier attempt at Parakeet went through a NeMo pip venv and left 5.5 GB of
-torch and CUDA wheels under `/realm/library/media/model/parakeet` with no model weights
-in it and no service ever built. That is what the packaged route replaced, and
-the venv is gone.
+## Open
 
-## Still open
-
-- **Voxtral Transcribe 2** as a streaming engine (`sinnix-mke`) — the
-  always-on lane currently sends discrete VAD regions rather than a continuous
-  stream, which is enough for utterances and not for live dictation. llama.cpp
-  has voxtral audio support and the existing `llama-cpp` service is the natural
-  host.
-- **Semantic end-of-turn** (LiveKit turn-detector, pipecat smart-turn v2) —
-  needed before a conversation, as opposed to an utterance, is the unit.
-- **AS-norm on the speaker verifier**, which is what gates the command channel.
-- The desktop **ASR tee** (`%t/sinnix/audio/asr.pcm`, pointed at the Yeti) is
-  live and still has no consumer — that is the socket a streaming engine would
-  attach to.
+- A streaming engine (Voxtral Transcribe 2 through llama.cpp) for live
+  dictation; the phone lane sends discrete segments today (`sinnix-mke`).
+- End-of-turn detection, needed before a conversation rather than an utterance
+  can be the unit.
+- The desktop ASR tee (`%t/sinnix/audio/asr.pcm`) is live but has no consumer
+  yet; a streaming engine would attach there.

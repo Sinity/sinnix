@@ -1,510 +1,143 @@
 # The hub
 
-`sinnix.services.hub` is the operator's browser front door to the system:
-generated reports, a live dashboard, and a control panel for the local AI
-backends, reachable from a phone or the desktop and from nowhere else.
-
-It makes each generated report a URL rather than a `file://` path, puts the
-system's current state on its control origin, and gives report annotations
-somewhere to go.
+`sinnix.services.hub` is the browser front door to the workstation: a
+dashboard, generated reports, and controls for the local AI backends. It is
+reachable from the desktop and over Tailscale (the phone), and from nowhere
+else. It runs as a Caddy user service in front of `sinnix-ops-reducer`, the
+user service that collects machine state and executes actions.
 
 ## Routes
 
-Control pages below use the hub port (8880 by default); `/reports/` uses the isolated report port (8883 by default), and every page carries
-the same nav, so the routes are reachable from each other rather than by URL.
+Control pages use port 8880; generated reports use a separate port, 8883.
+Open WebUI and ComfyUI are republished on 8881 and 8882 (they cannot run under
+a sub-path).
 
-| Route            | What it is                                                          |
-| ---------------- | ------------------------------------------------------------------- |
-| `/`              | The three-second read: a verdict, six tiles, then supporting detail |
-| `/work/`         | What is actually running, named — see below                         |
-| `/pressure/`     | Which pressure regime the machine is in, and what acting costs      |
-| `/services/`     | Every attested runtime surface, grouped by resource class           |
-| `/ai/`           | The local AI backends and their activation semantics                |
-| `/shaders/`      | The Hyprland screen-shader library, and which one is applied        |
-| `/capabilities/` | Everything this machine can do and how to invoke it — see below     |
-| `/reports/`      | Report-origin only; generated reports, scripts and relative assets  |
-| `/ops/v1/*`      | Reverse proxy onto the ops-reducer's read and action API            |
-| `/feedback`      | Append-only spool for report annotations                            |
-| `/terminals/`    | Live kitty terminal contents, control, and scrollback history       |
+| Route            | What it is                                                     |
+| ---------------- | -------------------------------------------------------------- |
+| `/`              | Summary: a verdict, six tiles, then detail                     |
+| `/work/`         | What is running: project commands, pueue groups, jobs, budgets |
+| `/pressure/`     | Memory and I/O pressure, the biggest processes, scheduled load |
+| `/services/`     | Declared services grouped by resource class                    |
+| `/ai/`           | Local AI backends and how they start                           |
+| `/shaders/`      | Screen-shader library and the one applied                      |
+| `/capabilities/` | Everything the machine can do and how to invoke it             |
+| `/terminals/`    | Live kitty terminals, control and scrollback                   |
+| `/reports/`      | Generated reports (report port only)                           |
+| `/ops/v1/*`      | The ops-reducer's read and action API                          |
+| `/feedback`      | Write-only inbox for report annotations                        |
 
-The loopback web UIs get one port each rather than a subpath of the hub —
-`8881` Open WebUI and `8882` ComfyUI. They are single-page apps
-that emit absolute asset URLs and have no base-path support, so a `/ui/comfyui/`
-mount would half-work in the way that wastes an afternoon. One port each costs
-one firewall entry and always works.
+## Actions
 
-## The workload view
+Every button posts to `/ops/v1/actions`, the ops-reducer's action API; the hub
+itself runs no commands. The API only accepts:
 
-`/work/` answers "what is this machine doing right now?" in sentences, not in a
-process list. It can, because sinnix already names its own work:
+- `start`, `stop`, `restart` on a unit listed in
+  `/etc/sinnix/runtime-inventory.json` that declares `observe.restartable`;
+- `interrupt` on a queued or running agentctl job;
+- `stop` on one process, identified by PID and start time, and only inside
+  `agent.slice`, `build.slice` or a slice the inventory marks as killable
+  (SIGTERM, then SIGKILL after 3 s);
+- `park` (freeze a unit with a required thaw time) and
+  `set_policy`/`reset_policy` (runtime-only changes to the resource limits a
+  unit declares).
 
-- **Project commands in flight** come from the project ledger. A row is
-  "sinex is running `test`, in flight 3m 14s, developer-build".
-- **Queue** is pueue's groups, one per pool, with running and queued counts;
-  a paused group holds new work back, whether paused by the operator or automation.
-- **Jobs** come from `agentctl job snapshot --limit 100`, including label,
-  phase, group, elapsed time and explicit omitted-row coverage, with an
-  interrupt on any task that is not yet terminal. Reducer probes terminate
-  their entire process group on timeout or response-size overflow before
-  closing output pipes; nested native clients are not left running.
-  The card shows active jobs first and states both its displayed count and the
-  owner's omitted active/completed counts. Run and worker details remain in
-  the current native `agentctl view <project>`; rendering the page does not
-  query every project or load the retired worktree-lane projection.
-- **Slice budgets** show the resource policy carried by declared services and
-  queued jobs.
+Each action carries the target the page observed; if the unit, job or process
+changed in the meantime, the action is refused rather than retargeted. Pages
+build their buttons from the same inventory, so they never offer an action the
+API would refuse. Privilege comes from the existing polkit rule for `wheel`.
 
-### What the page can and cannot do
+## Pressure page
 
-Lifecycle control goes through the reducer's action API and nowhere else, so
-the page can only offer what that API accepts: `start`/`stop`/`restart` on an
-attested inventory unit that declares `observe.restartable`, `interrupt` on a
-queued job that is not terminal, and `stop` on an admitted `{pid, start_ticks}`
-process (sinnix-mble — see "Unshackling the hub" below). A process is admitted
-by live cgroup membership — only inside `agent.slice`, `build.slice`, or a slice the
-runtime inventory itself marks sacrificial — never by name, so the button is
-only offered where the action would actually be accepted. Two gaps remain
-and stay named rather than papered over: a slice-level policy change
-(`MemoryHigh` on `agent.slice` itself) is refused because `set_policy`
-resolves through the runtime inventory and slices are not registered surfaces
-there, and nothing drains swap or reclaims a slice's already-swapped pages.
+`/pressure/` names the current state instead of showing gauges:
 
-## The pressure view
+- `CALM`;
+- `SWAP-CRITICAL`: swap at or above 75%, or memory full PSI at or above 20;
+- `SPIKE`: under 2 GiB available but nothing stalling;
+- `IO-SATURATED`: I/O full PSI at or above 40 while memory is fine.
 
-`/pressure/` exists because the machine's two ways of becoming unusable look
-nothing alike, and the conventional gauges see neither. It is derived from a
-clustering of this host's own incident telemetry, so every number on it earns
-its place:
+Swap use is the main widget because past freezes started with swap nearly full
+while "available memory" still looked healthy. The process table ranks
+resident plus swapped memory and marks which processes are cheap to stop. A
+strip lists the scheduled heavy jobs (Borg, btrbk, scrubs, database dumps) and
+their last durations. Swap at 75% with memory PSI still low also raises a
+desktop notification, since that is the state just before a freeze.
 
-- **A regime banner** naming the cluster rather than a severity: `CALM`,
-  `SWAP-CRITICAL` (swap at/above 75%, or memory full PSI at/above 20),
-  `SPIKE` (under 2 GiB available while nothing is stalling), `IO-SATURATED`
-  (io full PSI at/above 40 with memory fine). They call for different actions,
-  and two of them call for none.
-- **Swap headroom as the primary widget.** Across 29 measured freeze onsets,
-  swap was 90% consumed ten minutes before the freeze while available memory
-  still read 12.8 GiB. Nothing else on this machine displays it.
-- **`memory_psi_full` second** — the honest "is anything actually stalled" —
-  and **available memory last and explicitly demoted**, because it is the
-  number that looks healthy during a freeze and triggers the emergency killer
-  during a burst the machine was surviving.
-- **A hog table ranked on resident _plus_ swapped pages**, with a cost column:
-  a re-runnable tool invocation (`rg`, `bd list`, `git diff`) is free to stop,
-  an expensive job or model server is not, and session processes are summed in
-  one row rather than given rows they would take from something actionable.
-- **A scheduled-pressure strip** off the timer table: borg, btrbk, the scrubs
-  and the SQLite dumps, with how long each one's last run took. This class of
-  IO pressure is declared in advance, so the page predicts rather than alarms.
+## Capability index
 
-The same evidence produces one health lane, on the reducer's existing sweep:
-swap at/above 75% while memory full PSI is below 20 emits a
-`sinnix-health-transition-v1` transition and a desktop notification through the
-same debounce, ledger and dedup path as every other lane. That pair is the
-pre-freeze state specifically; swap saturated _while_ everything stalls is
-reported as `stalled`, because the warning has already been missed.
+`/capabilities/` lists every feature, service, AI backend, script, devshell
+command, skill, capture lane, MCP server and agent CLI, with its description,
+how to run it, whether it is enabled, and the file that declares it.
+`/etc/sinnix/capability-index.json` is built at evaluation time
+(`modules/capability-index.nix`) from the descriptions those declarations
+already require, so nothing is written twice. The ops-reducer adds the hub's
+own routes and the weekly usage report (`sinnix census`). Missing usage data
+means "unknown", never "unused".
 
-Buttons exist only where the bounded action API admits the target: `park` with
-its own thaw deadline on a _running_ backup unit the runtime inventory carries,
-and — on hog rows the cost column classifies re-runnable — `stop` on the one process
-(`{pid, start_ticks}`), so reclaiming a runaway `rg` no longer means stopping
-its whole agent session. The pin is re-verified against `/proc/<pid>/stat`
-at execution time (a mismatch means the pid was reused and is refused, never
-silently retargeted), and admission is by live cgroup membership rather than
-process name: only `agent.slice`, `build.slice`, and slices the runtime
-inventory itself marks sacrificial (`ManagedOOMMemoryPressure = kill`) can be
-targeted, so a PID 1 direct child, the reducer's own process, and anything in
-a session-critical or unmarked slice never gets the button. The stop is
-SIGTERM first, escalating to SIGKILL only if the same identity is still alive
-after a 3-second grace window — short because every command this reaches is a
-short-lived tool invocation with no state to flush. One gap remains and the
-page still states it rather than routing around it: no slice target exists
-for `set_policy`, since slices are not registered surfaces, and nothing drains
-swap or reclaims a slice's already-swapped pages at all.
-
-## The capability index
-
-`/capabilities/` answers the question no other page does: not what is happening,
-but what exists at all. Every row — feature, service, AI backend, script,
-devshell command, agent skill, capture lane, MCP server, agent CLI lane, hub
-page — carries a description, how to invoke it, whether it is enabled, and the
-repo file that declares it.
-
-Nothing on that page is written twice. `/etc/sinnix/capability-index.json` is
-built at evaluation time (`modules/capability-index.nix`, builder in
-`modules/lib/capability-index.nix`) out of the declarations that already carry
-the description: script frontmatter, which fails evaluation without one; the
-`description` argument `mkFeatureModule`/`mkServiceModule` require; the devshell
-command registry; `SKILL.md` frontmatter; the MCP registry, which now throws on
-a server that does not describe itself. Capture lanes and agent CLI lanes have
-no prose of their own, so their rows are rendered from their own structured
-fields — the owning service's description plus the declared cadence, the client
-plus the MCP profile and backend.
-
-The reducer adds the two things Nix cannot know:
-
-- **The hub's own routes**, declared in `pages/shell.py` because that is where
-  the routing lives. The nav and the `hub-page` rows read one table.
-- **The usage census** (`sinnix census`, weekly), joined by name — and, for
-  services, by every runtime surface the module declared, since the census
-  enumerates services from the runtime inventory where `polylogue` the service
-  is `polylogued` the surface. The reader selects one complete snapshot tied to the current declaration
-  digest and revision. It reads backward by record boundaries with progress
-  and cancellation, including large observations and interrupted tails.
-  Expand a capability’s evidence to see source limits, typed outcomes,
-  reference paths and named coverage gaps; CLI and cheatsheet share that
-  projection. Legacy rows, torn writes, mismatched declarations and
-  observations older than two weekly periods remain historical. Shell history
-  matches, service activation and path freshness are separate observations;
-  absent typed route coverage means usage is unknown, never permission to remove.
-  The CLI, hub and cheatsheet carry the same snapshot status and coverage gaps.
-
-There are no buttons. Discovering a capability is not an action verb, and the
-things you would do with one already have a page or a shell.
-
-The same merged view is available without a browser:
-
-```
+```bash
 sinnix-ops-reducer capabilities                # grouped table
-sinnix-ops-reducer capabilities --json         # the whole view
-sinnix-ops-reducer capabilities --kind script  # one kind
+sinnix-ops-reducer capabilities --json
+sinnix-ops-reducer capabilities --kind script
+sinnix cheatsheet                              # offline HTML, also Super+Shift+/
 ```
 
-`sinnix cheatsheet` (SUPER SHIFT+Slash) renders it into the searchable offline
-page at `/realm/project/sinnix/analysis/cheatsheet.html`, published through the explicit `/reports/cheatsheet.html` projection. It includes the live Hyprland binds, so the same answer is one keystroke away
-from the desktop and one tab away from the phone.
+## Access boundaries
 
-The capability page and CLI distinguish a missing declaration index from an
-unavailable or invalid one. A valid index with no declarations remains present.
-Read diagnostics are excluded from declaration fingerprints, and census access
-errors remain visible without implying zero observed usage.
+- **Binding.** Caddy listens only on loopback and on this machine's
+  `tailscale0` address, which a start-up step reads from the interface and
+  checks against `tailscale status`. Each site block needs an explicit `bind`:
+  without it Caddy merges same-port sites into one `0.0.0.0` listener. After
+  editing the Caddyfile, check the result:
 
-## Why it cannot be seen from the LAN
+  ```bash
+  caddy adapt --adapter caddyfile --config <file> | jq '.apps.http.servers | map_values(.listen)'
+  ```
 
-Two independent layers, either of which would suffice alone.
+  Every listen entry must be an explicit address; a bare `":8880"` is a bug.
+- **Host and Origin.** Requests with an unknown `Host` are refused before
+  anything is served. Accepted names: localhost, loopback, the machine name,
+  and its tailnet IP and DNS name. Republished frontends also refuse requests
+  from other browser origins.
+- **Firewall.** The ports are opened on `tailscale0` only
+  (`networking.firewall.interfaces.tailscale0.allowedTCPPorts`).
 
-**Binding.** Caddy listens on exactly two addresses per port: loopback, and the
-host's `tailscale0` IPv4 address. The tailnet address is not known at build time
-and is not a fact this public repository should carry, so an `ExecStartPre`
-reads it off the interface, retries while the interface comes up, and fails the
-unit if it never appears. Before publishing the bind environment, it verifies
-that Tailscale's own status assigns that address to this machine and supplies a
-valid DNS name. A failed identity query leaves the previous environment intact
-and refuses startup. A hub that cannot bind the tailnet is supposed to be down, not
-listening wider.
+The hub runs in the user manager because the ops-reducer's socket and the
+reports tree are operator-owned; no privileged port or extra permission is
+needed.
 
-The `bind` directive in each site block is load-bearing. Listing two site
-addresses on the same port does _not_ produce two listeners: Caddy merges
-same-port sites into one server on `:PORT` — that is `0.0.0.0` — and separates
-them by `Host` header, which is no boundary at all. After any edit to the
-Caddyfile, check the adapted config rather than trusting how it reads:
+## Shaders
 
-```
-caddy adapt --adapter caddyfile --config <file> | jq '.apps.http.servers | map_values(.listen)'
-```
+`/shaders/` lists `dots/hypr/shaders` and the shader Hyprland currently has
+applied (from `hyprctl getoption`). It has no buttons: use `F4` to cycle and
+`Shift+F4` to clear, or `sinnix-shader apply a b c`, which compiles several
+shaders into one. `sinnix-shader play` cycles them from a transient unit that
+clears the screen when it stops. Two things to know:
 
-Every entry must be an explicit address. A bare `":8880"` is a regression.
+- Animated shaders need `debug:damage_tracking = 0` (full redraw each frame);
+  otherwise Hyprland shows a red error banner. `sinnix-shader` sets it first.
+- Screenshots (`grim`) do not show the shader stage, so check shaders with
+  `glslangValidator`, not with a screenshot.
 
-**Host admission.** The hub and every republished frontend reject unknown Host
-names before serving files or proxying. Accepted names are localhost, loopback,
-the declared machine name, and this machine's verified tailnet IP/DNS name.
-Origin checks use the same names, so the declared entrances also support their
-own browser actions. An arbitrary domain resolving to loopback or the tailnet
-address cannot inherit a private HTTP entrance.
+## AI backends
 
-Republished frontends also reject foreign browser Origins and cross-site API
-requests before proxying. Each frontend accepts its own port on those verified
-host names; the report origin cannot act as a frontend client. Native clients,
-same-origin browser requests and WebSocket upgrades remain supported, as does
-a user-activated top-level GET/HEAD navigation. A backend's direct listener
-retains its own admission contract; the hub guard protects the published route.
+The backends behind `/ai/` start on first connection and stop after 30 s idle,
+so "idle" is their normal state. See `docs/local-ai-activation.md`.
 
-**Firewall.** Ports are opened on `tailscale0` only, via
-`networking.firewall.interfaces.tailscale0.allowedTCPPorts`. This matters
-because `useRoutingFeatures = "none"` means upstream does not put `tailscale0`
-in `trustedInterfaces` — without the per-interface opening, the phone would be
-dropped; without the per-interface _scoping_, the LAN would not be.
+## Report annotations
 
-## Why it runs in the user manager
-
-The dashboard's whole value is the ops-reducer's current-state snapshot, and the
-reducer is a _user_ service whose Unix socket is `0600` and operator-owned.
-Running the hub in the same manager reaches that socket, the operator-owned
-reports tree, and the action API without loosening a single permission. Nothing
-here needs a privileged port.
-
-The reducer runs refreshes and health sweeps serially on one worker. Its main
-loop supervises that worker and sends watchdog pings without doing filesystem
-I/O. Storage stalls leave the previous snapshot and its observation timestamp
-available. Worker exceptions still fail the service; the watchdog detects a
-stalled main loop and does not diagnose stalled storage or worker deadlocks.
-
-## The shader page has no buttons
-
-`/shaders/` lists the screen-shader library in `dots/hypr/shaders`, describes
-each stage, and reports what Hyprland currently has applied — read live from
-`hyprctl getoption`, not from a manifest that could be stale.
-
-It stops there. Applying a shader is not a verb the reducer's action API has,
-and the doctrine below is the whole reason: a page that shelled out to
-`hyprctl` would be the second control plane. So the page prints the
-`sinnix-shader` commands and says why they are not buttons. The keyboard is the
-fast path anyway — `F4` cycles, `Shift+F4` clears — and `Shift+F4` matters,
-because a shader can make the screen unreadable and the way out must not depend
-on finding a terminal.
-
-Making it clickable is a reducer change: a shader target with its own
-attestation. It is not a hub change.
-
-The page also carries the two facts that are easy to get wrong about screen
-shaders here, because there is nowhere better to put them. Hyprland pins the
-`time` and pointer uniforms to constants unless `debug:damage_tracking` is `0`,
-so animation is real but costs a full-screen redraw per frame; and a shader that
-reads those uniforms _while_ damage tracking is on makes Hyprland paint a red
-error banner across the top of the display. Turning damage tracking off before
-applying avoids the banner rather than dismissing it afterwards, which is the
-order `sinnix-shader` uses. Measured cost of the animated case, from Hyprland's
-own `debug:overlay`: 120fps/1.05ms render becomes 118fps/1.12ms, and GPU draw
-moves about a watt.
-
-Shaders compose. Hyprland takes one path, so nothing stacks at the compositor,
-but `sinnix-shader apply a b c` generates a single fragment shader containing all
-of them — warps on the sampling coordinate, one texture fetch, then shades — and
-`_presets.conf` names the combinations worth keeping. `play` cycles shaders or
-presets on an interval, crossfading by generating both pipelines into one shader
-and mixing on `time`. It runs as a transient systemd unit whose `ExecStopPost`
-clears the screen, so a `SIGKILL` mid-cycle still restores the display; that is
-the one teardown a signal handler cannot promise, and it is why playback is a
-unit rather than a background process.
-
-Note that a screen shader cannot be verified by screenshotting. `grim` and
-screencopy do not observe the final shader stage on this host — a full-screen
-invert produces a byte-identical capture while whiting out the actual display.
-They _do_ see the error overlay and the debug overlay, which is why both are
-usable as instruments. Shader compilation is checked with `glslangValidator`
-before anything reaches the display instead, because Hyprland defers the compile
-to the next render pass and logs nothing when it fails.
-
-## Why there is no second control plane
-
-Every button on every page posts to `/ops/v1/actions` — the ops-reducer's existing
-bounded action API. That API already owns admission (targets must be attested
-runtime-inventory units that declare `observe.restartable`), optimistic
-target checks (`expected_target` binds the observed unit manager and invocation,
-job launch and attempt, or process PID and start time), idempotency keys, and
-durable receipts. An unrelated refresh does not invalidate an action. Buttons
-use the displayed target token; `/ops/v1/actions/prepare` supplies one when the
-caller has no target observation. The hub adds no shell-out, no `sudo`,
-and no privileged helper.
-
-`start`, `stop`, and `restart` are one verb set behind that gate, sharing the
-same admission and the same receipts. Privilege comes from the workstation
-profile's existing polkit rule for `wheel` on `org.freedesktop.systemd1.*`; the
-hub introduces no new grant.
-
-The pages resolve every unit from `/etc/sinnix/runtime-inventory.json` — the
-same attested document the action API validates against — so they cannot offer
-a button the API would refuse for a reason the page does not know about. A
-service whose module is not enabled renders as "not registered" rather than
-silently disappearing, and a unit with no `observe.restartable` renders as "not
-restartable" rather than with a button that would 403.
-
-Flattened capture entries retain their declared producer surface, unit, and manager. Standalone captures carry a null producer; consumers cannot infer a service binding from the capture name or path. These are current declarations, not proof of historical capture continuity.
-
-**The backends are socket-activated.** They sit behind `systemd-socket-proxyd`
-and exit after a 30s idle timeout, so _idle_ is the normal resting state, not a
-fault, and connecting to the public endpoint starts one with no privileged
-action at all. CUDA backends hold the same `gpu-inference` admission key
-and conflict by design. See `docs/local-ai-activation.md`.
-
-## Unshackling the hub
-
-The process-target admission rule above keeps the reducer as the only control
-plane. The remaining verbs
-(`freeze`/`thaw`/`park`/`set_policy`/`reset_policy`, already implemented and
-already unit-only) belong on a page:
-
-- **`park` and `set_policy`/`reset_policy` are on `/pressure/` and
-  `/services/`.** `park` freezes a unit's cgroup and schedules its own thaw in
-  the same action, so a parked backup cannot be forgotten frozen — the hub
-  button prompts for the deadline rather than guessing one, because the
-  action refuses to run without it. `set_policy`/`reset_policy` tune whichever
-  `MemoryHigh`/`MemoryMax`/`MemoryLow`/`CPUWeight`/`IOWeight`/`Nice` properties
-  a surface's own `effectiveResources` already declares. Reset restores all
-  those properties from the inventory. Both policy actions use runtime-only
-  systemd properties. They do not write or remove persistent overrides.
-- **Bare `freeze`/`thaw` stay backend-only.** They are `park`'s own building
-  blocks (`sinnix-pressure-park freeze`/`thaw`), and the difference that
-  matters is the missing deadline: a bare freeze has no scheduled thaw, so a
-  forgotten one is an indefinitely paused unit rather than a unit that
-  resumes on its own. `park` is strictly more capable for every case a hub
-  button would want (pause now, resume later) and carries the safety property
-  bare freeze does not, so there is no case where surfacing the primitive
-  adds power the composed verb lacks — it only adds a way to forget.
-- **`/feedback/elicit/<domain>`** is the read-API design this bead also asked
-  for, covered under "Report annotations, handed back" below.
-
-## Report annotations, handed back
-
-The html-report skill generates annotation widgets that autosave to
-`localStorage` and export one JSON blob for the operator to paste into a chat.
-With a server in front of the reports, that paste step can be one `fetch()`:
+Reports made with the html-report skill can send their annotations with one
+request:
 
 ```js
 fetch("/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(collectState()) });
 ```
 
-`collectState()` is the skill's own function. Deliberately a _simple_ request —
-no custom headers, so no CORS preflight — which means the same line works from a
-report served by the hub and from one opened straight off disk as `file://`
-(`Origin: null`), as long as the hub is reachable and the URL is absolute in the
-`file://` case.
+Submissions are appended to `/realm/state/hub-feedback/<UTC-date>.jsonl`, each
+wrapped with receive time, referring page and a sequence number. There is no
+route that reads the inbox back. POST routes require exactly one
+`application/json` Content-Type.
 
-`/feedback` is a route on the ops-reducer, reached through the same reverse
-proxy as the pages. Submissions land in
-`/realm/state/hub-feedback/<UTC-date>.jsonl`, one JSON object per line,
-each wrapping the payload in an envelope carrying the receive time, the
-referring page, and a sequence number — so a consuming agent can tell
-submissions apart without trusting client-supplied fields. That file format is
-the contract and is unchanged from the earlier standalone feedback daemon
-this route replaced.
-
-The spool itself is write-only. There is no route that reads it back: serving
-arbitrary posted payloads would turn a sink into an exfiltration surface for
-the personal analysis those annotations describe. That refusal stands.
-
-Feedback, terminal send, action prepare/execute and failure-notification POSTs
-require exactly one `application/json` Content-Type (parameters are accepted).
-Missing, duplicate or other media types receive 415 before any body read or
-owner call. The phone action routes (`intent` and `job-answer`) also require exactly one JSON Content-Type, both at the proxy and directly. The phone receiver keeps its separate binary upload and bodyless acknowledgement protocols.
-The proxy applies the same refusal before forwarding incomplete bodies;
-comma-containing media-type parameter lists are rejected as ambiguous.
-
-A `sinnix-elicit-v1` record arriving in the spool starts the drain
-(`sinnix-elicit autoingest`, as a transient `sinnix-elicit-autoingest` unit)
-instead of a 120s timer looking for one. The trigger coalesces: a comparison
-session is a burst of one POST per judgment, and the Bradley-Terry refit happens
-once, a few seconds after the last tap, rather than once per tap.
-
-`GET /feedback/elicit/<domain>` is the one read this route does carry, and it
-is a different decision from the spool refusal above, not a walk-back of it:
-it serves back a domain's own fitted `model.json` (`sinnix-elicit`'s
-`/realm/state/elicit/<domain>/model.json`), a derived
-Bradley-Terry fit over items the operator defined themselves on this host,
-not an arbitrary posted payload. Bounded the same way as everything else
-here — the domain name is checked against a fixed charset and the resolved
-path must stay under the configured preferences root — never a general
-filesystem read. This unblocks the in-session "learning so far" preview
-noted onto this bead from sinnix-eb9c: a comparison session can poll its own
-domain's model mid-session instead of only after the next full page load.
-Wiring that poll into the session page's own JS is `scripts/sinnix-elicit`'s
-follow-up, not this route's.
-
-An absent model returns 404; inaccessible files, broken links and wrong object
-types return 503. Invalid UTF-8 or JSON returns 502. These failures do not mean
-that the domain has never been ranked.
-
-## Terminal views
-
-Terminal titles, working directories, send history and capture labels are rendered as text, and history filenames are encoded as URL path components. Captured metadata cannot supply page markup.
-
-`/terminals/` (sinnix-859p) reads and drives the operator's own kitty windows
-over the browser, without a multiplexer. It is a route family on the
-ops-reducer, absorbed from an earlier standalone terminal-viewing daemon —
-same URLs, same response shapes, same design doctrine, now falling through
-the same catch-all `handle` in the Caddyfile as every other page instead of
-its own `handle_path` block and its own Unix-socket process.
-
-Three sources, none of them a new capture lane:
-
-- **Live** — every kitty shell already runs under `asciinema session
---stream-local` (that is how the capture lake is written), so the reducer
-  reads the recorder's own process environment and listening port back out of
-  `/proc` and proxies its player and WebSocket under `/terminals/v1/live/
-<pid>/<window_id>/`. A viewer joining late gets the current screen first.
-- **Snapshot** — kitty's own remote-control protocol (`kitty @ get-text
---ansi`), for any window with no live stream (started before streaming was
-  wired in, or outside `sinnix-captured-shell`).
-- **History** — the existing full-ANSI scrollback captures
-  `sinnix-capture-kitty-scrollback` already writes to
-  `/realm/activity/kitty-scrollback`, joined to a window by the
-  `(kitty_pid, window_id)` pair that is the capture's own filename key.
-
-`send-text`/`send-key`, from the page's input box and quick-action buttons,
-are the operator's own deliberate typing routed through a browser instead of
-a keyboard — not the "never inject into a live agent TUI" case, which is
-about _automated_ interruption of a session an agent doesn't own.
-
-No auth beyond the tailnet boundary the rest of the hub relies on, and no
-database: kitty's own `ls`/`get-text` and the scrollback files on disk are
-the only state, and per-window sent-text recall lives in the browser's own
-`localStorage`.
-
-## Rendering
-
-The ops-reducer renders every page on request and Caddy reverse-proxies the
-page paths to its Unix socket; only `/reports/` is served off disk. Each
-response is complete HTML: the browser fetches nothing to display state. A phone
-on a flaky link, or a page left open overnight, shows the system as of a
-timestamp it prints, rather than an empty skeleton waiting on XHR. Client-side
-logic is limited to the action buttons, the theme and text-size toggles, the
-services filter, and the three lines that rewrite the frontend port links to
-whichever host you reached the hub on.
-
-Rendering on request replaced an earlier render-on-timer design that wrote the
-same pages to static files every 60 seconds. The reducer already held the
-state those pages show, so the timer bought nothing but staleness: a page is
-now as current as the moment it was asked for.
-
-Inputs are the reducer's live snapshot, the runtime inventory, a Nix-generated
-manifest, and live systemd state. Background refresh reads current pressure and
-batched unit state; expensive diagnostics run when their page or section is
-requested. Source failures retain the other healthy sections and expose the
-failed component's coverage. Collector sampling and capture cadence are separate
-from these dashboard reads.
-
-Serving the pages over the reducer's Unix socket is what keeps the auth model
-intact. The reducer treats that socket as authorized — it is 0600 in the
-operator's runtime directory — and still demands a bearer token on its loopback
-TCP listener, so the page routes expose exactly what the action API already
-exposed there. `/ops/*` and the page/terminal routes reject foreign Origins
-and cross-site Fetch Metadata before proxying. Native clients omit those headers;
-same-origin browser clients and user-activated top-level GET/HEAD navigation remain
-supported. Cross-site writes receive no navigation exception. `/feedback*` also rejects foreign
-web origins but preserves `Origin: null` for local reports. The phone API is
-native-only and rejects all browser Origin/Fetch Metadata. The reducer's target
-identity checks remain in effect. Pressure freeze/thaw/park actions use the system manager,
-as required by their owning helper.
-
-The visual language is sinnix's own: the same CSS custom properties, status
-tones, stat tiles, badges and A−/A+ controls as the generated reports, in the
-violet "ops" accent so the hub is distinguishable at a glance from a report.
-It is styled for the phone first — one column, ≥2.4rem touch targets, no
-horizontal scroll at 360px — and widens into columns on a desktop instead of
-stretching one long list across 4K.
-
-## Operating it
-
-```
-systemctl --user status sinnix-hub sinnix-ops-reducer
-journalctl --user -u sinnix-hub -n 50             # Caddy errors only; access logs are off
-journalctl --user -u sinnix-ops-reducer -n 50     # page rendering and the action API
-```
-
-State lives in `/realm/state/sinnix-hub` (Caddy's own scratch and the access
-log) and holds nothing that is not regenerated, so it is on the NVMe volume
-rather than the wear-limited root and needs no persistence entry.
-
-## Deliberately not included
-
-- **No HTTPS.** `tailscale serve` would provide it, but it needs MagicDNS and
-  tailnet-wide cert provisioning, and this host runs `enableMagicDNS = false`
-  under a standing "never touch DNS" posture. Plain HTTP over WireGuard is the
-  honest trade; revisit only alongside that posture.
-- **No proxying of the raw model APIs** (Ollama `:11434`, LiteLLM `:4000`).
-  Republishing them would widen the surface and hold the idle proxies open,
-  defeating the teardown the activation design exists for.
-- **No auth beyond the tailnet.** Consistent with the rest of sinnix: the
-  tailnet is the boundary, and every agent on this host is already
-  root-equivalent.
-
-Report HTTP serving uses a separate origin so received or captured report scripts cannot read or invoke the operator control API. It serves the original publication bytes and relative assets. Only report feedback is proxied there; action, terminal, phone and private catalog routes are absent. The old control-origin report serving route is removed. Report links and the cheatsheet entrance use the declared report port. Local file reports retain their opaque-origin feedback compatibility.
+A `sinnix-elicit-v1` submission starts `sinnix-elicit autoingest` a few
+seconds after the last tap, so a burst of comparisons is fitted once.
+`GET /feedback/elicit/<domain>` returns that domain's fitted `model.json`, so a
+comparison session can show progress; the domain name is checked and confined
+to the elicit state root.
