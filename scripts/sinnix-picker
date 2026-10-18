@@ -69,11 +69,12 @@ import io
 import json
 import os
 import re
+import sqlite3
 import stat
 import subprocess
 import sys
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
@@ -117,35 +118,82 @@ class Entry:
 
 
 def load_history() -> list[Entry]:
-    # Keep the newest visit per normalized URL; stream rather than sort
-    # 932k rows in memory twice.
-    seen: dict[str, tuple[str, str, str]] = {}
     try:
         with (
             _regular_input(HISTORY_PATH) as binary,
-            io.TextIOWrapper(binary, encoding="utf-8") as f,
+            closing(sqlite3.connect("")) as database,
         ):
-            for line in f:
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                norm = row.get("norm") or row.get("url")
-                iso_time = row.get("iso_time", "")
-                title = row.get("title") or row.get("url", "")
-                url = row.get("url", "")
-                if not norm or not url:
-                    continue
-                prior = seen.get(norm)
-                if prior is None or iso_time > prior[0]:
-                    seen[norm] = (iso_time, title, url)
+            before = os.fstat(binary.fileno())
+            # An empty filename selects SQLite's private temporary database,
+            # unlinked while open on this host. Bound its cache; sort spill
+            # follows SQLite's existing TMPDIR rather than creating a cache.
+            database.executescript("""
+                PRAGMA cache_size=-2048;
+                PRAGMA temp_store=FILE;
+                PRAGMA journal_mode=OFF;
+                PRAGMA synchronous=OFF;
+                CREATE TABLE visits(norm TEXT PRIMARY KEY, iso_time TEXT, position INTEGER, record_bytes INTEGER);
+            """)
+
+            def records():
+                position = 0
+                for line in binary:
+                    start = position
+                    position += len(line)
+                    try:
+                        row = json.loads(line.decode("utf-8"))
+                    except json.JSONDecodeError:
+                        continue
+                    if not isinstance(row, dict):
+                        raise ValueError("history record is not an object")
+                    norm = row.get("norm") or row.get("url")
+                    iso_time = row.get("iso_time", "")
+                    title = row.get("title") or row.get("url", "")
+                    url = row.get("url", "")
+                    if not norm or not url:
+                        continue
+                    if not all(
+                        isinstance(value, str) for value in (norm, iso_time, title, url)
+                    ):
+                        raise ValueError("history record has non-text fields")
+                    yield norm, iso_time, start, len(line)
+
+            # UPDATE preserves the original rowid, matching the dictionary's
+            # first-insertion tie order even after a later visit improves it.
+            database.executemany(
+                """
+                INSERT INTO visits VALUES (?, ?, ?, ?)
+                ON CONFLICT(norm) DO UPDATE SET
+                    iso_time=excluded.iso_time, position=excluded.position, record_bytes=excluded.record_bytes
+                WHERE excluded.iso_time > visits.iso_time
+            """,
+                records(),
+            )
+            out = []
+            for position, record_bytes in database.execute(
+                "SELECT position,record_bytes FROM visits ORDER BY iso_time DESC,rowid LIMIT ?",
+                (HISTORY_LIMIT,),
+            ):
+                # Read exactly the selected record, avoiding BufferedReader's
+                # large read-ahead window for unrelated timestamp-order seeks.
+                row = json.loads(
+                    os.pread(binary.fileno(), record_bytes, position).decode("utf-8")
+                )
+                out.append(Entry("hist", row.get("title") or row["url"], row["url"]))
+            after = os.fstat(binary.fileno())
+            # Offsets address this open inode, including across an atomic
+            # producer rename. Refuse an in-place rewrite during either pass.
+            if (before.st_size, before.st_mtime_ns) != (
+                after.st_size,
+                after.st_mtime_ns,
+            ):
+                raise OSError(errno.ESTALE, "history changed while being read")
+            return out
     except FileNotFoundError:
         return []
-    except (OSError, UnicodeError) as error:
+    except (OSError, ValueError, sqlite3.Error) as error:
         _unavailable("history", HISTORY_PATH, error)
         return []
-    ranked = sorted(seen.values(), key=lambda t: t[0], reverse=True)[:HISTORY_LIMIT]
-    return [Entry("hist", title, url) for _, title, url in ranked]
 
 
 def load_raindrop() -> list[Entry]:
