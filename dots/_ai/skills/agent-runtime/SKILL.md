@@ -98,9 +98,9 @@ fast-forward), and closes the tasks its acceptance record satisfies.
 
 ## Worker toolbelt
 
-Batch workers have `batch-worker` on PATH. `batch-worker task` prints the original packet and
+Batch workers have `batch-worker` on PATH. `batch-worker task` prints the original prompt and
 current owner task amendments for its bound attempt. Assess changed requirements
-against retained work; unavailable comparisons stay explicit. `lane
+against retained work; unavailable comparisons stay explicit. `batch-worker
 verify` runs the descriptor's focused profile without arguments. For an
 operation requiring a selector, use `agentctl job start <project> <operation>
 --workspace <worktree> -- <selector>` explicitly. `batch-worker done <result.json>` requires a clean tree,

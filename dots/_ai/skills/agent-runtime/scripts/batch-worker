@@ -121,7 +121,7 @@ lane_done() (
     printf 'batch-worker: refusing to finish with uncommitted changes. Offenders:\n%s\n' "$dirty" >&2
     exit 1
   fi
-  snapshot=$(mktemp "${TMPDIR:-/realm/tmp/work}/lane-result.XXXXXXXX") || die "cannot allocate result snapshot"
+  snapshot=$(mktemp "${TMPDIR:-/realm/tmp/work}/batch-worker-result.XXXXXXXX") || die "cannot allocate result snapshot"
   trap 'rm -f -- "$snapshot"' EXIT
   # Validate, inspect and emit one captured sequence, even if the worker
   # replaces its original result while validation is running.

@@ -1,4 +1,4 @@
-# Proton VPN lane for OpenAI surfaces.
+# Proton VPN route for OpenAI traffic.
 #
 # A Proton-generated WireGuard config stays outside the Nix store (normally
 # agenix). The tunnel never installs a host-wide default route. A loopback-only
@@ -16,7 +16,7 @@ let
 in
 mkServiceModule {
   name = "proton-openai";
-  description = "Proton WireGuard lane for ChatGPT, Codex and OpenAI web traffic";
+  description = "Proton WireGuard route for ChatGPT, Codex and OpenAI web traffic";
   docs = "docs/proton-openai.md";
   extraOptions = {
     wireGuardConfigFile = lib.mkOption {

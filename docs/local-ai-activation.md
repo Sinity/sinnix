@@ -155,7 +155,7 @@ The RAG embedding model is `qwen3-embedding:0.6b`. It is used by Open WebUI and 
 
 ## Driving local models from agents
 
-The local wrapper lanes use LiteLLM and default to `local-chat`:
+The local agent profiles use LiteLLM and default to `local-chat`:
 
 ```bash
 claude-local
@@ -179,7 +179,7 @@ Open `http://127.0.0.1:8080` or its hub frontend on port 8881; the first request
 
 The hub frontend applies the hub's own request checks and then forwards as a native client. There is no login (`WEBUI_AUTH=False`, single operator).
 
-The configuration provides Ollama models and LiteLLM lanes, including the direct llama.cpp profiles, through `OPENAI_API_BASE_URLS`. Document embeddings use the roster's Ollama embedding model. The actual model list still depends on those owners being reachable.
+The configuration provides Ollama models and LiteLLM model routes, including the direct llama.cpp profiles, through `OPENAI_API_BASE_URLS`. Document embeddings use the roster's Ollama embedding model. The actual model list still depends on those owners being reachable.
 
 ## Speech, reranking, and media generation
 

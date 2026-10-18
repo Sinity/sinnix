@@ -34,7 +34,7 @@ The `clodex` command is the managed Clodex CLI. It bootstraps the pinned runtime
 
 Routed accounting is published by the hub server from Clodex's bounded `~/.clodex/logs/inference-requests.jsonl` response-usage records. It reports aggregate request and token counters with source freshness; missing accounting is unavailable, never zero. Request bodies, credentials, and raw logs are not copied into hub server state.
 
-Orchestrated lanes use the AgentCTL Codex backend directly, for example `agentctl batch start sinnix <bead> --backend codex --model gpt-6-sol --effort high`. Clodex is a Claude Code subscription bridge, not a second job scheduler.
+Batch workers use the AgentCTL Codex backend directly, for example `agentctl batch start sinnix <bead> --backend codex --model gpt-6-sol --effort high`. Clodex is a Claude Code subscription bridge, not a second job scheduler.
 
 ## Operating limits
 

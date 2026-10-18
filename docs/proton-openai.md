@@ -24,14 +24,14 @@ Consumers:
   `/etc/sinnix/openai-proxy.pac`; only ChatGPT/OpenAI origins are
   proxied and every other site is `DIRECT`.
 
-The lane is fail-closed for participating clients: if the tunnel/proxy is down,
+The route is fail-closed for participating clients: if the tunnel/proxy is down,
 their proxied OpenAI requests fail rather than falling back through the host
 route. Disabling the service also removes the Chrome PAC launch flag.
 
 Existing Chrome and desktop processes need a relaunch to use changed launch
 flags. The profile expires annually; renew it through Proton Downloads and
 replace the encrypted deployment input before expiry. DNS lookup by the proxy
-uses the host resolver; this lane scopes egress, not host-wide DNS privacy.
+uses the host resolver; this route scopes egress, not host-wide DNS privacy.
 
 ## Rooted Android phone
 
