@@ -48,8 +48,11 @@ import time
 from pathlib import Path
 
 from sinnix_lib.atomic_json import read_json, write_json_atomic
+from sinnix_lib.lock import flock
 
-STATE_DIR = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "sinnix"
+STATE_DIR = (
+    Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "sinnix"
+)
 STATE_FILE = STATE_DIR / "reading-stack.json"
 CAPTURE_ROOT = os.environ.get("SINNIX_CAPTURE_ROOT", "/realm/activity")
 SOFT_CAP = 20
@@ -63,7 +66,7 @@ def _load() -> list[dict]:
 def _save(items: list[dict]) -> None:
     # Durability: atomic only. Every push and pop is also captured to the
     # activity lake, which is where the stack is reconstructed from.
-    write_json_atomic(STATE_FILE, items)
+    write_json_atomic(STATE_FILE, items, mode=0o600)
 
 
 def _capture(event: str, payload: dict) -> None:
@@ -87,7 +90,6 @@ def _capture(event: str, payload: dict) -> None:
 
 
 def cmd_push(args: argparse.Namespace) -> int:
-    items = _load()
     entry = {
         "url": args.url,
         "title": args.title or args.anchor_text or args.url,
@@ -100,30 +102,35 @@ def cmd_push(args: argparse.Namespace) -> int:
     # De-dup by URL: re-pushing something already queued bumps it to the top
     # (most-recent-first) instead of creating a second row -- the same link
     # queued twice is one intention, not two.
-    items = [i for i in items if i.get("url") != entry["url"]]
-    items.insert(0, entry)
-    _save(items)
-    _capture("push", entry)
+    with flock(STATE_FILE.with_name(STATE_FILE.name + ".lock")):
+        items = [i for i in _load() if i.get("url") != entry["url"]]
+        items.insert(0, entry)
+        _save(items)
+        _capture("push", entry)
     if len(items) > SOFT_CAP:
-        print(f"reading-stack: {len(items)} items -- over the soft cap ({SOFT_CAP}); consider reviewing.", file=sys.stderr)
+        print(
+            f"reading-stack: {len(items)} items -- over the soft cap ({SOFT_CAP}); consider reviewing.",
+            file=sys.stderr,
+        )
     return 0
 
 
 def cmd_pop(args: argparse.Namespace) -> int:
-    items = _load()
-    if not items:
-        print("reading-stack: empty", file=sys.stderr)
-        return 1
-    if args.url:
-        idx = next((i for i, e in enumerate(items) if e["url"] == args.url), None)
-        if idx is None:
-            print(f"reading-stack: no entry for {args.url}", file=sys.stderr)
+    with flock(STATE_FILE.with_name(STATE_FILE.name + ".lock")):
+        items = _load()
+        if not items:
+            print("reading-stack: empty", file=sys.stderr)
             return 1
-        entry = items.pop(idx)
-    else:
-        entry = items.pop(0)
-    _save(items)
-    _capture("pop", entry)
+        if args.url:
+            idx = next((i for i, e in enumerate(items) if e["url"] == args.url), None)
+            if idx is None:
+                print(f"reading-stack: no entry for {args.url}", file=sys.stderr)
+                return 1
+            entry = items.pop(idx)
+        else:
+            entry = items.pop(0)
+        _save(items)
+        _capture("pop", entry)
     print(json.dumps(entry))
     return 0
 
@@ -147,19 +154,29 @@ def cmd_count(_args: argparse.Namespace) -> int:
 
 
 def cmd_open(args: argparse.Namespace) -> int:
-    items = _load()
-    entry = next((item for item in items if not args.url or item["url"] == args.url), None)
-    if entry is None:
-        print("reading-stack: empty" if not args.url else f"reading-stack: no entry for {args.url}", file=sys.stderr)
-        return 1
-    try:
-        subprocess.Popen(["sinnix-browser-app", entry["url"]], start_new_session=True)
-    except FileNotFoundError:
-        print("reading-stack: sinnix-browser-app is unavailable", file=sys.stderr)
-        return 1
-    items.remove(entry)
-    _save(items)
-    _capture("pop", entry)
+    with flock(STATE_FILE.with_name(STATE_FILE.name + ".lock")):
+        items = _load()
+        entry = next(
+            (item for item in items if not args.url or item["url"] == args.url), None
+        )
+        if entry is None:
+            print(
+                "reading-stack: empty"
+                if not args.url
+                else f"reading-stack: no entry for {args.url}",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            subprocess.Popen(
+                ["sinnix-browser-app", entry["url"]], start_new_session=True
+            )
+        except FileNotFoundError:
+            print("reading-stack: sinnix-browser-app is unavailable", file=sys.stderr)
+            return 1
+        items.remove(entry)
+        _save(items)
+        _capture("pop", entry)
     print(json.dumps(entry))
     return 0
 
@@ -178,7 +195,9 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_push)
 
     p = sub.add_parser("pop")
-    p.add_argument("--url", default=None, help="pop a specific entry; default is most-recent")
+    p.add_argument(
+        "--url", default=None, help="pop a specific entry; default is most-recent"
+    )
     p.set_defaults(func=cmd_pop)
 
     p = sub.add_parser("list")
@@ -190,7 +209,11 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=cmd_count)
 
     p = sub.add_parser("open")
-    p.add_argument("--url", default=None, help="open and consume a queued entry; default is most-recent")
+    p.add_argument(
+        "--url",
+        default=None,
+        help="open and consume a queued entry; default is most-recent",
+    )
     p.set_defaults(func=cmd_open)
 
     args = parser.parse_args(argv)
