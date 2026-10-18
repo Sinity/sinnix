@@ -24,7 +24,8 @@ State lives in `$XDG_STATE_HOME/sinnix/activity` (override with
 `SINNIX_ACTIVITY_STATE_DIR`; directory 0700, files 0600, persisted with
 `.local/state/sinnix`). `activity.sqlite3` holds the current state, the
 append-only event history and notification records; `current.json` is a copy
-of the current state for the panel. `export` prints all events as JSONL,
+of the declared state for the panel, rewritten only when that state changes;
+time-derived fields such as the remaining time come from `status`. `export` prints all events as JSONL,
 `history --json` the recent ones. `import-checkpoint PATH` seeds an empty
 store and refuses to overwrite one. A corrupt store is reported as an error,
 never treated as empty.

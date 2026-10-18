@@ -226,18 +226,32 @@ class Runtime:
         for key in ("started", "reconsider"):
             value = state[key + "_at"]
             current[key + "_local"] = timestamp(value).astimezone(self.zone).strftime("%Y-%m-%d %H:%M %Z") if value else None
+        self.project({key: value for key, value in current.items() if key not in ("generated_at", "seconds_remaining")})
+        return current
+
+    def project(self, view: dict) -> None:
+        """Replace current.json only when the declared state changed.
+
+        Clock-derived fields stay out of the file, so a timer tick over an
+        unchanged state writes nothing.
+        """
+        target = self.root / "current.json"
+        try:
+            if json.loads(target.read_text()) == view:
+                return
+        except (OSError, ValueError):
+            pass
         fd, temporary = tempfile.mkstemp(prefix=".current-", dir=self.root)
         try:
             with os.fdopen(fd, "w") as stream:
-                json.dump(current, stream, ensure_ascii=False)
+                json.dump(view, stream, ensure_ascii=False)
                 stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary, self.root / "current.json")
+            os.replace(temporary, target)
         finally:
             if os.path.exists(temporary):
                 os.unlink(temporary)
-        return current
 
     def choose(self, activity, *, for_duration=None, until=None, open_ended=False, return_url=None):
         previous = self.read()
