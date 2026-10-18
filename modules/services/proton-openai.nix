@@ -210,6 +210,9 @@ mkServiceModule {
           fi
           bind_ip="$(cat "$bind_file")"
 
+          # Warning, not Info: Info and Connect log several lines for every
+          # proxied connection, about 640k lines a day, three quarters of the
+          # whole system journal.
           cat >/run/proton-openai-proxy/tinyproxy.conf <<EOF
           Port ${toString cfg.proxyPort}
           Listen 127.0.0.1
@@ -220,7 +223,7 @@ mkServiceModule {
           DisableViaHeader Yes
           ConnectPort 80
           ConnectPort 443
-          LogLevel Info
+          LogLevel Warning
           EOF
 
           exec tinyproxy -d -c /run/proton-openai-proxy/tinyproxy.conf

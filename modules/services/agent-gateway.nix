@@ -375,7 +375,8 @@ mkServiceModule {
                     --mcp.startup-wait-timeout 30s \
                     --mcp.max-concurrent-requests 32 \
                     --health.listen-addr 127.0.0.1:${toString endpoint.healthPort} \
-                    --log.format json
+                    --log.format json \
+                    --log.level warn
                 '';
                 LoadCredential = "runtime-key:${endpoint.runtimeKeyFile}";
                 Restart = "always";
@@ -385,8 +386,12 @@ mkServiceModule {
                   "-${endpoint.stateDir}"
                 ];
                 UMask = "0077";
-                # No gateway PATH or typelib path: the client execs nothing.
-                # Every input of this unit must be the tunnel's own, since
+                # warn: at info the client logs its whole dependency graph on
+                # every start plus a line per dispatched call.
+                # No gateway PATH or typelib path. The client does start
+                # `codex app-server` (from the user manager's PATH) to serve
+                # Codex over the tunnel; the codex wrapper scopes it under
+                # agent.slice. Every input of this unit must be the tunnel's own, since
                 # Home Manager restarts a unit whose file changed and a
                 # tunnel restart drops every in-flight call. A restart of the
                 # server alone does not: the client reconnects to its socket.

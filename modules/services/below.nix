@@ -4,9 +4,11 @@
 # Use `below replay` to investigate what happened at any point in time.
 #
 # Data stored under storeDir, alongside the rest of machine telemetry.
-# Retention is indefinite: at 1 s with dict-compress (chunk-32, ~8.8× over
-# plain zstd) this is ~720 MB/day = ~260 GB/year. Export via
-# `below dump -O json/csv`. Backup coverage follows the shared backup policy.
+# Retention is indefinite. At 1 s with dictionary compression this measured
+# ~740-840 MB/day in March-April 2026 and projects to ~2 GB/day at the
+# October 2026 process count; a 3-minute A/B gave chunk 16 about 7% below
+# chunk 32, with 8 and 256 both larger. Export via `below dump -O json/csv`.
+# Backup coverage follows the shared backup policy.
 {
   mkServiceModule,
   lib,
@@ -89,7 +91,7 @@ mkServiceModule {
 
           serviceConfig = {
             Type = "simple";
-            ExecStart = "${pkgs.below}/bin/below record --collect-io-stat --compress --dict-compress-chunk-size 32 --interval-s ${toString cfg.collectIntervalSec}";
+            ExecStart = "${pkgs.below}/bin/below record --collect-io-stat --compress --dict-compress-chunk-size 16 --interval-s ${toString cfg.collectIntervalSec}";
             Restart = "on-failure";
             RestartSec = "5s";
           }

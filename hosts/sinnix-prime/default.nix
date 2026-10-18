@@ -140,7 +140,6 @@
     # Nothing runs on the router.
     capture-router.enable = true;
     below = {
-      collectIntervalSec = 5;
       # Keep telemetry on /realm so the root filesystem stays slim. Same
       # subtree as machine-telemetry and activitywatch captures.
       storeDir = "/realm/state/below";
@@ -265,7 +264,9 @@
     SyncIntervalSec = lib.mkForce "2min";
     MaxRetentionSec = lib.mkForce "365day";
     SystemMaxUse = lib.mkForce "100G";
-    SystemKeepFree = lib.mkForce "200G";
+    # The journal lives on /realm. At 200G, journald deleted almost every
+    # archived file while /realm sat near full, leaving five days of logs.
+    SystemKeepFree = lib.mkForce "20G";
     # Sinex's imported ten-file default would rotate this window at about
     # 1 GiB despite the host's 100 GiB budget. Keep count secondary to size
     # and time, including journals split across system and user streams.
