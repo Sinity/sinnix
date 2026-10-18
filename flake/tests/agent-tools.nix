@@ -919,12 +919,6 @@ in
             jq -e '
               [.hooks.SessionStart[].hooks[].command] | any(contains("sessionstart-sinex-recall.sh"))
             ' "$HOME/.codex/hooks.json" >/dev/null
-            jq -e '
-              [.hooks.PreToolUse[]
-               | select(.matcher == "^spawn_agent$")
-               | .hooks[].command]
-              | any(contains("pretooluse-agent-model.sh"))
-            ' "$HOME/.codex/hooks.json" >/dev/null
             ${claudeLaneWrapperChecks}
             grep -Fq 'claude_args+=(--add-dir=' "$HOME/.local/bin/claude"
             ! grep -Fq 'claude_args+=(--add-dir "' "$HOME/.local/bin/claude"

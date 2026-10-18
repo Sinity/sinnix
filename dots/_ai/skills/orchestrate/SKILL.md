@@ -27,8 +27,8 @@ next, not on supervising progress.
   - Use a fresh `general-purpose` agent only when a clean context is the
     point (an independent review, a self-contained packet that must not
     inherit bias) or a different model is needed. Prefer Opus 5.5 to Fable 5.1.
-    Every non-fork dispatch passes an explicit `model`; the
-    dispatch hook refuses one without it.
+    Pass an explicit `model` on a non-fork dispatch when the role default
+    is not what you want; a fork always inherits the parent model.
   - In Codex, native spawn takes `model`, `reasoning_effort`, and `fork_turns`
     (`'none'` by default; `'all'` for deliberate full-history inheritance,
     with no model or effort override).

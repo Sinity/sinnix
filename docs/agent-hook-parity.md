@@ -9,7 +9,6 @@ This matrix records the current boundary between Claude Code and Codex hooks. It
 | Pre-compaction handoff     | Enforced    | Enforced | Both clients run `sinnix-context-handoff`.                                                                                               |
 | Tool-use evidence          | Enforced    | Enforced | Both clients send tool events to Polylogue.                                                                                              |
 | Stop capture               | Enforced    | Enforced | Both clients capture the stop event through Polylogue.                                                                                   |
-| Agent model dispatch guard | Enforced    | Manual   | Claude has the structured `Agent` matcher and `pretooluse-agent-model.sh`; Codex applies the explicit-model contract at AgentCTL launch. |
 | Destructive Bash guard     | Enforced    | Manual   | Claude has the structured `Bash` matcher and `pretooluse-bash.sh`; Codex follows the shared Git protocol.                                |
 
 The generated Codex configuration is the authority for Codex-supported rows. This document is a parity record, not a second hook registry.
