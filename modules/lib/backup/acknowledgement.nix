@@ -1,5 +1,6 @@
 # Internal backup component. Public options and shared policy live in modules/backup.nix.
 {
+  lib,
   pkgs,
   realmSnapshots,
   persistSnapshots,
@@ -23,7 +24,32 @@
   realmExcludes,
   persistNoncanonical,
   realmNoncanonical,
+  username,
 }:
+let
+  # Root snapshot paths left out of the archive. One list feeds both the
+  # `borg create` excludes and the coverage check, so an excluded root can
+  # never be reported as missing canonical content: when `home/*/.cache` was
+  # excluded but absent from the check, every snapshot since 2026-09-13 was
+  # retained and the job failed nightly.
+  rootSnapshotExcludes = [
+    "dev"
+    "home/${username}/.cache"
+    "mnt"
+    "neo-outer-realm"
+    "nix"
+    "outer-realm"
+    "persist"
+    "proc"
+    "realm"
+    "root/.cache"
+    "run"
+    "swap"
+    "sys"
+    "tmp"
+    "var/cache"
+  ];
+in
 [
   # ─── Borg Snapshot Drainers ───
   #
@@ -226,24 +252,7 @@
         # remain on disk; no fallback recursive deletion is safe here.
         ${snapshotCoverage} verify "$snap_dir" "$archive_name" "$snapshot_uuid" \
           ${
-            pkgs.writeText "root-snapshot-coverage.json" (
-              builtins.toJSON [
-                "dev"
-                "mnt"
-                "neo-outer-realm"
-                "nix"
-                "outer-realm"
-                "persist"
-                "proc"
-                "realm"
-                "root/.cache"
-                "run"
-                "swap"
-                "sys"
-                "tmp"
-                "var/cache"
-              ]
-            )
+            pkgs.writeText "root-snapshot-coverage.json" (builtins.toJSON rootSnapshotExcludes)
           } || return 1
         [ "$(${snapshotCoverage} identity "$snap_dir")" = "$snapshot_uuid" ] || return 1
         btrfs subvolume delete "$snap_dir"
@@ -274,21 +283,7 @@
           --compression auto,zstd,1 \
           --comment "sinnix-snapshot-v1:$snapshot_uuid" \
           --lock-wait ${toString borgLockWaitSec} \
-          --exclude "$snap_dir/dev" \
-          --exclude "$snap_dir/home/*/.cache" \
-          --exclude "$snap_dir/mnt" \
-          --exclude "$snap_dir/neo-outer-realm" \
-          --exclude "$snap_dir/nix" \
-          --exclude "$snap_dir/outer-realm" \
-          --exclude "$snap_dir/persist" \
-          --exclude "$snap_dir/proc" \
-          --exclude "$snap_dir/realm" \
-          --exclude "$snap_dir/root/.cache" \
-          --exclude "$snap_dir/run" \
-          --exclude "$snap_dir/swap" \
-          --exclude "$snap_dir/sys" \
-          --exclude "$snap_dir/tmp" \
-          --exclude "$snap_dir/var/cache" \
+          ${lib.concatMapStringsSep " " (path: "--exclude \"$snap_dir/${path}\"") rootSnapshotExcludes} \
           "::$archive_name" "$snap_dir/./"; then
           if delete_archived_snapshot; then
             backed_up=$((backed_up + 1))

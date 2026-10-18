@@ -1465,6 +1465,7 @@ in
       })
       ++ (import ./lib/backup/acknowledgement.nix {
         inherit
+          lib
           pkgs
           realmSnapshots
           persistSnapshots
@@ -1488,6 +1489,7 @@ in
           realmExcludes
           persistNoncanonical
           realmNoncanonical
+          username
           ;
       })
       ++ (import ./lib/backup/verification.nix {
