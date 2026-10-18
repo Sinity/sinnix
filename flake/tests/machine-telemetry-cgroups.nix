@@ -61,6 +61,13 @@ in
           [
             {
               assertion =
+                config.systemd.services.machine-telemetry-sqlite-verify.unitConfig.X-OnlyManualStart
+                && config.systemd.timers.machine-telemetry-sqlite-verify.unitConfig.X-OnlyManualStart
+                && config.systemd.timers.machine-telemetry-sqlite-verify.wantedBy == [ ];
+              message = "Lifetime structural verification requires explicit admission; activating the host must not start the old scan or rearm its timer.";
+            }
+            {
+              assertion =
                 config.systemd.services.machine-telemetry-sqlite-verify.serviceConfig.Slice
                 == config.sinnix.runtime.inventory.classes.backup.serviceConfig.Slice;
               message = "Standalone telemetry must retain the declared backup-class slice when the backup owner is disabled.";

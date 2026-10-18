@@ -450,6 +450,8 @@ mkServiceModule {
               backupRoot
               backupSnapshotRoot
             ];
+            # Activation is not admission for a lifetime structural walk.
+            unitConfig.X-OnlyManualStart = true;
             restartIfChanged = false;
           };
           timer = {
@@ -460,6 +462,12 @@ mkServiceModule {
         }
       )
       {
+        # Keep explicit verification available while its lifetime schedule is
+        # replaced by checks of bounded active and sealed segments.
+        systemd.timers.machine-telemetry-sqlite-verify = {
+          wantedBy = lib.mkForce [ ];
+          unitConfig.X-OnlyManualStart = true;
+        };
         systemd.tmpfiles.rules = [
           "d ${config.sinnix.paths.machinePaths.experiment} 0775 ${username} users -"
           "d ${dataDir}/legacy 0775 ${username} users -"
