@@ -113,35 +113,16 @@ scratch = "nvme"
 timeout_seconds = 1800
 
 [operations.verify_telemetry_restore]
-description = "Restore and structurally verify one retained telemetry SQLite zstd artifact"
-exec = ["sinnix-sqlite-backup", "--immutable-source", "--verify-only", "--compressed-source", "--max-restore-bytes", "85899345920", "--acquire-budget-seconds", "3600", "--check-budget-seconds", "9000"]
+description = "Restore one retained telemetry SQLite zstd artifact and check its structure"
+exec = ["sinnix-sqlite-backup", "--immutable-source", "--verify-only", "--compressed-source", "--max-restore-bytes", "85899345920", "--acquire-budget-seconds", "3600"]
 arguments = "required"
 pool = "bulk"
 result = "exit"
 cache = "none"
 scratch = "nvme"
-timeout_seconds = 13200
+timeout_seconds = 43200
 admission = { memory_mib = 4096 }
-unit_properties = ["MemoryHigh=4G", "MemoryMax=5G", "IOWeight=10", "IOReadBandwidthMax=/realm 20M", "IOWriteBandwidthMax=/realm 40M"]
-
-[operations.rotate_telemetry]
-description = "Perform or recover the first native telemetry SQLite cutover with its retained preimage"
-exec = ["sudo", "-n", "--", "systemctl", "start", "--wait", "machine-telemetry-sqlite-rotate.service"]
-pool = "normal"
-result = "exit"
-cache = "none"
-timeout_seconds = 420
-
-[operations.verify_telemetry_structure]
-description = "Structurally verify one retained immutable telemetry SQLite image"
-exec = ["sinnix-sqlite-backup", "--immutable-source", "--verify-only", "--check-budget-seconds", "9000"]
-arguments = "required"
-pool = "bulk"
-result = "exit"
-cache = "none"
-timeout_seconds = 9600
-admission = { memory_mib = 2048 }
-unit_properties = ["MemoryHigh=2G", "MemoryMax=3G", "IOWeight=10", "IOReadBandwidthMax=/realm 20M"]
+unit_properties = ["MemoryHigh=4G", "MemoryMax=5G"]
 
 [operations.verify_job_limits]
 description = "Verify declared operation limits in its actual kernel cgroup"

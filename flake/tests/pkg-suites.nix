@@ -173,14 +173,14 @@
             root = ../../pkgs/machine-telemetry;
             fileset = lib.fileset.unions [
               ../../pkgs/machine-telemetry/tests/test_collector_process_memory.py
-              ../../pkgs/machine-telemetry/tests/test_rotation.py
+              ../../pkgs/machine-telemetry/tests/test_segments.py
             ];
           };
           extraInputs = [
             pkgs.coreutils
             pkgs.zstd
           ];
-          pytestArgs = "tests/test_collector_process_memory.py tests/test_rotation.py";
+          pytestArgs = "tests/test_collector_process_memory.py tests/test_segments.py";
           beforeTests = ''
             export SINNIX_SQLITE_BACKUP="${sinnixScriptRegistry.packageSet.sinnix-sqlite-backup}/bin/sinnix-sqlite-backup"
           '';

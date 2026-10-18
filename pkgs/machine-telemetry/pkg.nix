@@ -23,7 +23,7 @@ python3Packages.buildPythonApplication {
   ];
   pythonImportsCheck = [
     "machine_telemetry.collector"
-    "machine_telemetry.rotation"
+    "machine_telemetry.segments"
   ];
 
   meta = {

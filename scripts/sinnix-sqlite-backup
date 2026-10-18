@@ -420,7 +420,7 @@ def verify_immutable_source(
     )
     try:
         started = time.monotonic()
-        deadline = started + check_budget_seconds
+        deadline = started + check_budget_seconds if check_budget_seconds else None
         check, verdict = check_immutable_snapshot(source, deadline, mode="structural")
         if receipt_path is not None:
             digest = hashlib.sha256()
@@ -430,7 +430,7 @@ def verify_immutable_source(
                 while block := stream.read(1024 * 1024):
                     if cancel_requested:
                         raise BackupCancelled
-                    if time.monotonic() >= deadline:
+                    if deadline is not None and time.monotonic() >= deadline:
                         raise RuntimeError("verification digest exceeded its check budget")
                     digest.update(block)
                 after = source_observation(os.fstat(stream.fileno()))
@@ -439,7 +439,7 @@ def verify_immutable_source(
                 raise RuntimeError("immutable verification source changed")
             if cancel_requested:
                 raise BackupCancelled
-            if time.monotonic() >= deadline:
+            if deadline is not None and time.monotonic() >= deadline:
                 raise RuntimeError("verification digest exceeded its check budget")
             publish_verification_receipt(receipt_path, source_path, {
                 "schema": "sinnix-sqlite-verification-v1",
@@ -579,8 +579,8 @@ def main() -> int:
     if args.verify_only:
         if not args.immutable_source or args.output is not None:
             parser.error("--verify-only requires --immutable-source and no output")
-        if args.check_mode != "structural" or args.check_budget_seconds <= 0:
-            parser.error("--verify-only requires structural mode and a positive check budget")
+        if args.check_mode != "structural":
+            parser.error("--verify-only requires structural mode")
     elif args.output is None:
         parser.error("output is required unless --verify-only is used")
     if args.check_mode == "header" and not args.immutable_source:

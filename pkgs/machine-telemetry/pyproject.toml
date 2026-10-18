@@ -10,8 +10,7 @@ requires-python = ">=3.12"
 
 [project.scripts]
 machine-telemetry = "machine_telemetry.collector:main"
-machine-telemetry-rotate = "machine_telemetry.rotation:main"
-machine-telemetry-archive-legacy = "machine_telemetry.rotation:archive_main"
+machine-telemetry-segments = "machine_telemetry.segments:main"
 
 [tool.setuptools.packages.find]
 include = ["machine_telemetry*"]

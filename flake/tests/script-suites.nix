@@ -198,7 +198,10 @@
           name = "machine-telemetry";
           suiteDir = ../../pkgs/machine-telemetry/tests;
           scripts = [ "sinnix-sqlite-backup" ];
-          packageFiles = [ "machine_telemetry/collector.py" ];
+          packageFiles = [
+            "machine_telemetry/collector.py"
+            "machine_telemetry/segments.py"
+          ];
           extraPythonPackages = [ sinnix-lib ];
           nativeBuildInputs = [ pkgs.zstd ];
         };

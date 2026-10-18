@@ -25,12 +25,8 @@ let
   # btrbk→borg coverage.
   backupRoot = "/realm/state/db-dumps/machine-telemetry";
   backupSnapshotRoot = "${realmRoot}/state/machine-telemetry-backup-snapshots";
-  # Backup publication uses a bounded schema/header check. A full page walk
-  # would keep a growing database from producing any current backup.
-  # The first immutable legacy handoff adds one compressed-artifact digest to
-  # an acquisition previously measured at about 29 minutes. Later runs reuse
-  # that receipt and publish only the small active file. No structural walk
-  # of legacy history belongs to this budget.
+  # The daily backup copies only the active file, which weekly sealing keeps
+  # small, and checks its header; sealed files get one full check each.
   backupTimeoutMinutes = 40;
   manifestPath = "${dataDir}/manifest.json";
   username = config.sinnix.user.name;
@@ -252,34 +248,22 @@ mkServiceModule {
       );
     in
     lib.mkMerge [
+      # Weekly: seal the active file so it stays small, then archive and
+      # structurally check each sealed file once. Sealed files never change,
+      # so neither step repeats and neither needs a deadline.
       (lib.sinnix.mkScheduledJob
         {
           inherit config;
-          unitName = "machine-telemetry-sqlite-rotate";
-          description = "Perform or recover the initial telemetry SQLite cutover";
-          surface = config.sinnix.runtime.surfaces.machine-telemetry-sqlite-rotate;
+          unitName = "machine-telemetry-seal";
+          description = "Seal the active telemetry file; archive and check sealed files once";
+          surface = config.sinnix.runtime.surfaces.machine-telemetry-seal;
         }
         {
           script = ''
             set -euo pipefail
             umask 077
-            install -d -m 0700 -o ${lib.escapeShellArg username} -g users ${lib.escapeShellArg backupSnapshotRoot}
             exec 9>>${lib.escapeShellArg "${dbRoot}/.maintenance.lock"}
             flock -n 9 || { echo "telemetry maintenance is already active" >&2; exit 75; }
-            # A frozen-input job may still be compressing/checking after it
-            # releases the lock. Only older invocations without this protocol
-            # need to defer cutover for their whole lifetime.
-            for unit in machine-telemetry-sqlite-backup machine-telemetry-sqlite-verify; do
-              if systemctl is-active --quiet "$unit.service"; then
-                owner_pid="$(systemctl show --property=MainPID --value "$unit.service")"
-                owner_lock="$(stat -Lc '%d:%i' "/proc/$owner_pid/fd/9" 2>/dev/null || true)"
-                expected_lock="$(stat -Lc '%d:%i' ${lib.escapeShellArg "${dbRoot}/.maintenance.lock"})"
-                if [ "$owner_lock" != "$expected_lock" ] && systemctl is-active --quiet "$unit.service"; then
-                  echo "telemetry cutover deferred for nonparticipating $unit" >&2
-                  exit 75
-                fi
-              fi
-            done
             writer_was_active=0
             resume_writer() {
               if [ "$writer_was_active" -eq 1 ]; then
@@ -293,37 +277,39 @@ mkServiceModule {
               writer_was_active=1
               systemctl stop machine-telemetry.service
             fi
-            if [ -e ${lib.escapeShellArg "${dbPath}.rotation.json"} ]; then
-              snapshot="$(jq -er '.snapshot | select(type == "string" and length > 0)' ${lib.escapeShellArg "${dbPath}.rotation.json"})"
-            else
-              snapshot=${lib.escapeShellArg backupSnapshotRoot}/rotation-"$INVOCATION_ID"
-              btrfs subvolume snapshot -r ${lib.escapeShellArg dbRoot} "$snapshot"
-            fi
-            machine-telemetry-rotate --db ${lib.escapeShellArg dbPath} --preimage "$snapshot"
-            # The native preimage and recovery journal are retained. Removing
-            # either is a separate custody decision, never an EXIT trap.
+            machine-telemetry-segments seal --db ${lib.escapeShellArg dbPath}
+            resume_writer
+            flock -u 9
+            machine-telemetry-segments archive --db ${lib.escapeShellArg dbPath} --output ${lib.escapeShellArg backupRoot}
+            machine-telemetry-segments verify --db ${lib.escapeShellArg dbPath} --records ${lib.escapeShellArg "${backupRoot}/verified"}
+            chown -R ${lib.escapeShellArg username}:users ${lib.escapeShellArg "${backupRoot}/verified"}
           '';
           path = [
             pkgs.coreutils
-            pkgs.util-linux
-            pkgs.jq
-            pkgs.btrfs-progs
             pkgs.e2fsprogs
+            pkgs.util-linux
             machineTelemetry
+            scriptPkgs.sinnix-sqlite-backup
           ];
+          # chattr +i on the sealed file needs root.
           user = "root";
-          serviceConfig.TimeoutStartSec = "5min";
+          serviceConfig = {
+            Group = "users";
+            TimeoutStartSec = "infinity";
+          };
           unit = {
             requires = [ "realm.mount" ];
             after = [ "realm.mount" ];
-            unitConfig = {
-              RequiresMountsFor = [
-                dbRoot
-                backupSnapshotRoot
-              ];
-              X-OnlyManualStart = true;
-            };
+            unitConfig.RequiresMountsFor = [
+              dbRoot
+              backupRoot
+            ];
             restartIfChanged = false;
+          };
+          timer = {
+            onCalendar = "Sun *-*-* 04:30:00";
+            randomizedDelaySec = "30min";
+            persistent = true;
           };
         }
       )
@@ -375,7 +361,7 @@ mkServiceModule {
             # the checkpointed input; the helper then compresses it directly.
             exec 9>>${lib.escapeShellArg "${dbRoot}/.maintenance.lock"}
             flock -n 9 || { echo "telemetry maintenance is already active" >&2; exit 75; }
-            machine-telemetry-rotate --db ${lib.escapeShellArg dbPath} --check-source
+            machine-telemetry-segments check --db ${lib.escapeShellArg dbPath}
             if systemctl is-active --quiet machine-telemetry.service; then
               writer_was_active=1
               systemctl stop machine-telemetry.service
@@ -394,9 +380,6 @@ mkServiceModule {
               --check-mode header \
               "$snapshot/telemetry.sqlite" "$final"
             chown ${lib.escapeShellArg username}:users "$final"
-            # The legacy file is immutable. Its receipt makes this acquisition
-            # once-only; active backup publication stays first on every run.
-            machine-telemetry-archive-legacy --db ${lib.escapeShellArg dbPath} --output ${lib.escapeShellArg backupRoot}
 
           '';
           path = [
@@ -439,124 +422,7 @@ mkServiceModule {
           };
         }
       )
-      (lib.sinnix.mkScheduledJob
-        {
-          inherit config;
-          unitName = "machine-telemetry-sqlite-verify";
-          description = "Independently check machine telemetry SQLite structure";
-          surface = config.sinnix.runtime.surfaces.machine-telemetry-sqlite-verify;
-        }
-        {
-          script = ''
-            set -euo pipefail
-            umask 077
-            install -d -m 0700 -o ${lib.escapeShellArg username} -g users ${lib.escapeShellArg backupRoot}
-            stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-            snapshot="${backupSnapshotRoot}/verify-$stamp-$INVOCATION_ID"
-            proof="${backupRoot}/structural-verification-$stamp-$INVOCATION_ID.json"
-            snapshot_created=0
-            receipt=${lib.escapeShellArg backupRoot}/structural-verification.status
-            writer_was_active=0
-            write_state() {
-              printf 'time=%s state=%s check=structural source=immutable_snapshot\n' "$stamp" "$1" > "$receipt.tmp"
-              chown ${lib.escapeShellArg username}:users "$receipt.tmp"
-              mv -f "$receipt.tmp" "$receipt"
-            }
-            resume_writer() {
-              if [ "$writer_was_active" -eq 1 ]; then
-                systemctl start machine-telemetry.service
-                writer_was_active=0
-              fi
-            }
-            cleanup() {
-              rc="$?"
-              trap - EXIT
-              resume_writer || rc=1
-              if [ "$snapshot_created" -eq 1 ]; then
-                btrfs subvolume delete "$snapshot" >/dev/null || rc=1
-              fi
-              if [ "$rc" -ne 0 ]; then write_state failed; fi
-              exit "$rc"
-            }
-            trap cleanup EXIT
-            trap 'exit 143' INT TERM
-            write_state running
-            exec 9>>${lib.escapeShellArg "${dbRoot}/.maintenance.lock"}
-            flock -n 9 || { echo "telemetry maintenance is already active" >&2; exit 75; }
-            machine-telemetry-rotate --db ${lib.escapeShellArg dbPath} --check-source
-            if systemctl is-active --quiet machine-telemetry.service; then
-              writer_was_active=1
-              systemctl stop machine-telemetry.service
-            fi
-            sqlite3 ${lib.escapeShellArg dbPath} 'PRAGMA wal_checkpoint(TRUNCATE);'
-            if [ -s ${lib.escapeShellArg "${dbPath}-wal"} ]; then
-              echo "machine telemetry WAL remained after checkpoint" >&2
-              exit 1
-            fi
-            btrfs subvolume snapshot -r ${lib.escapeShellArg dbRoot} "$snapshot"
-            snapshot_created=1
-            resume_writer
-            flock -u 9
-            sinnix-sqlite-backup --immutable-source --verify-only \
-              --check-budget-seconds 9000 --verification-receipt "$proof" "$snapshot/telemetry.sqlite"
-            chown ${lib.escapeShellArg username}:users "$proof"
-            btrfs subvolume delete "$snapshot" >/dev/null
-            snapshot_created=0
-            write_state ok
-          '';
-          path = [
-            pkgs.coreutils
-            pkgs.btrfs-progs
-            pkgs.sqlite
-            pkgs.util-linux
-            machineTelemetry
-            scriptPkgs.sinnix-sqlite-backup
-          ];
-          user = "root";
-          serviceConfig = {
-            Group = "users";
-            TimeoutStartSec = "160min";
-            # Full structural walks need an independent working-set budget
-            # from the coverage audit in the shared background slice. Reuse
-            # the backup owner's bounded slice and retain per-unit limits.
-            Slice =
-              if config.sinnix.backup.enable then
-                "borgdrain.slice"
-              else
-                config.sinnix.runtime.inventory.classes.backup.serviceConfig.Slice;
-          };
-          unit = {
-            after = [
-              "realm.mount"
-              "persist.mount"
-            ];
-            requires = [
-              "realm.mount"
-              "persist.mount"
-            ];
-            unitConfig.RequiresMountsFor = [
-              dbRoot
-              backupRoot
-              backupSnapshotRoot
-            ];
-            # Activation is not admission for a lifetime structural walk.
-            unitConfig.X-OnlyManualStart = true;
-            restartIfChanged = false;
-          };
-          timer = {
-            onCalendar = "Sun *-*-* 07:00:00";
-            randomizedDelaySec = "30min";
-            persistent = false;
-          };
-        }
-      )
       {
-        # Keep explicit verification available while its lifetime schedule is
-        # replaced by checks of bounded active and sealed segments.
-        systemd.timers.machine-telemetry-sqlite-verify = {
-          wantedBy = lib.mkForce [ ];
-          unitConfig.X-OnlyManualStart = true;
-        };
         systemd.tmpfiles.rules = [
           "d ${config.sinnix.paths.machinePaths.experiment} 0775 ${username} users -"
           "d ${dataDir}/legacy 0775 ${username} users -"
@@ -672,38 +538,17 @@ mkServiceModule {
             resourceClass = "backup";
             observe.enable = true;
           };
-          machine-telemetry-sqlite-rotate = {
-            unit = "machine-telemetry-sqlite-rotate.service";
+          machine-telemetry-seal = {
+            unit = "machine-telemetry-seal.service";
             resourceClass = "backup";
             observe.enable = true;
+          };
+          machine-telemetry-seal-timer = {
+            unit = "machine-telemetry-seal.timer";
+            kind = "timer";
           };
           machine-telemetry-sqlite-backup-timer = {
             unit = "machine-telemetry-sqlite-backup.timer";
-            kind = "timer";
-          };
-          machine-telemetry-sqlite-verify = {
-            unit = "machine-telemetry-sqlite-verify.service";
-            resourceClass = "backup";
-            observe.enable = true;
-            captures = [
-              {
-                name = "machine-telemetry-sqlite-structural-verification";
-                path = "${backupRoot}/structural-verification.status";
-                eventDriven = true;
-                staleAfterSeconds = 691200;
-                livenessProbe = {
-                  command = "${pkgs.gnugrep}/bin/grep -q ' state=ok ' ${lib.escapeShellArg "${backupRoot}/structural-verification.status"}";
-                  timeoutSeconds = 10;
-                };
-                data = {
-                  class = "derived";
-                  inputs = [ "machine-telemetry" ];
-                };
-              }
-            ];
-          };
-          machine-telemetry-sqlite-verify-timer = {
-            unit = "machine-telemetry-sqlite-verify.timer";
             kind = "timer";
           };
         };

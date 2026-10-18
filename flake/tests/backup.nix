@@ -75,16 +75,10 @@ assert lib.assertMsg (
           {
             assertion =
               let
-                unit = config.systemd.services.machine-telemetry-sqlite-verify;
-                policy = config.sinnix.runtime.inventory.classes.backup.serviceConfig;
+                unit = config.systemd.services.machine-telemetry-seal;
               in
-              unit.serviceConfig.Slice == "borgdrain.slice"
-              && unit.serviceConfig.MemoryHigh == policy.MemoryHigh
-              && unit.serviceConfig.MemoryMax == policy.MemoryMax
-              && unit.serviceConfig.IOSchedulingClass == policy.IOSchedulingClass
-              && unit.serviceConfig.IOWeight == policy.IOWeight
-              && !unit.restartIfChanged;
-            message = "Independent telemetry verification must reuse the bounded backup slice while preserving its own limits, IO policy and active-run protection.";
+              !unit.restartIfChanged && unit.serviceConfig.TimeoutStartSec == "infinity";
+            message = "Telemetry sealing must not restart on activation, and each sealed file's one structural check must run to completion.";
           }
           {
             assertion = lib.hasInfix config.services.sinex.storage.blob.repositoryPath config.systemd.services.borgbackup-job-sinex-blobs.script;

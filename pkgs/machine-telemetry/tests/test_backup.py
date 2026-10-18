@@ -1139,3 +1139,20 @@ def test_verification_receipt_cli_publishes_success(tmp_path):
         "--check-budget-seconds", "5", "--verification-receipt", str(receipt)], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert json.loads(receipt.read_text())["structural_check"] == "ok"
+
+
+def test_verify_only_without_a_budget_runs_to_completion(tmp_path: Path) -> None:
+    source = tmp_path / "sealed.sqlite"
+    with sqlite3.connect(source) as connection:
+        connection.execute("PRAGMA journal_mode=DELETE")
+        connection.execute("CREATE TABLE sample(value INTEGER)")
+        connection.execute("INSERT INTO sample VALUES (1)")
+    connection.close()
+    result = subprocess.run(
+        [str(SCRIPT), str(source), "--immutable-source", "--verify-only"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "structural_check=ok" in result.stdout

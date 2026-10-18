@@ -61,25 +61,9 @@ in
           [
             {
               assertion =
-                config.systemd.services.machine-telemetry-sqlite-rotate.unitConfig.X-OnlyManualStart
-                && lib.hasInfix ".maintenance.lock" config.systemd.services.machine-telemetry-sqlite-rotate.script
-                && lib.hasInfix ".maintenance.lock" config.systemd.services.machine-telemetry-sqlite-backup.script
-                && lib.hasInfix ".maintenance.lock" config.systemd.services.machine-telemetry-sqlite-verify.script
-                && lib.hasInfix "machine-telemetry-archive-legacy" config.systemd.services.machine-telemetry-sqlite-backup.script;
-              message = "Telemetry cutover must be manual, serialized with snapshot acquisition, and retain once-only legacy backup coverage.";
-            }
-            {
-              assertion =
-                config.systemd.services.machine-telemetry-sqlite-verify.unitConfig.X-OnlyManualStart
-                && config.systemd.timers.machine-telemetry-sqlite-verify.unitConfig.X-OnlyManualStart
-                && config.systemd.timers.machine-telemetry-sqlite-verify.wantedBy == [ ];
-              message = "Lifetime structural verification requires explicit admission; activating the host must not start the old scan or rearm its timer.";
-            }
-            {
-              assertion =
-                config.systemd.services.machine-telemetry-sqlite-verify.serviceConfig.Slice
-                == config.sinnix.runtime.inventory.classes.backup.serviceConfig.Slice;
-              message = "Standalone telemetry must retain the declared backup-class slice when the backup owner is disabled.";
+                lib.hasInfix ".maintenance.lock" config.systemd.services.machine-telemetry-seal.script
+                && lib.hasInfix ".maintenance.lock" config.systemd.services.machine-telemetry-sqlite-backup.script;
+              message = "Sealing and the daily backup must serialize on the telemetry maintenance lock.";
             }
             {
               assertion = poolSliceNames != [ ];
@@ -111,18 +95,14 @@ in
             ];
           }
           ''
-            cat > rotate-owner <<'EOF_ROTATE_OWNER'
-            ${evaluated.config.systemd.services.machine-telemetry-sqlite-rotate.script}
-            EOF_ROTATE_OWNER
-            python3 ${./machine-telemetry-owner.py} rotate-owner
-            cat > verify-owner <<'EOF_VERIFY_OWNER'
-            ${evaluated.config.systemd.services.machine-telemetry-sqlite-verify.script}
-            EOF_VERIFY_OWNER
-            python3 ${./machine-telemetry-verify-owner.py} verify-owner
+            cat > seal-owner <<'EOF_SEAL_OWNER'
+            ${evaluated.config.systemd.services.machine-telemetry-seal.script}
+            EOF_SEAL_OWNER
+            python3 ${./machine-telemetry-seal-owner.py} seal-owner
             cat > backup-owner <<'EOF_BACKUP_OWNER'
             ${evaluated.config.systemd.services.machine-telemetry-sqlite-backup.script}
             EOF_BACKUP_OWNER
-            python3 ${./machine-telemetry-verify-owner.py} backup-owner backup
+            python3 ${./machine-telemetry-backup-owner.py} backup-owner
             cat > exec-start <<'EOF_EXEC_START'
             ${renderedExecStart}
             EOF_EXEC_START
