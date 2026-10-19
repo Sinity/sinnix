@@ -22,9 +22,9 @@ from sinnix_lib.systemd import sd_notify, watchdog_period
 from . import health, pages
 from . import inventory as runtime_inventory
 from .actions import ActionError, ActionService
-from .feedback import FeedbackSpool
 from .feedback import MAX_BODY as FEEDBACK_MAX_BODY
 from .feedback import SCHEMA as FEEDBACK_SCHEMA
+from .feedback import FeedbackSpool
 from .snapshot import SnapshotBuilder
 
 FEEDBACK_PATH = "/feedback"
