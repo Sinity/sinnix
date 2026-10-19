@@ -50,6 +50,10 @@ mkServiceModule {
           manager = "user";
           overrides = {
             Type = "notify";
+            # Test databases are agent tool work. In app.slice their tmpfs
+            # pages (4.7G on 2026-10-19, mostly leaked) counted against the
+            # desktop's memory reservation, and Chrome was swapped out instead.
+            Slice = "agenttool.slice";
             RuntimeDirectory = "devkit/pg";
             RuntimeDirectoryMode = "0700";
             ExecStartPre = "${initdb} %t/devkit/pg/data";

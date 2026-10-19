@@ -229,7 +229,8 @@ rec {
       user = {
         IOAccounting = true;
         IODeviceLatencyTargetSec = interactiveIoLatency;
-        MemoryLow = "11776M";
+        # app 8G + session 5G + desktop shell 512M.
+        MemoryLow = "13824M";
       };
       # Low weights, and per-unit memory limits from each unit's class. A
       # shared 2G ceiling here made every scheduled job reclaim against the
@@ -291,7 +292,7 @@ rec {
         # Throttle, never kill: every in-process subagent shell is a child of
         # the coordinator's Claude process in the same scope, so an oomd
         # policy here would take the session down with its runaway child.
-        # 10G leaves the desktop reservation (app 6G + session 5G +
+        # 10G leaves the desktop reservation (app 8G + session 5G +
         # desktop-shell 512M) and the job plane room on a 31 GB host.
         MemoryHigh = "10G";
         # Hard backstop only if throttling cannot hold: the kernel's
@@ -316,11 +317,20 @@ rec {
         CPUWeight = 90;
         CPUQuota = "1600%";
         IOWeight = 90;
-        # Throttle, never kill: a killed tool is a failed command the agent
-        # can retry, but MemoryMax is the backstop against a runaway build.
+        # Kill, not throttle, once the tools as a whole thrash. A killed tool
+        # is a failed command the agent can retry; throttling at MemoryHigh
+        # instead held every session's commands in reclaim and swap for half
+        # an hour on 2026-10-19. oomd kills the descendant with the most
+        # reclaim, which here is one command's scope (claude-tool-scope gives
+        # each its own, with a 10G ceiling of its own). Unlike the agentctl
+        # pytest parent, there is no long critical-path job in this slice to
+        # protect: anything that long belongs in an agentctl pool.
         MemoryHigh = "12G";
         MemoryMax = "16G";
-        MemorySwapMax = "4G";
+        MemorySwapMax = "2G";
+        ManagedOOMMemoryPressure = "kill";
+        ManagedOOMMemoryPressureLimit = "50%";
+        ManagedOOMMemoryPressureDurationSec = "20s";
         TasksMax = 8192;
       };
       app = {
@@ -332,8 +342,10 @@ rec {
         # which is what swap-in feels like under six lanes.
         IODeviceLatencyTargetSec = interactiveIoLatency;
         # Batch under agentctl.slice grows into swap; the desktop's working
-        # set must not be what gets reclaimed to make room for it.
-        MemoryLow = "6G";
+        # set must not be what gets reclaimed to make room for it. Chrome
+        # alone measured 6.6G on 2026-10-19, when 6G let it be swapped out
+        # (3 GB) and video stuttered.
+        MemoryLow = "8G";
       };
       session = {
         IOAccounting = true;
@@ -405,7 +417,7 @@ rec {
       # outer agentctl.slice and the agent pool are never oomd victims; the
       # pytest leaf pools and bulk are killed at their own pressure. The
       # reservations are fixed against the workstation's 32 GiB physical
-      # memory: app 6 GiB, session 5 GiB, desktop shell 512 MiB, and the
+      # memory: app 8 GiB, session 5 GiB, desktop shell 512 MiB, and the
       # remaining job plane is admitted by pool rather than free-RAM probes.
       # Each pool may swap a little of its own memory; MemoryMax still ends a
       # runaway, and the plane's MemorySwapMax bounds the total.

@@ -39,9 +39,17 @@ esac
 
 # The scope keeps this PID, stdio and signals, so Claude's timeouts and
 # kills still reach the command. Without a user manager to ask, run in place.
+#
+# One command may use 10G and 1G of swap; past that the kernel kills it in
+# its own scope. On 2026-10-19 a real-data run started as a Bash command
+# peaked at 11.3G + 3.4G swap, filled the slice every agent's tools share,
+# and held them all in reclaim for half an hour. Over the preceding week 4
+# of 6,096 commands exceeded 10G; work that size is a declared agentctl
+# operation with its own pool budget.
 if [ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/systemd/private" ]; then
   exec systemd-run --user --scope --quiet --collect \
     --expand-environment=no \
+    -p MemoryMax=10G -p MemorySwapMax=1G \
     --slice=agenttool.slice -- "${cmd[@]}"
 fi
 exec "${cmd[@]}"

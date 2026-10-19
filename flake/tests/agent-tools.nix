@@ -434,7 +434,7 @@ in
             && managedWork ? MemorySwapMax
             && !(managedWork ? ManagedOOMSwap)
             && !(managedWork ? ManagedOOMMemoryPressure)
-            && userSlices.app.MemoryLow == "6G"
+            && userSlices.app.MemoryLow == "8G"
             && userSlices.session.MemoryLow == "5G"
             # Interactive agents and whatever they shell out to are bounded:
             # they yield CPU to the desktop, throttle before swapping, and
