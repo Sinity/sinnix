@@ -39,7 +39,7 @@ _ENVIRONMENT_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
 CACHE_KINDS = frozenset({"none", "tree+environment"})
 # Where an operation's job-owned scratch directory lives: nowhere, in RAM, or
 # on disk. `run` owns the roots and the removal.
-SCRATCH_KINDS = frozenset({"none", "tmpfs", "disk"})
+SCRATCH_KINDS = frozenset({"none", "tmpfs", "nvme"})
 # Whether `job start` may be invoked with extra argv. `required` is a
 # declaration that the operation cannot execute without a caller-supplied
 # selector. A focused profile can name such an operation; its packet command

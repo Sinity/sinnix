@@ -112,7 +112,7 @@ access (`ReadOnlyPaths`, `ReadWritePaths`, `InaccessiblePaths`).
 
 ### Scratch
 
-An operation with `scratch = "tmpfs"` or `"disk"` gets one job-owned directory,
+An operation with `scratch = "tmpfs"` or `"nvme"` gets one job-owned directory,
 `/dev/shm/agentctl/<ref>` or `/realm/tmp/work/agentctl/<ref>` (mode 0700),
 exported as `AGENTCTL_SCRATCH` and `TMPDIR`. After the unit exits, agentctl
 records its size in the outcome and deletes it. If deletion fails, the outcome
@@ -407,7 +407,7 @@ admission = { memory_mib = 12288 }
 | `arguments`           | `none`, or `required` when the caller must pass a selector after `--`                                    |
 | `checkout`            | `any` (the caller's `--workspace` or the project root) or `default` (the project root only)              |
 | `cache`               | `none`, or `tree+environment` to reuse a matching active or completed job                                |
-| `scratch`             | `none`, `tmpfs` or `disk`                                                                                |
+| `scratch`             | `none`, `tmpfs` or `nvme`                                                                                |
 | `admission`           | `{ memory_mib }`: the expected footprint, exported as `AGENTCTL_ADMISSION_MEMORY_MIB`. It is not a limit |
 | `unit_properties`     | resource limits for the unit, e.g. `["MemoryMax=3G", "IOReadBandwidthMax=/realm 20M"]`                   |
 

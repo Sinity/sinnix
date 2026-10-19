@@ -1044,11 +1044,11 @@ def test_a_declared_scratch_tier_reaches_the_launch_input_and_job_get(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The wrapper is told which directory to own, and `job get` shows what it cost."""
-    monkeypatch.setenv("AGENTCTL_DISK_SCRATCH_ROOT", str(tmp_path / "disk"))
+    monkeypatch.setenv("AGENTCTL_NVME_SCRATCH_ROOT", str(tmp_path / "nvme"))
     descriptor = project_root / ".agentctl" / "project.toml"
     descriptor.write_text(
         descriptor.read_text() + '\n[operations.heavy]\ndescription = "Fixture heavy"\n'
-        'exec = ["fixture-heavy"]\npool = "bulk"\nresult = "exit"\nscratch = "disk"\n'
+        'exec = ["fixture-heavy"]\npool = "bulk"\nresult = "exit"\nscratch = "nvme"\n'
     )
     project = load_project_adapter(project_root)
 
@@ -1057,8 +1057,8 @@ def test_a_declared_scratch_tier_reaches_the_launch_input_and_job_get(
     written = read_launch(config, fake_pueue.task(started["job_id"]))
     reference = Path(fake_pueue.added[0]["command"][1]).stem
     assert written["scratch"] == {
-        "kind": "disk",
-        "path": str(tmp_path / "disk" / reference),
+        "kind": "nvme",
+        "path": str(tmp_path / "nvme" / reference),
     }
     plain = launch.start_operation(config, project, project.operation("check"))
     assert "scratch" not in read_launch(config, fake_pueue.task(plain["job_id"]))
@@ -1071,7 +1071,7 @@ def test_a_declared_scratch_tier_reaches_the_launch_input_and_job_get(
                 "outcome": "success",
                 "exit_code": 0,
                 "scratch": {
-                    "kind": "disk",
+                    "kind": "nvme",
                     "path": written["scratch"]["path"],
                     "bytes": 2048,
                     "files": 3,

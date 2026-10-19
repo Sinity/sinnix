@@ -59,12 +59,12 @@ UNIT_BANDWIDTH_VALUE = re.compile(r"/[^\x00-\x20:]+ [1-9][0-9]*[KMGTPE]?\Z")
 
 # A job-owned scratch directory: created before the command, exported as
 # `AGENTCTL_SCRATCH` and `TMPDIR`, measured at unit exit and removed. `tmpfs` is RAM,
-# `disk` the scratch filesystem; the environment overrides exist so a test
+# `nvme` the scratch filesystem; the environment overrides exist so a test
 # owns both roots.
-SCRATCH_KINDS = frozenset({"tmpfs", "disk"})
+SCRATCH_KINDS = frozenset({"tmpfs", "nvme"})
 SCRATCH_ROOTS = {
     "tmpfs": ("AGENTCTL_TMPFS_SCRATCH_ROOT", "/dev/shm/agentctl"),
-    "disk": ("AGENTCTL_DISK_SCRATCH_ROOT", "/realm/tmp/work/agentctl"),
+    "nvme": ("AGENTCTL_NVME_SCRATCH_ROOT", "/realm/tmp/work/agentctl"),
 }
 
 

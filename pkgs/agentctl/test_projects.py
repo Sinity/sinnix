@@ -235,13 +235,13 @@ def test_a_declared_scratch_tier_is_carried_by_the_operation(tmp_path: Path) -> 
     descriptor = root / ".agentctl" / "project.toml"
     descriptor.write_text(
         descriptor.read_text()
-        + '\n[operations.heavy]\ndescription = "x"\nexec = ["x"]\nscratch = "disk"\n'
+        + '\n[operations.heavy]\ndescription = "x"\nexec = ["x"]\nscratch = "nvme"\n'
     )
 
     project = load_project_adapter(root)
 
-    assert project.operation("heavy").scratch == "disk"
-    assert project.operation("heavy").catalog_row()["scratch"] == "disk"
+    assert project.operation("heavy").scratch == "nvme"
+    assert project.operation("heavy").catalog_row()["scratch"] == "nvme"
     assert project.operation("check").scratch == "none"
 
 
