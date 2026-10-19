@@ -254,7 +254,7 @@ in
             execStart = "/bin/true";
             inherit timer;
           }
-        ).systemd.timers.sinnix-cadence-fixture.content.timerConfig;
+        ).systemd.timers.sinnix-cadence-fixture.timerConfig;
       cadenceRefused = timer: !(builtins.tryEval (builtins.deepSeq (renderTimer timer) true)).success;
       # Every accepted cadence is wall-clock: no rendered unit is anchored on
       # its own activation, which a failed start leaves with no next elapse.
