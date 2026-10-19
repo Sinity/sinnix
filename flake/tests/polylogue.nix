@@ -152,11 +152,7 @@ in
               actual = builtins.toJSON archiveInventory;
             }
             ''
-              jq -e --arg root "$sentinelDataDir" '
-                .archiveRoot == $root and
-                (.databaseTiers == ["index.db", "source.db", "embeddings.db", "ops.db", "audit.db", "user.db"]) and
-                (.projections | any(.kind == "bind-mount" and .path == "/home/sinity/.local/share/polylogue" and .source == $root))
-              ' <<<"$actual" >/dev/null
+              jq -e --arg root "$sentinelDataDir" '.archiveRoot == $root' <<<"$actual" >/dev/null
               touch "$out"
             '';
       };

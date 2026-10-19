@@ -1,4 +1,7 @@
 { lib }:
+let
+  inherit (import ../../flake/data/runtime-defaults.nix { inherit lib; }) classes;
+in
 {
   mkRestartPolicy =
     {
@@ -47,8 +50,8 @@
       serviceConfig =
         if surfaceForUnit != null then
           surfaceForUnit.effectiveResources
-        else if builtins.hasAttr resolvedResourceClass runtimeInventory.classes then
-          runtimeInventory.classes.${resolvedResourceClass}.serviceConfig
+        else if builtins.hasAttr resolvedResourceClass classes then
+          classes.${resolvedResourceClass}.serviceConfig
         else
           throw "unknown Sinnix runtime resource class: ${resolvedResourceClass}";
       defaults = lib.mapAttrs (_: lib.mkDefault) serviceConfig;

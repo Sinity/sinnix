@@ -42,7 +42,7 @@ SNAPSHOT_HEALTHY: dict[str, Any] = {
             },
         ],
         "runtime_inventory": {
-            "schema": "sinnix-runtime-inventory-v1",
+            "schema": "sinnix-runtime-inventory-v2",
             "surfaces": {
                 "sinex": {
                     "unit": "sinex.service",

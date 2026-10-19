@@ -197,7 +197,7 @@ def test_the_hubs_own_sweep_reads_the_machine_when_nothing_is_injected(
     """
     inventory = tmp_path / "inventory.json"
     inventory.write_text(
-        json.dumps({"schema": "sinnix-runtime-inventory-v1", "surfaces": {}})
+        json.dumps({"schema": "sinnix-runtime-inventory-v2", "surfaces": {}})
     )
     state = tmp_path / "state.json"
     server.run_sweep(
@@ -243,7 +243,7 @@ def test_process_admission_widens_with_a_sacrificial_slice_marker() -> None:
     inventory's own marker and this stops tracking a real policy change.
     """
     inventory = {
-        "schema": "sinnix-runtime-inventory-v1",
+        "schema": "sinnix-runtime-inventory-v2",
         "slices": {
             "user": {
                 "background": {"ManagedOOMMemoryPressure": "kill"},

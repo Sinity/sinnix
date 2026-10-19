@@ -187,11 +187,6 @@ mkServiceModule {
         "d ${modelsDir} 0755 ollama ollama -"
       ];
 
-      sinnix.runtime.dataStores.ollama-model-cache = {
-        path = modelsDir;
-        class = "cache";
-      };
-
       environment.systemPackages = [ pkgs.ollama-cuda ]; # `ollama` CLI on PATH
 
       systemd.services = lib.mkMerge [

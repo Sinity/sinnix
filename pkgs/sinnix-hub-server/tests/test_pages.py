@@ -16,7 +16,7 @@ from sinnix_hub_server.pages.probes import project_of
 from sinnix_hub_server.pages.services import lifecycle_controls, policy_controls
 
 INVENTORY: dict[str, Any] = {
-    "schema": "sinnix-runtime-inventory-v1",
+    "schema": "sinnix-runtime-inventory-v2",
     "surfaces": {
         "controllable": {
             "unit": "controllable.service",

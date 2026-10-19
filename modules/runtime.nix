@@ -114,89 +114,6 @@ let
     }
   ];
 
-  backupInventory = {
-    snapshotDirs = [
-      "${cfg.paths.realmRoot}/.btrfs/snapshot"
-      "/persist/.btrfs/snapshot"
-    ];
-    backupTargets = [ ];
-    drillLog = "${cfg.paths.machineRoot}/borg_drill.jsonl";
-  };
-
-  dataPolicyModule =
-    { config, ... }:
-    {
-      options = {
-        class = lib.mkOption {
-          type = lib.types.enum [
-            "canonical"
-            "derived"
-            "cache"
-            "exact-copy"
-          ];
-          default = "canonical";
-          description = "Lifecycle class of the stored data.";
-        };
-        inputs = lib.mkOption {
-          type = lib.types.listOf lib.types.str;
-          default = [ ];
-          description = "Data-store or capture IDs used to rebuild or populate this representation.";
-        };
-        source = lib.mkOption {
-          type = lib.types.nullOr lib.types.str;
-          default = null;
-          description = "Single data-store or capture ID preserved by this exact copy.";
-        };
-        preservation = lib.mkOption {
-          type = lib.types.enum [
-            "indefinite"
-            "rebuildable"
-            "ephemeral"
-          ];
-          default =
-            {
-              canonical = "indefinite";
-              derived = "rebuildable";
-              cache = "ephemeral";
-              exact-copy = "ephemeral";
-            }
-            .${config.class};
-        };
-        fidelity = lib.mkOption {
-          type = lib.types.enum [
-            "source"
-            "lossless-transform"
-            "derived"
-          ];
-          default =
-            {
-              canonical = "source";
-              derived = "derived";
-              cache = "derived";
-              exact-copy = "lossless-transform";
-            }
-            .${config.class};
-        };
-        backup = lib.mkOption {
-          type = lib.types.enum [
-            "inherited"
-            "direct"
-            "none"
-          ];
-          default = if config.class == "canonical" then "inherited" else "none";
-        };
-      };
-    };
-
-  dataPolicyType = lib.types.submodule dataPolicyModule;
-  dataStoreType = lib.types.submodule {
-    imports = [ dataPolicyModule ];
-    options.path = lib.mkOption {
-      type = lib.types.str;
-      description = "Absolute path owned by this data store.";
-    };
-  };
-
   # One shape for a capture lane, used in two places: inline on a runtime
   # surface that owns its own lane, and standalone in sinnix.runtime.captures
   # for a lane whose writer is not a systemd unit at all. Those used to be the
@@ -320,11 +237,6 @@ let
           JSONL envelopes.
         '';
       };
-      data = lib.mkOption {
-        type = dataPolicyType;
-        default = { };
-        description = "Preservation policy for this capture lane.";
-      };
     };
   };
 
@@ -333,9 +245,7 @@ let
       hostname = config.networking.hostName;
       inherit surfaces;
       captures = config.sinnix.runtime.captures;
-      dataStores = config.sinnix.runtime.dataStores;
       mounts = mountMonitoring;
-      backups = backupInventory;
     }
     // {
       capture_scopes = {
@@ -345,37 +255,11 @@ let
           builtins.filter (name: builtins.elem name (map (lane: lane.name) runtimeInventory.captures)) names
         ) config.sinnix.runtime.captureSubjects;
       };
-      # The archive root is configuration, not a guessed XDG sibling. Keep the
-      # six durable tier names beside it so read-only operators inspect the same
-      # topology as the daemon, backup jobs, and storage projections.
-      polylogue = {
-        archiveRoot = config.sinnix.services.polylogue.dataDir;
-        databaseTiers = [
-          "index.db"
-          "source.db"
-          "embeddings.db"
-          "ops.db"
-          "audit.db"
-          "user.db"
-        ];
-        projections = [
-          {
-            name = "home-xdg-data";
-            path = "/home/${config.sinnix.user.name}/.local/share/polylogue";
-            kind = "bind-mount";
-            source = config.sinnix.services.polylogue.dataDir;
-          }
-        ];
-      };
+      # The archive root is configuration, not a guessed XDG sibling.
+      polylogue.archiveRoot = config.sinnix.services.polylogue.dataDir;
     };
 in
 {
-  options.sinnix.runtime.dataStores = lib.mkOption {
-    type = lib.types.attrsOf dataStoreType;
-    default = { };
-    description = "Canonical, derived, cached, and exact-copy data stores with explicit lifecycle policy.";
-  };
-
   options.sinnix.runtime.surfaces = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule (
@@ -755,19 +639,8 @@ in
     {
       assertions =
         let
-          captureRows = map (capture: {
-            id = capture.name;
-            inherit (capture) path;
-            inherit (capture) data;
-          }) runtimeInventory.captures;
-          storeRows = lib.mapAttrsToList (id: store: {
-            inherit id;
-            inherit (store) path;
-            data = store;
-          }) config.sinnix.runtime.dataStores;
-          rows = captureRows ++ storeRows;
-          ids = map (row: row.id) rows;
-          paths = map (row: row.path) rows;
+          ids = map (capture: capture.name) runtimeInventory.captures;
+          paths = map (capture: capture.path) runtimeInventory.captures;
           duplicates =
             values:
             lib.unique (
@@ -775,35 +648,6 @@ in
                 value: builtins.length (builtins.filter (candidate: candidate == value) values) > 1
               ) values
             );
-          invalidRows = builtins.filter (
-            row:
-            let
-              policy = row.data;
-              references = policy.inputs ++ lib.optional (policy.source != null) policy.source;
-              referencesExist = builtins.all (reference: builtins.elem reference ids) references;
-              shapeIsValid =
-                if policy.class == "canonical" then
-                  policy.preservation == "indefinite"
-                  && policy.fidelity != "derived"
-                  && policy.inputs == [ ]
-                  && policy.source == null
-                else if policy.class == "derived" then
-                  policy.inputs != [ ]
-                  && policy.source == null
-                  && policy.preservation == "rebuildable"
-                  && policy.fidelity == "derived"
-                else if policy.class == "cache" then
-                  policy.source == null
-                  && policy.preservation != "indefinite"
-                  && policy.fidelity == "derived"
-                  && policy.backup == "none"
-                else
-                  (policy.source != null || policy.inputs != [ ])
-                  && !(policy.source != null && policy.inputs != [ ])
-                  && policy.fidelity != "derived";
-            in
-            !(shapeIsValid && referencesExist)
-          ) rows;
           # A class only becomes real when some module writes it onto the unit.
           # nix-gc declared `background` for months while nixpkgs owned the
           # unit and nothing applied it, so it ran at the default IOWeight of
@@ -874,26 +718,13 @@ in
           }
           {
             assertion = duplicates ids == [ ];
-            message = "sinnix.runtime capture and data-store IDs must be unique: ${lib.concatStringsSep ", " (duplicates ids)}";
+            message = "sinnix.runtime capture lane names must be unique: ${lib.concatStringsSep ", " (duplicates ids)}";
           }
           {
             assertion = duplicates paths == [ ];
-            message = "sinnix.runtime capture and data-store paths must be unique: ${lib.concatStringsSep ", " (duplicates paths)}";
-          }
-          {
-            assertion = invalidRows == [ ];
-            message = "sinnix.runtime data policies contain invalid lifecycle relationships: ${
-              lib.concatStringsSep ", " (map (row: row.id) invalidRows)
-            }";
+            message = "sinnix.runtime capture lane paths must be unique: ${lib.concatStringsSep ", " (duplicates paths)}";
           }
         ];
-
-      sinnix.runtime.dataStores = {
-        journal-raw = {
-          path = "${cfg.paths.journalRoot}/raw-log.md";
-          class = "canonical";
-        };
-      };
 
       sinnix.runtime.surfaces = runtimeDefaults.baseSurfaces // {
         # Critical, not background: its probes have 30 s timeouts, and in the

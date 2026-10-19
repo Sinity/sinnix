@@ -21,7 +21,7 @@ from sinnix_hub_server.server import Handler
 from sinnix_hub_server.snapshot import SnapshotBuilder
 
 INVENTORY: dict[str, Any] = {
-    "schema": "sinnix-runtime-inventory-v1",
+    "schema": "sinnix-runtime-inventory-v2",
     "observedServices": [
         {"kind": "service", "manager": "user", "unit": "usersurf.service"},
     ],
@@ -139,7 +139,7 @@ def test_explicit_manager_survives_inventory_order_on_http_and_fallback(
     tmp_path: Path, monkeypatch, capsys, hub_socket
 ) -> None:
     mixed = {
-        "schema": "sinnix-runtime-inventory-v1",
+        "schema": "sinnix-runtime-inventory-v2",
         "observedServices": [
             {"kind": "service", "manager": "system", "unit": "dup.service"},
             {"kind": "service", "manager": "user", "unit": "dup.service"},

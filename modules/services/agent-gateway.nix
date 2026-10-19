@@ -226,10 +226,6 @@ mkServiceModule {
         );
     in
     {
-      sinnix.runtime.dataStores.agent-gateway-state = {
-        path = cfg.stateDir;
-        class = "canonical";
-      };
 
       assertions = [
         {

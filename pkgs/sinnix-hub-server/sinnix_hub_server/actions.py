@@ -316,7 +316,7 @@ class ActionService:
         value, reason = runtime_inventory.load(self.inventory_path)
         if value is None:
             raise ActionError(f"runtime inventory unavailable: {reason}", 503)
-        if value.get("schema") != "sinnix-runtime-inventory-v1":
+        if value.get("schema") != "sinnix-runtime-inventory-v2":
             raise ActionError("runtime inventory is not attested", 503)
         return value
 

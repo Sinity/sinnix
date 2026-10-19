@@ -130,9 +130,5 @@ mkServiceModule {
       sinnix.runtime.surfaces = lib.mapAttrs mkSurface enabledProfiles;
       systemd.services = lib.mapAttrs mkService enabledProfiles;
       systemd.tmpfiles.rules = [ "d ${modelRoot}/gguf 0755 ${user} users -" ];
-      sinnix.runtime.dataStores.llama-cpp-models = {
-        path = "${modelRoot}/gguf";
-        class = "cache";
-      };
     };
 } args

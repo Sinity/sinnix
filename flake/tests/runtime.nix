@@ -226,24 +226,6 @@ in
       };
       evaluated = evalTestSpec system spec;
       inventoryJson = builtins.toJSON evaluated.config.sinnix.runtime.inventory;
-      invalidLifecycleSpec = mkFeatureTest {
-        name = "invalid-runtime-data-policy";
-        feature = "sinnix.features.cli.polylogue.enable";
-        extraModules = [
-          ({ ... }: {
-            sinnix.runtime.dataStores.invalid-canonical = {
-              path = "/fixture/invalid-canonical";
-              class = "canonical";
-              preservation = "ephemeral";
-            };
-          })
-        ];
-        assertions = _: [ ];
-      };
-      invalidLifecycleRejected =
-        !(builtins.tryEval (
-          builtins.deepSeq (evalTestSpec system invalidLifecycleSpec).config.assertions true
-        )).success;
       localModels = import ../data/local-models.nix { inherit lib; };
       localModelRosterJson = builtins.toJSON {
         models = localModels.models;
@@ -714,15 +696,6 @@ in
             ' inventory.json >/dev/null
             touch "$out"
           '';
-      # Red twin for the preservation seam: canonical data cannot be made
-      # ephemeral by an owning module.
-      checks.runtime-data-policy =
-        assert invalidLifecycleRejected;
-        pkgs.runCommand "runtime-data-policy-check" { } ''
-          cat > "$out" <<'EOF_INVENTORY'
-          ${inventoryJson}
-          EOF_INVENTORY
-        '';
       # A CPU-only container must evaluate on a host without an NVIDIA driver.
       checks.ai-cpu-container-runtime = pkgs.runCommand "ai-cpu-container-runtime-check" { } ''
         cat > "$out" <<'EOF_INVENTORY'

@@ -88,15 +88,6 @@ let
     capture:
     {
       inherit (capture) name path;
-      data =
-        capture.data or {
-          class = "canonical";
-          inputs = [ ];
-          source = null;
-          preservation = "indefinite";
-          fidelity = "source";
-          backup = "inherited";
-        };
     }
     // lib.optionalAttrs ((capture.producerProgressPath or null) != null) {
       inherit (capture) producerProgressPath;
@@ -647,20 +638,14 @@ rec {
       hostname ? "",
       surfaces ? baseSurfaces,
       mounts ? [ ],
-      backups ? { },
       captures ? [ ],
-      dataStores ? { },
     }:
     {
-      schema = "sinnix-runtime-inventory-v1";
-      inherit
-        hostname
-        classes
-        slices
-        ;
+      schema = "sinnix-runtime-inventory-v2";
+      inherit hostname slices;
       earlyoomEmergencyAvoidPattern = earlyoomPatternFor (lib.mapAttrs (_: normalizeSurface) surfaces);
       surfaces = lib.mapAttrs (_: effectiveSurface classes) surfaces;
-      inherit mounts backups dataStores;
+      inherit mounts;
       observedServices = observedServiceRows surfaces;
       captures = captureRows surfaces captures;
     };

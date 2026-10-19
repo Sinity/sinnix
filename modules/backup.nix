@@ -45,7 +45,6 @@ let
   # unattended whenever ingestion resumes.
   polylogueStateRoot = config.sinnix.services.polylogue.dataDir;
   polylogueBackupRoot = "${realmRoot}/state/db-dumps/polylogue";
-  machineTelemetryBackupRoot = "${realmRoot}/state/db-dumps/machine-telemetry";
   # A writable aside copy of Polylogue state from before the 2026-09 reindex.
   # As a nested subvolume no realm snapshot reaches it; the Polylogue Borg
   # job archives it.
@@ -1072,129 +1071,6 @@ in
             MemoryMax = "8G";
           };
 
-          sinnix.runtime.dataStores = {
-            # Backup coverage remains active for persisted Polylogue data even
-            # when its daemon is disabled. The owning service supplies the
-            # same higher-priority declarations when enabled.
-            polylogue-inbox = lib.mkDefault {
-              path = "${polylogueStateRoot}/inbox";
-              class = "canonical";
-            };
-            polylogue-source = lib.mkDefault {
-              path = "${polylogueStateRoot}/source.db";
-              class = "canonical";
-            };
-            polylogue-user = lib.mkDefault {
-              path = "${polylogueStateRoot}/user.db";
-              class = "canonical";
-            };
-            polylogue-audit = lib.mkDefault {
-              path = "${polylogueStateRoot}/audit.db";
-              class = "canonical";
-            };
-            polylogue-ops = lib.mkDefault {
-              path = "${polylogueStateRoot}/ops.db";
-              class = "canonical";
-            };
-            polylogue-index = lib.mkDefault {
-              path = "${polylogueStateRoot}/index.db";
-              class = "derived";
-              inputs = [
-                "polylogue-inbox"
-                "polylogue-source"
-                "polylogue-user"
-                "polylogue-audit"
-                "polylogue-ops"
-              ];
-            };
-            polylogue-embeddings = lib.mkDefault {
-              path = "${polylogueStateRoot}/embeddings.db";
-              class = "derived";
-              inputs = [ "polylogue-source" ];
-            };
-            realm-source = {
-              path = realmRoot;
-              class = "canonical";
-            };
-            persist-source = {
-              path = "/persist";
-              class = "canonical";
-            };
-            realm-snapshots = {
-              path = realmSnapshots;
-              class = "exact-copy";
-              source = "realm-source";
-            };
-            persist-snapshots = {
-              path = persistSnapshots;
-              class = "exact-copy";
-              source = "persist-source";
-            };
-            borg-realm-archives = {
-              # Historical canonical contents selected by the actual Borg
-              # exclusions. This is not a full copy of /realm: nested dedicated
-              # subvolumes have separate backup jobs, and every deletion needs
-              # the per-snapshot coverage proof above.
-              path = borgRepoRealmPath;
-              class = "canonical";
-              preservation = "indefinite";
-              backup = "direct";
-            };
-            borg-persist-archives = {
-              path = borgRepoPersistPath;
-              class = "canonical";
-              preservation = "indefinite";
-              backup = "direct";
-            };
-            sinex-blob-repository = {
-              path = sinexBlobRepositoryPath;
-              class = "canonical";
-            };
-            borg-sinex-blob-archives = {
-              path = borgRepoSinexBlobsPath;
-              class = "exact-copy";
-              source = "sinex-blob-repository";
-              preservation = "indefinite";
-              backup = "direct";
-            };
-            borg-root-archives = {
-              path = borgRepoRootSnapshotsPath;
-              # Each archive is the durable historical record after
-              # rebuildable root paths are excluded from a pre-wipe snapshot.
-              class = "canonical";
-              backup = "direct";
-            };
-            borg-polylogue-state-archives = {
-              # This repository preserves selected non-database state across
-              # versions and is therefore a canonical historical source.
-              path = borgRepoPolylogueStatePath;
-              class = "canonical";
-              backup = "direct";
-            };
-            polylogue-db-dumps = {
-              path = polylogueBackupRoot;
-              class = "exact-copy";
-              inputs = [
-                "polylogue-source"
-                "polylogue-user"
-                "polylogue-audit"
-                "polylogue-ops"
-                "polylogue-index"
-                "polylogue-embeddings"
-              ];
-              preservation = "indefinite";
-              backup = "direct";
-            };
-            machine-telemetry-dumps = {
-              path = machineTelemetryBackupRoot;
-              class = "exact-copy";
-              source = "machine-telemetry";
-              preservation = "indefinite";
-              # Realm snapshots archive the dump directory.
-              backup = "inherited";
-            };
-          };
-
           sinnix.runtime.surfaces = {
             borgbackup-drain-coordinator = {
               unit = "borgbackup-drain-coordinator.service";
@@ -1232,10 +1108,6 @@ in
                     command = "${snapshotCoverage} freshness ${borgDrainStateRoot}/persist.latest-archived ${toString borgDataFreshnessMaxAgeSec}";
                     timeoutSeconds = 15;
                   };
-                  data = {
-                    class = "derived";
-                    inputs = [ "borg-persist-archives" ];
-                  };
                 }
               ];
             };
@@ -1262,10 +1134,6 @@ in
                     command = "${snapshotCoverage} freshness ${borgDrainStateRoot}/realm.latest-archived ${toString borgDataFreshnessMaxAgeSec}";
                     timeoutSeconds = 15;
                   };
-                  data = {
-                    class = "derived";
-                    inputs = [ "borg-realm-archives" ];
-                  };
                 }
               ];
             };
@@ -1288,10 +1156,6 @@ in
                   # persist/realm drain cadence, so it keeps the daily budget the
                   # retired borgbackup-status check used for it (3x cadence).
                   staleAfterSeconds = borgDailyArchiveMaxAgeSec;
-                  data = {
-                    class = "derived";
-                    inputs = [ "borg-sinex-blob-archives" ];
-                  };
                 }
               ];
             };
@@ -1318,10 +1182,6 @@ in
                   eventDriven = true;
                   # Daily timer, same budget convention as sinex-blobs: 3x cadence.
                   staleAfterSeconds = borgDailyArchiveMaxAgeSec;
-                  data = {
-                    class = "derived";
-                    inputs = [ "borg-polylogue-state-archives" ];
-                  };
                 }
               ];
             };
@@ -1341,10 +1201,6 @@ in
                   livenessProbe = {
                     command = "${snapshotCoverage} audit-status ${realmCoverageAuditReceipt} ${realmCoveragePolicy} 691200 --mode sampled";
                     timeoutSeconds = 10;
-                  };
-                  data = {
-                    class = "derived";
-                    inputs = [ "borg-realm-archives" ];
                   };
                 }
               ];
@@ -1382,13 +1238,6 @@ in
                   livenessProbe = {
                     command = mkIntegrityStuckProbeScript;
                     timeoutSeconds = 10;
-                  };
-                  data = {
-                    class = "derived";
-                    inputs = [
-                      "borg-realm-archives"
-                      "borg-persist-archives"
-                    ];
                   };
                 }
               ];

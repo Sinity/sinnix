@@ -72,10 +72,6 @@ mkFeatureModule {
         # an empty cache source-builds wheels with no published build (the
         # free-threaded duckdb) and that build nearly took the host down.
         systemd.tmpfiles.rules = [ "d /realm/state/cache/uv 0755 ${user} users -" ];
-        sinnix.runtime.dataStores.uv-cache = {
-          path = "/realm/state/cache/uv";
-          class = "cache";
-        };
         home-manager.users.${user}.home.packages = [
           (pkgs.python3.withPackages (
             ps: with ps; [

@@ -30,7 +30,7 @@ UTC_TS = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 SENTINEL = "1999-12-31T23:59:58Z"
 
 INVENTORY = {
-    "schema": "sinnix-runtime-inventory-v1",
+    "schema": "sinnix-runtime-inventory-v2",
     "surfaces": {
         "safe": {
             "unit": "safe.service",

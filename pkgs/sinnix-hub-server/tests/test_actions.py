@@ -144,7 +144,7 @@ def inventory(path: Path) -> None:
     path.write_text(
         json.dumps(
             {
-                "schema": "sinnix-runtime-inventory-v1",
+                "schema": "sinnix-runtime-inventory-v2",
                 "surfaces": {
                     "safe": {
                         "unit": "safe.service",
@@ -638,7 +638,7 @@ def inventory_with_sacrificial_slice(path: Path) -> None:
     path.write_text(
         json.dumps(
             {
-                "schema": "sinnix-runtime-inventory-v1",
+                "schema": "sinnix-runtime-inventory-v2",
                 "surfaces": {
                     "safe": {
                         "unit": "safe.service",
@@ -1132,7 +1132,7 @@ def test_canonical_unit_manager_is_never_retargeted(tmp_path):
     inventory_path.write_text(
         json.dumps(
             {
-                "schema": "sinnix-runtime-inventory-v1",
+                "schema": "sinnix-runtime-inventory-v2",
                 "surfaces": {
                     "system-copy": {
                         "unit": "shared.service",
@@ -1204,7 +1204,7 @@ def test_canonical_manager_search_survives_opposite_scope_surface_id_collision(
     inventory_path.write_text(
         json.dumps(
             {
-                "schema": "sinnix-runtime-inventory-v1",
+                "schema": "sinnix-runtime-inventory-v2",
                 "surfaces": {
                     "shared.service": {
                         "unit": "shared.service",
@@ -1250,7 +1250,7 @@ def test_pressure_actions_refuse_user_scope_before_dispatch(tmp_path):
     inventory_path.write_text(
         json.dumps(
             {
-                "schema": "sinnix-runtime-inventory-v1",
+                "schema": "sinnix-runtime-inventory-v2",
                 "surfaces": {
                     "system": {"unit": "shared.service", "manager": "system"},
                     "user": {"unit": "shared.service", "manager": "user"},

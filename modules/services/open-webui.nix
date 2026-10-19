@@ -69,10 +69,6 @@ mkAiService {
           null;
     in
     {
-      sinnix.runtime.dataStores.open-webui-state = {
-        path = "/var/lib/open-webui";
-        class = "canonical";
-      };
 
       services.open-webui = {
         enable = true;

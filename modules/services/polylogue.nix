@@ -160,45 +160,6 @@ mkServiceModule {
         "d ${cfg.dataDir}/inbox 0700 ${userName} users -"
       ];
 
-      sinnix.runtime.dataStores = {
-        polylogue-inbox = {
-          path = "${cfg.dataDir}/inbox";
-          class = "canonical";
-        };
-        polylogue-source = {
-          path = "${cfg.dataDir}/source.db";
-          class = "canonical";
-        };
-        polylogue-user = {
-          path = "${cfg.dataDir}/user.db";
-          class = "canonical";
-        };
-        polylogue-audit = {
-          path = "${cfg.dataDir}/audit.db";
-          class = "canonical";
-        };
-        polylogue-ops = {
-          path = "${cfg.dataDir}/ops.db";
-          class = "canonical";
-        };
-        polylogue-index = {
-          path = "${cfg.dataDir}/index.db";
-          class = "derived";
-          inputs = [
-            "polylogue-inbox"
-            "polylogue-source"
-            "polylogue-user"
-            "polylogue-audit"
-            "polylogue-ops"
-          ];
-        };
-        polylogue-embeddings = {
-          path = "${cfg.dataDir}/embeddings.db";
-          class = "derived";
-          inputs = [ "polylogue-source" ];
-        };
-      };
-
       # ── Import the upstream Home Manager module ────────────────────
       home-manager.users.${userName} = {
         imports = [ inputs.polylogue.homeManagerModules.default ];

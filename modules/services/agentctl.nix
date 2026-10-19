@@ -195,22 +195,6 @@ mkServiceModule {
       );
     in
     lib.mkMerge [
-      {
-        sinnix.runtime.dataStores = {
-          agentctl-events = {
-            path = eventSpool;
-            class = "canonical";
-          };
-          agentctl-state = {
-            path = "${config.sinnix.paths.stateRoot}/agentctl";
-            class = "canonical";
-          };
-          task-authorities = {
-            path = taskStateRoot;
-            class = "canonical";
-          };
-        };
-      }
       (lib.sinnix.mkScheduledJob
         {
           inherit config;
