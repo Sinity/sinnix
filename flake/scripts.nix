@@ -74,7 +74,7 @@ let
     };
   };
   scriptPackages = lib.mapAttrs (_: v: v.package) registry // {
-    # Generated meta-CLI front door over every packaged script above. Kept
+    # Generated meta-CLI entry point over every packaged script above. Kept
     # in scriptPackages (not externalPackages) because it is derived
     # entirely from `registry`, not from an external flake input.
     sinnix = import ./cli-dispatcher.nix { inherit lib pkgs registry; };

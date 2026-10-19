@@ -145,17 +145,17 @@ def inventory(path: Path) -> None:
         json.dumps(
             {
                 "schema": "sinnix-runtime-inventory-v2",
-                "surfaces": {
+                "units": {
                     "safe": {
                         "unit": "safe.service",
                         "manager": "system",
-                        "observe": {"restartable": True},
+                        "operatorRestart": True,
                         "effectiveResources": {"CPUWeight": 5},
                     },
                     "fixed": {
                         "unit": "fixed.service",
                         "manager": "user",
-                        "observe": {"restartable": False},
+                        "operatorRestart": False,
                     },
                 },
             }
@@ -639,11 +639,11 @@ def inventory_with_sacrificial_slice(path: Path) -> None:
         json.dumps(
             {
                 "schema": "sinnix-runtime-inventory-v2",
-                "surfaces": {
+                "units": {
                     "safe": {
                         "unit": "safe.service",
                         "manager": "user",
-                        "observe": {"restartable": True},
+                        "operatorRestart": True,
                         "effectiveResources": {"CPUWeight": 5},
                     },
                 },
@@ -1133,21 +1133,21 @@ def test_canonical_unit_manager_is_never_retargeted(tmp_path):
         json.dumps(
             {
                 "schema": "sinnix-runtime-inventory-v2",
-                "surfaces": {
+                "units": {
                     "system-copy": {
                         "unit": "shared.service",
                         "manager": "system",
-                        "observe": {"restartable": True},
+                        "operatorRestart": True,
                     },
                     "user-copy": {
                         "unit": "shared.service",
                         "manager": "user",
-                        "observe": {"restartable": True},
+                        "operatorRestart": True,
                     },
                     "system-only": {
                         "unit": "system-only.service",
                         "manager": "system",
-                        "observe": {"restartable": True},
+                        "operatorRestart": True,
                     },
                 },
             }
@@ -1205,16 +1205,16 @@ def test_canonical_manager_search_survives_opposite_scope_surface_id_collision(
         json.dumps(
             {
                 "schema": "sinnix-runtime-inventory-v2",
-                "surfaces": {
+                "units": {
                     "shared.service": {
                         "unit": "shared.service",
                         "manager": "system",
-                        "observe": {"restartable": True},
+                        "operatorRestart": True,
                     },
                     "user-copy": {
                         "unit": "shared.service",
                         "manager": "user",
-                        "observe": {"restartable": True},
+                        "operatorRestart": True,
                     },
                 },
             }
@@ -1251,7 +1251,7 @@ def test_pressure_actions_refuse_user_scope_before_dispatch(tmp_path):
         json.dumps(
             {
                 "schema": "sinnix-runtime-inventory-v2",
-                "surfaces": {
+                "units": {
                     "system": {"unit": "shared.service", "manager": "system"},
                     "user": {"unit": "shared.service", "manager": "user"},
                 },
@@ -1290,7 +1290,7 @@ def test_policy_adapter_changes_are_runtime_only(
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
     data = json.loads(inventory_path.read_text())
-    data["surfaces"]["safe"]["manager"] = manager
+    data["units"]["safe"]["manager"] = manager
     inventory_path.write_text(json.dumps(data))
     builder = SnapshotBuilder(
         tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}

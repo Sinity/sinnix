@@ -41,7 +41,7 @@ mkFeatureModule {
       nixosConfig = config;
     in
     {
-      sinnix.runtime.surfaces.noctalia = {
+      sinnix.runtime.units.noctalia = {
         unit = "noctalia.service";
         manager = "user";
         resourceClass = "ordinary";
@@ -52,10 +52,8 @@ mkFeatureModule {
           processMatchers = [ "noctalia" ];
           earlyoomAvoid = true;
         };
-        observe = {
-          enable = true;
-          restartable = true;
-        };
+        notifyOnFailure = true;
+        operatorRestart = true;
       };
 
       home-manager.users.${user} =

@@ -1,6 +1,6 @@
 # The hub
 
-`sinnix.services.hub` is the browser front door to the workstation: a
+`sinnix.services.hub` is the browser entry point to the workstation: a
 dashboard, generated reports, and the phone's receiver. It is
 reachable from the desktop and over Tailscale (the phone), and from nowhere
 else. It runs as a Caddy user service in front of `sinnix-hub-server`, the
@@ -27,7 +27,7 @@ Every button posts to `/ops/v1/actions`, the hub-server's action API; the hub
 itself runs no commands. The API only accepts:
 
 - `start`, `stop`, `restart` on a unit listed in
-  `/etc/sinnix/runtime-inventory.json` that declares `observe.restartable`;
+  `/etc/sinnix/runtime-inventory.json` that declares `operatorRestart`;
 - `interrupt` on a queued or running agentctl job;
 - `stop` on one process, identified by PID and start time, and only inside
   `agent.slice`, `build.slice` or a slice the inventory marks as killable

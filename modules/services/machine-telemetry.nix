@@ -40,10 +40,8 @@ mkServiceModule {
   surface = {
     unit = "machine-telemetry.service";
     resourceClass = "critical";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
+    notifyOnFailure = true;
+    operatorRestart = true;
     captures = [
       {
         name = "machine-telemetry";
@@ -207,7 +205,7 @@ mkServiceModule {
           inherit config;
           unitName = "machine-telemetry-seal";
           description = "Seal the active telemetry file; archive and check sealed files once";
-          surface = config.sinnix.runtime.surfaces.machine-telemetry-seal;
+          surface = config.sinnix.runtime.units.machine-telemetry-seal;
         }
         {
           script = ''
@@ -273,7 +271,7 @@ mkServiceModule {
           inherit config;
           unitName = "machine-telemetry-sqlite-backup";
           description = "Back up machine telemetry SQLite database";
-          surface = config.sinnix.runtime.surfaces.machine-telemetry-sqlite-backup;
+          surface = config.sinnix.runtime.units.machine-telemetry-sqlite-backup;
         }
         {
           script = ''
@@ -483,16 +481,16 @@ mkServiceModule {
           };
         };
 
-        sinnix.runtime.surfaces = {
+        sinnix.runtime.units = {
           machine-telemetry-sqlite-backup = {
             unit = "machine-telemetry-sqlite-backup.service";
             resourceClass = "backup";
-            observe.enable = true;
+            notifyOnFailure = true;
           };
           machine-telemetry-seal = {
             unit = "machine-telemetry-seal.service";
             resourceClass = "backup";
-            observe.enable = true;
+            notifyOnFailure = true;
           };
           machine-telemetry-seal-timer = {
             unit = "machine-telemetry-seal.timer";

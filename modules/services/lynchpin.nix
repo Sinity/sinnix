@@ -196,10 +196,10 @@ mkServiceModule {
         lib.mkMerge (
           [
             {
-              sinnix.runtime.surfaces = lib.mapAttrs (unitName: job: {
+              sinnix.runtime.units = lib.mapAttrs (unitName: job: {
                 unit = "${unitName}.service";
                 resourceClass = "ordinary";
-                observe.enable = true;
+                notifyOnFailure = true;
                 workload = {
                   class = "sacrificial";
                   inherit (job) rationale;
@@ -214,7 +214,7 @@ mkServiceModule {
               {
                 inherit config unitName;
                 inherit (job) description;
-                surface = config.sinnix.runtime.surfaces.${unitName};
+                surface = config.sinnix.runtime.units.${unitName};
               }
               {
                 execStart = "${scriptPkgs.agentctl}/bin/agentctl job fire lynchpin ${job.operation} --wait";

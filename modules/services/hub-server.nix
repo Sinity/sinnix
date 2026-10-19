@@ -33,14 +33,12 @@ mkServiceModule {
         scriptPkgs.sinnix-rebuild-override
       ];
       systemd.tmpfiles.rules = [ "d /realm/state/hub 0700 ${userName} users -" ];
-      sinnix.runtime.surfaces.hub-server = {
+      sinnix.runtime.units.hub-server = {
         unit = "sinnix-hub-server.service";
         manager = "user";
         resourceClass = "ordinary";
-        observe = {
-          enable = true;
-          restartable = true;
-        };
+        notifyOnFailure = true;
+        operatorRestart = true;
         workload = {
           class = "protected";
           rationale = "Read-only operator snapshot publisher; it never owns lifecycle actions.";

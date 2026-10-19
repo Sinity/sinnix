@@ -67,11 +67,11 @@ def assert_targets(html):
 def test_services_controls_keep_their_manager_observation(monkeypatch):
     monkeypatch.setattr(probes, "show_units", observed)
     inventory = {
-        "surfaces": {
+        "units": {
             manager: {
                 "unit": "shared.service",
                 "manager": manager,
-                "observe": {"restartable": True},
+                "operatorRestart": True,
             }
             for manager in ("system", "user")
         }

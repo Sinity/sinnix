@@ -12,7 +12,7 @@
 }:
 let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
-  httpFrontdoor = import ../lib/ai-http-frontdoor.nix { inherit lib; };
+  httpProxy = import ../lib/ai-http-proxy.nix { inherit lib; };
   systemdSocketProxyd = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd";
 
   # The backend and proxy bind their lifetimes to each other. The proxy
@@ -23,7 +23,7 @@ let
   # BindsTo is needed for a natural idle exit, which PartOf alone does not
   # propagate to the backend.
   #
-  # Every value the front door needs is read from the backend's own runtime
+  # Every value the proxy needs is read from the backend's own runtime
   # surface: endpoints, the idle window, the readiness bound, and the
   # admission key. The backend module is the single place any of them is
   # written, so a proxy cannot drift from the service it fronts.
@@ -37,7 +37,7 @@ let
   mkProxy =
     name:
     let
-      surface = config.sinnix.runtime.surfaces.${name};
+      surface = config.sinnix.runtime.units.${name};
       backendUnit = surface.unit;
       inherit (surface.activation)
         publicEndpoint
@@ -110,7 +110,7 @@ let
         socketUnit
         ;
       consumers = surface.activation.consumers or [ ];
-      httpConfig = httpFrontdoor {
+      httpConfig = httpProxy {
         inherit publicEndpoint backendEndpoint socketPath;
         inherit (surface.ai) browserRequests;
       };
@@ -142,7 +142,7 @@ let
   backendNames = lib.naturalSort (
     lib.attrNames (
       lib.filterAttrs (_: surface: surface.ai != null && surface.activation.mode == "socket-proxy") (
-        builtins.removeAttrs config.sinnix.runtime.surfaces [ "ai-http" ]
+        builtins.removeAttrs config.sinnix.runtime.units [ "ai-http" ]
       )
     )
   );
@@ -191,14 +191,12 @@ in
   # Keep membership unconditional: conditioning this registry entry on a
   # query of the same registry creates a module fixed-point recursion.
   # Observation follows the actual Caddy enablement instead.
-  sinnix.runtime.surfaces.ai-http = {
+  sinnix.runtime.units.ai-http = {
     unit = "caddy.service";
     ai = null;
     resourceClass = "ordinary";
-    observe = {
-      enable = backendNames != [ ];
-      restartable = backendNames != [ ];
-    };
+    notifyOnFailure = backendNames != [ ];
+    operatorRestart = backendNames != [ ];
   };
   services.caddy = lib.mkIf (backendNames != [ ]) {
     enable = true;

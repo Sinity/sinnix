@@ -32,10 +32,8 @@ mkServiceModule {
       readinessTimeout = 60;
       exclusiveResource = "gpu-inference";
     };
-    observe = {
-      enable = true;
-      restartable = true;
-    };
+    notifyOnFailure = true;
+    operatorRestart = true;
   };
   extraOptions = {
     image = args.lib.mkOption {
@@ -46,7 +44,7 @@ mkServiceModule {
     port = args.lib.mkOption {
       type = args.lib.types.port;
       default = helpers.data.ports.ocr.public;
-      description = "PUBLIC host port (bound to 127.0.0.1) clients use -- the ocr-proxy socket front door.";
+      description = "PUBLIC host port (bound to 127.0.0.1) clients use -- the ocr-proxy socket proxy.";
     };
     backendPort = args.lib.mkOption {
       type = args.lib.types.port;

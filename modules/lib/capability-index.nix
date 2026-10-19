@@ -18,7 +18,7 @@
 #
 # Row shape:
 #   kind         feature | service | ai-backend | script | command | skill
-#                | capture-lane | mcp-server | agent-lane
+#                | capture-lane | mcp-server | agent-cli
 #                (hub-page rows are added at render time by the hub-server,
 #                which owns the route table)
 #   name         the identifier the operator would use
@@ -253,10 +253,10 @@ let
         let
           siblings = surfacesDeclaredIn file;
         in
-        if config.sinnix.runtime.surfaces ? ${name} then
-          config.sinnix.runtime.surfaces.${name}
+        if config.sinnix.runtime.units ? ${name} then
+          config.sinnix.runtime.units.${name}
         else if builtins.length siblings == 1 then
-          config.sinnix.runtime.surfaces.${builtins.head siblings}
+          config.sinnix.runtime.units.${builtins.head siblings}
         else
           null;
 
@@ -288,7 +288,7 @@ let
           # Every surface this module declared, for the live-state probe.
           surfaces = map (surfaceName: {
             name = surfaceName;
-            inherit (config.sinnix.runtime.surfaces.${surfaceName}) unit manager;
+            inherit (config.sinnix.runtime.units.${surfaceName}) unit manager;
           }) (naturalSort (surfacesDeclaredIn owner));
         in
         mkRow {
@@ -312,7 +312,7 @@ let
       ) services;
 
       # ── scripts ──────────────────────────────────────────────────────────
-      # `sinnix <short>` is the front door for every packaged script
+      # `sinnix <short>` is the entry point for every packaged script
       # (flake/cli-dispatcher.nix), so that is the invocation worth printing.
       scriptRows = mapAttrsToList (
         name: entry:
@@ -395,7 +395,7 @@ let
           option.definitionsWithLocations or [ ]
         );
 
-      surfaceOwners = definitionFiles (options.sinnix.runtime.surfaces or { }) (
+      surfaceOwners = definitionFiles (options.sinnix.runtime.units or { }) (
         file: surfaces: lib.mapAttrs (_: _: file) surfaces
       );
 
@@ -426,7 +426,7 @@ let
       surfaceLaneRows = concatLists (
         mapAttrsToList (
           surfaceName: surface: map (mkLaneRow surfaceName) surface.captures
-        ) config.sinnix.runtime.surfaces
+        ) config.sinnix.runtime.units
       );
       standaloneLaneRows = map (mkLaneRow null) config.sinnix.runtime.captures;
 
@@ -450,52 +450,52 @@ let
         }
       ) mcpRegistry.registry;
 
-      # ── agent CLI lanes ──────────────────────────────────────────────────
-      # No prose in the registry, and none wanted: what distinguishes a lane IS
+      # ── agent CLI profiles ──────────────────────────────────────────────────
+      # No prose in the registry, and none wanted: what distinguishes a profile IS
       # its client, MCP profile and backend, so the row renders those.
-      laneBackend =
-        lane:
-        if lane ? model then
-          " on ${lane.model}"
-        else if lane ? env then
+      profileBackend =
+        profile:
+        if profile ? model then
+          " on ${profile.model}"
+        else if profile ? env then
           " on an alternate backend"
         else
           "";
 
-      claudeLaneRows = mapAttrsToList (
-        _name: lane:
+      claudeProfileRows = mapAttrsToList (
+        _name: profile:
         mkRow {
-          kind = "agent-lane";
-          name = lane.binName;
-          description = "Claude Code, ${lane.mcpProfile} MCP profile${laneBackend lane}";
-          invoke = lane.binName;
+          kind = "agent-cli";
+          name = profile.binName;
+          description = "Claude Code, ${profile.mcpProfile} MCP profile${profileBackend profile}";
+          invoke = profile.binName;
           owner = "flake/data/agent-profiles.nix";
           extra = {
             client = "claude";
-            inherit (lane) mcpProfile;
+            inherit (profile) mcpProfile;
           };
         }
       ) agentProfiles.claudeProfiles;
 
-      codexLaneRows = mapAttrsToList (
-        _name: lane:
+      codexProfileRows = mapAttrsToList (
+        _name: profile:
         mkRow {
-          kind = "agent-lane";
-          name = lane.binName;
-          description = "Codex CLI, ${lane.mcpProfile} profile${laneBackend lane}";
-          invoke = lane.binName;
+          kind = "agent-cli";
+          name = profile.binName;
+          description = "Codex CLI, ${profile.mcpProfile} profile${profileBackend profile}";
+          invoke = profile.binName;
           owner = "flake/data/agent-profiles.nix";
           extra = {
             client = "codex";
-            inherit (lane) mcpProfile;
+            inherit (profile) mcpProfile;
           };
         }
       ) agentProfiles.codexProfiles;
 
-      hermesLaneRows = mapAttrsToList (
+      hermesProfileRows = mapAttrsToList (
         name: profile:
         mkRow {
-          kind = "agent-lane";
+          kind = "agent-cli";
           name = "hermes-${name}";
           description = "Hermes ${name} profile, ${profile.mcpProfile or "evidence"} MCP profile, ${
             profile.reasoningEffort or "medium"
@@ -518,9 +518,9 @@ let
         ++ surfaceLaneRows
         ++ standaloneLaneRows
         ++ mcpRows
-        ++ claudeLaneRows
-        ++ codexLaneRows
-        ++ hermesLaneRows;
+        ++ claudeProfileRows
+        ++ codexProfileRows
+        ++ hermesProfileRows;
 
       undescribed = filter (row: row.description == null || trim row.description == "") rows;
     in

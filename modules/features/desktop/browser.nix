@@ -104,15 +104,13 @@ mkFeatureModule {
         "d ${config.sinnix.paths.capturePaths.reading-stack} 0700 ${user} ${user} -"
       ];
 
-      sinnix.runtime.surfaces = {
+      sinnix.runtime.units = {
         sinnix-capture-browser-nav = {
           unit = "sinnix-capture-browser-nav.service";
           manager = "user";
           resourceClass = "capture";
-          observe = {
-            enable = true;
-            restartable = true;
-          };
+          notifyOnFailure = true;
+          operatorRestart = true;
           captures = [
             {
               name = "browser-nav-edges";

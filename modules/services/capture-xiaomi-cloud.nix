@@ -40,10 +40,8 @@ mkServiceModule {
     unit = "sinnix-capture-xiaomi-cloud.service";
     manager = "user";
     resourceClass = "capture";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
+    notifyOnFailure = true;
+    operatorRestart = true;
     captures = [
       {
         name = "xiaomi-cloud";

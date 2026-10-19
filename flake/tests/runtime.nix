@@ -15,7 +15,7 @@ in
         feature = "sinnix.features.cli.polylogue.enable";
         extraModules = [
           ({ config, lib, ... }: {
-            sinnix.runtime.surfaces = {
+            sinnix.runtime.units = {
               runtime-policy-system = {
                 unit = "runtime-policy-system.service";
                 resourceClass = "background";
@@ -23,7 +23,7 @@ in
                   MemoryMax = "900M";
                   Nice = 7;
                 };
-                observe.enable = true;
+                notifyOnFailure = true;
                 captures = [
                   {
                     name = "fixture-system-capture";
@@ -38,7 +38,7 @@ in
                 resources = {
                   MemoryLow = "768M";
                 };
-                observe.enable = true;
+                notifyOnFailure = true;
                 captures = [
                   {
                     name = "fixture-user-capture";
@@ -86,7 +86,7 @@ in
                   surface = {
                     unit = "sinnix-failure-attach-observed.service";
                     resourceClass = "background";
-                    observe.enable = true;
+                    notifyOnFailure = true;
                   };
                   job.execStart = "/bin/true";
                 })
@@ -103,7 +103,7 @@ in
         assertions =
           config:
           let
-            surfaces = config.sinnix.runtime.inventory.surfaces;
+            surfaces = config.sinnix.runtime.inventory.units;
             # The class table is the source of the defaults, so read the
             # expected values from it rather than restating them here.
             backgroundClass =
@@ -270,7 +270,7 @@ in
             assertion =
               let
                 env = config.services.open-webui.environment;
-                endpoint = config.sinnix.runtime.inventory.surfaces.kokoro.activation.publicEndpoint;
+                endpoint = config.sinnix.runtime.inventory.units.kokoro.activation.publicEndpoint;
               in
               env.AUDIO_TTS_OPENAI_API_BASE_URL == "http://${endpoint}/v1"
               && env.AUDIO_TTS_ENGINE == "openai"
@@ -320,15 +320,15 @@ in
         assertions =
           config:
           let
-            # Every socket-proxy front door, read from the inventory rather
+            # Every socket proxy, read from the inventory rather
             # than listed here, so a new backend is covered the day it is
             # declared.
             proxyBackends = lib.filterAttrs (
               _: surface: surface.ai != null && (surface.activation.mode or "direct") == "socket-proxy"
-            ) config.sinnix.runtime.inventory.surfaces;
+            ) config.sinnix.runtime.inventory.units;
             containerBackends = lib.filterAttrs (
               _: surface: surface.ai != null && surface.ai.backendKind == "container"
-            ) config.sinnix.runtime.inventory.surfaces;
+            ) config.sinnix.runtime.inventory.units;
             proxies = lib.mapAttrsToList (name: surface: {
               name = "${name}-proxy";
               inherit (surface) activation;
@@ -389,7 +389,7 @@ in
               assertion =
                 let
                   env = config.services.open-webui.environment;
-                  endpoint = config.sinnix.runtime.inventory.surfaces.tts.activation.publicEndpoint;
+                  endpoint = config.sinnix.runtime.inventory.units.tts.activation.publicEndpoint;
                 in
                 env.AUDIO_TTS_OPENAI_API_BASE_URL == "http://${endpoint}/v1"
                 && env.AUDIO_TTS_MODEL == "tts-1"
@@ -413,15 +413,15 @@ in
               message = "Each OCI backend must publish the endpoint its runtime inventory advertises";
             }
             {
-              assertion = config.sinnix.runtime.inventory.surfaces.stt.ai.browserRequests == "native-only";
+              assertion = config.sinnix.runtime.inventory.units.stt.ai.browserRequests == "native-only";
               message = "STT must refuse browser metadata before starting its native-only receiver";
             }
             {
               # ai-control must discover the owning service declarations,
               # rather than carry another backend-name list. Every marked
-              # enabled socket backend therefore gets exactly one front door.
+              # enabled socket backend therefore gets exactly one proxy.
               assertion = lib.naturalSort proxyNames == map (name: "${name}-proxy") declaredAiSocketBackends;
-              message = "Every AI service that declares socket-proxy activation must receive exactly one derived front door";
+              message = "Every AI service that declares socket-proxy activation must receive exactly one derived proxy";
             }
             {
               # Manual starts acquire the private listen FD; natural proxy
@@ -448,7 +448,7 @@ in
               # The downward edge must exist, or an idle proxy exit leaves the
               # backend resident and the GPU held.
               assertion = builtins.all (proxyName: backendUnitsOf proxyName != [ ]) proxyNames;
-              message = "Every socket-proxy front door must have at least one backend declaring PartOf= on it, or idling the proxy never releases the backend";
+              message = "Every socket proxy must have at least one backend declaring PartOf= on it, or idling the proxy never releases the backend";
             }
             {
               # Without an explicit limit the default is 200 activations in
@@ -461,7 +461,7 @@ in
                 ((socketOf proxyName).socketConfig.TriggerLimitBurst or null) != null
                 && ((socketOf proxyName).socketConfig.TriggerLimitIntervalSec or null) != null
               ) proxyNames;
-              message = "Every socket-proxy front door must set an explicit activation trigger limit rather than inheriting systemd's short default window";
+              message = "Every socket proxy must set an explicit activation trigger limit rather than inheriting systemd's short default window";
             }
             {
               # The inventory is what sinnix-observe and the hub read; the
@@ -475,7 +475,7 @@ in
                 && (socketOf proxy.name).socketConfig.SocketUser == config.sinnix.user.name
                 && lib.hasInfix "http://:${lib.last (lib.splitString ":" proxy.activation.publicEndpoint)}" config.services.caddy.extraConfig
               ) proxies;
-              message = "Each AI HTTP front door must guard the public endpoint before its operator/Caddy-only Unix activation socket";
+              message = "Each AI HTTP proxy must guard the public endpoint before its operator/Caddy-only Unix activation socket";
             }
             {
               assertion = builtins.all (
@@ -614,7 +614,7 @@ in
           config:
           let
             service = config.systemd.services.lynchpin-materialize.serviceConfig;
-            surface = config.sinnix.runtime.inventory.surfaces.lynchpin-materialize;
+            surface = config.sinnix.runtime.inventory.units.lynchpin-materialize;
           in
           [
             {
@@ -741,7 +741,7 @@ in
             entry: entry.model_name == "local-gemma4-26b-abliterated"
           ) null localModels.litellmModelList;
           glimmerEndpoint =
-            aiActivationEvaluated.config.sinnix.runtime.inventory.surfaces.muse-glimmer.activation.publicEndpoint;
+            aiActivationEvaluated.config.sinnix.runtime.inventory.units.muse-glimmer.activation.publicEndpoint;
         in
         assert lib.assertMsg (
           !lib.elem "muse-glimmer" localModels.ollamaLoadModels

@@ -33,10 +33,8 @@ mkServiceModule {
       readinessTimeout = 180;
       exclusiveResource = "gpu-inference";
     };
-    observe = {
-      enable = true;
-      restartable = true;
-    };
+    notifyOnFailure = true;
+    operatorRestart = true;
   };
   extraOptions = {
     image = args.lib.mkOption {
@@ -47,7 +45,7 @@ mkServiceModule {
     port = args.lib.mkOption {
       type = args.lib.types.port;
       default = helpers.data.ports.musicgen.public;
-      description = "PUBLIC host port (bound to 127.0.0.1) clients use -- the musicgen-proxy socket front door.";
+      description = "PUBLIC host port (bound to 127.0.0.1) clients use -- the musicgen-proxy socket proxy.";
     };
     backendPort = args.lib.mkOption {
       type = args.lib.types.port;

@@ -12,7 +12,7 @@
 #
 # Socket-activated behind the same idle-aware proxy pattern as
 # GPU inference backends (modules/services/ai-control.nix): the public port
-# 8890 is the systemd socket front door (8880 belongs to sinnix-hub); the
+# 8890 is the systemd socket proxy (8880 belongs to sinnix-hub); the
 # backend container runs on a private loopback port and exits after 30s idle.
 #
 # Digest-pinned OCI container; weights (~330MB) are baked into the image at

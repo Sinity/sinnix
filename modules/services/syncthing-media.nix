@@ -14,10 +14,8 @@ mkServiceModule {
   surface = {
     unit = "syncthing.service";
     resourceClass = "background";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
+    notifyOnFailure = true;
+    operatorRestart = true;
   };
   configFn =
     {

@@ -4,7 +4,7 @@
 # runtimeInputs: bash @sinnix-hub-server
 set -euo pipefail
 
-# Thin front door: `sinnix capabilities` (this wrapper, discovered like every
+# Thin wrapper: `sinnix capabilities` (this wrapper, discovered like every
 # other scripts/ entry) execs into the merge that lives in the hub-server
 # package, which joins /etc/sinnix/capability-index.json with the hub's own
 # routes. See `sinnix-hub-server capabilities --help`.

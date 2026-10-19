@@ -43,24 +43,14 @@ SNAPSHOT_HEALTHY: dict[str, Any] = {
         ],
         "runtime_inventory": {
             "schema": "sinnix-runtime-inventory-v2",
-            "surfaces": {
+            "units": {
                 "sinex": {
                     "unit": "sinex.service",
-                    "acknowledged": {
-                        "down": True,
-                        "reason": "repair in progress",
-                        "since": "2026-07-10",
-                        "ref": "sinnix-abcd",
-                    },
+                    "expectedDown": "repair in progress (sinnix-abcd, since 2026-07-10)",
                 },
                 "stt": {
                     "unit": "sinnix-stt.service",
-                    "acknowledged": {
-                        "down": False,
-                        "reason": "",
-                        "since": "",
-                        "ref": "",
-                    },
+                    "expectedDown": None,
                 },
             },
         },
@@ -126,16 +116,14 @@ def test_acknowledged_outages_extracts_only_down_true() -> None:
         {
             "surface": "sinex",
             "unit": "sinex.service",
-            "reason": "repair in progress",
-            "since": "2026-07-10",
-            "ref": "sinnix-abcd",
+            "reason": "repair in progress (sinnix-abcd, since 2026-07-10)",
         }
     ]
 
 
 def test_acknowledged_outages_absent_inventory_is_empty() -> None:
     assert hub_status.acknowledged_outages(None) == []
-    assert hub_status.acknowledged_outages({"surfaces": "not-a-dict"}) == []
+    assert hub_status.acknowledged_outages({"units": "not-a-dict"}) == []
 
 
 def test_capture_freshness_counts_and_lists_non_healthy() -> None:
@@ -311,9 +299,7 @@ def test_render_acknowledged_only_matches_hook_contract() -> None:
         {
             "surface": "sinex",
             "unit": "sinex.service",
-            "reason": "repair in progress",
-            "since": "2026-07-10",
-            "ref": "sinnix-abcd",
+            "reason": "repair in progress (sinnix-abcd, since 2026-07-10)",
         }
     ]
     text = hub_status.render_acknowledged_only(acked)
@@ -321,7 +307,7 @@ def test_render_acknowledged_only_matches_hook_contract() -> None:
         "## Acknowledged outages (known-down, do not re-report as incidents)\n\n"
     )
     assert (
-        "- sinex (sinex.service) — repair in progress [since 2026-07-10, ref sinnix-abcd]"
+        "- sinex (sinex.service) — repair in progress (sinnix-abcd, since 2026-07-10)"
         in text
     )
     assert text.endswith("rather than raising it as new.\n")

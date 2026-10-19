@@ -72,7 +72,7 @@ in
               assertion =
                 !builtins.hasAttr "sinex-document-scan" config.systemd.services
                 && !builtins.hasAttr "sinex-document-scan" config.systemd.timers
-                && !builtins.hasAttr "sinex-document-scan" config.sinnix.runtime.surfaces;
+                && !builtins.hasAttr "sinex-document-scan" config.sinnix.runtime.units;
               message = "A disabled document source must not emit invalid document-scan units or inventory.";
             }
             {

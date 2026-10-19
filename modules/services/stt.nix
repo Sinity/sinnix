@@ -18,7 +18,7 @@
 #
 # It is still socket-activated. Not for VRAM -- there is none to release --
 # but because the encoder is 650 MB of resident RSS that a mostly-idle service
-# has no business holding. The proxy front door keeps the port always
+# has no business holding. The proxy keeps the port always
 # answerable while the backend comes and goes.
 {
   mkAiService,
@@ -73,7 +73,7 @@ mkAiService {
           inherit config;
           unitName = "sinnix-stt-recordings";
           description = "Transcribe newly captured recordings";
-          surface = config.sinnix.runtime.surfaces.stt-recordings;
+          surface = config.sinnix.runtime.units.stt-recordings;
         }
         {
           execStart = "${scriptPkgs.sinnix-stt}/bin/sinnix-stt recordings";
@@ -113,13 +113,11 @@ mkAiService {
         # The hub's own surface comes from mkAiService; the recordings pass is a
         # second unit and needs its own registration, or mkRuntimeServiceConfig
         # throws on an unknown unit (which is the contract working as intended).
-        sinnix.runtime.surfaces.stt-recordings = {
+        sinnix.runtime.units.stt-recordings = {
           unit = "sinnix-stt-recordings.service";
           resourceClass = "background";
-          observe = {
-            enable = true;
-            restartable = true;
-          };
+          notifyOnFailure = true;
+          operatorRestart = true;
           captures = [
             {
               name = "transcripts";
@@ -157,7 +155,7 @@ mkAiService {
               ];
               Environment = [
                 "SINNIX_STT_MODEL_ROOT=${modelDir}"
-                "SINNIX_STT_PUBLIC_ENDPOINT=${config.sinnix.runtime.surfaces.stt.activation.publicEndpoint}"
+                "SINNIX_STT_PUBLIC_ENDPOINT=${config.sinnix.runtime.units.stt.activation.publicEndpoint}"
               ];
             }
             (lib.sinnix.mkRuntimeServiceConfig {

@@ -151,13 +151,11 @@ mkFeatureModule {
         # Archives are retained until a later realm backup receipt exists;
         # the script exits successfully when the USB headset is absent, so a
         # daily timer is safe on an unattended workstation.
-        sinnix.runtime.surfaces.quest-media-prune = {
+        sinnix.runtime.units.quest-media-prune = {
           unit = "sinnix-quest-media-prune.timer";
           manager = "user";
-          observe = {
-            enable = true;
-            restartable = false;
-          };
+          notifyOnFailure = true;
+          operatorRestart = false;
         };
       })
       (lib.mkIf cfg.wivrn.enable (
@@ -166,7 +164,7 @@ mkFeatureModule {
             inherit config;
             unitName = "sinnix-quest-media-prune";
             description = "Prune Quest recordings safely archived and backed up for 30 days";
-            surface = config.sinnix.runtime.surfaces.quest-media-prune;
+            surface = config.sinnix.runtime.units.quest-media-prune;
           }
           {
             manager = "user";

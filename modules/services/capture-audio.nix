@@ -133,7 +133,7 @@ mkServiceModule {
           inherit config;
           unitName = "sinnix-audio-index";
           description = "Sinnix audio capture: Silero VAD index pass over recently-closed Opus segments";
-          surface = config.sinnix.runtime.surfaces.capture-audio-index;
+          surface = config.sinnix.runtime.units.capture-audio-index;
         }
         {
           manager = "user";
@@ -156,15 +156,13 @@ mkServiceModule {
           "d ${indexDir} 0700 ${username} users -"
         ];
 
-        sinnix.runtime.surfaces = {
+        sinnix.runtime.units = {
           capture-audio-recorder-devices = {
             unit = "sinnix-audio-recorder-devices.service";
             manager = "user";
             resourceClass = "capture";
-            observe = {
-              enable = true;
-              restartable = true;
-            };
+            notifyOnFailure = true;
+            operatorRestart = true;
             captures = [
               {
                 # The supervisor's own state lane, not the audio directories:
@@ -191,10 +189,8 @@ mkServiceModule {
             unit = "sinnix-audio-topology.service";
             manager = "user";
             resourceClass = "capture";
-            observe = {
-              enable = true;
-              restartable = true;
-            };
+            notifyOnFailure = true;
+            operatorRestart = true;
             captures = [
               {
                 name = "audio-topology";
@@ -212,10 +208,8 @@ mkServiceModule {
             unit = "sinnix-audio-index.service";
             manager = "user";
             resourceClass = "capture";
-            observe = {
-              enable = true;
-              restartable = true;
-            };
+            notifyOnFailure = true;
+            operatorRestart = true;
             captures = [
               {
                 name = "audio-index";

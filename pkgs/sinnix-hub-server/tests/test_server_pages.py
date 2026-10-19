@@ -95,7 +95,7 @@ def test_json_action_media_type_preserves_native_dispatch(
 def hub_server(hub_server_factory, tmp_path: Path) -> str:
     inventory = tmp_path / "inventory.json"
     inventory.write_text(
-        json.dumps({"schema": "sinnix-runtime-inventory-v2", "surfaces": {}})
+        json.dumps({"schema": "sinnix-runtime-inventory-v2", "units": {}})
     )
     return hub_server_factory(
         sources=lambda: {"systemd_units": []}, inventory_path=inventory
@@ -185,11 +185,11 @@ def test_prepare_and_execute_share_the_http_target_contract(
         json.dumps(
             {
                 "schema": "sinnix-runtime-inventory-v2",
-                "surfaces": {
+                "units": {
                     "fixture": {
                         "unit": "fixture.service",
                         "manager": "user",
-                        "observe": {"restartable": True},
+                        "operatorRestart": True,
                     }
                 },
             }

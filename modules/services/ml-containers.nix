@@ -18,7 +18,7 @@ let
   containersRoot = "${config.sinnix.paths.stateRoot}/containers";
   needsCuda = lib.any (
     surface: surface.ai != null && surface.ai.backendKind == "container" && surface.ai.requiresCuda
-  ) (lib.attrValues config.sinnix.runtime.surfaces);
+  ) (lib.attrValues config.sinnix.runtime.units);
 in
 {
   options.sinnix.ml.containerRuntime.enable =

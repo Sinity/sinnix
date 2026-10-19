@@ -35,22 +35,20 @@ mkFeatureModule {
       };
     in
     {
-      sinnix.runtime.surfaces = lib.mkIf cfg.autoStart {
+      sinnix.runtime.units = lib.mkIf cfg.autoStart {
         activitywatch = {
           unit = "activitywatch.service";
           manager = "user";
           resourceClass = "background";
-          observe = {
-            enable = true;
-            restartable = true;
-          };
+          notifyOnFailure = true;
+          operatorRestart = true;
           # Points directly at AW's own SQLite state, which the backup
           # pipeline already covers -- same pattern as atuin's surface.
           #
           # Watches the DB DIRECTORY, not sqlite.db: aw-server runs WAL mode,
           # so live writes land in -wal and leave sqlite.db's mtime stale until
           # an opportunistic checkpoint. Watching the file alone would measure
-          # checkpoint cadence and call it capture health. The sentinel takes
+          # checkpoint cadence and call it capture health. The health sweep takes
           # the newest file under the path, so the directory reads whichever of
           # db/-wal/-shm was touched last.
           captures = [
@@ -66,10 +64,8 @@ mkFeatureModule {
           unit = "activitywatch-watcher-awatcher.service";
           manager = "user";
           resourceClass = "background";
-          observe = {
-            enable = true;
-            restartable = true;
-          };
+          notifyOnFailure = true;
+          operatorRestart = true;
         };
       };
 

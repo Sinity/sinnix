@@ -43,10 +43,8 @@ mkServiceModule {
       idleTimeout = "30s";
       readinessTimeout = 30;
     };
-    observe = {
-      enable = true;
-      restartable = true;
-    };
+    notifyOnFailure = true;
+    operatorRestart = true;
   };
   extraOptions = {
     autoStart = args.lib.mkOption {
@@ -77,7 +75,7 @@ mkServiceModule {
       services.litellm = {
         enable = true;
         host = "127.0.0.1";
-        # The public port is reserved for the socket-activated front door.
+        # The public port is reserved for the socket-activated proxy.
         port = helpers.data.ports.litellm.backend;
         openFirewall = false;
         settings = {

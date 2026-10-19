@@ -172,7 +172,7 @@ let
         in
         lib.mkMerge [
           (lib.optionalAttrs (surfaceValue != null) {
-            sinnix.runtime.surfaces.${name} = surfaceValue;
+            sinnix.runtime.units.${name} = surfaceValue;
           })
           (lib.optionalAttrs (jobValue != null) (mkJobConfig jobValue))
           (configFn moduleArgs)
@@ -212,10 +212,8 @@ let
         ai = {
           inherit backendKind requiresCuda browserRequests;
         };
-        observe = {
-          enable = true;
-          restartable = true;
-        };
+        notifyOnFailure = true;
+        operatorRestart = true;
       };
       configFn =
         args:

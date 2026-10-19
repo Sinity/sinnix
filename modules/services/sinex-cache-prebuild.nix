@@ -52,10 +52,8 @@ mkServiceModule {
   surface = {
     unit = "sinex-cache-prebuild.timer";
     manager = "user";
-    observe = {
-      enable = true;
-      restartable = false;
-    };
+    notifyOnFailure = true;
+    operatorRestart = false;
   };
   job =
     { cfg, ... }:

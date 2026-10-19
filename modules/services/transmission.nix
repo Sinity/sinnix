@@ -17,10 +17,8 @@ mkServiceModule {
     resourceClass = "background";
     # Transmission is often intentionally stopped for disk maintenance.
     # Its mount owns boot startup; observability reflects manual stops.
-    observe = {
-      enable = true;
-      restartable = false;
-    };
+    notifyOnFailure = true;
+    operatorRestart = false;
   };
   extraOptions = {
     autoStart = lib.mkOption {

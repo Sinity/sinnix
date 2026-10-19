@@ -30,10 +30,10 @@ inventory_json() {
 
 service_names() {
   inventory_json | jq -r '
-    if (.surfaces | type) != "object" then
-      error("runtime inventory surfaces must be an object")
+    if (.units | type) != "object" then
+      error("runtime inventory units must be an object")
     else
-      .surfaces | to_entries | sort_by(.key)[]
+      .units | to_entries | sort_by(.key)[]
       | select(.value.ai != null) | .key
     end
   '
@@ -77,7 +77,7 @@ action API (%t/sinnix/hub.sock), so restartability and idempotency stay
 single-sourced.
 Bringing the socket proxy back from a latched trigger-limit (reset-failed
 + start) has no equivalent action-API verb and stays a direct systemctl
-call -- it is cleanup of the front door, not a lifecycle decision about
+call -- it is cleanup of the proxy, not a lifecycle decision about
 the registered backend.
 EOF
 }
@@ -155,7 +155,7 @@ lookup() {
     exit 1
   fi
   REG_NAME="$name"
-  surface="$(inventory_json | jq -c --arg n "$name" '.surfaces[$n] // null')"
+  surface="$(inventory_json | jq -c --arg n "$name" '.units[$n] // null')"
   if [[ "$surface" == "null" ]]; then
     REG_REGISTERED=0
     REG_UNIT=""; REG_ENDPOINT=""; REG_IDLE=""
@@ -215,7 +215,7 @@ cmd_status() {
     host="${REG_ENDPOINT%%:*}"; port="${REG_ENDPOINT##*:}"
   fi
   # Probing the PUBLIC port is not a read: it connects to the
-  # socket-activation front door, so it STARTS the backend -- and for a
+  # socket-activation proxy, so it STARTS the backend -- and for a
   # gpu-inference member, starting it evicts whatever else was resident
   # (Conflicts= SIGKILLs the peer). Only probe a backend already up.
   if [[ "$(unit_state "$REG_UNIT")" == active ]]; then
@@ -282,7 +282,7 @@ cmd_start() {
     echo "starting $REG_NAME ($REG_UNIT)..."
     if [[ "$REG_HAS_PROXY" == 1 ]]; then
       # Clear any latched activation-trigger-limit failure and bring the
-      # front door up first: a socket stuck failed refuses every connection
+      # proxy up first: a socket stuck failed refuses every connection
       # no matter how healthy the backend then becomes.
       # The socket unit name carries a hash of its definition; the proxy
       # service names it.

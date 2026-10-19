@@ -757,7 +757,7 @@ def test_machine_query_selects_and_pages_large_collector_report(tmp_path: Path) 
         "workload_rows": [{"workload": "fixture"}],
         "resource_slices": [{"slice": "agent.slice"}],
         "blocked_tasks": [],
-        "runtime_inventory": {"surfaces": []},
+        "runtime_inventory": {"units": []},
         "agent_gateway": {"available": True},
         "chrome_io": {"available": True},
         "polylogue_live_attempts": {"available": False},

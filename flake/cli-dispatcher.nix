@@ -1,5 +1,5 @@
 /*
-  `sinnix` — generated meta-CLI front door over the packaged script registry.
+  `sinnix` — generated meta-CLI entry point over the packaged script registry.
 
   Consumes the `registry` produced by `script-discovery.nix` (name ->
   { description; runtimeInputs; package; }) and renders a single
@@ -76,7 +76,7 @@ let
 
     print_help() {
       cat <<'SINNIX_HELP_EOF'
-    sinnix -- front door for ${toString count} Sinnix scripts
+    sinnix -- entry point for ${toString count} Sinnix scripts
 
     Usage:
       sinnix <command> [args...]
@@ -147,5 +147,5 @@ pkgs.writeShellApplication {
     pkgs.coreutils
   ];
   text = scriptText;
-  meta.description = "Discoverable front door over the packaged Sinnix script registry";
+  meta.description = "Discoverable entry point over the packaged Sinnix script registry";
 }

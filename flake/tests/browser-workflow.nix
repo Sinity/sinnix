@@ -79,7 +79,7 @@ in
             }
             {
               assertion =
-                builtins.hasAttr "sinnix-capture-browser-nav" inventory.surfaces
+                builtins.hasAttr "sinnix-capture-browser-nav" inventory.units
                 && builtins.any (capture: capture.name == "browser-nav-edges") inventory.captures
                 && builtins.any (capture: capture.name == "reading-stack") inventory.captures;
               message = "The runtime inventory must declare the browser services and their capture lanes.";

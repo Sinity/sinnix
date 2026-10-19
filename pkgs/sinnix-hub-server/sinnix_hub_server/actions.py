@@ -126,7 +126,7 @@ ACTIONS = {
 }
 
 # Lifecycle verbs share one admission gate: the target must be an attested
-# runtime-inventory unit that declares observe.restartable. This is what lets
+# runtime-inventory unit that declares operatorRestart. This is what lets
 # the web hub drive on-demand AI backends without a second control plane.
 LIFECYCLE_ACTIONS = {"restart", "start", "stop"}
 
@@ -340,7 +340,7 @@ class ActionService:
         if "process" in target:
             process = target["process"]
             return self._resolve_process(process["pid"], process["start_ticks"])
-        surfaces = self._inventory().get("surfaces", {})
+        surfaces = self._inventory().get("units", {})
         surface = surfaces.get(target["unit"])
         manager = target.get("manager")
         if (
@@ -365,8 +365,8 @@ class ActionService:
         if not isinstance(surface, dict):
             raise ActionError("runtime unit is not in the inventory", 403)
         if request["action"] in LIFECYCLE_ACTIONS and not surface.get(
-            "observe", {}
-        ).get("restartable", False):
+            "operatorRestart", False
+        ):
             raise ActionError("runtime unit is not restartable", 403)
         if (
             request["action"] in {"freeze", "thaw", "park"}

@@ -31,11 +31,11 @@ SENTINEL = "1999-12-31T23:59:58Z"
 
 INVENTORY = {
     "schema": "sinnix-runtime-inventory-v2",
-    "surfaces": {
+    "units": {
         "safe": {
             "unit": "safe.service",
             "manager": "system",
-            "observe": {"restartable": True},
+            "operatorRestart": True,
         }
     },
 }

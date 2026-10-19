@@ -197,7 +197,7 @@ def test_the_hubs_own_sweep_reads_the_machine_when_nothing_is_injected(
     """
     inventory = tmp_path / "inventory.json"
     inventory.write_text(
-        json.dumps({"schema": "sinnix-runtime-inventory-v2", "surfaces": {}})
+        json.dumps({"schema": "sinnix-runtime-inventory-v2", "units": {}})
     )
     state = tmp_path / "state.json"
     server.run_sweep(

@@ -56,7 +56,7 @@ mkServiceModule (mkCaptureLane {
   # A day-long staleness budget cannot notice the real failure mode -- unit
   # healthy, listeners registered, but registry root at ChildCount=0, so the
   # lane is structurally guaranteed to stay silent. Poll the registry root
-  # on the sentinel's 1-minute cadence instead: exit 0 when something is
+  # on the health sweep's 1-minute cadence instead: exit 0 when something is
   # published, exit 1 when the bus answers with ChildCount 0
   # (confirmed-absent publisher), exit 3 for anything the probe cannot tell
   # (missing socket, busctl error, non-numeric reply, timeout) so it reports

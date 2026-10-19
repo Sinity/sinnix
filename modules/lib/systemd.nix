@@ -30,7 +30,7 @@ in
     let
       # A unit lookup takes precedence over an explicit resourceClass (callers
       # never pass both; see modules/services/* call sites). Resolve the
-      # surface at most once instead of walking runtimeInventory.surfaces
+      # surface at most once instead of walking runtimeInventory.units
       # twice for the same unit.
       surfaceForUnit =
         if unit == null then
@@ -39,7 +39,7 @@ in
           let
             matchingSurfaces = lib.filterAttrs (
               _: surface: surface.unit == unit && (surface.manager or "system") == manager
-            ) runtimeInventory.surfaces;
+            ) runtimeInventory.units;
             surfaceNames = builtins.attrNames matchingSurfaces;
           in
           if surfaceNames == [ ] then

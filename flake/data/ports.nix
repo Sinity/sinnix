@@ -9,7 +9,7 @@
 #
 # CONVENTION. Every entry is a loopback port unless a comment says otherwise.
 # Socket-activated AI backends follow the docs/local-ai-activation.md pattern:
-# a PUBLIC front door that clients use, and a PRIVATE backend the
+# a PUBLIC proxy that clients use, and a PRIVATE backend the
 # systemd-socket-proxyd unit forwards to. Keep those adjacent so the pairing is
 # obvious.
 #
@@ -29,7 +29,7 @@
   };
   hubServer = 3090; # hub server: current machine state and actions (also a unix socket)
 
-  # ── Local AI backends (public front door / private backend) ──────────────
+  # ── Local AI backends (public proxy / private backend) ──────────────
   ollama = {
     public = 11434;
     backend = 11435;

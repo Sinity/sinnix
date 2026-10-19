@@ -21,16 +21,13 @@ from .shell import (
 
 
 def surface_rows(inventory: dict[str, Any] | None) -> list[dict[str, Any]]:
-    surfaces = inventory.get("surfaces") if isinstance(inventory, dict) else None
+    surfaces = inventory.get("units") if isinstance(inventory, dict) else None
     if not isinstance(surfaces, dict):
         return []
     rows = []
     for name, surface in surfaces.items():
         if not isinstance(surface, dict) or not surface.get("unit"):
             continue
-        observe = (
-            surface.get("observe") if isinstance(surface.get("observe"), dict) else {}
-        )
         activation = (
             surface.get("activation")
             if isinstance(surface.get("activation"), dict)
@@ -48,7 +45,7 @@ def surface_rows(inventory: dict[str, Any] | None) -> list[dict[str, Any]]:
                 "manager": str(surface.get("manager") or "system"),
                 "kind": str(surface.get("kind") or "service"),
                 "resource_class": str(surface.get("resourceClass") or "unclassified"),
-                "restartable": bool(observe.get("restartable")),
+                "restartable": bool(surface.get("operatorRestart")),
                 "activation": activation,
                 "effective_resources": effective_resources,
             }
@@ -125,7 +122,7 @@ def lifecycle_controls(
     if not restartable:
         return (
             '<span class="sub" title="the runtime inventory does not declare '
-            "observe.restartable, and the action API refuses lifecycle verbs "
+            "operatorRestart, and the action API refuses lifecycle verbs "
             'for it">not restartable</span>'
         )
     identity_keys = ("LoadState", "ActiveState", "SubState", "InvocationID")
@@ -226,7 +223,7 @@ def render_services(
         '<p class="sub">Grouped by the resource class that decides its slice, '
         "weights, and ceilings. Lifecycle buttons post to the hub server's bounded "
         "action API, which independently re-checks that the unit is attested and "
-        "declares <code>observe.restartable</code>. <code>adjust</code> chips "
+        "declares <code>operatorRestart</code>. <code>adjust</code> chips "
         "cover whichever properties the runtime inventory already declares for "
         "that surface (MemoryHigh, MemoryMax, MemoryLow, CPUWeight, IOWeight, "
         "Nice); <code>reset to inventory defaults</code> restores every one of "

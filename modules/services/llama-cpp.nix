@@ -52,7 +52,7 @@ mkServiceModule {
       enabledProfiles = lib.filterAttrs (_: profile: profile.enable) cfg.profiles;
       portFor = profile: helpers.data.ports.${profile.portKey};
       # The server listens only on a Unix socket (llama-server binds one when
-      # --host ends in .sock), so the Caddy front door is its sole TCP entry point.
+      # --host ends in .sock), so the Caddy proxy is its sole TCP entry point.
       backendSocket = name: "/run/${name}/llama.sock";
       mkSurface = name: profile: {
         unit = "${name}.service";
@@ -68,10 +68,8 @@ mkServiceModule {
           inherit (profile) idleTimeout readinessTimeout;
           exclusiveResource = if profile.requiresCuda then "gpu-inference" else null;
         };
-        observe = {
-          enable = true;
-          restartable = true;
-        };
+        notifyOnFailure = true;
+        operatorRestart = true;
       };
       mkExecStart =
         name: profile:
@@ -126,7 +124,7 @@ mkServiceModule {
       };
     in
     {
-      sinnix.runtime.surfaces = lib.mapAttrs mkSurface enabledProfiles;
+      sinnix.runtime.units = lib.mapAttrs mkSurface enabledProfiles;
       systemd.services = lib.mapAttrs mkService enabledProfiles;
       systemd.tmpfiles.rules = [ "d ${modelRoot}/gguf 0755 ${user} users -" ];
     };

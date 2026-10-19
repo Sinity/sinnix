@@ -34,16 +34,9 @@ let
         manager = "system";
         kind = lib.last (lib.splitString "." surface.unit);
         resourceClass = "ordinary";
-        observe = {
-          enable = false;
-          restartable = false;
-        };
-        acknowledged = {
-          down = false;
-          reason = "";
-          since = "";
-          ref = "";
-        };
+        notifyOnFailure = false;
+        operatorRestart = false;
+        expectedDown = null;
         captures = [ ];
         activation = {
           mode = "direct";
@@ -139,12 +132,11 @@ let
           ;
         workload = surface.workload;
         type = surfaceType surface;
-        restartable = surface.observe.restartable;
+        inherit (surface) operatorRestart expectedDown;
         activationMode = surface.activation.mode;
-        acknowledged = surface.acknowledged;
       })
       (
-        lib.filterAttrs (_: surface: surface.observe.enable) (lib.mapAttrs (_: normalizeSurface) surfaces)
+        lib.filterAttrs (_: surface: surface.notifyOnFailure) (lib.mapAttrs (_: normalizeSurface) surfaces)
       );
 in
 rec {
@@ -635,17 +627,17 @@ rec {
   mkInventory =
     {
       hostname ? "",
-      surfaces ? baseSurfaces,
+      units ? baseSurfaces,
       mounts ? [ ],
       captures ? [ ],
     }:
     {
       schema = "sinnix-runtime-inventory-v2";
       inherit hostname slices;
-      earlyoomEmergencyAvoidPattern = earlyoomPatternFor (lib.mapAttrs (_: normalizeSurface) surfaces);
-      surfaces = lib.mapAttrs (_: effectiveSurface classes) surfaces;
+      earlyoomEmergencyAvoidPattern = earlyoomPatternFor (lib.mapAttrs (_: normalizeSurface) units);
+      units = lib.mapAttrs (_: effectiveSurface classes) units;
       inherit mounts;
-      observedServices = observedServiceRows surfaces;
-      captures = captureRows surfaces captures;
+      observedServices = observedServiceRows units;
+      captures = captureRows units captures;
     };
 }

@@ -136,25 +136,17 @@ def system_verdict(units: list[dict[str, Any]], degraded: list[str]) -> tuple[st
 def acknowledged_outages(inventory: dict[str, Any] | None) -> list[dict[str, Any]]:
     if not isinstance(inventory, dict):
         return []
-    surfaces = inventory.get("surfaces")
-    if not isinstance(surfaces, dict):
+    units = inventory.get("units")
+    if not isinstance(units, dict):
         return []
     rows = []
-    for name, surface in sorted(surfaces.items()):
-        if not isinstance(surface, dict):
+    for name, unit in sorted(units.items()):
+        if not isinstance(unit, dict):
             continue
-        acked = surface.get("acknowledged")
-        if not isinstance(acked, dict) or acked.get("down") is not True:
+        reason = unit.get("expectedDown")
+        if not isinstance(reason, str) or not reason:
             continue
-        rows.append(
-            {
-                "surface": name,
-                "unit": surface.get("unit"),
-                "reason": acked.get("reason") or "no reason recorded",
-                "since": acked.get("since") or "?",
-                "ref": acked.get("ref") or "?",
-            }
-        )
+        rows.append({"surface": name, "unit": unit.get("unit"), "reason": reason})
     return rows
 
 
@@ -296,8 +288,7 @@ def render_human(data: dict[str, Any]) -> str:
         )
         for row in acked:
             lines.append(
-                f"  - {row['surface']} ({row.get('unit') or '?'}) — {row['reason']} "
-                f"[since {row['since']}, ref {row['ref']}]"
+                f"  - {row['surface']} ({row.get('unit') or '?'}) — {row['reason']}"
             )
 
     freshness = data.get("capture_freshness") or {}
@@ -329,10 +320,7 @@ def render_acknowledged_only(acked: list[dict[str, Any]]) -> str:
         return ""
     lines = ["## Acknowledged outages (known-down, do not re-report as incidents)", ""]
     for row in acked:
-        lines.append(
-            f"- {row['surface']} ({row.get('unit') or '?'}) — {row['reason']} "
-            f"[since {row['since']}, ref {row['ref']}]"
-        )
+        lines.append(f"- {row['surface']} ({row.get('unit') or '?'}) — {row['reason']}")
     lines.append("")
     lines.append(
         "These are declared in the runtime inventory with a tracking reference. "

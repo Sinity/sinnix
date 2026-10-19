@@ -26,10 +26,8 @@ mkServiceModule {
   surface = {
     unit = "below.service";
     resourceClass = "critical";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
+    notifyOnFailure = true;
+    operatorRestart = true;
   };
   extraOptions = {
     collectIntervalSec = lib.mkOption {

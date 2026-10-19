@@ -23,7 +23,7 @@ KINDS: tuple[tuple[str, str, str], ...] = (
     ("feature", "Features", "capabilities the host turns on or off wholesale"),
     ("skill", "Agent skills", "loadable procedure for Claude/Codex/Gemini"),
     ("mcp-server", "MCP servers", "tools agents can reach, by profile tier"),
-    ("agent-lane", "Agent CLI lanes", "which client, which MCP profile, which backend"),
+    ("agent-cli", "Agent CLIs", "which client, which MCP profile, which backend"),
 )
 
 KIND_LABELS = {kind: label for kind, label, _ in KINDS}

@@ -290,7 +290,7 @@ def world(tmp_path: Path, monkeypatch):
                 "kind": "service",
                 "manager": "system",
                 "unit": "acknowledged.service",
-                "acknowledged": {"down": True, "ref": "sinnix-abc1"},
+                "expectedDown": "fixture outage (sinnix-abc1)",
             },
             {"kind": "service", "manager": "system", "unit": "midflight.service"},
             {"kind": "service", "manager": "user", "unit": "usersurf.service"},
@@ -426,7 +426,7 @@ def test_every_lane_and_unit_shape_reaches_the_ledger(world) -> None:
 
     acknowledged = find(events, "service_failure", "acknowledged.service")
     assert acknowledged["status"] == "acknowledged"
-    assert "acknowledged_ref=sinnix-abc1" in acknowledged["evidence"]
+    assert "expected_down=fixture outage (sinnix-abc1)" in acknowledged["evidence"]
 
     # Mid-transition is not a verdict: no event either way.
     assert find(events, "service_failure", "midflight.service") is None

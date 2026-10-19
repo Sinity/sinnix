@@ -39,10 +39,8 @@ mkServiceModule {
   surface = {
     unit = "proton-openai-proxy.service";
     resourceClass = "ordinary";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
+    notifyOnFailure = true;
+    operatorRestart = true;
   };
   configFn =
     {

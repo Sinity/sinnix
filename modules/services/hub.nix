@@ -1,4 +1,4 @@
-# Sinnix hub — the operator's browser front door to the system, reachable from
+# Sinnix hub — the operator's browser entry point to the system, reachable from
 # the tailnet and nowhere else.
 #
 # One unit of its own, in the user manager, default-off until a host opts in:
@@ -92,10 +92,8 @@ mkServiceModule {
     unit = "sinnix-hub.service";
     manager = "user";
     resourceClass = "ordinary";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
+    notifyOnFailure = true;
+    operatorRestart = true;
   };
 
   extraOptions = {
@@ -311,7 +309,7 @@ mkServiceModule {
             route {
               ${hostGuard "frontend${toString frontend.port}"}
               ${browserGuard "frontend${toString frontend.port}" false frontend.port}
-              # The guards above vetted the browser. Upstream AI front doors
+              # The guards above vetted the browser. Upstream AI proxies
               # accept only loopback authorities, so forward as a native
               # client of the upstream rather than replaying browser metadata.
               reverse_proxy ${frontend.upstream} {
@@ -559,15 +557,13 @@ mkServiceModule {
         scriptPkgs.sinnix-phone-dispatcher
       ];
 
-      sinnix.runtime.surfaces = {
+      sinnix.runtime.units = {
         phone-dispatcher = {
           unit = "sinnix-phone-dispatcher.service";
           manager = "user";
           resourceClass = "ordinary";
-          observe = {
-            enable = true;
-            restartable = true;
-          };
+          notifyOnFailure = true;
+          operatorRestart = true;
           # The ambient archive lands HERE now, not through the drain: the
           # capture app uploads each finished chunk to this service and
           # deletes its copy only once the hash comes back verified. The lane

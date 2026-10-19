@@ -217,7 +217,7 @@ def test_workload_identity_prefers_registered_unit(monkeypatch, tmp_path) -> Non
     inventory_path.write_text(
         json.dumps(
             {
-                "surfaces": {
+                "units": {
                     "shell": {
                         "unit": "shell.service",
                         "workload": {
@@ -409,24 +409,14 @@ def test_render_human_surfaces_acknowledged_outages() -> None:
         "workload_rows": [],
         "gaps_summary": {},
         "runtime_inventory": {
-            "surfaces": {
+            "units": {
                 "polylogued": {
                     "unit": "polylogued.service",
-                    "acknowledged": {
-                        "down": True,
-                        "reason": "storage migration blocks every start",
-                        "since": "2026-08-14",
-                        "ref": "sinnix-qh6s",
-                    },
+                    "expectedDown": "storage migration blocks every start (sinnix-qh6s, since 2026-08-14)",
                 },
                 "ollama": {
                     "unit": "ollama.service",
-                    "acknowledged": {
-                        "down": False,
-                        "reason": "",
-                        "since": "",
-                        "ref": "",
-                    },
+                    "expectedDown": None,
                 },
             }
         },
@@ -720,14 +710,14 @@ def test_current_profile_never_fans_out_expensive_collectors(monkeypatch):
         "collect_current_units",
         lambda _: (_ for _ in ()).throw(RuntimeError("manager down")),
     )
-    monkeypatch.setattr(cli, "collect_runtime_inventory", lambda _: {"surfaces": {}})
+    monkeypatch.setattr(cli, "collect_runtime_inventory", lambda _: {"units": {}})
     report = cli.collect_report(
         cli.parse_args(["--format", "json", "--section", "current"])
     )
     assert report["live_pressure"] == {"memory": 5}
     assert report["sections"]["live_pressure"]["available"] is True
     assert report["sections"]["systemd_units"]["available"] is False
-    assert report["runtime_inventory"] == {"surfaces": {}}
+    assert report["runtime_inventory"] == {"units": {}}
 
 
 def test_sqlite_read_helpers_close_their_connections(tmp_path, monkeypatch):

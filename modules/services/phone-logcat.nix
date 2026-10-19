@@ -36,10 +36,8 @@ mkServiceModule {
     unit = "sinnix-phone-logcat.service";
     manager = "user";
     resourceClass = "capture";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
+    notifyOnFailure = true;
+    operatorRestart = true;
     captures = [
       # adb-only, which is a reason for a generous budget rather than a tight
       # one: adbd's TCP mode does not survive a reboot, so an ordinary gap

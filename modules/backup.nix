@@ -40,7 +40,7 @@ let
   # sinex-postgres-dump and machine-telemetry-sqlite-backup already use: a
   # logical dump/direct-path copy on a timer, landing in a plain directory
   # that IS covered by ordinary realm snapshot+borg. polylogued is currently
-  # parked (acknowledged.down in modules/services/polylogue.nix) so these
+  # parked (expectedDown in modules/services/polylogue.nix) so these
   # jobs run against a quiescent tree today; both are written to work
   # unattended whenever ingestion resumes.
   polylogueStateRoot = config.sinnix.services.polylogue.dataDir;
@@ -151,7 +151,7 @@ let
       {
         inherit config description;
         unitName = name;
-        surface = config.sinnix.runtime.surfaces.${name};
+        surface = config.sinnix.runtime.units.${name};
       }
       (
         lib.removeAttrs job [ "description" ]
@@ -1071,14 +1071,12 @@ in
             MemoryMax = "8G";
           };
 
-          sinnix.runtime.surfaces = {
+          sinnix.runtime.units = {
             borgbackup-drain-coordinator = {
               unit = "borgbackup-drain-coordinator.service";
               resourceClass = "backup";
-              observe = {
-                enable = true;
-                restartable = false;
-              };
+              notifyOnFailure = true;
+              operatorRestart = false;
             };
             btrbk = {
               unit = "btrbk.service";
@@ -1086,18 +1084,14 @@ in
             };
             btrbk-timer = {
               unit = "btrbk.timer";
-              observe = {
-                enable = true;
-                restartable = false;
-              };
+              notifyOnFailure = true;
+              operatorRestart = false;
             };
             borgbackup-job-persist = {
               unit = "borgbackup-job-persist.service";
               resourceClass = "backup";
-              observe = {
-                enable = true;
-                restartable = false;
-              };
+              notifyOnFailure = true;
+              operatorRestart = false;
               captures = [
                 {
                   name = "borg-persist-archive";
@@ -1120,10 +1114,8 @@ in
                 MemoryHigh = "6G";
                 MemoryMax = "6G";
               };
-              observe = {
-                enable = true;
-                restartable = false;
-              };
+              notifyOnFailure = true;
+              operatorRestart = false;
               captures = [
                 {
                   name = "borg-realm-archive";
@@ -1142,10 +1134,8 @@ in
             borgbackup-job-sinex-blobs = lib.mkIf (sinexBlobRepositoryPath != "") {
               unit = "borgbackup-job-sinex-blobs.service";
               resourceClass = "backup";
-              observe = {
-                enable = true;
-                restartable = false;
-              };
+              notifyOnFailure = true;
+              operatorRestart = false;
               captures = [
                 {
                   name = "borg-sinex-blobs-archive";
@@ -1161,7 +1151,7 @@ in
             polylogue-sqlite-backup = {
               unit = "polylogue-sqlite-backup.service";
               resourceClass = "backup";
-              observe.enable = true;
+              notifyOnFailure = true;
             };
             polylogue-sqlite-backup-timer = {
               unit = "polylogue-sqlite-backup.timer";
@@ -1169,10 +1159,8 @@ in
             borgbackup-job-polylogue-state = {
               unit = "borgbackup-job-polylogue-state.service";
               resourceClass = "backup";
-              observe = {
-                enable = true;
-                restartable = false;
-              };
+              notifyOnFailure = true;
+              operatorRestart = false;
               captures = [
                 {
                   name = "borg-polylogue-state-archive";
@@ -1186,10 +1174,8 @@ in
             borgbackup-coverage-audit-realm = {
               unit = "borgbackup-coverage-audit-realm.service";
               resourceClass = "backup";
-              observe = {
-                enable = true;
-                restartable = false;
-              };
+              notifyOnFailure = true;
+              operatorRestart = false;
               captures = [
                 {
                   name = "borg-realm-independent-coverage-audit";
@@ -1206,10 +1192,8 @@ in
             borgbackup-verify = {
               unit = "borgbackup-verify.service";
               resourceClass = "backup";
-              observe = {
-                enable = true;
-                restartable = false;
-              };
+              notifyOnFailure = true;
+              operatorRestart = false;
               captures = [
                 {
                   name = "borg-check";
@@ -1243,10 +1227,8 @@ in
             borgbackup-maintenance = {
               unit = "borgbackup-maintenance.service";
               resourceClass = "backup";
-              observe = {
-                enable = true;
-                restartable = false;
-              };
+              notifyOnFailure = true;
+              operatorRestart = false;
             };
             borgbackup-root-snapshots = {
               unit = "borgbackup-root-snapshots.service";

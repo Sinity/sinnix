@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Open a URL as a chromeless --app= Chrome window -- the browser-inversion front door
+# description: Open a URL as a chromeless --app= Chrome window -- the browser-inversion entry point
 # runtimeInputs: bash
 # Each resource is its own window rather than a tab in a permanent tab bar,
 # so closing the window is closing the "tab" and no pile can accumulate.

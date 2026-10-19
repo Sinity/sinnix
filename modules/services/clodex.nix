@@ -17,10 +17,8 @@ mkServiceModule {
     unit = "sinnix-clodex.service";
     manager = "user";
     resourceClass = "ordinary";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
+    notifyOnFailure = true;
+    operatorRestart = true;
   };
   configFn =
     { cfg, ... }:

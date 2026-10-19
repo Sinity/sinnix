@@ -4,10 +4,10 @@
 # Without this, every fresh session that looks at the machine rediscovers an
 # intentional outage as an emergency and reports it as a finding. The
 # acknowledgements live in the runtime inventory next to the surfaces they
-# describe (sinnix.runtime.surfaces.<name>.acknowledged); `sinnix status
+# describe (sinnix.runtime.units.<name>.expectedDown); `sinnix status
 # --acknowledged-only` reads that same declared state directly (a fast static
 # read, socket fallback only if the file is unreadable), so this hook is not
-# a second implementation of the read, just its session-start front door.
+# a second implementation of the read, just its session-start entry point.
 #
 # Silent when there is nothing acknowledged, and silent on any error: a
 # session must never fail to start because a status preamble could not render.

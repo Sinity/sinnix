@@ -128,7 +128,7 @@ in
   };
   programs.dconf.enable = true;
 
-  sinnix.runtime.surfaces.interception-tools = {
+  sinnix.runtime.units.interception-tools = {
     unit = "interception-tools.service";
     resourceClass = "critical";
     captures = [

@@ -236,7 +236,7 @@ mkServiceModule {
       # ── Runtime-surface registration (sinnix-specific) ─────────────
       # A direct attrset rather than the single-surface `surface` factory
       # argument: the unit name differs from the "polylogue" service name.
-      sinnix.runtime.surfaces = {
+      sinnix.runtime.units = {
         polylogued = {
           unit = "polylogued.service";
           manager = "user";
@@ -245,19 +245,12 @@ mkServiceModule {
             MemoryHigh = polyloguedMemoryHigh;
             MemoryMax = polyloguedMemoryMax;
           };
-          observe = {
-            enable = true;
-            restartable = true;
-          };
+          notifyOnFailure = true;
+          operatorRestart = true;
           # Archive availability is owned by the reindex campaign, not by this
           # package's activation. The owning task records
           # restart authorization; installing a new reader does not grant it.
-          acknowledged = {
-            down = true;
-            reason = "Daemon autostart is disabled; archive deployment follows the Polylogue reindex campaign rather than package activation";
-            since = "2026-08-14";
-            ref = "polylogue-reindex-2026.1";
-          };
+          expectedDown = "Daemon autostart is disabled; archive deployment follows the Polylogue reindex campaign rather than package activation (polylogue-reindex-2026.1, since 2026-08-14)";
         };
       };
     };

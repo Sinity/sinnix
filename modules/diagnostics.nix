@@ -62,7 +62,7 @@ in
         inherit config;
         unitName = "syslog-index";
         description = "Build no-loss boot-metric capture indexes";
-        surface = config.sinnix.runtime.surfaces.syslog-index;
+        surface = config.sinnix.runtime.units.syslog-index;
       }
       {
         # manager defaults "system", which always resolves resources via the
@@ -92,7 +92,7 @@ in
         inherit config;
         unitName = "sinnix-capture-boot-metrics";
         description = "Capture boot metrics";
-        surface = config.sinnix.runtime.surfaces.sinnix-capture-boot-metrics;
+        surface = config.sinnix.runtime.units.sinnix-capture-boot-metrics;
       }
       {
         execStart = "${captureBootMetrics}/bin/sinnix-capture-boot-metrics";
@@ -129,16 +129,16 @@ in
         "d ${journaldBaseDir}/index 0750 ${username} users -"
       ];
 
-      sinnix.runtime.surfaces.sinnix-capture-boot-metrics = {
+      sinnix.runtime.units.sinnix-capture-boot-metrics = {
         unit = "sinnix-capture-boot-metrics.service";
         resourceClass = "background";
-        observe.enable = true;
+        notifyOnFailure = true;
       };
 
-      sinnix.runtime.surfaces.syslog-index = {
+      sinnix.runtime.units.syslog-index = {
         unit = "syslog-index.service";
         resourceClass = "background";
-        observe.enable = true;
+        notifyOnFailure = true;
       };
     }
   ];

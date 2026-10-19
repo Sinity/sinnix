@@ -46,13 +46,13 @@
             type = lib.types.str;
             default = "fixture";
           };
-          options.sinnix.runtime.surfaces = lib.mkOption {
+          options.sinnix.runtime.units = lib.mkOption {
             type = lib.types.attrsOf lib.types.anything;
             default = { };
           };
           config = {
             _module.args.helpers.mkSinnixPackagesFor = _: { sinnix-ai = pkgs.emptyDirectory; };
-            sinnix.runtime.surfaces = {
+            sinnix.runtime.units = {
               fixture-one = fixture "fixture-one" 24821 24822;
               fixture-two = fixture "fixture-two" 24823 24824;
               fixture-native = lib.recursiveUpdate (fixture "fixture-native" 24825 24826) {

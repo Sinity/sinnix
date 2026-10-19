@@ -24,7 +24,7 @@ mkServiceModule {
   surface = {
     unit = "sinnix-url-ledger.service";
     resourceClass = "background";
-    observe.enable = true;
+    notifyOnFailure = true;
     workload = {
       class = "sacrificial";
       rationale = "Read-only join against public archive indexes; rerunnable at will.";

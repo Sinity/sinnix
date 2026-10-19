@@ -23,7 +23,7 @@
                     "eventDriven"
                     "requiredPayloadFields"
                   ] row
-                ) config.sinnix.runtime.surfaces.capture-idle-inhibitors.captures == [
+                ) config.sinnix.runtime.units.capture-idle-inhibitors.captures == [
                   {
                     name = "idle-inhibitors";
                     path = config.sinnix.paths.capturePaths.idle-inhibitors;

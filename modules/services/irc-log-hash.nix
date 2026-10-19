@@ -34,10 +34,8 @@ mkServiceModule {
     {
       unit = "sinnix-irc-log-hash.timer";
       manager = "user";
-      observe = {
-        enable = true;
-        restartable = false;
-      };
+      notifyOnFailure = true;
+      operatorRestart = false;
       # The IRC capture lane is written continuously by weechat, outside this
       # repo's process management; it rides the timer's surface because that
       # is the unit this module owns.

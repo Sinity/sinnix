@@ -40,7 +40,7 @@ mkServiceModule (mkCaptureLane {
   captureName = lane;
   eventDriven = true;
   # Event-driven with no numeric cadence, so staleAfterSeconds is the
-  # sentinel's only signal (see modules/runtime.nix). Notifications are
+  # health sweep's only signal (see modules/runtime.nix). Notifications are
   # legitimately bursty and can go silent for many hours (screen off, DND,
   # a quiet afternoon), so anything tighter than a daily "did anything write
   # today" budget false-positives routinely.

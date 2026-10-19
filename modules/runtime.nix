@@ -1,6 +1,6 @@
 # Runtime inventory registry
 #
-# One source of truth for Sinnix runtime surfaces, resource classes, systemd
+# One source of truth for Sinnix runtime units, resource classes, systemd
 # slices, static slice budgets, and capture inventory.
 {
   lib,
@@ -51,7 +51,7 @@ let
     '';
   };
 
-  surfaces = config.sinnix.runtime.surfaces;
+  units = config.sinnix.runtime.units;
   surfaceRows = lib.mapAttrsToList (name: surface: {
     inherit name;
     inherit (surface)
@@ -60,23 +60,12 @@ let
       resourceClass
       unit
       ;
-  }) surfaces;
+  }) units;
   surfaceUnitKeys = map (surface: "${surface.manager}:${surface.unit}") surfaceRows;
   duplicateSurfaceUnitKeys = lib.unique (
     builtins.filter (
       key: (builtins.length (builtins.filter (candidate: candidate == key) surfaceUnitKeys)) > 1
     ) surfaceUnitKeys
-  );
-  unreferencedAcknowledgements = lib.mapAttrsToList (name: _: name) (
-    lib.filterAttrs (
-      _: surface:
-      surface.acknowledged.down
-      && (
-        surface.acknowledged.reason == ""
-        || surface.acknowledged.since == ""
-        || surface.acknowledged.ref == ""
-      )
-    ) surfaces
   );
   mountMonitoring = [
     {
@@ -145,10 +134,10 @@ let
         description = ''
           Absolute staleness budget in seconds, independent of
           cadenceSeconds. Event-driven lanes (eventDriven = true)
-          have no numeric cadence for the sentinel's 2*cadence
+          have no numeric cadence for the health sweep's 2*cadence
           staleness check, so this is the only signal that flags
           them stale when writes stop. Lanes with a numeric
-          cadenceSeconds may set this too; the sentinel flags a
+          cadenceSeconds may set this too; the health sweep flags a
           lane stale when EITHER threshold is exceeded.
         '';
       };
@@ -171,7 +160,7 @@ let
                   AT-SPI registry root had zero children
                   published).
 
-                  Exit-code contract the sentinel relies on:
+                  Exit-code contract the health sweep relies on:
                   0 = present, 1 = confirmed absent, anything
                   else (including a timeout's 124) = unknown.
                   A probe that cannot determine the answer must
@@ -184,7 +173,7 @@ let
                 type = lib.types.ints.positive;
                 default = 5;
                 description = ''
-                  Bound on the probe's runtime. The sentinel runs
+                  Bound on the probe's runtime. The health sweep runs
                   on a 1-minute cadence against every capture
                   lane, so a hung probe must not hang the sweep;
                   a timeout is reported as unknown, never healthy.
@@ -240,7 +229,7 @@ let
   runtimeInventory =
     runtimeDefaults.mkInventory {
       hostname = config.networking.hostName;
-      inherit surfaces;
+      inherit units;
       captures = config.sinnix.runtime.captures;
       mounts = mountMonitoring;
     }
@@ -257,7 +246,7 @@ let
     };
 in
 {
-  options.sinnix.runtime.surfaces = lib.mkOption {
+  options.sinnix.runtime.units = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule (
         { name, config, ... }:
@@ -299,7 +288,7 @@ in
               apply =
                 value:
                 lib.throwIf (config.kind == "timer" && value != "ordinary")
-                  "sinnix.runtime.surfaces.${name}: a timer has no serviceConfig, so resourceClass = \"${value}\" can never apply; declare it on the .service surface this timer triggers"
+                  "sinnix.runtime.units.${name}: a timer has no serviceConfig, so resourceClass = \"${value}\" can never apply; declare it on the .service surface this timer triggers"
                   value;
               description = "Sinnix runtime resource class.";
             };
@@ -377,17 +366,19 @@ in
                 description = "Add this surface's processMatchers to the earlyoom emergency avoid pattern (session-recovery surfaces only).";
               };
             };
-            observe = {
-              enable = lib.mkOption {
-                type = lib.types.bool;
-                default = false;
-                description = "Expose this surface in /etc/sinnix/runtime-inventory.json.";
-              };
-              restartable = lib.mkOption {
-                type = lib.types.bool;
-                default = false;
-                description = "Whether operators may restart this surface directly.";
-              };
+            notifyOnFailure = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = ''
+                Attach the failure-notify template (OnFailure=) and list the unit in
+                the inventory's observedServices, which the hub server's health
+                sweep watches.
+              '';
+            };
+            operatorRestart = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "Whether the hub server may restart this unit on the operator's request.";
             };
             ai = lib.mkOption {
               type = lib.types.nullOr (
@@ -418,33 +409,15 @@ in
               default = null;
               description = "AI backend classification carried by the owning runtime surface.";
             };
-            # A machine-readable carrier for "yes, this is down, we know".
-            # Without one, every fresh agent session rediscovers an intentional
-            # outage as an emergency and re-reports it. An acknowledgement is
-            # not a mute: the surface still appears, in its own section, with
-            # the reason and the tracking reference attached, so a stale ack is
-            # visible rather than a permanent silence.
-            acknowledged = {
-              down = lib.mkOption {
-                type = lib.types.bool;
-                default = false;
-                description = "This surface is expected to be down; do not report it as a failure.";
-              };
-              reason = lib.mkOption {
-                type = lib.types.str;
-                default = "";
-                description = "Why it is down, in one line, for a human reading a status page.";
-              };
-              since = lib.mkOption {
-                type = lib.types.str;
-                default = "";
-                description = "ISO date the acknowledgement was made, so its age is auditable.";
-              };
-              ref = lib.mkOption {
-                type = lib.types.str;
-                default = "";
-                description = "Tracking reference (Beads id) for the work that ends the outage.";
-              };
+            # Without this, every fresh agent session rediscovers an intentional
+            # outage as an emergency and re-reports it. It is not a mute: the
+            # unit still appears, in its own section, with this text attached,
+            # so a stale entry stays visible.
+            expectedDown = lib.mkOption {
+              type = lib.types.nullOr lib.types.nonEmptyStr;
+              default = null;
+              example = "Parked during the archive reindex (polylogue-reindex-2026.1, since 2026-08-14)";
+              description = "Why this unit is expected to be down, with its tracking reference and date; null when it should run.";
             };
             captures = lib.mkOption {
               type = lib.types.listOf captureLaneType;
@@ -479,7 +452,7 @@ in
                 type = lib.types.nullOr lib.types.ints.positive;
                 default = null;
                 description = ''
-                  Seconds a socket-proxy front door blocks its own start,
+                  Seconds a socket proxy blocks its own start,
                   waiting for the backend to accept a TCP connection, before
                   giving up. Bounds the queueing window for a cold-start
                   request: without it, systemd-socket-proxyd starts
@@ -524,7 +497,7 @@ in
       )
     );
     default = { };
-    description = "Enabled runtime units and capture surfaces declared by owning modules.";
+    description = "Enabled runtime units and their capture lanes, declared by owning modules.";
   };
 
   # Lanes with no owning systemd unit: a hotkey script, a shell wrapper the
@@ -537,7 +510,7 @@ in
     default = [ ];
     description = ''
       Capture lanes that no runtime surface owns. Declared here rather than as
-      a surface with a synthetic unit name, so the sentinel and the inventory
+      a surface with a synthetic unit name, so the health sweep and the inventory
       see their freshness without anything having to special-case them.
     '';
   };
@@ -552,7 +525,7 @@ in
     type = lib.types.attrs;
     readOnly = true;
     default = runtimeInventory;
-    description = "Canonical Sinnix runtime surfaces, resource classes, slices, command policy, and capture inventory.";
+    description = "Sinnix runtime units, slices and capture inventory.";
   };
 
   config = lib.mkMerge [
@@ -578,7 +551,7 @@ in
         inherit config;
         unitName = "sinnix-user-manager-watchdog";
         description = "Re-execute the operator's user manager when its job queue wedges";
-        surface = config.sinnix.runtime.surfaces.user-manager-watchdog;
+        surface = config.sinnix.runtime.units.user-manager-watchdog;
       }
       {
         # System manager on purpose: a wedged user manager never dispatches
@@ -596,7 +569,7 @@ in
         inherit config;
         unitName = "sinnix-config-drift";
         description = "Compare live state with the evaluated Sinnix configuration";
-        surface = config.sinnix.runtime.surfaces.config-drift;
+        surface = config.sinnix.runtime.units.config-drift;
       }
       {
         execStart = lib.concatStringsSep " " [
@@ -671,28 +644,22 @@ in
                 "${name} (${surface.unit}, class ${surface.resourceClass})"
               else
                 null
-            ) surfaces
+            ) units
           );
         in
         [
           {
             assertion = inertResourceClasses == [ ];
             message =
-              "sinnix.runtime.surfaces declare a resourceClass that never reaches the unit; "
+              "sinnix.runtime.units declare a resourceClass that never reaches the unit; "
               + "the owning module must write it with lib.sinnix.mkRuntimeServiceConfig: "
               + lib.concatStringsSep ", " inertResourceClasses;
           }
           {
             assertion = duplicateSurfaceUnitKeys == [ ];
             message =
-              "sinnix.runtime.surfaces must not declare duplicate manager/unit pairs: "
+              "sinnix.runtime.units must not declare duplicate manager/unit pairs: "
               + lib.concatStringsSep ", " duplicateSurfaceUnitKeys;
-          }
-          {
-            assertion = unreferencedAcknowledgements == [ ];
-            message =
-              "sinnix.runtime.surfaces acknowledged outages must carry reason, since and ref: "
-              + lib.concatStringsSep ", " unreferencedAcknowledgements;
           }
           {
             assertion = duplicates ids == [ ];
@@ -704,14 +671,14 @@ in
           }
         ];
 
-      sinnix.runtime.surfaces = runtimeDefaults.baseSurfaces // {
+      sinnix.runtime.units = runtimeDefaults.baseSurfaces // {
         # Critical, not background: its probes have 30 s timeouts, and in the
         # background class one run took 97 s of wall time for 33 ms of CPU,
         # long enough to misjudge a healthy manager as wedged.
         user-manager-watchdog = {
           unit = "sinnix-user-manager-watchdog.service";
           resourceClass = "critical";
-          observe.enable = true;
+          notifyOnFailure = true;
         };
         # The drift probe itself is governed like everything else it audits:
         # classed, observed, and its output watched as a lane, so a silently
@@ -719,7 +686,7 @@ in
         config-drift = {
           unit = "sinnix-config-drift.service";
           resourceClass = "background";
-          observe.enable = true;
+          notifyOnFailure = true;
           captures = [
             {
               name = "config-drift";
@@ -753,8 +720,8 @@ in
         "z /run/sinnix/health-state.json.lock 0664 root users -"
       ];
       # Consumer entries from activation.consumers render as forced environment
-      # overrides (front-door routing; see the consumers option comment),
-      # merged with the sentinel/observe units.
+      # overrides (proxy routing; see the consumers option comment),
+      # merged with the failure-notify units.
       systemd.services = lib.mkMerge (
         lib.concatLists (
           lib.mapAttrsToList (
@@ -762,7 +729,7 @@ in
             map (c: {
               ${c.unit}.environment = lib.mapAttrs (_: v: lib.mkForce v) c.environment;
             }) (surface.activation.consumers or [ ])
-          ) surfaces
+          ) units
         )
         ++ [
           (
@@ -785,8 +752,8 @@ in
                 )
                 (
                   lib.filterAttrs (
-                    _: surface: surface.manager == "system" && surface.kind == "service" && surface.observe.enable
-                  ) surfaces
+                    _: surface: surface.manager == "system" && surface.kind == "service" && surface.notifyOnFailure
+                  ) units
                 )
           )
         ]
@@ -823,8 +790,8 @@ in
             )
             (
               lib.filterAttrs (
-                _: surface: surface.manager == "user" && surface.kind == "service" && surface.observe.enable
-              ) surfaces
+                _: surface: surface.manager == "user" && surface.kind == "service" && surface.notifyOnFailure
+              ) units
             );
       };
     }

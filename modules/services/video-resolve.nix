@@ -24,7 +24,7 @@ mkServiceModule {
   surface = {
     unit = "sinnix-video-resolve.service";
     resourceClass = "background";
-    observe.enable = true;
+    notifyOnFailure = true;
     workload = {
       class = "sacrificial";
       rationale = "Weekly, rerunnable at will; yt-dlp's own download-archive de-dups across runs.";

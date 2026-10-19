@@ -43,10 +43,8 @@ mkServiceModule {
         }
       ];
     };
-    observe = {
-      enable = true;
-      restartable = true;
-    };
+    notifyOnFailure = true;
+    operatorRestart = true;
   };
   extraOptions = {
     autoStart = args.lib.mkOption {
@@ -155,7 +153,7 @@ mkServiceModule {
         user = "ollama";
         group = "ollama";
         host = "127.0.0.1";
-        # The public port is reserved for the socket-activated front door.
+        # The public port is reserved for the socket-activated proxy.
         # Keep the daemon on the private loopback backend port so clients
         # cannot bypass lifecycle admission and idle teardown.
         port = helpers.data.ports.ollama.backend;

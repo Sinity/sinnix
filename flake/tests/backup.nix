@@ -107,7 +107,7 @@ assert lib.assertMsg (
                   + lib.concatMapStrings (scriptName: builtins.readFile (../../scripts + "/${scriptName}")) invoked;
                 jobs = lib.filterAttrs (
                   name: surface: lib.hasPrefix "borgbackup-" name && surface.captures != [ ]
-                ) config.sinnix.runtime.surfaces;
+                ) config.sinnix.runtime.units;
               in
               jobs != { }
               && lib.all (
@@ -129,7 +129,7 @@ assert lib.assertMsg (
                 lane.livenessProbe == null
                 || (lane.livenessProbe.command != "" && lane.livenessProbe.timeoutSeconds > 0)
               ) surface.captures
-            ) (lib.attrValues config.sinnix.runtime.surfaces);
+            ) (lib.attrValues config.sinnix.runtime.units);
             message = "A capture lane's liveness probe must carry a real command and a bounded timeout";
           }
         ];
@@ -692,14 +692,14 @@ assert lib.assertMsg (
       # Provably fails when: a Borg job's marker path and its capture lane
       # drift apart, or a lane declares a probe with no command.
       borgHealthLanesJson = builtins.toJSON {
-        inherit (backupRuntimeEval.config.sinnix.runtime.surfaces)
+        inherit (backupRuntimeEval.config.sinnix.runtime.units)
           borgbackup-job-persist
           borgbackup-job-realm
           borgbackup-job-sinex-blobs
           borgbackup-job-polylogue-state
           borgbackup-verify
           ;
-        allSurfaceNames = builtins.attrNames backupRuntimeEval.config.sinnix.runtime.surfaces;
+        allSurfaceNames = builtins.attrNames backupRuntimeEval.config.sinnix.runtime.units;
       };
 
       borgHealthLanesRuntime = pkgs.runCommand "backup-health-lanes-check" { } ''

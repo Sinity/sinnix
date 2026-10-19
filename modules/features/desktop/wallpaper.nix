@@ -148,13 +148,11 @@ mkFeatureModule {
         ]
         ++ moodDirs;
 
-        sinnix.runtime.surfaces.wallpaper-timeofday = {
+        sinnix.runtime.units.wallpaper-timeofday = {
           unit = "sinnix-wallpaper-timeofday.timer";
           manager = "user";
-          observe = {
-            enable = true;
-            restartable = false;
-          };
+          notifyOnFailure = true;
+          operatorRestart = false;
         };
 
         environment.systemPackages = [

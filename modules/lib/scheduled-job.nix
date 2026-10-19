@@ -117,7 +117,7 @@ let
     surface != null
     && (surface.unit or null) == "${unitName}.service"
     && (surface.manager or "system") == manager;
-  surfaceCoversFailure = surfaceIsThisService && (surface.observe.enable or false);
+  surfaceCoversFailure = surfaceIsThisService && (surface.notifyOnFailure or false);
   serviceBody = {
     description = j.description or description;
     serviceConfig =

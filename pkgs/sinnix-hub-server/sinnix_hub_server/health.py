@@ -178,8 +178,8 @@ def describe(
     if key == "service_failure:acknowledged":
         return (
             f"{unit} is down, as expected",
-            "A known outage, acknowledged in the runtime inventory: "
-            + evidence_field(evidence, "acknowledged_ref"),
+            "A known outage, declared in the runtime inventory: "
+            + evidence_field(evidence, "expected_down"),
         )
     if key == "service_failure:unknown":
         return (
@@ -203,8 +203,7 @@ def describe(
             "It hit systemd's activation rate limit and latched into failed, so "
             "its public port now refuses everything."
             if result == "trigger-limit-hit"
-            else "The front-door socket is down, so nothing can reach the service "
-            "behind it."
+            else "The proxy socket is down, so nothing can reach the service behind it."
         )
         return (
             f"{unit} is not accepting connections",
@@ -996,11 +995,8 @@ def sweep_services(
             continue
         manager = str(entry.get("manager") or "system")
         activation_mode = str(entry.get("activationMode") or "direct")
-        acknowledged = (
-            entry.get("acknowledged")
-            if isinstance(entry.get("acknowledged"), dict)
-            else {}
-        )
+        expected_down = entry.get("expectedDown")
+        expected_down = expected_down if isinstance(expected_down, str) else ""
         info = properties.get((manager, unit), {})
         active_state = info.get("ActiveState", "")
         unit_type = info.get("Type", "")
@@ -1059,9 +1055,9 @@ def sweep_services(
         # emits, carrying its acknowledgement reference, so it appears in the
         # ledger as known-down rather than disappearing. An ack that outlives
         # its reason should be embarrassing to look at, not invisible.
-        if acknowledged.get("down") is True and status == "failed":
+        if expected_down and status == "failed":
             status = "acknowledged"
-            evidence = f"{evidence};acknowledged_ref={acknowledged.get('ref') or ''}"
+            evidence = f"{evidence};expected_down={expected_down.replace(';', ',')}"
         emitter.emit(key, "service_failure", unit, status, evidence)
 
 
@@ -1071,7 +1067,7 @@ def sweep_sockets(
     emitter: Emitter,
     recover: Callable[[str, str], bool] | None = None,
 ) -> None:
-    """A socket's healthy resting state is "listening" -- it is the front door,
+    """A socket's healthy resting state is "listening" -- it is the proxy,
     and unlike the backends behind it there is no legitimate reason for it to be
     down.
 

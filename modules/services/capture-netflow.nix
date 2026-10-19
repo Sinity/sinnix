@@ -123,10 +123,8 @@ mkServiceModule {
     unit = "sinnix-capture-netflow.service";
     manager = "system";
     resourceClass = "capture";
-    observe = {
-      enable = true;
-      restartable = true;
-    };
+    notifyOnFailure = true;
+    operatorRestart = true;
     captures = [
       {
         name = "netflow";

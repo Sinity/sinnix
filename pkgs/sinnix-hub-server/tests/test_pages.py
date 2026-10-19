@@ -2,7 +2,7 @@
 
 The control surface mirrors the action API's admission rule: a lifecycle
 button may exist only where the runtime inventory declares
-`observe.restartable`. If these two ever disagree the hub starts offering
+`operatorRestart`. If these two ever disagree the hub starts offering
 buttons the action API answers with 403.
 """
 
@@ -17,13 +17,14 @@ from sinnix_hub_server.pages.services import lifecycle_controls, policy_controls
 
 INVENTORY: dict[str, Any] = {
     "schema": "sinnix-runtime-inventory-v2",
-    "surfaces": {
+    "units": {
         "controllable": {
             "unit": "controllable.service",
             "manager": "user",
             "kind": "service",
             "resourceClass": "background-maintenance",
-            "observe": {"enable": True, "restartable": True},
+            "notifyOnFailure": True,
+            "operatorRestart": True,
             "activation": {"mode": "direct"},
         },
         "read-only": {
@@ -31,7 +32,8 @@ INVENTORY: dict[str, Any] = {
             "manager": "system",
             "kind": "service",
             "resourceClass": "system",
-            "observe": {"enable": True, "restartable": False},
+            "notifyOnFailure": True,
+            "operatorRestart": False,
             "activation": {"mode": "direct"},
         },
     },

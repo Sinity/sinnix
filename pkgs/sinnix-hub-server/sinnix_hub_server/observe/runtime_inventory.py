@@ -16,7 +16,7 @@ def load_inventory() -> dict[str, Any]:
 
 
 def surfaces() -> dict[str, dict[str, Any]]:
-    raw = load_inventory().get("surfaces", {})
+    raw = load_inventory().get("units", {})
     return (
         {str(name): value for name, value in raw.items() if isinstance(value, dict)}
         if isinstance(raw, dict)

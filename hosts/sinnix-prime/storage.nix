@@ -122,7 +122,7 @@ let
         inherit config;
         unitName = "sinnix-fstrim";
         description = "Trim canonical NVMe data filesystem";
-        surface = config.sinnix.runtime.surfaces.sinnix-fstrim;
+        surface = config.sinnix.runtime.units.sinnix-fstrim;
       }
       {
         resourceClass = "background";
@@ -520,10 +520,10 @@ in
     polylogueShareMount
   ];
 
-  sinnix.runtime.surfaces.sinnix-fstrim = {
+  sinnix.runtime.units.sinnix-fstrim = {
     unit = "sinnix-fstrim.service";
     resourceClass = "background";
-    observe.enable = true;
+    notifyOnFailure = true;
   };
 
   boot.supportedFilesystems = [

@@ -1,6 +1,6 @@
 # Open WebUI — ChatGPT-style web frontend for the local Ollama hub.
 #
-# Started on demand behind the socket-activated front door on 127.0.0.1:8080
+# Started on demand behind the socket-activated proxy on 127.0.0.1:8080
 # (backend 8079) and stopped when idle; republished by the hub on its tailnet
 # frontend. Single-operator mode disables the login form. RAG/document
 # chat uses the Ollama embedding model; TTS read-aloud / voice-call points at the
@@ -72,7 +72,7 @@ mkAiService {
       services.open-webui = {
         enable = true;
         host = "127.0.0.1";
-        # The public port belongs to the on-demand front door.
+        # The public port belongs to the on-demand proxy.
         port = helpers.data.ports.openWebui.backend;
         openFirewall = false;
         environment = {

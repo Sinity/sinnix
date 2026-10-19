@@ -65,7 +65,7 @@ sys.exit(1)
             "activation": {"mode": "direct"},
         },
     }
-    inventory.write_text(json.dumps({"surfaces": surfaces}))
+    inventory.write_text(json.dumps({"units": surfaces}))
     launcher = root / "systemd-run"
     launch_log = root / "launch.json"
     launcher.write_text(
@@ -117,14 +117,14 @@ sys.exit(1)
         assert result.returncode != 0 and "unknown service:" in result.stderr, result
         assert not result.stdout, result.stdout
     assert calls.read_bytes() == before, "invalid names reached systemctl"
-    for content in ("{", '{"surfaces": null}', '{"surfaces": []}'):
+    for content in ("{", '{"units": null}', '{"units": []}'):
         inventory.write_text(content)
         result = run("list")
         assert result.returncode != 0 and result.stderr, result
     inventory.unlink()
     result = run("list")
     assert result.returncode != 0 and "unreadable" in result.stderr, result
-    inventory.write_text('{"surfaces": {}}')
+    inventory.write_text('{"units": {}}')
     result = run("list")
     assert result.returncode == 0 and len(result.stdout.splitlines()) == 1, result
     print(

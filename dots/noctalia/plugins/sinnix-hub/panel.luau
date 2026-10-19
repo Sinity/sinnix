@@ -86,12 +86,12 @@ end
 local function governanceText()
   local inventory = stateValue("runtime_inventory")
   if type(inventory) ~= "table" then return "Governance: unavailable (no runtime_inventory in snapshot)" end
-  local surfaces = 0
-  if type(inventory.surfaces) == "table" then
-    for _ in pairs(inventory.surfaces) do surfaces = surfaces + 1 end
+  local units = 0
+  if type(inventory.units) == "table" then
+    for _ in pairs(inventory.units) do units = units + 1 end
   end
   local captures = type(inventory.captures) == "table" and #inventory.captures or 0
-  return "Governance: " .. tostring(surfaces) .. " surfaces, " .. tostring(captures) .. " capture lanes, " .. tostring(sliceCount) .. " slices live"
+  return "Governance: " .. tostring(units) .. " units, " .. tostring(captures) .. " capture lanes, " .. tostring(sliceCount) .. " slices live"
 end
 
 -- ## Agents: owner queue snapshot ##

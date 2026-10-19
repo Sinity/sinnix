@@ -94,18 +94,17 @@ def render_human(report: dict[str, Any]) -> str:
     # Before the unit dump, so anyone reading top-down learns which of the
     # red lines below are already known about. The whole point is that a
     # fresh reader does not re-derive an intentional outage as an incident.
-    acknowledged = [
-        (name, surface.get("acknowledged", {}))
-        for name, surface in sorted(
-            (report.get("runtime_inventory", {}).get("surfaces", {}) or {}).items()
+    expected_down = [
+        (name, unit["expectedDown"])
+        for name, unit in sorted(
+            (report.get("runtime_inventory", {}).get("units", {}) or {}).items()
         )
-        if isinstance(surface, dict) and (surface.get("acknowledged") or {}).get("down")
+        if isinstance(unit, dict) and unit.get("expectedDown")
     ]
-    if acknowledged:
+    if expected_down:
         section("acknowledged outages (known-down, not incidents)")
-        for name, ack in acknowledged:
-            lines.append(f"{name:<28} since={ack.get('since')} ref={ack.get('ref')}")
-            lines.append(f"  {ack.get('reason')}")
+        for name, reason in expected_down:
+            lines.append(f"{name:<28} {reason}")
 
     section("managed workload units")
     for unit in report.get("systemd_units", []):

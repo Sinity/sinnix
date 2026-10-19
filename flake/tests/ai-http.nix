@@ -8,7 +8,7 @@ in
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
-      render = import ../../modules/lib/ai-http-frontdoor.nix { inherit lib; };
+      render = import ../../modules/lib/ai-http-proxy.nix { inherit lib; };
       configFile = pkgs.writeText "ai-http-fixture.Caddyfile" (
         ''
           {

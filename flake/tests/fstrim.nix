@@ -6,7 +6,7 @@
       host = inputs.self.nixosConfigurations.sinnix-prime.config;
       service = host.systemd.services.sinnix-fstrim.serviceConfig;
       timer = host.systemd.timers.sinnix-fstrim;
-      surface = host.sinnix.runtime.inventory.surfaces.sinnix-fstrim;
+      surface = host.sinnix.runtime.inventory.units.sinnix-fstrim;
     in
     {
       checks.sinnix-fstrim-policy =

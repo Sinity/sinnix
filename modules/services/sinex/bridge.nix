@@ -535,14 +535,12 @@ in
       # placement for PostgreSQL/NATS, mount ordering for /var/lib/sinex,
       # maintenance-timer scheduling, and the post-activation ACL repair.
       (lib.mkIf runtimeEnabled {
-        sinnix.runtime.surfaces = {
+        sinnix.runtime.units = {
           sinex-runtime = {
             unit = "sinex-runtime.target";
             resourceClass = "capture";
-            observe = {
-              enable = runtimeAutoStart;
-              restartable = false;
-            };
+            notifyOnFailure = runtimeAutoStart;
+            operatorRestart = false;
           };
           sinex-runtime-timer = {
             unit = "sinex-runtime.timer";
@@ -550,10 +548,8 @@ in
           sinexd = {
             unit = "sinexd.service";
             resourceClass = "capture";
-            observe = {
-              enable = runtimeAutoStart;
-              restartable = false;
-            };
+            notifyOnFailure = runtimeAutoStart;
+            operatorRestart = false;
           };
           nats = {
             unit = "nats.service";
@@ -565,10 +561,8 @@ in
               IOWeight = 20;
               MemoryHigh = "8G";
             };
-            observe = {
-              enable = runtimeAutoStart;
-              restartable = false;
-            };
+            notifyOnFailure = runtimeAutoStart;
+            operatorRestart = false;
           };
           postgresql = {
             unit = "postgresql.service";
@@ -580,10 +574,8 @@ in
               IOWeight = 20;
               MemoryHigh = "8G";
             };
-            observe = {
-              enable = runtimeAutoStart;
-              restartable = false;
-            };
+            notifyOnFailure = runtimeAutoStart;
+            operatorRestart = false;
           };
           sinex-postgres-dump = {
             unit = "sinex-postgres-dump.service";

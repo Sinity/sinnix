@@ -278,17 +278,15 @@ mkServiceModule {
         }
       ];
 
-      sinnix.runtime.surfaces =
+      sinnix.runtime.units =
         (lib.mapAttrs' (
           name: endpoint:
           lib.nameValuePair "agent-gateway-${name}" {
             unit = "sinnix-agent-gateway-${name}.service";
             manager = "user";
             resourceClass = "ordinary";
-            observe = {
-              enable = true;
-              restartable = true;
-            };
+            notifyOnFailure = true;
+            operatorRestart = true;
             workload = {
               class = "protected";
               rationale = "Outbound ${endpoint.principal} control path for endpoint ${name}; independently bounded and restartable.";
@@ -306,10 +304,8 @@ mkServiceModule {
             unit = "sinnix-agent-gateway-${name}-mcp.service";
             manager = "user";
             resourceClass = "ordinary";
-            observe = {
-              enable = true;
-              restartable = true;
-            };
+            notifyOnFailure = true;
+            operatorRestart = true;
             workload = {
               class = "protected";
               rationale = "Loopback MCP server for the ${name} operator tunnel.";

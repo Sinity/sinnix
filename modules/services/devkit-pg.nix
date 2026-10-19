@@ -30,7 +30,7 @@ mkServiceModule {
     unit = "sinnix-devkit-pg.service";
     manager = "user";
     resourceClass = "ordinary";
-    observe.enable = true;
+    notifyOnFailure = true;
   };
   configFn =
     { config, ... }:

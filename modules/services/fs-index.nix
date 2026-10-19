@@ -23,7 +23,7 @@ mkServiceModule {
   surface = {
     unit = "sinnix-fs-index.service";
     resourceClass = "background";
-    observe.enable = true;
+    notifyOnFailure = true;
     workload = {
       class = "sacrificial";
       rationale = "Full re-walk of /realm and /outer-realm; rerunnable at will, next timer firing recovers a killed run.";

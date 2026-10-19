@@ -44,10 +44,8 @@ mkServiceModule {
       readinessTimeout = 180;
       exclusiveResource = "gpu-inference";
     };
-    observe = {
-      enable = true;
-      restartable = true;
-    };
+    notifyOnFailure = true;
+    operatorRestart = true;
   };
   extraOptions = {
     autoStart = args.lib.mkOption {

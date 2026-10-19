@@ -7,7 +7,7 @@
 #     (capture-notifications, capture-clipboard, capture-a11y, ...).
 #
 # Both shapes share: a tmpfiles-provisioned lane directory, a
-# `sinnix.runtime.surfaces.<name>` entry carrying `captures[]`, and
+# `sinnix.runtime.units.<name>` entry carrying `captures[]`, and
 # NoNewPrivileges with a private UMask. mkCaptureLane encodes that shape once; callers
 # supply only what actually varies (the writer's ExecStart, cadence/staleness
 # budgets, and any lane-specific overrides) and get back the `{ name;
@@ -43,7 +43,7 @@
   # "poll" (oneshot + timer) or "stream" (long-running, session-lifecycle).
   mode,
 
-  # --- captures[] (sinnix.runtime.surfaces.<name>.captures) ---
+  # --- captures[] (sinnix.runtime.units.<name>.captures) ---
   # captureName defaults to the service `name`'s "capture-" suffix stripped,
   # matching every existing lane's convention (capture-awair -> "environment"
   # is the one exception, so callers with a differently-named lane pass
@@ -136,10 +136,8 @@ let
 
   surface = {
     inherit unit manager resourceClass;
-    observe = {
-      enable = true;
-      inherit restartable;
-    };
+    notifyOnFailure = true;
+    operatorRestart = restartable;
     captures = resolvedCaptures;
   }
   // extraSurface;
@@ -172,7 +170,7 @@ let
   # resolution, and unit shape. That lands the poll lane at NixOS-level
   # `systemd.user.*` (/etc/systemd/user) rather than home-manager's per-user
   # tree; modules/runtime.nix's failure-notify drop-in is keyed on
-  # `surface.unit`/`manager`/`observe.enable`, not on which of those two
+  # `unit`/`manager`/`notifyOnFailure`, not on which of those two
   # namespaces declared the unit, so observability is unaffected.
   #
   jobServiceConfig = builtins.removeAttrs baseOverrides [ "ExecStart" ] // serviceOverrides;

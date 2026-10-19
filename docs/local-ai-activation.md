@@ -4,7 +4,7 @@ Most local AI backends use on-demand socket activation. Caddy checks Host and br
 
 ## Service map
 
-| Capability             | Front door        | Main command or model                                                                                                                     | Lifecycle                        | Resource notes                                       |
+| Capability             | Proxy             | Main command or model                                                                                                                     | Lifecycle                        | Resource notes                                       |
 | ---------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------- | ---------------------------------------------------- |
 | Ollama text and vision | `127.0.0.1:11434` | `local-chat`, `local-vision`, `local-coder`, `local-coder-moe`, `local-reasoner`, `local-thinker`, `local-multimodal-moe`, `local-reader` | on demand                        | CUDA, one GPU inference occupant                     |
 | LiteLLM gateway        | `127.0.0.1:4000`  | OpenAI `/v1/chat/completions` and Anthropic `/v1/messages`                                                                                | on demand                        | translates agent clients to local backends           |
@@ -28,18 +28,18 @@ these defaults; switch those through Open WebUI's configuration API when changin
 providers, preserving unrelated settings.
 
 The llama.cpp profiles listen only on a Unix socket under `/run/<profile>/`, so
-the Caddy front door is their only TCP entry point.
+the Caddy proxy is their only TCP entry point.
 
 Kokoro's RAM and swap bounds apply directly to its Podman container. Its model
 process is in a separate cgroup from the systemd client unit, whose memory
 counter does not describe the model's working set. These limits do not govern
 other AI containers.
 
-The canonical model roster is `flake/data/local-models.nix`. The canonical port and front-door map is `flake/data/ports.nix`. Edit those sources when changing the platform. Do not add a model only to LiteLLM or only to an agent wrapper.
+The canonical model roster is `flake/data/local-models.nix`. The canonical port and proxy map is `flake/data/ports.nix`. Edit those sources when changing the platform. Do not add a model only to LiteLLM or only to an agent wrapper.
 
 ## The operator control plane
 
-Use the `sinnix ai` front door for lifecycle operations:
+Use the `sinnix ai` command for lifecycle operations:
 
 ```bash
 sinnix ai list
@@ -211,7 +211,7 @@ The runtime inventory at `/etc/sinnix/runtime-inventory.json` records the declar
 
 ### Browser protection
 
-Browser pages are kept away from these services in two places. Caddy checks Host, Origin and Fetch Metadata on every public front door before a request can activate a backend. Chrome's Local Network Access gate (Chrome 142 and later) makes a public website ask for permission before it can reach `localhost` or `127.0.0.1` at all, including through DNS rebinding. Backends get no source patches: the llama.cpp profiles are reachable only through Caddy, and Ollama, LiteLLM and Open WebUI keep their upstream Host and CORS handling on their private loopback ports.
+Browser pages are kept away from these services in two places. Caddy checks Host, Origin and Fetch Metadata on every public proxy before a request can activate a backend. Chrome's Local Network Access gate (Chrome 142 and later) makes a public website ask for permission before it can reach `localhost` or `127.0.0.1` at all, including through DNS rebinding. Backends get no source patches: the llama.cpp profiles are reachable only through Caddy, and Ollama, LiteLLM and Open WebUI keep their upstream Host and CORS handling on their private loopback ports.
 
 ### HTTP activation boundary
 

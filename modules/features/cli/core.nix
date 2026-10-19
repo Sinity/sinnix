@@ -107,7 +107,7 @@ mkFeatureModule {
             arp-scan
             nmap
           ])
-          # `sinnix` -- discoverable front door over the whole packaged script
+          # `sinnix` -- discoverable entry point over the whole packaged script
           # registry (`sinnix help`, `sinnix <name> [args...]`).
           ++ [ scriptPkgs.sinnix ];
 
