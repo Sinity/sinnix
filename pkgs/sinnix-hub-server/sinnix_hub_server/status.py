@@ -23,24 +23,14 @@ from typing import Any, Callable
 
 from sinnix_lib.ledger import utc_ts
 
+from . import inventory as runtime_inventory
+
 SCHEMA = "sinnix-status-v1"
 
 SOCKET_TIMEOUT = 3.0
 BD_TIMEOUT = 8.0
 BD_HEAD_LIMIT = 5
 TITLE_MAX = 88
-
-
-def default_static_inventory_path() -> Path:
-    """Honors SINNIX_RUNTIME_INVENTORY_FILE, the same override
-    sinnix-observe's runtime_inventory.inventory_path() reads -- so hermetic
-    tests and fixture hosts that already point that env var elsewhere also
-    redirect this acknowledged-outages read."""
-    return Path(
-        os.environ.get(
-            "SINNIX_RUNTIME_INVENTORY_FILE", "/etc/sinnix/runtime-inventory.json"
-        )
-    )
 
 
 class UnixConnection(http.client.HTTPConnection):
@@ -86,11 +76,7 @@ def fetch_socket_json(
 
 
 def read_static_inventory(path: Path) -> dict[str, Any] | None:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return value if isinstance(value, dict) else None
+    return runtime_inventory.load(path)[0]
 
 
 def failed_and_attention_units(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -247,7 +233,7 @@ def compose(
     bd_head: Callable[[], dict[str, Any]] = bd_ready_head,
 ) -> dict[str, Any]:
     if static_inventory_path is None:
-        static_inventory_path = default_static_inventory_path()
+        static_inventory_path = runtime_inventory.default_path()
     snapshot = fetch(socket_path, "/v1/snapshot")
     lanes = fetch(socket_path, "/v1/health/lanes")
     state = snapshot.get("state") if isinstance(snapshot, dict) else None
@@ -399,7 +385,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--socket", type=Path, default=default_socket_path())
     parser.add_argument(
-        "--inventory", type=Path, default=default_static_inventory_path()
+        "--inventory", type=Path, default=runtime_inventory.default_path()
     )
     args = parser.parse_args(argv)
 

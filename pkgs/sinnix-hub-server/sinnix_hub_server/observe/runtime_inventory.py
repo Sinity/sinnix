@@ -1,47 +1,18 @@
-"""Sinnix runtime inventory loader shared by observe collectors."""
+"""Runtime inventory views the observe collectors join against."""
 
 from __future__ import annotations
 
-import json
-import os
-from pathlib import Path
 from typing import Any
 
-
-def inventory_path() -> Path:
-    return Path(
-        os.environ.get(
-            "SINNIX_RUNTIME_INVENTORY_FILE",
-            "/etc/sinnix/runtime-inventory.json",
-        )
-    )
+from .. import inventory
 
 
 def load_inventory() -> dict[str, Any]:
-    path = inventory_path()
-    if not path.is_file():
-        return {
-            "available": False,
-            "reason": "runtime inventory missing",
-        }
-    try:
-        inventory = json.loads(path.read_text(encoding="utf-8"))
-    except OSError:
-        return {
-            "available": False,
-            "reason": "runtime inventory unreadable",
-        }
-    except (json.JSONDecodeError, UnicodeError):
-        return {
-            "available": False,
-            "reason": "runtime inventory malformed",
-        }
-    if not isinstance(inventory, dict):
-        return {
-            "available": False,
-            "reason": "runtime inventory malformed",
-        }
-    return inventory
+    """The inventory, or an explicit unavailable row a report can carry."""
+    value, reason = inventory.load()
+    if value is None:
+        return {"available": False, "reason": reason}
+    return value
 
 
 def surfaces() -> dict[str, dict[str, Any]]:

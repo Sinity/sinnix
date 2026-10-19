@@ -5,6 +5,9 @@ requires-python = ">=3.11"
 
 [project.scripts]
 sinnix-hub-server = "sinnix_hub_server.cli:main"
+# The observability report, also `sinnix-hub-server observe`; the gateway and
+# below's wrapper run it by this name.
+sinnix-observe = "sinnix_hub_server.observe.cli:main"
 
 [build-system]
 requires = ["setuptools"]

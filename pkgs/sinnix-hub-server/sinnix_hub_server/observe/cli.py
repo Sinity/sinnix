@@ -215,7 +215,9 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        prog="sinnix-observe", description="Workstation observability report"
+    )
     parser.add_argument("--format", choices=["human", "json"], default="human")
     parser.add_argument("--since", default=DEFAULT_BEGIN)
     parser.add_argument("--duration", default=DEFAULT_DURATION)

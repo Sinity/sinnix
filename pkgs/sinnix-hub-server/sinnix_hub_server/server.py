@@ -20,6 +20,7 @@ from sinnix_lib.lock import flock
 from sinnix_lib.systemd import sd_notify, watchdog_period
 
 from . import health, pages
+from . import inventory as runtime_inventory
 from .actions import ActionError, ActionService
 from .feedback import ELICIT_MODEL_DIR_DEFAULT, FeedbackSpool, resolve_elicit_model
 from .feedback import ELICIT_SCHEMA as FEEDBACK_ELICIT_SCHEMA
@@ -497,9 +498,9 @@ def run_sweep(
     """One health sweep, isolated: a broken probe or an unreadable inventory
     must not take the hub server's snapshot loop down with it."""
     try:
-        inventory, _ = pages.load_json(inventory_path)
-        if inventory:
-            health.sweep(inventory, emitter_factory())
+        runtime, _ = runtime_inventory.load(inventory_path)
+        if runtime:
+            health.sweep(runtime, emitter_factory())
     except Exception as error:  # a sweep is advisory; the hub server is not
         print(f"sinnix-hub-server: health sweep failed: {error}", file=sys.stderr)
 

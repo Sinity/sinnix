@@ -9,12 +9,13 @@ import sys
 from pathlib import Path
 
 from . import capabilities, feedback, health, pages
+from . import inventory as runtime_inventory
 from .actions import ActionService
 from .agent_jobs import AgentCtlClient
 from .ambient import product_source
 from .clodex_usage import clodex_usage
 from .feedback import CoalescingTrigger, FeedbackSpool
-from .snapshot import SnapshotBuilder, observe_source
+from .snapshot import SnapshotBuilder, observe_section
 from .server import FAILURE_PATH, ensure_token, serve
 from .state import StateLayer
 
@@ -81,16 +82,13 @@ def emit_failure_command(argv: list[str]) -> int:
         / "hub.sock",
     )
     parser.add_argument(
-        "--inventory", type=Path, default=Path("/etc/sinnix/runtime-inventory.json")
+        "--inventory", type=Path, default=runtime_inventory.default_path()
     )
     args = parser.parse_args(argv)
     if post_failure(args.socket, args.unit, args.result, manager=args.manager):
         return 0
-    try:
-        inventory = json.loads(args.inventory.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        inventory = {}
-    health.emit_failure(args.unit, args.result, inventory, manager=args.manager)
+    runtime, _ = runtime_inventory.load(args.inventory)
+    health.emit_failure(args.unit, args.result, runtime or {}, manager=args.manager)
     print(
         f"sinnix-hub-server: recorded {args.unit} failure directly; "
         "the hub server was unreachable",
@@ -157,6 +155,10 @@ def main() -> None:
         from .status import main as status_main
 
         raise SystemExit(status_main(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "observe":
+        from .observe.cli import main as observe_main
+
+        raise SystemExit(observe_main(sys.argv[2:]))
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--runtime-dir",
@@ -165,11 +167,6 @@ def main() -> None:
     )
     parser.add_argument(
         "--state-dir", type=Path, default=Path("/realm/state/hub")
-    )
-    parser.add_argument(
-        "--observe-command",
-        nargs="+",
-        default=["sinnix-observe", "--format", "json", "--limit", "10"],
     )
     parser.add_argument("--interval", type=float, default=10.0)
     parser.add_argument(
@@ -185,7 +182,7 @@ def main() -> None:
     parser.add_argument("--anchor-events", type=Path, default=None)
     parser.add_argument("--hyprland-events", type=Path, default=None)
     parser.add_argument(
-        "--inventory", type=Path, default=Path("/etc/sinnix/runtime-inventory.json")
+        "--inventory", type=Path, default=runtime_inventory.default_path()
     )
     parser.add_argument(
         "--feedback-dir",
@@ -241,10 +238,6 @@ def main() -> None:
         help="Clodex routed inference accounting JSONL",
     )
     args = parser.parse_args()
-    observe_command = list(args.observe_command)
-    if len(observe_command) == 1:
-        observe_command += ["--format", "json", "--limit", "10"]
-    observe_command += ["--section", "current"]
     root = args.runtime_dir / "sinnix"
     root.mkdir(parents=True, exist_ok=True)
     layer = StateLayer.build(
@@ -255,11 +248,9 @@ def main() -> None:
     builder = SnapshotBuilder(
         layer.snapshot_path,
         layer.token_path,
-        observe_source(observe_command),
+        lambda: observe_section("current"),
         layer.sequence_path,
-        section_source=lambda section: observe_source(
-            [*observe_command[:-2], "--section", section], timeout=60
-        )(),
+        section_source=observe_section,
         ambient_source=product_source(args.ambient_product),
         agent_jobs_source=agentctl.snapshot,
         clodex_usage_source=lambda: clodex_usage(args.clodex_usage),

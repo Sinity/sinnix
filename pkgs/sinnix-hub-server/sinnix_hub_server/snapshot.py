@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
-import subprocess
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +12,7 @@ from sinnix_lib.ledger import utc_ts
 from . import SCHEMA
 from .anchor import expire_anchor, reduce_anchor_event
 from .hyprland import HyprlandState, Socket2Adapter, reduce_socket_event
+from .observe import cli as observe_cli
 
 
 class SnapshotBuilder:
@@ -405,26 +404,9 @@ class SnapshotBuilder:
         return [event for event in self.events if event["sequence"] > sequence]
 
 
-def observe_source(
-    command: list[str], timeout: float = 5.0
-) -> Callable[[], dict[str, Any]]:
-    def collect() -> dict[str, Any]:
-        result = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env={
-                "PATH": os.environ.get("PATH", ""),
-                "XDG_RUNTIME_DIR": os.environ.get("XDG_RUNTIME_DIR", ""),
-            },
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"collector exited {result.returncode}")
-        value = json.loads(result.stdout)
-        if not isinstance(value, dict):
-            raise ValueError("collector returned a non-object")
-        return value
-
-    return collect
+def observe_section(section: str, limit: int = 10) -> dict[str, Any]:
+    """One observe report section, collected in this process."""
+    args = observe_cli.parse_args(
+        ["--format", "json", "--limit", str(limit), "--section", section]
+    )
+    return observe_cli.collect_report(args)

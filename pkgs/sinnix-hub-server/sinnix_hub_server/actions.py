@@ -16,6 +16,7 @@ from sinnix_lib.ledger import append_jsonl, utc_ts
 from sinnix_lib.procfs import parse_stat_start_time
 from sinnix_lib.systemd import show_units
 
+from . import inventory as runtime_inventory
 from . import pressure as pressure_model
 from .agent_jobs import AgentCtlClient, AgentCtlError
 
@@ -312,14 +313,10 @@ class ActionService:
         return receipts
 
     def _inventory(self) -> dict[str, Any]:
-        try:
-            value = json.loads(self.inventory_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise ActionError(f"runtime inventory unavailable: {error}", 503) from error
-        if (
-            not isinstance(value, dict)
-            or value.get("schema") != "sinnix-runtime-inventory-v1"
-        ):
+        value, reason = runtime_inventory.load(self.inventory_path)
+        if value is None:
+            raise ActionError(f"runtime inventory unavailable: {reason}", 503)
+        if value.get("schema") != "sinnix-runtime-inventory-v1":
             raise ActionError("runtime inventory is not attested", 503)
         return value
 

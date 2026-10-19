@@ -53,7 +53,7 @@ mkServiceModule {
     {
       environment.systemPackages = [
         pkgs.below
-        scriptPkgs.sinnix-observe
+        scriptPkgs.sinnix-hub-server # sinnix-observe
       ];
 
       # below 0.11+ has no --store-dir flag; store_dir/log_dir come only from

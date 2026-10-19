@@ -24,7 +24,7 @@ from pathlib import Path
 
 def observe_report_keys(observe_root: Path) -> set[str]:
     """Keys of the dict collect_report() returns in sinnix-observe's cli."""
-    tree = ast.parse((observe_root / "sinnix_observe/cli.py").read_text())
+    tree = ast.parse((observe_root / "cli.py").read_text())
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == "collect_report":
             for stmt in ast.walk(node):
@@ -97,7 +97,7 @@ def plugin_bound_keys(plugin_root: Path) -> dict[str, list[str]]:
 def main() -> int:
     plugin_root = Path(os.environ["NOCTALIA_HUB_PLUGIN"])
     hub_root = Path(os.environ["NOCTALIA_HUB_SERVER"])
-    observe_root = Path(os.environ["NOCTALIA_HUB_OBSERVE"])
+    observe_root = hub_root / "sinnix_hub_server/observe"
     published = observe_report_keys(observe_root) | snapshot_state_keys(hub_root)
     failures = []
     for entry, keys in plugin_bound_keys(plugin_root).items():

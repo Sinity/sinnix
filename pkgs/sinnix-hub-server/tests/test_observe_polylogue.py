@@ -3,7 +3,7 @@
 import json
 import sqlite3
 
-from sinnix_observe.sources import polylogue
+from sinnix_hub_server.observe.sources import polylogue
 
 
 def make_ops(path):

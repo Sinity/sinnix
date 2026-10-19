@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from sinnix_hub_server import inventory
 from sinnix_hub_server import status as hub_status
 
 SNAPSHOT_HEALTHY: dict[str, Any] = {
@@ -363,17 +364,15 @@ def test_acknowledged_only_report_falls_back_to_socket(tmp_path: Path) -> None:
     assert "sinex" in text
 
 
-def test_default_static_inventory_path_honors_env_override(
+def test_default_inventory_path_honors_env_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", "/tmp/fixture-inventory.json")
-    assert hub_status.default_static_inventory_path() == Path("/tmp/fixture-inventory.json")
+    assert inventory.default_path() == Path("/tmp/fixture-inventory.json")
 
 
-def test_default_static_inventory_path_falls_back_to_etc(
+def test_default_inventory_path_falls_back_to_etc(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("SINNIX_RUNTIME_INVENTORY_FILE", raising=False)
-    assert hub_status.default_static_inventory_path() == Path(
-        "/etc/sinnix/runtime-inventory.json"
-    )
+    assert inventory.default_path() == Path("/etc/sinnix/runtime-inventory.json")

@@ -117,7 +117,7 @@ in
         ++ [
           scriptPkgs.asbl-no-moar
           scriptPkgs.nuke-builds
-          scriptPkgs.sinnix-observe
+          scriptPkgs.sinnix-hub-server # sinnix-observe
           scriptPkgs.machine-experiment-run
           scriptPkgs.syslog-index
         ]

@@ -17,24 +17,34 @@ whole observation down.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from contextlib import closing
 from pathlib import Path
 from typing import Any
 
-_ERRORS: list[dict[str, str]] = []
+# Per thread: the hub server collects reports in-process from its refresh
+# worker and from page requests at once, and each report publishes only the
+# failures of its own collection.
+_STATE = threading.local()
+
+
+def _errors() -> list[dict[str, str]]:
+    if not hasattr(_STATE, "errors"):
+        _STATE.errors = []
+    return _STATE.errors
 
 
 def sqlite_errors() -> list[dict[str, str]]:
     """Failures recorded since the last clear, for the caller to publish."""
-    return list(_ERRORS)
+    return list(_errors())
 
 
 def clear_sqlite_errors() -> None:
-    _ERRORS.clear()
+    _errors().clear()
 
 
 def _record(db: Path, operation: str, exc: Exception) -> None:
-    _ERRORS.append(
+    _errors().append(
         {
             "db": str(db),
             "operation": operation,

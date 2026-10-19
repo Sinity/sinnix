@@ -436,10 +436,6 @@ let
 
     chatgpt-app = pkgs.callPackage ../pkgs/chatgpt-app { };
 
-    sinnix-observe = pkgs.callPackage ../pkgs/sinnix-observe/pkg.nix {
-      inherit sinnix-lib;
-    };
-
     machine-telemetry = pkgs.callPackage ../pkgs/machine-telemetry/pkg.nix {
       inherit sinnix-lib;
     };

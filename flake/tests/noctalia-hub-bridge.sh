@@ -12,7 +12,6 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 plugin="${NOCTALIA_HUB_PLUGIN:-$repo_root/dots/noctalia/plugins/sinnix-hub}"
 hub_root="${NOCTALIA_HUB_SERVER:-$repo_root/pkgs/sinnix-hub-server}"
-observe_root="${NOCTALIA_HUB_OBSERVE:-$repo_root/pkgs/sinnix-observe}"
 contract="${NOCTALIA_HUB_CONTRACT:-$repo_root/flake/tests/noctalia-state-contract.py}"
 
 test -f "$plugin/plugin.toml"
@@ -63,7 +62,6 @@ fi
 # state additions. Both sides are parsed from their source.
 NOCTALIA_HUB_PLUGIN="$plugin" \
   NOCTALIA_HUB_SERVER="$hub_root" \
-  NOCTALIA_HUB_OBSERVE="$observe_root" \
   python3 "$contract"
 python3 "${NOCTALIA_HUB_ORDERING:-$repo_root/flake/tests/noctalia-hub-ordering.py}"
 echo "noctalia hub bridge fixture passed"

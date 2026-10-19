@@ -16,7 +16,7 @@
     }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
-      sinnixObserve = sinnixScriptRegistry.packageSet.sinnix-observe;
+      sinnixObserve = sinnixScriptRegistry.packageSet.sinnix-hub-server;
       lib = inputs.nixpkgs.lib;
       testLib = import ../test-lib.nix { inherit inputs lib; };
       generationLogCheck =

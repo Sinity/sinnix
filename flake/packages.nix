@@ -29,7 +29,7 @@
         "sinnix-agent-gateway"
         "agentctl"
         "sinnix-deslop"
-        "sinnix-observe"
+        "sinnix-hub-server"
         "sinnix-phone-app"
         "sinnix-phone-app-install"
         "tunnel-client"
