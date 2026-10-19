@@ -75,6 +75,9 @@ mkServiceModule {
         systemd.user.services.sinnix-hub-server = {
           Unit = {
             Description = "Sinnix hub server: current machine state and operator actions";
+            # Without Requires, a direct start (login, switch) can beat the
+            # socket, which then refuses to bind and 3090 stays closed.
+            Requires = [ "sinnix-hub-server.socket" ];
             After = [ "sinnix-hub-server.socket" ];
           };
           Service = {
