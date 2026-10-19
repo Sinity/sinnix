@@ -1197,7 +1197,7 @@ in
                 )
                 started = launch.start_operation(config, project, operation)
                 written = json.loads(Path(added[0]["command"][1]).read_text())
-            assert started["job_id"] == 7
+            assert started["task_id"] == 7
             assert added[0]["group"] == "bulk"
             assert added[0]["label"] == "sinnix:sinex_cache_prebuild"
             assert added[0]["priority"] == 0
