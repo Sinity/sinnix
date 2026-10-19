@@ -445,7 +445,7 @@ let
     };
 
     # Shared Python library (importable, not a CLI): atomic state, ledgers,
-    # locks, notify, systemd probes, spools. Python packages here depend on
+    # locks, notify, systemd probes. Python packages here depend on
     # it instead of carrying private copies of these helpers.
     sinnix-lib = pkgs.callPackage ../pkgs/sinnix-lib/pkg.nix { };
 
