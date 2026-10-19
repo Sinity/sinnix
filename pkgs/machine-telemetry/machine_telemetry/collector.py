@@ -2162,7 +2162,15 @@ def scan_kill_events(
     # from the last MATCH instead re-read every entry since the last kill on
     # each 30 s scan: 7.8 s of CPU and a re-read of the journal per scan on
     # 2026-10-19, months after the last kill, growing every day.
-    cmd = ["journalctl", "-o", "json", "--no-pager", "--show-cursor", "-g", KILL_EVENT_GREP]
+    cmd = [
+        "journalctl",
+        "-o",
+        "json",
+        "--no-pager",
+        "--show-cursor",
+        "-g",
+        KILL_EVENT_GREP,
+    ]
     if after_cursor:
         cmd += ["--after-cursor", after_cursor]
     else:

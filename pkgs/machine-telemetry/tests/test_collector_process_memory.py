@@ -298,7 +298,9 @@ def test_kill_event_scan_parses_complete_bounded_output(monkeypatch) -> None:
     assert rows[0]["victim_pid"] == 42
 
 
-def test_kill_event_scan_resumes_after_the_scanned_tail_without_matches(monkeypatch) -> None:
+def test_kill_event_scan_resumes_after_the_scanned_tail_without_matches(
+    monkeypatch,
+) -> None:
     collector = _collector()
     monkeypatch.setattr(
         collector,

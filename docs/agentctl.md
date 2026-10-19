@@ -18,30 +18,30 @@ batch's run manifest, and the `view` screen.
 
 ## Verbs
 
-| Verb                                                                        | Does                                                                                                              |
-| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `project list \| get [p] \| operations [p]`                                 | the configured descriptors                                                                                        |
-| `job start [p] <op> [--workspace P] [--wait] [--if-idle] [-- args…]`        | queue an operation in its pool, label `<p>:<op>`; `--if-idle` skips it while the same label is queued or running  |
-| `job list [--project p] [--active] [--all]`                                 | job rows, newest first (40 unless `--all`)                                                                        |
-| `job snapshot [--limit N]`                                                  | group state and counts plus bounded job rows, unfinished first                                                    |
+| Verb                                                                        | Does                                                                                                                                                 |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project list \| get [p] \| operations [p]`                                 | the configured descriptors                                                                                                                           |
+| `job start [p] <op> [--workspace P] [--wait] [--if-idle] [-- args…]`        | queue an operation in its pool, label `<p>:<op>`; `--if-idle` skips it while the same label is queued or running                                     |
+| `job list [--project p] [--active] [--all]`                                 | job rows, newest first (40 unless `--all`)                                                                                                           |
+| `job snapshot [--limit N]`                                                  | group state and counts plus bounded job rows, unfinished first                                                                                       |
 | `job get \| logs \| result \| cancel \| retry \| wait <id>`                 | one job by pueue task id, plus `--job-id` to follow it across a reorder; `--attempt` selects a retry; `logs`/`result` page with `--offset`/`--limit` |
-| `job clean <id> \| --all-terminal`                                          | remove terminal queue entries; inputs, attempts, results and evidence are kept                                    |
-| `batch start [p] <bead>… [--worker a,b]…`                                   | validate members, write the manifest, claim, create worktrees, queue workers and the landing behind them          |
-| `batch land <run>`                                                          | the landing body: integrate, verify, review, publish, accept, clean up; re-runnable                               |
-| `batch queue <run>`                                                         | queue the landing as a job instead of running it here                                                             |
-| `batch status <run>` / `batch list [p]`                                     | the manifest joined with pueue state and the landing PR                                                           |
-| `batch result <run> <worker> <result.json> [--attempt n]`                   | file a worker result produced by another harness                                                                  |
-| `batch resume <run> --worker <w>`                                           | queue a fresh agent into the worker's worktree with a resume prompt                                               |
-| `batch task [--run r --worker w --attempt n]`                               | a worker's current tasks beside its dispatch-time bindings; read-only                                             |
-| `batch scope-correct <run> <worker> <candidate> --authorize <bead>=<glob>…` | replace a malformed stored worker scope, keeping the correction history                                           |
-| `batch abandon <run> [--reason R]`                                          | release a run that will not land                                                                                  |
-| `batch clean [p]`                                                           | remove worktrees of landed or abandoned runs, keeping any with uncommitted or unmerged work                       |
-| `result validate-worker <result.json>`                                      | validate a worker result without filing it (same checks as `batch result`)                                        |
-| `evidence file \| list \| get`                                              | retain or read evidence for work done outside a batch                                                             |
-| `view [p]`                                                                  | queue groups, failures, active jobs, open runs and ready tasks                                                    |
-| `events tail [--lines N] [--follow] [--project p]`                          | the event log (`/realm/state/agentctl/events.jsonl`)                                                              |
-| `pools apply`                                                               | write the declared pool widths into the running pueued                                                            |
-| `pressure tick`                                                             | one pass pausing or reopening groups against memory pressure                                                      |
+| `job clean <id> \| --all-terminal`                                          | remove terminal queue entries; inputs, attempts, results and evidence are kept                                                                       |
+| `batch start [p] <bead>… [--worker a,b]…`                                   | validate members, write the manifest, claim, create worktrees, queue workers and the landing behind them                                             |
+| `batch land <run>`                                                          | the landing body: integrate, verify, review, publish, accept, clean up; re-runnable                                                                  |
+| `batch queue <run>`                                                         | queue the landing as a job instead of running it here                                                                                                |
+| `batch status <run>` / `batch list [p]`                                     | the manifest joined with pueue state and the landing PR                                                                                              |
+| `batch result <run> <worker> <result.json> [--attempt n]`                   | file a worker result produced by another harness                                                                                                     |
+| `batch resume <run> --worker <w>`                                           | queue a fresh agent into the worker's worktree with a resume prompt                                                                                  |
+| `batch task [--run r --worker w --attempt n]`                               | a worker's current tasks beside its dispatch-time bindings; read-only                                                                                |
+| `batch scope-correct <run> <worker> <candidate> --authorize <bead>=<glob>…` | replace a malformed stored worker scope, keeping the correction history                                                                              |
+| `batch abandon <run> [--reason R]`                                          | release a run that will not land                                                                                                                     |
+| `batch clean [p]`                                                           | remove worktrees of landed or abandoned runs, keeping any with uncommitted or unmerged work                                                          |
+| `result validate-worker <result.json>`                                      | validate a worker result without filing it (same checks as `batch result`)                                                                           |
+| `evidence file \| list \| get`                                              | retain or read evidence for work done outside a batch                                                                                                |
+| `view [p]`                                                                  | queue groups, failures, active jobs, open runs and ready tasks                                                                                       |
+| `events tail [--lines N] [--follow] [--project p]`                          | the event log (`/realm/state/agentctl/events.jsonl`)                                                                                                 |
+| `pools apply`                                                               | write the declared pool widths into the running pueued                                                                                               |
+| `pressure tick`                                                             | one pass pausing or reopening groups against memory pressure                                                                                         |
 
 `job start` and `job wait` take `--timeout-seconds` for the wait.
 The project is `--project`, a leading positional naming a project or checkout
