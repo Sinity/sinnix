@@ -35,11 +35,6 @@ let
     "sinex-nats-client-nkey"
     "sinex-nats-server-cert"
     "sinex-nats-server-key"
-    # Shared by capture-mail (mbsync IMAP) and capture-calendar (vdirsyncer
-    # CalDAV) -- same account, one app-specific password, one agenix secret.
-    # Neither module ships ciphertext; both stay default-off until the
-    # operator creates this secret (see each module's header).
-    "mail-app-password"
   ];
 
   # Declarative per-secret overrides. Any secret NOT listed here falls back to
@@ -116,9 +111,8 @@ let
     # Nothing here reads ANTHROPIC_API_KEY from the environment; it remains
     # readable at /run/agenix/anthropic-api-key for anything that wants it.
     "anthropic-api-key".exportEnv = false;
-    # Account-linked bearer credentials, read directly from /run/agenix by
-    # their owning capture lane -- no reason to widen their blast radius to
-    # every login shell.
+    # An account password with no consumer here; it stays out of login
+    # shells until the operator retires it.
     "mail-app-password".exportEnv = false;
     # Retained former runner registration material stays out of login shells.
     "github-runner-polylogue-token".exportEnv = false;

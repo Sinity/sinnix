@@ -18,8 +18,7 @@
 #
 # Deliberately NOT covered here (see modules/services/*.nix for why each
 # stays hand-rolled): capture-audio (three cooperating units sharing one
-# --capture-root), capture-replay (gpu-screen-recorder needs cap_sys_admin),
-# capture-netflow (system-manager unit with an ambient-capability
+# --capture-root), capture-netflow (system-manager unit with an ambient-capability
 # ExecStartPre root step), terminal-capture (no owning unit at all -- a
 # `sinnix.runtime.captures` lane, not a surface).
 { lib }:

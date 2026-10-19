@@ -40,7 +40,6 @@ in
     ./tests/claude-session.nix
     ./tests/crypt-folder.nix
     ./tests/capture-idle-inhibitors.nix
-    ./tests/capture-mail.nix
     ./tests/capture-awair.nix
     ./tests/capture-mpris.nix
     ./tests/backup.nix

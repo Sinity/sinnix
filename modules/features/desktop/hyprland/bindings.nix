@@ -135,10 +135,6 @@ let
     (run "XF86AudioPrev" "Rewind active media" "sinnix quest video media-key previous")
     (run "XF86AudioRaiseVolume" "Raise the volume" "pamixer -i 2")
     (run "XF86AudioLowerVolume" "Lower the volume" "pamixer -d 2")
-  ]
-  ++ lib.optionals sinnix.services.capture-replay.enable [
-    (run "F10" "Save the screen replay ring" "sinnix-replay-save")
-    (run "SHIFT + F10" "Stop the screen replay ring" "sinnix-replay-stop")
   ];
 
   binddl = [

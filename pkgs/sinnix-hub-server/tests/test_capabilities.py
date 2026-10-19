@@ -40,11 +40,11 @@ INDEX: dict[str, Any] = {
         },
         {
             "kind": "service",
-            "name": "airvpn-seed",
+            "name": "fixture-disabled",
             "description": "Seedbox VPN egress",
             "invoke": None,
             "enabled": False,
-            "owner": "modules/services/airvpn-seed.nix",
+            "owner": "modules/services/fixture-disabled.nix",
             "docs": None,
         },
         {
@@ -69,7 +69,7 @@ def write_index(tmp_path, index=INDEX):
 def test_disabled_capabilities_stay_in_the_view(tmp_path) -> None:
     view = capabilities.build(write_index(tmp_path))
     rows = {row["name"]: row for row in view["rows"]}
-    assert rows["airvpn-seed"]["enabled"] is False
+    assert rows["fixture-disabled"]["enabled"] is False
 
 
 def test_unknown_kinds_are_grouped_rather_than_dropped(tmp_path) -> None:
@@ -140,7 +140,7 @@ def test_cli_prints_every_group_and_filters_by_kind(tmp_path, capsys) -> None:
     assert capabilities_command(["--index", str(index)]) == 0
     out = capsys.readouterr().out
     assert "Declaration index: selected" in out
-    assert "airvpn-seed" in out and "future-kind" in out
+    assert "fixture-disabled" in out and "future-kind" in out
     assert (
         capabilities_command(["--index", str(index), "--kind", "service", "--json"])
         == 0
