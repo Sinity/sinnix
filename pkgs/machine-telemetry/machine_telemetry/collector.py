@@ -31,6 +31,26 @@ from sinnix_lib.procfs import (
 from sinnix_lib.systemd import show_units, show_units_as_user
 from sinnix_lib.values import float_or_none, int_or_none, read_text
 
+# Sampling cadence and probe targets. One host runs this collector and nothing
+# ever tuned these per host, so they are constants rather than options.
+SAMPLE_INTERVAL_SEC = 10.0
+# Matches the heartbeat, so per-unit IO bytes are attributable at
+# below-comparable resolution.
+SERVICE_INTERVAL_SEC = 10.0
+NETWORK_INTERVAL_SEC = 300.0
+NETWORK_INTERFACE = "enp4s0"
+NETWORK_GATEWAY = "192.168.1.1"
+# Minimum seconds between the 10 MB bufferbloat download probes.
+BUFFERBLOAT_INTERVAL_SEC = 1800.0
+# The dedicated NVML sampler (power, temperature, utilisation, clocks).
+GPU_INTERVAL_SEC = 1.0
+PROCESS_IO_TOP = 40
+# Top-PSS processes persisted per smaps_rollup sample.
+PROCESS_MEMORY_TOP = 50
+PROCESS_MEMORY_INTERVAL_SEC = 60.0
+# Journald scans for earlyoom, systemd-oomd and kernel OOM kills.
+KILL_EVENT_INTERVAL_SEC = 30.0
+
 SCHEMA_VERSION = 5
 # Interval between explicit `wal_checkpoint(TRUNCATE)` runs on the main
 # writer connection; see the checkpoint block at the bottom of the heartbeat
@@ -2226,18 +2246,7 @@ def main() -> int:
     parser.add_argument("--db", required=True)
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--host", required=True)
-    parser.add_argument("--interval", type=float, default=10.0)
-    parser.add_argument("--service-interval", type=float, default=60.0)
-    parser.add_argument("--network-interval", type=float, default=300.0)
-    parser.add_argument("--gpu-interval", type=float, default=1.0)
-    parser.add_argument("--network-interface", default="enp4s0")
-    parser.add_argument("--network-gateway", default="192.168.1.1")
-    parser.add_argument("--bufferbloat-interval", type=float, default=1800.0)
     parser.add_argument("--network-probe-once", action="store_true")
-    parser.add_argument("--process-io-top", type=int, default=40)
-    parser.add_argument("--process-memory-top", type=int, default=50)
-    parser.add_argument("--process-memory-interval", type=float, default=60.0)
-    parser.add_argument("--kill-event-interval", type=float, default=30.0)
     parser.add_argument("--cgroups", default="")
     parser.add_argument("--units", default="")
     parser.add_argument("--user-name", required=True)
@@ -2297,8 +2306,8 @@ def collect(args: argparse.Namespace) -> int:
                 network_probe(
                     args.host,
                     read_text("/proc/sys/kernel/random/boot_id"),
-                    args.network_interface,
-                    args.network_gateway,
+                    NETWORK_INTERFACE,
+                    NETWORK_GATEWAY,
                     do_bloat=True,
                 ),
             )
@@ -2361,10 +2370,10 @@ def collect(args: argparse.Namespace) -> int:
         # permanently disabling GPU capture until the next restart.
         gpu_stop = threading.Event()
         gpu_thread: threading.Thread | None = None
-        if not _nvml_unavailable and args.gpu_interval > 0:
+        if not _nvml_unavailable and GPU_INTERVAL_SEC > 0:
             gpu_thread = threading.Thread(
                 target=gpu_sampler_thread,
-                args=(str(db), args.host, boot_id, args.gpu_interval, gpu_stop),
+                args=(str(db), args.host, boot_id, GPU_INTERVAL_SEC, gpu_stop),
                 name="gpu-sampler",
                 daemon=True,
             )
@@ -2373,8 +2382,8 @@ def collect(args: argparse.Namespace) -> int:
         prev_process_io = process_io_snapshot()
 
         while True:
-            target = time.monotonic() + args.interval
-            time.sleep(args.interval)
+            target = time.monotonic() + SAMPLE_INTERVAL_SEC
+            time.sleep(SAMPLE_INTERVAL_SEC)
             sample_start = time.monotonic()
             elapsed = sample_start - prev_time
             oversleep_ms = max((sample_start - target) * 1000.0, 0.0)
@@ -2430,7 +2439,7 @@ def collect(args: argparse.Namespace) -> int:
                 prev_process_io,
                 current_process_io,
                 interval_s=elapsed,
-                limit=max(args.process_io_top, 0),
+                limit=max(PROCESS_IO_TOP, 0),
             )
             prev_process_io = current_process_io
             row = {
@@ -2576,17 +2585,17 @@ def collect(args: argparse.Namespace) -> int:
             )
             insert_block_device_stats(conn, observed_at, args.host, boot_id)
             insert_process_io_deltas(conn, process_io_rows)
-            if args.process_memory_interval > 0 and sample_start >= next_process_memory:
+            if PROCESS_MEMORY_INTERVAL_SEC > 0 and sample_start >= next_process_memory:
                 insert_process_memory_rows(
                     conn,
                     process_memory_rows(
                         observed_at,
                         args.host,
                         boot_id,
-                        limit=max(args.process_memory_top, 0),
+                        limit=max(PROCESS_MEMORY_TOP, 0),
                     ),
                 )
-                next_process_memory = sample_start + args.process_memory_interval
+                next_process_memory = sample_start + PROCESS_MEMORY_INTERVAL_SEC
             if sample_start >= next_service:
                 insert_service_states(conn, args.host, boot_id, units, args.user_name)
                 insert_cgroup_memory_stats(
@@ -2595,26 +2604,26 @@ def collect(args: argparse.Namespace) -> int:
                         observed_at, args.host, boot_id, cgroup_specs
                     ),
                 )
-                next_service = sample_start + args.service_interval
-            if args.network_interval > 0 and sample_start >= next_network:
+                next_service = sample_start + SERVICE_INTERVAL_SEC
+            if NETWORK_INTERVAL_SEC > 0 and sample_start >= next_network:
                 do_bloat = (
-                    args.bufferbloat_interval > 0
-                    and sample_start - last_bloat >= args.bufferbloat_interval
+                    BUFFERBLOAT_INTERVAL_SEC > 0
+                    and sample_start - last_bloat >= BUFFERBLOAT_INTERVAL_SEC
                 )
                 insert_network_sample(
                     conn,
                     network_probe(
                         args.host,
                         boot_id,
-                        args.network_interface,
-                        args.network_gateway,
+                        NETWORK_INTERFACE,
+                        NETWORK_GATEWAY,
                         do_bloat=do_bloat,
                     ),
                 )
                 if do_bloat:
                     last_bloat = sample_start
-                next_network = sample_start + args.network_interval
-            if args.kill_event_interval > 0 and sample_start >= next_kill_event:
+                next_network = sample_start + NETWORK_INTERVAL_SEC
+            if KILL_EVENT_INTERVAL_SEC > 0 and sample_start >= next_kill_event:
                 kill_rows, new_cursor = scan_kill_events(
                     args.host, boot_id, kill_event_cursor
                 )
@@ -2622,7 +2631,7 @@ def collect(args: argparse.Namespace) -> int:
                 if new_cursor and new_cursor != kill_event_cursor:
                     kill_event_cursor = new_cursor
                     save_kill_event_cursor(conn, new_cursor)
-                next_kill_event = sample_start + args.kill_event_interval
+                next_kill_event = sample_start + KILL_EVENT_INTERVAL_SEC
             conn.commit()
             # PASSIVE autocheckpoints drain the WAL but never shrink the
             # file; TRUNCATE does both, so it runs here on a schedule.

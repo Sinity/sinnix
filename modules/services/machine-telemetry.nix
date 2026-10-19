@@ -48,61 +48,12 @@ mkServiceModule {
       {
         name = "machine-telemetry";
         path = dataRoot;
-        cadenceSeconds = config.sinnix.services."machine-telemetry".intervalSec or 10;
+        # The collector's sampling interval (SAMPLE_INTERVAL_SEC).
+        cadenceSeconds = 10;
       }
     ];
   };
   extraOptions = {
-    intervalSec = lib.mkOption {
-      type = lib.types.int;
-      default = 10;
-      description = "Machine telemetry sampling interval in seconds.";
-    };
-    serviceIntervalSec = lib.mkOption {
-      type = lib.types.int;
-      default = 10;
-      description = "Systemd service-state sampling interval in seconds. Matches the heartbeat cadence so per-unit IO bytes are attributable at below-comparable resolution.";
-    };
-    networkIntervalSec = lib.mkOption {
-      type = lib.types.int;
-      default = 300;
-      description = "Network-link sampling interval in seconds; 0 disables the integrated network probe.";
-    };
-    networkInterfaceName = lib.mkOption {
-      type = lib.types.str;
-      default = "enp4s0";
-      description = "Network interface used for machine telemetry NIC counters.";
-    };
-    networkGateway = lib.mkOption {
-      type = lib.types.str;
-      default = "192.168.1.1";
-      description = "Gateway address used by the integrated machine telemetry ping probe.";
-    };
-    bufferbloatIntervalSec = lib.mkOption {
-      type = lib.types.ints.unsigned;
-      default = 1800;
-      description = "Minimum seconds between integrated 10 MB bufferbloat download probes. 0 disables the heavy probe.";
-    };
-    gpuIntervalSec = lib.mkOption {
-      type = lib.types.numbers.nonnegative;
-      default = 1.0;
-      description = "Dedicated NVML-backed GPU sampler interval in seconds (power/temp/util/clocks). 0 disables the high-frequency sampler.";
-    };
-    processMemoryTop = lib.mkOption {
-      type = lib.types.ints.unsigned;
-      default = 50;
-      description = "Number of top-PSS processes to persist in each process-memory sample.";
-    };
-    processMemoryIntervalSec = lib.mkOption {
-      type = lib.types.numbers.nonnegative;
-      default = 60.0;
-      description = "Seconds between process smaps_rollup PSS/private memory samples. 0 disables process-memory sampling.";
-    };
-    killEventIntervalSec = lib.mkOption {
-      type = lib.types.numbers.nonnegative;
-      default = 30.0;
-      description = "Seconds between journald scans for earlyoom/systemd-oomd/kernel OOM kill events. 0 disables kill-event capture.";
-    };
     extraMonitoredCgroups = lib.mkOption {
       type = lib.types.listOf (
         lib.types.submodule {
@@ -522,7 +473,7 @@ mkServiceModule {
             Environment = lib.optionals (config.sinnix.gpu.mode != "igpu") [
               "LD_LIBRARY_PATH=/run/opengl-driver/lib"
             ];
-            ExecStart = "${machineTelemetry}/bin/machine-telemetry --db ${dbPath} --manifest ${manifestPath} --host ${hostName} --interval ${toString cfg.intervalSec} --service-interval ${toString cfg.serviceIntervalSec} --network-interval ${toString cfg.networkIntervalSec} --network-interface ${cfg.networkInterfaceName} --network-gateway ${cfg.networkGateway} --bufferbloat-interval ${toString cfg.bufferbloatIntervalSec} --gpu-interval ${toString cfg.gpuIntervalSec} --process-memory-top ${toString cfg.processMemoryTop} --process-memory-interval ${toString cfg.processMemoryIntervalSec} --kill-event-interval ${toString cfg.killEventIntervalSec} --cgroups ${cgroupArgs} --units ${unitArgs} --user-name ${username}";
+            ExecStart = "${machineTelemetry}/bin/machine-telemetry --db ${dbPath} --manifest ${manifestPath} --host ${hostName} --cgroups ${cgroupArgs} --units ${unitArgs} --user-name ${username}";
             Restart = "on-failure";
             RestartSec = "5s";
           }
