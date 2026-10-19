@@ -12,7 +12,7 @@ import pytest
 
 
 @pytest.fixture
-def lake(tmp_path, monkeypatch):
+def recordings(tmp_path, monkeypatch):
     path = Path(__file__).resolve().parents[3] / "scripts" / "sinnix-stt"
     loader = importlib.machinery.SourceFileLoader("sinnix_stt_test", str(path))
     spec = importlib.util.spec_from_loader(loader.name, loader)
@@ -39,28 +39,28 @@ def lake(tmp_path, monkeypatch):
     return module, calls, phone, mic
 
 
-def run_lake(module):
-    assert module.cmd_lake(argparse.Namespace(lane=None, limit=0)) == 0
+def run_recordings(module):
+    assert module.cmd_recordings(argparse.Namespace(lane=None, limit=0)) == 0
 
 
-def test_cli_creates_private_transcripts_under_a_permissive_parent_umask(lake):
-    module, calls, phone, mic = lake
+def test_cli_creates_private_transcripts_under_a_permissive_parent_umask(recordings):
+    module, calls, phone, mic = recordings
     previous = os.umask(0o022)
     try:
-        assert module.main(["lake"]) == 0
+        assert module.main(["recordings"]) == 0
     finally:
         os.umask(previous)
     assert calls == [phone, mic]
     assert stat.S_IMODE(module.TRANSCRIPT_DIR.stat().st_mode) == 0o700
     outputs = list(module.TRANSCRIPT_DIR.iterdir())
     assert module.LEDGER in outputs
-    assert module.TRANSCRIPT_DIR / ".lake.lock" in outputs
+    assert module.TRANSCRIPT_DIR / ".recordings.lock" in outputs
     assert all(stat.S_IMODE(path.stat().st_mode) == 0o600 for path in outputs)
 
 
 @pytest.mark.parametrize("kind", ["directory", "fifo", "broken-link"])
-def test_unusable_history_refuses_before_transcription(lake, kind):
-    module, calls, phone, mic = lake
+def test_unusable_history_refuses_before_transcription(recordings, kind):
+    module, calls, phone, mic = recordings
     module.TRANSCRIPT_DIR.mkdir()
     if kind == "directory":
         module.LEDGER.mkdir()
@@ -69,13 +69,13 @@ def test_unusable_history_refuses_before_transcription(lake, kind):
     else:
         module.LEDGER.symlink_to("absent-ledger")
     with pytest.raises(OSError):
-        run_lake(module)
+        run_recordings(module)
     assert calls == []
     assert not list(module.TRANSCRIPT_DIR.glob("20*.jsonl"))
 
 
-def test_denied_history_is_not_empty(lake, monkeypatch):
-    module, calls, phone, mic = lake
+def test_denied_history_is_not_empty(recordings, monkeypatch):
+    module, calls, phone, mic = recordings
     module.TRANSCRIPT_DIR.mkdir()
     module.LEDGER.write_text("{}\n")
     original = os.open
@@ -87,12 +87,12 @@ def test_denied_history_is_not_empty(lake, monkeypatch):
 
     monkeypatch.setattr(module.os, "open", denied)
     with pytest.raises(PermissionError, match="synthetic denied ledger"):
-        run_lake(module)
+        run_recordings(module)
     assert calls == []
 
 
-def test_history_streams_and_accepts_regular_symlink(lake, monkeypatch):
-    module, calls, phone, mic = lake
+def test_history_streams_and_accepts_regular_symlink(recordings, monkeypatch):
+    module, calls, phone, mic = recordings
     module.TRANSCRIPT_DIR.mkdir()
     target = module.TRANSCRIPT_DIR / "retained-ledger"
     target.write_text(
@@ -107,10 +107,10 @@ def test_history_streams_and_accepts_regular_symlink(lake, monkeypatch):
     assert module.ledger_seen() == {("phone", phone.name, 4)}
 
 
-def test_same_name_and_size_in_different_lanes_transcribe_once_each(lake):
-    module, calls, phone, mic = lake
-    run_lake(module)
-    run_lake(module)
+def test_same_name_and_size_in_different_lanes_transcribe_once_each(recordings):
+    module, calls, phone, mic = recordings
+    run_recordings(module)
+    run_recordings(module)
     assert calls == [phone, mic]
     rows = [json.loads(line) for line in module.LEDGER.read_text().splitlines()]
     assert [(row["lane"], row["file"], row["bytes"]) for row in rows] == [
@@ -129,27 +129,27 @@ def test_same_name_and_size_in_different_lanes_transcribe_once_each(lake):
     }
 
 
-def test_legacy_row_without_lane_does_not_hide_current_sources(lake):
-    module, calls, phone, mic = lake
+def test_legacy_row_without_lane_does_not_hide_current_sources(recordings):
+    module, calls, phone, mic = recordings
     module.TRANSCRIPT_DIR.mkdir()
     legacy = json.dumps({"file": "same.opus", "bytes": 4}) + "\n"
     module.LEDGER.write_text(legacy)
-    run_lake(module)
-    run_lake(module)
+    run_recordings(module)
+    run_recordings(module)
     assert calls == [phone, mic]
     assert module.LEDGER.read_text().startswith(legacy)
 
 
-def test_lane_qualified_history_and_repaired_size(lake):
-    module, calls, phone, mic = lake
+def test_lane_qualified_history_and_repaired_size(recordings):
+    module, calls, phone, mic = recordings
     module.TRANSCRIPT_DIR.mkdir()
     prior = json.dumps({"lane": "phone", "file": "same.opus", "bytes": 4}) + "\n"
     module.LEDGER.write_text(prior)
-    run_lake(module)
+    run_recordings(module)
     assert calls == [mic]
     phone.write_text("repaired recording")
-    run_lake(module)
-    run_lake(module)
+    run_recordings(module)
+    run_recordings(module)
     assert calls == [mic, phone]
     assert module.LEDGER.read_text().startswith(prior)
 
@@ -164,12 +164,12 @@ def test_lane_qualified_history_and_repaired_size(lake):
         ([("Content-Length", "2")], b"{}", True),
     ],
 )
-def test_http_framing_precedes_transcription(lake, monkeypatch, framing, raw, success):
+def test_http_framing_precedes_transcription(recordings, monkeypatch, framing, raw, success):
     import io
     import socketserver
     from email.message import Message
 
-    module = lake[0]
+    module = recordings[0]
     calls, statuses = [], []
     monkeypatch.setattr(
         module, "_multipart_file", lambda body, ctype: calls.append(body) or b"audio"
@@ -208,12 +208,12 @@ def test_http_framing_precedes_transcription(lake, monkeypatch, framing, raw, su
 
 @pytest.mark.parametrize("failure", [None, "write", "transcribe"])
 def test_upload_scratch_is_removed_even_after_partial_write(
-    lake, monkeypatch, tmp_path, failure
+    recordings, monkeypatch, tmp_path, failure
 ):
     import socketserver
     from email.message import Message
 
-    module = lake[0]
+    module = recordings[0]
     scratch = tmp_path / "requests"
     scratch.mkdir()
     monkeypatch.setattr(module.tempfile, "tempdir", str(scratch))
@@ -267,12 +267,12 @@ def test_upload_scratch_is_removed_even_after_partial_write(
     assert list(scratch.iterdir()) == []
 
 
-def test_native_http_guard_before_upload_and_transcription(lake, monkeypatch):
+def test_native_http_guard_before_upload_and_transcription(recordings, monkeypatch):
     import http.client
     import socketserver
     import threading
 
-    module, calls, _, _ = lake
+    module, calls, _, _ = recordings
     monkeypatch.setenv("SINNIX_STT_PUBLIC_ENDPOINT", "127.0.0.1:18090")
     original = socketserver.ThreadingTCPServer
     statuses = []

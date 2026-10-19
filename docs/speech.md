@@ -13,7 +13,7 @@ local LLMs.
 ```text
 sinnix stt lanes                 # audio lanes on this host, and which a pass takes
 sinnix stt transcribe FILE...    # files to JSON
-sinnix stt lake [--lane N]       # transcribe new recordings in the capture lanes
+sinnix stt recordings [--lane N] # transcribe new recordings in the capture lanes
 sinnix stt diarize FILE          # who spoke when
 sinnix stt models                # fetch or verify the models
 ```

@@ -63,7 +63,7 @@ mkAiService {
       modelDir = "${config.sinnix.paths.modelsRoot}/sherpa";
     in
     lib.mkMerge [
-      # The lake pass. Opportunistic and cheap: the VAD gate means a day of
+      # The recordings pass. Opportunistic and cheap: the VAD gate means a day of
       # mostly-silent ambient audio costs seconds, so this can run often
       # enough that a transcript is never far behind the recording. Direct
       # mkScheduledJob call, not mkAiService/mkServiceModule's `job` sugar:
@@ -72,12 +72,12 @@ mkAiService {
       (lib.sinnix.mkScheduledJob
         {
           inherit config;
-          unitName = "sinnix-stt-lake";
-          description = "Transcribe newly landed audio in the lake";
-          surface = config.sinnix.runtime.surfaces.stt-lake;
+          unitName = "sinnix-stt-recordings";
+          description = "Transcribe newly captured recordings";
+          surface = config.sinnix.runtime.surfaces.stt-recordings;
         }
         {
-          execStart = "${scriptPkgs.sinnix-stt}/bin/sinnix-stt lake";
+          execStart = "${scriptPkgs.sinnix-stt}/bin/sinnix-stt recordings";
           user = user;
           serviceConfig = {
             Group = "users";
@@ -97,7 +97,7 @@ mkAiService {
           };
           timer = {
             onBootSec = "10min";
-            intervalSec = cfg.lakeIntervalSec;
+            intervalSec = cfg.recordingsIntervalSec;
             accuracySec = "5min";
             description = "Periodic transcription of newly landed audio";
           };
@@ -111,11 +111,11 @@ mkAiService {
 
         environment.systemPackages = [ scriptPkgs.sinnix-stt ];
 
-        # The hub's own surface comes from mkAiService; the lake pass is a
+        # The hub's own surface comes from mkAiService; the recordings pass is a
         # second unit and needs its own registration, or mkRuntimeServiceConfig
         # throws on an unknown unit (which is the contract working as intended).
-        sinnix.runtime.surfaces.stt-lake = {
-          unit = "sinnix-stt-lake.service";
+        sinnix.runtime.surfaces.stt-recordings = {
+          unit = "sinnix-stt-recordings.service";
           resourceClass = "background";
           observe = {
             enable = true;
@@ -125,7 +125,7 @@ mkAiService {
             {
               name = "transcripts";
               path = "${config.sinnix.paths.capturePaths.transcripts}";
-              # Deliberately unbudgeted. The lake pass runs on lakeIntervalSec,
+              # Deliberately unbudgeted. The recordings pass runs on recordingsIntervalSec,
               # but it only writes when the VAD gate found speech in newly
               # landed audio, so a quiet stretch --
               # the operator away, or simply not talking -- produces nothing and
@@ -174,10 +174,10 @@ mkAiService {
       }
     ];
   extraOptions = {
-    lakeIntervalSec = args.lib.mkOption {
+    recordingsIntervalSec = args.lib.mkOption {
       type = args.lib.types.ints.positive;
       default = 1800;
-      description = "Seconds between lake transcription passes.";
+      description = "Seconds between recordings transcription passes.";
     };
   };
 } args

@@ -192,7 +192,7 @@
           extraPythonPackages = [ sinnix-lib ];
           nativeBuildInputs = [ pkgs.ripgrep ];
         };
-        stt-lake-suite = mkScriptSuite {
+        stt-suite = mkScriptSuite {
           name = "sinnix-stt";
           suiteDir = ../../pkgs/sinnix-stt/tests;
           scripts = [ "sinnix-stt" ];

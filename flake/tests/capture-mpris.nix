@@ -125,7 +125,7 @@
             message = "Browser evidence must retain private entrances owned by its writer.";
           }
           {
-            assertion = config.systemd.services.sinnix-stt-lake.serviceConfig.UMask == "0077";
+            assertion = config.systemd.services.sinnix-stt-recordings.serviceConfig.UMask == "0077";
             message = "Transcript writers must create owner-only output.";
           }
           {
