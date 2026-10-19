@@ -731,19 +731,29 @@ def test_a_catalog_call_does_not_stall_the_event_loop(
     That held the loop for about a second per `gateway.catalog`, and every
     concurrent call waited as long (the `gateway.loop_stall` lines of
     2026-09-29).
+
+    The measure is CPU time the loop thread spends between two 20 ms ticks,
+    not wall-clock lag: the check runs in the low-priority build slice, and
+    on a loaded host a process that is simply not scheduled for 400 ms read
+    as a 400 ms stall (2026-10-19, load 50). Work on the loop consumes the
+    loop thread's CPU; waiting for a core does not.
     """
     from sinnix_agent_gateway.app import create_server
 
     server = create_server(GatewayConfig(state_dir=tmp_path / "state", projects={}))
-    stalls: list[dict[str, Any]] = []
+    stalls: list[float] = []
+
+    async def watch_loop_cpu() -> None:
+        while True:
+            started = time.thread_time()
+            await anyio.sleep(0.02)
+            spent = time.thread_time() - started
+            if spent > 0.25:
+                stalls.append(round(spent, 3))
 
     async def scenario() -> None:
         async with anyio.create_task_group() as group:
-            group.start_soon(
-                lambda: calllog.watch_event_loop(
-                    interval=0.02, threshold=0.25, sink=stalls.append
-                )
-            )
+            group.start_soon(watch_loop_cpu)
             await anyio.sleep(0.05)
             for query in ("shell", "jobs", "files"):
                 result = await server.call_tool(
