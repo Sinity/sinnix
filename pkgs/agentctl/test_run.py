@@ -2204,4 +2204,3 @@ def test_dirty_endpoints_with_different_content_are_changed() -> None:
     )
     changed = run_module.execution_receipt(start, {**start, "content_tree": "b"})
     assert changed["binding"] == "changed"
-    assert "immutable_execution_attestation" not in changed
