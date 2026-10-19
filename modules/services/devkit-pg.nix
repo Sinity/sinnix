@@ -36,6 +36,11 @@ mkServiceModule {
     { config, ... }:
     {
       environment.systemPackages = [ postgres ];
+      # logind sizes $XDG_RUNTIME_DIR at 10% of RAM (3.2G here); concurrent
+      # test databases from parallel build lanes filled it. tmpfs takes RAM
+      # only as it fills. Applies at the next login; a live session needs
+      # `mount -o remount,size=10G /run/user/<uid>`.
+      services.logind.settings.Login.RuntimeDirectorySize = "10G";
       systemd.user.services.sinnix-devkit-pg = {
         description = "Disposable PostgreSQL for devkit (socket in %t/devkit/pg)";
         wantedBy = [ "default.target" ];
