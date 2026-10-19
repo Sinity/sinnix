@@ -168,8 +168,8 @@ def request(
 ) -> dict:
     if "process" in target:
         expected = {"kind": "process", **target["process"]}
-    elif "job_id" in target:
-        expected = {"kind": "job", "launch_reference": "launch-fixture", "attempt": 1}
+    elif "task_id" in target:
+        expected = {"kind": "job", "job_id": "launch-fixture", "attempt": 1}
     else:
         properties = {
             "LoadState": "loaded",
@@ -213,20 +213,20 @@ def fake_unit_state_prober(unit: str, manager: str) -> dict[str, str]:
 class FakeAgentJobs:
     def __init__(self, jobs: list[dict]) -> None:
         self.jobs = {
-            str(job["job_id"]): {"reference": "launch-fixture", "attempt": 1, **job}
+            str(job["task_id"]): {"job_id": "launch-fixture", "attempt": 1, **job}
             for job in jobs
         }
         self.cancelled: list[str] = []
 
-    def get(self, job_id: str, *, reference=None) -> dict:
+    def get(self, task_id: str, *, job_id=None) -> dict:
         try:
-            return self.jobs[job_id]
+            return self.jobs[task_id]
         except KeyError as error:
             raise AgentCtlError("unknown job") from error
 
-    def cancel(self, job_id: str, *, reference=None, expected_attempt=None) -> dict:
-        job = self.get(job_id)
-        self.cancelled.append(job_id)
+    def cancel(self, task_id: str, *, job_id=None, expected_attempt=None) -> dict:
+        job = self.get(task_id)
+        self.cancelled.append(task_id)
         return job | {
             "phase": "cancelled",
             "terminal": True,
@@ -240,7 +240,7 @@ def test_action_fixtures_are_attested_and_idempotent_across_restart(
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
     job = {
-        "job_id": "job-1",
+        "task_id": "job-1",
         "label": "sinnix:lane:sinnix-1",
         "kind": "attested-agent",
         "project": "sinnix",
@@ -274,9 +274,9 @@ def test_action_fixtures_are_attested_and_idempotent_across_restart(
         agent_jobs=FakeAgentJobs([job]),
         unit_state_prober=fake_unit_state_prober,
     )
-    first = actions.execute(request("interrupt", {"job_id": "job-1"}))
+    first = actions.execute(request("interrupt", {"task_id": "job-1"}))
     assert first["schema"] == "sinnix-hub-action-v1"
-    assert actions.execute(request("interrupt", {"job_id": "job-1"})) == first
+    assert actions.execute(request("interrupt", {"task_id": "job-1"})) == first
     assert calls == ["interrupt"]
     for action, target, key in [
         ("freeze", {"unit": "safe"}, "k3"),
@@ -346,7 +346,7 @@ def test_action_rejects_unknown_pid_stale_revision_and_unsafe_unit(
                 }
             )
         with pytest.raises(ActionError, match="only support interrupt"):
-            validate_request(request(action, {"job_id": "job-1"}, key=f"{action}-job"))
+            validate_request(request(action, {"task_id": "job-1"}, key=f"{action}-job"))
 
 
 def test_policy_properties_and_rebuild_override_are_enumerated(tmp_path: Path) -> None:
@@ -449,7 +449,7 @@ def test_interrupt_uses_agentctl_and_records_its_cancellation_truth(
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
     job = {
-        "job_id": "job-1",
+        "task_id": "job-1",
         "label": "sinnix:lane:sinnix-1",
         "kind": "attested-agent",
         "project": "sinnix",
@@ -472,7 +472,7 @@ def test_interrupt_uses_agentctl_and_records_its_cancellation_truth(
         agent_jobs=agent_jobs,
         unit_state_prober=fake_unit_state_prober,
     )
-    receipt = actions.execute(request("interrupt", {"job_id": "job-1"}))
+    receipt = actions.execute(request("interrupt", {"task_id": "job-1"}))
     assert agent_jobs.cancelled == ["job-1"]
     assert receipt["previous_state"]["job"]["phase"] == "running"
     assert receipt["resulting_state"]["job"]["phase"] == "cancelled"
@@ -486,7 +486,7 @@ def test_interrupt_uses_agentctl_and_records_its_cancellation_truth(
             tmp_path / "other-receipts.jsonl",
             agent_jobs=FakeAgentJobs([job | {"phase": "succeeded", "terminal": True}]),
             unit_state_prober=fake_unit_state_prober,
-        ).execute(request("interrupt", {"job_id": "job-1"}, key="terminal"))
+        ).execute(request("interrupt", {"task_id": "job-1"}, key="terminal"))
 
 
 def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_system(
@@ -507,7 +507,7 @@ def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_system(
     # action's own target.
     bloat_jobs = [
         {
-            "job_id": f"unrelated-{i}",
+            "task_id": f"unrelated-{i}",
             "schema_version": 3,
             "worktree": f"/realm/worktree/unrelated-{i}",
             "execution": {
@@ -1053,7 +1053,7 @@ def test_new_unit_invocation_and_job_attempt_refuse_old_action(tmp_path):
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
     properties = fake_unit_state_prober("", "")
-    jobs = FakeAgentJobs([{"job_id": "job-1", "terminal": False}])
+    jobs = FakeAgentJobs([{"task_id": "job-1", "terminal": False}])
     calls = []
     actions = ActionService(
         lambda: {"sequence": 99},
@@ -1071,7 +1071,7 @@ def test_new_unit_invocation_and_job_attempt_refuse_old_action(tmp_path):
         ),
         (
             "interrupt",
-            {"job_id": "job-1"},
+            {"task_id": "job-1"},
             lambda: jobs.jobs["job-1"].update(attempt=2),
         ),
     ):

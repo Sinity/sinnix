@@ -216,6 +216,7 @@ class CallRecord:
         }
         job = _job(response)
         if job is not None:
+            record["task_id"] = job.get("task_id")
             record["job_id"] = job.get("job_id")
             record["group"] = job.get("group")
         if self.clamped:
@@ -230,7 +231,7 @@ def _job(response: Mapping[str, Any] | None) -> Mapping[str, Any] | None:
         return None
     nested = data.get("job")
     job = nested if isinstance(nested, Mapping) else data
-    return job if job.get("job_id") is not None else None
+    return job if job.get("task_id") is not None else None
 
 
 async def watch_event_loop(

@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 92c3e5336dbd37c5ddae785d441e0fc7f10a201c9af8e4fcd7218f0db11a8be6 -->
+<!-- gateway-catalog-sha256: 35576d0065ddb68105cca8abee726b8ef78cba502e3cd993cec1fd9f58c6a03a -->
 
 # Agent Gateway
 
@@ -108,7 +108,7 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 - `beads.get` — Read one bead by ref, id or title fragment, with optional comments, history, dependencies or graph.
 - `jobs.get` — One job's state and bead binding, with its log range or typed result on request.
 - `jobs.logs` — A byte range of a job's bounded log (workload output, then the wrapper's stderr).
-- `batches.status` — Every id is a pueue task id: pass a worker's or the landing's job_id to jobs.logs, jobs.wait or jobs.cancel, with its job_launch_reference so the call survives a reorder.
+- `batches.status` — Every id is a pueue task id: pass a worker's or the landing's task_id to jobs.logs, jobs.wait or jobs.cancel, with its job_id so the call survives a reorder.
 - `terminals.get` — Resolve one terminal by ref, kitty id, title, cwd, pid or focus.
 - `browser.page` — Element refs (g<generation>e<n>) are attached to the DOM for this snapshot; a later snapshot or reload replaces them, and a stale ref fails not_found.
 - `machine.units.get` — Describe one unit via systemctl show: states, main pid, cgroup, restarts, timestamps.
@@ -130,7 +130,7 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 
 ### wait
 
-- `jobs.wait` — outcome is terminal, running or queued; running and queued are continuations, never failures, and carry queue: the group's occupancy and the job's place in it. Pass output_offset (the previous output.next_offset) to receive only new log bytes. The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.
+- `jobs.wait` — outcome is terminal, running or queued; running and queued are continuations, never failures, and carry queue: the group's occupancy and the job's place in it. Pass output_offset (the previous output.next_offset) to receive only new log bytes. The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the job_id the start returned and the wait follows its job across a reorder, answering with the id it is at now.
 - `wait.for` — Conditions: job_terminal, bead_status, bead_revision, unit_state, file_hash, file_exists, capture_freshness, receipt_appearance, terminal_output. A timeout returns the current evidence and a continuation token.
 - `terminals.wait` — Wait until a terminal is at its prompt, shows a regex, finishes a process, or changes title.
 - `processes.wait` — Wait until a process (same pid and start ticks) exits, or the bounded timeout elapses.
@@ -181,10 +181,10 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 - `operations.run` — Queue one project-declared operation in its declared pool on the root or a worktree.
 - `shell.run` — cwd is confined to the checkout. pool=auto sends agent CLI launches (claude, codex, ...) to the long pool and everything else to the quick pool. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) and returns output; outcome running or queued is a continuation with queue occupancy, never a failure: pass continuation and output.next_offset to jobs.wait. timeout_seconds is an optional kill ceiling; omitted, the job runs until it finishes.
 - `batches.start` — backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.
-- `batches.land` — batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.
+- `batches.land` — batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_task_id rather than on this call.
 - `batches.resume` — backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.
 - `terminals.run` — wait=true appends a visible completion sentinel and waits for it (or for at_prompt when kitty reports it). Captured shells disable prompt marks, so the sentinel is the reliable completion signal. exit_status is parsed from that sentinel.
 
 `sinnix-agent-gateway-generate --reference` prints every schema and example.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `92c3e5336dbd37c5ddae785d441e0fc7f10a201c9af8e4fcd7218f0db11a8be6`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `35576d0065ddb68105cca8abee726b8ef78cba502e3cd993cec1fd9f58c6a03a`.

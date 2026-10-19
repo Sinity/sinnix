@@ -181,10 +181,10 @@ def test_interrupted_launch_reconciles_owner_identity_without_running_again(
     def reconcile(key):
         seen.append(key)
         if malformed:
-            return {"launch_reference": "retained-launch"}
+            return {"job_id": "retained-launch"}
         return {
-            "job_id": "7",
-            "launch_reference": "retained-launch",
+            "task_id": "7",
+            "job_id": "retained-launch",
             "state": {"phase": "queued"},
         }
 
@@ -203,7 +203,7 @@ def test_interrupted_launch_reconciles_owner_identity_without_running_again(
         assert response["error"]["code"] == "indeterminate", response
     else:
         assert response["result"]["outcome"] == "ok", response
-        assert response["data"]["launch_reference"] == "retained-launch"
+        assert response["data"]["job_id"] == "retained-launch"
     assert seen == [runtime.launch_idempotency_key("operations.run", "launch-key")]
     if not malformed:
         assert anyio.run(invoke) == response
@@ -240,12 +240,12 @@ def test_interrupted_shell_launch_recovers_exact_job_or_stays_indeterminate(
             return None
         if evidence == "malformed":
             return {
-                "launch_reference": "request-retained",
+                "job_id": "request-retained",
                 "state": {"phase": "running"},
             }
         return {
-            "job_id": "71",
-            "launch_reference": "request-retained",
+            "task_id": "71",
+            "job_id": "request-retained",
             "group": "shell-long",
             "state": {"phase": "running", "terminal": False, "exit_code": None},
         }
@@ -268,8 +268,8 @@ def test_interrupted_shell_launch_recovers_exact_job_or_stays_indeterminate(
     if evidence != "valid":
         assert response["error"]["code"] == "indeterminate"
     else:
-        assert response["data"]["job_id"] == 71
-        assert response["data"]["launch_reference"] == "request-retained"
+        assert response["data"]["task_id"] == 71
+        assert response["data"]["job_id"] == "request-retained"
         assert response["data"]["outcome"] == "running"
         assert anyio.run(invoke, request) == response
         assert len(seen) == 1

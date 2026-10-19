@@ -152,12 +152,12 @@ def _receipt_observation(
     match = _RECEIPT.fullmatch(receipt) if isinstance(receipt, str) else None
     if match is None:
         raise JobError(
-            "native verification receipt must be agentctl://jobs/<id>/<launch-reference>"
+            "native verification receipt must be agentctl://jobs/<task-id>/<job-id>"
         )
-    task_id, reference = int(match.group(1)), match.group(2)
+    task_id, job_id = int(match.group(1)), match.group(2)
     try:
-        task = launch._read_task(config, task_id, reference)
-        job = launch.get_job(task.task_id, config, reference)
+        task = launch._read_task(config, task_id, job_id)
+        job = launch.get_job(task.task_id, config, job_id)
     except JobError as error:
         raise JobError(
             f"native verification receipt does not resolve: {receipt}"
@@ -225,8 +225,8 @@ def _receipt_observation(
     return {
         "observed_at": datetime.now(timezone.utc).isoformat(),
         "source": "agentctl",
-        "job_id": job["job_id"],
-        "reference": reference,
+        "task_id": job["task_id"],
+        "job_id": job_id,
         "attempt": job["attempt"],
         "artifacts": job["artifacts"],
         "queue_present": job["queue_present"],

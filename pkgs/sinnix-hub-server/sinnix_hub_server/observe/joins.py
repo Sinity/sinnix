@@ -221,21 +221,21 @@ def build_gateway_rows(
             continue
         rows.append(
             {
-                "workload_id": f"agentctl:{job.get('job_id')}",
+                "workload_id": f"agentctl:{job.get('task_id')}",
                 "source": "agentctl",
                 "project": job.get("project"),
                 "kind": job.get("kind"),
                 "name": job.get("label"),
-                "run_id": job.get("job_id"),
+                "run_id": job.get("task_id"),
                 "status": job.get("phase"),
                 "unit": None,
                 "cgroup": None,
                 "resource_class": None,
-                "below": match_below(str(job.get("job_id")), None, below),
+                "below": match_below(str(job.get("task_id")), None, below),
                 "metrics": {
                     "group": job.get("group"),
                     "operation": job.get("operation"),
-                    "reference": job.get("reference"),
+                    "job_id": job.get("job_id"),
                 },
                 "gaps": [] if gateway.get("available") else ["agentctl.unavailable"],
             }

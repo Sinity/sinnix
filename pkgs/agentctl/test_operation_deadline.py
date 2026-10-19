@@ -67,18 +67,18 @@ def test_landing_no_deadline_reuses_live_job_until_terminal(
     views = iter(
         [
             {
-                "job_id": 17,
+                "task_id": 17,
                 "terminal": False,
                 "phase": "running",
                 "started_at": "2000-01-01T00:00:00Z",
             },
-            {"job_id": 17, "terminal": True, "phase": "done"},
+            {"task_id": 17, "terminal": True, "phase": "done"},
         ]
     )
     calls = []
 
-    def wait(job_id: int, **kwargs: object) -> dict[str, object]:
-        calls.append(job_id)
+    def wait(task_id: int, **kwargs: object) -> dict[str, object]:
+        calls.append(task_id)
         return next(views)
 
     monkeypatch.setattr(landing.launch, "wait", wait)

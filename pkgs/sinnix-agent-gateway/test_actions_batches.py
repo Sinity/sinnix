@@ -39,9 +39,9 @@ RUN = {
             "branch": f"batch/{RUN_ID}/fixture-7",
             "worktree": f"/realm/worktree/fixture-batch-{RUN_ID}-fixture-7",
             "stage": "running",
-            "job_id": "41",
-            "job_launch_reference": "fixture-worker-abcd1234",
-            "job_ids": ["41"],
+            "task_id": "41",
+            "job_id": "fixture-worker-abcd1234",
+            "task_ids": ["41"],
             "backend": "claude",
             "model": "claude-opus-5",
             "effort": "high",
@@ -50,8 +50,8 @@ RUN = {
         }
     ],
     "landing": {
-        "job_id": "42",
-        "job_launch_reference": "fixture-integrate-9f10",
+        "task_id": "42",
+        "job_id": "fixture-integrate-9f10",
         "integration_branch": f"batch/{RUN_ID}/integration",
         "candidate_sha": None,
         "pr_number": None,
@@ -112,14 +112,14 @@ def test_status_names_every_worker_bead_and_the_pueue_ids_jobs_actions_take(
         "sinnix://projects/fixture/beads/fixture-7",
         "sinnix://projects/fixture/beads/fixture-8",
     ]
-    assert worker["job_id"] == 41 and worker["job_ref"] == "sinnix://jobs/41"
+    assert worker["task_id"] == 41 and worker["job_ref"] == "sinnix://jobs/41"
     # The stable identity a jobs.* call takes so a reorder cannot redirect it.
-    assert worker["job_launch_reference"] == "fixture-worker-abcd1234"
-    assert worker["job_ids"] == [41]
+    assert worker["job_id"] == "fixture-worker-abcd1234"
+    assert worker["task_ids"] == [41]
     assert worker["state"]["phase"] == "running"
-    assert data["landing"]["job_id"] == 42
+    assert data["landing"]["task_id"] == 42
     assert data["landing"]["job_ref"] == "sinnix://jobs/42"
-    assert data["landing"]["job_launch_reference"] == "fixture-integrate-9f10"
+    assert data["landing"]["job_id"] == "fixture-integrate-9f10"
     assert data["next_actions"] == ["batches.status", "jobs.wait", "jobs.logs"]
     assert fake.calls[-1].arguments == {"run_id": "a2c81926"}
 
@@ -199,15 +199,15 @@ def test_land_and_resume_return_the_queued_task_rather_than_running_it(
 ) -> None:
     """Breaks if a caller has to hold an MCP request open for a whole landing."""
     server, fake = make_server(tmp_path, monkeypatch)
-    fake.responses["batch.land"] = {**RUN, "landing_job_id": "77"}
-    fake.responses["batch.resume"] = {**RUN, "resumed_job_id": "78"}
+    fake.responses["batch.land"] = {**RUN, "landing_task_id": "77"}
+    fake.responses["batch.resume"] = {**RUN, "resumed_task_id": "78"}
 
     landed = ok(
         server,
         "batches.land",
         {"target": {"run_id": "a2c81926"}, "idempotency_key": "land-1"},
     )
-    assert landed["landing_job_id"] == 77
+    assert landed["landing_task_id"] == 77
     assert landed["landing_job_ref"] == "sinnix://jobs/77"
 
     resumed = ok(
@@ -220,7 +220,7 @@ def test_land_and_resume_return_the_queued_task_rather_than_running_it(
             "idempotency_key": "resume-1",
         },
     )
-    assert resumed["resumed_job_id"] == 78
+    assert resumed["resumed_task_id"] == 78
     assert fake.calls[-1].arguments == {
         "run_id": "a2c81926",
         "worker_id": "fixture-7",

@@ -875,7 +875,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     secrets, lost_secrets = secret_environment(Path(launch_input), launch)
     environment.update(secrets)
     # Native invocation provenance is owned here, not inherited from a parent
-    # job or caller. The launch reference joins this attempt to retained input.
+    # job or caller. The job id joins this attempt to retained input.
     for field in (
         "JOB_ID",
         "CORRELATION_ID",

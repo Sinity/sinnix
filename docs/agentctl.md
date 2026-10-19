@@ -24,7 +24,7 @@ batch's run manifest, and the `view` screen.
 | `job start [p] <op> [--workspace P] [--wait] [--if-idle] [-- args…]`        | queue an operation in its pool, label `<p>:<op>`; `--if-idle` skips it while the same label is queued or running  |
 | `job list [--project p] [--active] [--all]`                                 | job rows, newest first (40 unless `--all`)                                                                        |
 | `job snapshot [--limit N]`                                                  | group state and counts plus bounded job rows, unfinished first                                                    |
-| `job get \| logs \| result \| cancel \| retry \| wait <id>`                 | one job by pueue id or `--reference`; `--attempt` selects a retry; `logs`/`result` page with `--offset`/`--limit` |
+| `job get \| logs \| result \| cancel \| retry \| wait <id>`                 | one job by pueue task id, plus `--job-id` to follow it across a reorder; `--attempt` selects a retry; `logs`/`result` page with `--offset`/`--limit` |
 | `job clean <id> \| --all-terminal`                                          | remove terminal queue entries; inputs, attempts, results and evidence are kept                                    |
 | `batch start [p] <bead>… [--worker a,b]…`                                   | validate members, write the manifest, claim, create worktrees, queue workers and the landing behind them          |
 | `batch land <run>`                                                          | the landing body: integrate, verify, review, publish, accept, clean up; re-runnable                               |
@@ -55,13 +55,14 @@ did not succeed.
 
 ## Jobs
 
-A job is a pueue task: its id is pueue's task id, its pool is pueue's group. A
-task id is only a queue position (`pueue switch` swaps ids), so every job also
-has a durable launch reference, returned by every job verb and accepted as
-`--reference`.
+A job is a pueue task, and its pool is pueue's group. Each job has two ids:
+`task_id`, pueue's task number, which is only a queue position (`pueue switch`
+swaps them), and `job_id`, agentctl's stable string id. Every job verb returns
+both and takes the task id as its argument; pass `--job-id` too so the call
+follows the job if the queue is reordered.
 
 `job start` writes a private launch input
-(`$XDG_STATE_HOME/agentctl/inputs/<ref>.json`, mode 0600) with the argv, the
+(`$XDG_STATE_HOME/agentctl/inputs/<job-id>.json`, mode 0600) with the argv, the
 resolved environment, working directory, timeout, result kind and artifact
 paths. It then runs `pueue add` with the command `agentctl-run <input>`.
 `pueue add` runs with a scrubbed environment because pueue stores the adding
@@ -347,7 +348,7 @@ agentctl evidence get <evidence_id> --project <project> --json
 
 The result names a candidate SHA, its tasks, their acceptance bindings and a
 `self_review`. Each verification claim must be a job receipt,
-`agentctl://jobs/<id>/<launch-reference>`. Filing checks that the job
+`agentctl://jobs/<task-id>/<job-id>`. Filing checks that the job
 succeeded on a clean checkout of the candidate, and records whether the
 candidate is published on the base branch. Records are immutable files under
 `$XDG_STATE_HOME/agentctl/native-evidence/`.

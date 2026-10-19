@@ -65,8 +65,8 @@ class JobBinding(GatewayModel):
 
 class JobView(GatewayModel):
     ref: str
-    job_id: int
-    launch_reference: str | None = Field(
+    task_id: int
+    job_id: str | None = Field(
         default=None,
         description="The job's own name. Pass it back in a target locator to "
         "address this job after the queue has been reordered.",
@@ -107,8 +107,8 @@ class QueueEntry(GatewayModel):
     """One job holding or awaiting a slot in its group."""
 
     ref: str
-    job_id: int
-    launch_reference: str | None = None
+    task_id: int
+    job_id: str | None = None
     label: str | None = None
     command: str | None = Field(
         default=None, description="The job's argv as one redacted line."
@@ -163,11 +163,11 @@ def _command(argv: Any) -> str | None:
 
 
 def _entry(raw: Mapping[str, Any]) -> QueueEntry:
-    job_id = int(raw["job_id"])
+    task_id = int(raw["task_id"])
     return QueueEntry(
-        ref=job_ref(job_id),
-        job_id=job_id,
-        launch_reference=raw.get("reference"),
+        ref=job_ref(task_id),
+        task_id=task_id,
+        job_id=raw.get("job_id"),
         label=raw.get("label"),
         command=_command(raw.get("argv")),
         since=raw.get("since"),
@@ -236,7 +236,7 @@ def _binding(payload: Mapping[str, Any]) -> JobBinding | None:
 
 def _job_view(payload: Mapping[str, Any]) -> JobView:
     try:
-        job_id = int(payload["job_id"])
+        task_id = int(payload["task_id"])
     except (KeyError, TypeError, ValueError) as exc:
         raise ProtocolError("owner_failed", "job owner omitted the job id") from exc
     state = payload.get("state") if isinstance(payload.get("state"), Mapping) else {}
@@ -250,11 +250,11 @@ def _job_view(payload: Mapping[str, Any]) -> JobView:
     next_actions.append("jobs.retry" if terminal else "jobs.wait")
     if not terminal:
         next_actions.append("jobs.cancel")
-    launch_reference = payload.get("launch_reference")
+    job_id = payload.get("job_id")
     return JobView(
-        ref=job_ref(job_id),
-        job_id=job_id,
-        launch_reference=str(launch_reference) if launch_reference else None,
+        ref=job_ref(task_id),
+        task_id=task_id,
+        job_id=str(job_id) if job_id else None,
         label=payload.get("label"),
         kind=payload.get("kind"),
         project_id=project_id,
@@ -294,29 +294,29 @@ def _job_view(payload: Mapping[str, Any]) -> JobView:
 def _job(
     runtime: Runtime,
     operation: str,
-    job_id: int,
-    launch_reference: str | None = None,
+    task_id: int,
+    job_id: str | None = None,
     **arguments: Any,
 ) -> dict[str, Any]:
     """One LocalJobs operation on a job, proving the answer names that job.
 
     Which identity the answer must match is the identity the call addressed:
-    a launch reference names the job wherever the queue moved it, so its
+    a job id names the job wherever the queue moved it, so its
     answer is expected to carry another task id, while an id alone names only
     the position and its answer must still be about that position.
     """
-    if launch_reference is None:
-        result = runtime._job(operation, {"job_id": job_id, **arguments})
-        if str(result.get("job_id")) != str(job_id):
+    if job_id is None:
+        result = runtime._job(operation, {"task_id": task_id, **arguments})
+        if str(result.get("task_id")) != str(task_id):
             raise ProtocolError(
                 "owner_failed", f"job owner {operation} response names another job"
             )
         return result
     result = runtime._job(
         operation,
-        {"job_id": job_id, "launch_reference": launch_reference, **arguments},
+        {"task_id": task_id, "job_id": job_id, **arguments},
     )
-    if str(result.get("launch_reference") or "") != launch_reference:
+    if str(result.get("job_id") or "") != job_id:
         raise ProtocolError(
             "owner_failed", f"job owner {operation} response names another job"
         )
@@ -435,7 +435,7 @@ class JobLog(GatewayModel):
     size_bytes: int | None = None
     base64: str | None = None
     ref: str
-    job_id: int
+    task_id: int
     content: str
     offset: int
     max_bytes: int
@@ -465,17 +465,17 @@ class JobDetail(JobView):
 
 def _log(
     runtime: Runtime,
-    job_id: int,
+    task_id: int,
     offset: int,
     max_bytes: int,
-    launch_reference: str | None = None,
+    job_id: str | None = None,
     attempt: int | None = None,
 ) -> JobLog:
     raw = _job(
         runtime,
         "job.logs",
+        task_id,
         job_id,
-        launch_reference,
         offset=offset,
         max_bytes=max_bytes,
         **({"attempt": attempt} if attempt is not None else {}),
@@ -483,11 +483,11 @@ def _log(
     content = str(raw.get("content") or "")
     truncated = bool(raw.get("truncated"))
     returned = raw.get("returned_bytes", len(content.encode()))
-    # A reference-addressed read answers about whatever id the job is at now.
-    job_id = int(raw.get("job_id", job_id))
+    # A job_id-addressed read answers about whatever id the job is at now.
+    task_id = int(raw.get("task_id", task_id))
     return JobLog(
-        ref=job_ref(job_id),
-        job_id=job_id,
+        ref=job_ref(task_id),
+        task_id=task_id,
         content=content,
         offset=offset,
         max_bytes=max_bytes,
@@ -504,7 +504,7 @@ def _log(
 
 
 def _get(runtime: Runtime, inp: GetInput) -> JobDetail:
-    job_id, _, reference = inp.target.resolve()
+    task_id, _, job_id = inp.target.resolve()
     selectors = {}
     if inp.attempt is not None:
         selectors["attempt"] = inp.attempt
@@ -512,7 +512,7 @@ def _get(runtime: Runtime, inp: GetInput) -> JobDetail:
         selectors.update(
             attempt_offset=inp.attempt_offset, attempt_limit=inp.attempt_limit
         )
-    raw = _job(runtime, "job.get", job_id, reference, **selectors)
+    raw = _job(runtime, "job.get", task_id, job_id, **selectors)
     view = _job_view(raw)
     detail = JobDetail(
         **view.model_dump(),
@@ -522,14 +522,14 @@ def _get(runtime: Runtime, inp: GetInput) -> JobDetail:
     )
     if inp.projection == "log":
         detail.log = _log(
-            runtime, job_id, inp.offset, inp.max_bytes, reference, inp.attempt
+            runtime, task_id, inp.offset, inp.max_bytes, job_id, inp.attempt
         )
     elif inp.projection == "result":
         raw = _job(
             runtime,
             "job.result",
+            task_id,
             job_id,
-            reference,
             max_bytes=inp.max_bytes,
             offset=inp.offset,
             **({"attempt": inp.attempt} if inp.attempt is not None else {}),
@@ -548,8 +548,8 @@ class LogsInput(RequestControls):
 
 
 def _logs(runtime: Runtime, inp: LogsInput) -> JobLog:
-    job_id, _, reference = inp.target.resolve()
-    return _log(runtime, job_id, inp.offset, inp.max_bytes, reference, inp.attempt)
+    task_id, _, job_id = inp.target.resolve()
+    return _log(runtime, task_id, inp.offset, inp.max_bytes, job_id, inp.attempt)
 
 
 # ------------------------------------------------------------------ wait
@@ -569,7 +569,7 @@ class JobWaitInput(RequestControls):
 
 class JobWait(GatewayModel):
     ref: str
-    job_id: int
+    task_id: int
     outcome: Progress = Field(
         description="terminal, or the job is still running or queued; a "
         "running or queued answer is a continuation, not a failure."
@@ -588,13 +588,13 @@ class JobWait(GatewayModel):
 
 async def _wait(runtime: Runtime, inp: JobWaitInput) -> JobWait:
     """Block on pueue in a worker thread; a cancelled MCP request abandons it."""
-    job_id, _, reference = inp.target.resolve()
+    task_id, _, job_id = inp.target.resolve()
     raw = await anyio.to_thread.run_sync(
         lambda: _job(
             runtime,
             "job.wait",
+            task_id,
             job_id,
-            reference,
             timeout_seconds=inp.timeout_seconds,
         ),
         abandon_on_cancel=True,
@@ -606,10 +606,10 @@ async def _wait(runtime: Runtime, inp: JobWaitInput) -> JobWait:
         output = await anyio.to_thread.run_sync(
             lambda: _log(
                 runtime,
-                view.job_id,
+                view.task_id,
                 inp.output_offset or 0,
                 inp.max_output_bytes,
-                view.launch_reference,
+                view.job_id,
             ),
             abandon_on_cancel=True,
         )
@@ -620,7 +620,7 @@ async def _wait(runtime: Runtime, inp: JobWaitInput) -> JobWait:
     # Where the job is now, which a reorder may have moved since it started.
     return JobWait(
         ref=view.ref,
-        job_id=view.job_id,
+        task_id=view.task_id,
         outcome=outcome,
         job=view,
         queue=_job_queue(raw),
@@ -689,7 +689,7 @@ class CancelInput(MutationControls):
 
 class CancelResult(GatewayModel):
     ref: str
-    job_id: int
+    task_id: int
     previous_phase: str | None = None
     job: JobView
     cancel_requested: bool
@@ -709,7 +709,7 @@ class CancelResult(GatewayModel):
 
 
 def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
-    job_id, ref, reference = inp.target.resolve()
+    task_id, ref, job_id = inp.target.resolve()
     expected = inp.expected_phase
     if inp.preconditions:
         if set(inp.preconditions) - {"expected_phase"}:
@@ -717,7 +717,7 @@ def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
                 "invalid_request", "job preconditions are not recognized"
             )
         expected = expected or inp.preconditions.get("expected_phase")
-    before = _job_view(_job(runtime, "job.get", job_id, reference))
+    before = _job_view(_job(runtime, "job.get", task_id, job_id))
     if expected is not None and before.state.phase != expected:
         raise ProtocolError(
             "precondition_failed",
@@ -731,8 +731,8 @@ def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
     raw = _job(
         runtime,
         "job.cancel",
+        task_id,
         job_id,
-        reference,
         actor=f"gateway:{PRINCIPAL}",
         reason=inp.reason,
     )
@@ -760,7 +760,7 @@ def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
     cancelled_view = _job_view(raw)
     return CancelResult(
         ref=cancelled_view.ref,
-        job_id=cancelled_view.job_id,
+        task_id=cancelled_view.task_id,
         previous_phase=before.state.phase,
         job=cancelled_view,
         cancel_requested=raw["cancel_requested"],
@@ -779,8 +779,8 @@ class RetryInput(MutationControls):
 
 
 def _retry(runtime: Runtime, inp: RetryInput) -> JobView:
-    job_id, _, reference = inp.target.resolve()
-    return _job_view(_job(runtime, "job.retry", job_id, reference))
+    task_id, _, job_id = inp.target.resolve()
+    return _job_view(_job(runtime, "job.retry", task_id, job_id))
 
 
 class CleanInput(MutationControls):
@@ -789,7 +789,7 @@ class CleanInput(MutationControls):
 
 class CleanResult(GatewayModel):
     ref: str
-    job_id: int
+    task_id: int
     cleaned: bool
     removed: list[str] = Field(
         default_factory=list,
@@ -799,13 +799,13 @@ class CleanResult(GatewayModel):
 
 
 def _clean(runtime: Runtime, inp: CleanInput) -> CleanResult:
-    job_id, _, reference = inp.target.resolve()
-    raw = _job(runtime, "job.clean", job_id, reference)
+    task_id, _, job_id = inp.target.resolve()
+    raw = _job(runtime, "job.clean", task_id, job_id)
     # The id the owner cleaned, which a reorder may have moved the job to.
-    cleaned_id = int(raw.get("job_id", job_id))
+    cleaned_id = int(raw.get("task_id", task_id))
     return CleanResult(
         ref=job_ref(cleaned_id),
-        job_id=cleaned_id,
+        task_id=cleaned_id,
         cleaned=bool(raw.get("cleaned")),
         removed=[str(path) for path in raw.get("removed") or []],
         next_actions=["jobs.list"],
@@ -931,7 +931,7 @@ def _shell_result(result: Mapping[str, Any], pool: str, reason: str) -> ShellRun
         queue_unavailable=result.get("queue_unavailable"),
         continuation=None
         if view.state.terminal
-        else JobLocator(job_id=view.job_id, launch_reference=view.launch_reference),
+        else JobLocator(task_id=view.task_id, job_id=view.job_id),
     )
 
 
@@ -943,7 +943,7 @@ async def _run_shell(runtime: Runtime, inp: ShellRunInput) -> ShellRunResult:
     view = _job_view(result)
     if not inp.wait:
         return _shell_result(result, pool, reason)
-    target = JobLocator(job_id=view.job_id, launch_reference=view.launch_reference)
+    target = JobLocator(task_id=view.task_id, job_id=view.job_id)
     waited = await _wait(
         runtime,
         JobWaitInput(
@@ -965,7 +965,7 @@ async def _run_shell(runtime: Runtime, inp: ShellRunInput) -> ShellRunResult:
         continuation=(
             None
             if waited.outcome == "terminal"
-            else JobLocator(job_id=view.job_id, launch_reference=view.launch_reference)
+            else JobLocator(task_id=view.task_id, job_id=view.job_id)
         ),
     )
 
@@ -1006,7 +1006,7 @@ ACTIONS: tuple[Action, ...] = (
         next_actions=("jobs.logs", "jobs.wait", "jobs.cancel", "jobs.retry"),
         aliases=("job status", "job result", "job output", "phase"),
         examples=(
-            Example(title="Job summary", input={"target": {"job_id": 41}}),
+            Example(title="Job summary", input={"target": {"task_id": 41}}),
             Example(
                 title="Typed result",
                 input={"target": {"ref": _JOB}, "projection": "result"},
@@ -1025,7 +1025,7 @@ ACTIONS: tuple[Action, ...] = (
         next_actions=("jobs.get", "jobs.wait"),
         aliases=("job log", "tail", "output", "stdout"),
         examples=(
-            Example(title="First 64 KB of a log", input={"target": {"job_id": 41}}),
+            Example(title="First 64 KB of a log", input={"target": {"task_id": 41}}),
             Example(
                 title="Continue from an offset",
                 input={"target": {"ref": _JOB}, "offset": 64_000, "max_bytes": 64_000},
@@ -1045,18 +1045,18 @@ ACTIONS: tuple[Action, ...] = (
         resource_kinds=("job",),
         next_actions=("jobs.get", "jobs.logs", "jobs.queues", "jobs.cancel"),
         aliases=("wait for job", "block", "until done", "continue"),
-        documentation="outcome is terminal, running or queued; running and queued are continuations, never failures, and carry queue: the group's occupancy and the job's place in it. Pass output_offset (the previous output.next_offset) to receive only new log bytes. The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.",
+        documentation="outcome is terminal, running or queued; running and queued are continuations, never failures, and carry queue: the group's occupancy and the job's place in it. Pass output_offset (the previous output.next_offset) to receive only new log bytes. The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the job_id the start returned and the wait follows its job across a reorder, answering with the id it is at now.",
         examples=(
             Example(
                 title="Wait a minute",
-                input={"target": {"job_id": 41}, "timeout_seconds": 60},
+                input={"target": {"task_id": 41}, "timeout_seconds": 60},
             ),
             Example(
                 title="Continue a shell's output",
                 input={
                     "target": {
-                        "job_id": 41,
-                        "launch_reference": "sinnix-shell-3f9a21c8",
+                        "task_id": 41,
+                        "job_id": "sinnix-shell-3f9a21c8",
                     },
                     "timeout_seconds": 20,
                     "output_offset": 4_096,
@@ -1066,8 +1066,8 @@ ACTIONS: tuple[Action, ...] = (
                 title="Wait on the job, not the queue position",
                 input={
                     "target": {
-                        "job_id": 41,
-                        "launch_reference": "sinnix-check-3f9a21c8",
+                        "task_id": 41,
+                        "job_id": "sinnix-check-3f9a21c8",
                     },
                     "timeout_seconds": 60,
                 },
@@ -1111,7 +1111,7 @@ ACTIONS: tuple[Action, ...] = (
             Example(
                 title="Cancel a running job",
                 input={
-                    "target": {"job_id": 41},
+                    "target": {"task_id": 41},
                     "expected_phase": "running",
                     "idempotency_key": "cancel-41",
                 },
@@ -1132,7 +1132,7 @@ ACTIONS: tuple[Action, ...] = (
         examples=(
             Example(
                 title="Retry job 41",
-                input={"target": {"job_id": 41}, "idempotency_key": "retry-41"},
+                input={"target": {"task_id": 41}, "idempotency_key": "retry-41"},
             ),
         ),
     ),
@@ -1151,7 +1151,7 @@ ACTIONS: tuple[Action, ...] = (
         examples=(
             Example(
                 title="Clean job 41",
-                input={"target": {"job_id": 41}, "idempotency_key": "clean-41"},
+                input={"target": {"task_id": 41}, "idempotency_key": "clean-41"},
             ),
         ),
     ),

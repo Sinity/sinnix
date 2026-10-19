@@ -438,7 +438,7 @@ def _checkout_preconditions(runtime: Runtime) -> dict[str, str]:
 @pytest.mark.parametrize(
     ("reference", "target"),
     [
-        ("sinnix://jobs/job-1", {"job_id": "job-1"}),
+        ("sinnix://jobs/job-1", {"task_id": "job-1"}),
         (
             "sinnix://machine/units/user/fixture.service",
             {"unit": "fixture.service", "manager": "user"},

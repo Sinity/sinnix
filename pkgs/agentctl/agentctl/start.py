@@ -164,7 +164,7 @@ def _effective_selection(
 def _attempt(
     *,
     task_id: int,
-    task_reference: Any,
+    job_id: Any,
     prompt_path: Path,
     result_path: Path,
     backend: str,
@@ -176,7 +176,7 @@ def _attempt(
     return {
         "number": number,
         "task_id": task_id,
-        "task_reference": task_reference,
+        "job_id": job_id,
         "prompt_path": str(prompt_path),
         "result_path": str(result_path),
         "backend": backend,
@@ -421,7 +421,7 @@ def result_provenance(
             },
             "attempt": latest.get("number"),
             "task_id": latest.get("task_id"),
-            "launch_reference": latest.get("task_reference"),
+            "job_id": latest.get("job_id"),
         },
         "bead_revisions": dict(worker.get("bead_revisions") or {}),
         "result_schema_version": value.get("schema_version"),
@@ -601,17 +601,17 @@ def _prepare(
                 task = pending_task(config, pending) if pending else None
 
                 def record_pending(
-                    reference: str,
+                    job_id: str,
                     *,
                     run_id: str = run.run_id,
                     worker_index: int = index,
                 ) -> None:
-                    set_worker(config, run_id, worker_index, pending_launch=reference)
+                    set_worker(config, run_id, worker_index, pending_launch=job_id)
 
                 if task is not None:
                     job = {
-                        "job_id": task.task_id,
-                        "reference": launch.launch_reference(task),
+                        "task_id": task.task_id,
+                        "job_id": launch.job_id_of(task),
                     }
                 else:
                     job = queue_agent(
@@ -641,13 +641,13 @@ def _prepare(
                     config,
                     run.run_id,
                     index,
-                    task_id=job["job_id"],
+                    task_id=job["task_id"],
                     pending_launch=None,
-                    task_reference=job.get("reference"),
+                    job_id=job.get("job_id"),
                     attempts=[
                         _attempt(
-                            task_id=job["job_id"],
-                            task_reference=job.get("reference"),
+                            task_id=job["task_id"],
+                            job_id=job.get("job_id"),
                             prompt_path=path / WORKTREE_STATE_DIR / "prompt.md",
                             result_path=result_path(path),
                             backend=worker["backend"],
@@ -674,10 +674,8 @@ def _prepare(
                 run.run_id,
                 task_id=landing_id,
                 pending_launch=None,
-                task_reference=(
-                    launch.launch_reference(landing_task)
-                    if landing_task is not None
-                    else None
+                job_id=(
+                    launch.job_id_of(landing_task) if landing_task is not None else None
                 ),
                 # Only the external harness starts its landing stashed for result
                 # filing. A normal queued landing can later be stashed by an
@@ -1176,7 +1174,7 @@ def _result_locked(
     with landing_recovery_locked(config, run.run_id):
         run = load(config, run_id)
         landing_id = run.landing.get("task_id")
-        reference = run.landing.get("task_reference")
+        job_id = run.landing.get("job_id")
         if run.live and isinstance(landing_id, int):
             try:
                 tasks = pueue.tasks()
@@ -1195,7 +1193,7 @@ def _result_locked(
                     "landing_requeued": requeued,
                     "landing_requeue_error": requeue_error,
                 }
-            task = launch.find_task(tasks, landing_id, reference)
+            task = launch.find_task(tasks, landing_id, job_id)
             if task is None:
                 # The queue lost the landing task with its state. Nothing else
                 # would queue another, and the manifest would keep naming a task
@@ -1288,9 +1286,7 @@ def _resume_locked(
             f"worker {worker_id} has no worktree; start the batch instead",
         )
     tasks = pueue.tasks()
-    current = launch.find_task(
-        tasks, worker.get("task_id"), worker.get("task_reference")
-    )
+    current = launch.find_task(tasks, worker.get("task_id"), worker.get("job_id"))
     if (
         current is not None
         and not current.terminal
@@ -1336,16 +1332,16 @@ def _resume_locked(
     )
     if recovered is not None:
         job = {
-            "job_id": recovered.task_id,
-            "reference": launch.launch_reference(recovered),
+            "task_id": recovered.task_id,
+            "job_id": launch.job_id_of(recovered),
         }
     else:
 
-        def record_pending(reference: str) -> None:
+        def record_pending(job_id: str) -> None:
             def apply(document: dict[str, Any]) -> None:
                 for entry in document["workers"]:
                     if entry["id"] == worker_id:
-                        entry["pending_launch"] = reference
+                        entry["pending_launch"] = job_id
                         entry["pending_attempt"] = attempt
 
             update(config, run_id, apply)
@@ -1375,14 +1371,14 @@ def _resume_locked(
             inaccessible=other_worktrees(project, run, worker_id),
             before_enqueue=record_pending,
         )
-    task_id = job["job_id"]
+    task_id = job["task_id"]
 
     def record(document: dict[str, Any]) -> None:
         for entry in document["workers"]:
             if entry["id"] == worker_id:
                 entry["task_id"] = task_id
                 entry["task_ids"] = [*entry.get("task_ids", []), task_id]
-                entry["task_reference"] = job.get("reference")
+                entry["job_id"] = job.get("job_id")
                 entry["pending_launch"] = None
                 entry["pending_attempt"] = None
                 entry["backend"] = effective_backend
@@ -1400,7 +1396,7 @@ def _resume_locked(
                     ),
                     _attempt(
                         task_id=task_id,
-                        task_reference=job.get("reference"),
+                        job_id=job.get("job_id"),
                         prompt_path=prompt_path,
                         result_path=resume_result,
                         backend=effective_backend,
@@ -1417,7 +1413,7 @@ def _resume_locked(
         # A landing task waits on the worker tasks it was queued behind; the
         # new worker task is not among them, so any landing that has not
         # started is replaced by one queued behind every current worker task.
-        old = launch.find_task(tasks, landing_id, run.landing.get("task_reference"))
+        old = launch.find_task(tasks, landing_id, run.landing.get("job_id"))
         replace = old is None or old.status != "Running"
         if old is not None and replace:
             pueue.remove([old.task_id])
@@ -1430,7 +1426,7 @@ def _resume_locked(
                     task := launch.find_task(
                         current_tasks,
                         item.get("task_id"),
-                        item.get("task_reference"),
+                        item.get("job_id"),
                     )
                 )
                 is not None
@@ -1442,8 +1438,8 @@ def _resume_locked(
             def relink(document: dict[str, Any]) -> None:
                 document["landing"]["task_id"] = new_landing
                 task = pueue.task(new_landing)
-                document["landing"]["task_reference"] = (
-                    launch.launch_reference(task)
+                document["landing"]["job_id"] = (
+                    launch.job_id_of(task)
                     if task is not None
                     else document["landing"].get("pending_launch")
                 )

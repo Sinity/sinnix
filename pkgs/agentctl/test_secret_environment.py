@@ -126,18 +126,18 @@ def test_job_log_reads_mask_a_secret_written_before_masking(
     monkeypatch.setenv("FIXTURE_API_KEY", SECRET)
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("verify"))
-    written = read_launch(config, fake_pueue.task(started["job_id"]))
+    written = read_launch(config, fake_pueue.task(started["task_id"]))
     artifacts.begin(written, "fixture-input")
     log_path = Path(written["log_path"])
     text = f"before {SECRET} after\n"
     log_path.write_text(text)
-    fake_pueue.succeed(started["job_id"])
+    fake_pueue.succeed(started["task_id"])
 
-    assert SECRET not in launch.logs(config, started["job_id"])
+    assert SECRET not in launch.logs(config, started["task_id"])
     split = text.index(SECRET) + 5
-    first = launch.read_job_artifact(config, started["job_id"], limit=split)
+    first = launch.read_job_artifact(config, started["task_id"], limit=split)
     second = launch.read_job_artifact(
-        config, started["job_id"], offset=first["next_offset"], limit=1000
+        config, started["task_id"], offset=first["next_offset"], limit=1000
     )
     joined = first["text"] + second["text"]
     assert SECRET[:5] not in first["text"] and SECRET[5:] not in second["text"]

@@ -153,12 +153,12 @@ def validate_request(value: Any) -> dict[str, Any]:
     if (
         not isinstance(target, dict)
         or not target
-        or set(target) - {"job_id", "unit", "process", "manager"}
+        or set(target) - {"task_id", "unit", "process", "manager"}
     ):
         raise ActionError(
             "target must identify a job, unit with optional manager, or process"
         )
-    if sum(key in target for key in ("job_id", "unit", "process")) != 1:
+    if sum(key in target for key in ("task_id", "unit", "process")) != 1:
         raise ActionError(
             "target must identify exactly one job, runtime unit, or process"
         )
@@ -195,9 +195,9 @@ def validate_request(value: Any) -> dict[str, Any]:
     parameters = value["parameters"]
     if not isinstance(parameters, dict):
         raise ActionError("parameters must be an object")
-    if "job_id" in target and action != "interrupt":
+    if "task_id" in target and action != "interrupt":
         raise ActionError("job targets only support interrupt")
-    if action == "interrupt" and "job_id" not in target:
+    if action == "interrupt" and "task_id" not in target:
         raise ActionError("interrupt requires a job target")
     if (
         action in {"set_policy", "reset_policy", "park", "thaw"}
@@ -324,11 +324,11 @@ class ActionService:
         self, request: dict[str, Any], snapshot: dict[str, Any]
     ) -> dict[str, Any]:
         target = request["target"]
-        if "job_id" in target:
+        if "task_id" in target:
             try:
                 job = self.agent_jobs.get(
-                    target["job_id"],
-                    reference=request["expected_target"].get("launch_reference"),
+                    target["task_id"],
+                    job_id=request["expected_target"].get("job_id"),
                 )
             except AgentCtlError as error:
                 raise ActionError(
@@ -589,7 +589,7 @@ class ActionService:
         return {
             key: job.get(key)
             for key in (
-                "job_id",
+                "task_id",
                 "label",
                 "kind",
                 "project",
@@ -600,7 +600,7 @@ class ActionService:
                 "exit_code",
                 "path",
                 "started_at",
-                "reference",
+                "job_id",
                 "attempt",
                 "ended_at",
             )
@@ -641,11 +641,11 @@ class ActionService:
             }
         if kind == "job":
             job = state["job"]
-            if not job.get("reference") or not isinstance(job.get("attempt"), int):
+            if not job.get("job_id") or not isinstance(job.get("attempt"), int):
                 raise ActionError("job attempt identity unavailable", 503)
             return {
                 "kind": kind,
-                "launch_reference": job["reference"],
+                "job_id": job["job_id"],
                 "attempt": job["attempt"],
             }
         surface, properties = state["surface"], state["systemd"]
@@ -798,13 +798,13 @@ class ActionService:
     ) -> dict[str, Any]:
         action = request["action"]
         if action == "interrupt":
-            job_id = resolved["job"]["job_id"]
+            task_id = resolved["job"]["task_id"]
             try:
                 return {
                     "name": action,
                     "job": self.agent_jobs.cancel(
-                        job_id,
-                        reference=resolved["job"]["reference"],
+                        task_id,
+                        job_id=resolved["job"]["job_id"],
                         expected_attempt=request["expected_target"]["attempt"],
                     ),
                 }

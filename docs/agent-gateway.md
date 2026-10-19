@@ -129,7 +129,8 @@ otherwise reads name a checkout id from `projects.list`.
 `operations.run` queues a declared project operation; `shell.run` queues one
 argv confined to a checkout. `jobs.list`, `jobs.get`, `jobs.logs`, `jobs.wait`,
 `jobs.queues`, `jobs.cancel`, `jobs.retry` and `jobs.clean` read and control any
-job. A job keeps one durable launch reference across queue reordering; each
+job. A job has a `task_id` (pueue's queue position) and a stable `job_id`
+that survives queue reordering; each
 retry is a separate attempt with its own logs and result. `batches.*` wrap
 agentctl batches (`batches.start`, `status`, `list`, `resume`, `land`).
 

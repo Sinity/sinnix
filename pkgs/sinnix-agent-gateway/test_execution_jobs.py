@@ -29,7 +29,7 @@ def runtime_with_jobs(
         max_result_bytes=max_result_bytes,
     )
     runtime = Runtime.create(config)
-    jobs = FakeJobs(default={"job_id": "job-fixture"})
+    jobs = FakeJobs(default={"task_id": "job-fixture"})
     runtime.jobs = jobs  # type: ignore[assignment]
     return runtime, jobs
 
@@ -50,7 +50,7 @@ def test_get_reads_a_canonical_ref_through_the_action_that_owns_the_kind(
     """
     runtime, jobs = runtime_with_jobs(tmp_path)
     jobs.responses["job.get"] = {
-        "job_id": "7",
+        "task_id": "7",
         "label": "fixture:check",
         "project_id": "fixture",
         "state": {"phase": "succeeded", "terminal": True, "exit_code": 0},

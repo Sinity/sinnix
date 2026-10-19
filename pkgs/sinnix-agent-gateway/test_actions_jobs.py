@@ -65,7 +65,7 @@ def make_server(
 
 RUN_ID = "fixture-20260906-012123-a2c81926"
 RUNNING = {
-    "job_id": "41",
+    "task_id": "41",
     "label": f"fixture:worker:{RUN_ID}:fixture-7",
     "kind": "attested-agent",
     "project_id": "fixture",
@@ -83,23 +83,23 @@ RUNNING = {
 DONE = {**RUNNING, "state": {"phase": "succeeded", "terminal": True, "exit_code": 0}}
 
 
-def test_job_locator_accepts_ref_or_id_and_carries_the_launch_reference() -> None:
-    assert JobLocator(job_id=41).resolve() == (41, "sinnix://jobs/41", None)
+def test_job_locator_accepts_ref_or_id_and_carries_the_job_id_argument() -> None:
+    assert JobLocator(task_id=41).resolve() == (41, "sinnix://jobs/41", None)
     assert JobLocator(ref="sinnix://jobs/41").resolve() == (
         41,
         "sinnix://jobs/41",
         None,
     )
-    assert JobLocator(job_id=41, launch_reference="fixture-check-abc").resolve() == (
+    assert JobLocator(task_id=41, job_id="fixture-check-abc").resolve() == (
         41,
         "sinnix://jobs/41",
         "fixture-check-abc",
     )
     with pytest.raises(ValueError, match="exactly one"):
         JobLocator()
-    # A reference names one file under the state directory, never a path.
+    # A job_id names one file under the state directory, never a path.
     with pytest.raises(ValidationError):
-        JobLocator(job_id=41, launch_reference="../../etc/passwd")
+        JobLocator(task_id=41, job_id="../../etc/passwd")
 
 
 def test_list_pages_with_refs_and_forwards_the_project_filter(
@@ -111,7 +111,7 @@ def test_list_pages_with_refs_and_forwards_the_project_filter(
             RUNNING,
             {
                 **DONE,
-                "job_id": "40",
+                "task_id": "40",
                 "label": "fixture:check",
                 "kind": "declared-operation",
                 "binding": None,
@@ -120,7 +120,10 @@ def test_list_pages_with_refs_and_forwards_the_project_filter(
         "total": 2,
         "truncated": True,
         "next_cursor": "c2",
-        "snapshot": {"ordering": "created_at_desc_job_id_desc", "ceiling": ["x", "41"]},
+        "snapshot": {
+            "ordering": "created_at_desc_task_id_desc",
+            "ceiling": ["x", "41"],
+        },
     }
     page = call(server, "jobs.list", {"project": {"project": "fixture"}, "limit": 2})
     assert page["result"]["outcome"] == "ok", page
@@ -152,7 +155,7 @@ def test_get_returns_summary_log_range_and_result(
     server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.get"] = DONE
     fake.responses["job.logs"] = lambda args: {
-        "job_id": "41",
+        "task_id": "41",
         "content": "abcdef"[args["offset"] : args["offset"] + args["max_bytes"]],
         "offset": args["offset"],
         "max_bytes": args["max_bytes"],
@@ -160,7 +163,7 @@ def test_get_returns_summary_log_range_and_result(
     }
     fake.responses["job.result"] = {**DONE, "kind": "artifact", "value": {"passed": 3}}
 
-    summary = call(server, "jobs.get", {"target": {"job_id": 41}})["data"]
+    summary = call(server, "jobs.get", {"target": {"task_id": 41}})["data"]
     assert (
         summary["ref"] == "sinnix://jobs/41"
         and summary["state"]["phase"] == "succeeded"
@@ -184,7 +187,7 @@ def test_get_returns_summary_log_range_and_result(
         "size_bytes": None,
         "base64": None,
         "ref": "sinnix://jobs/41",
-        "job_id": 41,
+        "task_id": 41,
         "content": "cd",
         "offset": 2,
         "max_bytes": 2,
@@ -193,11 +196,11 @@ def test_get_returns_summary_log_range_and_result(
         "next_offset": 4,
         "next_actions": ["jobs.get", "jobs.logs"],
     }
-    tail = call(server, "jobs.logs", {"target": {"job_id": 41}, "offset": 4})["data"]
+    tail = call(server, "jobs.logs", {"target": {"task_id": 41}, "offset": 4})["data"]
     assert tail["content"] == "ef" and tail["next_offset"] is None
 
     result = call(
-        server, "jobs.get", {"target": {"job_id": 41}, "projection": "result"}
+        server, "jobs.get", {"target": {"task_id": 41}, "projection": "result"}
     )["data"]
     assert result["result"] == {
         "kind": "artifact",
@@ -213,8 +216,8 @@ def test_get_returns_summary_log_range_and_result(
         "job.result",
     ]
 
-    fake.responses["job.get"] = {**DONE, "job_id": "99"}
-    mismatch = call(server, "jobs.get", {"target": {"job_id": 41}})
+    fake.responses["job.get"] = {**DONE, "task_id": "99"}
+    mismatch = call(server, "jobs.get", {"target": {"task_id": 41}})
     assert mismatch["error"]["code"] == "owner_failed"
 
 
@@ -228,41 +231,41 @@ def test_wait_reports_terminal_running_or_queued_from_the_queue(
         "detail": "still running",
     }
     waited = call(
-        server, "jobs.wait", {"target": {"job_id": 41}, "timeout_seconds": 5}
+        server, "jobs.wait", {"target": {"task_id": 41}, "timeout_seconds": 5}
     )["data"]
     assert waited["outcome"] == "running"
     assert (
         waited["detail"] == "still running" and "jobs.cancel" in waited["next_actions"]
     )
-    assert fake.calls[-1].arguments == {"job_id": 41, "timeout_seconds": 5}
+    assert fake.calls[-1].arguments == {"task_id": 41, "timeout_seconds": 5}
 
     fake.responses["job.wait"] = {
         **RUNNING,
         "state": {"phase": "queued", "terminal": False, "exit_code": None},
         "timed_out": True,
     }
-    queued = call(server, "jobs.wait", {"target": {"job_id": 41}})["data"]
+    queued = call(server, "jobs.wait", {"target": {"task_id": 41}})["data"]
     assert queued["outcome"] == "queued"
 
     fake.responses["job.wait"] = DONE
-    done = call(server, "jobs.wait", {"target": {"job_id": 41}})["data"]
+    done = call(server, "jobs.wait", {"target": {"task_id": 41}})["data"]
     assert done["outcome"] == "terminal" and done["job"]["state"]["terminal"] is True
 
 
 MOVED = {
     **DONE,
-    "job_id": "44",
-    "launch_reference": "fixture-worker-abcd1234",
+    "task_id": "44",
+    "job_id": "fixture-worker-abcd1234",
 }
 
 
-def test_a_wait_carrying_a_launch_reference_follows_its_job_to_another_id(
+def test_a_wait_carrying_a_job_id_follows_its_job_to_another_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The owner answers about the job, wherever a reorder put it.
 
     Anti-vacuity: a wait that proved identity by the id it sent would refuse
-    its own answer, and one that never sent the reference would be told about
+    its own answer, and one that never sent the job_id would be told about
     whatever task the switch moved to that id.
     """
     server, _, fake = make_server(tmp_path, monkeypatch)
@@ -272,19 +275,19 @@ def test_a_wait_carrying_a_launch_reference_follows_its_job_to_another_id(
         server,
         "jobs.wait",
         {
-            "target": {"job_id": 41, "launch_reference": "fixture-worker-abcd1234"},
+            "target": {"task_id": 41, "job_id": "fixture-worker-abcd1234"},
             "timeout_seconds": 5,
         },
     )["data"]
 
     assert fake.calls[-1].arguments == {
-        "job_id": 41,
-        "launch_reference": "fixture-worker-abcd1234",
+        "task_id": 41,
+        "job_id": "fixture-worker-abcd1234",
         "timeout_seconds": 5,
     }
     assert waited["outcome"] == "terminal"
-    assert (waited["job_id"], waited["ref"]) == (44, "sinnix://jobs/44")
-    assert waited["job"]["launch_reference"] == "fixture-worker-abcd1234"
+    assert (waited["task_id"], waited["ref"]) == (44, "sinnix://jobs/44")
+    assert waited["job"]["job_id"] == "fixture-worker-abcd1234"
 
 
 def test_an_answer_about_another_job_is_refused_whichever_identity_was_sent(
@@ -294,14 +297,14 @@ def test_an_answer_about_another_job_is_refused_whichever_identity_was_sent(
     server, _, fake = make_server(tmp_path, monkeypatch)
 
     fake.responses["job.wait"] = MOVED
-    by_id = call(server, "jobs.wait", {"target": {"job_id": 41}})
+    by_id = call(server, "jobs.wait", {"target": {"task_id": 41}})
     assert by_id["error"]["code"] == "owner_failed"
 
-    fake.responses["job.wait"] = {**DONE, "launch_reference": "fixture-check-9999"}
+    fake.responses["job.wait"] = {**DONE, "job_id": "fixture-check-9999"}
     by_reference = call(
         server,
         "jobs.wait",
-        {"target": {"job_id": 41, "launch_reference": "fixture-worker-abcd1234"}},
+        {"target": {"task_id": 41, "job_id": "fixture-worker-abcd1234"}},
     )
     assert by_reference["error"]["code"] == "owner_failed"
 
@@ -310,7 +313,7 @@ def test_a_job_view_returns_the_reference_a_later_call_addresses_it_by(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     server, _, fake = make_server(tmp_path, monkeypatch)
-    fake.responses["job.start"] = {**RUNNING, "launch_reference": "fixture-check-abcd"}
+    fake.responses["job.start"] = {**RUNNING, "job_id": "fixture-check-abcd"}
 
     started = call(
         server,
@@ -322,14 +325,14 @@ def test_a_job_view_returns_the_reference_a_later_call_addresses_it_by(
         },
     )["data"]
 
-    assert started["launch_reference"] == "fixture-check-abcd"
+    assert started["job_id"] == "fixture-check-abcd"
 
 
 def test_clean_and_cancel_address_the_job_the_reference_names(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     server, _, fake = make_server(tmp_path, monkeypatch)
-    reference = "fixture-worker-abcd1234"
+    job_id = "fixture-worker-abcd1234"
     fake.responses["job.get"] = MOVED
     fake.responses["job.cancel"] = {
         **MOVED,
@@ -346,21 +349,19 @@ def test_clean_and_cancel_address_the_job_the_reference_names(
         server,
         "jobs.cancel",
         {
-            "target": {"job_id": 41, "launch_reference": reference},
+            "target": {"task_id": 41, "job_id": job_id},
             "idempotency_key": "cancel-1",
         },
     )["data"]
-    assert (cancelled["job_id"], cancelled["ref"]) == (44, "sinnix://jobs/44")
-    assert cancelled["job"]["launch_reference"] == reference
-    assert all(
-        request.arguments.get("launch_reference") == reference for request in fake.calls
-    )
+    assert (cancelled["task_id"], cancelled["ref"]) == (44, "sinnix://jobs/44")
+    assert cancelled["job"]["job_id"] == job_id
+    assert all(request.arguments.get("job_id") == job_id for request in fake.calls)
 
     cleaned = call(
         server,
         "jobs.clean",
         {
-            "target": {"job_id": 41, "launch_reference": reference},
+            "target": {"task_id": 41, "job_id": job_id},
             "idempotency_key": "clean-1",
         },
     )["data"]
@@ -389,7 +390,11 @@ def test_cancel_checks_the_phase_and_surfaces_reap_survivors(
     stale = call(
         server,
         "jobs.cancel",
-        {"target": {"job_id": 41}, "expected_phase": "queued", "idempotency_key": "c1"},
+        {
+            "target": {"task_id": 41},
+            "expected_phase": "queued",
+            "idempotency_key": "c1",
+        },
     )
     assert stale["error"]["code"] == "precondition_failed"
     assert stale["error"]["details"]["phase"] == "running"
@@ -399,7 +404,7 @@ def test_cancel_checks_the_phase_and_surfaces_reap_survivors(
         server,
         "jobs.cancel",
         {
-            "target": {"job_id": 41},
+            "target": {"task_id": 41},
             "expected_phase": "running",
             "idempotency_key": "c2",
             "reason": "stop requested",
@@ -427,7 +432,7 @@ def test_cancel_checks_the_phase_and_surfaces_reap_survivors(
         },
     }
     owner_only = call(
-        server, "jobs.cancel", {"target": {"job_id": 41}, "idempotency_key": "c3"}
+        server, "jobs.cancel", {"target": {"task_id": 41}, "idempotency_key": "c3"}
     )["data"]
     assert (
         owner_only["scope_unit"] == "fixture.service"
@@ -441,7 +446,7 @@ def test_cancel_checks_the_phase_and_surfaces_reap_survivors(
         "state": {"phase": "queued", "terminal": False, "exit_code": None},
     }
     retried = call(
-        server, "jobs.retry", {"target": {"job_id": 41}, "idempotency_key": "r1"}
+        server, "jobs.retry", {"target": {"task_id": 41}, "idempotency_key": "r1"}
     )["data"]
     assert (
         retried["state"]["phase"] == "queued"
@@ -455,7 +460,7 @@ def test_operations_run_targets_the_root_or_a_linked_worktree(
     server, runtime, fake = make_server(tmp_path, monkeypatch, with_git=True)
     fake.responses["job.start"] = {
         **DONE,
-        "job_id": "50",
+        "task_id": "50",
         "label": "fixture:check",
         "kind": "declared-operation",
         "operation": "check",
@@ -523,7 +528,7 @@ def test_shell_run_is_operator_only_and_keeps_cwd_inside_the_checkout(
     server, runtime, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.shell.start"] = {
         **DONE,
-        "job_id": "51",
+        "task_id": "51",
         "label": "fixture:shell",
         "operation": "shell",
         "group": "shell-quick",
@@ -579,9 +584,9 @@ QUEUE = {
     "parallel": 1,
     "running": [
         {
-            "job_id": 60,
+            "task_id": 60,
             "label": "fixture:shell",
-            "reference": "fixture-shell-aaaa1111",
+            "job_id": "fixture-shell-aaaa1111",
             "argv": ["/bin/sh", "-c", "claude", "-p", "long work"],
             "since": "2026-09-29T10:00:00+00:00",
             "seconds": 1_800,
@@ -590,9 +595,9 @@ QUEUE = {
     "running_count": 1,
     "queued": [
         {
-            "job_id": 61,
+            "task_id": 61,
             "label": "fixture:shell",
-            "reference": "fixture-shell-bbbb2222",
+            "job_id": "fixture-shell-bbbb2222",
             "argv": None,
             "since": "2026-09-29T10:20:00+00:00",
             "seconds": 600,
@@ -605,8 +610,8 @@ QUEUE = {
 }
 QUEUED_SHELL = {
     **RUNNING,
-    "job_id": "61",
-    "launch_reference": "fixture-shell-bbbb2222",
+    "task_id": "61",
+    "job_id": "fixture-shell-bbbb2222",
     "label": "fixture:shell",
     "kind": "declared-operation",
     "operation": "shell",
@@ -630,7 +635,7 @@ def test_shell_run_starts_agent_clis_in_the_long_lane_and_reads_in_the_quick_one
     server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.shell.start"] = lambda arguments: {
         **DONE,
-        "job_id": "70",
+        "task_id": "70",
         "label": "fixture:shell",
         "operation": "shell",
         "group": arguments["group"],
@@ -693,8 +698,8 @@ def test_a_shell_still_queued_answers_with_its_place_and_what_holds_the_lane(
     assert data["outcome"] == "queued"
     assert data["continuation"] == {
         "ref": None,
-        "job_id": 61,
-        "launch_reference": "fixture-shell-bbbb2222",
+        "task_id": 61,
+        "job_id": "fixture-shell-bbbb2222",
     }
     queue = data["queue"]
     assert queue["position"] == 1 and queue["oldest_queued_seconds"] == 600
@@ -712,7 +717,7 @@ def test_a_shell_still_queued_answers_with_its_place_and_what_holds_the_lane(
         server,
         "jobs.wait",
         {
-            "target": {"job_id": 61, "launch_reference": "fixture-shell-bbbb2222"},
+            "target": {"task_id": 61, "job_id": "fixture-shell-bbbb2222"},
             "timeout_seconds": 2,
             "output_offset": 4_096,
         },
@@ -739,7 +744,7 @@ def test_a_shell_still_queued_answers_with_its_place_and_what_holds_the_lane(
         server,
         "jobs.wait",
         {
-            "target": {"job_id": 61, "launch_reference": "fixture-shell-bbbb2222"},
+            "target": {"task_id": 61, "job_id": "fixture-shell-bbbb2222"},
             "timeout_seconds": 2,
             "output_offset": 4_096,
         },

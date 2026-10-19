@@ -45,7 +45,7 @@ def test_job_start_get_logs_and_wait_round_trip(
     assert cli.main(["job", "start", "fixture", "check", "--", "--flag"]) == 0
     captured = capsys.readouterr()
     started = json.loads(captured.out)
-    assert started["job_id"] == 1 and started["phase"] == "running"
+    assert started["task_id"] == 1 and started["phase"] == "running"
     assert captured.err.startswith("job 1 fixture:check running since ")
     assert fake_pueue.added[0]["label"] == "fixture:check"
 
@@ -159,15 +159,15 @@ def test_cli_cancel_before_start_retains_not_started_across_reads(
 ) -> None:
     assert cli.main(["job", "start", "fixture", "check"]) == 0
     started = json.loads(capsys.readouterr().out)
-    fake_pueue.queue(started["job_id"])
+    fake_pueue.queue(started["task_id"])
     assert (
         cli.main(
             [
                 "job",
                 "cancel",
-                str(started["job_id"]),
-                "--reference",
-                started["reference"],
+                str(started["task_id"]),
+                "--job-id",
+                started["job_id"],
             ]
         )
         == 0
@@ -181,9 +181,9 @@ def test_cli_cancel_before_start_retains_not_started_across_reads(
                     "--json",
                     "job",
                     "get",
-                    str(started["job_id"]),
-                    "--reference",
-                    started["reference"],
+                    str(started["task_id"]),
+                    "--job-id",
+                    started["job_id"],
                 ]
             )
             == 0
@@ -204,7 +204,7 @@ def test_job_list_is_newest_first_and_bounded_unless_all(
         capsys.readouterr()
     assert cli.main(["--json", "job", "list"]) == 0
     listed = json.loads(capsys.readouterr().out)
-    assert [row["job_id"] for row in listed][:3] == [
+    assert [row["task_id"] for row in listed][:3] == [
         DEFAULT_JOB_ROWS + 3,
         DEFAULT_JOB_ROWS + 2,
         DEFAULT_JOB_ROWS + 1,
@@ -261,7 +261,7 @@ def test_job_snapshot_bounds_terminal_history_without_hiding_active_jobs(
 
     assert cli.main(["--json", "job", "snapshot", "--limit", "3"]) == 0
     snapshot = json.loads(capsys.readouterr().out)
-    assert [row["job_id"] for row in snapshot["jobs"][:2]] == [queued, running]
+    assert [row["task_id"] for row in snapshot["jobs"][:2]] == [queued, running]
     assert snapshot["groups"]["agent"]["running"] == 1
     assert snapshot["groups"]["agent"]["queued"] == 1
     assert snapshot["groups"]["normal"]["terminal"] == 80
@@ -345,8 +345,8 @@ def test_job_get_renders_the_scratch_footprint(
 ) -> None:
     assert cli.main(["job", "start", "fixture", "check"]) == 0
     capsys.readouterr()
-    reference = Path(fake_pueue.added[0]["command"][1]).stem
-    outcome = cli_config.jobs_dir / f"{reference}.attempts" / "1" / "output.outcome"
+    job_id = Path(fake_pueue.added[0]["command"][1]).stem
+    outcome = cli_config.jobs_dir / f"{job_id}.attempts" / "1" / "output.outcome"
     outcome.parent.mkdir(parents=True, exist_ok=True)
     outcome.write_text(
         json.dumps(
@@ -779,12 +779,12 @@ def test_batch_status_renders_requested_dispatch_and_abandonment(
     document = json.loads(path.read_text())
     document["workers"][0].update(
         {
-            "task_reference": "worker-launch",
+            "job_id": "worker-launch",
             "attempts": [
                 {
                     "number": 2,
                     "task_id": 41,
-                    "task_reference": "worker-launch",
+                    "job_id": "worker-launch",
                     "backend": "fixture-backend",
                     "model": "fixture-model",
                     "effort": "high",
@@ -794,14 +794,14 @@ def test_batch_status_renders_requested_dispatch_and_abandonment(
     )
     document["landing"].update(
         {
-            "task_reference": "landing-launch",
-            "verify_run": {"job_id": 42, "reference": "verify-launch"},
+            "job_id": "landing-launch",
+            "verify_run": {"task_id": 42, "job_id": "verify-launch"},
             "review_verdict": {"policy": "none"},
             "agent_attempts": [
                 {
                     "kind": "review",
-                    "job_id": 43,
-                    "launch_reference": "review-launch",
+                    "task_id": 43,
+                    "job_id": "review-launch",
                     "requested": {
                         "backend": "fixture-backend",
                         "model": "fixture-model",
@@ -822,13 +822,13 @@ def test_batch_status_renders_requested_dispatch_and_abandonment(
     text = capsys.readouterr().out
     assert (
         "dispatch: attempt 2; requested backend=fixture-backend "
-        "model=fixture-model effort=high; task 41; ref worker-launch" in text
+        "model=fixture-model effort=high; task 41; job worker-launch" in text
     )
-    assert "landing: task None ref landing-launch" in text
-    assert "evidence: verify task 42 ref verify-launch; review policy none" in text
+    assert "landing: task None job landing-launch" in text
+    assert "evidence: verify task 42 job verify-launch; review policy none" in text
     assert (
         "landing agent: review; requested backend=fixture-backend "
-        "model=fixture-model effort=high; task 43; ref review-launch" in text
+        "model=fixture-model effort=high; task 43; job review-launch" in text
     )
     assert "abandoned: " in text and "canary failed" in text
     assert "residual: batch/run/w1: worktree kept" in text
@@ -940,7 +940,7 @@ def _lost_landing(config: Config, run_id: str, *, filed: bool) -> Path:
     path = manifest.manifest_path(config, run_id)
     document = json.loads(path.read_text())
     document["landing"]["task_id"] = 4547
-    document["landing"]["task_reference"] = "land-4547"
+    document["landing"]["job_id"] = "land-4547"
     if filed:
         document["workers"][0]["result"] = {
             "candidate_sha": "c" * 40,
@@ -1006,7 +1006,7 @@ def test_batch_queue_replaces_a_lost_landing_once_the_results_are_in(
     assert task.status != "Stashed" and task.dependencies == ()
     assert summary == f"queued landing task {queued} for 0123abcd\n"
     stored = json.loads(path.read_text())["landing"]
-    assert stored["task_id"] == queued and stored["task_reference"] is not None
+    assert stored["task_id"] == queued and stored["job_id"] is not None
 
     assert cli.main(["batch", "status", "0123abcd"]) == 0
     assert "pueue no longer has it" not in capsys.readouterr().out
@@ -1032,7 +1032,7 @@ def test_wait_reports_elapsed_age_after_blocking(
         started = clock.isoformat()
         clock += timedelta(minutes=10)
         return {
-            "job_id": 1,
+            "task_id": 1,
             "label": "fixture:check",
             "phase": "running",
             "started_at": started,
@@ -1070,7 +1070,7 @@ def test_job_launch_wait_timeout_is_not_success(
     observed = json.loads(capsys.readouterr().out)
     assert observed["wait_timed_out"] is True
     assert observed["phase"] == "running"
-    assert fake_pueue.task(observed["job_id"]).status == "Running"
+    assert fake_pueue.task(observed["task_id"]).status == "Running"
 
 
 @pytest.mark.parametrize("flags", [[], ["--if-idle"]])
@@ -1210,13 +1210,12 @@ def test_wait_archived_cancellation_retains_job_failure_exit(
 ):
     assert cli.main(["job", "start", "fixture", "check"]) == 0
     own = json.loads(capsys.readouterr().out)
-    fake_pueue.queue(own["job_id"])
+    fake_pueue.queue(own["task_id"])
     assert (
-        cli.main(["job", "cancel", str(own["job_id"]), "--reference", own["reference"]])
-        == 0
+        cli.main(["job", "cancel", str(own["task_id"]), "--job-id", own["job_id"]]) == 0
     )
     capsys.readouterr()
-    fake_pueue.next_id = own["job_id"]
+    fake_pueue.next_id = own["task_id"]
     assert cli.main(["job", "start", "fixture", "check"]) == 0
     capsys.readouterr()
     assert (
@@ -1225,9 +1224,9 @@ def test_wait_archived_cancellation_retains_job_failure_exit(
                 "--json",
                 "job",
                 "wait",
-                str(own["job_id"]),
-                "--reference",
-                own["reference"],
+                str(own["task_id"]),
+                "--job-id",
+                own["job_id"],
             ]
         )
         == cli.EXIT_JOB_NOT_SUCCEEDED
@@ -1235,5 +1234,5 @@ def test_wait_archived_cancellation_retains_job_failure_exit(
     output = capsys.readouterr()
     observed = json.loads(output.out)
     assert observed["phase"] == "cancelled" and observed["terminal"] is True
-    assert observed["reference"] == own["reference"] and observed["exit_code"] == 130
+    assert observed["job_id"] == own["job_id"] and observed["exit_code"] == 130
     assert "no task" not in output.err

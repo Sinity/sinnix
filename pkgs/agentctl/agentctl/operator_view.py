@@ -61,7 +61,7 @@ def vanished_of(
     run: Run,
     tasks: Mapping[int, Task] | None,
     *,
-    references: Mapping[str, Task] | None = None,
+    job_ids: Mapping[str, Task] | None = None,
 ) -> Vanished:
     """What the queue lost of this run; ``None`` tasks means it was unreadable.
 
@@ -75,8 +75,8 @@ def vanished_of(
         if launch.vanished(
             tasks,
             landing_id,
-            run.landing.get("task_reference"),
-            references=references,
+            run.landing.get("job_id"),
+            job_ids=job_ids,
         )
         else None,
         workers=tuple(
@@ -85,8 +85,8 @@ def vanished_of(
             if launch.vanished(
                 tasks,
                 worker.get("task_id"),
-                worker.get("task_reference"),
-                references=references,
+                worker.get("job_id"),
+                job_ids=job_ids,
             )
         ),
     )
@@ -150,15 +150,15 @@ def status(
     """The manifest with each task's pueue view and the landing PR's state."""
     run = load(config, run_id)
     tasks = pueue.tasks()
-    references = launch.index_task_references(tuple(tasks.values()))
-    lost = vanished_of(run, tasks, references=references)
+    job_ids = launch.index_tasks_by_job_id(tuple(tasks.values()))
+    lost = vanished_of(run, tasks, job_ids=job_ids)
     document = run.to_dict()
     for worker in document["workers"]:
         task = launch.find_task(
             tasks,
             worker.get("task_id"),
-            worker.get("task_reference"),
-            references=references,
+            worker.get("job_id"),
+            job_ids=job_ids,
         )
         worker["task"] = job_view(task) if task else None
         worker["vanished"] = worker["id"] in lost.workers
@@ -166,8 +166,8 @@ def status(
     landing_task = launch.find_task(
         tasks,
         document["landing"].get("task_id"),
-        document["landing"].get("task_reference"),
-        references=references,
+        document["landing"].get("job_id"),
+        job_ids=job_ids,
     )
     document["landing"]["task"] = job_view(landing_task) if landing_task else None
     for attempt in document["landing"].get("agent_attempts") or []:
@@ -175,9 +175,9 @@ def status(
             continue
         task = launch.find_task(
             tasks,
+            attempt.get("task_id"),
             attempt.get("job_id"),
-            attempt.get("launch_reference"),
-            references=references,
+            job_ids=job_ids,
         )
         attempt["task"] = job_view(task) if task else None
     # The recorded landing id when pueue no longer has it, so a reader never
@@ -190,8 +190,8 @@ def status(
             launch.find_task(
                 tasks,
                 w.get("task_id"),
-                w.get("task_reference"),
-                references=references,
+                w.get("job_id"),
+                job_ids=job_ids,
             )
             for w in run.workers
         ],
@@ -227,16 +227,16 @@ class Snapshot:
     global_groups: Mapping[str, Mapping[str, int | None]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
-        references: dict[str, Task] = {}
+        job_ids: dict[str, Task] = {}
         task_index: dict[int, Task] = {}
         jobs = []
         for task in self.tasks:
             job = job_view(task)
             jobs.append(job)
             task_index[task.task_id] = task
-            reference = job["reference"]
-            if reference is not None:
-                references.setdefault(reference, task)
+            job_id = job["job_id"]
+            if job_id is not None:
+                job_ids.setdefault(job_id, task)
         return {
             "schema": "sinnix.agentctl.view.v3",
             "project": self.project_id,
@@ -258,7 +258,7 @@ class Snapshot:
                     self.tasks,
                     self.now,
                     queue_read=self.queue_read,
-                    references=references,
+                    job_ids=job_ids,
                     task_index=task_index,
                 )
                 for run in self.runs
@@ -318,32 +318,32 @@ def run_dict(
     now: datetime,
     *,
     queue_read: bool = True,
-    references: Mapping[str, Task] | None = None,
+    job_ids: Mapping[str, Task] | None = None,
     task_index: Mapping[int, Task] | None = None,
 ) -> dict[str, Any]:
     """One run's rows: stage from pueue first, the manifest second."""
-    if references is None:
-        references = launch.index_task_references(tasks)
-    # By launch reference where the manifest has one: an id alone names a
+    if job_ids is None:
+        job_ids = launch.index_tasks_by_job_id(tasks)
+    # By launch job_id where the manifest has one: an id alone names a
     # queue position, which `pueue switch` and a daemon reset both reassign.
     index = (
         task_index if task_index is not None else {task.task_id: task for task in tasks}
     )
-    lost = vanished_of(run, index if queue_read else None, references=references)
+    lost = vanished_of(run, index if queue_read else None, job_ids=job_ids)
     worker_tasks = [
         launch.find_task(
             index,
             worker.get("task_id"),
-            worker.get("task_reference"),
-            references=references,
+            worker.get("job_id"),
+            job_ids=job_ids,
         )
         for worker in run.workers
     ]
     landing_task = launch.find_task(
         index,
         run.landing.get("task_id"),
-        run.landing.get("task_reference"),
-        references=references,
+        run.landing.get("job_id"),
+        job_ids=job_ids,
     )
     workers = []
     for worker, task in zip(run.workers, worker_tasks, strict=True):
@@ -591,7 +591,7 @@ def _lost_jobs(row: Mapping[str, Any]) -> str:
 
 def render(snapshot: Snapshot) -> str:
     now = snapshot.now
-    references = launch.index_task_references(snapshot.tasks)
+    job_ids = launch.index_tasks_by_job_id(snapshot.tasks)
     task_index = {task.task_id: task for task in snapshot.tasks}
     lines = [
         f"== {snapshot.project_id} at {now.astimezone().strftime('%Y-%m-%d %H:%M')}"
@@ -641,7 +641,7 @@ def render(snapshot: Snapshot) -> str:
             snapshot.tasks,
             now,
             queue_read=snapshot.queue_read,
-            references=references,
+            job_ids=job_ids,
             task_index=task_index,
         )
         for run in snapshot.runs
@@ -825,7 +825,7 @@ class Output:
             else ""
         )
         return (
-            f"job {job['job_id']} {job['label']} {job['phase']}{exit_text} "
+            f"job {job['task_id']} {job['label']} {job['phase']}{exit_text} "
             f"{when}{scratch_text}"
         )
 
@@ -836,7 +836,7 @@ class Output:
             ("id", "label", "phase", "started", "age", "exit", "cwd"),
             [
                 (
-                    row["job_id"],
+                    row["task_id"],
                     row["label"],
                     row["phase"],
                     self.clock(row.get("started_at") or row.get("enqueued_at")),
@@ -879,7 +879,7 @@ class Output:
         lines.append(
             f"landing: task {landing.get('task_id')}"
             f"{' (pueue no longer has it)' if landing.get('vanished') is not None else ''}"
-            f"{_reference_text(landing.get('task_reference'))}"
+            f"{_job_id_text(landing.get('job_id'))}"
             f" candidate {self.sha(landing.get('candidate_sha'))}"
             f"{' PR #' + str(landing['pr_number']) if landing.get('pr_number') else ''}"
             f"{' failure ' + landing['failure']['code'] if landing.get('failure') else ''}"
@@ -932,8 +932,8 @@ class Output:
         )
 
 
-def _reference_text(reference: Any) -> str:
-    return f" ref {reference}" if isinstance(reference, str) and reference else ""
+def _job_id_text(job_id: Any) -> str:
+    return f" job {job_id}" if isinstance(job_id, str) and job_id else ""
 
 
 def _requested_text(value: Any) -> str:
@@ -958,14 +958,14 @@ def _worker_dispatch(worker: Mapping[str, Any]) -> str:
     requested = _requested_text(attempt) or _requested_text(worker)
     number = attempt.get("number")
     task_id = attempt.get("task_id", worker.get("task_id"))
-    reference = attempt.get("task_reference", worker.get("task_reference"))
+    job_id = attempt.get("job_id", worker.get("job_id"))
     fields = [f"attempt {number}" if isinstance(number, int) else "dispatch"]
     if requested:
         fields.append(f"requested {requested}")
     if isinstance(task_id, int):
         fields.append(f"task {task_id}")
-    if isinstance(reference, str) and reference:
-        fields.append(f"ref {reference}")
+    if isinstance(job_id, str) and job_id:
+        fields.append(f"job {job_id}")
     return "; ".join(fields) if len(fields) > 1 else ""
 
 
@@ -977,10 +977,10 @@ def _landing_agent_dispatch(attempt: Mapping[str, Any]) -> str:
     requested = _requested_text(attempt.get("requested"))
     if requested:
         fields.append(f"requested {requested}")
-    if isinstance(attempt.get("job_id"), int):
-        fields.append(f"task {attempt['job_id']}")
-    if isinstance(attempt.get("launch_reference"), str) and attempt["launch_reference"]:
-        fields.append(f"ref {attempt['launch_reference']}")
+    if isinstance(attempt.get("task_id"), int):
+        fields.append(f"task {attempt['task_id']}")
+    if isinstance(attempt.get("job_id"), str) and attempt["job_id"]:
+        fields.append(f"job {attempt['job_id']}")
     task = attempt.get("task")
     if isinstance(task, Mapping) and isinstance(task.get("phase"), str):
         fields.append(task["phase"])
@@ -990,15 +990,15 @@ def _landing_agent_dispatch(attempt: Mapping[str, Any]) -> str:
 def _landing_evidence(landing: Mapping[str, Any]) -> str:
     facts = []
     verify = landing.get("verify_run")
-    if isinstance(verify, Mapping) and isinstance(verify.get("job_id"), int):
+    if isinstance(verify, Mapping) and isinstance(verify.get("task_id"), int):
         facts.append(
-            f"verify task {verify['job_id']}{_reference_text(verify.get('reference'))}"
+            f"verify task {verify['task_id']}{_job_id_text(verify.get('job_id'))}"
         )
     review = landing.get("review_verdict")
     if isinstance(review, Mapping):
-        if isinstance(review.get("job_id"), int):
+        if isinstance(review.get("task_id"), int):
             facts.append(
-                f"review task {review['job_id']}{_reference_text(review.get('reference'))}"
+                f"review task {review['task_id']}{_job_id_text(review.get('job_id'))}"
             )
         elif isinstance(review.get("policy"), str):
             facts.append(f"review policy {review['policy']}")

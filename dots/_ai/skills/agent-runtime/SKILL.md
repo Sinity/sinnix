@@ -29,7 +29,7 @@ extension point is a declared operation in the project's
   PR. A run ID's suffix is accepted everywhere.
 
 Capture JSON job details and results locally, then print the fields needed for
-the decision: job/reference, terminal status and exit, candidate binding, result
+the decision: task_id/job_id, terminal status and exit, candidate binding, result
 summary, and artifact paths. Responses can repeat result encodings; inspect
 the full artifact only when needed, and do not dump the envelope into agent
 context.

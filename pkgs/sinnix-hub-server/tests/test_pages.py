@@ -145,7 +145,7 @@ def test_work_page_renders_queue_jobs_and_interrupts_live_jobs() -> None:
                 },
                 "jobs": [
                     {
-                        "job_id": 7,
+                        "task_id": 7,
                         "label": "sinnix:lane:sinnix-1",
                         "kind": "attested-agent",
                         "project": "sinnix",
@@ -160,7 +160,7 @@ def test_work_page_renders_queue_jobs_and_interrupts_live_jobs() -> None:
                         "ended_at": None,
                     },
                     {
-                        "job_id": 8,
+                        "task_id": 8,
                         "label": "sinex:cache_prebuild",
                         "kind": "declared-operation",
                         "project": "sinex",
@@ -192,8 +192,8 @@ def test_work_page_renders_queue_jobs_and_interrupts_live_jobs() -> None:
     # Jobs are pueue tasks by label; only a live one can be interrupted.
     assert "sinnix:lane:sinnix-1" in html
     assert "sinex:cache_prebuild" in html and "exit 2" in unescape(html)
-    assert "act('interrupt','job_id',\"7\"" in unescape(html)
-    assert "act('interrupt','job_id',\"8\"" not in unescape(html)
+    assert "act('interrupt','task_id',\"7\"" in unescape(html)
+    assert "act('interrupt','task_id',\"8\"" not in unescape(html)
     assert "1" in html and "jobs queued or running" in html
 
 
@@ -244,7 +244,7 @@ def test_jobs_prioritize_active_and_explain_both_display_and_owner_omissions():
 
     jobs = [
         {
-            "job_id": i,
+            "task_id": i,
             "label": f"completed-{i}",
             "terminal": True,
             "phase": "succeeded",
@@ -254,7 +254,7 @@ def test_jobs_prioritize_active_and_explain_both_display_and_owner_omissions():
     ]
     jobs.append(
         {
-            "job_id": 100,
+            "task_id": 100,
             "label": "old-running-job",
             "terminal": False,
             "phase": "running",

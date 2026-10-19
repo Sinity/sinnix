@@ -124,10 +124,10 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
     )
 
     if inp.job is not None:
-        job_id, ref, launch_reference = inp.job.resolve()
-        identity = {"job_id": job_id, "max_bytes": 64000}
-        if launch_reference is not None:
-            identity["launch_reference"] = launch_reference
+        task_id, ref, job_id = inp.job.resolve()
+        identity = {"task_id": task_id, "max_bytes": 64000}
+        if job_id is not None:
+            identity["job_id"] = job_id
         try:
             value = await anyio.to_thread.run_sync(runtime._job, "job.result", identity)
         except ProtocolError as exc:
@@ -140,12 +140,12 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
                 source_ref=ref,
             )
         else:
-            key = "launch_reference" if launch_reference is not None else "job_id"
+            key = "job_id" if job_id is not None else "task_id"
             if str(value.get(key)) != str(identity[key]):
                 raise ProtocolError(
                     "owner_failed", "job owner response names another job"
                 )
-            ref = f"sinnix://jobs/{value['job_id']}"
+            ref = f"sinnix://jobs/{value['task_id']}"
             product = OwnerProduct(
                 owner="agentctl", availability="available", data=value, source_ref=ref
             )
@@ -418,7 +418,7 @@ ACTIONS: tuple[Action, ...] = (
             ),
             Example(
                 title="Review a job",
-                input={"intent": "job.review", "job": {"job_id": 41}},
+                input={"intent": "job.review", "job": {"task_id": 41}},
             ),
             Example(
                 title="Incident overview",

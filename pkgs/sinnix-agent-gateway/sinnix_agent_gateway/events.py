@@ -529,24 +529,24 @@ class NormalizedEventService:
                     observation = {
                         "jobs": [
                             {
+                                "task_id": job.get("task_id"),
                                 "job_id": job.get("job_id"),
-                                "launch_reference": job.get("launch_reference"),
                                 "attempt": job.get("attempt"),
                                 "state": job.get("state"),
                             }
                             for job in jobs
                             if isinstance(job, Mapping)
-                            and isinstance(job.get("job_id"), str)
+                            and isinstance(job.get("task_id"), str)
                         ]
                     }
                     # Owner page order is incidental; queue position remains an
                     # observation, while launch and attempt identify the work.
                     observation["jobs"].sort(
-                        key=lambda job: (job["job_id"], _digest(job))
+                        key=lambda job: (job["task_id"], _digest(job))
                     )
                     identity_incomplete = any(
-                        not isinstance(job["launch_reference"], str)
-                        or not job["launch_reference"]
+                        not isinstance(job["job_id"], str)
+                        or not job["job_id"]
                         or type(job["attempt"]) is not int
                         or job["attempt"] < 1
                         for job in observation["jobs"]

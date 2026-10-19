@@ -646,17 +646,17 @@ class PageLocator(GatewayModel):
 JOB_REF = re.compile(r"^sinnix://jobs/(\d+)$")
 
 
-def job_ref(job_id: int | str) -> str:
-    return f"sinnix://jobs/{int(job_id)}"
+def job_ref(task_id: int | str) -> str:
+    return f"sinnix://jobs/{int(task_id)}"
 
 
 class JobLocator(GatewayModel):
-    """A queued job by canonical ref or pueue task id, and the job's own name.
+    """A queued job by canonical ref or pueue task id, and the job's own id.
 
     A task id is a position in the queue: `pueue switch` exchanges the ids of
-    two queued tasks, so an id addresses whatever the queue keeps there. The
-    launch reference every job response carries addresses the job itself, and
-    a locator that includes one follows its job across a reorder.
+    two queued tasks, so a task id addresses whatever the queue keeps there.
+    The job id every job response carries addresses the job itself, and a
+    locator that includes one follows its job across a reorder.
     """
 
     ref: str | None = Field(
@@ -664,34 +664,34 @@ class JobLocator(GatewayModel):
         pattern=r"^sinnix://jobs/\d+$",
         description="Canonical job ref returned by a run or list.",
     )
-    job_id: int | None = Field(
+    task_id: int | None = Field(
         default=None,
         ge=0,
         description="pueue task id, as `agentctl job list` shows it.",
     )
-    launch_reference: str | None = Field(
+    job_id: str | None = Field(
         default=None,
         min_length=1,
         max_length=512,
         pattern=r"^[A-Za-z0-9._-]+$",
-        description="The job's launch reference, as every job response returns "
-        "it. Include it so the call follows this job if the queue is reordered.",
+        description="The job's stable id, as every job response returns it. "
+        "Include it so the call follows this job if the queue is reordered.",
     )
 
     @model_validator(mode="after")
     def exactly_one(self) -> JobLocator:
-        if (self.ref is None) == (self.job_id is None):
-            raise ValueError("give exactly one of ref or job_id")
+        if (self.ref is None) == (self.task_id is None):
+            raise ValueError("give exactly one of ref or task_id")
         return self
 
     def resolve(self) -> tuple[int, str, str | None]:
-        """``(pueue task id, canonical ref, launch reference)``, no queue read."""
+        """``(pueue task id, canonical ref, job id)``, no queue read."""
         if self.ref is not None:
             match = JOB_REF.match(self.ref)
             assert match is not None
-            return int(match.group(1)), self.ref, self.launch_reference
-        assert self.job_id is not None
-        return self.job_id, job_ref(self.job_id), self.launch_reference
+            return int(match.group(1)), self.ref, self.job_id
+        assert self.task_id is not None
+        return self.task_id, job_ref(self.task_id), self.job_id
 
 
 # ------------------------------------------------------------------ machine

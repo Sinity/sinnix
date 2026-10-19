@@ -36,7 +36,7 @@ def agent_task(config: Config, project: ProjectAdapter) -> int:
         timeout_seconds=60,
         result_kind="exit",
         environment={},
-    )["job_id"]
+    )["task_id"]
 
 
 def _legacy_stash(
@@ -57,7 +57,7 @@ def _legacy_stash(
         result_kind="exit",
         environment={},
         stashed=True,
-    )["job_id"]
+    )["task_id"]
     task = launch.pueue.task(task_id)
     assert task is not None
     path = launch.launch_input_path(task)
@@ -74,7 +74,9 @@ def test_new_launches_do_not_stash_or_read_cross_pool_policy(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:
     project = load_project_adapter(project_root)
-    job = launch.start_operation(config, project, project.operation("verify"))["job_id"]
+    job = launch.start_operation(config, project, project.operation("verify"))[
+        "task_id"
+    ]
     assert fake_pueue.task(job).status == "Running"
     assert "hold" not in launch._launch_input(config, fake_pueue.task(job))
 
@@ -106,7 +108,7 @@ def test_heavy_verification_waits_for_an_agent_wave(
     worker = agent_task(config, project)
     corpus = replace(project.operation("verify"), pool="pytest-heavy")
 
-    held = launch.start_operation(config, project, corpus)["job_id"]
+    held = launch.start_operation(config, project, corpus)["task_id"]
 
     task = fake_pueue.task(held)
     assert task.status == "Stashed"
@@ -121,7 +123,7 @@ def test_affected_verification_stays_admissible_beside_agents(
     agent_task(config, project)
 
     affected = launch.start_operation(config, project, project.operation("verify"))[
-        "job_id"
+        "task_id"
     ]
 
     assert fake_pueue.task(affected).group == "pytest"
@@ -136,7 +138,7 @@ def test_heavy_hold_releases_after_the_agent_wave_drains(
     fake_pueue.groups["pytest-heavy"] = 1
     worker = agent_task(config, project)
     corpus = replace(project.operation("verify"), pool="pytest-heavy")
-    held = launch.start_operation(config, project, corpus)["job_id"]
+    held = launch.start_operation(config, project, corpus)["task_id"]
     fake_pueue.kill_directly(worker)
 
     result = launch.release_holds(config)
@@ -153,7 +155,7 @@ def test_operator_restash_after_automatic_release_keeps_its_intent(
     fake_pueue.groups["pytest-heavy"] = 1
     worker = agent_task(config, project)
     corpus = replace(project.operation("verify"), pool="pytest-heavy")
-    held = launch.start_operation(config, project, corpus)["job_id"]
+    held = launch.start_operation(config, project, corpus)["task_id"]
     fake_pueue.kill_directly(worker)
 
     released = launch.release_holds(config)
@@ -171,7 +173,7 @@ def test_operator_restash_after_automatic_release_keeps_its_intent(
     assert [row["task_id"] for row in released["released"]] == [held]
 
 
-def test_reordered_hold_follows_launch_reference_and_is_consumed(
+def test_reordered_hold_follows_job_id_and_is_consumed(
     fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:
     """A moved queue id must not leave an old hold that releases an operator restash."""
@@ -180,7 +182,7 @@ def test_reordered_hold_follows_launch_reference_and_is_consumed(
     fake_pueue.groups["pytest-heavy"] = 1
     worker = agent_task(config, project)
     corpus = replace(project.operation("verify"), pool="pytest-heavy")
-    held = launch.start_operation(config, project, corpus)["job_id"]
+    held = launch.start_operation(config, project, corpus)["task_id"]
     other = launch.enqueue(
         config,
         project=project,
@@ -193,7 +195,7 @@ def test_reordered_hold_follows_launch_reference_and_is_consumed(
         result_kind="exit",
         environment={},
         stashed=True,
-    )["job_id"]
+    )["task_id"]
     fake_pueue.switch(held, other)
     fake_pueue.kill_directly(worker)
 
@@ -241,7 +243,7 @@ def test_enqueue_acknowledgement_and_hold_release_share_admission_lock(
             release_results.append(launch.release_holds(cfg))
 
     monkeypatch.setattr(launch, "admission_lock", release_on_unlock)
-    held = launch.start_operation(config, project, corpus)["job_id"]
+    held = launch.start_operation(config, project, corpus)["task_id"]
     assert [row["task_id"] for row in release_results[0]["released"]] == [held]
     assert fake_pueue.enqueued == [held]
     task = fake_pueue.task(held)
@@ -260,13 +262,13 @@ def test_retry_respects_active_exclusive_partner(
     fake_pueue.groups["pytest-heavy"] = 1
     corpus = replace(project.operation("verify"), pool="pytest-heavy")
     started = launch.start_operation(config, project, corpus)
-    fake_pueue.fail(started["job_id"], exit_code=1)
+    fake_pueue.fail(started["task_id"], exit_code=1)
     worker = agent_task(config, project)
 
-    retried = launch.retry(config, started["job_id"], started["reference"])
+    retried = launch.retry(config, started["task_id"], started["job_id"])
 
     assert retried["phase"] == "stashed"
-    task = fake_pueue.task(started["job_id"])
+    task = fake_pueue.task(started["task_id"])
     assert task is not None and task.status == "Stashed"
     assert read_launch(config, task)["hold"]["waiting_for"] == [worker]
     fake_pueue.kill_directly(worker)

@@ -27,7 +27,7 @@ exec = ["true"]
 """
 
 JOB_ROW = {
-    "job_id": 41,
+    "task_id": 41,
     "label": "fixture:verify",
     "kind": "declared-operation",
     "project": "fixture",
@@ -115,7 +115,7 @@ def test_job_start_launches_the_declared_operation(
         "operation": "verify",
         "workspace": None,
     }
-    assert payload["job_id"] == "41"
+    assert payload["task_id"] == "41"
     assert payload["kind"] == "declared-operation"
     assert payload["state"] == {
         "phase": "queued",
@@ -235,13 +235,13 @@ def test_job_list_cursor_is_bound_to_the_project_filter(
     rows = [
         {
             **JOB_ROW,
-            "job_id": 30,
+            "task_id": 30,
             "project": "b",
             "enqueued_at": "2026-09-07T02:00:00Z",
         },
         {
             **JOB_ROW,
-            "job_id": 20,
+            "task_id": 20,
             "project": "a",
             "enqueued_at": "2026-09-07T01:00:00Z",
         },
@@ -250,9 +250,9 @@ def test_job_list_cursor_is_bound_to_the_project_filter(
     monkeypatch.setattr(launch, "attach_bindings", lambda _config, page: page)
 
     first = adapter.list(limit=1)
-    assert [row["job_id"] for row in first["jobs"]] == ["30"]
+    assert [row["task_id"] for row in first["jobs"]] == ["30"]
     second = adapter.list(limit=1, cursor=first["next_cursor"])
-    assert [row["job_id"] for row in second["jobs"]] == ["20"]
+    assert [row["task_id"] for row in second["jobs"]] == ["20"]
 
     with pytest.raises(JobOwnerError) as stale:
         adapter.list(limit=1, project_id="b", cursor=first["next_cursor"])
@@ -279,7 +279,7 @@ RUN_DOCUMENT = {
             "model": "policy",
             "effort": "medium",
             "task_id": 41,
-            "task_reference": "fixture-worker-abcd1234",
+            "job_id": "fixture-worker-abcd1234",
             "task_ids": [41],
             "result": None,
             "stage": "running",
@@ -288,7 +288,7 @@ RUN_DOCUMENT = {
     ],
     "landing": {
         "task_id": 42,
-        "task_reference": "fixture-integrate-9f10",
+        "job_id": "fixture-integrate-9f10",
         "integration_branch": "batch/fixture-run/integration",
         "candidate_sha": None,
         "pr_number": None,
@@ -337,9 +337,9 @@ def test_batch_start_hands_the_beads_to_agentctl_and_answers_from_the_manifest(
     worker = payload["workers"][0]
     assert worker["worker_id"] == "fixture-1"
     assert worker["beads"] == ["fixture-1", "fixture-2"]
-    assert worker["job_id"] == "41" and worker["job_ids"] == ["41"]
-    # The manifest's stable reference for each job, which jobs.* addresses by.
-    assert worker["job_launch_reference"] == "fixture-worker-abcd1234"
+    assert worker["task_id"] == "41" and worker["task_ids"] == ["41"]
+    # The manifest's stable job_id for each job, which jobs.* addresses by.
+    assert worker["job_id"] == "fixture-worker-abcd1234"
     assert worker["state"] == {
         "phase": "running",
         "terminal": False,
@@ -347,8 +347,8 @@ def test_batch_start_hands_the_beads_to_agentctl_and_answers_from_the_manifest(
         "dependencies": None,
     }
     assert worker["result_filed"] is False
-    assert payload["landing"]["job_id"] == "42"
-    assert payload["landing"]["job_launch_reference"] == "fixture-integrate-9f10"
+    assert payload["landing"]["task_id"] == "42"
+    assert payload["landing"]["job_id"] == "fixture-integrate-9f10"
     assert payload["landing"]["state"]["phase"] == "queued"
 
     def refuse(config, project, seeds, **_kwargs):
@@ -379,7 +379,7 @@ def test_batch_land_queues_a_landing_task_and_reports_the_refusal_class(
     )
 
     response = _call(adapter, "batch.land", {"run_id": "a2c81926"})
-    assert response["landing_job_id"] == "77"
+    assert response["landing_task_id"] == "77"
 
     def refuse(*_args):
         raise batch.BatchRefusal("landing_in_progress", "landing task 42 is queued")
@@ -410,16 +410,16 @@ def test_batch_verbs_refuse_a_run_that_belongs_to_another_project(
     assert "belongs to other" in str(refused.value)
 
 
-def test_job_operations_pass_the_launch_reference_through_to_agentctl(
+def test_job_operations_pass_the_job_id_through_to_agentctl(
     adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The gateway's stable job identity is agentctl's launch reference.
+    """The gateway's stable job identity is agentctl's launch job_id.
 
     Red if an operation drops it, which leaves the call addressing a queue
     position that a reorder may have given to another job.
     """
-    reference = "fixture-verify-3f9a21c8"
-    moved = {**JOB_ROW, "job_id": 44, "reference": reference}
+    job_id = "fixture-verify-3f9a21c8"
+    moved = {**JOB_ROW, "task_id": 44, "job_id": job_id}
     seen: dict[str, Any] = {}
 
     def record(name: str, value: Any = moved) -> Any:
@@ -451,14 +451,14 @@ def test_job_operations_pass_the_launch_reference_through_to_agentctl(
         answer = _call(
             adapter,
             operation,
-            {"job_id": 41, "launch_reference": reference, **arguments},
+            {"task_id": 41, "job_id": job_id, **arguments},
         )
-        assert answer["launch_reference"] == reference
-        assert answer["job_id"] == "44"
+        assert answer["job_id"] == job_id
+        assert answer["task_id"] == "44"
 
     for name in ("wait", "get", "cancel", "retry", "clean", "result"):
         args, kwargs = seen[name]
-        assert reference in (*args, *kwargs.values()), name
+        assert job_id in (*args, *kwargs.values()), name
     assert seen["retry"][0][0] is adapter.config
 
 
@@ -485,7 +485,7 @@ def test_cancel_keeps_requester_and_does_not_infer_prior_terminal_state(
 
     monkeypatch.setattr(launch, "cancel", cancel)
     answer = adapter.cancel(
-        job_id=41, actor="gateway:operator", reason="stop requested"
+        task_id=41, actor="gateway:operator", reason="stop requested"
     )
     assert seen["actor"] == "gateway:operator" and seen["reason"] == "stop requested"
     assert answer["already_terminal"] is already_terminal
@@ -496,13 +496,13 @@ def test_cancel_keeps_requester_and_does_not_infer_prior_terminal_state(
     )
 
 
-def test_a_launch_reference_that_is_a_path_is_refused(adapter: LocalJobs) -> None:
+def test_a_job_id_that_is_a_path_is_refused(adapter: LocalJobs) -> None:
     """It names one file under the state directory; a path would leave it."""
     with pytest.raises(JobOwnerError) as refused:
         _call(
             adapter,
             "job.get",
-            {"job_id": 41, "launch_reference": "../../etc/passwd"},
+            {"task_id": 41, "job_id": "../../etc/passwd"},
         )
     assert refused.value.code == "invalid_request"
 
@@ -510,13 +510,13 @@ def test_a_launch_reference_that_is_a_path_is_refused(adapter: LocalJobs) -> Non
 def test_job_logs_reads_the_log_of_the_job_the_reference_addresses(
     adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The reference is resolved once and the log comes from that task.
+    """The job_id is resolved once and the log comes from that task.
 
-    Red if the read re-addresses the answering id without the reference: a
+    Red if the read re-addresses the answering id without the job_id: a
     `pueue switch` between the two reads hands back another job's log under
-    this job's launch reference.
+    this job's launch job_id.
     """
-    reference = "fixture-verify-3f9a21c8"
+    job_id = "fixture-verify-3f9a21c8"
     jobs_dir = adapter.config.jobs_dir
     jobs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -535,10 +535,10 @@ def test_job_logs_reads_the_log_of_the_job_the_reference_addresses(
             command=f"agentctl-run {jobs_dir / f'{name}.json'}",
         )
 
-    mine = task(44, reference)
+    mine = task(44, job_id)
     occupant = task(44, "fixture-other-0badc0de")
 
-    # Id 41 names nothing now; the reference finds its job by the one command
+    # Id 41 names nothing now; the job_id finds its job by the one command
     # that names its launch input, never through the whole history.
     monkeypatch.setattr(
         launch.pueue, "task", lambda task_id: {45: occupant}.get(task_id)
@@ -554,10 +554,10 @@ def test_job_logs_reads_the_log_of_the_job_the_reference_addresses(
     )
     monkeypatch.setattr(launch.pueue, "log", lambda _task_id: "")
 
-    answer = _call(adapter, "job.logs", {"job_id": 41, "launch_reference": reference})
-    assert answer["launch_reference"] == reference
-    assert answer["job_id"] == "44"
-    assert answer["content"] == f"log of {reference}"
+    answer = _call(adapter, "job.logs", {"task_id": 41, "job_id": job_id})
+    assert answer["job_id"] == job_id
+    assert answer["task_id"] == "44"
+    assert answer["content"] == f"log of {job_id}"
 
 
 def _task(
@@ -591,15 +591,15 @@ def test_an_unfinished_job_answers_with_its_place_in_the_queue(
         {"shell-long": {"status": "Running", "parallel_tasks": 1}},
     )
     monkeypatch.setattr(pueue, "live", lambda: busy)
-    queued = {**JOB_ROW, "group": "shell-long", "job_id": 41}
+    queued = {**JOB_ROW, "group": "shell-long", "task_id": 41}
     monkeypatch.setattr(launch, "get_job", lambda *args, **kwargs: queued)
 
-    answer = _call(adapter, "job.get", {"job_id": 41})
+    answer = _call(adapter, "job.get", {"task_id": 41})
 
     queue = answer["queue"]
     assert queue["group"] == "shell-long" and queue["parallel"] == 1
     assert queue["position"] == 1 and queue["queued_count"] == 1
-    assert [entry["job_id"] for entry in queue["occupied_by"]] == [40]
+    assert [entry["task_id"] for entry in queue["occupied_by"]] == [40]
     assert queue["occupied_by"][0]["seconds"] > 0
 
     rows = _call(adapter, "job.queues", {"groups": ["shell-long"]})["queues"]
@@ -610,8 +610,8 @@ def test_an_unfinished_job_answers_with_its_place_in_the_queue(
         raise pueue.PueueError("daemon unreachable")
 
     monkeypatch.setattr(pueue, "live", unavailable)
-    degraded = _call(adapter, "job.get", {"job_id": 41})
+    degraded = _call(adapter, "job.get", {"task_id": 41})
     # The job's own answer stands; the missing queue is named, not fatal.
     assert "queue" not in degraded
     assert degraded["queue_unavailable"] == "daemon unreachable"
-    assert degraded["job_id"] == "41"
+    assert degraded["task_id"] == "41"

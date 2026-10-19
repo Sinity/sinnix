@@ -12,7 +12,7 @@ AGENT_MEMORY_MAX = "4G"
 # worktree provisioning under a corpus run takes over a minute and a wedged daemon still surfaces.
 CALL_TIMEOUT_SECONDS = 300
 SYSTEMCTL_TIMEOUT_SECONDS = 30
-# Hex characters shown of a run id's suffix, a commit, or a job reference.
+# Hex characters shown of a run id's suffix, a commit, or a job id.
 SHORT_ID = 8
 # What a queued command leaves behind: its exit status, a JSON document, a
 # pytest report, or an agent's last message.

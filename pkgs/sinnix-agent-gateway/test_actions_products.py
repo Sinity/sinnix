@@ -79,7 +79,7 @@ def test_runtime_projection_keeps_requested_and_observed_evidence_separate():
     job = jobs._job_view(
         job_payload(
             {
-                "job_id": 1,
+                "task_id": 1,
                 "project": "fixture",
                 "dependencies": [7],
                 "binding": {
@@ -321,12 +321,12 @@ def test_shell_wait_preserves_job_identity_and_returns_output(
     server, _, fake = make_server(tmp_path, monkeypatch, with_git=True)
     fake.responses["job.shell.start"] = {
         **RUNNING,
-        "launch_reference": "fixture-shell-abc",
+        "job_id": "fixture-shell-abc",
     }
     view = {
         **(DONE if terminal else RUNNING),
-        "launch_reference": "fixture-shell-abc",
-        "job_id": "44",
+        "job_id": "fixture-shell-abc",
+        "task_id": "44",
     }
     fake.responses["job.wait"] = {**view, "timed_out": not terminal}
     fake.responses["job.logs"] = {**view, "content": "output", "truncated": False}
@@ -342,12 +342,12 @@ def test_shell_wait_preserves_job_identity_and_returns_output(
     )
     assert result["result"]["outcome"] == "ok", result
     data = result["data"]
-    assert data["job_id"] == 44
+    assert data["task_id"] == 44
     assert data["outcome"] == ("terminal" if terminal else "running")
     assert data["output"]["content"] == "output"
     wait_call = next(c for c in fake.calls if c.operation == "job.wait")
     assert wait_call.arguments["timeout_seconds"] == 5
-    assert wait_call.arguments["launch_reference"] == "fixture-shell-abc"
+    assert wait_call.arguments["job_id"] == "fixture-shell-abc"
     assert (data["continuation"] is None) is terminal
 
 

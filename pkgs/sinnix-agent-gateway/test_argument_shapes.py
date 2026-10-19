@@ -20,7 +20,7 @@ from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 OWNED = (*jobs.ACTIONS, *beads.ACTIONS)
 
 JOB = {
-    "job_id": "41",
+    "task_id": "41",
     "label": "fixture:check",
     "project_id": "fixture",
     "state": {"phase": "succeeded", "terminal": True, "exit_code": 0},
@@ -59,8 +59,8 @@ def refusal(server: Any, name: str, arguments: dict[str, Any]) -> dict[str, Any]
 
 # The shapes a cold connector session actually sent instead of the published one.
 MISROUTES: tuple[tuple[str, dict[str, Any], str], ...] = (
-    ("jobs.wait", {"parameters": {"target": {"job_id": 41}}}, "target"),
-    ("jobs.wait", {"job_id": 41}, "target"),
+    ("jobs.wait", {"parameters": {"target": {"task_id": 41}}}, "target"),
+    ("jobs.wait", {"task_id": 41}, "target"),
     ("beads.get", {"parameters": {"target": {"id": "fixture-1"}}}, "target"),
     ("beads.get", {"id": "fixture-1"}, "target"),
     ("beads.get", {"bead": {"id": "fixture-1"}}, "target"),
@@ -84,12 +84,12 @@ def test_the_catalogued_shape_reaches_the_owner(server: Any) -> None:
     A key the schema does not declare is dropped before the handler, so the
     payload is read from the declared fields or not at all.
     """
-    waited = call(server, "jobs.wait", {"target": {"job_id": 41}})
+    waited = call(server, "jobs.wait", {"target": {"task_id": 41}})
     assert waited["result"]["outcome"] == "ok", waited
-    assert waited["data"]["job_id"] == 41 and waited["data"]["outcome"] == "terminal"
+    assert waited["data"]["task_id"] == 41 and waited["data"]["outcome"] == "terminal"
 
     decorated = call(
-        server, "jobs.wait", {"target": {"job_id": 41}, "parameters": {"job_id": 9}}
+        server, "jobs.wait", {"target": {"task_id": 41}, "parameters": {"task_id": 9}}
     )
     assert decorated["result"]["outcome"] == "error", decorated
     assert decorated["error"]["code"] == "invalid_request"

@@ -518,7 +518,7 @@ def test_agent_gateway_reads_the_bounded_agentctl_projection(monkeypatch) -> Non
             "groups": {"agent": {"running": 1}},
             "jobs": [
                 {
-                    "job_id": 7,
+                    "task_id": 7,
                     "label": "sinnix:worker:run",
                     "project": "sinnix",
                     "kind": "attested-agent",
@@ -534,7 +534,7 @@ def test_agent_gateway_reads_the_bounded_agentctl_projection(monkeypatch) -> Non
     assert out["schema"] == "sinnix-observe-agentctl-v2"
     assert out["available"] is True
     assert out["groups"]["agent"]["running"] == 1
-    assert out["jobs"][0]["job_id"] == 7
+    assert out["jobs"][0]["task_id"] == 7
     assert out["omitted"]["terminal"] == 1
 
 
@@ -559,7 +559,7 @@ def test_human_render_reports_owner_queue_omissions() -> None:
                 "available": True,
                 "jobs": [
                     {
-                        "job_id": 7,
+                        "task_id": 7,
                         "label": "sinnix:worker",
                         "phase": "running",
                         "group": "agent",
@@ -579,7 +579,7 @@ def test_gateway_rows_use_agentctl_snapshot_fields() -> None:
         {
             "jobs": [
                 {
-                    "job_id": 7,
+                    "task_id": 7,
                     "label": "sinnix:worker:run",
                     "project": "sinnix",
                     "kind": "attested-agent",
@@ -640,7 +640,7 @@ def test_successful_read_records_no_error(tmp_path):
 def test_gateway_failure_surfaces_as_a_gap_category() -> None:
     rows = joins.build_gateway_rows(
         {
-            "jobs": [{"job_id": "j", "phase": "running"}],
+            "jobs": [{"task_id": "j", "phase": "running"}],
             "available": False,
         },
         {},

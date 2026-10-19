@@ -4,7 +4,7 @@ A job is a pueue task in the descriptor's pool with label
 ``<project>:<operation>``. Its id is the pueue task id; pueue's state is the
 job's state. agentctl adds only the launch input `agentctl-run` consumes
 (argv, environment, timeout, artifact paths) and reads bounded views of the complete log and
-typed result back by the launch reference embedded in the task's command.
+typed result back by the job id embedded in the task's command.
 """
 
 from __future__ import annotations
@@ -83,10 +83,10 @@ class JobError(RuntimeError):
 class EnqueueUncertain(JobError):
     """Pueue may have accepted a launch whose acknowledgement was lost."""
 
-    def __init__(self, reference: str, error: PueueError) -> None:
-        self.reference = reference
+    def __init__(self, job_id: str, error: PueueError) -> None:
+        self.job_id = job_id
         self.error = error
-        super().__init__(f"pueue acceptance is unknown for launch {reference}: {error}")
+        super().__init__(f"pueue acceptance is unknown for launch {job_id}: {error}")
 
 
 def read_outcome(path: Path | None, limit: int) -> dict[str, Any] | None:
@@ -116,12 +116,12 @@ def label_for(project_id: str, operation: str) -> str:
     return f"{project_id}:{operation}"
 
 
-# A reference names one file under inputs/, so it is a single path component
+# A job id names one file under inputs/, so it is a single path component
 # in the characters a sanitised label leaves.
-REFERENCE = re.compile(r"^[A-Za-z0-9._-]+$")
+JOB_ID = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
-def _reference(label: str) -> str:
+def _new_job_id(label: str) -> str:
     safe = re.sub(r"[^A-Za-z0-9._-]+", "-", label).strip("-") or "job"
     return f"{safe}-{uuid.uuid4().hex[:SHORT_ID]}"
 
@@ -320,7 +320,7 @@ def enqueue(
     tree_receipt: Mapping[str, Any] | None = None,
     environment_receipt: Mapping[str, str] | None = None,
     binding: Mapping[str, Any] | None = None,
-    reference: str | None = None,
+    job_id: str | None = None,
     before_enqueue: Callable[[str], None] | None = None,
     idempotency_key: str | None = None,
     request_digest: str | None = None,
@@ -331,10 +331,10 @@ def enqueue(
     it is stored as written and read back on ``job get``. ``scratch`` names
     the tier of the job-owned directory the wrapper creates and removes.
     """
-    reference = reference or _reference(label)
-    if not REFERENCE.fullmatch(reference):
-        raise JobError(f"invalid launch reference: {reference!r}")
-    log_path = config.jobs_dir / f"{reference}.log"
+    job_id = job_id or _new_job_id(label)
+    if not JOB_ID.fullmatch(job_id):
+        raise JobError(f"invalid job id: {job_id!r}")
+    log_path = config.jobs_dir / f"{job_id}.log"
     environment = dict(environment)
     if config.config_path is not None:
         # A queued task calls agentctl again (`batch result`, `batch land`);
@@ -342,7 +342,7 @@ def enqueue(
         # state directory.
         environment["AGENTCTL_CONFIG"] = str(config.config_path)
     launch: dict[str, Any] = {
-        "job_id": reference,
+        "job_id": job_id,
         "project_id": project.project_id,
         "project_root": str(project.root),
         "operation": operation,
@@ -375,19 +375,19 @@ def enqueue(
         launch["environment_receipt"] = dict(environment_receipt)
     if binding:
         launch["binding"] = dict(binding)
-    scratch_dir = scratch_path(scratch, reference)
+    scratch_dir = scratch_path(scratch, job_id)
     if scratch_dir is not None:
         launch["scratch"] = {"kind": scratch, "path": str(scratch_dir)}
     if result_kind != "exit":
-        launch["result_path"] = str(config.jobs_dir / f"{reference}.result")
-    input_path = config.inputs_dir / f"{reference}.json"
+        launch["result_path"] = str(config.jobs_dir / f"{job_id}.result")
+    input_path = config.inputs_dir / f"{job_id}.json"
     with admission_lock(config):
         hold = None if stashed else _admission_hold(config, group, label=label)
         if hold is not None:
             launch["hold"] = hold
         write_input(input_path, launch)
         if before_enqueue is not None:
-            before_enqueue(reference)
+            before_enqueue(job_id)
         try:
             task_id = pueue.add(
                 group=group,
@@ -402,7 +402,7 @@ def enqueue(
                 input_path.unlink(missing_ok=True)
             raise
         except PueueError as error:
-            raise EnqueueUncertain(reference, error) from error
+            raise EnqueueUncertain(job_id, error) from error
         # Keep queue acknowledgement and the hold marker in the same admission
         # transaction. A release between add and this write could enqueue a
         # task while the stale local launch value restores its consumed hold.
@@ -417,7 +417,7 @@ def enqueue(
     return (
         job_view(task)
         if task is not None
-        else {"job_id": task_id, "label": label, "reference": reference}
+        else {"task_id": task_id, "label": label, "job_id": job_id}
     )
 
 
@@ -461,9 +461,9 @@ def queue_state(
             document = _launch_input(config, task) or {}
             argv = document.get("argv")
             return {
-                "job_id": task.task_id,
+                "task_id": task.task_id,
                 "label": task.label,
-                "reference": launch_reference(task),
+                "job_id": job_id_of(task),
                 # What the slot is doing, from the launch input the job owns.
                 "argv": [str(word) for word in argv]
                 if isinstance(argv, list)
@@ -512,12 +512,12 @@ def job_queue(
         return None
     state = queue_state(config, [group], now=now)[group]
     queued = job.get("phase") == "queued"
-    job_id = job.get("job_id")
+    task_id = job.get("task_id")
     ahead = (
         [
-            entry["job_id"]
+            entry["task_id"]
             for entry in state["queued"]
-            if isinstance(job_id, int) and entry["job_id"] < job_id
+            if isinstance(task_id, int) and entry["task_id"] < task_id
         ]
         if queued
         else []
@@ -584,7 +584,7 @@ def _hold_of(config: Config, task: Task) -> dict[str, Any] | None:
         not isinstance(hold, Mapping)
         or hold.get("reason") != HOLD_REASON
         or hold.get("pool") != task.group
-        or value.get("job_id") != launch_reference(task)
+        or value.get("job_id") != job_id_of(task)
         or value.get("pool") != task.group
     ):
         return None
@@ -602,7 +602,7 @@ def _consume_hold(config: Config, task: Task, expected: Mapping[str, Any]) -> bo
     if (
         path is None
         or value is None
-        or value.get("job_id") != launch_reference(task)
+        or value.get("job_id") != job_id_of(task)
         or value.get("pool") != task.group
         or value.get("hold") != dict(expected)
     ):
@@ -659,7 +659,7 @@ def release_holds(config: Config) -> dict[str, list[dict[str, Any]]]:
         return {"released": [], "waiting": [{"error": str(error)}]}
 
 
-def _idempotent_reference(key: str) -> str:
+def _idempotent_job_id(key: str) -> str:
     if not isinstance(key, str) or not key or len(key) > 4096:
         raise JobError(
             "idempotency_key must be a nonempty string of at most 4096 characters"
@@ -675,17 +675,17 @@ def lookup_operation_request(
     An input without a queue acknowledgement or execution evidence represents
     an uncertain submission. An absent queue row alone cannot prove rejection.
     """
-    reference = _idempotent_reference(idempotency_key)
-    path = config.inputs_dir / f"{reference}.json"
+    job_id = _idempotent_job_id(idempotency_key)
+    path = config.inputs_dir / f"{job_id}.json"
     raw = read_bounded(path, MAX_LAUNCH_INPUT_BYTES)
     if raw is None:
         if path.exists():
-            raise JobError(f"unreadable idempotent launch {reference}")
+            raise JobError(f"unreadable idempotent launch {job_id}")
         return None
     try:
         document = json.loads(raw)
     except (ValueError, UnicodeDecodeError) as error:
-        raise JobError(f"invalid idempotent launch {reference}") from error
+        raise JobError(f"invalid idempotent launch {job_id}") from error
     if (
         not isinstance(document, dict)
         or document.get("idempotency_key") != idempotency_key
@@ -694,17 +694,17 @@ def lookup_operation_request(
             and document.get("request_digest") != request_digest
         )
     ):
-        raise JobError(f"idempotent launch identity mismatch for {reference}")
-    task = find_task(pueue.tasks(), document.get("queue_task_id", -1), reference)
+        raise JobError(f"idempotent launch identity mismatch for {job_id}")
+    task = find_task(pueue.tasks(), document.get("queue_task_id", -1), job_id)
     if task is not None:
-        return {**get_job(task.task_id, config, reference), "reused": True}
+        return {**get_job(task.task_id, config, job_id), "reused": True}
     if document.get("queue_task_id") is not None or artifacts.attempts(document):
         return {
-            **get_job(document.get("queue_task_id", -1), config, reference),
+            **get_job(document.get("queue_task_id", -1), config, job_id),
             "reused": True,
         }
     raise EnqueueUncertain(
-        reference, PueueError("retained launch has no acknowledged queue task")
+        job_id, PueueError("retained launch has no acknowledged queue task")
     )
 
 
@@ -716,16 +716,16 @@ def enqueue_request(
     **arguments: Any,
 ) -> dict[str, Any]:
     """Submit one keyed job, or read its exact retained launch under the key lock."""
-    reference = _idempotent_reference(idempotency_key)
+    job_id = _idempotent_job_id(idempotency_key)
     config.inputs_dir.mkdir(parents=True, exist_ok=True)
-    with (config.inputs_dir / f"{reference}.lock").open("a") as lock:
+    with (config.inputs_dir / f"{job_id}.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         existing = lookup_operation_request(config, idempotency_key, request_digest)
         if existing is not None:
             return existing
         return enqueue(
             config,
-            reference=reference,
+            job_id=job_id,
             idempotency_key=idempotency_key,
             request_digest=request_digest,
             **arguments,
@@ -750,7 +750,7 @@ def start_operation(
             workspace=workspace,
             extra_argv=extra_argv,
         )
-    reference = _idempotent_reference(idempotency_key)
+    job_id = _idempotent_job_id(idempotency_key)
     config.inputs_dir.mkdir(parents=True, exist_ok=True)
     fingerprint = hashlib.sha256(
         json.dumps(
@@ -764,15 +764,15 @@ def start_operation(
             sort_keys=True,
         ).encode()
     ).hexdigest()
-    with (config.inputs_dir / f"{reference}.lock").open("a") as lock:
+    with (config.inputs_dir / f"{job_id}.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        path = config.inputs_dir / f"{reference}.json"
+        path = config.inputs_dir / f"{job_id}.json"
         raw = read_bounded(path, MAX_LAUNCH_INPUT_BYTES)
         if raw is not None:
             try:
                 previous = json.loads(raw)
             except (ValueError, UnicodeDecodeError) as error:
-                raise JobError(f"invalid idempotent launch {reference}") from error
+                raise JobError(f"invalid idempotent launch {job_id}") from error
             if (
                 not isinstance(previous, dict)
                 or previous.get("request_digest") != fingerprint
@@ -864,10 +864,10 @@ def _start_operation(
                         if key in existing_input
                     },
                 }
-    reference = (
-        _idempotent_reference(idempotency_key)
+    job_id = (
+        _idempotent_job_id(idempotency_key)
         if idempotency_key is not None
-        else _reference(label_for(project.project_id, operation.name))
+        else _new_job_id(label_for(project.project_id, operation.name))
     )
     started = enqueue(
         config,
@@ -883,7 +883,7 @@ def _start_operation(
         scratch=operation.scratch,
         admission=operation.admission,
         unit_properties=operation.unit_properties,
-        reference=reference,
+        job_id=job_id,
         idempotency_key=idempotency_key,
         request_digest=request_digest,
         tree_receipt=tree_receipt,
@@ -998,7 +998,7 @@ def read_bounded(path: Path, limit: int) -> bytes | None:
         os.close(descriptor)
 
 
-def launch_reference(task: Task) -> str | None:
+def job_id_of(task: Task) -> str | None:
     path = launch_input_path(task)
     return path.stem if path is not None else None
 
@@ -1019,7 +1019,7 @@ def job_view(task: Task) -> dict[str, Any]:
     # Agent labels are <project>:<kind>:<run>[:<worker>] for a batch's agents.
     agent = operation.split(":", 1)[0] in AGENT_OPERATIONS and ":" in operation
     return {
-        "job_id": task.task_id,
+        "task_id": task.task_id,
         "label": task.label,
         "kind": "attested-agent" if agent else "declared-operation",
         "project": project,
@@ -1031,7 +1031,7 @@ def job_view(task: Task) -> dict[str, Any]:
         "result": task.result,
         "exit_code": task.exit_code,
         "path": task.path,
-        "reference": launch_reference(task),
+        "job_id": job_id_of(task),
         "enqueued_at": task.enqueued_at,
         "started_at": task.started_at,
         "ended_at": task.ended_at,
@@ -1125,7 +1125,7 @@ def _snapshot_row(task: Task, config: Config | None = None) -> dict[str, Any]:
     if config is not None:
         row["attempt"] = _artifact_view(config, task)["attempt"]
     shortened = []
-    for key in ("label", "operation", "path", "reference"):
+    for key in ("label", "operation", "path", "job_id"):
         value = row.get(key)
         if isinstance(value, str) and len(value) > MAX_SNAPSHOT_TEXT:
             row[key] = value[: MAX_SNAPSHOT_TEXT - 1] + "…"
@@ -1141,28 +1141,24 @@ def attach_bindings(
     """Each row with the binding recorded in the launch input its task names.
 
     One selected-id read for the page. A queue id can move after listing,
-    so a launch reference, when present, owns the binding's identity.
+    so a job id, when present, owns the binding's identity.
     """
     tasks = pueue.tasks_by_ids(
         [
             value
             for row in rows
-            if isinstance(value := row.get("job_id"), int)
+            if isinstance(value := row.get("task_id"), int)
             and not isinstance(value, bool)
             and value >= 0
         ]
     )
-    references = index_task_references(tuple(tasks.values()))
+    job_ids = index_tasks_by_job_id(tuple(tasks.values()))
     attached = []
     for row in rows:
-        task_id, reference = row.get("job_id"), row.get("reference")
-        task = find_task(tasks, task_id, reference, references=references)
-        if (
-            task is None
-            and isinstance(reference, str)
-            and REFERENCE.fullmatch(reference)
-        ):
-            task = locate(task_id, reference)
+        task_id, job_id = row.get("task_id"), row.get("job_id")
+        task = find_task(tasks, task_id, job_id, job_ids=job_ids)
+        if task is None and isinstance(job_id, str) and JOB_ID.fullmatch(job_id):
+            task = locate(task_id, job_id)
         binding = (_launch_input(config, task) or {}).get("binding") if task else None
         attached.append({**row, "binding": binding} if binding else dict(row))
     return attached
@@ -1175,36 +1171,36 @@ def _task(task_id: int) -> Task:
     return task
 
 
-def locate(task_id: int, reference: str | None = None) -> Task | None:
+def locate(task_id: int, job_id: str | None = None) -> Task | None:
     """The task carrying this job, read without the queue's whole history.
 
-    The id is tried first, since a queue is rarely reordered; a reference
+    The id is tried first, since a queue is rarely reordered; a job_id
     that does not match it is looked up by the one command that names its
     launch input.
     """
     task = pueue.task(task_id) if isinstance(task_id, int) and task_id >= 0 else None
-    if reference is None or (task is not None and launch_reference(task) == reference):
+    if job_id is None or (task is not None and job_id_of(task) == job_id):
         return task
-    matches = pueue.tasks_by_command(f"{reference}.json")
-    return find_task(matches, task_id, reference)
+    matches = pueue.tasks_by_command(f"{job_id}.json")
+    return find_task(matches, task_id, job_id)
 
 
-def _read_task(config: Config, task_id: int, reference: str | None) -> Task:
-    task = locate(task_id, reference)
+def _read_task(config: Config, task_id: int, job_id: str | None) -> Task:
+    task = locate(task_id, job_id)
     if task is not None:
         return task
-    if reference is None or not REFERENCE.fullmatch(reference):
+    if job_id is None or not JOB_ID.fullmatch(job_id):
         raise JobError(
-            f"pueue has no task {reference or task_id}; archived reads require a reference"
+            f"pueue has no task {job_id or task_id}; archived reads require a job id"
         )
-    path = config.inputs_dir / f"{reference}.json"
+    path = config.inputs_dir / f"{job_id}.json"
     raw = read_bounded(path, MAX_LAUNCH_INPUT_BYTES)
     try:
         document = json.loads(raw) if raw else None
     except (ValueError, UnicodeDecodeError):
         document = None
     if not isinstance(document, dict):
-        raise JobError(f"no retained launch {reference}")
+        raise JobError(f"no retained launch {job_id}")
     return Task(
         task_id=document.get("queue_task_id", task_id),
         label=document.get("label", ""),
@@ -1222,13 +1218,13 @@ def _artifact_view(
     config: Config, task: Task, attempt: int | None = None
 ) -> dict[str, Any]:
     document = _launch_input(config, task) or {}
-    reference = launch_reference(task)
-    if not document.get("log_path") and reference is not None:
+    job_id = job_id_of(task)
+    if not document.get("log_path") and job_id is not None:
         # Older queue entries can outlive their input while their conventional
-        # state-directory artifacts remain available by the command reference.
+        # state-directory artifacts remain available by the job id in the command.
         document = {
-            "log_path": str(config.jobs_dir / f"{reference}.log"),
-            "result_path": str(config.jobs_dir / f"{reference}.result"),
+            "log_path": str(config.jobs_dir / f"{job_id}.log"),
+            "result_path": str(config.jobs_dir / f"{job_id}.result"),
         }
     records = artifacts.attempts(document) if document.get("log_path") else []
     # Retain ownership checks even for externally authored launch inputs.
@@ -1244,7 +1240,7 @@ def _artifact_view(
         else (records[-1] if records else None)
     )
     if attempt is not None and selected is None and not (attempt == 0 and not records):
-        raise JobError(f"launch {launch_reference(task)} has no attempt {attempt}")
+        raise JobError(f"launch {job_id_of(task)} has no attempt {attempt}")
     return {
         "attempt": selected["attempt"] if selected else 0,
         "artifacts": selected["artifacts"] if selected else {},
@@ -1256,7 +1252,7 @@ def _artifact_view(
 def get_job(
     task_id: int,
     config: Config | None = None,
-    reference: str | None = None,
+    job_id: str | None = None,
     *,
     attempt: int | None = None,
     attempt_offset: int = 0,
@@ -1266,11 +1262,7 @@ def get_job(
         raise JobError(
             "attempt_offset must be nonnegative and attempt_limit must be 1..100"
         )
-    task = (
-        _read_task(config, task_id, reference)
-        if config
-        else addressed(task_id, reference)
-    )
+    task = _read_task(config, task_id, job_id) if config else addressed(task_id, job_id)
     if config is None:
         return job_view(task)
     return _job_detail(config, task, attempt, attempt_offset, attempt_limit)
@@ -1357,18 +1349,14 @@ def _artifact(
     if isinstance(declared, str) and declared:
         path = Path(declared)
         return path.resolve() if _task_owned(config, task, path) else None
-    reference = launch_reference(task)
-    return (
-        config.jobs_dir / f"{reference}{suffix}"
-        if reference and attempt is None
-        else None
-    )
+    job_id = job_id_of(task)
+    return config.jobs_dir / f"{job_id}{suffix}" if job_id and attempt is None else None
 
 
 def read_job_artifact(
     config: Config,
     task_id: int,
-    reference: str | None = None,
+    job_id: str | None = None,
     *,
     attempt: int | None = None,
     artifact: str = "log",
@@ -1381,7 +1369,7 @@ def read_job_artifact(
     bytes, including characters split across byte offsets. Follow next_offset
     with the returned attempt number to remain on one invocation during retries.
     """
-    task = _read_task(config, task_id, reference)
+    task = _read_task(config, task_id, job_id)
     return _read_artifact(config, task, attempt, artifact, offset, limit)
 
 
@@ -1445,7 +1433,7 @@ def _read_artifact(
                 os.close(descriptor)
     next_offset = offset + len(raw)
     return {
-        "reference": launch_reference(task),
+        "job_id": job_id_of(task),
         "attempt": view["attempt"],
         "artifact": artifact,
         "path": str(path) if path else None,
@@ -1492,24 +1480,24 @@ def task_logs(config: Config, task: Task, *, attempt: int | None = None) -> str:
 def logs(
     config: Config,
     task_id: int,
-    reference: str | None = None,
+    job_id: str | None = None,
     *,
     attempt: int | None = None,
 ) -> str:
-    return task_logs(config, _read_task(config, task_id, reference), attempt=attempt)
+    return task_logs(config, _read_task(config, task_id, job_id), attempt=attempt)
 
 
 def result(
     config: Config,
     task_id: int,
-    reference: str | None = None,
+    job_id: str | None = None,
     *,
     attempt: int | None = None,
     offset: int = 0,
     limit: int = MAX_RESULT_BYTES,
 ) -> dict[str, Any]:
     """Bound the view only; large typed results remain complete valid artifacts."""
-    task = _read_task(config, task_id, reference)
+    task = _read_task(config, task_id, job_id)
     view = _job_detail(config, task, attempt)
     page = _read_artifact(
         config, task, view["attempt"], "result", offset, limit, selected_view=view
@@ -1660,7 +1648,7 @@ def cancel(
     config: Config,
     task_id: int,
     *,
-    reference: str | None = None,
+    job_id: str | None = None,
     expected_attempt: int | None = None,
     actor: str | None = None,
     reason: str | None = None,
@@ -1683,14 +1671,14 @@ def cancel(
         return _cancel(
             config,
             task_id,
-            reference=reference,
+            job_id=job_id,
             settle_seconds=settle_seconds,
             sleep=sleep,
             cancellation=request,
         )
-    if reference is None:
-        raise JobError("expected_attempt requires a stable launch reference")
-    task = addressed(task_id, reference)
+    if job_id is None:
+        raise JobError("expected_attempt requires a stable job id")
+    task = addressed(task_id, job_id)
     document = _launch_input(config, task) or {}
     log = document.get("log_path")
     if not log or not _task_owned(config, task, Path(log)):
@@ -1707,7 +1695,7 @@ def cancel(
         return _cancel(
             config,
             task.task_id,
-            reference=reference,
+            job_id=job_id,
             settle_seconds=settle_seconds,
             sleep=sleep,
             allocation_lock=lock,
@@ -1897,7 +1885,7 @@ def _cancel(
     config: Config,
     task_id: int,
     *,
-    reference: str | None = None,
+    job_id: str | None = None,
     settle_seconds: float | None = None,
     sleep: Callable[[float], None] = time.sleep,
     allocation_lock: TextIO | None = None,
@@ -1916,7 +1904,7 @@ def _cancel(
     """
     if settle_seconds is None:
         settle_seconds = CANCEL_SETTLE_SECONDS
-    task = addressed(task_id, reference)
+    task = addressed(task_id, job_id)
     task_id = task.task_id
     view = job_view(task)
     if task.terminal:
@@ -2009,7 +1997,7 @@ def _cancel(
                         ] != expected_attempt or (
                             observed is not None
                             and (
-                                launch_reference(observed) != launch_reference(task)
+                                job_id_of(observed) != job_id_of(task)
                                 or observed.started_at != task.started_at
                             )
                         ):
@@ -2057,16 +2045,16 @@ def _unlink_all(paths: Sequence[Path]) -> list[str]:
     return removed
 
 
-def clean(config: Config, task_id: int, reference: str | None = None) -> dict[str, Any]:
+def clean(config: Config, task_id: int, job_id: str | None = None) -> dict[str, Any]:
     """Remove a terminal queue entry; retain its launch and execution evidence."""
-    if reference is not None and not REFERENCE.fullmatch(reference):
-        raise JobError(f"{reference!r} is not a launch reference")
-    task = _read_task(config, task_id, reference)
+    if job_id is not None and not JOB_ID.fullmatch(job_id):
+        raise JobError(f"{job_id!r} is not a job id")
+    task = _read_task(config, task_id, job_id)
     if task.status != "Archived" and not task.terminal:
         raise JobError(
             f"task {task.task_id} is still {task.status.lower()}; cancel it first"
         )
-    view = get_job(task.task_id, config, launch_reference(task))
+    view = get_job(task.task_id, config, job_id_of(task))
     if task.status != "Archived":
         pueue.remove([task.task_id])
     log = _artifact(config, task, ".log")
@@ -2075,7 +2063,7 @@ def clean(config: Config, task_id: int, reference: str | None = None) -> dict[st
 
 
 def _live_run_jobs(config: Config, tasks: Mapping[int, Task]) -> set[int]:
-    """Jobs a live batch still needs, including attempts predating stable references."""
+    """Jobs a live batch still needs, including attempts predating stable job ids."""
     runs = [run for run in manifest.list_runs(config, strict=True) if run.live]
     run_ids = {run.run_id for run in runs}
     worktrees: set[str] = set()
@@ -2088,13 +2076,9 @@ def _live_run_jobs(config: Config, tasks: Mapping[int, Task]) -> set[int]:
             if isinstance(record := run.landing.get(key), dict)
         )
         for record in records:
-            reference = (
-                record.get("pending_launch")
-                or record.get("task_reference")
-                or record.get("reference")
-            )
-            task_id = record.get("task_id", record.get("job_id"))
-            task = find_task(tasks, task_id, reference)
+            job_id = record.get("pending_launch") or record.get("job_id")
+            task_id = record.get("task_id")
+            task = find_task(tasks, task_id, job_id)
             if task is not None:
                 retained.add(task.task_id)
             retained.update(
@@ -2124,7 +2108,7 @@ def clean_terminal(config: Config) -> list[dict[str, Any]]:
     tasks = pueue.tasks()
     retained = _live_run_jobs(config, tasks)
     return [
-        clean(config, task.task_id, launch_reference(task))
+        clean(config, task.task_id, job_id_of(task))
         for task in sorted(tasks.values(), key=lambda item: item.task_id)
         if task.terminal
         and task.task_id not in retained
@@ -2132,21 +2116,17 @@ def clean_terminal(config: Config) -> list[dict[str, Any]]:
     ]
 
 
-def retry(config: Config, task_id: int, reference: str | None = None) -> dict[str, Any]:
+def retry(config: Config, task_id: int, job_id: str | None = None) -> dict[str, Any]:
     """Restart in place, applying the same cross-pool admission as a new launch."""
     with admission_lock(config):
-        task = addressed(task_id, reference)
+        task = addressed(task_id, job_id)
         if not task.terminal:
             raise JobError(f"task {task.task_id} is still {task.status.lower()}")
         hold = _admission_hold(config, task.group, label=task.label)
         if hold is not None:
             value = _launch_input(config, task)
             path = launch_input_path(task)
-            if (
-                value is None
-                or path is None
-                or value.get("job_id") != launch_reference(task)
-            ):
+            if value is None or path is None or value.get("job_id") != job_id_of(task):
                 raise JobError(
                     f"task {task.task_id} has no owned launch input for a held retry"
                 )
@@ -2163,43 +2143,43 @@ def retry(config: Config, task_id: int, reference: str | None = None) -> dict[st
             )
         else:
             pueue.restart(task.task_id)
-    return get_job(task.task_id, config, reference)
+    return get_job(task.task_id, config, job_id)
 
 
 def find_task(
     tasks: Mapping[int, Task],
     task_id: object,
-    reference: object = None,
+    job_id: object = None,
     *,
-    references: Mapping[str, Task] | None = None,
+    job_ids: Mapping[str, Task] | None = None,
 ) -> Task | None:
     """Resolve a stored job identity after pueue may have reassigned its id."""
-    if isinstance(reference, str):
-        if references is not None:
-            return references.get(reference)
+    if isinstance(job_id, str):
+        if job_ids is not None:
+            return job_ids.get(job_id)
         return next(
-            (task for task in tasks.values() if launch_reference(task) == reference),
+            (task for task in tasks.values() if job_id_of(task) == job_id),
             None,
         )
     return tasks.get(task_id) if isinstance(task_id, int) else None
 
 
-def index_task_references(tasks: Sequence[Task]) -> dict[str, Task]:
+def index_tasks_by_job_id(tasks: Sequence[Task]) -> dict[str, Task]:
     """Index launch identities once for callers resolving several saved jobs."""
-    references: dict[str, Task] = {}
+    job_ids: dict[str, Task] = {}
     for task in tasks:
-        reference = launch_reference(task)
-        if reference is not None:
-            references.setdefault(reference, task)
-    return references
+        job_id = job_id_of(task)
+        if job_id is not None:
+            job_ids.setdefault(job_id, task)
+    return job_ids
 
 
 def vanished(
     tasks: Mapping[int, Task],
     task_id: object,
-    reference: object = None,
+    job_id: object = None,
     *,
-    references: Mapping[str, Task] | None = None,
+    job_ids: Mapping[str, Task] | None = None,
 ) -> bool:
     """Whether a recorded job identity names nothing the queue holds any more.
 
@@ -2208,27 +2188,27 @@ def vanished(
     stranger's task. A record that named no task in the first place — an
     external worker, a landing not yet queued — has not vanished.
     """
-    if not isinstance(task_id, int) and not isinstance(reference, str):
+    if not isinstance(task_id, int) and not isinstance(job_id, str):
         return False
-    return find_task(tasks, task_id, reference, references=references) is None
+    return find_task(tasks, task_id, job_id, job_ids=job_ids) is None
 
 
-def addressed(task_id: int, reference: str | None = None) -> Task:
+def addressed(task_id: int, job_id: str | None = None) -> Task:
     """The task carrying this job now, whatever id the queue moved it to.
 
     `pueue switch` exchanges the ids of two queued tasks, so an id names a
-    position in the queue and not a job. The launch reference does name one:
+    position in the queue and not a job. The job id does name one:
     pueue carries a task's command wherever it moves the task, and the
-    reference is the launch input path inside that command. A caller that
-    holds a reference addresses its own job; one that holds only an id
+    job_id is the launch input path inside that command. A caller that
+    holds a job_id addresses its own job; one that holds only an id
     addresses whatever the queue keeps at that position, which one read of
     that position answers.
     """
-    if reference is None:
+    if job_id is None:
         return _task(task_id)
-    task = locate(task_id, reference)
+    task = locate(task_id, job_id)
     if task is None:
-        raise JobError(f"pueue has no task for job {reference}")
+        raise JobError(f"pueue has no task for job {job_id}")
     return task
 
 
@@ -2248,34 +2228,34 @@ def wait(
     task_id: int,
     *,
     timeout_seconds: float,
-    reference: str | None = None,
+    job_id: str | None = None,
     config: Config | None = None,
 ) -> dict[str, Any]:
     """Block until the job is terminal, following it across queue task ids.
 
-    ``reference`` is the launch reference the caller started; without one the
+    ``job_id`` is the job id the caller started; without one the
     job is the one the queue holds at ``task_id`` when the wait begins. A
     caller that followed the id alone would wake on a stranger's task, or
     sleep past the end of its own.
     """
     deadline = time.monotonic() + timeout_seconds
-    if reference is None:
-        reference = launch_reference(_task(task_id))
+    if job_id is None:
+        job_id = job_id_of(_task(task_id))
 
     def observe() -> tuple[Task, dict[str, Any]]:
         nonlocal task_id
         task = (
-            _read_task(config, task_id, reference)
+            _read_task(config, task_id, job_id)
             if config is not None
-            else addressed(task_id, reference)
+            else addressed(task_id, job_id)
         )
-        # Keep the current hint; every lookup still checks the launch reference.
+        # Keep the current hint; every lookup still checks the job id.
         task_id = task.task_id
         if config is not None and task.status == "Archived":
             view = _job_detail(config, task, None)
             if not view.get("terminal"):
                 raise JobError(
-                    f"job {reference} is absent from pueue with no verified terminal outcome"
+                    f"job {job_id} is absent from pueue with no verified terminal outcome"
                 )
             return task, view
         return task, job_view(task)

@@ -147,10 +147,10 @@ def scratch_root(kind: str) -> Path | None:
     return Path(os.environ.get(variable) or default)
 
 
-def scratch_path(kind: str, reference: str) -> Path | None:
-    """Where the job named ``reference`` owns its scratch under ``kind``'s root."""
+def scratch_path(kind: str, job_id: str) -> Path | None:
+    """Where the job ``job_id`` owns its scratch under ``kind``'s root."""
     root = scratch_root(kind)
-    return root / reference if root is not None else None
+    return root / job_id if root is not None else None
 
 
 def write_input(path: Path, document: Mapping[str, Any]) -> None:

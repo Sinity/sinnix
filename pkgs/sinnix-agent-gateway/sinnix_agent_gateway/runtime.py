@@ -518,14 +518,14 @@ class Runtime:
             arguments["idempotency_key"] = idempotency_key
             arguments["request_digest"] = request_digest
         result = self._job("job.shell.start", arguments)
-        job_id = result.get("job_id")
-        if not isinstance(job_id, str) or not job_id:
+        task_id = result.get("task_id")
+        if not isinstance(task_id, str) or not task_id:
             raise ProtocolError(
-                "owner_failed", "job owner start response omitted the job ID"
+                "owner_failed", "job owner start response omitted the task ID"
             )
         return {
             **result,
-            "ref": REGISTRY.reference("job", {"job_id": job_id}),
+            "ref": REGISTRY.reference("job", {"task_id": task_id}),
         }
 
     def run_declared_operation(
@@ -559,13 +559,13 @@ class Runtime:
         if workspace_id is not None:
             arguments["workspace_id"] = workspace_id
         result = self._job("job.start", arguments)
-        job_id = result.get("job_id")
-        if not isinstance(job_id, str) or not job_id:
+        task_id = result.get("task_id")
+        if not isinstance(task_id, str) or not task_id:
             raise ProtocolError(
                 "owner_failed",
-                "job owner declared-operation start response omitted the job ID",
+                "job owner declared-operation start response omitted the task ID",
             )
-        return {**result, "ref": REGISTRY.reference("job", {"job_id": job_id})}
+        return {**result, "ref": REGISTRY.reference("job", {"task_id": task_id})}
 
     @staticmethod
     def _required_preconditions(
@@ -593,7 +593,7 @@ class Runtime:
             raise ProtocolError("owner_failed", "job owner list response is malformed")
         rows = [
             {
-                "ref": REGISTRY.reference("job", {"job_id": str(job.get("job_id"))}),
+                "ref": REGISTRY.reference("job", {"task_id": str(job.get("task_id"))}),
                 **job,
             }
             for job in jobs
@@ -639,7 +639,7 @@ class Runtime:
             ) from exc
         canonical_ref = str(resource.ref_template.format(values))
         if resource.kind == "job":
-            return canonical_ref, {"job_id": values["job_id"]}
+            return canonical_ref, {"task_id": values["task_id"]}
         if resource.kind == "machine_unit":
             if values["manager"] not in {"user", "system"}:
                 raise ProtocolError(
@@ -792,13 +792,12 @@ class Runtime:
         expected: Mapping[str, Any] | None = None,
         poll_seconds: float = 0.25,
         cancelled: Callable[[], bool] | None = None,
-        launch_reference: str | None = None,
+        job_id: str | None = None,
     ) -> dict[str, Any]:
         """``reference`` is the canonical ref of the waited resource.
 
-        ``launch_reference`` is a job's own name, and a job wait that has one
-        follows its job across a queue reorder instead of the task id the ref
-        encodes.
+        ``job_id`` is a job's own name, and a job wait that has one follows its
+        job across a queue reorder instead of the task id the ref encodes.
         """
         if not isinstance(reference, str) or not 1 <= len(reference) <= 2_048:
             raise ProtocolError("invalid_request", "wait ref is malformed")
@@ -826,11 +825,11 @@ class Runtime:
                     "continuation": source_revision({"ref": reference}),
                 }
             wait_arguments: dict[str, Any] = {
-                "job_id": values["job_id"],
+                "task_id": values["task_id"],
                 "timeout_seconds": timeout_seconds,
             }
-            if launch_reference is not None:
-                wait_arguments["launch_reference"] = launch_reference
+            if job_id is not None:
+                wait_arguments["job_id"] = job_id
             if cancelled is None:
                 result = await anyio.to_thread.run_sync(
                     self._job,
@@ -891,23 +890,21 @@ class Runtime:
                         {"ref": reference, "evidence": evidence}
                     ),
                 }
-            # The answer must name the identity the wait addressed. A launch
-            # reference names the job wherever the queue moved it, so its
-            # answer carries the id the job is at now; an id alone names only
-            # the position, and its answer must still be about that position.
+            # The answer must name the identity the wait addressed. A job id
+            # names the job wherever the queue moved it, so its answer carries
+            # the task id the job is at now; a task id alone names only the
+            # position, and its answer must still be about that position.
             answered = (
-                result.get("launch_reference")
-                if launch_reference is not None
-                else result.get("job_id")
+                result.get("job_id") if job_id is not None else result.get("task_id")
             )
-            if answered != (launch_reference or values["job_id"]):
+            if answered != (job_id or values["task_id"]):
                 raise ProtocolError(
                     "owner_failed",
                     "job owner wait response does not match the requested job",
                 )
             return {
                 **result,
-                "ref": REGISTRY.reference("job", {"job_id": result["job_id"]}),
+                "ref": REGISTRY.reference("job", {"task_id": result["task_id"]}),
                 "target": wait_target.value,
             }
         if self.waits is None:

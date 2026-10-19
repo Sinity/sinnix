@@ -69,7 +69,7 @@ def test_native_protocol_limit_stops_oversized_response():
 
 
 def test_snapshot_reads_one_bounded_owner_projection() -> None:
-    jobs = [{"job_id": number, "label": "p:op"} for number in range(2)]
+    jobs = [{"task_id": number, "label": "p:op"} for number in range(2)]
     owner_snapshot = {
         "schema": "sinnix.agentctl.job-snapshot.v1",
         "limit": MAX_SNAPSHOT_JOBS,
@@ -128,11 +128,11 @@ def test_get_and_cancel_require_a_job_object_with_an_id() -> None:
 
     def runner(command, **_kwargs):
         calls.append(command)
-        return response({"job_id": int(command[-1]), "phase": "running"})
+        return response({"task_id": int(command[-1]), "phase": "running"})
 
     client = AgentCtlClient("fixture-agentctl", runner=runner)
-    assert client.get(3)["job_id"] == 3
-    assert client.cancel("3")["job_id"] == 3
+    assert client.get(3)["task_id"] == 3
+    assert client.cancel("3")["task_id"] == 3
     assert calls == [
         ["fixture-agentctl", "--json", "job", "get", "3"],
         ["fixture-agentctl", "--json", "job", "cancel", "3"],
@@ -165,9 +165,9 @@ def test_oversized_rejected_or_malformed_responses_are_typed_failures() -> None:
 def test_cancel_pins_launch_and_attempt_at_the_owner():
     calls = []
     client = AgentCtlClient(
-        runner=lambda command, **_: calls.append(command) or response({"job_id": 7})
+        runner=lambda command, **_: calls.append(command) or response({"task_id": 7})
     )
-    client.cancel(7, reference="launch-fixture", expected_attempt=2)
+    client.cancel(7, job_id="launch-fixture", expected_attempt=2)
     assert calls == [
         [
             "agentctl",
@@ -175,7 +175,7 @@ def test_cancel_pins_launch_and_attempt_at_the_owner():
             "job",
             "cancel",
             "7",
-            "--reference",
+            "--job-id",
             "launch-fixture",
             "--expected-attempt",
             "2",

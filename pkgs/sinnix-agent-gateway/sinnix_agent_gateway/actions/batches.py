@@ -91,13 +91,13 @@ class WorkerView(GatewayModel):
     stage: str | None = Field(
         default=None, description="pueue's phase first, the manifest second."
     )
-    job_id: int | None = None
+    task_id: int | None = None
     job_ref: str | None = None
-    job_launch_reference: str | None = Field(
+    job_id: str | None = Field(
         default=None,
         description="This worker's job as jobs.* addresses it across a reorder.",
     )
-    job_ids: list[int] = Field(
+    task_ids: list[int] = Field(
         default_factory=list,
         description="Every task this worker has had, oldest first.",
     )
@@ -117,9 +117,9 @@ class WorkerView(GatewayModel):
 
 
 class LandingView(GatewayModel):
-    job_id: int | None = None
+    task_id: int | None = None
     job_ref: str | None = None
-    job_launch_reference: str | None = Field(
+    job_id: str | None = Field(
         default=None,
         description="The landing job as jobs.* addresses it across a reorder.",
     )
@@ -163,11 +163,11 @@ def _state(raw: Any) -> JobState | None:
     )
 
 
-def _reference(raw: Any) -> str | None:
+def _name(raw: Any) -> str | None:
     return str(raw) if isinstance(raw, str) and raw else None
 
 
-def _job_id(raw: Any) -> int | None:
+def _task_id(raw: Any) -> int | None:
     try:
         return int(raw)
     except (TypeError, ValueError):
@@ -177,7 +177,7 @@ def _job_id(raw: Any) -> int | None:
 def _worker_view(project_id: str, payload: Mapping[str, Any]) -> WorkerView:
     beads = [str(bead) for bead in payload.get("beads") or []]
     worktree = payload.get("worktree")
-    job_id = _job_id(payload.get("job_id"))
+    task_id = _task_id(payload.get("task_id"))
     return WorkerView(
         worker_id=str(payload.get("worker_id")),
         beads=beads,
@@ -186,12 +186,12 @@ def _worker_view(project_id: str, payload: Mapping[str, Any]) -> WorkerView:
         worktree=worktree,
         worktree_ref=encode_file_ref(worktree) if worktree else None,
         stage=payload.get("stage"),
-        job_id=job_id,
-        job_ref=job_ref(job_id) if job_id is not None else None,
-        job_launch_reference=_reference(payload.get("job_launch_reference")),
-        job_ids=[
+        task_id=task_id,
+        job_ref=job_ref(task_id) if task_id is not None else None,
+        job_id=_name(payload.get("job_id")),
+        task_ids=[
             value
-            for value in (_job_id(item) for item in payload.get("job_ids") or [])
+            for value in (_task_id(item) for item in payload.get("task_ids") or [])
             if value is not None
         ],
         backend=payload.get("backend"),
@@ -220,7 +220,7 @@ def _run_view(payload: Mapping[str, Any]) -> RunView:
     landing = (
         payload.get("landing") if isinstance(payload.get("landing"), Mapping) else {}
     )
-    landing_job = _job_id(landing.get("job_id"))
+    landing_job = _task_id(landing.get("task_id"))
     stage = payload.get("stage")
     accepted = bool(payload.get("accepted"))
     return RunView(
@@ -240,9 +240,9 @@ def _run_view(payload: Mapping[str, Any]) -> RunView:
             if isinstance(worker, Mapping)
         ],
         landing=LandingView(
-            job_id=landing_job,
+            task_id=landing_job,
             job_ref=job_ref(landing_job) if landing_job is not None else None,
-            job_launch_reference=_reference(landing.get("job_launch_reference")),
+            job_id=_name(landing.get("job_id")),
             state=_state(landing.get("state")),
             integration_branch=landing.get("integration_branch"),
             candidate_sha=landing.get("candidate_sha"),
@@ -359,18 +359,18 @@ class LandInput(MutationControls):
 
 
 class LandQueued(RunView):
-    landing_job_id: int = Field(description="The landing task this call queued.")
+    landing_task_id: int = Field(description="The landing task this call queued.")
     landing_job_ref: str
 
 
 def _land(runtime: Runtime, inp: LandInput) -> LandQueued:
     result = _owner(runtime, "batch.land", inp.target.resolve())
-    queued = _job_id(result.get("landing_job_id"))
+    queued = _task_id(result.get("landing_task_id"))
     if queued is None:
         raise ProtocolError("owner_failed", "batch owner queued no landing task")
     return LandQueued(
         **_run_view(result).model_dump(),
-        landing_job_id=queued,
+        landing_task_id=queued,
         landing_job_ref=job_ref(queued),
     )
 
@@ -388,7 +388,7 @@ class ResumeInput(AgentChoice):
 
 
 class ResumeQueued(RunView):
-    resumed_job_id: int = Field(description="The agent task this call queued.")
+    resumed_task_id: int = Field(description="The agent task this call queued.")
     resumed_job_ref: str
 
 
@@ -404,12 +404,12 @@ def _resume(runtime: Runtime, inp: ResumeInput) -> ResumeQueued:
             "effort": inp.effort,
         },
     )
-    queued = _job_id(result.get("resumed_job_id"))
+    queued = _task_id(result.get("resumed_task_id"))
     if queued is None:
         raise ProtocolError("owner_failed", "batch owner queued no agent task")
     return ResumeQueued(
         **_run_view(result).model_dump(),
-        resumed_job_id=queued,
+        resumed_task_id=queued,
         resumed_job_ref=job_ref(queued),
     )
 
@@ -455,7 +455,7 @@ ACTIONS: tuple[Action, ...] = (
             "how is the batch",
             "agentctl batch status",
         ),
-        documentation="Every id is a pueue task id: pass a worker's or the landing's job_id to jobs.logs, jobs.wait or jobs.cancel, with its job_launch_reference so the call survives a reorder.",
+        documentation="Every id is a pueue task id: pass a worker's or the landing's task_id to jobs.logs, jobs.wait or jobs.cancel, with its job_id so the call survives a reorder.",
         examples=(
             Example(title="By run suffix", input={"target": _SUFFIX}),
             Example(title="By canonical ref", input={"target": {"ref": _RUN}}),
@@ -507,7 +507,7 @@ ACTIONS: tuple[Action, ...] = (
         resource_kinds=("run", "job"),
         next_actions=("jobs.wait", "jobs.logs", "batches.status"),
         aliases=("land", "agentctl batch land", "publish the batch", "merge the run"),
-        documentation="batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.",
+        documentation="batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_task_id rather than on this call.",
         examples=(
             Example(
                 title="Re-run a failed landing",

@@ -92,7 +92,8 @@ def test_agentctl_failure_degrades_only_the_job_source(tmp_path: Path) -> None:
 
 def test_job_plane_survives_into_snapshot_state(tmp_path: Path) -> None:
     jobs = [
-        {"job_id": number, "label": "p:op", "phase": "running"} for number in range(100)
+        {"task_id": number, "label": "p:op", "phase": "running"}
+        for number in range(100)
     ]
     groups = {"agent": {"status": "Paused", "parallel": 4, "running": 1, "queued": 2}}
     builder = SnapshotBuilder(
@@ -129,7 +130,7 @@ def test_failed_observe_preserves_jobs_desktop_and_last_good_pressure(tmp_path):
             raise value
         return value
 
-    jobs = {"jobs": [{"job_id": 7}], "groups": {}, "truncated": False}
+    jobs = {"jobs": [{"task_id": 7}], "groups": {}, "truncated": False}
     builder = SnapshotBuilder(
         tmp_path / "status.json",
         tmp_path / "token",

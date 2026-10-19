@@ -477,9 +477,9 @@ def test_a_waiting_caller_keeps_its_job_when_the_operator_reorders_the_queue(
     finally:
         operator.join()
 
-    assert waited["reference"] == "own"
+    assert waited["job_id"] == "own"
     # The switch put this job at the other's id, and the wait returns it there.
-    assert (waited["job_id"], waited["phase"]) == (other, "succeeded")
+    assert (waited["task_id"], waited["phase"]) == (other, "succeeded")
     stranger = pueue.task(own)
     assert stranger is not None and not stranger.terminal, (
         "the wait consumed the job the switch moved to its id"
@@ -514,24 +514,26 @@ def test_cleanup_after_a_real_reorder_spares_the_queued_job_that_moved(
         for name in ("survivor", "dropped")
     ]
     survivor, dropped = queued
-    survivor_input = config.inputs_dir / f"{survivor['reference']}.json"
-    assert json.loads(survivor_input.read_text())["queue_task_id"] == survivor["job_id"]
+    survivor_input = config.inputs_dir / f"{survivor['job_id']}.json"
+    assert (
+        json.loads(survivor_input.read_text())["queue_task_id"] == survivor["task_id"]
+    )
 
     subprocess.run(
-        ["pueue", "switch", str(survivor["job_id"]), str(dropped["job_id"])],
+        ["pueue", "switch", str(survivor["task_id"]), str(dropped["task_id"])],
         check=True,
     )
-    pueue.remove([survivor["job_id"]])
-    vacated = survivor["job_id"]
+    pueue.remove([survivor["task_id"]])
+    vacated = survivor["task_id"]
 
     with pytest.raises(JobError, match="pueue has no task"):
         launch.clean(config, vacated)
 
     assert survivor_input.exists(), "the queued job lost its own launch input"
-    moved = launch.get_job(vacated, config, survivor["reference"])
-    assert (moved["job_id"], moved["reference"]) == (
-        dropped["job_id"],
-        survivor["reference"],
+    moved = launch.get_job(vacated, config, survivor["job_id"])
+    assert (moved["task_id"], moved["job_id"]) == (
+        dropped["task_id"],
+        survivor["job_id"],
     )
 
 
@@ -569,32 +571,30 @@ def test_a_landing_queued_behind_a_worker_is_cancelled_by_its_own_reference(
         timeout_seconds=60,
         result_kind="exit",
         environment={},
-        after=[worker["job_id"]],
+        after=[worker["task_id"]],
     )
 
-    landing_input = config.inputs_dir / f"{landing['reference']}.json"
+    landing_input = config.inputs_dir / f"{landing['job_id']}.json"
     landing_before = landing_input.read_bytes()
-    worker_input = config.inputs_dir / f"{worker['reference']}.json"
+    worker_input = config.inputs_dir / f"{worker['job_id']}.json"
     worker_before = worker_input.read_bytes()
 
     subprocess.run(
-        ["pueue", "switch", str(worker["job_id"]), str(landing["job_id"])], check=True
+        ["pueue", "switch", str(worker["task_id"]), str(landing["task_id"])], check=True
     )
 
-    cancelled = launch.cancel(config, landing["job_id"], reference=landing["reference"])
+    cancelled = launch.cancel(config, landing["task_id"], job_id=landing["job_id"])
 
-    assert cancelled["reference"] == landing["reference"]
-    assert cancelled["job_id"] == worker["job_id"], (
+    assert cancelled["job_id"] == landing["job_id"]
+    assert cancelled["task_id"] == worker["task_id"], (
         "the landing did not follow the switch to the worker's old id"
     )
-    assert pueue.task(cancelled["job_id"]) is None
+    assert pueue.task(cancelled["task_id"]) is None
     assert landing_input.read_bytes() == landing_before
-    retained = launch.get_job(
-        cancelled["job_id"], config, reference=landing["reference"]
-    )
+    retained = launch.get_job(cancelled["task_id"], config, job_id=landing["job_id"])
     assert retained["queue_present"] is False
-    assert retained["reference"] == landing["reference"]
-    survivor = launch.get_job(landing["job_id"], config, reference=worker["reference"])
+    assert retained["job_id"] == landing["job_id"]
+    survivor = launch.get_job(landing["task_id"], config, job_id=worker["job_id"])
     assert not survivor["terminal"], "the cancel reached the worker, not the landing"
     assert worker_input.read_bytes() == worker_before
 

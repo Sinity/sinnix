@@ -72,18 +72,18 @@ def test_terminal_cleanup_retains_live_worker_evidence(
         input_path.write_text(json.dumps(written))
 
         def legacy_worker(document: dict) -> None:
-            document["workers"][0].pop("task_reference", None)
+            document["workers"][0].pop("job_id", None)
             document["workers"][0]["worktree"] = None
 
         manifest.update(harness.config, run["run_id"], legacy_worker)
     unrelated = launch.start_operation(
         harness.config, harness.project, harness.project.operation("check")
     )
-    harness.pueue.succeed(unrelated["job_id"])
+    harness.pueue.succeed(unrelated["task_id"])
 
     cleaned = launch.clean_terminal(harness.config)
 
-    assert [row["job_id"] for row in cleaned] == [unrelated["job_id"]]
+    assert [row["task_id"] for row in cleaned] == [unrelated["task_id"]]
     assert harness.pueue.task(task.task_id) is not None
     assert input_path.is_file() and log.read_text() == "worker complete\n"
 
@@ -112,17 +112,15 @@ def test_terminal_runs_release_worker_jobs_for_cleanup(
 
     cleaned = launch.clean_terminal(harness.config)
 
-    assert [row["job_id"] for row in cleaned] == [task.task_id]
+    assert [row["task_id"] for row in cleaned] == [task.task_id]
     assert harness.pueue.task(task.task_id) is None
-    assert cleaned[0]["reference"] == launch.launch_reference(task)
+    assert cleaned[0]["job_id"] == launch.job_id_of(task)
     assert cleaned[0]["retained"] is True
     assert input_path.read_bytes() == input_before
     assert log.read_text() == "worker completed before terminal cleanup\n"
     assert result_path.read_bytes() == result_before
     assert (
-        launch.logs(
-            harness.config, task.task_id, reference=launch.launch_reference(task)
-        )
+        launch.logs(harness.config, task.task_id, job_id=launch.job_id_of(task))
         == "worker completed before terminal cleanup\n"
     )
 
@@ -130,7 +128,7 @@ def test_terminal_runs_release_worker_jobs_for_cleanup(
 def test_terminal_cleanup_retains_a_verification_in_a_live_worktree(
     harness: Harness,
 ) -> None:
-    """A completed check can precede recording its job reference in the manifest."""
+    """A completed check can precede recording its job job_id in the manifest."""
     run = prepared_run(harness, "fx-solo")
     check = launch.start_operation(
         harness.config,
@@ -138,47 +136,47 @@ def test_terminal_cleanup_retains_a_verification_in_a_live_worktree(
         harness.project.operation("check"),
         workspace=Path(run["workers"][0]["worktree"]),
     )
-    harness.pueue.succeed(check["job_id"])
+    harness.pueue.succeed(check["task_id"])
 
     assert launch.clean_terminal(harness.config) == []
-    assert harness.pueue.task(check["job_id"]) is not None
+    assert harness.pueue.task(check["task_id"]) is not None
 
 
 def test_terminal_cleanup_retains_a_recorded_verification_job(harness: Harness) -> None:
-    """A receipt can reference a check outside the integration worktree."""
+    """A receipt can job_id a check outside the integration worktree."""
     run = prepared_run(harness, "fx-solo")
     check = launch.start_operation(
         harness.config, harness.project, harness.project.operation("check")
     )
-    harness.pueue.succeed(check["job_id"])
+    harness.pueue.succeed(check["task_id"])
     manifest.land_update(
-        harness.config, run["run_id"], verify_run={"job_id": check["job_id"]}
+        harness.config, run["run_id"], verify_run={"task_id": check["task_id"]}
     )
 
     assert launch.clean_terminal(harness.config) == []
-    assert harness.pueue.task(check["job_id"]) is not None
+    assert harness.pueue.task(check["task_id"]) is not None
 
 
 def test_terminal_cleanup_retains_a_legacy_landing_after_reorder(
     harness: Harness,
 ) -> None:
-    """Legacy landing jobs have a run label but no binding or stable reference."""
+    """Legacy landing jobs have a run label but no binding or stable job_id."""
     run = prepared_run(harness, "fx-solo")
     landing = harness.pueue.task(run["landing"]["task_id"])
     other = launch.start_operation(
         harness.config, harness.project, harness.project.operation("check")
     )
-    harness.pueue.queue(other["job_id"])
-    harness.pueue.switch(landing.task_id, other["job_id"])
-    harness.pueue.succeed(other["job_id"])
+    harness.pueue.queue(other["task_id"])
+    harness.pueue.switch(landing.task_id, other["task_id"])
+    harness.pueue.succeed(other["task_id"])
     manifest.update(
         harness.config,
         run["run_id"],
-        lambda document: document["landing"].pop("task_reference", None),
+        lambda document: document["landing"].pop("job_id", None),
     )
 
     assert launch.clean_terminal(harness.config) == []
-    assert harness.pueue.task(other["job_id"]).label == landing.label
+    assert harness.pueue.task(other["task_id"]).label == landing.label
 
 
 def failed_publication(harness: Harness) -> dict:
@@ -292,9 +290,9 @@ def test_failed_verification_is_retried_on_the_same_candidate(
     run = prepared_run(harness, "fx-solo")
     original = launch.wait
 
-    def fail(job_id, **kwargs):
-        harness.pueue.fail(job_id, exit_code=1)
-        return launch.job_view(harness.pueue.task(job_id))
+    def fail(task_id, **kwargs):
+        harness.pueue.fail(task_id, exit_code=1)
+        return launch.job_view(harness.pueue.task(task_id))
 
     monkeypatch.setattr(launch, "wait", fail)
     with pytest.raises(BatchRefusal, match="verify_failed"):
@@ -404,7 +402,7 @@ def test_the_last_result_requeues_a_landing_the_queue_lost(harness: Harness) -> 
     unrelated = launch.start_operation(
         harness.config, harness.project, harness.project.operation("check")
     )
-    assert unrelated["job_id"] == stranded
+    assert unrelated["task_id"] == stranded
 
     filed = harness.file_result(run, "fx-solo")
 
@@ -422,7 +420,7 @@ def test_the_last_result_requeues_a_landing_the_queue_lost(harness: Harness) -> 
     ]
     stored = manifest.load(harness.config, run["run_id"])
     assert stored.landing["task_id"] == queued
-    assert stored.landing["task_reference"] == launch.launch_reference(task)
+    assert stored.landing["job_id"] == launch.job_id_of(task)
 
 
 def test_concurrent_results_replace_a_lost_landing_once(

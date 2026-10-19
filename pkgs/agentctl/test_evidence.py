@@ -75,9 +75,9 @@ def _receipt_job(
         environment={},
         tree_receipt={"head": SHA, "tree": "b" * 40, "dirty": False},
     )
-    fake_pueue.succeed(queued["job_id"])
-    begin_attempt(config, queued["reference"])
-    outcome = outcome_path_for(config.jobs_dir / f"{queued['reference']}.log")
+    fake_pueue.succeed(queued["task_id"])
+    begin_attempt(config, queued["job_id"])
+    outcome = outcome_path_for(config.jobs_dir / f"{queued['job_id']}.log")
     outcome.write_text(
         json.dumps(
             {
@@ -101,7 +101,7 @@ def _receipt_job(
             }
         )
     )
-    return queued["job_id"], queued["reference"]
+    return queued["task_id"], queued["job_id"]
 
 
 def _beads() -> FakeBd:
@@ -127,9 +127,9 @@ def test_file_keeps_claim_separate_from_clean_receipt_observation(
     tmp_path: Path,
 ) -> None:
     project = resolve_project(config, "fixture")
-    job_id, reference = _receipt_job(config, fake_pueue, project)
+    task_id, job_id = _receipt_job(config, fake_pueue, project)
     if cleaned:
-        launch.clean(config, job_id, reference)
+        launch.clean(config, task_id, job_id)
     monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
     monkeypatch.setattr(
         evidence,
@@ -150,11 +150,11 @@ def test_file_keeps_claim_separate_from_clean_receipt_observation(
         },
     )
     path = tmp_path / "native.json"
-    path.write_text(json.dumps(_claim(receipt=f"agentctl://jobs/{job_id}/{reference}")))
+    path.write_text(json.dumps(_claim(receipt=f"agentctl://jobs/{task_id}/{job_id}")))
 
     record = evidence.file(config, project, path)
 
-    assert record["worker_result"]["verification"][0]["receipt"].endswith(reference)
+    assert record["worker_result"]["verification"][0]["receipt"].endswith(job_id)
     observation = record["verification"][0]["observation"]
     assert observation["eligible"] is True
     assert observation["queue_present"] is not cleaned
@@ -194,7 +194,7 @@ def test_file_without_publication_workspace_retains_unknown_observation(
     descriptor.write_text(text[:start] + text[end:])
     project = resolve_project(config, "fixture")
     assert project.workspace is None
-    job_id, reference = _receipt_job(config, fake_pueue, project)
+    task_id, job_id = _receipt_job(config, fake_pueue, project)
     monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
     monkeypatch.setattr(
         evidence,
@@ -214,7 +214,7 @@ def test_file_without_publication_workspace_retains_unknown_observation(
     path.write_text(
         json.dumps(
             _claim(
-                receipt=f"agentctl://jobs/{job_id}/{reference}",
+                receipt=f"agentctl://jobs/{task_id}/{job_id}",
                 schema_version=2,
             )
         )
@@ -238,10 +238,10 @@ def test_v2_claim_must_match_the_current_filing_snapshot(
     tmp_path: Path,
 ) -> None:
     project = resolve_project(config, "fixture")
-    job_id, reference = _receipt_job(config, fake_pueue, project)
+    task_id, job_id = _receipt_job(config, fake_pueue, project)
     monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
     path = tmp_path / "native.json"
-    claim = _claim(receipt=f"agentctl://jobs/{job_id}/{reference}", schema_version=2)
+    claim = _claim(receipt=f"agentctl://jobs/{task_id}/{job_id}", schema_version=2)
     claim["beads"][0]["bead_revision"] = "old"
     path.write_text(json.dumps(claim))
 
@@ -249,19 +249,19 @@ def test_v2_claim_must_match_the_current_filing_snapshot(
         evidence.file(config, project, path)
 
 
-def test_receipt_requires_the_immutable_launch_reference(
+def test_receipt_requires_the_immutable_job_id(
     config: Config,
     fake_pueue: FakePueue,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     project = resolve_project(config, "fixture")
-    job_id, _reference = _receipt_job(config, fake_pueue, project)
+    task_id, _reference = _receipt_job(config, fake_pueue, project)
     monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
     path = tmp_path / "native.json"
-    path.write_text(json.dumps(_claim(receipt=f"agentctl://jobs/{job_id}")))
+    path.write_text(json.dumps(_claim(receipt=f"agentctl://jobs/{task_id}")))
 
-    with pytest.raises(launch.JobError, match="launch-reference"):
+    with pytest.raises(launch.JobError, match="<job-id>"):
         evidence.file(config, project, path)
 
 
@@ -274,10 +274,10 @@ def test_native_evidence_requires_a_narrated_self_review(
     """Breaks if native filing accepts a claim with no self_review: native
     work has no dispatch record to carry the requirement."""
     project = resolve_project(config, "fixture")
-    job_id, reference = _receipt_job(config, fake_pueue, project)
+    task_id, job_id = _receipt_job(config, fake_pueue, project)
     monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
     path = tmp_path / "native.json"
-    claim = _claim(receipt=f"agentctl://jobs/{job_id}/{reference}")
+    claim = _claim(receipt=f"agentctl://jobs/{task_id}/{job_id}")
     del claim["self_review"]
     path.write_text(json.dumps(claim))
 
@@ -292,10 +292,10 @@ def test_v2_native_route_rejects_a_queued_execution_claim(
     tmp_path: Path,
 ) -> None:
     project = resolve_project(config, "fixture")
-    job_id, reference = _receipt_job(config, fake_pueue, project)
+    task_id, job_id = _receipt_job(config, fake_pueue, project)
     monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
     path = tmp_path / "native.json"
-    claim = _claim(receipt=f"agentctl://jobs/{job_id}/{reference}", schema_version=2)
+    claim = _claim(receipt=f"agentctl://jobs/{task_id}/{job_id}", schema_version=2)
     claim["execution"] = "queued"
     path.write_text(json.dumps(claim))
 
@@ -310,12 +310,12 @@ def test_receipt_needs_clean_candidate_at_both_execution_endpoints(
     tmp_path: Path,
 ) -> None:
     project = resolve_project(config, "fixture")
-    job_id, reference = _receipt_job(config, fake_pueue, project, start_sha="c" * 40)
+    task_id, job_id = _receipt_job(config, fake_pueue, project, start_sha="c" * 40)
     monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
     monkeypatch.setattr(evidence, "_candidate", lambda project, candidate: {})
     monkeypatch.setattr(evidence, "_publication", lambda project, candidate: {})
     path = tmp_path / "native.json"
-    path.write_text(json.dumps(_claim(receipt=f"agentctl://jobs/{job_id}/{reference}")))
+    path.write_text(json.dumps(_claim(receipt=f"agentctl://jobs/{task_id}/{job_id}")))
 
     record = evidence.file(config, project, path)
 
@@ -365,8 +365,8 @@ def test_large_valid_execution_receipt_is_filed_and_retrievable(
     tmp_path: Path,
 ) -> None:
     project = resolve_project(config, "fixture")
-    job_id, reference = _receipt_job(config, fake_pueue, project)
-    outcome = outcome_path_for(config.jobs_dir / f"{reference}.log")
+    task_id, job_id = _receipt_job(config, fake_pueue, project)
+    outcome = outcome_path_for(config.jobs_dir / f"{job_id}.log")
     value = json.loads(outcome.read_text())
     value["execution_evidence"] = {
         "dirty_manifest": [
@@ -382,7 +382,7 @@ def test_large_valid_execution_receipt_is_filed_and_retrievable(
         evidence, "_publication", lambda project, candidate: {"state": "unknown"}
     )
     path = tmp_path / "native.json"
-    path.write_text(json.dumps(_claim(receipt=f"agentctl://jobs/{job_id}/{reference}")))
+    path.write_text(json.dumps(_claim(receipt=f"agentctl://jobs/{task_id}/{job_id}")))
 
     record = evidence.file(config, project, path)
     listed = evidence.list_records(config, "fixture")
@@ -509,15 +509,15 @@ def test_read_paths_need_no_owner_and_reject_misaddressed_reference(
     )
     assert evidence.get_record(config, "fixture", evidence_id) == document
 
-    reference = json.loads(path.read_text())
-    reference["bytes"] += 1
-    path.write_text(json.dumps(reference))
+    job_id = json.loads(path.read_text())
+    job_id["bytes"] += 1
+    path.write_text(json.dumps(job_id))
     with pytest.raises(launch.JobError, match="size mismatch"):
         evidence.get_record(config, "fixture", evidence_id)
 
-    reference["bytes"] -= 1
-    reference["evidence_id"] = "b" * 32
-    path.write_text(json.dumps(reference))
+    job_id["bytes"] -= 1
+    job_id["evidence_id"] = "b" * 32
+    path.write_text(json.dumps(job_id))
     listed = evidence.list_records(config, "fixture")
     assert listed["records"] == []
     assert listed["coverage"] == "partial"
@@ -530,9 +530,9 @@ def test_cleaned_receipt_never_substitutes_an_unrelated_reused_queue_id(
     retained: bool,
 ) -> None:
     project = resolve_project(config, "fixture")
-    job_id, reference = _receipt_job(config, fake_pueue, project, start_sha="c" * 40)
-    launch.clean(config, job_id, reference)
-    fake_pueue.next_id = job_id
+    task_id, job_id = _receipt_job(config, fake_pueue, project, start_sha="c" * 40)
+    launch.clean(config, task_id, job_id)
+    fake_pueue.next_id = task_id
     unrelated = launch.enqueue(
         config,
         project=project,
@@ -545,24 +545,24 @@ def test_cleaned_receipt_never_substitutes_an_unrelated_reused_queue_id(
         result_kind="exit",
         environment={},
     )
-    fake_pueue.succeed(unrelated["job_id"])
-    original_outcome = outcome_path_for(config.jobs_dir / f"{reference}.log")
-    begin_attempt(config, unrelated["reference"])
-    other_outcome = outcome_path_for(config.jobs_dir / f"{unrelated['reference']}.log")
+    fake_pueue.succeed(unrelated["task_id"])
+    original_outcome = outcome_path_for(config.jobs_dir / f"{job_id}.log")
+    begin_attempt(config, unrelated["job_id"])
+    other_outcome = outcome_path_for(config.jobs_dir / f"{unrelated['job_id']}.log")
     successful = json.loads(original_outcome.read_text())
     successful["execution_receipt"]["start"]["head"] = SHA
     other_outcome.write_text(json.dumps(successful))
-    assert unrelated["job_id"] == job_id
-    claim = {"receipt": f"agentctl://jobs/{job_id}/{reference}"}
+    assert unrelated["task_id"] == task_id
+    claim = {"receipt": f"agentctl://jobs/{task_id}/{job_id}"}
     if not retained:
-        (config.inputs_dir / f"{reference}.json").unlink()
+        (config.inputs_dir / f"{job_id}.json").unlink()
         with pytest.raises(launch.JobError, match="does not resolve"):
             evidence._receipt_observation(config, claim, SHA, project_id="fixture")
         return
     observation = evidence._receipt_observation(
         config, claim, SHA, project_id="fixture"
     )
-    assert observation["reference"] == reference
+    assert observation["job_id"] == job_id
     assert observation["operation"] == "check"
     assert observation["queue_present"] is False
     assert observation["eligible"] is False
@@ -579,9 +579,9 @@ def test_cleaned_receipt_still_requires_complete_project_bound_execution_evidenc
     damage: str,
 ) -> None:
     project = resolve_project(config, "fixture")
-    job_id, reference = _receipt_job(config, fake_pueue, project)
-    launch.clean(config, job_id, reference)
-    outcome_path = outcome_path_for(config.jobs_dir / f"{reference}.log")
+    task_id, job_id = _receipt_job(config, fake_pueue, project)
+    launch.clean(config, task_id, job_id)
+    outcome_path = outcome_path_for(config.jobs_dir / f"{job_id}.log")
     if damage == "missing-outcome":
         outcome_path.resolve().unlink()
     elif damage == "incomplete-endpoint":
@@ -589,11 +589,11 @@ def test_cleaned_receipt_still_requires_complete_project_bound_execution_evidenc
         outcome["execution_receipt"].pop("end")
         outcome_path.write_text(json.dumps(outcome))
     else:
-        input_path = config.inputs_dir / f"{reference}.json"
+        input_path = config.inputs_dir / f"{job_id}.json"
         document = json.loads(input_path.read_text())
         document["project_id"] = "another-project"
         input_path.write_text(json.dumps(document))
-    claim = {"receipt": f"agentctl://jobs/{job_id}/{reference}"}
+    claim = {"receipt": f"agentctl://jobs/{task_id}/{job_id}"}
     if damage == "other-project":
         with pytest.raises(launch.JobError, match="another project"):
             evidence._receipt_observation(config, claim, SHA, project_id="fixture")

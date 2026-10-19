@@ -23,7 +23,7 @@ from . import shell_pools
 from .schemas import ErrorCode
 
 OWNER = "systemd-jobs"
-JOB_LIST_ORDERING = "created_at_desc_job_id_desc"
+JOB_LIST_ORDERING = "created_at_desc_task_id_desc"
 DEFAULT_CHECKOUT = "default"
 SHELL_OPERATION = "shell"
 SHELL_GROUPS = frozenset(shell_pools.GROUPS.values())
@@ -82,20 +82,20 @@ def _optional_str(arguments: Mapping[str, Any], name: str) -> str | None:
     return value
 
 
-def _launch_reference(arguments: Mapping[str, Any]) -> str | None:
+def _job_id_argument(arguments: Mapping[str, Any]) -> str | None:
     """The job's own name, when the caller kept the one its start returned.
 
     It becomes a filename under the state directory, so it is one path
     component here and not a path.
     """
-    reference = _optional_str(arguments, "launch_reference")
-    if reference is not None and not launch.REFERENCE.match(reference):
-        raise _Refusal("invalid_request", "launch_reference must be a launch reference")
-    return reference
+    job_id = _optional_str(arguments, "job_id")
+    if job_id is not None and not launch.JOB_ID.match(job_id):
+        raise _Refusal("invalid_request", "job_id must be a job id")
+    return job_id
 
 
 def _sort_key(job: Mapping[str, Any]) -> tuple[str, str]:
-    return (str(job.get("enqueued_at") or ""), str(job.get("job_id")))
+    return (str(job.get("enqueued_at") or ""), str(job.get("task_id")))
 
 
 def _encode_cursor(key: tuple[str, str], project_id: str | None = None) -> str:
@@ -133,8 +133,8 @@ def job_payload(job: Mapping[str, Any]) -> dict[str, Any]:
     parsing a pueue label.
     """
     return {
-        "job_id": str(job.get("job_id")),
-        "launch_reference": job.get("reference"),
+        "task_id": str(job.get("task_id")),
+        "job_id": job.get("job_id"),
         "binding": job.get("binding"),
         "label": job.get("label"),
         "kind": job.get("kind"),
@@ -190,9 +190,9 @@ def worker_payload(worker: Mapping[str, Any]) -> dict[str, Any]:
         "branch": worker.get("branch"),
         "worktree": worker.get("worktree"),
         "stage": worker.get("stage"),
-        "job_id": str(task_id) if isinstance(task_id, int) else None,
-        "job_launch_reference": worker.get("task_reference"),
-        "job_ids": [str(item) for item in worker.get("task_ids") or []],
+        "task_id": str(task_id) if isinstance(task_id, int) else None,
+        "job_id": worker.get("job_id"),
+        "task_ids": [str(item) for item in worker.get("task_ids") or []],
         "backend": worker.get("backend"),
         "model": worker.get("model"),
         "effort": worker.get("effort"),
@@ -233,8 +233,8 @@ def run_payload(document: Mapping[str, Any]) -> dict[str, Any]:
             if isinstance(worker, Mapping)
         ],
         "landing": {
-            "job_id": str(task_id) if isinstance(task_id, int) else None,
-            "job_launch_reference": landing.get("task_reference"),
+            "task_id": str(task_id) if isinstance(task_id, int) else None,
+            "job_id": landing.get("job_id"),
             "integration_branch": landing.get("integration_branch"),
             "candidate_sha": landing.get("candidate_sha"),
             "pr_number": landing.get("pr_number"),
@@ -441,9 +441,9 @@ class LocalJobs:
         return job_payload(
             self._with_queue(
                 launch.get_job(
-                    _require_int(arguments, "job_id"),
+                    _require_int(arguments, "task_id"),
                     self.config,
-                    _launch_reference(arguments),
+                    _job_id_argument(arguments),
                     **{
                         key: arguments[key]
                         for key in ("attempt", "attempt_offset", "attempt_limit")
@@ -454,12 +454,12 @@ class LocalJobs:
         )
 
     def _wait(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        job_id = _require_int(arguments, "job_id")
+        task_id = _require_int(arguments, "task_id")
         timeout_seconds = _require_int(arguments, "timeout_seconds")
         job = launch.wait(
-            job_id,
+            task_id,
             timeout_seconds=float(timeout_seconds),
-            reference=_launch_reference(arguments),
+            job_id=_job_id_argument(arguments),
             config=self.config,
         )
         return {
@@ -478,19 +478,19 @@ class LocalJobs:
         return {"queues": [states[name] for name in sorted(states)]}
 
     def _logs(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        job_id = _require_int(arguments, "job_id")
-        reference = _launch_reference(arguments)
+        task_id = _require_int(arguments, "task_id")
+        job_id = _job_id_argument(arguments)
         offset = int(arguments.get("offset") or 0)
         max_bytes = int(arguments.get("max_bytes") or MAX_LOG_BYTES)
         page = launch.read_job_artifact(
             self.config,
+            task_id,
             job_id,
-            reference,
             attempt=arguments.get("attempt"),
             offset=offset,
             limit=max_bytes,
         )
-        view = launch.get_job(job_id, self.config, reference, attempt=page["attempt"])
+        view = launch.get_job(task_id, self.config, job_id, attempt=page["attempt"])
         return {
             **job_payload(view),
             **page,
@@ -500,11 +500,11 @@ class LocalJobs:
         }
 
     def _result(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        job_id = _require_int(arguments, "job_id")
+        task_id = _require_int(arguments, "task_id")
         observed = launch.result(
             self.config,
-            job_id,
-            _launch_reference(arguments),
+            task_id,
+            _job_id_argument(arguments),
             attempt=arguments.get("attempt"),
             offset=int(arguments.get("offset") or 0),
             limit=int(arguments.get("max_bytes") or MAX_LOG_BYTES),
@@ -517,11 +517,11 @@ class LocalJobs:
         }
 
     def _cancel(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        job_id = _require_int(arguments, "job_id")
+        task_id = _require_int(arguments, "task_id")
         job = launch.cancel(
             self.config,
-            job_id,
-            reference=_launch_reference(arguments),
+            task_id,
+            job_id=_job_id_argument(arguments),
             actor=arguments.get("actor"),
             reason=arguments.get("reason"),
         )
@@ -579,14 +579,14 @@ class LocalJobs:
         return job_payload(
             launch.retry(
                 self.config,
-                _require_int(arguments, "job_id"),
-                _launch_reference(arguments),
+                _require_int(arguments, "task_id"),
+                _job_id_argument(arguments),
             )
         )
 
     def _clean(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        job_id = _require_int(arguments, "job_id")
-        cleaned = launch.clean(self.config, job_id, _launch_reference(arguments))
+        task_id = _require_int(arguments, "task_id")
+        cleaned = launch.clean(self.config, task_id, _job_id_argument(arguments))
         return {
             **job_payload(cleaned),
             "cleaned": bool(cleaned.get("cleaned")),
@@ -679,7 +679,7 @@ class LocalJobs:
         queued = batch.queue(self.config, project, run_id)
         return {
             **self._status(run_id, project),
-            "landing_job_id": str(queued["landing_task_id"]),
+            "landing_task_id": str(queued["landing_task_id"]),
         }
 
     def _batch_resume(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
@@ -696,7 +696,7 @@ class LocalJobs:
         )
         return {
             **self._status(run_id, project),
-            "resumed_job_id": str(resumed["job"]["job_id"]),
+            "resumed_task_id": str(resumed["job"]["task_id"]),
         }
 
     def _shell_start(self, arguments: Mapping[str, Any]) -> dict[str, Any]:

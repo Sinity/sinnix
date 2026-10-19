@@ -68,7 +68,7 @@ focused_operation() {
 }
 
 worker_verify() {
-  local operation output job_id reference identity
+  local operation output task_id job_id identity
   command -v agentctl >/dev/null 2>&1 || die "agentctl is unavailable for managed verification"
   operation=$(focused_operation "$(project_file)")
   if [[ -z $operation ]]; then
@@ -83,15 +83,15 @@ worker_verify() {
   identity=$(python3 -c '
 import json, sys
 value = json.load(sys.stdin)
-job_id, reference = value.get("job_id"), value.get("reference")
-if type(job_id) is not int or job_id < 0 or not isinstance(reference, str) or not reference:
-    raise SystemExit("missing job id or launch reference")
+task_id, job_id = value.get("task_id"), value.get("job_id")
+if type(task_id) is not int or task_id < 0 or not isinstance(job_id, str) or not job_id:
+    raise SystemExit("missing task id or job id")
+print(task_id)
 print(job_id)
-print(reference)
 ' <<<"$output") || die "managed verification returned no launch identity"
-  job_id=${identity%%$'\n'*}
-  reference=${identity#*$'\n'}
-  agentctl job wait "$job_id" --reference "$reference" --timeout-seconds "${AGENTCTL_TIMEOUT_SECONDS:-3600}" || die "managed verification did not succeed"
+  task_id=${identity%%$'\n'*}
+  job_id=${identity#*$'\n'}
+  agentctl job wait "$task_id" --job-id "$job_id" --timeout-seconds "${AGENTCTL_TIMEOUT_SECONDS:-3600}" || die "managed verification did not succeed"
 }
 
 git_offenders() {

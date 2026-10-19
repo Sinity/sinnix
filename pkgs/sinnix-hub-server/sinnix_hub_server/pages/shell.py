@@ -387,7 +387,7 @@ function hublog(message, tone){
 async function act(verb, kind, id, button, parameters){
   parameters = parameters || {};
   // A process target is a {pid, start_ticks} object, not a string -- every
-  // other target kind (unit/job_id) is a plain string identifier.
+  // other target kind (unit/task_id) is a plain string identifier.
   var idText = (typeof id === 'object' && id !== null) ? JSON.stringify(id) : id;
   var label = verb + ' ' + kind + ' ' + idText;
   button.disabled = true;

@@ -43,9 +43,9 @@ def test_action_arguments_survive_browser_attribute_decoding():
         ),
         (
             queue.job_row(
-                {"job_id": unit, "terminal": False}, dt.datetime.now(dt.timezone.utc)
+                {"task_id": unit, "terminal": False}, dt.datetime.now(dt.timezone.utc)
             ),
-            [("act", ["interrupt", "job_id", unit])],
+            [("act", ["interrupt", "task_id", unit])],
         ),
     ]
     cases = []

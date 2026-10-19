@@ -113,7 +113,7 @@ def _refuse_unless_workers_done(run: Run) -> None:
             continue
         if run.harness == "queued":
             task_id = worker.get("task_id")
-            task = launch.find_task(tasks, task_id, worker.get("task_reference"))
+            task = launch.find_task(tasks, task_id, worker.get("job_id"))
             if task is None:
                 raise BatchRefusal(
                     "worker_not_done",
@@ -432,8 +432,8 @@ def _record_landing_agent_attempt(
     """
     attempt = {
         "kind": kind,
+        "task_id": job.get("task_id"),
         "job_id": job.get("job_id"),
-        "launch_reference": job.get("reference"),
         "requested": dict(requested),
         "prompt_path": str(prompt_path),
     }
@@ -624,15 +624,15 @@ def _integrate(
             prompt_path=path / WORKTREE_STATE_DIR / "integrate.md",
         )
         waited = launch.wait(
-            job["job_id"],
+            job["task_id"],
             timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS,
-            reference=job.get("reference"),
+            job_id=job.get("job_id"),
             config=config,
         )
         if waited.get("phase") != "succeeded":
             raise BatchRefusal(
                 "integration_failed",
-                f"integration task {waited['job_id']} {waited.get('phase')}",
+                f"integration task {waited['task_id']} {waited.get('phase')}",
             )
         _refuse_unless_integrated(path, targets, who="integration agent")
         break
@@ -1007,7 +1007,7 @@ def _verification_failure_detail(
     phase = str(job.get("phase") or "vanished")
     exit_code = job.get("exit_code")
     duration = _job_duration_seconds(job)
-    detail = f"{profile} task {job.get('job_id')} {phase}"
+    detail = f"{profile} task {job.get('task_id')} {phase}"
     facts: list[str] = []
     if exit_code is not None:
         facts.append(f"exit {exit_code}")
@@ -1035,8 +1035,8 @@ def _run_seconds(job: Mapping[str, Any], first_seen: float) -> float:
 
 def _await_verification(
     profile: str,
-    job_id: int,
-    reference: Any,
+    task_id: int,
+    job_id: Any,
     timeout_seconds: float,
     *,
     config: Config | None = None,
@@ -1056,13 +1056,13 @@ def _await_verification(
     wait_for = limit if limit is not None else VERIFY_EXIT_GRACE_SECONDS
     while True:
         waited = launch.wait(
-            job_id, timeout_seconds=wait_for, reference=reference, config=config
+            task_id, timeout_seconds=wait_for, job_id=job_id, config=config
         )
         # `launch.wait` can return the last non-terminal view at the instant
         # its deadline passes; pueue's current record decides.
         try:
             task = launch.find_task(
-                pueue.tasks(), waited.get("job_id", job_id), reference
+                pueue.tasks(), waited.get("task_id", task_id), job_id
             )
         except PueueError:
             task = None
@@ -1070,11 +1070,11 @@ def _await_verification(
             waited = {**waited, **launch.job_view(task)}
         if waited.get("terminal"):
             return waited
-        job_id = int(waited.get("job_id", job_id))
+        task_id = int(waited.get("task_id", task_id))
         if waited.get("detail"):
             raise BatchRefusal(
                 "verify_running",
-                f"{profile} task {job_id} is {waited.get('phase')}; "
+                f"{profile} task {task_id} is {waited.get('phase')}; "
                 f"the queue could not be read: {waited['detail']}",
             )
         if not waited.get("started_at"):
@@ -1087,7 +1087,7 @@ def _await_verification(
         if limit is not None and ran >= limit:
             raise BatchRefusal(
                 "verify_running",
-                f"{profile} task {job_id} is still {waited.get('phase')} after "
+                f"{profile} task {task_id} is still {waited.get('phase')} after "
                 f"{int(ran)}s of its {timeout_seconds:g}s budget; "
                 "landing again waits for the same task",
             )
@@ -1239,13 +1239,13 @@ def _verify(
     operation = project.operation(profile)
     before = _worktree_attestation(path)
     started = launch.start_operation(config, project, operation, workspace=path)
-    job_id = started.get("job_id")
-    if not isinstance(job_id, int):
+    task_id = started.get("task_id")
+    if not isinstance(task_id, int):
         raise JobError(f"verification {profile} returned no task id")
     waited = _await_verification(
         profile,
-        job_id,
-        started.get("reference"),
+        task_id,
+        started.get("job_id"),
         operation.timeout_seconds,
         config=config,
     )
@@ -1264,13 +1264,13 @@ def _verify(
         and before["dirty"] is False
         and after["dirty"] is False
     )
-    reference = started.get("reference")
-    if not isinstance(reference, str) or not reference:
+    job_id = started.get("job_id")
+    if not isinstance(job_id, str) or not job_id:
         raise BatchRefusal(
             "verify_failed",
-            f"verification {profile} succeeded without an AgentCTL launch reference",
+            f"verification {profile} succeeded without an AgentCTL launch job_id",
         )
-    task = launch.find_task(pueue.tasks(), waited["job_id"], started.get("reference"))
+    task = launch.find_task(pueue.tasks(), waited["task_id"], started.get("job_id"))
     execution = (
         launch.successful_cached_attempt(
             config,
@@ -1305,13 +1305,13 @@ def _verify(
     receipt = {
         "kind": "operation",
         "operation": profile,
-        "job_id": waited["job_id"],
+        "task_id": waited["task_id"],
         "candidate_sha": candidate,
         "requested_sha": candidate,
         "phase": "succeeded",
         "status": "passed",
-        "reference": reference,
-        "receipt": f"agentctl://jobs/{waited['job_id']}/{reference}",
+        "job_id": job_id,
+        "receipt": f"agentctl://jobs/{waited['task_id']}/{job_id}",
         "command": list(operation.command),
         "head_before": before["head"],
         "head_after": after["head"],
@@ -1388,14 +1388,14 @@ def _review(
         prompt_path=path / WORKTREE_STATE_DIR / "review.md",
     )
     waited = launch.wait(
-        job["job_id"],
+        job["task_id"],
         timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS,
-        reference=job.get("reference"),
+        job_id=job.get("job_id"),
         config=config,
     )
     if waited.get("phase") != "succeeded":
         raise BatchRefusal(
-            "review_failed", f"review task {waited['job_id']} {waited.get('phase')}"
+            "review_failed", f"review task {waited['task_id']} {waited.get('phase')}"
         )
     verdict, errors = results.load_result(
         path / WORKTREE_STATE_DIR / "review.result.json", kind="judge"
@@ -1405,8 +1405,8 @@ def _review(
     record = {
         **verdict,
         "candidate_sha": candidate,
-        "job_id": waited["job_id"],
-        "reference": job.get("reference"),
+        "task_id": waited["task_id"],
+        "job_id": job.get("job_id"),
     }
     land_update(config, run.run_id, review_verdict=record)
     if verdict["verdict"] != "pass":
@@ -1733,7 +1733,7 @@ def queue(config: Config, project: ProjectAdapter, run_id: str) -> dict[str, Any
         if run.landing.get("pending_launch"):
             run, queued = requeue_landing(config, project, run, tasks)
             return {**run.to_dict(), "landing_task_id": queued}
-        current = launch.find_task(tasks, task_id, run.landing.get("task_reference"))
+        current = launch.find_task(tasks, task_id, run.landing.get("job_id"))
         if current is not None and not current.terminal:
             raise BatchRefusal(
                 "landing_in_progress",
@@ -2632,7 +2632,7 @@ def abandon(
         landing_task = launch.find_task(
             tasks,
             landing_id,
-            run.landing.get("pending_launch") or run.landing.get("task_reference"),
+            run.landing.get("pending_launch") or run.landing.get("job_id"),
         )
         if landing_task is not None and landing_task.status == "Running":
             raise BatchRefusal(
@@ -2652,7 +2652,7 @@ def abandon(
             task = launch.find_task(
                 pueue.tasks(),
                 task_id,
-                worker.get("pending_launch") or worker.get("task_reference"),
+                worker.get("pending_launch") or worker.get("job_id"),
             )
             if task is not None and not task.terminal:
                 launch.cancel(

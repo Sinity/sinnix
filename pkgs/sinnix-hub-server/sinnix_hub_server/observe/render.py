@@ -125,7 +125,7 @@ def render_human(report: dict[str, Any]) -> str:
     )
     for row in gateway.get("jobs", [])[:10]:
         lines.append(
-            f"  {row.get('job_id')} {row.get('label')} {row.get('phase')} group={row.get('group')}"
+            f"  {row.get('task_id')} {row.get('label')} {row.get('phase')} group={row.get('group')}"
         )
 
     section("resource slices")

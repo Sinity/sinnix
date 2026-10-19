@@ -14,7 +14,7 @@ def test_compose_input_binds_target_to_intent():
             {"intent": "job.review", "project": {"project": "x"}}
         )
     with pytest.raises(ValueError, match="takes project"):
-        ComposeInput.model_validate({"intent": "incident", "job": {"job_id": 1}})
+        ComposeInput.model_validate({"intent": "incident", "job": {"task_id": 1}})
 
 
 @pytest.mark.parametrize(
@@ -69,7 +69,7 @@ def test_job_review_preserves_native_receipt_and_incident_uses_observe(
     }
     fake.responses["job.result"] = receipt
     review = call(
-        server, "context.compose", {"intent": "job.review", "job": {"job_id": 41}}
+        server, "context.compose", {"intent": "job.review", "job": {"task_id": 41}}
     )
     assert review["result"]["outcome"] == "ok", review
     assert review["data"]["components"][0]["data"]["data"] == receipt
@@ -89,19 +89,19 @@ def test_job_review_preserves_native_receipt_and_incident_uses_observe(
     assert incident["data"]["components"][0]["data"]["data"] == observed
 
 
-@pytest.mark.parametrize("target", [{"job_id": 41}, {"ref": "sinnix://jobs/41"}])
+@pytest.mark.parametrize("target", [{"task_id": 41}, {"ref": "sinnix://jobs/41"}])
 def test_job_review_follows_launch_identity_across_reorders(
     tmp_path, monkeypatch, target
 ):
     server, _, fake = make_server(tmp_path, monkeypatch)
-    reference = "fixture-worker-original"
+    job_id = "fixture-worker-original"
 
     def observe(args):
-        assert args["launch_reference"] == reference
+        assert args["job_id"] == job_id
         return {
             **DONE,
-            "job_id": "43",
-            "launch_reference": reference,
+            "task_id": "43",
+            "job_id": job_id,
             "content": "original output",
         }
 
@@ -109,7 +109,7 @@ def test_job_review_follows_launch_identity_across_reorders(
     response = call(
         server,
         "context.compose",
-        {"intent": "job.review", "job": {**target, "launch_reference": reference}},
+        {"intent": "job.review", "job": {**target, "job_id": job_id}},
     )
     assert response["result"]["outcome"] == "ok", response
     assert response["data"]["ref"] == "sinnix://jobs/43"
@@ -123,13 +123,13 @@ def test_job_review_rejects_another_launch(tmp_path, monkeypatch):
     server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.result"] = {
         **DONE,
-        "launch_reference": "replacement",
+        "job_id": "replacement",
         "content": "wrong output",
     }
     response = call(
         server,
         "context.compose",
-        {"intent": "job.review", "job": {"job_id": 41, "launch_reference": "original"}},
+        {"intent": "job.review", "job": {"task_id": 41, "job_id": "original"}},
     )
     assert response["result"]["outcome"] == "error"
     assert "wrong output" not in str(response)

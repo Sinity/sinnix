@@ -325,13 +325,13 @@ def worker_then(
 
 
 def pending_task(
-    config: Config, reference: str, tasks: Mapping[int, pueue.Task] | None = None
+    config: Config, job_id: str, tasks: Mapping[int, pueue.Task] | None = None
 ) -> pueue.Task | None:
     """Resolve an interrupted admission without treating a lost response as rejection."""
-    found = launch.find_task(pueue.tasks() if tasks is None else tasks, None, reference)
-    if found is None and (config.inputs_dir / f"{reference}.json").exists():
+    found = launch.find_task(pueue.tasks() if tasks is None else tasks, None, job_id)
+    if found is None and (config.inputs_dir / f"{job_id}.json").exists():
         raise launch.JobError(
-            f"launch {reference} has uncertain admission; retained input and workspace require reconciliation"
+            f"launch {job_id} has uncertain admission; retained input and workspace require reconciliation"
         )
     return found
 
@@ -350,9 +350,9 @@ def queue_landing(
         if task is not None:
             return task.task_id
 
-    def record_pending(reference: str) -> None:
+    def record_pending(job_id: str) -> None:
         land_update(
-            config, run.run_id, pending_launch=reference, waiting_for_results=stashed
+            config, run.run_id, pending_launch=job_id, waiting_for_results=stashed
         )
 
     started = launch.enqueue(
@@ -372,7 +372,7 @@ def queue_landing(
         stashed=stashed,
         before_enqueue=record_pending,
     )
-    task_id = started.get("job_id")
+    task_id = started.get("task_id")
     if not isinstance(task_id, int):
         raise PueueError("pueue returned no task id for the landing task")
     return task_id
@@ -399,9 +399,7 @@ def requeue_landing(
         task.task_id
         for worker in run.workers
         if (
-            task := launch.find_task(
-                tasks, worker.get("task_id"), worker.get("task_reference")
-            )
+            task := launch.find_task(tasks, worker.get("task_id"), worker.get("job_id"))
         )
         is not None
         and not task.terminal
@@ -422,8 +420,8 @@ def requeue_landing(
             run.run_id,
             task_id=landing_id,
             pending_launch=None,
-            task_reference=(
-                launch.launch_reference(queued)
+            job_id=(
+                launch.job_id_of(queued)
                 if queued
                 else load(config, run.run_id).landing.get("pending_launch")
             ),

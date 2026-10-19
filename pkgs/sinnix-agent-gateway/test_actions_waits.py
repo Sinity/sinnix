@@ -18,7 +18,7 @@ def test_wait_for_job_terminal_uses_the_queue_wait(
         server,
         "wait.for",
         {
-            "condition": {"kind": "job_terminal", "target": {"job_id": 41}},
+            "condition": {"kind": "job_terminal", "target": {"task_id": 41}},
             "timeout_seconds": 3,
         },
     )
@@ -26,7 +26,7 @@ def test_wait_for_job_terminal_uses_the_queue_wait(
     data = done["data"]
     assert data["outcome"] == "satisfied" and data["ref"] == "sinnix://jobs/41"
     assert data["job"]["state"]["phase"] == "succeeded" and data["continuation"] is None
-    assert fake.calls[-1].arguments == {"job_id": "41", "timeout_seconds": 3}
+    assert fake.calls[-1].arguments == {"task_id": "41", "timeout_seconds": 3}
 
     fake.responses["job.wait"] = {**RUNNING, "timed_out": True}
     late = call(
@@ -44,7 +44,7 @@ def test_wait_for_job_terminal_uses_the_queue_wait(
     assert late["continuation"] and late["job"]["state"]["phase"] == "running"
 
 
-def test_wait_for_job_terminal_carries_the_launch_reference_to_the_queue(
+def test_wait_for_job_terminal_carries_the_job_id_to_the_queue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The same stable identity jobs.wait uses, through the condition locator.
@@ -53,8 +53,8 @@ def test_wait_for_job_terminal_carries_the_launch_reference_to_the_queue(
     encodes, and answers about whatever a reorder moved there.
     """
     server, _, fake = make_server(tmp_path, monkeypatch)
-    reference = "fixture-worker-abcd1234"
-    fake.responses["job.wait"] = {**DONE, "job_id": "44", "launch_reference": reference}
+    job_id = "fixture-worker-abcd1234"
+    fake.responses["job.wait"] = {**DONE, "task_id": "44", "job_id": job_id}
 
     satisfied = call(
         server,
@@ -62,21 +62,21 @@ def test_wait_for_job_terminal_carries_the_launch_reference_to_the_queue(
         {
             "condition": {
                 "kind": "job_terminal",
-                "target": {"job_id": 41, "launch_reference": reference},
+                "target": {"task_id": 41, "job_id": job_id},
             },
             "timeout_seconds": 3,
         },
     )["data"]
 
     assert fake.calls[-1].arguments == {
-        "job_id": "41",
-        "launch_reference": reference,
+        "task_id": "41",
+        "job_id": job_id,
         "timeout_seconds": 3,
     }
     assert satisfied["outcome"] == "satisfied"
     # The job's current position, not the one the caller addressed.
     assert satisfied["ref"] == "sinnix://jobs/44"
-    assert satisfied["job"]["launch_reference"] == reference
+    assert satisfied["job"]["job_id"] == job_id
 
 
 def test_wait_for_file_exists_polls_until_the_deadline(
@@ -174,7 +174,10 @@ def test_events_tail_pages_with_a_scope_bound_cursor(
         "total": 1,
         "truncated": False,
         "next_cursor": None,
-        "snapshot": {"ordering": "created_at_desc_job_id_desc", "ceiling": ["x", "41"]},
+        "snapshot": {
+            "ordering": "created_at_desc_task_id_desc",
+            "ceiling": ["x", "41"],
+        },
     }
     first = call(
         server, "events.tail", {"limit": 50, "projects": [{"project": "fixture"}]}

@@ -54,14 +54,14 @@ def test_queue_state_names_what_holds_each_slot_and_who_waits(
 
     state = launch.queue_state(config, [GROUP])[GROUP]
     assert (state["parallel"], state["status"]) == (1, "Running")
-    assert [entry["job_id"] for entry in state["running"]] == [long]
-    assert [entry["job_id"] for entry in state["queued"]] == [first, second]
+    assert [entry["task_id"] for entry in state["running"]] == [long]
+    assert [entry["task_id"] for entry in state["queued"]] == [first, second]
     assert state["queued_count"] == 2
     assert state["oldest_queued_seconds"] is not None
 
     position = launch.job_queue(config, launch.job_view(pueue.task(second)))
     assert position["position"] == 2 and position["ahead"] == [first]
-    assert [entry["job_id"] for entry in position["occupied_by"]] == [long]
+    assert [entry["task_id"] for entry in position["occupied_by"]] == [long]
     running = launch.job_queue(config, launch.job_view(pueue.task(long)))
     assert running["position"] is None and running["occupied_by"] == []
 
@@ -71,7 +71,7 @@ def test_queue_state_names_what_holds_each_slot_and_who_waits(
     pueue.remove([first, second])
 
 
-def test_a_job_read_by_reference_never_loads_the_queue_history(
+def test_a_job_read_by_job_id_never_loads_the_queue_history(
     fake_pueue: FakePueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Anti-vacuity: the full status read raises here, so a lookup that fell
@@ -105,6 +105,6 @@ def test_a_job_read_by_reference_never_loads_the_queue_history(
     )
 
     assert launch.locate(first, "fixture-shell-aaaa1111").task_id == first
-    # The id now names another job: the reference finds its own.
+    # The id now names another job: the job_id finds its own.
     assert launch.locate(first, "fixture-shell-bbbb2222").task_id == moved
     assert launch.locate(first, "fixture-shell-cccc3333") is None

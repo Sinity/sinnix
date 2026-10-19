@@ -120,11 +120,11 @@ def _project_option(target: argparse.ArgumentParser) -> None:
     target.add_argument("--project", help=PROJECT_HELP)
 
 
-def _reference_option(target: argparse.ArgumentParser) -> None:
+def _job_id_option(target: argparse.ArgumentParser) -> None:
     target.add_argument(
-        "--reference",
-        help="the job's launch reference; addresses the job itself rather "
-        "than whatever task id the queue currently keeps it at",
+        "--job-id",
+        help="the job's stable id; addresses the job itself rather than "
+        "whatever task id the queue currently keeps it at",
     )
 
 
@@ -224,8 +224,8 @@ def parser() -> argparse.ArgumentParser:
     _output_arguments(snapshot)
     for name in ("get", "logs", "result", "cancel", "retry"):
         one = job_verbs.add_parser(name)
-        one.add_argument("job_id", type=int)
-        _reference_option(one)
+        one.add_argument("task_id", type=int)
+        _job_id_option(one)
         if name in {"get", "logs", "result"}:
             one.add_argument(
                 "--attempt", type=int, help="execution attempt (latest by default)"
@@ -256,13 +256,13 @@ def parser() -> argparse.ArgumentParser:
     clean = job_verbs.add_parser(
         "clean", help="remove a terminal queue task, retaining execution evidence"
     )
-    clean.add_argument("job_id", type=int, nargs="?")
-    _reference_option(clean)
+    clean.add_argument("task_id", type=int, nargs="?")
+    _job_id_option(clean)
     clean.add_argument("--all-terminal", action="store_true")
     _output_arguments(clean)
     wait = job_verbs.add_parser("wait")
-    wait.add_argument("job_id", type=int)
-    _reference_option(wait)
+    wait.add_argument("task_id", type=int)
+    _job_id_option(wait)
     wait.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
     _output_arguments(wait)
 
@@ -520,9 +520,9 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         )
         if arguments.wait:
             started = launch.wait(
-                started["job_id"],
+                started["task_id"],
                 timeout_seconds=arguments.timeout_seconds,
-                reference=started.get("reference"),
+                job_id=started.get("job_id"),
                 config=config,
             )
         out.write(started, out.job_line(started))
@@ -537,7 +537,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         rows = launch.list_jobs(arguments.project)
         if arguments.active:
             rows = [row for row in rows if not row["terminal"]]
-        rows.sort(key=lambda row: row["job_id"], reverse=True)
+        rows.sort(key=lambda row: row["task_id"], reverse=True)
         if not arguments.all:
             rows = rows[:DEFAULT_JOB_ROWS]
         out.read(rows, out.jobs_table(rows))
@@ -548,9 +548,9 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         return EXIT_OK
     if verb == "get":
         job = launch.get_job(
-            arguments.job_id,
+            arguments.task_id,
             config,
-            arguments.reference,
+            arguments.job_id,
             attempt=arguments.attempt,
             attempt_offset=arguments.attempt_offset,
             attempt_limit=arguments.attempt_limit,
@@ -560,8 +560,8 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     if verb == "logs":
         page = launch.read_job_artifact(
             config,
+            arguments.task_id,
             arguments.job_id,
-            arguments.reference,
             attempt=arguments.attempt,
             offset=arguments.offset,
             limit=arguments.limit,
@@ -571,8 +571,8 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     if verb == "result":
         result = launch.result(
             config,
+            arguments.task_id,
             arguments.job_id,
-            arguments.reference,
             attempt=arguments.attempt,
             offset=arguments.offset,
             limit=arguments.limit,
@@ -592,8 +592,8 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     if verb == "cancel":
         job = launch.cancel(
             config,
-            arguments.job_id,
-            reference=arguments.reference,
+            arguments.task_id,
+            job_id=arguments.job_id,
             expected_attempt=arguments.expected_attempt,
             actor=arguments.actor,
             reason=arguments.reason,
@@ -605,20 +605,20 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             rows = launch.clean_terminal(config)
             out.write(rows, f"cleaned {len(rows)} terminal task(s)")
             return EXIT_OK
-        if arguments.job_id is None:
-            raise JobError("job clean needs a job id or --all-terminal")
-        job = launch.clean(config, arguments.job_id, arguments.reference)
+        if arguments.task_id is None:
+            raise JobError("job clean needs a task id or --all-terminal")
+        job = launch.clean(config, arguments.task_id, arguments.job_id)
         out.write(job, f"{out.job_line(job)}; cleaned")
         return EXIT_OK
     if verb == "retry":
-        job = launch.retry(config, arguments.job_id, arguments.reference)
+        job = launch.retry(config, arguments.task_id, arguments.job_id)
         out.write(job, out.job_line(job))
         return EXIT_OK
     if verb == "wait":
         waited = launch.wait(
-            arguments.job_id,
+            arguments.task_id,
             timeout_seconds=arguments.timeout_seconds,
-            reference=arguments.reference,
+            job_id=arguments.job_id,
             config=config,
         )
         out.read(

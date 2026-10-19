@@ -171,7 +171,7 @@ def test_a_blocking_shell_start_does_not_stall_concurrent_calls(
     jobs = GatedJobs()
     release = threading.Event()
     jobs.gates["job.shell.start"] = release
-    jobs.responses["job.shell.start"] = {**DONE, "job_id": "51"}
+    jobs.responses["job.shell.start"] = {**DONE, "task_id": "51"}
     jobs.responses["job.list"] = EMPTY_PAGE
     runtime.jobs = jobs  # type: ignore[assignment]
 
@@ -242,13 +242,13 @@ def test_a_remote_wait_is_capped_below_the_tunnel_deadline(
     fake.responses["job.wait"] = {**DONE, "timed_out": True}
 
     waited = call(
-        server, "jobs.wait", {"target": {"job_id": 41}, "timeout_seconds": 300}
+        server, "jobs.wait", {"target": {"task_id": 41}, "timeout_seconds": 300}
     )
 
     assert waited["result"]["outcome"] == "ok", waited
     assert waited["data"]["outcome"] == "terminal"
     assert fake.calls[-1].arguments == {
-        "job_id": 41,
+        "task_id": 41,
         "timeout_seconds": tooling.REMOTE_WAIT_CAP_SECONDS,
     }
     line = next(
@@ -264,7 +264,7 @@ def test_a_remote_wait_is_capped_below_the_tunnel_deadline(
     }
 
     runtime.transport = "stdio"
-    call(server, "jobs.wait", {"target": {"job_id": 41}, "timeout_seconds": 300})
+    call(server, "jobs.wait", {"target": {"task_id": 41}, "timeout_seconds": 300})
     assert fake.calls[-1].arguments["timeout_seconds"] == 300
 
 
@@ -276,7 +276,7 @@ def test_each_remote_call_leaves_one_redacted_journal_line(
     """Fails if a remote call is unlogged or its log carries a secret value."""
     server, runtime, fake = make_server(tmp_path, monkeypatch)
     runtime.transport = tooling.REMOTE_TRANSPORT
-    fake.responses["job.shell.start"] = {**DONE, "job_id": "52"}
+    fake.responses["job.shell.start"] = {**DONE, "task_id": "52"}
     secret = "sk-" + "a1b2c3d4" * 4
 
     started = call(
@@ -675,7 +675,7 @@ def test_a_remote_shell_still_running_is_logged_as_running(
     runtime.transport = tooling.REMOTE_TRANSPORT
     running = {
         **DONE,
-        "job_id": "53",
+        "task_id": "53",
         "group": "shell-long",
         "state": {"phase": "running", "terminal": False, "exit_code": None},
     }
@@ -699,9 +699,13 @@ def test_a_remote_shell_still_running_is_logged_as_running(
         if "gateway.call" in text
     ]
     assert line["outcome"] == "running"
-    assert (line["job_id"], line["group"]) == (53, "shell-long")
+    assert (line["task_id"], line["group"]) == (53, "shell-long")
 
-    fake.responses["job.shell.start"] = {**DONE, "job_id": "54", "group": "shell-quick"}
+    fake.responses["job.shell.start"] = {
+        **DONE,
+        "task_id": "54",
+        "group": "shell-quick",
+    }
     call(
         server,
         "shell.run",
@@ -716,7 +720,7 @@ def test_a_remote_shell_still_running_is_logged_as_running(
         for text in capsys.readouterr().err.splitlines()
         if "gateway.call" in text
     ]
-    assert done["outcome"] == "ok" and done["job_id"] == 54
+    assert done["outcome"] == "ok" and done["task_id"] == 54
 
 
 def test_a_catalog_call_does_not_stall_the_event_loop(

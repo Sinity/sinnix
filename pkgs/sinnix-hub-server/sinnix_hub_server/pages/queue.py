@@ -95,12 +95,12 @@ def job_row(job: dict[str, Any], now: dt.datetime) -> str:
     controls = ""
     if job.get("terminal") is not True:
         controls = (
-            f'<button class="act danger" data-expected-target="{esc(json.dumps(job.get("expected_target")))}" onclick="act(\'interrupt\',\'job_id\','
-            f'{js_arg(str(job.get("job_id")))},this)">interrupt</button>'
+            f'<button class="act danger" data-expected-target="{esc(json.dumps(job.get("expected_target")))}" onclick="act(\'interrupt\',\'task_id\','
+            f'{js_arg(str(job.get("task_id")))},this)">interrupt</button>'
         )
     headline = (
-        f"<strong>{esc(str(job.get('label') or job.get('job_id') or '?'))}</strong>"
-        f' <span class="sub">#{esc(str(job.get("job_id") or ""))}</span>'
+        f"<strong>{esc(str(job.get('label') or job.get('task_id') or '?'))}</strong>"
+        f' <span class="sub">#{esc(str(job.get("task_id") or ""))}</span>'
     )
     return row(headline, meta, controls, "bad" if phase == "failed" else "")
 

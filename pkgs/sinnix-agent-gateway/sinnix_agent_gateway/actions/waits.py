@@ -275,7 +275,7 @@ async def _wait_for(runtime: Runtime, inp: WaitInput) -> WaitResult:
     if isinstance(condition, TerminalOutput):
         return await _poll(runtime, inp, f"sinnix://terminals/{condition.match}")
     ref, expected = _legacy_target(runtime, condition)
-    launch_reference = (
+    job_id = (
         condition.target.resolve()[2] if isinstance(condition, JobTerminal) else None
     )
     raw = await runtime.wait_async(
@@ -284,7 +284,7 @@ async def _wait_for(runtime: Runtime, inp: WaitInput) -> WaitResult:
         condition.kind,
         expected,
         inp.poll_seconds,
-        launch_reference=launch_reference,
+        job_id=job_id,
     )
     if isinstance(condition, JobTerminal) and "outcome" not in raw:
         view = _job_view(raw)
@@ -312,7 +312,7 @@ async def _wait_for(runtime: Runtime, inp: WaitInput) -> WaitResult:
         raise ProtocolError("owner_failed", f"wait owner reported outcome {outcome!r}")
     evidence = raw.get("evidence") if isinstance(raw.get("evidence"), dict) else {}
     job = None
-    if isinstance(condition, JobTerminal) and "job_id" in raw:
+    if isinstance(condition, JobTerminal) and "task_id" in raw:
         job = _job_view(raw)
     return WaitResult(
         kind=condition.kind,
@@ -404,7 +404,7 @@ ACTIONS: tuple[Action, ...] = (
             Example(
                 title="Wait for a job",
                 input={
-                    "condition": {"kind": "job_terminal", "target": {"job_id": 41}},
+                    "condition": {"kind": "job_terminal", "target": {"task_id": 41}},
                     "timeout_seconds": 120,
                 },
             ),

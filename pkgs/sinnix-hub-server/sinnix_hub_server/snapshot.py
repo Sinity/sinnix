@@ -239,11 +239,11 @@ class SnapshotBuilder:
                         **job,
                         "expected_target": {
                             "kind": "job",
-                            "launch_reference": job["reference"],
+                            "job_id": job["job_id"],
                             "attempt": job["attempt"],
                         },
                     }
-                    if isinstance(job.get("reference"), str)
+                    if isinstance(job.get("job_id"), str)
                     and isinstance(job.get("attempt"), int)
                     else job
                     for job in value["jobs"]

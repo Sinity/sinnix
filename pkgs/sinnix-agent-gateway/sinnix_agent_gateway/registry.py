@@ -104,7 +104,7 @@ def build_registry() -> ResourceRegistry:
         ),
         ResourceSpec(
             "job",
-            RefTemplate("job", "sinnix://jobs/{job_id}"),
+            RefTemplate("job", "sinnix://jobs/{task_id}"),
             "jobs",
             ("summary", "output", "manifest"),
             True,

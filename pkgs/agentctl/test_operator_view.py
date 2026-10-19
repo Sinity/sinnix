@@ -192,7 +192,7 @@ def test_stage_and_next_follow_from_the_queue_then_the_manifest() -> None:
     assert stages["run-5"]["workers"][0]["stage"] == "awaiting result"
 
 
-def test_run_view_indexes_task_references_once_for_many_workers(
+def test_run_view_indexes_job_ids_once_for_many_workers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Breaks if each worker lookup reparses every queued command."""
@@ -208,26 +208,26 @@ def test_run_view_indexes_task_references_once_for_many_workers(
     workers = []
     for offset in range(worker_count):
         task_id = task_count - worker_count + offset
-        reference = f"worker-{offset}"
+        job_id = f"worker-{offset}"
         tasks.append(
             replace(
                 task(task_id, f"fixture:worker:run-many:fx-{offset}"),
-                command=f"agentctl-run /s/inputs/{reference}.json",
+                command=f"agentctl-run /s/inputs/{job_id}.json",
             )
         )
         entry = worker(f"fx-{offset}", task_id=task_id)
-        entry["task_reference"] = reference
+        entry["job_id"] = job_id
         workers.append(entry)
 
     parsed = 0
-    original = operator_view.launch.launch_reference
+    original = operator_view.launch.job_id_of
 
     def count_parses(value: Task) -> str | None:
         nonlocal parsed
         parsed += 1
         return original(value)
 
-    monkeypatch.setattr(operator_view.launch, "launch_reference", count_parses)
+    monkeypatch.setattr(operator_view.launch, "job_id_of", count_parses)
     row = operator_view.run_dict(run("run-many", workers), tasks, NOW)
 
     assert [entry["job"] for entry in row["workers"]] == [
@@ -237,7 +237,7 @@ def test_run_view_indexes_task_references_once_for_many_workers(
 
 
 @pytest.mark.timeout(15)
-def test_many_run_snapshot_indexes_tasks_once_and_preserves_reference_resolution(
+def test_many_run_snapshot_indexes_tasks_once_and_preserves_job_id_resolution(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Anti-vacuity: each of 160 runs names a moved task among 1,200 tasks."""
@@ -256,34 +256,34 @@ def test_many_run_snapshot_indexes_tasks_once_and_preserves_reference_resolution
     runs = []
     for offset in range(160):
         task_id = 1_000 + offset
-        reference = f"run-ref-{offset}"
+        job_id = f"run-ref-{offset}"
         tasks[task_id] = replace(
-            tasks[task_id], command=f"agentctl-run /s/inputs/{reference}.json"
+            tasks[task_id], command=f"agentctl-run /s/inputs/{job_id}.json"
         )
         entry = worker(f"fx-{offset}", task_id=offset)
-        entry["task_reference"] = reference
+        entry["job_id"] = job_id
         runs.append(run(f"many-{offset}", [entry]))
 
     tasks[10] = replace(tasks[10], command="agentctl-run /s/inputs/duplicate.json")
     tasks[20] = replace(tasks[20], command="agentctl-run /s/inputs/duplicate.json")
     duplicate = run("duplicate", [worker("duplicate", task_id=20)], landing_task=20)
-    duplicate.workers[0]["task_reference"] = "duplicate"
-    duplicate.landing["task_reference"] = "duplicate"
+    duplicate.workers[0]["job_id"] = "duplicate"
+    duplicate.landing["job_id"] = "duplicate"
     runs.append(duplicate)
     missing = run("missing", [worker("missing", task_id=1_150)])
-    missing.workers[0]["task_reference"] = "unknown"
+    missing.workers[0]["job_id"] = "unknown"
     runs.append(missing)
     runs.append(run("id-fallback", [worker("fallback", task_id=1_150)]))
 
     parsed = 0
-    original = operator_view.launch.launch_reference
+    original = operator_view.launch.job_id_of
 
     def count_parses(value: Task) -> str | None:
         nonlocal parsed
         parsed += 1
         return original(value)
 
-    monkeypatch.setattr(operator_view.launch, "launch_reference", count_parses)
+    monkeypatch.setattr(operator_view.launch, "job_id_of", count_parses)
     rows = snapshot(tasks=tasks, runs=tuple(runs), groups={}).to_dict()["runs"]
 
     assert [row["workers"][0]["job"] for row in rows[:160]] == list(range(1_000, 1_160))
@@ -534,7 +534,7 @@ def test_collect_distinguishes_global_occupancy_from_project_work(
     text = operator_view.render(collected)
 
     assert reads == 1 and payload["queue_read"] is True
-    assert [row["job_id"] for row in payload["jobs"]] == [queued, stashed]
+    assert [row["task_id"] for row in payload["jobs"]] == [queued, stashed]
     assert payload["groups"]["bulk"] == {
         "status": "Paused" if group_paused else "Running",
         "scope": "project",

@@ -67,29 +67,29 @@ class AgentCtlClient:
             raise AgentCtlError("agentctl job list did not print a job array")
         return value
 
-    def get(self, job_id: str | int, *, reference: str | None = None) -> dict[str, Any]:
+    def get(self, task_id: str | int, *, job_id: str | None = None) -> dict[str, Any]:
         return self._job_response(
             (
                 "job",
                 "get",
-                str(job_id),
-                *(("--reference", reference) if reference else ()),
+                str(task_id),
+                *(("--job-id", job_id) if job_id else ()),
             )
         )
 
     def cancel(
         self,
-        job_id: str | int,
+        task_id: str | int,
         *,
-        reference: str | None = None,
+        job_id: str | None = None,
         expected_attempt: int | None = None,
     ) -> dict[str, Any]:
         return self._job_response(
             (
                 "job",
                 "cancel",
-                str(job_id),
-                *(("--reference", reference) if reference else ()),
+                str(task_id),
+                *(("--job-id", job_id) if job_id else ()),
                 *(
                     ("--expected-attempt", str(expected_attempt))
                     if expected_attempt is not None
@@ -101,7 +101,7 @@ class AgentCtlClient:
     def _job_response(self, arguments: Sequence[str]) -> dict[str, Any]:
         value = self._call((self.command, "--json", *arguments))
         if not isinstance(value, dict) or not isinstance(
-            value.get("job_id"), (int, str)
+            value.get("task_id"), (int, str)
         ):
             raise AgentCtlError("agentctl job response has no job ID")
         return value

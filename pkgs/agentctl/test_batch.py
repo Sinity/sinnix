@@ -652,16 +652,16 @@ def harness(
     )
 
     def wait(
-        job_id: int,
+        task_id: int,
         *,
         timeout_seconds: float,
-        reference: str | None = None,
+        job_id: str | None = None,
         config: Config | None = None,
     ) -> dict[str, Any]:
         """Every waited task succeeds; a review task also leaves its verdict."""
         assert config is built.config
-        built.waited.append(job_id)
-        task = fake_pueue.task(job_id)
+        built.waited.append(task_id)
+        task = fake_pueue.task(task_id)
         assert task is not None
         if ":review:" in task.label:
             (Path(task.path) / ".agentctl" / "review.result.json").write_text(
@@ -671,7 +671,7 @@ def harness(
             run_id = task.label.rsplit(":", 1)[1]
             for worker in manifest.load(built.config, run_id).workers:
                 git.merge(task.path, worker["branch"])
-        fake_pueue.succeed(job_id)
+        fake_pueue.succeed(task_id)
         if task.label == "fixture:check":
             launch_input = read_launch(built.config, task)
             input_path = launch.launch_input_path(task)
@@ -721,7 +721,7 @@ def harness(
                     }
                 )
             )
-        return launch.job_view(fake_pueue.task(job_id))
+        return launch.job_view(fake_pueue.task(task_id))
 
     monkeypatch.setattr(launch, "wait", wait)
     return built
@@ -805,10 +805,8 @@ def test_start_claims_creates_worktrees_and_queues_workers_then_the_landing(
         manifest.manifest_path(harness.config, run["run_id"]).read_text()
     )
     assert stored["workers"][0]["task_id"] == lead["task_id"]
-    assert stored["workers"][0]["task_reference"] == launch.launch_reference(
-        worker_task
-    )
-    assert stored["landing"]["task_reference"] == launch.launch_reference(landing)
+    assert stored["workers"][0]["job_id"] == launch.job_id_of(worker_task)
+    assert stored["landing"]["job_id"] == launch.job_id_of(landing)
     assert stored["workers"][0]["claimed_beads"] == ["fx-lead", "fx-member"]
     assert launch.get_job(lead["task_id"], harness.config)["binding"] == {
         "beads": ["fx-lead", "fx-member"],
@@ -846,7 +844,7 @@ def test_result_read_projection_separates_dispatch_from_worker_claims(
         },
         "attempt": 1,
         "task_id": run["workers"][0]["task_id"],
-        "launch_reference": run["workers"][0]["task_reference"],
+        "job_id": run["workers"][0]["job_id"],
     }
     assert provenance["bead_revisions"] == {"fx-solo": "103"}
     assert provenance["worker_claim"] == {
@@ -1509,7 +1507,7 @@ def test_resume_requeues_the_worker_and_a_landing_behind_it(
     )
 
     worker = resumed["workers"][0]
-    assert worker["task_id"] == resumed["job"]["job_id"] and worker["task_ids"] == [
+    assert worker["task_id"] == resumed["job"]["task_id"] and worker["task_ids"] == [
         lead_task,
         worker["task_id"],
     ]
@@ -1628,17 +1626,15 @@ def test_land_integrates_verifies_reviews_publishes_and_closes_satisfied_members
     assert verify["requested_sha"] == SHA and verify["tested_sha"] == SHA
     assert verify["git_dirty"] is False and verify["status"] == "passed"
     assert (
-        verify["receipt"] == f"agentctl://jobs/{verify['job_id']}/{verify['reference']}"
+        verify["receipt"] == f"agentctl://jobs/{verify['task_id']}/{verify['job_id']}"
     )
-    assert verify["reference"] == launch.launch_reference(
-        harness.pueue.task(verify["job_id"])
-    )
-    verify_task = harness.pueue.task(verify["job_id"])
+    assert verify["job_id"] == launch.job_id_of(harness.pueue.task(verify["task_id"]))
+    verify_task = harness.pueue.task(verify["task_id"])
     assert verify_task.label == "fixture:check"
     assert verify_task.path.endswith(f"fixture-batch-{run_id}-integration")
     review = landed["landing"]["review_verdict"]
     assert review["verdict"] == "pass" and review["candidate_sha"] == SHA
-    review_task = harness.pueue.task(review["job_id"])
+    review_task = harness.pueue.task(review["task_id"])
     assert review_task.label == f"fixture:review:{run_id}"
     assert read_launch(harness.config, review_task)["argv"][-1].endswith(
         "judge.schema.json"
@@ -1733,7 +1729,7 @@ def test_landing_retries_an_active_reused_check_after_execution_tree_mismatch(
     ]
     assert len(verify_tasks) == 2
     assert verify_tasks[0].succeeded and verify_tasks[1].succeeded
-    assert verify["job_id"] == verify_tasks[1].task_id
+    assert verify["task_id"] == verify_tasks[1].task_id
     assert verify["tested_sha"] == SHA
     assert verify["executed_attempt"] == 1
 
@@ -1822,8 +1818,8 @@ def test_a_conflict_runs_one_integration_agent_and_requires_every_branch_merged(
         if item["kind"] == "integration"
     )
     assert attempt["kind"] == "integration"
-    assert attempt["job_id"] == task.task_id
-    assert attempt["launch_reference"] == launch.launch_reference(task)
+    assert attempt["task_id"] == task.task_id
+    assert attempt["job_id"] == launch.job_id_of(task)
     assert attempt["requested"] == {
         key: run["workers"][0][key] for key in ("backend", "model", "effort")
     }
@@ -2001,26 +1997,26 @@ def test_a_verification_queued_past_its_budget_waits_and_then_succeeds(
 
     def start_queued(*args: Any, **kwargs: Any) -> dict[str, Any]:
         job = started(*args, **kwargs)
-        harness.pueue.queue(job["job_id"])
+        harness.pueue.queue(job["task_id"])
         return job
 
     def wait(
-        job_id: int,
+        task_id: int,
         *,
         timeout_seconds: float,
-        reference: str | None = None,
+        job_id: str | None = None,
         config: Config | None = None,
     ):
         # The pool stays paused for three full budgets, then admits the job.
         if harness.pueue.clock < 3 * timeout:
             harness.pueue.clock += timeout_seconds
             return {
-                **launch.job_view(harness.pueue.task(job_id)),
+                **launch.job_view(harness.pueue.task(task_id)),
                 "wait_timed_out": True,
             }
-        harness.pueue.running(job_id)
+        harness.pueue.running(task_id)
         return harness_wait(
-            job_id, timeout_seconds=timeout_seconds, reference=reference, config=config
+            task_id, timeout_seconds=timeout_seconds, job_id=job_id, config=config
         )
 
     monkeypatch.setattr(launch, "start_operation", start_queued)
@@ -2051,16 +2047,16 @@ def test_a_terminal_verification_timeout_reports_outcome_exit_and_duration(
     run = prepared_run(harness, "fx-solo")
     timeout = harness.project.operation("check").timeout_seconds
 
-    def timeout_when_waited(job_id: int, **kwargs: Any) -> None:
+    def timeout_when_waited(task_id: int, **kwargs: Any) -> None:
         harness.pueue.finish_when_waited(
-            job_id, lambda fake: fake.fail(job_id, exit_code=TIMEOUT_EXIT_CODE)
+            task_id, lambda fake: fake.fail(task_id, exit_code=TIMEOUT_EXIT_CODE)
         )
 
     original_wait = launch.wait
 
-    def wait_and_timeout(job_id: int, **kwargs: Any) -> dict[str, Any]:
-        timeout_when_waited(job_id, **kwargs)
-        return original_wait(job_id, **kwargs)
+    def wait_and_timeout(task_id: int, **kwargs: Any) -> dict[str, Any]:
+        timeout_when_waited(task_id, **kwargs)
+        return original_wait(task_id, **kwargs)
 
     monkeypatch.setattr(launch, "wait", wait_and_timeout)
     with pytest.raises(BatchRefusal, match="verify_failed") as refused:
@@ -2352,9 +2348,9 @@ def test_status_follows_manifest_jobs_across_queue_reordering(harness: Harness) 
 
     document = batch.status(harness.config, run["run_id"])
 
-    assert document["workers"][0]["task"]["job_id"] == landing_id
+    assert document["workers"][0]["task"]["task_id"] == landing_id
     assert document["workers"][0]["task"]["label"].startswith("fixture:worker:")
-    assert document["landing"]["task"]["job_id"] == worker_id
+    assert document["landing"]["task"]["task_id"] == worker_id
     assert document["landing"]["task"]["label"].startswith("fixture:land:")
 
 
@@ -3002,7 +2998,7 @@ def test_resume_replaces_its_own_landing_after_the_queue_was_reordered(
         "the resume dropped the id the landing was queued at, where the "
         "switch had left an unrelated job"
     )
-    assert launch.launch_reference(harness.pueue.task(queued_landing_at)) == "other", (
+    assert launch.job_id_of(harness.pueue.task(queued_landing_at)) == "other", (
         "the unrelated job no longer holds the id the switch gave it"
     )
     landing = harness.pueue.task(resumed["landing"]["task_id"])
@@ -3171,8 +3167,8 @@ def test_a_failing_verdict_is_recorded_and_a_hand_fix_lands_with_keep_integratio
     assert stored.landing["review_verdict"]["candidate_sha"] == SHA
     attempt = stored.landing["agent_attempts"][-1]
     assert attempt["kind"] == "review"
+    assert attempt["task_id"] == stored.landing["review_verdict"]["task_id"]
     assert attempt["job_id"] == stored.landing["review_verdict"]["job_id"]
-    assert attempt["launch_reference"] == stored.landing["review_verdict"]["reference"]
     assert attempt["requested"] == {
         key: run["workers"][0][key] for key in ("backend", "model", "effort")
     }
@@ -3803,9 +3799,7 @@ def test_landing_agents_get_members_scopes_and_accepted_evidence(
         if name == "review":
             verify = blocks[2][0]
             assert verify["candidate_sha"] == SHA and verify["phase"] == "succeeded"
-            assert verify["reference"] == launch.launch_reference(
-                tasks["fixture:check"]
-            )
+            assert verify["job_id"] == launch.job_id_of(tasks["fixture:check"])
             assert verify["log_path"] == str(
                 launch._artifact(harness.config, tasks["fixture:check"], ".log")
             )
@@ -4462,7 +4456,7 @@ def test_landing_agents_run_in_their_own_pool(harness: Harness) -> None:
     added = {entry["task_id"]: entry for entry in harness.pueue.added}
     # `batch start` creates the pool, so a landing never waits on `pools apply`.
     assert harness.pueue.groups["land-agent"] == 2
-    assert added[review["job_id"]]["group"] == "land-agent"
+    assert added[review["task_id"]]["group"] == "land-agent"
     assert {
         entry["group"] for entry in harness.pueue.added if ":worker:" in entry["label"]
     } == {"agent"}
@@ -4791,7 +4785,7 @@ def test_clean_keeps_denied_recorded_checkout_instead_of_reporting_absent(
 def test_attach_bindings_does_not_load_unrelated_history(harness, monkeypatch):
     run = harness.start("fx-solo")
     worker = run["workers"][0]["task_id"]
-    page = [row for row in launch.list_jobs("fixture") if row["job_id"] == worker]
+    page = [row for row in launch.list_jobs("fixture") if row["task_id"] == worker]
 
     def history():
         raise AssertionError("binding page loaded unrelated queue history")
@@ -4801,14 +4795,14 @@ def test_attach_bindings_does_not_load_unrelated_history(harness, monkeypatch):
     assert result[0]["binding"]["beads"] == ["fx-solo"]
 
 
-def test_attach_bindings_follows_launch_reference_after_queue_reorder(harness):
+def test_attach_bindings_follows_job_id_after_queue_reorder(harness):
     run = harness.start("fx-lead", "fx-solo")
     first, second = [worker["task_id"] for worker in run["workers"]]
     for task_id in (first, second):
         harness.pueue._tasks[task_id] = replace(
             harness.pueue.task(task_id), status="Queued"
         )
-    page = [row for row in launch.list_jobs("fixture") if row["job_id"] == first]
+    page = [row for row in launch.list_jobs("fixture") if row["task_id"] == first]
     expected = read_launch(harness.config, harness.pueue.task(first))["binding"]
     harness.pueue.switch(first, second)
     assert launch.attach_bindings(harness.config, page)[0]["binding"] == expected
@@ -4817,7 +4811,7 @@ def test_attach_bindings_follows_launch_reference_after_queue_reorder(harness):
 def test_attach_bindings_never_uses_a_replacement_jobs_binding(harness):
     run = harness.start("fx-lead", "fx-solo")
     first, second = [worker["task_id"] for worker in run["workers"]]
-    page = [row for row in launch.list_jobs("fixture") if row["job_id"] == first]
+    page = [row for row in launch.list_jobs("fixture") if row["task_id"] == first]
     other = harness.pueue.task(second)
     harness.pueue._tasks[first] = replace(other, task_id=first)
     del harness.pueue._tasks[second]
@@ -4847,6 +4841,6 @@ def test_unusable_integer_input_does_not_discard_other_page_bindings(
         rows = launch.attach_bindings(harness.config, page)
     finally:
         sys.set_int_max_str_digits(previous)
-    indexed = {row["job_id"]: row for row in rows}
+    indexed = {row["task_id"]: row for row in rows}
     assert "binding" not in indexed[first]
     assert indexed[second]["binding"]["beads"] == ["fx-solo"]
