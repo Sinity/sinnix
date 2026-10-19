@@ -14,7 +14,7 @@ sinnix fs status --index-dir INDEX    # validity, freshness, coverage, last atte
 sinnix fs query --index-dir INDEX 'SELECT * FROM coverage'   # read-only SQL
 sinnix fs judgments explain|audit|report|import|vocabulary
 sinnix fs note-links --root DIR [--reference-root DIR]       # plan wiki-link repairs
-sinnix realm-path-refs                      # literal path references in source code
+sinnix realm-layout-check --refs            # literal /realm paths in source must exist
 ```
 
 ## Generations
@@ -57,7 +57,7 @@ before matching exclusions, so an alias cannot bypass a boundary.
 
 ## Judgments
 
-`judgments.jsonl` (and `lake_refs.jsonl`) in the index directory are authored
+`judgments.jsonl` in the index directory holds authored
 records, not derived data. `judgments` reads them directly, without DuckDB or
 a rescan:
 
@@ -93,10 +93,11 @@ Exit 2 means incomplete input, 1 that links were found, 0 none.
 
 ## Literal references
 
-`sinnix realm-path-refs` lists literal `/realm` paths in source code; `check` exits 1
-when a referenced path is missing. Test fixtures and docstrings are marked
-`fixture` and `cosmetic`, so a missing example is not a broken consumer.
-An unreachable repository exits 2 and keeps the previous reference ledger.
+`sinnix realm-layout-check --refs` finds literal `/realm` paths in sinnix,
+Lynchpin and Polylogue source and exits 1 when a referenced path is missing.
+Test fixtures and docstrings are classified `fixture` and `cosmetic` and not
+checked, so a missing example is not a broken consumer. An unreachable
+repository exits 2.
 
 ## Tests
 

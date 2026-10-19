@@ -190,6 +190,7 @@
           suiteDir = ../../pkgs/sinnix-realm-layout-check/tests;
           scripts = [ "sinnix-realm-layout-check" ];
           extraPythonPackages = [ sinnix-lib ];
+          nativeBuildInputs = [ pkgs.ripgrep ];
         };
         stt-lake-suite = mkScriptSuite {
           name = "sinnix-stt";
@@ -242,13 +243,6 @@
           suiteDir = ../../pkgs/sinnix-git-store-repair/tests;
           scripts = [ "sinnix-git-store-repair" ];
           nativeBuildInputs = [ pkgs.git ];
-        };
-        realm-path-refs-suite = mkScriptSuite {
-          name = "sinnix-realm-path-refs";
-          suiteDir = ../../pkgs/sinnix-realm-path-refs/tests;
-          scripts = [ "sinnix-realm-path-refs" ];
-          extraPythonPackages = [ sinnix-lib ];
-          nativeBuildInputs = [ pkgs.ripgrep ];
         };
         borg-check-suite = mkScriptSuite {
           name = "sinnix-borg-check";

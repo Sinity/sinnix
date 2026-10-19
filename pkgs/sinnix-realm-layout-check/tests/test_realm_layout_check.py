@@ -241,7 +241,7 @@ def test_denied_root_is_not_absent_or_success(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(Path, "lstat", denied)
     monkeypatch.setenv("LAKE_LINT_ROOT_PREFIX", str(tmp_path))
-    assert module["main"]() == 1
+    assert module["check_taxonomy"]() == 1
     output = capsys.readouterr()
     assert "INACCESSIBLE root" in output.out
     assert f"SKIP {root}" not in output.err

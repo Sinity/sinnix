@@ -6,11 +6,11 @@ from types import SimpleNamespace
 
 import pytest
 
-SCRIPT = Path(__file__).parents[3] / "scripts/sinnix-realm-path-refs"
+SCRIPT = Path(__file__).parents[3] / "scripts/sinnix-realm-layout-check"
 
 
 def load_refs():
-    loader = SourceFileLoader("lake_refs", str(SCRIPT))
+    loader = SourceFileLoader("realm_refs", str(SCRIPT))
     spec = spec_from_loader(loader.name, loader)
     module = module_from_spec(spec)
     loader.exec_module(module)
@@ -18,9 +18,8 @@ def load_refs():
 
 
 @pytest.mark.parametrize("failure", ["missing", "file", "rg", "spawn"])
-@pytest.mark.parametrize("command", ["scan", "check"])
-def test_unavailable_scan_fails_without_overwriting_ledger(
-    tmp_path, monkeypatch, capsys, failure, command
+def test_unavailable_scan_fails_rather_than_passing(
+    tmp_path, monkeypatch, capsys, failure
 ):
     refs = load_refs()
     root = tmp_path / "source"
@@ -43,38 +42,14 @@ def test_unavailable_scan_fails_without_overwriting_ledger(
             raise OSError("synthetic unavailable executable")
 
         monkeypatch.setattr(refs.subprocess, "run", fail)
-    out = tmp_path / "ledger.jsonl"
-    out.write_text("retained observations\n")
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [str(SCRIPT), command] + (["--out", str(out)] if command == "scan" else []),
-    )
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--refs"])
     assert refs.main() == 2
-    assert out.read_text() == "retained observations\n"
-    assert "sinnix-realm-path-refs:" in capsys.readouterr().err
+    assert "sinnix-realm-layout-check:" in capsys.readouterr().err
 
 
 def test_readable_empty_source_is_a_valid_empty_result(tmp_path):
     refs = load_refs()
     assert refs.scan_repo("fixture", tmp_path) == []
-
-
-def test_failed_publication_preserves_existing_ledger(tmp_path, monkeypatch):
-    from sinnix_lib import atomic
-
-    refs = load_refs()
-    monkeypatch.setattr(refs, "REPOS", {"fixture": tmp_path})
-    out = tmp_path / "ledger.jsonl"
-    out.write_text("retained observations\n")
-
-    def fail(*args, **kwargs):
-        raise OSError("synthetic publication failure")
-
-    monkeypatch.setattr(atomic.os, "replace", fail)
-    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "scan", "--out", str(out)])
-    assert refs.main() == 2
-    assert out.read_text() == "retained observations\n"
 
 
 @pytest.mark.parametrize(
@@ -152,7 +127,7 @@ def test_source_filename_separators_do_not_corrupt_rg_records(tmp_path, filename
     ]
 
 
-def test_malformed_rg_record_refuses_to_publish_an_empty_ledger(tmp_path, monkeypatch):
+def test_malformed_rg_record_fails_rather_than_passing(tmp_path, monkeypatch):
     refs = load_refs()
     monkeypatch.setattr(refs, "REPOS", {"fixture": tmp_path})
     monkeypatch.setattr(
@@ -162,11 +137,8 @@ def test_malformed_rg_record_refuses_to_publish_an_empty_ledger(tmp_path, monkey
             returncode=0, stdout="malformed JSON\n", stderr=""
         ),
     )
-    out = tmp_path / "ledger.jsonl"
-    out.write_text("retained observations\n")
-    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "scan", "--out", str(out)])
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--refs"])
     assert refs.main() == 2
-    assert out.read_text() == "retained observations\n"
 
 
 @pytest.mark.parametrize("failure", [PermissionError, NotADirectoryError])
@@ -201,7 +173,7 @@ def test_uninspectable_reference_is_not_reported_missing(
                 }
             ],
         )
-        monkeypatch.setattr(sys, "argv", [str(SCRIPT), "check"])
+        monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--refs"])
         assert refs.main() == 2
         err = capsys.readouterr().err
         assert "synthetic inspection failure" in err

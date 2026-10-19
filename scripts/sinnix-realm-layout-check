@@ -1,13 +1,30 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Assert root nodes match the shared filesystem taxonomy in both directions
-# runtimeInputs: python3
+# description: Assert root nodes match the shared filesystem taxonomy, or (--refs) that literal /realm paths in source exist
+# runtimeInputs: python3 ripgrep coreutils
 # pythonPackages: @sinnix-lib
 
+"""Check /realm against its declared shape.
+
+By default, the taxonomy: root nodes match the shared filesystem layout in
+both directions. With --refs, the literal paths under /realm in sinnix,
+Lynchpin and Polylogue source must exist. Configuration-derived paths stay
+owned by their modules; this covers literals in scripts and adapters,
+including references left behind by filesystem moves. Comments and
+documentation are classified apart from executable lines, and fixtures are
+not checked.
+"""
+
+import argparse
+import ast
+import base64
+import json
 import os
+import re
 import stat
-from pathlib import Path
+import subprocess
 import sys
+from pathlib import Path
 
 from sinnix_lib.layout import COLLECTION_PATHS, MACHINE_LANES, OPTIONAL, RETIRED_PATHS, ROOTS
 
@@ -31,7 +48,7 @@ def is_tool_cache(path: Path) -> bool:
         return handle.read(43) == b"Signature: 8a477f597d28d172789f06886806bc55"
 
 
-def main() -> int:
+def check_taxonomy() -> int:
     status = 0
     inspected = 0
     skipped = 0
@@ -115,6 +132,197 @@ def main() -> int:
         else:
             print("sinnix-realm-layout-check: all roots match taxonomy")
     return status
+
+
+# ── --refs: literal /realm references in source ──
+
+REPOS = {
+    "sinnix": Path("/realm/project/sinnix/repo"),
+    "lynchpin": Path("/realm/project/sinity-lynchpin/repo"),
+    "polylogue": Path("/realm/project/polylogue/repo"),
+}
+
+PATH_RE = re.compile(r"/realm/[A-Za-z0-9_./+-]*[A-Za-z0-9_/+-]")
+
+COSMETIC_EXTS = {".md"}
+COSMETIC_PREFIXES = ("#", "//", "*", '"""', "'''")
+
+
+class ScanError(RuntimeError):
+    """A configured source could not be scanned, rather than being empty."""
+
+
+def classify_line(line: str) -> str:
+    stripped = line.strip()
+    if stripped.startswith(COSMETIC_PREFIXES):
+        return "cosmetic"
+    return "live"
+
+
+def fixture_file(path: Path, root: Path) -> bool:
+    parts = path.relative_to(root).parts
+    return (parts[0] == "tests" or parts[:2] == ("flake", "tests")
+            or (parts[0] == "pkgs" and ("tests" in parts[:-1]
+                or path.name.startswith("test_"))))
+
+
+def docstring_lines(path: Path) -> set[int]:
+    if path.suffix not in {".py", ""}:
+        return set()
+    try:
+        source = path.read_text(encoding="utf-8")
+        first = source.partition("\n")[0]
+        if path.suffix != ".py" and not (first.startswith("#!") and "python" in first):
+            return set()
+        tree = ast.parse(source)
+    except (SyntaxError, UnicodeError):
+        # Unparsed source stays eligible for live-path checks.
+        return set()
+    lines = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            lines.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
+    return lines
+
+
+def inspect_path(path: Path):
+    """Only a missing path is absent; access and traversal failures propagate."""
+    try:
+        return path.stat()
+    except FileNotFoundError:
+        return None
+
+
+def scan_repo(name: str, root: Path) -> list[dict]:
+    info = inspect_path(root)
+    if info is None or not stat.S_ISDIR(info.st_mode):
+        raise ScanError(f"source repository is unavailable or not a directory: {name}: {root}")
+    # Source files only, and only source files -- explicitly, not by
+    # excluding known-noisy extensions one at a time. First attempt used -uu
+    # (include hidden/gitignored) to catch generated files that might carry a
+    # stale baked-in path, and it swept in a lynchpin runtime cache directory
+    # of its own (.lynchpin/{cache,generated}) full of captured JSON blobs --
+    # data whose VALUES happen to contain path-shaped strings, not code that
+    # reads a path. That produced 98,871 "live" references against the
+    # roughly 131 the manual survey found; the true population is code, so
+    # code is what gets searched.
+    proc = subprocess.run(
+        ["rg", "--json", "--line-number",
+         "--glob", "scripts/*", "--glob", "!scripts/*.*",
+         "--glob", "*.nix", "--glob", "*.py", "--glob", "*.sh",
+         "--glob", "!.git/**", "--glob", "!node_modules/**",
+         "--glob", "!result/**", "--glob", "!result-*/**",
+         PATH_RE.pattern, "."],
+        cwd=root, capture_output=True, text=True,
+    )
+    if proc.returncode not in (0, 1):  # 1 = no matches, not an error
+        raise ScanError(f"rg failed on {name} (exit {proc.returncode}): {proc.stderr}")
+    rows = []
+    documentation: dict[str, set[int]] = {}
+    # JSON keeps filenames and matched source lines separate even when they
+    # contain colons, newlines or carriage returns.
+    for record in proc.stdout.split("\n"):
+        if not record:
+            continue
+        try:
+            event = json.loads(record)
+            if event["type"] != "match":
+                continue
+            data = event["data"]
+            fields = []
+            for field in (data["path"], data["lines"]):
+                text = field.get("text")
+                if text is None:
+                    text = base64.b64decode(field["bytes"], validate=True).decode("utf-8")
+                if not isinstance(text, str):
+                    raise ValueError("match text must be a string")
+                fields.append(text)
+            file_part, text = fields
+            lineno = data["line_number"]
+            if type(lineno) is not int or lineno < 1:
+                raise ValueError("match line number must be positive")
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            raise ScanError(f"cannot decode rg match from {name}: {exc}") from exc
+        path = root / file_part
+        if fixture_file(path, root):
+            kind = "fixture"
+        else:
+            if file_part not in documentation:
+                documentation[file_part] = docstring_lines(path)
+            kind = ("cosmetic" if path.suffix in COSMETIC_EXTS
+                    or int(lineno) in documentation[file_part] else classify_line(text))
+        for m in PATH_RE.finditer(text):
+            rows.append({
+                "repo": name,
+                "file": str(path),
+                "line": int(lineno),
+                "path": m.group(0).rstrip("/,;)\"'"),
+                "kind": kind,
+            })
+    return rows
+
+
+def scan() -> list[dict]:
+    rows: list[dict] = []
+    for name, root in REPOS.items():
+        rows.extend(scan_repo(name, root))
+    return rows
+
+
+def existing_ancestor(path: str) -> Path | None:
+    """The longest prefix of `path` that exists, or None if even /realm
+    style roots are gone -- returns None only in a scenario worth flagging
+    loudly, since those roots should always exist."""
+    p = Path(path)
+    while len(p.parts) >= 2:  # include the managed root, but not bare "/"
+        if inspect_path(p) is not None:
+            return p
+        p = p.parent
+    return None
+
+
+def check_refs() -> int:
+    rows = scan()
+    live = [r for r in rows if r["kind"] == "live"]
+    unique_paths = sorted({r["path"] for r in live})
+    missing: list[tuple[str, Path | None]] = []
+    for path in unique_paths:
+        if inspect_path(Path(path)) is None:
+            missing.append((path, existing_ancestor(path)))
+
+    if not missing:
+        print(f"sinnix-realm-layout-check: OK -- {len(unique_paths)} distinct live "
+              f"paths across {len(live)} references, all exist")
+        return 0
+
+    print(f"sinnix-realm-layout-check: {len(missing)} of {len(unique_paths)} live "
+          f"paths do not exist:", file=sys.stderr)
+    for path, ancestor in missing:
+        sites = [r for r in live if r["path"] == path]
+        where = ", ".join(f"{r['repo']}:{r['file']}:{r['line']}" for r in sites[:3])
+        more = f" (+{len(sites)-3} more)" if len(sites) > 3 else ""
+        print(f"  {path}", file=sys.stderr)
+        print(f"    nearest existing ancestor: {ancestor or '(none -- /realm itself?)'}",
+              file=sys.stderr)
+        print(f"    referenced at: {where}{more}", file=sys.stderr)
+    return 1
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument(
+        "--refs",
+        action="store_true",
+        help="check literal /realm paths in source instead of the taxonomy",
+    )
+    args = parser.parse_args()
+    if not args.refs:
+        return check_taxonomy()
+    try:
+        return check_refs()
+    except (ScanError, OSError) as exc:
+        print(f"sinnix-realm-layout-check: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
