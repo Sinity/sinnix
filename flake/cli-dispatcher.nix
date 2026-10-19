@@ -2,11 +2,10 @@
   `sinnix` — generated meta-CLI front door over the packaged script registry.
 
   Consumes the `registry` produced by `script-discovery.nix` (name ->
-  { description; runtimeInputs; tier; package; }) and renders a single
+  { description; runtimeInputs; package; }) and renders a single
   dispatcher shell script at eval time:
 
-    sinnix help              lists every packaged script, `name — description`,
-                              grouped by tier when more than one tier is in use
+    sinnix help              lists every packaged script, `name — description`
     sinnix <name> [args...]  execs the matching script package's binary
 
   Name resolution prefers an exact registry match (covers scripts that are
@@ -28,7 +27,6 @@
 let
   inherit (lib)
     concatStringsSep
-    filter
     foldl'
     genList
     hasPrefix
@@ -38,7 +36,6 @@ let
     removePrefix
     sort
     stringLength
-    unique
     ;
 
   entries = mapAttrsToList (name: meta: {
@@ -46,7 +43,6 @@ let
     description = meta.description;
     displayName = if hasPrefix "sinnix-" name then removePrefix "sinnix-" name else name;
     binPath = "${meta.package}/bin/${name}";
-    tier = meta.tier;
   }) registry;
 
   byDisplayName = a: b: a.displayName < b.displayName;
@@ -54,22 +50,13 @@ let
 
   count = length sorted;
 
-  tiers = sort (a: b: a < b) (unique (map (e: e.tier) sorted));
-  multiTier = length tiers > 1;
-
   maxWidth = foldl' (acc: e: max acc (stringLength e.displayName)) 0 sorted;
 
   padRight = width: str: str + concatStringsSep "" (genList (_: " ") (width - stringLength str));
 
   helpLineFor = e: "  ${padRight maxWidth e.displayName}  — ${e.description}";
 
-  helpBody =
-    if multiTier then
-      concatStringsSep "\n\n" (
-        map (t: "${t}:\n" + concatStringsSep "\n" (map helpLineFor (filter (e: e.tier == t) sorted))) tiers
-      )
-    else
-      concatStringsSep "\n" (map helpLineFor sorted);
+  helpBody = concatStringsSep "\n" (map helpLineFor sorted);
 
   # Static lookup table baked into the script: name <TAB> displayName <TAB>
   # binPath <TAB> description. Rendered inside a quoted heredoc (no shell

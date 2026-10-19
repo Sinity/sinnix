@@ -58,7 +58,6 @@ let
       description = "Sync Xiaomi cloud band data";
       package = externalPackages.sinnix-capture-xiaomi-cloud;
       runtimeInputs = [ ];
-      tier = "default";
       owner = "flake/scripts.nix";
       docs = "docs/phone.md";
     };
@@ -70,7 +69,6 @@ let
         };
       });
       runtimeInputs = [ ];
-      tier = "default";
       owner = "flake/scripts.nix";
       docs = "docs/phone.md";
     };

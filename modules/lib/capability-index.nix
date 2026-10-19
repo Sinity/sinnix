@@ -325,9 +325,6 @@ let
           # cloud capture) carry their own owner in flake/scripts.nix.
           owner = entry.owner or "scripts/${name}";
           docs = if entry.docs or null != null then entry.docs else docsFor (removePrefix "sinnix-" name);
-          extra = {
-            inherit (entry) tier;
-          };
         }
       ) scriptRegistry;
 

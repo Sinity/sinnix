@@ -12,7 +12,6 @@
       # Every packaged script already gets coreutils, gawk, gnugrep, gnused,
       # findutils, curl, jq and ffmpeg on PATH without asking. Declare only
       # the non-obvious things (pipewire, android-tools, conntrack-tools).
-      # tier: default                           (optional; default | heavy | dev)
 
   The script is copied into the Nix store with its shebang patched, so Python /
   bash / zsh dispatch is automatic inside sandboxed builds. `runtimeInputs`
@@ -191,7 +190,6 @@ let
         ffmpeg
       ];
       runtimeInputs = lib.unique (baseRuntimeInputs ++ declaredInputs);
-      tier = fields.tier or "default";
       # Optional `docs: docs/foo.md` frontmatter key, consumed by
       # modules/lib/capability-index.nix in place of (falling back to) its
       # docs/<name>.md filename convention. Absent unless the script's
@@ -270,7 +268,6 @@ let
       inherit
         description
         runtimeInputs
-        tier
         docs
         ;
       package = pkg;
