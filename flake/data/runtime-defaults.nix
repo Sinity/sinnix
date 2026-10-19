@@ -320,11 +320,13 @@ rec {
         # Kill, not throttle, once the tools as a whole thrash. A killed tool
         # is a failed command the agent can retry; throttling at MemoryHigh
         # instead held every session's commands in reclaim and swap for half
-        # an hour on 2026-10-19. oomd kills the descendant with the most
-        # reclaim, which here is one command's scope (claude-tool-scope gives
-        # each its own, with a 10G ceiling of its own). Unlike the agentctl
-        # pytest parent, there is no long critical-path job in this slice to
-        # protect: anything that long belongs in an agentctl pool.
+        # an hour on 2026-10-19 (one 11.3G real-data run beside other
+        # sessions' builds). oomd kills the descendant with the most reclaim,
+        # which here is one command's scope; claude-tool-scope gives each
+        # command its own. There is no per-command ceiling: a big command on
+        # a quiet host is fine, and only contention that actually stalls the
+        # slice is acted on. MemoryMax and the small swap allowance end a
+        # single runaway inside this slice instead of across the host.
         MemoryHigh = "12G";
         MemoryMax = "16G";
         MemorySwapMax = "2G";
