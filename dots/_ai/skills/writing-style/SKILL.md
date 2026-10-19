@@ -1,6 +1,6 @@
 ---
 name: writing-style
-description: Write or edit prose people read — PR descriptions, issues, review comments, commit message bodies, chat replies, reports, and documentation.
+description: "Write or edit prose people read: PR descriptions, issues, review comments, commit message bodies, chat replies, reports, and documentation."
 ---
 
 # Writing style

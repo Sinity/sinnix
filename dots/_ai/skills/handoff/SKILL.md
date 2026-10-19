@@ -1,6 +1,6 @@
 ---
 name: handoff
-description: Leave or resume a handoff when stopping mid-work, before compaction, passing work to another agent, or re-entering after one — job IDs, worktrees, Git and PR state, next action.
+description: "Leave or resume a handoff when stopping mid-work, before compaction, passing work to another agent, or re-entering after one: job IDs, worktrees, Git and PR state, next action."
 ---
 
 # Handoff

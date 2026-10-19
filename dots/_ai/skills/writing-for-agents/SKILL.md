@@ -1,6 +1,6 @@
 ---
 name: writing-for-agents
-description: Write, revise, or audit text agents load — global and project instructions (AGENTS.md), skills, agent definitions, memory, task prose — and improve the agent setup from observed friction.
+description: Write, revise, or audit text agents load (global and project AGENTS.md, skills, agent definitions, memory, task prose) and improve the agent setup from observed friction.
 ---
 
 # Writing for agents

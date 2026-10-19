@@ -1,6 +1,6 @@
 ---
 name: beads
-description: Read, claim, update, relate, close, or write Beads tasks with bd — ready work, notes, dependency edges, acceptance criteria, campaign epics, and follow-up filing.
+description: "Read, claim, update, relate, close, or write Beads tasks with bd: ready work, notes, dependency edges, acceptance criteria, campaign epics, and follow-up filing."
 ---
 
 # Beads

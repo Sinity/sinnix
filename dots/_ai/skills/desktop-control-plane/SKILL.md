@@ -1,6 +1,6 @@
 ---
 name: desktop-control-plane
-description: Drive the operator's desktop from an agent — shared Chrome through CDP, Kitty remote input and capture, Hyprland windows and shortcuts, and HDR-safe screenshots.
+description: "Drive the operator's desktop from an agent: shared Chrome through CDP, Kitty remote input and capture, Hyprland windows and shortcuts, and HDR-safe screenshots."
 metadata:
   short-description: Desktop control and automation toolkit
 ---

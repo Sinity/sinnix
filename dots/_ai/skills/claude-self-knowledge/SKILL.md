@@ -1,6 +1,6 @@
 ---
 name: claude-self-knowledge
-description: Verify what the installed Claude Code harness does — versions, models, dispatch and forks, hooks, permissions, compaction, notifications, local state — or diagnose a surprising harness behavior.
+description: Verify what the installed Claude Code harness does (versions, models, dispatch and forks, hooks, permissions, compaction, notifications, local state) or diagnose a surprising harness behavior.
 ---
 
 # Claude harness facts

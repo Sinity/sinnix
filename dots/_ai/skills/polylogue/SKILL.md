@@ -1,6 +1,6 @@
 ---
 name: polylogue
-description: Query past AI sessions through Polylogue, or develop Polylogue itself — ingestion, storage tiers, lineage, CLI, MCP, daemon convergence, devtools verification.
+description: "Query past AI sessions through Polylogue, or develop Polylogue itself: ingestion, storage tiers, lineage, CLI, MCP, daemon convergence, devtools verification."
 ---
 
 # Polylogue

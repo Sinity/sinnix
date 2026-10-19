@@ -84,7 +84,7 @@ Servers: context7, github, lynchpin, sinex.
 | `batch-reviewer` | Optional cross-family reviewer for a named unresolved risk on a pinned batch candidate. | `opus` | `high` |
 | `batch-worker` | External AgentCTL batch worker in an isolated worktree. Dispatch prompts carry task scope and conflict-planning estimates. | `sonnet` | `medium` |
 | `boilerplate-scribe` | Apply a supplied mechanical code or configuration pattern within an explicit file scope, then verify the affected behavior. | `haiku` | `` |
-| `implementer` | Implementation worker for one coherent ownership group in its own worktree — writes the whole change, verifies it, publishes it, and drives the PR through hosted review. Use instead of a fork when the work may exceed a fork's turn cap. | `` | `` |
+| `implementer` | "Implementation worker for one coherent task group in its own worktree: writes the whole change, verifies it, publishes it, and drives the PR through hosted review. Use instead of a fork when the work may exceed a fork's turn cap." | `` | `` |
 | `judge` | Headless structured judge with an explicit refutation attempt and honest unsupported path. | `sonnet` | `high` |
 | `review` | Read-only adversarial reviewer that cites exact evidence and tests the strongest counterclaim. | `opus` | `high` |
 | `test-coverage-sprint` | Strengthen tests for a bounded behavior or risk using the repository harness, with honest coverage and regression evidence. | `sonnet` | `` |
@@ -95,28 +95,28 @@ Servers: context7, github, lynchpin, sinex.
 | Skill | When to use |
 | --- | --- |
 | `agent-gateway` | Use when invoking, inspecting, or documenting Sinnix Agent Gateway actions through their typed MCP tools or the sinnix-agent-gateway CLI. |
-| `agent-runtime` | Run, watch, recover, or clean AgentCTL work — declared operations as pueue jobs, batches of isolated workers, landing tasks, results, events, and backpressure. |
+| `agent-runtime` | "Run, watch, recover, or clean AgentCTL work: declared operations as pueue jobs, batches of isolated workers, landing tasks, results, events, and backpressure." |
 | `android-device-control` | Control, configure, debloat, or capture from the rooted Android phone (Evolution X, Magisk) through adb, root shell, Termux, tailnet access, and resilient UI automation. |
-| `beads` | Read, claim, update, relate, close, or write Beads tasks with bd — ready work, notes, dependency edges, acceptance criteria, campaign epics, and follow-up filing. |
+| `beads` | "Read, claim, update, relate, close, or write Beads tasks with bd: ready work, notes, dependency edges, acceptance criteria, campaign epics, and follow-up filing." |
 | `chatgpt-conversations` | Read complete ChatGPT conversations and retrieve explicitly requested linked files or input attachments from already open Chrome tabs, without navigating or submitting messages. |
-| `claude-self-knowledge` | Verify what the installed Claude Code harness does — versions, models, dispatch and forks, hooks, permissions, compaction, notifications, local state — or diagnose a surprising harness behavior. |
+| `claude-self-knowledge` | Verify what the installed Claude Code harness does (versions, models, dispatch and forks, hooks, permissions, compaction, notifications, local state) or diagnose a surprising harness behavior. |
 | `claude-sessions` | Extract readable prose from raw Claude Code session JSONL when Polylogue is unavailable, including bounded user and assistant text, optional thinking, and tool summaries. |
 | `codebase-design` | Design or restructure modules, interfaces, seams, and adapters; judge module depth; or decide whether apparently unused code should be completed or deleted. |
-| `desktop-control-plane` | Drive the operator's desktop from an agent — shared Chrome through CDP, Kitty remote input and capture, Hyprland windows and shortcuts, and HDR-safe screenshots. |
+| `desktop-control-plane` | "Drive the operator's desktop from an agent: shared Chrome through CDP, Kitty remote input and capture, Hyprland windows and shortcuts, and HDR-safe screenshots." |
 | `grilling` | Grill the user relentlessly about a plan or design. Use when the user wants to stress-test a plan before building, or uses any 'grill' trigger phrases. |
 | `grok` | Audit an entire codebase systematically by measuring and partitioning it, dispatching tiered review lanes, triaging recurring defect patterns, and filing concrete findings when one context cannot cover the target. |
-| `handoff` | Leave or resume a handoff when stopping mid-work, before compaction, passing work to another agent, or re-entering after one — job IDs, worktrees, Git and PR state, next action. |
+| `handoff` | "Leave or resume a handoff when stopping mid-work, before compaction, passing work to another agent, or re-entering after one: job IDs, worktrees, Git and PR state, next action." |
 | `html-report` | Produce self-contained interactive HTML reports, reviews, censuses, dashboards, plans, incident timelines, or comparisons for human readers. |
 | `investigate` | Diagnose a bug, regression, flaky test, performance problem, incident, or missing artifact, or verify a contested claim, through reproduction, measurement, and preserved evidence. |
 | `lynchpin` | Query or develop Lynchpin evidence sources, materialization, DuckDB substrate generations, graphs, analyses, Chisel reports, Polylogue boundaries, and MCP evidence products. |
-| `orchestrate` | Coordinate several agents on one goal — ownership groups, model choice, native agents, forks or AgentCTL batches, integration review, and landing the result. |
-| `polylogue` | Query past AI sessions through Polylogue, or develop Polylogue itself — ingestion, storage tiers, lineage, CLI, MCP, daemon convergence, devtools verification. |
-| `prompting` | Write, rewrite, or diagnose prompts — dispatch prompts for subagents, handoffs to external or browser models, prompt portfolios, reusable agent definitions and templates, or enhancing the user's rough request. |
+| `orchestrate` | "Coordinate several agents on one goal: task groups, model choice, native agents, forks or AgentCTL batches, integration review, and landing the result." |
+| `polylogue` | "Query past AI sessions through Polylogue, or develop Polylogue itself: ingestion, storage tiers, lineage, CLI, MCP, daemon convergence, devtools verification." |
+| `prompting` | "Write, rewrite, or diagnose prompts: dispatch prompts for subagents, prompts for external or browser models, prompt portfolios and templates, or enhancing the user's rough request." |
 | `quest-hmd-control` | Control and verify a Meta Quest HMD through ADB, app intents, media forwarding, and immersive-session evidence. Use for Quest setup, pairing, streaming, capture, or headset UI beyond ordinary Android automation. |
-| `rank-options` | Order several generated options by real operator preference — brainstorm shortlists, design alternatives, candidate plans — with a few pairwise comparisons, a fitted order, and a resumable domain. |
+| `rank-options` | Order several generated options by real operator preference (brainstorm shortlists, design alternatives, candidate plans) with a few pairwise comparisons, a fitted order, and a resumable domain. |
 | `reverse-engineering` | Analyze firmware, updater packages, native binaries, encryption routines, and undocumented device protocols with REA, Ghidra, Binwalk, and Unblob on NixOS. |
 | `sinex` | Work on Sinex capture, provenance, schemas, sources, automata, xtask, AgentCTL operations, database-backed verification, replay, deployment, or wipe-campaign decisions. |
 | `sinnix` | Work on Sinnix NixOS configuration, modules, scripts, dotfiles, agentctl, the agent gateway, rebuilds, activation, or live workstation verification. |
-| `skill-authoring` | Create, restructure, validate, or retire a shared agent skill — routing description, SKILL.md layout, references, the validator, and routing probes. |
-| `writing-for-agents` | Write, revise, or audit text agents load — global and project instructions (AGENTS.md), skills, agent definitions, memory, task prose — and improve the agent setup from observed friction. |
-| `writing-style` | Write or edit prose people read — PR descriptions, issues, review comments, commit message bodies, chat replies, reports, and documentation. |
+| `skill-authoring` | "Create, restructure, validate, or retire a shared agent skill: routing description, SKILL.md layout, references, the validator, and routing probes." |
+| `writing-for-agents` | Write, revise, or audit text agents load (global and project AGENTS.md, skills, agent definitions, memory, task prose) and improve the agent setup from observed friction. |
+| `writing-style` | "Write or edit prose people read: PR descriptions, issues, review comments, commit message bodies, chat replies, reports, and documentation." |

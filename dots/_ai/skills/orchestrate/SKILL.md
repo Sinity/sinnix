@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: Coordinate several agents on one goal — ownership groups, model choice, native agents, forks or AgentCTL batches, integration review, and landing the result.
+description: "Coordinate several agents on one goal: task groups, model choice, native agents, forks or AgentCTL batches, integration review, and landing the result."
 ---
 
 # Orchestrate
@@ -41,7 +41,8 @@ next, not on supervising progress.
 
 ## Shape the work
 
-- An ownership group is defined by its accepted outcome: tasks that need the
+- A task group (one worker's share; in AgentCTL, a seed task plus its
+  `dispatch_group` members) is defined by its accepted outcome: tasks that need the
   same source edits, evidence, or test selection go to one owner even when
   their file lists differ. The owner may change connected callers, tests,
   docs, schemas, and generated files to meet its criteria without asking
@@ -118,7 +119,9 @@ pinned candidate; required hosted review stays with the forge.
   autostash.
 - Read the repository's required checks and conversation rules. Use one hosted
   review for the coherent delivery; address findings together, review the changed
-  delta, and resolve threads with a fix or concrete refutation. Request another
+  delta, and resolve threads with a fix or concrete refutation. Codex's review
+  state is the Code Review row of its summary comment; its separate
+  security-review usage-limit notice is unrelated. Request another
   review when protection requires it or a named new risk remains. An advisory
   review summary's commit or running state alone does not add a merge gate.
   Use the repository's protected merge route and matching candidate SHA.

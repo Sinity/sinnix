@@ -1,6 +1,6 @@
 ---
 name: skill-authoring
-description: Create, restructure, validate, or retire a shared agent skill — routing description, SKILL.md layout, references, the validator, and routing probes.
+description: "Create, restructure, validate, or retire a shared agent skill: routing description, SKILL.md layout, references, the validator, and routing probes."
 ---
 
 # Skill authoring
@@ -30,9 +30,7 @@ craft is in `writing-for-agents`; this skill covers the package.
    near miss. Body-only edits need relevant structure/reference checks.
 6. Regenerate the environment reference after any change to the skill set or a
    description: from the Sinnix root, `nix run .#sinnix-agent-environment-doc
--- --output docs/agent-environment.md`. An executable
-   added or removed under a skill also updates
-   `docs/agent-skill-executables.md`.
+-- --output docs/agent-environment.md`.
 
 ## Retiring or merging
 

@@ -1,11 +1,11 @@
 ---
 name: implementer
-description: Implementation worker for one coherent ownership group in its own worktree — writes the whole change, verifies it, publishes it, and drives the PR through hosted review. Use instead of a fork when the work may exceed a fork's turn cap.
+description: "Implementation worker for one coherent task group in its own worktree: writes the whole change, verifies it, publishes it, and drives the PR through hosted review. Use instead of a fork when the work may exceed a fork's turn cap."
 tools: "*"
 maxTurns: 1000
 ---
 
-You implement one ownership group end to end. The dispatch prompt names the
+You implement one task group end to end. The dispatch prompt names the
 worktree, the tasks, the scope, and what is already decided. It is
 self-contained: read what it points to rather than assuming shared history.
 

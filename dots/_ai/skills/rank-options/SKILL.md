@@ -1,6 +1,6 @@
 ---
 name: rank-options
-description: Order several generated options by real operator preference — brainstorm shortlists, design alternatives, candidate plans — with a few pairwise comparisons, a fitted order, and a resumable domain.
+description: Order several generated options by real operator preference (brainstorm shortlists, design alternatives, candidate plans) with a few pairwise comparisons, a fitted order, and a resumable domain.
 ---
 
 # Rank options

@@ -3,7 +3,7 @@
 Sinnix is the declarative NixOS and Home Manager configuration of the primary
 workstation, and the home of `agentctl` (the CLI that runs declared project
 operations and coding-agent batches) and the agent gateway. Keep configuration
-declarative, generated surfaces reproducible, and host behavior observable.
+declarative, generated files reproducible, and host behavior observable.
 
 ## Public boundary
 
@@ -83,7 +83,7 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
 - Project MCP servers are launched from the generated client profiles
   (`flake/data/mcp-registry.nix`); do not configure them per client.
 
-## Agent surfaces
+## Agent configuration
 
 The managed agent configuration stays small: the global instructions at
 `dots/_ai/AGENTS.md` (linked as `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`,
@@ -112,11 +112,6 @@ this repository. Worktrees remain the isolation for in-flight work.
   plus a source census, never by a test that an old spelling is absent.
 - Each commit message has a body that says why. A commit that only bumps
   `flake.lock` is titled `chore(inputs): ...`, never `fix(<area>)`.
-- Ordinary fixes get a brief delta review and a cheap static/import check or
-  small discriminating test when useful. Broader regression belongs at
-  integration milestones or a concrete risk, not after every patch. Report
-  known failures and untested areas without blocking unrelated progress;
-  required assertions and CI protections still apply.
 
 ## Activation
 

@@ -1,6 +1,6 @@
 ---
 name: agent-runtime
-description: Run, watch, recover, or clean AgentCTL work — declared operations as pueue jobs, batches of isolated workers, landing tasks, results, events, and backpressure.
+description: "Run, watch, recover, or clean AgentCTL work: declared operations as pueue jobs, batches of isolated workers, landing tasks, results, events, and backpressure."
 ---
 
 # Agent runtime
@@ -65,7 +65,7 @@ exit when supervision ends.
 
 `agentctl batch start <project> <task>… [--worker a,b]… [--backend B --model M
 --effort E]` validates and claims the members, creates one worktree per
-ownership group (a seed task plus its open `dispatch_group` members, or an
+task group (a seed task plus its open `dispatch_group` members, or an
 explicit `--worker` list), and queues the workers with the landing task behind
 them. With `--workers external`, you run the workers yourself in the manifest's
 worktrees and file each with `batch result <run> <worker> <result.json>`; the

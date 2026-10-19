@@ -64,13 +64,10 @@ Host `sinnix-prime`. Root storage is wear-limited; heavy work belongs on
 - `/realm/tmp/work/` is the managed `$TMPDIR`. Put scratch in a per-task
   subdirectory and remove it when done; retained results go to their owning
   store. `/tmp` is a small tmpfs.
-- Claude Code asks a person before running, even in bypass mode, any `rm`
-  whose target it cannot resolve statically (a shell variable, a glob after
-  `cd`) and any compound command that changes directory and then writes. In
-  unattended work, give `rm` literal absolute paths and use `git -C <path>`,
-  `env -C <dir> <cmd>`, tool options, or absolute paths instead of
-  `cd <dir> && …`. The shell's working directory may reset between tool
-  calls, so a check meant for a worktree must name it explicitly.
+- In unattended work, give `rm` literal absolute paths and use `git -C <path>`,
+  `env -C <dir> <cmd>`, or absolute paths instead of `cd <dir> && …`; Claude
+  Code stops for a person otherwise. The working directory may reset between
+  tool calls, so a check meant for a worktree names it explicitly.
 - Home Manager rebuilds `$HOME`; edit the declared source of a managed file.
   `xdg-user-dir` gives user-facing download and document locations.
 
@@ -83,10 +80,9 @@ them; test fixtures stay synthetic and neutral.
 Load `agent-runtime` before AgentCTL job or batch work and `orchestrate` before
 running agents in parallel.
 
-- Each kind of state has one owner: pueue for queued jobs and their results,
-  Git and worktrunk for commits and worktrees, GitHub for hosted publication,
-  Beads for tasks, systemd for fixed services and timers. `agentctl` is a CLI
-  over them; reconcile these sources rather than keeping another ledger.
+- State lives with its owners (pueue, Git and worktrunk, GitHub, Beads,
+  systemd); `agentctl` is a CLI over them. Reconcile those sources rather than
+  keeping another ledger.
 - Short foreground checks run directly. Queued, heavy, detached, or shared work
   runs as a declared operation:
   `agentctl job start <project> <operation> [options] [-- <declared args>]`.
@@ -98,8 +94,7 @@ running agents in parallel.
   names. In `pgrep -f` patterns, bracket one character so the search cannot
   match itself.
 - One accountable owner per concern, with one event watch; wait on completion
-  events rather than polling. Give long work an evidence-based duration and, at
-  about twice that, inspect it and decide to repair, cancel, or extend.
+  events rather than polling.
 
 ## Delivery
 
@@ -126,8 +121,6 @@ running agents in parallel.
   `gh pr merge --auto --squash --match-head-commit <sha>` and let it gate.
   Substantial findings outside this delivery or arriving after a merge become
   a follow-up; cheap nearby corrections belong in the current work.
-  For Codex, review state is the Code Review row of its summary comment; its
-  separate security-review usage-limit notice is unrelated.
 - A partial delivery leaves its unmet acceptance criteria open.
 
 ## Desktop and host changes
@@ -138,10 +131,9 @@ running agents in parallel.
   are touched only when a request is about them. Load `desktop-control-plane`
   for browser, Kitty, Hyprland, and screenshot work. `sinnix-observe` gives live
   host evidence.
-- Sinnix activation changes the live machine. Use only the devshell wrappers
-  (`nix develop --command switch|boot|test-vm` from a Sinnix checkout), state
-  the affected services and files, then verify the activated revision and the
-  direct live effect. An edited source proves nothing about what is installed.
+- Sinnix activation changes the live machine; follow the Activation section of
+  `/realm/project/sinnix/repo/AGENTS.md`. An edited source proves nothing about
+  what is installed.
 - Resets, deployment, paid vector preservation, and data-loss risks require
   evidence appropriate to their consequence. Keep those checks at the actual
   operational boundary rather than applying them to every source patch.
