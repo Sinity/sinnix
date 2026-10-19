@@ -415,8 +415,8 @@ in
           ];
           declaredPools = agentToolsRuntimeConfig.sinnix.services.agentctl.pools;
         in
-        # The gateway's shell.run groups are declared pools with their own
-        # slices.
+        # The gateway's shell.run pools (sinnix_agent_gateway/shell_pools.py)
+        # are declared pools with their own slices.
         assert lib.assertMsg (
           declaredPools ? shell-quick
           && declaredPools ? shell-long

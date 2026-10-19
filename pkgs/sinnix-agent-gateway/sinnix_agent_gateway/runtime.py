@@ -127,7 +127,7 @@ def manifest_measurement(manifest: Mapping[str, Any]) -> dict[str, Any]:
         "schema": "sinnix.gateway-schema-measurement.v1",
         "canonical_bytes": canonical_bytes,
         "tool_count": len(manifest.get("tools", [])),
-        "token_lane": {
+        "token_estimate": {
             "status": "estimated",
             "method": "canonical_bytes_divided_by_4",
             "estimated_tokens": (canonical_bytes + TOKEN_ESTIMATE_BYTES_PER_TOKEN - 1)
@@ -401,7 +401,7 @@ class Runtime:
             raise
         return context
 
-    async def v2_get(self, reference: str) -> dict[str, Any]:
+    async def read_ref(self, reference: str) -> dict[str, Any]:
         """Read one canonical resource through the action that owns its kind."""
         try:
             resource, values = REGISTRY.resolve(reference)
@@ -434,7 +434,7 @@ class Runtime:
             "data": action.Output.model_validate(data).model_dump(mode="json"),
         }
 
-    def v2_events(
+    def recent_events(
         self,
         limit: int,
         cursor: str | None = None,
@@ -469,7 +469,7 @@ class Runtime:
         result["events"] = rows
         return result
 
-    def v2_run_shell(
+    def run_shell(
         self,
         *,
         project_id: str,
@@ -528,7 +528,7 @@ class Runtime:
             "ref": REGISTRY.reference("job", {"job_id": job_id}),
         }
 
-    def v2_run_declared_operation(
+    def run_declared_operation(
         self,
         *,
         project_id: str | None,
@@ -737,7 +737,7 @@ class Runtime:
             "ref": canonical_ref,
         }
 
-    def v2_operate(
+    def operate(
         self,
         *,
         reference: str,
@@ -784,7 +784,7 @@ class Runtime:
         )
         return {"ref": canonical_ref, "action": action, "owner_receipt": owner_receipt}
 
-    async def v2_wait_async(
+    async def wait_async(
         self,
         reference: str,
         timeout_seconds: int,
@@ -1053,7 +1053,7 @@ class Runtime:
         collect(result)
         return sorted(set(refs))
 
-    def _record_v2_receipt(
+    def _record_receipt(
         self,
         action: Action,
         outcome: str,
@@ -1212,7 +1212,7 @@ class Runtime:
             encoded = json.dumps(raw, sort_keys=True, separators=(",", ":")).encode()
         except (TypeError, ValueError) as exc:
             raise ProtocolError(
-                "invalid_request", "V2 request is not JSON serializable"
+                "invalid_request", "request is not JSON serializable"
             ) from exc
         return RequestContext.create(
             hashlib.sha256(encoded).hexdigest(),
@@ -1224,14 +1224,14 @@ class Runtime:
             preconditions=preconditions,
         )
 
-    def _v2_success(
+    def _success(
         self, action: Action, result: Any, context: RequestContext
     ) -> dict[str, Any]:
         page = None
         if isinstance(result, ActionResult):
             page = result.page
             result = result.data
-        receipt = self._record_v2_receipt(action, "ok", context, result=result)
+        receipt = self._record_receipt(action, "ok", context, result=result)
         return self.results.record(
             action=action.name,
             owner=action.owner,
@@ -1244,7 +1244,7 @@ class Runtime:
             meta={"resource_refs": self._resource_refs(result)},
         )
 
-    def _v2_failure(
+    def _failure(
         self,
         action: Action,
         exc: Exception,
@@ -1316,7 +1316,7 @@ class Runtime:
                 "mutation_outcome": "indeterminate",
                 "retry_safe": False,
             }
-        receipt = self._record_v2_receipt(action, "error", context, error=error)
+        receipt = self._record_receipt(action, "error", context, error=error)
         return self.results.record(
             action=action.name,
             owner=action.owner,
@@ -1338,7 +1338,7 @@ class Runtime:
             ).hexdigest()
         )
 
-    async def _claim_v2_idempotency(
+    async def _claim_idempotency(
         self, action: Action, context: RequestContext, request: Mapping[str, Any]
     ) -> dict[str, Any] | None:
         if action.effect is EffectMode.READ:
@@ -1441,7 +1441,7 @@ class Runtime:
                         "ref": reference,
                         "action": verb,
                         "owner_receipt": verified,
-                        "affordances": ["machine.query", "audit.receipt"],
+                        "next_actions": ["machine.query", "audit.receipt"],
                     }
                     if hub_stop:
                         recovered = {
@@ -1451,10 +1451,10 @@ class Runtime:
                             "signal": "TERM",
                             "delivered": True,
                             "owner_receipt": verified,
-                            "affordances": ["processes.wait", "audit.receipt"],
+                            "next_actions": ["processes.wait", "audit.receipt"],
                         }
-                    response = self._v2_success(action, recovered, context)
-                    response = self._complete_v2_idempotency(action, context, response)
+                    response = self._success(action, recovered, context)
+                    response = self._complete_idempotency(action, context, response)
                     return response
             if action.name == "operations.run":
                 from .actions.jobs import _job_view
@@ -1475,11 +1475,11 @@ class Runtime:
                 except Exception:
                     recovered = None
                 if recovered is not None:
-                    response = self._v2_success(action, recovered, context)
-                    response = self._complete_v2_idempotency(action, context, response)
+                    response = self._success(action, recovered, context)
+                    response = self._complete_idempotency(action, context, response)
                     return response
             if action.name == "shell.run":
-                from . import shell_lanes
+                from . import shell_pools
                 from .actions.jobs import (
                     ShellRunInput,
                     _shell_request_digest,
@@ -1487,7 +1487,7 @@ class Runtime:
                 )
 
                 inp = ShellRunInput.model_validate(request)
-                lane, reason = shell_lanes.choose(inp.argv, inp.lane)
+                pool, reason = shell_pools.choose(inp.argv, inp.pool)
                 try:
                     job = await anyio.to_thread.run_sync(
                         lambda: self.jobs.reconcile_shell_start(
@@ -1498,15 +1498,15 @@ class Runtime:
                         )
                     )
                     recovered = (
-                        _shell_result(job, lane, reason).model_dump(mode="json")
+                        _shell_result(job, pool, reason).model_dump(mode="json")
                         if job is not None
                         else None
                     )
                 except Exception:
                     recovered = None
                 if recovered is not None:
-                    response = self._v2_success(action, recovered, context)
-                    return self._complete_v2_idempotency(action, context, response)
+                    response = self._success(action, recovered, context)
+                    return self._complete_idempotency(action, context, response)
             raise ProtocolError(
                 "indeterminate",
                 "Previous invocation ended without a confirmed outcome; reconcile with the owner before any new effect. This key will not execute again.",
@@ -1528,7 +1528,7 @@ class Runtime:
             },
         )
 
-    def _complete_v2_idempotency(
+    def _complete_idempotency(
         self, action: Action, context: RequestContext, response: Mapping[str, Any]
     ) -> dict[str, Any]:
         if action.effect is not EffectMode.READ and context.idempotency_key is not None:
@@ -1540,7 +1540,7 @@ class Runtime:
             )
         return dict(response)
 
-    async def execute_v2_async(
+    async def execute_async(
         self,
         action: Action,
         callback: Callable[[], Awaitable[Any]],
@@ -1566,7 +1566,7 @@ class Runtime:
                     raise ProtocolError(
                         "deadline", "request deadline elapsed before execution"
                     )
-                replay = await self._claim_v2_idempotency(action, context, request)
+                replay = await self._claim_idempotency(action, context, request)
                 if replay is not None:
                     return replay
                 reserved = action.effect is not EffectMode.READ
@@ -1575,12 +1575,12 @@ class Runtime:
                 # writes; every concurrent call would wait behind them on
                 # the event loop.
                 response = await anyio.to_thread.run_sync(
-                    self._v2_success, action, result, context
+                    self._success, action, result, context
                 )
             except Exception as exc:
                 response = await anyio.to_thread.run_sync(
                     functools.partial(
-                        self._v2_failure, action, exc, context, effect_started=reserved
+                        self._failure, action, exc, context, effect_started=reserved
                     )
                 )
             except BaseException:
@@ -1598,7 +1598,7 @@ class Runtime:
                     )
                 else:
                     response = await anyio.to_thread.run_sync(
-                        self._complete_v2_idempotency, action, context, response
+                        self._complete_idempotency, action, context, response
                     )
             return response
         finally:

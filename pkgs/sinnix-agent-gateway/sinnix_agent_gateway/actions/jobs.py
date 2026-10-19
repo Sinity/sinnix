@@ -17,7 +17,7 @@ import anyio
 from agentctl.limits import MAX_AGENT_TIMEOUT_SECONDS
 from pydantic import Field
 
-from .. import shell_lanes
+from .. import shell_pools
 from ..action import (
     Action,
     Example,
@@ -95,7 +95,7 @@ class JobView(GatewayModel):
     started_at: str | None = None
     ended_at: str | None = None
     binding: JobBinding | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 # A queue entry's command is a one-line summary for telling slots apart; the
@@ -246,10 +246,10 @@ def _job_view(payload: Mapping[str, Any]) -> JobView:
     )
     path = checkout.get("path") or None
     terminal = state.get("terminal")
-    affordances = ["jobs.get", "jobs.logs"]
-    affordances.append("jobs.retry" if terminal else "jobs.wait")
+    next_actions = ["jobs.get", "jobs.logs"]
+    next_actions.append("jobs.retry" if terminal else "jobs.wait")
     if not terminal:
-        affordances.append("jobs.cancel")
+        next_actions.append("jobs.cancel")
     launch_reference = payload.get("launch_reference")
     return JobView(
         ref=job_ref(job_id),
@@ -287,7 +287,7 @@ def _job_view(payload: Mapping[str, Any]) -> JobView:
         started_at=payload.get("started_at"),
         ended_at=payload.get("ended_at"),
         binding=_binding(payload),
-        affordances=affordances,
+        next_actions=next_actions,
     )
 
 
@@ -442,7 +442,7 @@ class JobLog(GatewayModel):
     returned_bytes: int
     truncated: bool
     next_offset: int | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 class JobResult(GatewayModel):
@@ -499,7 +499,7 @@ def _log(
             for key in ("attempt", "path", "size_bytes", "base64")
             if key in raw
         },
-        affordances=["jobs.get", "jobs.logs"],
+        next_actions=["jobs.get", "jobs.logs"],
     )
 
 
@@ -583,7 +583,7 @@ class JobWait(GatewayModel):
     queue_unavailable: str | None = None
     output: JobLog | None = None
     detail: str | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 async def _wait(runtime: Runtime, inp: JobWaitInput) -> JobWait:
@@ -627,7 +627,7 @@ async def _wait(runtime: Runtime, inp: JobWaitInput) -> JobWait:
         queue_unavailable=raw.get("queue_unavailable"),
         output=output,
         detail=raw.get("detail"),
-        affordances=(
+        next_actions=(
             ["jobs.get", "jobs.logs"]
             if outcome == "terminal"
             else ["jobs.wait", "jobs.queues", "jobs.cancel"]
@@ -648,7 +648,7 @@ class QueuesInput(RequestControls):
 
 class QueuePage(GatewayModel):
     queues: list[QueueState]
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _queues(runtime: Runtime, inp: QueuesInput) -> QueuePage:
@@ -665,7 +665,7 @@ def _queues(runtime: Runtime, inp: QueuesInput) -> QueuePage:
         raise ProtocolError("owner_failed", "job owner queue response is malformed")
     return QueuePage(
         queues=[QueueState(**_queue_fields(row)) for row in rows],
-        affordances=["jobs.get", "jobs.wait", "jobs.cancel"],
+        next_actions=["jobs.get", "jobs.wait", "jobs.cancel"],
     )
 
 
@@ -705,7 +705,7 @@ class CancelResult(GatewayModel):
         description="Owner-observed process survivors; null means the owner did not inspect or report them.",
     )
     warnings: list[str] = Field(default_factory=list)
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
@@ -770,7 +770,7 @@ def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
         scope_stopped=scope_stopped,
         survivors=survivors,
         warnings=warnings,
-        affordances=["jobs.get", "jobs.logs", "jobs.retry"],
+        next_actions=["jobs.get", "jobs.logs", "jobs.retry"],
     )
 
 
@@ -795,7 +795,7 @@ class CleanResult(GatewayModel):
         default_factory=list,
         description="Queue entries removed; retained attempt artifacts remain readable.",
     )
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _clean(runtime: Runtime, inp: CleanInput) -> CleanResult:
@@ -808,7 +808,7 @@ def _clean(runtime: Runtime, inp: CleanInput) -> CleanResult:
         job_id=cleaned_id,
         cleaned=bool(raw.get("cleaned")),
         removed=[str(path) for path in raw.get("removed") or []],
-        affordances=["jobs.list"],
+        next_actions=["jobs.list"],
     )
 
 
@@ -832,7 +832,7 @@ class OperationRunInput(MutationControls):
 def _run_operation(runtime: Runtime, inp: OperationRunInput) -> JobView:
     project_id, workspace, _ = _workspace(runtime, inp.checkout)
     result = _owner_call(
-        runtime.v2_run_declared_operation,
+        runtime.run_declared_operation,
         {"project": project_id, "operation": inp.operation, "checkout": workspace},
         project_id=project_id,
         operation=inp.operation,
@@ -854,7 +854,7 @@ class ShellRunInput(MutationControls):
         max_length=4_096,
         description="Relative to the checkout; may not leave it.",
     )
-    lane: Literal["auto", "quick", "long"] = Field(
+    pool: Literal["auto", "quick", "long"] = Field(
         default="auto",
         description="quick for reads and short commands, long for agent CLIs "
         "and anything that runs for minutes. auto sends agent CLI launches "
@@ -878,12 +878,12 @@ class ShellRunResult(JobView):
         description="terminal, or still running or queued; running and queued "
         "carry a continuation to pass to jobs.wait.",
     )
-    lane: Literal["quick", "long"]
-    lane_reason: str = Field(
-        description="declared, default, or agent-cli:<name> for an automatic long lane."
+    pool: Literal["quick", "long"]
+    pool_reason: str = Field(
+        description="declared, default, or agent-cli:<name> for an automatic long pool."
     )
     queue: JobQueue | None = Field(
-        default=None, description="Set while unfinished: the lane's occupancy."
+        default=None, description="Set while unfinished: the pool's occupancy."
     )
     queue_unavailable: str | None = None
     output: JobLog | None = None
@@ -900,18 +900,18 @@ def _shell_request_digest(inp: ShellRunInput) -> str:
     ).hexdigest()
 
 
-def _start_shell(runtime: Runtime, inp: ShellRunInput, lane: str) -> dict[str, Any]:
+def _start_shell(runtime: Runtime, inp: ShellRunInput, pool: str) -> dict[str, Any]:
     project_id, workspace, _ = _workspace(runtime, inp.checkout)
     if any(not argument for argument in inp.argv):
         raise ProtocolError("invalid_request", "argv entries must be non-empty")
     return _owner_call(
-        runtime.v2_run_shell,
+        runtime.run_shell,
         {"project": project_id, "checkout": workspace},
         project_id=project_id,
         checkout_id=workspace or "default",
         argv=inp.argv,
         cwd=inp.cwd,
-        group=shell_lanes.GROUPS[lane],
+        group=shell_pools.GROUPS[pool],
         timeout_seconds=inp.timeout_seconds,
         idempotency_key=runtime.launch_idempotency_key(
             "shell.run", inp.idempotency_key
@@ -920,13 +920,13 @@ def _start_shell(runtime: Runtime, inp: ShellRunInput, lane: str) -> dict[str, A
     )
 
 
-def _shell_result(result: Mapping[str, Any], lane: str, reason: str) -> ShellRunResult:
+def _shell_result(result: Mapping[str, Any], pool: str, reason: str) -> ShellRunResult:
     view = _job_view(result)
     return ShellRunResult(
         **view.model_dump(),
         outcome=_progress(view),
-        lane=lane,
-        lane_reason=reason,
+        pool=pool,
+        pool_reason=reason,
         queue=_job_queue(result),
         queue_unavailable=result.get("queue_unavailable"),
         continuation=None
@@ -936,13 +936,13 @@ def _shell_result(result: Mapping[str, Any], lane: str, reason: str) -> ShellRun
 
 
 async def _run_shell(runtime: Runtime, inp: ShellRunInput) -> ShellRunResult:
-    lane, reason = shell_lanes.choose(inp.argv, inp.lane)
+    pool, reason = shell_pools.choose(inp.argv, inp.pool)
     # Resolving the checkout and enqueueing the job run subprocesses; on the
     # event loop they would stall every other call the server is handling.
-    result = await anyio.to_thread.run_sync(_start_shell, runtime, inp, lane)
+    result = await anyio.to_thread.run_sync(_start_shell, runtime, inp, pool)
     view = _job_view(result)
     if not inp.wait:
-        return _shell_result(result, lane, reason)
+        return _shell_result(result, pool, reason)
     target = JobLocator(job_id=view.job_id, launch_reference=view.launch_reference)
     waited = await _wait(
         runtime,
@@ -957,8 +957,8 @@ async def _run_shell(runtime: Runtime, inp: ShellRunInput) -> ShellRunResult:
     return ShellRunResult(
         **view.model_dump(),
         outcome=waited.outcome,
-        lane=lane,
-        lane_reason=reason,
+        pool=pool,
+        pool_reason=reason,
         queue=waited.queue,
         queue_unavailable=waited.queue_unavailable,
         output=waited.output,
@@ -985,7 +985,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=JobPage,
         handler=_list,
         resource_kinds=("job",),
-        affordances=("jobs.get", "jobs.logs", "jobs.wait", "jobs.cancel"),
+        next_actions=("jobs.get", "jobs.logs", "jobs.wait", "jobs.cancel"),
         aliases=("queue", "pueue status", "running jobs", "tasks"),
         examples=(
             Example(title="Newest 20 jobs", input={"limit": 20}),
@@ -1003,7 +1003,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=JobDetail,
         handler=_get,
         resource_kinds=("job",),
-        affordances=("jobs.logs", "jobs.wait", "jobs.cancel", "jobs.retry"),
+        next_actions=("jobs.logs", "jobs.wait", "jobs.cancel", "jobs.retry"),
         aliases=("job status", "job result", "job output", "phase"),
         examples=(
             Example(title="Job summary", input={"target": {"job_id": 41}}),
@@ -1022,7 +1022,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=JobLog,
         handler=_logs,
         resource_kinds=("job",),
-        affordances=("jobs.get", "jobs.wait"),
+        next_actions=("jobs.get", "jobs.wait"),
         aliases=("job log", "tail", "output", "stdout"),
         examples=(
             Example(title="First 64 KB of a log", input={"target": {"job_id": 41}}),
@@ -1043,7 +1043,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=JobWait,
         handler=_wait,
         resource_kinds=("job",),
-        affordances=("jobs.get", "jobs.logs", "jobs.queues", "jobs.cancel"),
+        next_actions=("jobs.get", "jobs.logs", "jobs.queues", "jobs.cancel"),
         aliases=("wait for job", "block", "until done", "continue"),
         documentation="outcome is terminal, running or queued; running and queued are continuations, never failures, and carry queue: the group's occupancy and the job's place in it. Pass output_offset (the previous output.next_offset) to receive only new log bytes. The wait runs in a worker thread; cancelling the MCP request abandons it without stopping the job. A task id is a queue position: pass the launch_reference the start returned and the wait follows its job across a reorder, answering with the id it is at now.",
         examples=(
@@ -1083,13 +1083,13 @@ ACTIONS: tuple[Action, ...] = (
         Output=QueuePage,
         handler=_queues,
         resource_kinds=("job",),
-        affordances=("jobs.get", "jobs.wait", "jobs.cancel"),
-        aliases=("lanes", "occupancy", "queue length", "what is running", "backlog"),
-        documentation="shell-quick and shell-long are the shell.run groups. Reads only unfinished tasks, so it stays cheap however long the queue history is.",
+        next_actions=("jobs.get", "jobs.wait", "jobs.cancel"),
+        aliases=("pools", "occupancy", "queue length", "what is running", "backlog"),
+        documentation="shell-quick and shell-long are the shell.run pools. Reads only unfinished tasks, so it stays cheap however long the queue history is.",
         examples=(
             Example(title="Every group", input={}),
             Example(
-                title="The shell lanes",
+                title="The shell pools",
                 input={"groups": ["shell-quick", "shell-long"]},
             ),
         ),
@@ -1103,7 +1103,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=CancelResult,
         handler=_cancel,
         resource_kinds=("job",),
-        affordances=("jobs.get", "jobs.logs", "jobs.retry"),
+        next_actions=("jobs.get", "jobs.logs", "jobs.retry"),
         aliases=("kill", "stop job", "abort"),
         supports_precondition=True,
         documentation="Pass expected_phase to refuse when the job already moved on. The owner retains reason with the gateway caller label before stopping the job. Request metadata is separate from completion; survivors is null when the owner did not report a process inspection.",
@@ -1127,7 +1127,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=JobView,
         handler=_retry,
         resource_kinds=("job",),
-        affordances=("jobs.wait", "jobs.get"),
+        next_actions=("jobs.wait", "jobs.get"),
         aliases=("restart", "rerun", "requeue"),
         examples=(
             Example(
@@ -1145,7 +1145,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=CleanResult,
         handler=_clean,
         resource_kinds=("job",),
-        affordances=("jobs.list",),
+        next_actions=("jobs.list",),
         aliases=("remove job", "forget", "delete job", "prune"),
         documentation="Refused while the job is still queued or running; cancel it first.",
         examples=(
@@ -1164,7 +1164,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=JobView,
         handler=_run_operation,
         resource_kinds=("project", "checkout", "job"),
-        affordances=("jobs.wait", "jobs.logs", "jobs.get", "jobs.cancel"),
+        next_actions=("jobs.wait", "jobs.logs", "jobs.get", "jobs.cancel"),
         aliases=("agentctl job start", "run check", "run lint", "verify", "build"),
         examples=(
             Example(
@@ -1195,9 +1195,9 @@ ACTIONS: tuple[Action, ...] = (
         Output=ShellRunResult,
         handler=_run_shell,
         resource_kinds=("project", "checkout", "job"),
-        affordances=("jobs.wait", "jobs.logs", "jobs.queues", "jobs.cancel"),
+        next_actions=("jobs.wait", "jobs.logs", "jobs.queues", "jobs.cancel"),
         aliases=("exec", "command", "bash", "run command"),
-        documentation="cwd is confined to the checkout. lane=auto sends agent CLI launches (claude, codex, ...) to the long lane and everything else to the quick lane. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) and returns output; outcome running or queued is a continuation with queue occupancy, never a failure: pass continuation and output.next_offset to jobs.wait. timeout_seconds is an optional kill ceiling; omitted, the job runs until it finishes.",
+        documentation="cwd is confined to the checkout. pool=auto sends agent CLI launches (claude, codex, ...) to the long pool and everything else to the quick pool. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) and returns output; outcome running or queued is a continuation with queue occupancy, never a failure: pass continuation and output.next_offset to jobs.wait. timeout_seconds is an optional kill ceiling; omitted, the job runs until it finishes.",
         examples=(
             Example(
                 title="git status in sinnix",
@@ -1213,7 +1213,7 @@ ACTIONS: tuple[Action, ...] = (
                 input={
                     "checkout": {"project": "sinnix"},
                     "argv": ["claude", "-p", "Summarize docs/agent-gateway.md"],
-                    "lane": "long",
+                    "pool": "long",
                     "idempotency_key": "summary-1",
                 },
             ),

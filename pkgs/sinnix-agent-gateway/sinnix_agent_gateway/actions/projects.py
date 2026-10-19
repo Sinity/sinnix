@@ -133,14 +133,14 @@ class ProjectView(Identity):
     canonical_checkout_ref: str | None = None
     code_revision: str | None = None
     task_authority: dict[str, Any] | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _get(runtime: Runtime, inp: GetInput) -> ProjectView:
     resolved = inp.target.resolve(runtime)
     identity = _identity(resolved)
     selected = identity["checkout_id"]
-    affordances = [
+    next_actions = [
         "projects.tree",
         "projects.read",
         "projects.diff",
@@ -165,7 +165,7 @@ def _get(runtime: Runtime, inp: GetInput) -> ProjectView:
             canonical_checkout_ref=authority["canonical_checkout_ref"],
             code_revision=authority["code_revision"],
             task_authority=authority["task_authority"],
-            affordances=affordances,
+            next_actions=next_actions,
         )
     summary = owner(runtime.projects.summary, resolved.project_id, resolved.checkout_id)
     if inp.projection == "git":
@@ -183,7 +183,7 @@ def _get(runtime: Runtime, inp: GetInput) -> ProjectView:
             repository=catalog["repository"],
             checkout=checkout,
             checkouts=checkouts,
-            affordances=affordances,
+            next_actions=next_actions,
         )
     checkout = owner(runtime.projects.checkout, resolved.project_id, selected)[
         "checkout"
@@ -193,7 +193,7 @@ def _get(runtime: Runtime, inp: GetInput) -> ProjectView:
         projection="summary",
         project=summary,
         checkout=checkout,
-        affordances=affordances,
+        next_actions=next_actions,
     )
 
 
@@ -266,7 +266,7 @@ class ProjectFile(Identity):
     truncated: bool
     content_sha256: str
     checkout_revision: str
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _read(runtime: Runtime, inp: ReadInput) -> ProjectFile:
@@ -284,7 +284,7 @@ def _read(runtime: Runtime, inp: ReadInput) -> ProjectFile:
     return ProjectFile(
         **_identity(resolved),
         **result,
-        affordances=["projects.change", "projects.diff"],
+        next_actions=["projects.change", "projects.diff"],
     )
 
 
@@ -317,7 +317,7 @@ def _read_many(runtime: Runtime, inp: ReadManyInput) -> ReadMany:
         ProjectFile(
             **_identity(resolved),
             **file,
-            affordances=["projects.change", "projects.diff"],
+            next_actions=["projects.change", "projects.diff"],
         )
         for file in result["files"]
     ]
@@ -542,7 +542,7 @@ class ChangeResult(Identity):
     checkout: dict[str, Any] = Field(
         description="Checkout after the change: new head and dirty_sha256."
     )
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
@@ -630,7 +630,7 @@ def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
         bytes=result.get("bytes"),
         applied=True,
         checkout=after,
-        affordances=["projects.diff", "projects.read", "projects.get"],
+        next_actions=["projects.diff", "projects.read", "projects.get"],
     )
 
 
@@ -639,13 +639,13 @@ def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
 
 class ContextInput(RequestControls):
     target: ProjectLocator
-    intent: Literal["project.orientation", "project.triage"] = "project.orientation"
+    intent: Literal["project.overview", "project.triage"] = "project.overview"
 
 
 class ProjectContext(ComposedContext):
     project_ref: str
     project_id: str
-    intent: Literal["project.orientation", "project.triage"]
+    intent: Literal["project.overview", "project.triage"]
 
 
 async def _context(runtime: Runtime, inp: ContextInput) -> ProjectContext:
@@ -663,7 +663,7 @@ async def _context(runtime: Runtime, inp: ContextInput) -> ProjectContext:
         ),
     )
     fields = context.model_dump()
-    fields["affordances"] = [
+    fields["next_actions"] = [
         "projects.get",
         "beads.query",
         "projects.diff",
@@ -690,7 +690,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=ProjectList,
         handler=_list,
         resource_kinds=("project",),
-        affordances=("projects.get", "projects.context", "beads.query"),
+        next_actions=("projects.get", "projects.context", "beads.query"),
         aliases=("repos", "repositories", "workspaces", "which projects"),
         examples=(Example(title="List projects", input={}),),
     ),
@@ -703,7 +703,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=ProjectView,
         handler=_get,
         resource_kinds=_KINDS,
-        affordances=(
+        next_actions=(
             "projects.tree",
             "projects.diff",
             "projects.change",
@@ -735,7 +735,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=Tree,
         handler=_tree,
         resource_kinds=_KINDS,
-        affordances=("projects.read", "projects.search"),
+        next_actions=("projects.read", "projects.search"),
         aliases=("ls", "file list", "directory", "layout"),
         documentation="Lists project files without following symlinks. When truncated, pass next_start_after as start_after to list the next page of the same directory.",
         examples=(
@@ -754,7 +754,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=ProjectFile,
         handler=_read,
         resource_kinds=_KINDS,
-        affordances=("projects.change", "projects.search", "projects.diff"),
+        next_actions=("projects.change", "projects.search", "projects.diff"),
         aliases=("cat", "open", "view file", "source"),
         examples=(
             Example(
@@ -772,7 +772,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=ReadMany,
         handler=_read_many,
         resource_kinds=_KINDS,
-        affordances=("projects.read", "projects.change", "projects.diff"),
+        next_actions=("projects.read", "projects.change", "projects.diff"),
         aliases=("bulk read", "read files", "batch files"),
         examples=(
             Example(
@@ -796,7 +796,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=ProjectExport,
         handler=_export,
         resource_kinds=_KINDS,
-        affordances=("projects.get", "projects.read"),
+        next_actions=("projects.get", "projects.read"),
         aliases=("snapshot", "bundle", "download project", "portable export"),
         documentation="Exports tracked and nonignored untracked files, excluding sensitive and local-only paths. Symlink entries retain their link targets; symlinked parent directories are refused. Optional file and byte bounds return next_start_after; pass it with checkout_revision as expected_revision to continue. Fetch the ZIP through its artifact ref; its manifest_path holds the complete per-file manifest.",
         examples=(
@@ -815,7 +815,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=Diff,
         handler=_diff,
         resource_kinds=_KINDS,
-        affordances=("projects.read", "projects.get"),
+        next_actions=("projects.read", "projects.get"),
         aliases=("git diff", "changes", "what changed", "working tree"),
         examples=(
             Example(
@@ -833,7 +833,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=SearchResult,
         handler=_search,
         resource_kinds=_KINDS,
-        affordances=("projects.read", "projects.tree"),
+        next_actions=("projects.read", "projects.tree"),
         aliases=("grep", "rg", "find in files", "where is"),
         examples=(
             Example(
@@ -851,7 +851,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=ChangeResult,
         handler=_change,
         resource_kinds=_KINDS,
-        affordances=("projects.diff", "projects.read", "projects.get"),
+        next_actions=("projects.diff", "projects.read", "projects.get"),
         aliases=("write file", "edit", "apply patch", "save"),
         supports_precondition=True,
         documentation="Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read. Supply inline content/patch or a source artifact locator; artifact bytes are verified and streamed without a file-size ceiling from the response budget.",
@@ -892,9 +892,9 @@ ACTIONS: tuple[Action, ...] = (
         Output=ProjectContext,
         handler=_context,
         resource_kinds=("project",),
-        affordances=("projects.get", "beads.query", "projects.diff", "projects.tree"),
+        next_actions=("projects.get", "beads.query", "projects.diff", "projects.tree"),
         aliases=("orient", "overview", "where are we", "triage", "what is ready"),
-        documentation="Project-scoped view of context.compose with the same owner coverage, compact presentation and snapshot retrieval, plus project navigation affordances.",
+        documentation="Project-scoped view of context.compose with the same owner coverage, compact presentation and snapshot retrieval, plus project navigation next_actions.",
         examples=(
             Example(title="Orientation", input=_EXAMPLE),
             Example(title="Triage", input={**_EXAMPLE, "intent": "project.triage"}),

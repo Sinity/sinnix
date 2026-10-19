@@ -64,7 +64,7 @@ BY_NAME: dict[str, Action] = {action.name: action for action in ALL_ACTIONS}
 def catalog_hash() -> str:
     """Digest of every catalog row field.
 
-    The generated contract promises that examples and affordances participate
+    The generated contract promises that examples and next_actions participate
     in this digest alongside names and schemas. The action set is fixed for
     this process; the digest is computed once, at the server startup warm-up.
     Hashing the complete catalog row keeps that promise true when another

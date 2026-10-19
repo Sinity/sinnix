@@ -1,12 +1,12 @@
-"""Which lane a `shell.run` command belongs in.
+"""Which pool a `shell.run` command belongs in.
 
 Two pueue groups carry gateway shells (declared as agentctl pools):
 ``shell-quick`` for reads and short commands, ``shell-long`` for agent CLIs
 and anything the caller declares long. A long command the classifier leaves
-in the quick lane holds one of its slots until it finishes.
+in the quick pool holds one of its slots until it finishes.
 
 Nothing is refused here: the gateway is the operator's full-power shell, and a
-lane is a placement, not a permission.
+pool is a placement, not a permission.
 """
 
 from __future__ import annotations
@@ -16,9 +16,9 @@ import shlex
 from pathlib import PurePosixPath
 from typing import Literal
 
-Lane = Literal["quick", "long"]
+Pool = Literal["quick", "long"]
 
-GROUPS: dict[Lane, str] = {"quick": "shell-quick", "long": "shell-long"}
+GROUPS: dict[Pool, str] = {"quick": "shell-quick", "long": "shell-long"}
 
 # Agent command-line harnesses: each one launched from a shell is a session
 # that runs for minutes to hours.
@@ -221,8 +221,8 @@ def _agent(words: list[str], depth: int) -> str | None:
 
 def choose(
     argv: list[str], requested: Literal["auto", "quick", "long"]
-) -> tuple[Lane, str]:
-    """The lane and the reason, as the response reports them."""
+) -> tuple[Pool, str]:
+    """The pool and the reason, as the response reports them."""
     if requested != "auto":
         return requested, "declared"
     agent = _agent(list(argv), 0)

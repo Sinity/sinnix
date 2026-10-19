@@ -7,7 +7,7 @@ import sys
 import anyio
 import pytest
 from sinnix_agent_gateway.audit import AuditService
-from sinnix_agent_gateway.cli import build_manifest, verify_approval
+from sinnix_agent_gateway.cli import build_manifest, verify_manifest
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.results import RequestContext, ResultService
 
@@ -121,10 +121,10 @@ def test_package_manifest_checks_code_separately_from_connector(tmp_path):
     )
     manifest = anyio.run(build_manifest, config)
     path.write_text(json.dumps({"manifest": manifest}))
-    assert verify_approval(config)["tool_manifest_hash"] == manifest["sha256"]
+    assert verify_manifest(config)["tool_manifest_hash"] == manifest["sha256"]
     path.write_text(json.dumps({"manifest": {"sha256": "a" * 64}}))
     with pytest.raises(ValueError, match="drift"):
-        verify_approval(config)
+        verify_manifest(config)
 
 
 @pytest.mark.parametrize("size", [200, 20000])
@@ -194,7 +194,7 @@ def test_interrupted_launch_reconciles_owner_identity_without_running_again(
         pytest.fail("ambiguous launch must not execute again")
 
     async def invoke():
-        return await runtime.execute_v2_async(
+        return await runtime.execute_async(
             BY_NAME["operations.run"], forbidden, request
         )
 
@@ -225,7 +225,7 @@ def test_interrupted_shell_launch_recovers_exact_job_or_stays_indeterminate(
     request = {
         "checkout": {"project": "fixture"},
         "argv": ["git", "status"],
-        "lane": "long",
+        "pool": "long",
         "timeout_seconds": 60,
         "idempotency_key": "shell-key",
     }
@@ -256,7 +256,7 @@ def test_interrupted_shell_launch_recovers_exact_job_or_stays_indeterminate(
         pytest.fail("replay must never launch another shell job")
 
     async def invoke(body):
-        return await runtime.execute_v2_async(BY_NAME["shell.run"], forbidden, body)
+        return await runtime.execute_async(BY_NAME["shell.run"], forbidden, body)
 
     response = anyio.run(invoke, request)
     assert seen == [
@@ -288,7 +288,7 @@ def test_interrupted_shell_launch_recovers_exact_job_or_stays_indeterminate(
         {"argv": ["git", "log"]},
         {"checkout": {"project": "other"}},
         {"cwd": "sub"},
-        {"lane": "quick"},
+        {"pool": "quick"},
         {"timeout_seconds": 30},
     ):
         conflict = anyio.run(invoke, {**request, **changed})
@@ -312,9 +312,7 @@ def test_unreconciled_interruption_returns_indeterminate_and_no_effect(tmp_path)
         pytest.fail("ambiguous mutation must not execute again")
 
     async def invoke():
-        return await runtime.execute_v2_async(
-            BY_NAME["files.change"], forbidden, request
-        )
+        return await runtime.execute_async(BY_NAME["files.change"], forbidden, request)
 
     response = anyio.run(invoke)
     assert response["error"]["code"] == "indeterminate", response
@@ -385,7 +383,7 @@ def test_machine_recovery_requires_exact_confirmed_owner_request(
         pytest.fail("owner lookup must not repeat the mutation")
 
     async def invoke():
-        return await runtime.execute_v2_async(BY_NAME[action_name], forbidden, request)
+        return await runtime.execute_async(BY_NAME[action_name], forbidden, request)
 
     response = anyio.run(invoke)
     if tampered:
@@ -408,7 +406,7 @@ def test_error_after_mutation_exposes_uncertainty_and_never_repeats(tmp_path):
         raise RuntimeError("connection lost after mutation")
 
     async def invoke():
-        return await runtime.execute_v2_async(
+        return await runtime.execute_async(
             BY_NAME["files.change"], interrupted, {"idempotency_key": "uncertain"}
         )
 
@@ -465,7 +463,7 @@ def test_stopped_process_reconciles_without_resolving_a_live_process(tmp_path):
         pytest.fail("stopped process must never be resolved or signaled again")
 
     async def invoke():
-        return await runtime.execute_v2_async(
+        return await runtime.execute_async(
             BY_NAME["processes.signal"], forbidden, request
         )
 

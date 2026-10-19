@@ -213,7 +213,7 @@ class ProcessDetail(ProcessRow):
     parent: ProcessRow | None = None
     children: list[ProcessRow] = Field(default_factory=list)
     sockets: list[Socket] = Field(default_factory=list)
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 class GetInput(RequestControls):
@@ -369,7 +369,7 @@ def _get(runtime: Runtime, inp: GetInput) -> ProcessDetail:
         parent=_row(parent_raw, boot=boot, with_cmdline=False) if parent_raw else None,
         children=children,
         sockets=_sockets(pid) if inp.with_sockets else [],
-        affordances=[
+        next_actions=[
             "processes.tree",
             "processes.signal",
             "processes.wait",
@@ -462,7 +462,7 @@ class SignalInput(MutationControls):
     target: ProcessLocator
     request: HubStop | DirectSignal = Field(
         discriminator="operation",
-        description="stop: attested SIGTERM/SIGKILL through the hub server (admitted slices only). signal: direct os.kill by the operator.",
+        description="stop: SIGTERM/SIGKILL through the hub server (admitted slices only). signal: direct os.kill by the operator.",
     )
 
 
@@ -473,7 +473,7 @@ class SignalResult(GatewayModel):
     signal: str | None = None
     delivered: bool
     owner_receipt: dict[str, Any] | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _signal(runtime: Runtime, inp: SignalInput) -> SignalResult:
@@ -494,7 +494,7 @@ def _signal(runtime: Runtime, inp: SignalInput) -> SignalResult:
             signal="TERM",
             delivered=True,
             owner_receipt=receipt.owner_receipt,
-            affordances=["processes.wait", "audit.receipt"],
+            next_actions=["processes.wait", "audit.receipt"],
         )
     if raw["pid"] in {1, os.getpid()}:
         raise ProtocolError(
@@ -520,7 +520,7 @@ def _signal(runtime: Runtime, inp: SignalInput) -> SignalResult:
         operation="signal",
         signal=inp.request.signal,
         delivered=True,
-        affordances=["processes.wait", "processes.get"],
+        next_actions=["processes.wait", "processes.get"],
     )
 
 
@@ -541,7 +541,7 @@ class WaitResult(GatewayModel):
     state: str | None = Field(
         default=None, description="Last observed /proc state when still alive."
     )
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _wait(runtime: Runtime, inp: WaitInput) -> WaitResult:
@@ -564,7 +564,7 @@ def _wait(runtime: Runtime, inp: WaitInput) -> WaitResult:
                 pid=raw["pid"],
                 exited=True,
                 waited_seconds=round(time.monotonic() - started, 3),
-                affordances=["processes.list"],
+                next_actions=["processes.list"],
             )
         state = current["state"] if current else state
         if time.monotonic() >= deadline:
@@ -574,7 +574,7 @@ def _wait(runtime: Runtime, inp: WaitInput) -> WaitResult:
                 exited=False,
                 waited_seconds=round(time.monotonic() - started, 3),
                 state=state,
-                affordances=["processes.get", "processes.signal"],
+                next_actions=["processes.get", "processes.signal"],
             )
         time.sleep(min(inp.poll_seconds, max(0.0, deadline - time.monotonic())))
 
@@ -589,7 +589,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=ProcessListing,
         handler=_list,
         resource_kinds=("process",),
-        affordances=(
+        next_actions=(
             "processes.get",
             "processes.tree",
             "processes.signal",
@@ -612,7 +612,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=ProcessDetail,
         handler=_get,
         resource_kinds=("process",),
-        affordances=(
+        next_actions=(
             "processes.tree",
             "processes.signal",
             "processes.wait",
@@ -636,7 +636,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=ProcessTree,
         handler=_tree,
         resource_kinds=("process",),
-        affordances=("processes.get", "processes.signal"),
+        next_actions=("processes.get", "processes.signal"),
         aliases=("pstree", "children", "descendants"),
         examples=(
             Example(
@@ -649,15 +649,15 @@ ACTIONS: tuple[Action, ...] = (
         name="processes.signal",
         family=VerbFamily.OPERATE,
         owner="machine",
-        summary="Stop a process through the hub server (attested, admitted slices) or send one signal directly as the operator.",
+        summary="Stop a process through the hub server (admitted slices) or send one signal directly as the operator.",
         Input=SignalInput,
         Output=SignalResult,
         handler=_signal,
         resource_kinds=("process",),
-        affordances=("processes.wait", "processes.get", "audit.receipt"),
+        next_actions=("processes.wait", "processes.get", "audit.receipt"),
         aliases=("kill", "pkill", "terminate", "sigterm", "sigkill"),
         supports_precondition=True,
-        documentation="The hub server path is the attested one and needs expected_target; the direct path is receipted by the gateway audit chain only.",
+        documentation="The hub-server path is the checked one and needs expected_target; the direct path is receipted by the gateway audit chain only.",
         examples=(
             Example(
                 title="Hub stop",
@@ -696,7 +696,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=WaitResult,
         handler=_wait,
         resource_kinds=("process",),
-        affordances=("processes.get", "processes.signal", "processes.list"),
+        next_actions=("processes.get", "processes.signal", "processes.list"),
         aliases=("wait for exit", "await process", "has it finished"),
         examples=(
             Example(

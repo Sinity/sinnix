@@ -146,7 +146,7 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
             async def failing() -> Any:
                 raise failure
 
-            return await runtime.execute_v2_async(
+            return await runtime.execute_async(
                 action,
                 failing,
                 _safe_failure_controls(kwargs),
@@ -205,7 +205,7 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
             data = validated.model_dump(mode="json", by_alias=True)
             return ActionResult(data, page=page) if page is not None else data
 
-        return await runtime.execute_v2_async(action, callback, request), blocks
+        return await runtime.execute_async(action, callback, request), blocks
 
     def _project(response: dict[str, Any], blocks: list[Any]) -> CallToolResult:
         ok = response["result"]["outcome"] == "ok"
@@ -235,7 +235,7 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
         meta={
             "sinnix.family": action.family.value,
             "sinnix.owner": action.owner,
-            "sinnix.affordances": list(action.affordances),
+            "sinnix.next_actions": list(action.next_actions),
         },
     )
     return tool
@@ -289,7 +289,7 @@ async def _dispatch_core(
         async def failing(error=failure) -> Any:
             raise error
 
-        envelope = await runtime.execute_v2_async(
+        envelope = await runtime.execute_async(
             core,
             failing,
             _safe_failure_controls(arguments),
@@ -358,6 +358,6 @@ def _description(action: Action) -> str:
             f"Example ({example.title}): "
             + json.dumps(example.input, sort_keys=True, separators=(",", ":"))
         )
-    if action.affordances:
-        lines.append("Follow-up actions: " + ", ".join(action.affordances))
+    if action.next_actions:
+        lines.append("Follow-up actions: " + ", ".join(action.next_actions))
     return "\n".join(lines)

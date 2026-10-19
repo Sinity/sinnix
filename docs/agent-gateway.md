@@ -99,7 +99,7 @@ sinnix-agent-gateway call files.read \
   --set target='{"path":"/etc/os-release"}'
 sinnix-agent-gateway catalog files.patch --schema
 sinnix-agent-gateway manifest
-sinnix-agent-gateway approval-check
+sinnix-agent-gateway manifest-check
 ```
 
 The CLI runs the same action through the same runtime. `--set KEY=VALUE`
@@ -135,7 +135,7 @@ agentctl batches (`batches.start`, `status`, `list`, `resume`, `land`).
 
 `shell.run` picks a pool: `shell-quick` (width 8) for reads and short commands,
 or `shell-long` (width 4) for agent CLIs (`claude`, `codex`, `gemini`,
-`opencode`, `pi`, `cursor-agent`, `agentctl-agent`). `lane=auto`, the default,
+`opencode`, `pi`, `cursor-agent`, `agentctl-agent`). `pool=auto`, the default,
 detects them past `env`, `nohup`, `timeout` and `sh -c`. A quick-pool command
 still running after 20 s stops counting against the width, so long work never
 blocks the quick pool. `timeout_seconds` is an optional kill ceiling.
@@ -231,7 +231,7 @@ sinnix.services.agent-gateway = {
   Gateway code changes restart only the MCP unit, and the tunnel reconnects.
 
 **Manifest check.** At startup the MCP unit compares its live tool schemas with
-the package-generated manifest. `approval-check` runs the same comparison.
+the package-generated manifest. `manifest-check` runs the same comparison.
 
 **Deploying.** After provisioning the tunnel id and runtime key:
 

@@ -25,7 +25,7 @@ def test_registration_source_open_failure_does_not_leak_descriptors(
     tmp_path, monkeypatch, failure
 ):
     owner, source = service(tmp_path)
-    original_attestation = owner._source_is_attested
+    original_attestation = owner._source_in_gateway_state
     original_open = Path.open
 
     if failure == "missing":
@@ -35,7 +35,7 @@ def test_registration_source_open_failure_does_not_leak_descriptors(
             path.unlink()
             return attested
 
-        monkeypatch.setattr(owner, "_source_is_attested", disappear)
+        monkeypatch.setattr(owner, "_source_in_gateway_state", disappear)
     else:
 
         def denied(path, *args, **kwargs):

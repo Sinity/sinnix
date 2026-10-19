@@ -244,7 +244,7 @@ def test_actions_publish_honest_schemas(tmp_path: Path) -> None:
             action.Input.model_fields
         ), action.name
         assert tool.parameters.get("additionalProperties") is False
-        assert action.examples and action.aliases and action.affordances
+        assert action.examples and action.aliases and action.next_actions
         mutating = action.family in {VerbFamily.CHANGE, VerbFamily.OPERATE}
         assert issubclass(action.Input, MutationControls) is mutating
 
@@ -914,7 +914,7 @@ def test_context_composes_orientation_and_triage(tmp_path: Path) -> None:
     orientation = ok(server, "projects.context", {"target": {"project": "fixture"}})
     assert (
         orientation["ref"] == "sinnix://projects/fixture"
-        and orientation["intent"] == "project.orientation"
+        and orientation["intent"] == "project.overview"
     )
     assert orientation["snapshot_ref"].startswith("sinnix://results/")
     assert orientation["components"][0]["name"] == "lynchpin"

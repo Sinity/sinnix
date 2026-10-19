@@ -38,7 +38,7 @@ async def build_manifest(config: GatewayConfig) -> dict[str, Any]:
     return {**manifest, "measurement": manifest_measurement(manifest)}
 
 
-def verify_approval(config: GatewayConfig) -> dict[str, object]:
+def verify_manifest(config: GatewayConfig) -> dict[str, object]:
     """Check deployed code against its package-generated tool manifest."""
     expected = None
     if config.package_manifest_path is not None:
@@ -55,25 +55,23 @@ def verify_approval(config: GatewayConfig) -> dict[str, object]:
     }
 
 
-async def semantic_canary(config: GatewayConfig) -> dict[str, object]:
+async def self_test(config: GatewayConfig) -> dict[str, object]:
     """Exercise the typed envelopes a cold session starts from."""
     catalog = await invoke_mcp(config, "gateway.catalog", {"limit": 500})
     data = catalog.get("data") if isinstance(catalog, dict) else None
     if catalog.get("result", {}).get("outcome") != "ok" or not isinstance(data, dict):
-        raise ValueError("semantic canary catalog did not return its typed envelope")
+        raise ValueError("self-test catalog did not return its typed envelope")
     names = {row.get("name") for row in data.get("actions", [])}
     required = {"gateway.status", "projects.list", "files.read", "beads.query"}
     missing = sorted(required - names)
     if missing:
-        raise ValueError(f"semantic canary catalog omits actions: {', '.join(missing)}")
+        raise ValueError(f"self-test catalog omits actions: {', '.join(missing)}")
     projects = await invoke_mcp(config, "projects.list", {})
     rows = projects.get("data", {}).get("projects") if projects.get("data") else None
     if projects.get("result", {}).get("outcome") != "ok" or not isinstance(rows, list):
-        raise ValueError(
-            "semantic canary projects.list did not return its typed envelope"
-        )
+        raise ValueError("self-test projects.list did not return its typed envelope")
     if data.get("truncated"):
-        raise ValueError("semantic canary catalog was truncated")
+        raise ValueError("self-test catalog was truncated")
     return {
         "catalog_actions": len(names),
         "projects": len(rows),
@@ -91,8 +89,8 @@ def parser() -> argparse.ArgumentParser:
         "serve",
         "manifest",
         "catalog-hash",
-        "approval-check",
-        "canary",
+        "manifest-check",
+        "self-test",
         "info",
     ):
         subcommands.add_parser(name)
@@ -172,14 +170,14 @@ def main() -> None:
                 indent=2,
             )
         )
-    elif command == "approval-check":
+    elif command == "manifest-check":
         try:
-            print(json.dumps(verify_approval(config), indent=2))
+            print(json.dumps(verify_manifest(config), indent=2))
         except ValueError as error:
             raise SystemExit(str(error)) from error
-    elif command == "canary":
+    elif command == "self-test":
         try:
-            print(json.dumps(anyio.run(semantic_canary, config)))
+            print(json.dumps(anyio.run(self_test, config)))
         except ValueError as error:
             raise SystemExit(str(error)) from error
     elif command == "info":

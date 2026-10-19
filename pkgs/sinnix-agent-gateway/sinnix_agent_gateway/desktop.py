@@ -88,7 +88,7 @@ class DesktopService:
         output: str | None = None,
         target: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Capture the focused output, one output, or a region into attested state."""
+        """Capture the focused output, one output, or a region into gateway state."""
         if not isinstance(fix_hdr, bool):
             raise DesktopError("fix_hdr must be boolean")
         capture_dir = self.config.state_dir / "captures" / uuid.uuid4().hex

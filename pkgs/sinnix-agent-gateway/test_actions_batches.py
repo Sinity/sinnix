@@ -120,7 +120,7 @@ def test_status_names_every_worker_bead_and_the_pueue_ids_jobs_actions_take(
     assert data["landing"]["job_id"] == 42
     assert data["landing"]["job_ref"] == "sinnix://jobs/42"
     assert data["landing"]["job_launch_reference"] == "fixture-integrate-9f10"
-    assert data["affordances"] == ["batches.status", "jobs.wait", "jobs.logs"]
+    assert data["next_actions"] == ["batches.status", "jobs.wait", "jobs.logs"]
     assert fake.calls[-1].arguments == {"run_id": "a2c81926"}
 
     by_ref = ok(server, "batches.status", {"target": {"ref": RUN_REF}})
@@ -243,4 +243,4 @@ def test_a_landed_run_offers_no_further_transition(
 
     data = ok(server, "batches.status", {"target": {"run_id": "a2c81926"}})
 
-    assert data["accepted"] is True and data["affordances"] == ["batches.list"]
+    assert data["accepted"] is True and data["next_actions"] == ["batches.list"]

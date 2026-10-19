@@ -96,7 +96,7 @@ def test_artifact_rejects_unreceipted_capture_source(tmp_path: Path) -> None:
     source = desktop.config.state_dir / "captures" / "unreceipted.png"
     source.write_bytes(b"fixture")
 
-    with pytest.raises(ArtifactError, match="outside attested gateway state"):
+    with pytest.raises(ArtifactError, match="outside gateway state"):
         desktop.artifacts.register(
             source,
             kind="desktop-screenshot",

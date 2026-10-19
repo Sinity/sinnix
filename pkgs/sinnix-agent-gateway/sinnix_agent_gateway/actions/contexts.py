@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from ..runtime import Runtime
 
 Intent = Literal[
-    "project.orientation",
+    "project.overview",
     "project.triage",
     "job.review",
     "incident",
@@ -34,7 +34,7 @@ class ComposeInput(RequestControls):
     intent: Intent
     project: ProjectLocator | None = Field(
         default=None,
-        description="Required for project.orientation, project.triage and incident.",
+        description="Required for project.overview, project.triage and incident.",
     )
     job: JobLocator | None = Field(default=None, description="Required for job.review.")
     roots: list[str] = Field(default_factory=list, max_length=100)
@@ -91,15 +91,15 @@ class ComposedContext(GatewayModel):
     component_plan: list[dict[str, Any]] = Field(default_factory=list)
     total_budget_bytes: int
     availability: Availability = "available"
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
-_AFFORDANCES: dict[str, list[str]] = {
+_NEXT_ACTIONS: dict[str, list[str]] = {
     "campaign.progress": ["campaign.progress", "beads.get"],
     "session.orchestration": ["sessions.orchestration", "sessions.query"],
     "verification.regression": ["campaign.progress", "jobs.get"],
     "project.trajectory": ["campaign.progress", "sessions.query"],
-    "project.orientation": ["batches.start", "jobs.list", "events.tail"],
+    "project.overview": ["batches.start", "jobs.list", "events.tail"],
     "project.triage": ["batches.start", "jobs.list", "events.tail"],
     "job.review": ["jobs.logs", "jobs.retry", "jobs.cancel"],
     "incident": ["events.tail", "jobs.list", "wait.for"],
@@ -267,7 +267,7 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
     # Leave room for the standard result envelope and include model defaults
     # before measuring the presentation, rather than adding them afterwards.
     context["context_schema"] = context["schema"]
-    context["affordances"] = _AFFORDANCES[inp.intent]
+    context["next_actions"] = _NEXT_ACTIONS[inp.intent]
     context["availability"] = product.availability
     bounded = _within_budget(context)
     return ComposedContext(
@@ -391,7 +391,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=ComposedContext,
         handler=_compose,
         resource_kinds=("project", "checkout", "job", "context_snapshot"),
-        affordances=(
+        next_actions=(
             "jobs.list",
             "jobs.logs",
             "batches.start",
@@ -412,7 +412,7 @@ ACTIONS: tuple[Action, ...] = (
             Example(
                 title="Orient in sinnix",
                 input={
-                    "intent": "project.orientation",
+                    "intent": "project.overview",
                     "project": {"project": "sinnix"},
                 },
             ),

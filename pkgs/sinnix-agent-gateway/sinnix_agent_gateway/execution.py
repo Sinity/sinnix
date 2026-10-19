@@ -19,14 +19,14 @@ from agentctl.prompts import PromptError
 from agentctl.pueue import PueueError
 from agentctl.worktrunk import WorktrunkError
 
-from . import shell_lanes
+from . import shell_pools
 from .schemas import ErrorCode
 
 OWNER = "systemd-jobs"
 JOB_LIST_ORDERING = "created_at_desc_job_id_desc"
 DEFAULT_CHECKOUT = "default"
 SHELL_OPERATION = "shell"
-SHELL_GROUPS = frozenset(shell_lanes.GROUPS.values())
+SHELL_GROUPS = frozenset(shell_pools.GROUPS.values())
 MAX_LOG_BYTES = 262_144
 
 
@@ -700,7 +700,7 @@ class LocalJobs:
         }
 
     def _shell_start(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        """One argv queued in a shell lane, inside the project's environment."""
+        """One argv queued in a shell pool, inside the project's environment."""
         project = self._project(_require_str(arguments, "project_id"))
         worktree = self._worktree(project, arguments.get("checkout_id"))
         argv = arguments.get("argv")

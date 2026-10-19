@@ -40,7 +40,7 @@ async def invoke(target: Any, name: str, arguments: dict[str, Any]) -> dict[str,
     return response.structured_content
 
 
-def test_v2_get_reads_a_canonical_ref_through_the_action_that_owns_the_kind(
+def test_get_reads_a_canonical_ref_through_the_action_that_owns_the_kind(
     tmp_path: Path,
 ) -> None:
     """Red if `resources/read` of a canonical ref has no reader behind it.
@@ -56,7 +56,7 @@ def test_v2_get_reads_a_canonical_ref_through_the_action_that_owns_the_kind(
         "state": {"phase": "succeeded", "terminal": True, "exit_code": 0},
     }
 
-    payload = anyio.run(lambda: runtime.v2_get("sinnix://jobs/7"))
+    payload = anyio.run(lambda: runtime.read_ref("sinnix://jobs/7"))
 
     assert payload["kind"] == "job" and payload["action"] == "jobs.get"
     assert payload["ref"] == "sinnix://jobs/7"
@@ -65,9 +65,9 @@ def test_v2_get_reads_a_canonical_ref_through_the_action_that_owns_the_kind(
     assert jobs.calls[-1].operation == "job.get"
 
     with pytest.raises(ProtocolError, match="canonical resource was not found"):
-        anyio.run(lambda: runtime.v2_get("sinnix://nope/1"))
+        anyio.run(lambda: runtime.read_ref("sinnix://nope/1"))
     with pytest.raises(ProtocolError, match="canonical resource was not found"):
-        anyio.run(lambda: runtime.v2_get("sinnix://sessions/claude/abc"))
+        anyio.run(lambda: runtime.read_ref("sinnix://sessions/claude/abc"))
 
 
 def test_every_published_resource_template_has_a_reader(tmp_path: Path) -> None:

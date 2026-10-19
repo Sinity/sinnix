@@ -90,7 +90,7 @@ class CatalogAction(GatewayModel):
     owner: str
     summary: str
     aliases: list[str]
-    affordances: list[str]
+    next_actions: list[str]
     resource_kinds: list[str]
     effect: str
     example: dict[str, Any] | None = None
@@ -200,7 +200,7 @@ def _action_matches(
                 "summary": action.summary,
                 "documentation": action.documentation,
                 "aliases": list(action.aliases),
-                "affordances": list(action.affordances),
+                "next_actions": list(action.next_actions),
                 "resource_kinds": list(action.resource_kinds),
                 "effect": action.effect.value,
                 "example": action.examples[0].input if action.examples else None,
@@ -215,7 +215,7 @@ def _action_matches(
         "summary",
         "documentation",
         "aliases",
-        "affordances",
+        "next_actions",
         "resource_kinds",
     )
     selected = search_rows(rows, inp.query, fields)
@@ -391,7 +391,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=StatusInput,
         Output=GatewayStatus,
         handler=_status,
-        affordances=("gateway.catalog",),
+        next_actions=("gateway.catalog",),
         aliases=("health", "ready", "capabilities", "what can you do"),
         examples=(Example(title="Status", input={}),),
     ),
@@ -403,9 +403,9 @@ ACTIONS: tuple[Action, ...] = (
         Input=CatalogInput,
         Output=Catalog,
         handler=_catalog,
-        affordances=("gateway.status",),
+        next_actions=("gateway.status",),
         aliases=("search tools", "discover", "help", "list actions", "which tool"),
-        documentation="limit bounds inline rows per category. matched_counts and returned_counts distinguish observed matches from this response. matches_artifact retains every filtered match when cropped; artifacts.read retrieves its immutable bytes. Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).",
+        documentation="limit bounds inline rows per category. matched_counts and returned_counts distinguish observed matches from this response. matches_artifact retains every filtered match when cropped; artifacts.read retrieves its immutable bytes. Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, next_actions, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).",
         examples=(
             Example(title="Screenshot capability", input={"query": "screenshot"}),
             Example(title="Lynchpin tools", input={"query": "lynchpin"}),

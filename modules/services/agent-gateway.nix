@@ -120,13 +120,13 @@ mkServiceModule {
         set -euo pipefail
         exec ${gatewayBin} --config ${configFile} manifest
       '';
-      approvalGate = pkgs.writeShellScript "sinnix-agent-gateway-approval-gate" ''
+      manifestGate = pkgs.writeShellScript "sinnix-agent-gateway-manifest-check" ''
         set -euo pipefail
-        exec ${gatewayBin} --config ${configFile} approval-check
+        exec ${gatewayBin} --config ${configFile} manifest-check
       '';
-      semanticCanary = pkgs.writeShellScript "sinnix-agent-gateway-semantic-canary" ''
+      selfTest = pkgs.writeShellScript "sinnix-agent-gateway-self-test" ''
         set -euo pipefail
-        exec ${gatewayBin} --config ${configFile} canary
+        exec ${gatewayBin} --config ${configFile} self-test
       '';
       stateScaffold = pkgs.writeShellScript "sinnix-agent-gateway-state-scaffold" ''
         set -euo pipefail
@@ -283,8 +283,8 @@ mkServiceModule {
                 RuntimeDirectoryMode = "0700";
                 ExecStartPre = [
                   stateScaffold
-                  approvalGate
-                  semanticCanary
+                  manifestGate
+                  selfTest
                 ];
                 ExecStart = ''
                   ${gatewayBin} --config ${configFile} serve-http --socket %t/sinnix-agent-gateway/mcp.sock

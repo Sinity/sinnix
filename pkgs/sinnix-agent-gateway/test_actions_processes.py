@@ -143,7 +143,7 @@ def test_hub_stop_forwards_target_identity(tmp_path: Path, monkeypatch) -> None:
         requests.append(request)
         return {"ref": ref, "action": "stop", "owner_receipt": {"status": "accepted"}}
 
-    monkeypatch.setattr(rt, "v2_operate", execute)
+    monkeypatch.setattr(rt, "operate", execute)
     result = call(
         rt,
         "processes.signal",

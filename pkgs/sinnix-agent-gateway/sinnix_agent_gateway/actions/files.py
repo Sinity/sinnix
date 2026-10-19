@@ -124,7 +124,7 @@ class FileStat(FileEntry):
     sha256_reason: str | None = None
     inode: int
     device: int
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 class StatInput(RequestControls):
@@ -176,9 +176,9 @@ def _stat(runtime: Runtime, inp: StatInput) -> FileStat:
         owner = pwd.getpwuid(details.st_uid).pw_name
     except (KeyError, ImportError):
         owner = None
-    affordances = ["files.read", "files.change"] if kind == "file" else []
+    next_actions = ["files.read", "files.change"] if kind == "file" else []
     if kind == "directory":
-        affordances = ["files.list", "files.search", "files.change"]
+        next_actions = ["files.list", "files.search", "files.change"]
     return FileStat(
         ref=encode_file_ref(str(target)),
         path=str(target),
@@ -199,7 +199,7 @@ def _stat(runtime: Runtime, inp: StatInput) -> FileStat:
         sha256_reason=hash_reason,
         inode=details.st_ino,
         device=details.st_dev,
-        affordances=affordances,
+        next_actions=next_actions,
     )
 
 
@@ -338,7 +338,7 @@ class FileContent(GatewayModel):
         default=None,
         description="Set for binary files; bytes are represented by a canonical read-only link.",
     )
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
@@ -359,7 +359,7 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
         "media_type": media,
         "bytes": size,
         "sha256": digest,
-        "affordances": [
+        "next_actions": [
             "files.change",
             "files.patch",
             "files.stat",
@@ -467,7 +467,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=FileStat,
         handler=_stat,
         resource_kinds=("host_file",),
-        affordances=("files.read", "files.list", "files.change"),
+        next_actions=("files.read", "files.list", "files.change"),
         aliases=("file info", "metadata", "size", "permissions"),
         examples=(
             Example(title="Stat a file", input={"target": {"path": "/etc/os-release"}}),
@@ -482,7 +482,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=DirectoryListing,
         handler=_list,
         resource_kinds=("host_file",),
-        affordances=("files.stat", "files.read", "files.search"),
+        next_actions=("files.stat", "files.read", "files.search"),
         aliases=("ls", "directory", "folder", "browse"),
         examples=(
             Example(title="List /realm/tmp", input={"target": {"path": "/realm/tmp"}}),
@@ -497,7 +497,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=FileContent,
         handler=_read,
         resource_kinds=("host_file",),
-        affordances=("files.patch", "files.change", "files.stat"),
+        next_actions=("files.patch", "files.change", "files.stat"),
         aliases=("cat", "open", "view", "image", "picture", "screenshot file"),
         examples=(
             Example(
@@ -614,7 +614,7 @@ def _run(
 
     Search output is parsed as it arrives.  The typed result layer applies the
     client response bound afterwards and, when needed, retains the complete
-    structured result as an attested artifact.
+    structured result as a stored artifact.
     """
     return OwnerExecution().run(
         argv,
@@ -1055,7 +1055,7 @@ class PatchResult(GatewayModel):
     bytes: int
     lines_before: int
     lines_after: int
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _split_lines(text: str) -> list[str]:
@@ -1304,7 +1304,7 @@ def _patch(runtime: Runtime, inp: PatchInput) -> PatchResult:
         bytes=len(encoded),
         lines_before=len(lines),
         lines_after=len(updated),
-        affordances=["files.read", "files.patch", "files.stat"],
+        next_actions=["files.read", "files.patch", "files.stat"],
     )
 
 
@@ -1366,7 +1366,7 @@ class ChangeResult(GatewayModel):
     bytes: int | None = None
     previous_sha256: str | None = None
     sha256: str | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
@@ -1440,7 +1440,7 @@ def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
         sha256=result.get("sha256")
         if not isinstance(op, (CopyOp, MoveOp, RemoveOp))
         else None,
-        affordances=["files.stat", "files.read", "files.list"],
+        next_actions=["files.stat", "files.read", "files.list"],
     )
 
 
@@ -1454,7 +1454,7 @@ ACTIONS = ACTIONS + (
         Output=SearchResult,
         handler=_search,
         resource_kinds=("host_file",),
-        affordances=("files.read", "files.stat", "files.list"),
+        next_actions=("files.read", "files.stat", "files.list"),
         aliases=("find", "grep", "locate", "rg", "fd", "search files", "recent files"),
         documentation="Without content_regex the search is over paths (fd); with it, matching lines are returned (ripgrep --json). Content search retains complete records within 16 MiB per record, 64 MiB of ripgrep output, and 64 MiB of overflow. Reaching a bound stops the search and returns truncated=true with a warning. File count and timeout limits also apply.",
         examples=(
@@ -1488,7 +1488,7 @@ ACTIONS = ACTIONS + (
         Output=PatchResult,
         handler=_patch,
         resource_kinds=("host_file",),
-        affordances=("files.read", "files.stat"),
+        next_actions=("files.read", "files.stat"),
         aliases=("edit", "apply diff", "modify text", "sed"),
         supports_precondition=True,
         documentation="Pass expected_sha256 from the prior read so a concurrent change is refused instead of overwritten. Unified hunks are applied individually; rejected hunks are reported.",
@@ -1529,7 +1529,7 @@ ACTIONS = ACTIONS + (
         Output=ChangeResult,
         handler=_change,
         resource_kinds=("host_file",),
-        affordances=("files.stat", "files.read", "files.list"),
+        next_actions=("files.stat", "files.read", "files.list"),
         aliases=("write", "save", "rename", "delete", "mkdir", "touch"),
         supports_precondition=True,
         documentation="Copy and move never overwrite an existing destination. Remove supports regular files only.",

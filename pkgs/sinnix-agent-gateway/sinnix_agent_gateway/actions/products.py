@@ -223,7 +223,7 @@ class OrchestrationInput(RequestControls):
 class OrchestrationResult(GatewayModel):
     projection_version: int = 1
     sessions: list[OwnerProduct]
-    affordances: list[str] = Field(
+    next_actions: list[str] = Field(
         default_factory=lambda: ["sessions.query", "context.compose"]
     )
 
@@ -280,7 +280,7 @@ class CampaignResult(GatewayModel):
     projection_version: int = 2
     project: str
     product: OwnerProduct
-    affordances: list[str] = Field(
+    next_actions: list[str] = Field(
         default_factory=lambda: [
             "beads.get",
             "beads.query",
@@ -325,7 +325,7 @@ ACTIONS = (
         Output=CampaignResult,
         handler=_campaign,
         resource_kinds=("project", "bead"),
-        affordances=("beads.query", "beads.get", "context.compose"),
+        next_actions=("beads.query", "beads.get", "context.compose"),
         documentation="Task closure, verified delivery and acceptance remain separate. Missing evidence is unknown; bounded closure cannot establish an exact denominator. Historical task state is read at its resolved owner revision.",
         examples=(
             Example(
@@ -343,7 +343,7 @@ ACTIONS = (
         Output=OrchestrationResult,
         handler=_orchestration,
         resource_kinds=(),
-        affordances=("sessions.query", "context.compose"),
+        next_actions=("sessions.query", "context.compose"),
         documentation="Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.",
         examples=(
             Example(

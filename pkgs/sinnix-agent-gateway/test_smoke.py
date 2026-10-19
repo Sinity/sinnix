@@ -16,8 +16,8 @@ from sinnix_agent_gateway import actions as action_set
 from sinnix_agent_gateway.app import Runtime
 from sinnix_agent_gateway.cli import (
     build_manifest,
-    semantic_canary,
-    verify_approval,
+    self_test,
+    verify_manifest,
 )
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.owner_execution import ExecutionResult, OwnerExecution
@@ -42,7 +42,7 @@ def config(tmp_path: Path) -> GatewayConfig:
     )
 
 
-def test_gateway_resource_bounds_fall_back_to_an_attested_artifact(
+def test_gateway_resource_bounds_fall_back_to_a_stored_artifact(
     tmp_path: Path,
 ) -> None:
     runtime = Runtime.create(
@@ -234,16 +234,16 @@ def test_audit_chain_survives_concurrent_writers(tmp_path: Path) -> None:
     }
 
 
-def test_v2_events_are_receipted(tmp_path: Path) -> None:
+def test_events_are_receipted(tmp_path: Path) -> None:
     cfg = config(tmp_path)
     operator = Runtime.create(cfg)
     operator.audit.append("operator_event", "ok")
 
     async def invoke():
         async def callback():
-            return operator.v2_events(100)
+            return operator.recent_events(100)
 
-        return await operator.execute_v2_async(
+        return await operator.execute_async(
             action_set.BY_NAME["events.tail"], callback, {"limit": 100}
         )
 
@@ -480,25 +480,25 @@ def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:
     assert "source" not in chunk
 
 
-def test_approval_check_requires_the_current_package_manifest(tmp_path: Path) -> None:
+def test_manifest_check_requires_the_current_package_manifest(tmp_path: Path) -> None:
     cfg = config(tmp_path)
     live = anyio.run(build_manifest, cfg)["sha256"]
     cfg.package_manifest_path.write_text(json.dumps({"manifest": {"sha256": live}}))
 
-    assert verify_approval(cfg) == {
+    assert verify_manifest(cfg) == {
         "tool_manifest_hash": live,
         "action_catalog_hash": action_set.catalog_hash(),
     }
 
     cfg.package_manifest_path.write_text(json.dumps({"manifest": {"sha256": "stale"}}))
     with pytest.raises(ValueError, match="tool manifest drift"):
-        verify_approval(cfg)
+        verify_manifest(cfg)
 
 
 def test_semantic_canary_exercises_catalog_and_project_list_envelopes(
     tmp_path: Path,
 ) -> None:
-    result = anyio.run(semantic_canary, config(tmp_path))
+    result = anyio.run(self_test, config(tmp_path))
 
     assert result["catalog_actions"] >= 4
     assert result["projects"] == 1
@@ -780,7 +780,7 @@ print(json.dumps(report))
     ]
 
 
-def test_machine_section_overflow_is_retained_as_an_attested_artifact(
+def test_machine_section_overflow_is_retained_as_a_stored_artifact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runtime = Runtime.create(

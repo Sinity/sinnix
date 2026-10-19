@@ -133,18 +133,18 @@ def create_server(config: GatewayConfig, transport: str = "stdio") -> MCPServer:
             "resources": action_set.resource_rows(),
         }
 
-    @mcp.resource("sinnix://gateway/v2/catalog")
-    def gateway_v2_catalog() -> str:
+    @mcp.resource("sinnix://gateway/catalog")
+    def gateway_catalog() -> str:
         """Return the action and resource catalog."""
         return _bounded_resource_json(runtime, _catalog_rows(), "catalog")
 
     @mcp.resource(EVENTS_RESOURCE_URI)
-    def gateway_v2_events() -> str:
+    def gateway_events() -> str:
         """Return the bounded event page signalled by completion pushes."""
-        return _bounded_resource_json(runtime, runtime.v2_events(100), "events")
+        return _bounded_resource_json(runtime, runtime.recent_events(100), "events")
 
-    @mcp.resource("sinnix://gateway/v2/actions/{action_name}")
-    def gateway_v2_action_schema(action_name: str) -> str:
+    @mcp.resource("sinnix://gateway/actions/{action_name}")
+    def gateway_action_schema(action_name: str) -> str:
         """Return the full contract, schemas and examples of one action."""
         action = action_set.BY_NAME.get(action_name)
         if action is None:
@@ -155,8 +155,8 @@ def create_server(config: GatewayConfig, transport: str = "stdio") -> MCPServer:
             "action-schema",
         )
 
-    @mcp.resource("sinnix://gateway/v2/resources/{resource_kind}")
-    def gateway_v2_resource_contract(resource_kind: str) -> str:
+    @mcp.resource("sinnix://gateway/resources/{resource_kind}")
+    def gateway_resource_contract(resource_kind: str) -> str:
         """Return one canonical resource kind with the actions that use it."""
         row = next(
             (row for row in action_set.resource_rows() if row["kind"] == resource_kind),
@@ -171,14 +171,14 @@ def create_server(config: GatewayConfig, transport: str = "stdio") -> MCPServer:
         )
 
     @mcp.resource("sinnix://results/{result_id}")
-    def gateway_v2_result(result_id: str) -> str:
+    def gateway_result(result_id: str) -> str:
         """Return one immutable result snapshot."""
         return _bounded_resource_json(
             runtime, runtime.results.read(result_id), "result"
         )
 
     @mcp.resource("sinnix://receipts/{receipt_id}")
-    def gateway_v2_receipt(receipt_id: str) -> str:
+    def gateway_receipt(receipt_id: str) -> str:
         """Return one audit receipt behind its canonical ref."""
         return _bounded_resource_json(
             runtime, runtime.audit.receipt(receipt_id), "receipt"
@@ -217,7 +217,7 @@ def create_server(config: GatewayConfig, transport: str = "stdio") -> MCPServer:
                         )
                     payload = {"ref": reference, "kind": "mcp_tool", "tool": match}
                 else:
-                    payload = await runtime.v2_get(reference)
+                    payload = await runtime.read_ref(reference)
                 return _bounded_resource_json(runtime, payload, _resource.kind)
 
             # MCPServer validates template parameters with inspect.signature.

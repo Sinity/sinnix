@@ -138,8 +138,8 @@ def test_list_pages_with_refs_and_forwards_the_project_filter(
     ]
     assert binding["run_id"] == RUN_ID and binding["worker_id"] == "fixture-7"
     assert data["jobs"][1]["binding"] is None
-    assert "jobs.cancel" in data["jobs"][0]["affordances"]
-    assert "jobs.retry" in data["jobs"][1]["affordances"]
+    assert "jobs.cancel" in data["jobs"][0]["next_actions"]
+    assert "jobs.retry" in data["jobs"][1]["next_actions"]
     assert fake.calls[0].arguments == {"limit": 2, "project_id": "fixture"}
 
     unknown = call(server, "jobs.list", {"project": {"project": "nope"}})
@@ -191,7 +191,7 @@ def test_get_returns_summary_log_range_and_result(
         "returned_bytes": 2,
         "truncated": True,
         "next_offset": 4,
-        "affordances": ["jobs.get", "jobs.logs"],
+        "next_actions": ["jobs.get", "jobs.logs"],
     }
     tail = call(server, "jobs.logs", {"target": {"job_id": 41}, "offset": 4})["data"]
     assert tail["content"] == "ef" and tail["next_offset"] is None
@@ -232,7 +232,7 @@ def test_wait_reports_terminal_running_or_queued_from_the_queue(
     )["data"]
     assert waited["outcome"] == "running"
     assert (
-        waited["detail"] == "still running" and "jobs.cancel" in waited["affordances"]
+        waited["detail"] == "still running" and "jobs.cancel" in waited["next_actions"]
     )
     assert fake.calls[-1].arguments == {"job_id": 41, "timeout_seconds": 5}
 
@@ -541,7 +541,7 @@ def test_shell_run_is_operator_only_and_keeps_cwd_inside_the_checkout(
     )
     assert started["result"]["outcome"] == "ok", started
     assert started["data"]["group"] == "shell-quick"
-    assert started["data"]["lane"] == "quick"
+    assert started["data"]["pool"] == "quick"
     assert started["data"]["outcome"] == "terminal"
     submitted = fake.calls[-1].arguments
     assert len(submitted.pop("request_digest")) == 64
@@ -626,7 +626,7 @@ QUEUED_SHELL = {
 def test_shell_run_starts_agent_clis_in_the_long_lane_and_reads_in_the_quick_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Red if an agent launch lands in the lane quick reads use."""
+    """Red if an agent launch lands in the pool quick reads use."""
     server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.shell.start"] = lambda arguments: {
         **DONE,
@@ -645,28 +645,28 @@ def test_shell_run_starts_agent_clis_in_the_long_lane_and_reads_in_the_quick_one
         (["rg", "claude", "."], "auto", "shell-quick", "default"),
         (["make", "all"], "long", "shell-long", "declared"),
     )
-    for index, (argv, lane, group, reason) in enumerate(cases):
+    for index, (argv, pool, group, reason) in enumerate(cases):
         started = call(
             server,
             "shell.run",
             {
                 "checkout": {"project": "fixture"},
                 "argv": argv,
-                "lane": lane,
-                "idempotency_key": f"lane-{index}",
+                "pool": pool,
+                "idempotency_key": f"pool-{index}",
             },
         )
         assert started["result"]["outcome"] == "ok", started
         assert fake.calls[-1].arguments["group"] == group
         # No ceiling requested: none is sent, and the owner applies its watchdog.
         assert fake.calls[-1].arguments["timeout_seconds"] is None
-        assert started["data"]["lane_reason"] == reason
+        assert started["data"]["pool_reason"] == reason
 
 
 def test_a_shell_still_queued_answers_with_its_place_and_what_holds_the_lane(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Red if a continuation looks like a timeout or hides the lane occupancy."""
+    """Red if a continuation looks like a timeout or hides the pool occupancy."""
     server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.shell.start"] = QUEUED_SHELL
     fake.responses["job.wait"] = {**QUEUED_SHELL, "timed_out": True}
@@ -747,7 +747,7 @@ def test_a_shell_still_queued_answers_with_its_place_and_what_holds_the_lane(
     assert resumed["outcome"] == "running"
     assert resumed["output"]["content"] == "abc"
     assert resumed["output"]["next_offset"] == 4_099
-    assert "jobs.queues" in waited["affordances"]
+    assert "jobs.queues" in waited["next_actions"]
 
 
 def test_queues_report_each_groups_occupancy(

@@ -142,7 +142,7 @@ class WaitResult(GatewayModel):
         description="Stable token for the unsatisfied state; None once satisfied.",
     )
     job: JobView | None = Field(default=None, description="Set for job_terminal.")
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _legacy_target(
@@ -237,7 +237,7 @@ async def _poll(runtime: Runtime, inp: WaitInput, ref: str) -> WaitResult:
             else evidence,
             source_revision=revision,
             continuation=source_revision({"ref": ref, "revision": revision}),
-            affordances=["wait.for"],
+            next_actions=["wait.for"],
         )
 
     while True:
@@ -278,7 +278,7 @@ async def _wait_for(runtime: Runtime, inp: WaitInput) -> WaitResult:
     launch_reference = (
         condition.target.resolve()[2] if isinstance(condition, JobTerminal) else None
     )
-    raw = await runtime.v2_wait_async(
+    raw = await runtime.wait_async(
         ref,
         inp.timeout_seconds,
         condition.kind,
@@ -303,7 +303,7 @@ async def _wait_for(runtime: Runtime, inp: WaitInput) -> WaitResult:
             if timed_out
             else None,
             job=view,
-            affordances=["jobs.get", "jobs.logs"]
+            next_actions=["jobs.get", "jobs.logs"]
             if not timed_out
             else ["wait.for", "jobs.cancel"],
         )
@@ -324,7 +324,7 @@ async def _wait_for(runtime: Runtime, inp: WaitInput) -> WaitResult:
         source_revision=raw.get("source_revision"),
         continuation=raw.get("continuation"),
         job=job,
-        affordances=["wait.for"] if outcome != "satisfied" else [],
+        next_actions=["wait.for"] if outcome != "satisfied" else [],
     )
 
 
@@ -354,7 +354,7 @@ class EventPage(GatewayModel):
     next_cursor: str
     truncated: bool
     project_refs: list[str] = Field(default_factory=list)
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _events(runtime: Runtime, inp: EventsInput) -> EventPage:
@@ -363,7 +363,7 @@ def _events(runtime: Runtime, inp: EventsInput) -> EventPage:
         if inp.projects
         else None
     )
-    page = runtime.v2_events(inp.limit, inp.cursor, project_ids)
+    page = runtime.recent_events(inp.limit, inp.cursor, project_ids)
     return EventPage(
         event_schema=page.get("schema"),
         principal=str(page.get("principal") or PRINCIPAL),
@@ -374,7 +374,7 @@ def _events(runtime: Runtime, inp: EventsInput) -> EventPage:
         project_refs=[
             project_ref(p) for p in (project_ids or sorted(runtime.config.projects))
         ],
-        affordances=["events.tail"],
+        next_actions=["events.tail"],
     )
 
 
@@ -397,7 +397,7 @@ ACTIONS: tuple[Action, ...] = (
             "receipt",
             "terminal",
         ),
-        affordances=("jobs.get", "jobs.logs", "jobs.cancel", "events.tail"),
+        next_actions=("jobs.get", "jobs.logs", "jobs.cancel", "events.tail"),
         aliases=("wait until", "block until", "poll", "watch for"),
         documentation="Conditions: job_terminal, bead_status, bead_revision, unit_state, file_hash, file_exists, capture_freshness, receipt_appearance, terminal_output. A timeout returns the current evidence and a continuation token.",
         examples=(
@@ -449,7 +449,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=EventPage,
         handler=_events,
         resource_kinds=("receipt", "project", "job"),
-        affordances=("wait.for", "jobs.get", "events.tail"),
+        next_actions=("wait.for", "jobs.get", "events.tail"),
         aliases=("what happened", "recent activity", "audit log", "changes since"),
         documentation="Pass next_cursor back to continue; a cursor from another project scope fails stale_cursor.",
         examples=(

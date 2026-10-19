@@ -20,11 +20,11 @@ from .artifacts import ArtifactService
 from .config import GatewayConfig
 from .contracts import PRINCIPAL
 from .payloads import canonical_chunks, canonical_size, retain_json
-from .schemas import ERROR_CODES, V2ToolEnvelope
+from .schemas import ERROR_CODES, ToolResponse
 
 
 class ProtocolError(ValueError):
-    """An expected V2 domain failure that remains visible to an MCP caller."""
+    """An expected domain failure that remains visible to an MCP caller."""
 
     def __init__(
         self,
@@ -43,7 +43,7 @@ class ProtocolError(ValueError):
 
 
 class ResultError(ValueError):
-    """Raised when an immutable V2 response snapshot is unavailable."""
+    """Raised when an immutable response snapshot is unavailable."""
 
     def __init__(self, message: str, failure_class: str = "unavailable"):
         self.failure_class = failure_class
@@ -69,7 +69,7 @@ def derive_cursor_key(master_key: bytes, purpose: str, principal: str) -> bytes:
 
 @dataclass(frozen=True)
 class RequestContext:
-    """Caller attribution and transaction controls shared by every V2 action."""
+    """Caller attribution and transaction controls shared by every action."""
 
     request_id: str
     request_sha256: str
@@ -648,7 +648,7 @@ class ResultService:
         metadata_budget = min(4_096, max(1, self.config.max_result_bytes // 2))
         if payload_size > max(1, self.config.max_result_bytes - metadata_budget):
             raise ResultError(
-                "owner response exceeded V2 result bound", "response_bound"
+                "owner response exceeded the result bound", "response_bound"
             )
 
     def record(
@@ -724,11 +724,9 @@ class ResultService:
         envelope["error"] = payload if outcome == "error" else None
         envelope["result"]["sha256"] = self._digest(envelope)
         try:
-            V2ToolEnvelope.model_validate(envelope)
+            ToolResponse.model_validate(envelope)
         except ValueError as exc:
-            raise ResultError(
-                "V2 result envelope is malformed", "owner_failed"
-            ) from exc
+            raise ResultError("result envelope is malformed", "owner_failed") from exc
         encoded_size = canonical_size(envelope)
         if encoded_size > max(self.config.max_result_bytes, 4_096):
             metadata_artifact = self.artifacts.register_json(
@@ -749,11 +747,11 @@ class ResultService:
                 "correlation_id": request.request_id,
             }
             envelope["result"]["sha256"] = self._digest(envelope)
-            V2ToolEnvelope.model_validate(envelope)
+            ToolResponse.model_validate(envelope)
             encoded_size = canonical_size(envelope)
         if encoded_size > max(self.config.max_result_bytes, 4_096):
             raise ResultError(
-                "V2 result envelope exceeded response bound", "response_bound"
+                "result envelope exceeded response bound", "response_bound"
             )
         # Durability: file and directory. The result id is returned to the
         # client as the gateway's own record of what it did, so the name has

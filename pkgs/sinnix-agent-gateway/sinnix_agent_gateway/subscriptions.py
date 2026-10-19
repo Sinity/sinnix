@@ -111,7 +111,7 @@ class OwnerRevisionPublisher(SupervisedPublisher):
             self._revisions[reference] = revision
 
 
-EVENTS_RESOURCE_URI = "sinnix://gateway/v2/events"
+EVENTS_RESOURCE_URI = "sinnix://gateway/events"
 
 
 class EventSpoolPublisher(SupervisedPublisher):

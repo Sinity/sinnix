@@ -25,7 +25,7 @@ from .contracts import (
     VerbFamily,
 )
 from .revisions import token_input_schema
-from .schemas import GatewayModel, V2ToolEnvelope
+from .schemas import GatewayModel, ToolResponse
 
 READ_FAMILIES = frozenset(
     {
@@ -135,7 +135,7 @@ class Action:
     Output: type[BaseModel]
     handler: Handler = field(compare=False)
     resource_kinds: tuple[str, ...] = ()
-    affordances: tuple[str, ...] = ()
+    next_actions: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
     examples: tuple[Example, ...] = ()
     documentation: str = ""
@@ -230,7 +230,7 @@ class Action:
             "owner": self.owner,
             "effect": self.effect.value,
             "resource_kinds": list(self.resource_kinds),
-            "affordances": list(self.affordances),
+            "next_actions": list(self.next_actions),
             "aliases": list(self.aliases),
             "supports_idempotency": self.supports_idempotency,
             "supports_precondition": self.supports_precondition,
@@ -254,10 +254,10 @@ def _input_schema_text(model: type[BaseModel]) -> str:
 
 
 @functools.cache
-def _envelope_model(output: type[BaseModel]) -> type[V2ToolEnvelope]:
+def _envelope_model(output: type[BaseModel]) -> type[ToolResponse]:
     return create_model(
         f"{output.__name__}Envelope",
-        __base__=V2ToolEnvelope,
+        __base__=ToolResponse,
         data=(output | TruncatedData | None, None),
     )
 
@@ -291,9 +291,9 @@ def validate_actions(
         raise ValueError(f"duplicate action names: {duplicates}")
     known = set(names) | set(also_known)
     for action in ordered:
-        unknown = sorted(set(action.affordances) - known)
+        unknown = sorted(set(action.next_actions) - known)
         if unknown:
             raise ValueError(
-                f"action {action.name!r} affordances name unknown actions: {unknown}"
+                f"action {action.name!r} next_actions name unknown actions: {unknown}"
             )
     return ordered

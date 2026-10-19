@@ -165,7 +165,7 @@ def test_pages_lists_everything_and_flags_owned(tmp_path, monkeypatch) -> None:
     server, captured = fake_browser(tmp_path, monkeypatch)
     before = structured(call(server, "browser.pages", {}))["data"]
     assert [p["page_id"] for p in before["pages"]] == ["agent-target", "operator-page"]
-    assert before["owned_refs"] == [] and before["pages"][0]["affordances"] == []
+    assert before["owned_refs"] == [] and before["pages"][0]["next_actions"] == []
     assert commands(captured) == [["list-tabs", "--json"]]
 
     created = open_agent_page(server)
@@ -178,7 +178,7 @@ def test_pages_lists_everything_and_flags_owned(tmp_path, monkeypatch) -> None:
     ]
     assert after["owned_refs"] == ["sinnix://browser/pages/agent-target"]
     assert [p["type"] for p in after["pages"]] == ["page", "page", "service_worker"]
-    assert "browser.operate" in after["pages"][0]["affordances"]
+    assert "browser.operate" in after["pages"][0]["next_actions"]
 
 
 def test_page_snapshot_only_for_owned_pages(tmp_path, monkeypatch) -> None:

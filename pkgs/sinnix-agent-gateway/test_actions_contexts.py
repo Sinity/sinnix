@@ -20,7 +20,7 @@ def test_compose_input_binds_target_to_intent():
 @pytest.mark.parametrize(
     "intent",
     [
-        "project.orientation",
+        "project.overview",
         "project.triage",
         "project.trajectory",
         "verification.regression",
@@ -180,7 +180,7 @@ def test_oversized_orientation_uses_owner_projection_and_retains_exact_snapshot(
     response = call(
         server,
         "context.compose",
-        {"intent": "project.orientation", "project": {"project": "fixture"}},
+        {"intent": "project.overview", "project": {"project": "fixture"}},
     )
     assert response["result"]["outcome"] == "ok", response
     value = response["data"]
@@ -227,7 +227,7 @@ def test_unusable_oversized_orientation_is_explicitly_unavailable(
     response = call(
         server,
         "context.compose",
-        {"intent": "project.orientation", "project": {"project": "fixture"}},
+        {"intent": "project.overview", "project": {"project": "fixture"}},
     )
     assert response["result"]["outcome"] == "ok", response
     assert response["data"]["availability"] == "unavailable"
@@ -319,7 +319,7 @@ def test_project_wrapper_metadata_cannot_hide_orientation_in_an_artifact(
     runtime.mcp_broker = Broker({"ok": True, "data": product})
     monkeypatch.setattr(server_module, "ALL_ACTIONS", (*OWNED, *projects.ACTIONS))
     server = create_server(runtime.config)
-    arguments = {"intent": "project.orientation", "project": {"project": "fixture"}}
+    arguments = {"intent": "project.overview", "project": {"project": "fixture"}}
     initial = call(server, "context.compose", arguments)
     assert initial["result"]["outcome"] == "ok", initial
     product["evidence"] = "x" * (
@@ -413,7 +413,7 @@ def test_presentation_size_preserves_typed_defaults_and_any_serialization(kind):
     }[kind]
     context = {
         "ref": "fixture",
-        "intent": "project.orientation",
+        "intent": "project.overview",
         "target_ref": "fixture",
         "snapshot_ref": "snapshot",
         "total_budget_bytes": 4096,
@@ -440,7 +440,7 @@ def test_context_budget_does_not_copy_complete_native_owner_tree():
     data = {"rows": ["x" * 64] * 100000}
     context = {
         "ref": "fixture",
-        "intent": "project.orientation",
+        "intent": "project.overview",
         "target_ref": "fixture",
         "snapshot_ref": "snapshot",
         "total_budget_bytes": 4096,

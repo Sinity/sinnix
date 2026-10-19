@@ -21,21 +21,19 @@ class PromptSpec:
 
 PROMPT_SPECS = (
     PromptSpec(
-        "project-overview",
-        "project.orientation",
-        "Get an overview of one project before acting.",
+        "project-overview", "project.overview", "Survey one project before acting."
     ),
     PromptSpec(
         "triage-beads", "project.triage", "Triage bounded Beads work for one project."
     ),
     PromptSpec("review-job", "job.review", "Review one queued job and its evidence."),
     PromptSpec(
-        "incident-overview", "incident", "Review current runtime incident evidence."
+        "incident-overview", "incident", "Survey current runtime incident evidence."
     ),
 )
 
 PROMPT_KINDS = {
-    "project.orientation": frozenset({"project", "checkout"}),
+    "project.overview": frozenset({"project", "checkout"}),
     "project.triage": frozenset({"project", "checkout"}),
     "job.review": frozenset({"job"}),
     "incident": frozenset({"project"}),

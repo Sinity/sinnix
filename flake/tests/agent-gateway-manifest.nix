@@ -22,8 +22,8 @@ in
               touch "$out"
             '';
 
-        agent-gateway-approval =
-          pkgs.runCommand "agent-gateway-approval-check"
+        agent-gateway-manifest =
+          pkgs.runCommand "agent-gateway-manifest-check"
             {
               nativeBuildInputs = [
                 inputs.self.packages.${system}.sinnix-agent-gateway
@@ -36,7 +36,7 @@ in
               mkdir -p "$HOME"
               jq -n --arg state "$TMPDIR/state" --arg manifest "$gatewayPackage/share/sinnix-agent-gateway/manifest.json" \
                 '{stateDir:$state,packageManifestPath:$manifest}' > "$TMPDIR/config.json"
-              sinnix-agent-gateway --config "$TMPDIR/config.json" approval-check
+              sinnix-agent-gateway --config "$TMPDIR/config.json" manifest-check
               touch "$out"
             '';
       };

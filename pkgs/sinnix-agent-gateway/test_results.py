@@ -22,7 +22,7 @@ from sinnix_agent_gateway.results import (
     ResultError,
     ResultService,
 )
-from sinnix_agent_gateway.schemas import GatewayModel, V2ToolEnvelope
+from sinnix_agent_gateway.schemas import GatewayModel, ToolResponse
 
 
 def _execute(runtime, action, callback, request):
@@ -30,7 +30,7 @@ def _execute(runtime, action, callback, request):
         async def async_callback():
             return callback()
 
-        return await runtime.execute_v2_async(action, async_callback, request)
+        return await runtime.execute_async(action, async_callback, request)
 
     return anyio.run(invoke)
 
@@ -122,7 +122,7 @@ def test_result_snapshot_preserves_owner_page_and_receipt(tmp_path) -> None:
     assert results.read(snapshot["result"]["result_id"]) == snapshot
 
 
-def test_runtime_v2_envelopes_success_and_public_error(tmp_path) -> None:
+def test_runtime_envelopes_success_and_public_error(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path))
     action = ACTIONS["gateway.catalog"]
 
@@ -172,7 +172,7 @@ def test_runtime_v2_envelopes_success_and_public_error(tmp_path) -> None:
     )
 
 
-def test_runtime_v2_replaces_an_oversized_owner_payload_with_an_artifact(
+def test_runtime_replaces_an_oversized_owner_payload_with_an_artifact(
     tmp_path,
 ) -> None:
     runtime = Runtime.create(config(tmp_path, max_result_bytes=1_024))
@@ -238,9 +238,9 @@ def test_accepted_failure_classes_are_exactly_the_rendered_envelope_enum() -> No
     # `ERROR_CODES` is what `ProtocolError` may raise. They are one
     # definition, so a code the gateway can raise is always a code it can send.
     rendered = set(
-        V2ToolEnvelope.model_json_schema()["$defs"]["V2Error"]["properties"]["code"][
-            "enum"
-        ]
+        ToolResponse.model_json_schema()["$defs"]["ResponseError"]["properties"][
+            "code"
+        ]["enum"]
     )
 
     assert rendered == set(ERROR_CODES)
@@ -250,7 +250,7 @@ def test_accepted_failure_classes_are_exactly_the_rendered_envelope_enum() -> No
         ProtocolError("retired_code", "safe failure")
 
 
-def test_runtime_v2_keeps_each_expected_failure_in_a_typed_envelope(tmp_path) -> None:
+def test_runtime_keeps_each_expected_failure_in_a_typed_envelope(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path))
     action = _fixture_action("fixture.typed-failure", VerbFamily.QUERY)
 
@@ -393,7 +393,7 @@ def test_partial_completion_is_explicitly_non_atomic(tmp_path) -> None:
     assert receipt["payload"]["atomicity"] == "not_atomic"
 
 
-def test_v2_rejects_ignored_preconditions(tmp_path) -> None:
+def test_rejects_ignored_preconditions(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path))
 
     response = _execute(
@@ -446,7 +446,7 @@ def _checkout_preconditions(runtime: Runtime) -> dict[str, str]:
         ("sinnix://processes/42/123", {"process": {"pid": 42, "start_ticks": 123}}),
     ],
 )
-def test_v2_operate_maps_canonical_targets_and_validates_owner_receipts(
+def test_operate_maps_canonical_targets_and_validates_owner_receipts(
     tmp_path, reference, target
 ) -> None:
     runtime = Runtime.create(config(tmp_path))
@@ -485,7 +485,7 @@ def test_v2_operate_maps_canonical_targets_and_validates_owner_receipts(
     response = _execute(
         runtime,
         ACTIONS["machine.operate"],
-        lambda: runtime.v2_operate(
+        lambda: runtime.operate(
             reference=reference,
             action="restart",
             parameters={},
@@ -507,7 +507,7 @@ def test_v2_operate_maps_canonical_targets_and_validates_owner_receipts(
     assert receipt["payload"]["owner_receipt_id"] == "owner-receipt"
 
 
-def test_v2_operate_rejects_mismatched_owner_receipt(tmp_path) -> None:
+def test_operate_rejects_mismatched_owner_receipt(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path))
 
     runtime.machine_actions.execute = lambda *_args: {
@@ -522,7 +522,7 @@ def test_v2_operate_rejects_mismatched_owner_receipt(tmp_path) -> None:
     response = _execute(
         runtime,
         ACTIONS["machine.operate"],
-        lambda: runtime.v2_operate(
+        lambda: runtime.operate(
             reference="sinnix://machine/units/user/fixture.service",
             action="restart",
             parameters={},

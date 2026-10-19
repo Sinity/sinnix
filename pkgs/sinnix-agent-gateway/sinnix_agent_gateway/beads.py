@@ -20,7 +20,7 @@ from .results import ProtocolError, ResultError, ResultService
 
 
 class BeadsError(ProtocolError):
-    """An owner-backed failure which remains typed at the V2 boundary."""
+    """An owner-backed failure which remains typed at the protocol boundary."""
 
     def __init__(
         self,

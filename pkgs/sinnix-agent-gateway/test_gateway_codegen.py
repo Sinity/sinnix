@@ -47,7 +47,7 @@ def test_catalog_hash_includes_examples_and_affordances(
     action = action_set.BY_NAME["gateway.status"]
     rows = list(action_set.ALL_ACTIONS)
     rows[rows.index(action)] = replace(
-        action, affordances=("gateway.catalog", "gateway.status"), examples=()
+        action, next_actions=("gateway.catalog", "gateway.status"), examples=()
     )
 
     action_set.catalog_hash.cache_clear()

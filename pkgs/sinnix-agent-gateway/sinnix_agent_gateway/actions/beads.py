@@ -197,7 +197,7 @@ class BeadQuery(GatewayModel):
     warnings: list[str] = Field(default_factory=list)
     graph: dict[str, Any] | None = None
     memory: dict[str, Any] | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _query(runtime: Runtime, inp: QueryInput) -> BeadQuery:
@@ -205,7 +205,7 @@ def _query(runtime: Runtime, inp: QueryInput) -> BeadQuery:
     for project_id in projects:
         ProjectLocator(project=project_id).resolve(runtime)
     refs = [project_ref(project_id) for project_id in projects]
-    affordances = ["beads.get", "beads.update", "projects.context"]
+    next_actions = ["beads.get", "beads.update", "projects.context"]
     if inp.graph is not None:
         if inp.at:
             if inp.graph.status or inp.graph.mermaid:
@@ -233,7 +233,7 @@ def _query(runtime: Runtime, inp: QueryInput) -> BeadQuery:
             project_refs=refs,
             graph=result,
             items=result.get("nodes", []),
-            affordances=affordances,
+            next_actions=next_actions,
         )
     if inp.memory is not None:
         if inp.at:
@@ -246,7 +246,7 @@ def _query(runtime: Runtime, inp: QueryInput) -> BeadQuery:
             kind="bead_memory",
             project_refs=refs,
             memory=result,
-            affordances=affordances,
+            next_actions=next_actions,
         )
     result = runtime.beads.query(
         project_ids=projects,
@@ -262,7 +262,7 @@ def _query(runtime: Runtime, inp: QueryInput) -> BeadQuery:
         projection=inp.projection,
         aggregate=inp.aggregate,
     )
-    return BeadQuery(project_refs=refs, affordances=affordances, **result)
+    return BeadQuery(project_refs=refs, next_actions=next_actions, **result)
 
 
 # ------------------------------------------------------------------------ get
@@ -293,7 +293,7 @@ class Bead(GatewayModel):
         description="Normalized bead: fields, links, includes, task_revision, etag."
     )
     graph: dict[str, Any] | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _get(runtime: Runtime, inp: GetInput) -> Bead:
@@ -368,7 +368,7 @@ def _get(runtime: Runtime, inp: GetInput) -> Bead:
         projection=inp.projection,
         bead=bead,
         graph=graph,
-        affordances=["beads.update", "beads.query", "projects.context"],
+        next_actions=["beads.update", "beads.query", "projects.context"],
     )
 
 
@@ -379,7 +379,9 @@ class NativeResult(GatewayModel):
     project_ref: str
     owner_operation: str
     owner_result: dict[str, Any]
-    affordances: list[str] = Field(default_factory=lambda: ["beads.get", "beads.query"])
+    next_actions: list[str] = Field(
+        default_factory=lambda: ["beads.get", "beads.query"]
+    )
 
 
 class ReadInput(RequestControls, OwnerReadInput):
@@ -597,7 +599,7 @@ def _native_actions() -> tuple[Action, ...]:
                 Output=NativeResult,
                 handler=handler,
                 resource_kinds=_KINDS,
-                affordances=("beads.get", "beads.query"),
+                next_actions=("beads.get", "beads.query"),
                 examples=(
                     Example(
                         title=declaration["summary"],
@@ -679,7 +681,7 @@ class OperateResult(GatewayModel):
     publication: dict[str, Any] | None = None
     atomicity: str
     git_bookkeeping: str
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _operate(runtime: Runtime, inp: OperateInput) -> OperateResult:
@@ -696,7 +698,7 @@ def _operate(runtime: Runtime, inp: OperateInput) -> OperateResult:
     return OperateResult(
         ref=project_ref(project_id),
         project_id=project_id,
-        affordances=["beads.query", "projects.get"],
+        next_actions=["beads.query", "projects.get"],
         **result,
     )
 
@@ -737,7 +739,7 @@ def _closure(runtime: Runtime, inp: ClosureInput) -> ClosureOutput:
 
 ACTIONS: tuple[Action, ...] = (
     Action(
-        name="beads.closure",
+        name="beads.dependency_graph",
         family=VerbFamily.QUERY,
         owner="beads",
         summary="Read native dependency closure, cycles, readiness and incomplete frontier at one revision.",
@@ -745,7 +747,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=ClosureOutput,
         handler=_closure,
         resource_kinds=_KINDS,
-        affordances=("beads.get", "beads.query", "campaign.progress"),
+        next_actions=("beads.get", "beads.query", "campaign.progress"),
         aliases=("dependency closure", "campaign closure"),
         examples=(
             Example(
@@ -769,7 +771,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=BeadQuery,
         handler=_query,
         resource_kinds=_KINDS,
-        affordances=("beads.get", "beads.update", "projects.context"),
+        next_actions=("beads.get", "beads.update", "projects.context"),
         aliases=(
             "tasks",
             "issues",
@@ -820,7 +822,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=Bead,
         handler=_get,
         resource_kinds=("bead",),
-        affordances=("beads.update", "beads.query"),
+        next_actions=("beads.update", "beads.query"),
         aliases=("show task", "bd show", "issue details", "task notes"),
         examples=(
             Example(
@@ -851,7 +853,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=OperateResult,
         handler=_operate,
         resource_kinds=("project", "task_authority"),
-        affordances=("beads.query", "projects.get"),
+        next_actions=("beads.query", "projects.get"),
         aliases=("bd sync", "bd export", "backup beads", "restore beads"),
         examples=(
             Example(
@@ -884,7 +886,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=NativeResult,
         handler=_read,
         resource_kinds=_KINDS,
-        affordances=("beads.get", "beads.query"),
+        next_actions=("beads.get", "beads.query"),
         examples=(
             Example(
                 title="Page a pinned dependency closure",

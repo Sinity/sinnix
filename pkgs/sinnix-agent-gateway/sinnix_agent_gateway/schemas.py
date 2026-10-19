@@ -29,14 +29,14 @@ ErrorCode = Literal[
 ERROR_CODES = frozenset(get_args(ErrorCode))
 
 
-class V2Error(GatewayModel):
+class ResponseError(GatewayModel):
     code: ErrorCode
     message: str = Field(min_length=1, max_length=2_000)
     diagnostic_refs: list[str] = Field(default_factory=list, max_length=32)
     details: dict[str, Any] = Field(default_factory=dict)
 
 
-class V2Result(GatewayModel):
+class ResponseResult(GatewayModel):
     result_id: str = Field(min_length=1, max_length=128)
     ref: str = Field(min_length=1, max_length=2_048)
     action: str = Field(min_length=1, max_length=256)
@@ -51,14 +51,14 @@ class V2Result(GatewayModel):
     sha256: str = Field(pattern="^[0-9a-f]{64}$")
 
 
-class V2Receipt(GatewayModel):
+class ResponseReceipt(GatewayModel):
     receipt_id: str = Field(min_length=1, max_length=128)
     ref: str = Field(min_length=1, max_length=2_048)
     sequence: int = Field(ge=1)
     entry_hash: str = Field(pattern="^[0-9a-f]{64}$")
 
 
-class V2Page(GatewayModel):
+class ResponsePage(GatewayModel):
     kind: Literal["cursor", "offset", "snapshot"]
     cursor: str | int | None = None
     next_cursor: str | int | None = None
@@ -69,7 +69,7 @@ class V2Page(GatewayModel):
     snapshot_ref: str | None = Field(default=None, min_length=1, max_length=2_048)
 
 
-class V2Meta(GatewayModel):
+class ResponseMeta(GatewayModel):
     source: dict[str, Any]
     source_revisions: dict[str, str] = Field(default_factory=dict)
     coverage: dict[str, Any] = Field(default_factory=dict)
@@ -79,23 +79,23 @@ class V2Meta(GatewayModel):
     correlation_id: str | None = Field(default=None, min_length=1, max_length=256)
 
 
-class V2ToolEnvelope(GatewayModel):
+class ToolResponse(GatewayModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     protocol_schema: Literal["sinnix.gateway-result.v3"] = Field(alias="schema")
-    result: V2Result
-    receipt: V2Receipt
-    page: V2Page | None = None
+    result: ResponseResult
+    receipt: ResponseReceipt
+    page: ResponsePage | None = None
     data: Any | None = None
-    error: V2Error | None = None
-    meta: V2Meta
+    error: ResponseError | None = None
+    meta: ResponseMeta
 
     @model_validator(mode="after")
-    def validate_outcome(self) -> "V2ToolEnvelope":
+    def validate_outcome(self) -> "ToolResponse":
         if self.result.outcome == "ok" and self.error is not None:
-            raise ValueError("successful V2 responses cannot carry an error")
+            raise ValueError("successful responses cannot carry an error")
         if self.result.outcome == "error" and self.error is None:
-            raise ValueError("failed V2 responses require a structured error")
+            raise ValueError("failed responses require a structured error")
         return self
 
 

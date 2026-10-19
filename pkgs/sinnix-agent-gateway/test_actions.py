@@ -352,7 +352,7 @@ def test_files_actions_accept_paths_and_return_child_refs(tmp_path: Path) -> Non
     stat = structured(call(server, "files.stat", {"target": {"ref": child["ref"]}}))
     assert stat["data"]["kind"] == "file"
     assert stat["data"]["sha256"] and stat["data"]["media_type"].startswith("text/")
-    assert "files.read" in stat["data"]["affordances"]
+    assert "files.read" in stat["data"]["next_actions"]
 
     read = structured(call(server, "files.read", {"target": {"ref": child["ref"]}}))
     assert read["data"]["text"] == "beta\nline two\nline three\n"
@@ -623,13 +623,13 @@ def test_validation_failure_keeps_only_valid_request_controls(
     target = tmp_path / "protected.txt"
     target.write_text("before\n")
     seen: list[dict] = []
-    execute = runtime.execute_v2_async
+    execute = runtime.execute_async
 
     async def capture(action, callback, request, **kwargs):
         seen.append(dict(request))
         return await execute(action, callback, request, **kwargs)
 
-    monkeypatch.setattr(runtime, "execute_v2_async", capture)
+    monkeypatch.setattr(runtime, "execute_async", capture)
     base = {
         "target": {"path": str(target)},
         "edit": {
@@ -874,8 +874,8 @@ def test_files_image_and_pdf_afford_document_inspection(tmp_path: Path) -> None:
         read = structured(
             call(server, "files.read", {"target": {"path": str(target)}})
         )["data"]
-        assert "files.read" in stat["affordances"]
-        assert "files.change" in read["affordances"]
+        assert "files.read" in stat["next_actions"]
+        assert "files.change" in read["next_actions"]
 
 
 def test_files_stat_reports_hash_coverage(tmp_path: Path) -> None:
@@ -1526,7 +1526,7 @@ def test_catalog_retains_complete_filtered_matches(tmp_path, monkeypatch):
             "summary": "界" * 50,
             "documentation": "",
             "aliases": [],
-            "affordances": [],
+            "next_actions": [],
             "resource_kinds": [],
             "effect": "read",
         }

@@ -92,7 +92,7 @@ class CapturesResult(GatewayModel):
     reason: str | None = None
     command: list[str] | None = None
     unavailable_lanes: list[str] | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _captures(runtime: Runtime, inp: CapturesInput) -> CapturesResult:
@@ -102,13 +102,13 @@ def _captures(runtime: Runtime, inp: CapturesInput) -> CapturesResult:
             return CapturesResult(
                 operation="lanes",
                 **runtime.captures.lanes_visible(),
-                affordances=["captures.query", "activity.query"],
+                next_actions=["captures.query", "activity.query"],
             )
         if isinstance(op, LaneOp):
             return CapturesResult(
                 operation="lane",
                 lane=runtime.captures.lane(op.name),
-                affordances=["captures.query", "activity.query"],
+                next_actions=["captures.query", "activity.query"],
             )
         payload = runtime.captures.query(op.lanes, op.since, op.limit)
     except ValueError as exc:
@@ -122,7 +122,7 @@ def _captures(runtime: Runtime, inp: CapturesInput) -> CapturesResult:
             command=payload.get("command"),
             unavailable_lanes=payload.get("lanes"),
         )
-    return CapturesResult(operation="query", **payload, affordances=["activity.query"])
+    return CapturesResult(operation="query", **payload, next_actions=["activity.query"])
 
 
 # ---------------------------------------------------------------- activity
@@ -191,7 +191,7 @@ class Activity(GatewayModel):
     lanes_contributed: list[str]
     lanes_unavailable: list[str]
     coverage: list[LaneCoverage]
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _normalise(lane: str, envelope: dict[str, Any]) -> ActivityEvent | None:
@@ -408,7 +408,7 @@ def _activity(runtime: Runtime, inp: ActivityInput) -> Activity:
         ],
         lanes_unavailable=[row.lane for row in coverage if not row.available],
         coverage=coverage,
-        affordances=["captures.query", "sessions.query", "timeline.query"],
+        next_actions=["captures.query", "sessions.query", "timeline.query"],
     )
 
 
@@ -429,7 +429,7 @@ class SessionsInput(RequestControls):
 class SessionsResult(GatewayModel):
     operation: str
     owner_product: OwnerProduct
-    affordances: list[str] = Field(
+    next_actions: list[str] = Field(
         default_factory=lambda: ["sessions.read", "sessions.search", "timeline.query"]
     )
 
@@ -581,7 +581,7 @@ def _session_action(name: str, model: type, summary: str) -> Action:
         Output=SessionsResult,
         handler=_timeline,
         resource_kinds=(),
-        affordances=("sessions.read", "sessions.search", "timeline.query"),
+        next_actions=("sessions.read", "sessions.search", "timeline.query"),
         examples=(_SESSION_EXAMPLES[name],),
         documentation="Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.",
     )
@@ -597,7 +597,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=CapturesResult,
         handler=_captures,
         resource_kinds=("capture_lane",),
-        affordances=("activity.query", "captures.query"),
+        next_actions=("activity.query", "captures.query"),
         aliases=("capture lanes", "lane health", "records since", "sidecar index"),
         examples=(
             Example(title="Visible lanes", input={}),
@@ -622,7 +622,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=Activity,
         handler=_activity,
         resource_kinds=("capture_lane",),
-        affordances=("captures.query", "sessions.query", "timeline.query"),
+        next_actions=("captures.query", "sessions.query", "timeline.query"),
         aliases=(
             "what was I doing",
             "recent activity",
@@ -647,7 +647,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=SessionsResult,
         handler=_sessions,
         resource_kinds=(),
-        affordances=("sessions.read", "sessions.search", "timeline.query"),
+        next_actions=("sessions.read", "sessions.search", "timeline.query"),
         examples=(
             Example(
                 title="Project sessions",
@@ -664,7 +664,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=SessionsResult,
         handler=_memory,
         resource_kinds=(),
-        affordances=("memory.raw.search", "sessions.raw.read"),
+        next_actions=("memory.raw.search", "sessions.raw.read"),
         examples=(
             Example(
                 title="Search original sources",

@@ -64,7 +64,7 @@ class Terminal(GatewayModel):
     cmdline: list[str] = Field(default_factory=list)
     foreground_processes: list[Process] = Field(default_factory=list)
     extra: dict[str, Any] = Field(default_factory=dict)
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 _KNOWN = {
@@ -115,7 +115,7 @@ def _terminal(window: dict[str, Any]) -> Terminal:
             for key, value in window.items()
             if key not in _KNOWN and key not in _SECRET_WINDOW_FIELDS
         },
-        affordances=[
+        next_actions=[
             "terminals.screen",
             "terminals.send",
             "terminals.run",
@@ -146,7 +146,7 @@ class ListInput(RequestControls):
 class TerminalListing(GatewayModel):
     terminals: list[Terminal]
     focused_ref: str | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _list(runtime: Runtime, inp: ListInput) -> TerminalListing:
@@ -154,7 +154,7 @@ def _list(runtime: Runtime, inp: ListInput) -> TerminalListing:
     return TerminalListing(
         terminals=terminals,
         focused_ref=next((t.ref for t in terminals if t.focused), None),
-        affordances=[
+        next_actions=[
             "terminals.get",
             "terminals.screen",
             "terminals.send",
@@ -194,7 +194,7 @@ class TerminalText(GatewayModel):
     lines: int
     total_lines: int | None = Field(default=None, description="Before tail truncation.")
     truncated: bool = False
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 class ScreenInput(RequestControls):
@@ -211,7 +211,7 @@ def _screen(runtime: Runtime, inp: ScreenInput) -> TerminalText:
         extent="screen",
         text=text,
         lines=len(text.splitlines()),
-        affordances=["terminals.scrollback", "terminals.send", "terminals.wait"],
+        next_actions=["terminals.scrollback", "terminals.send", "terminals.wait"],
     )
 
 
@@ -243,7 +243,7 @@ def _scrollback(runtime: Runtime, inp: ScrollbackInput) -> TerminalText:
         lines=len(tail),
         total_lines=len(all_lines),
         truncated=len(all_lines) > len(tail),
-        affordances=["terminals.screen", "terminals.send", "terminals.wait"],
+        next_actions=["terminals.screen", "terminals.send", "terminals.wait"],
     )
 
 
@@ -303,7 +303,7 @@ class SendResult(GatewayModel):
     kind: Literal["text", "keys"]
     sent: str | list[str]
     terminal: Terminal | None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _send(runtime: Runtime, inp: SendInput) -> SendResult:
@@ -336,7 +336,7 @@ def _send(runtime: Runtime, inp: SendInput) -> SendResult:
         kind=inp.input.kind,
         sent=sent,
         terminal=_refresh(runtime, kitty_id),
-        affordances=["terminals.wait", "terminals.screen", "terminals.scrollback"],
+        next_actions=["terminals.wait", "terminals.screen", "terminals.scrollback"],
     )
 
 
@@ -380,7 +380,7 @@ class RunResult(GatewayModel):
     cwd: str | None = None
     duration_seconds: float | None = None
     terminal: Terminal | None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _strip_marker(text: str, marker_id: str) -> str:
@@ -463,7 +463,7 @@ def _run(runtime: Runtime, inp: RunInput) -> RunResult:
         cwd=terminal.cwd if terminal else None,
         duration_seconds=round(time.monotonic() - started, 3) if inp.wait else None,
         terminal=terminal,
-        affordances=["terminals.scrollback", "terminals.wait", "terminals.send"],
+        next_actions=["terminals.scrollback", "terminals.wait", "terminals.send"],
     )
 
 
@@ -512,7 +512,7 @@ class WaitResult(GatewayModel):
     waited_seconds: float
     matched_text: str | None = None
     terminal: Terminal | None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _wait(runtime: Runtime, inp: WaitInput) -> WaitResult:
@@ -581,7 +581,7 @@ def _wait(runtime: Runtime, inp: WaitInput) -> WaitResult:
         waited_seconds=round(time.monotonic() - started, 3),
         matched_text=matched,
         terminal=_refresh(runtime, kitty_id),
-        affordances=["terminals.screen", "terminals.scrollback", "terminals.send"],
+        next_actions=["terminals.screen", "terminals.scrollback", "terminals.send"],
     )
 
 
@@ -596,7 +596,7 @@ class FocusResult(GatewayModel):
     ref: str
     kitty_id: int
     terminal: Terminal | None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _focus(runtime: Runtime, inp: FocusInput) -> FocusResult:
@@ -607,7 +607,7 @@ def _focus(runtime: Runtime, inp: FocusInput) -> FocusResult:
         ref=ref,
         kitty_id=kitty_id,
         terminal=_refresh(runtime, kitty_id),
-        affordances=["terminals.send", "terminals.screen"],
+        next_actions=["terminals.send", "terminals.screen"],
     )
 
 
@@ -633,7 +633,7 @@ class OpenResult(GatewayModel):
     ref: str
     kitty_id: int
     terminal: Terminal | None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _open(runtime: Runtime, inp: OpenInput) -> OpenResult:
@@ -665,7 +665,7 @@ def _open(runtime: Runtime, inp: OpenInput) -> OpenResult:
         ref=terminal_ref(kitty_id),
         kitty_id=kitty_id,
         terminal=terminal,
-        affordances=[
+        next_actions=[
             "terminals.send",
             "terminals.run",
             "terminals.screen",
@@ -692,7 +692,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=ListInput,
         Output=TerminalListing,
         handler=_list,
-        affordances=(
+        next_actions=(
             "terminals.get",
             "terminals.screen",
             "terminals.send",
@@ -709,7 +709,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=GetInput,
         Output=Terminal,
         handler=_get,
-        affordances=("terminals.screen", "terminals.send", "terminals.run"),
+        next_actions=("terminals.screen", "terminals.send", "terminals.run"),
         aliases=("find terminal", "which terminal", "focused terminal"),
         examples=(
             Example(title="The focused terminal", input={"target": {"focused": True}}),
@@ -723,7 +723,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=ScreenInput,
         Output=TerminalText,
         handler=_screen,
-        affordances=("terminals.scrollback", "terminals.send", "terminals.wait"),
+        next_actions=("terminals.scrollback", "terminals.send", "terminals.wait"),
         aliases=("what does the terminal show", "terminal contents", "screen text"),
         examples=(Example(title="Screen of a titled terminal", input=_TARGET),),
         **_READ,
@@ -735,7 +735,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=ScrollbackInput,
         Output=TerminalText,
         handler=_scrollback,
-        affordances=("terminals.screen", "terminals.send", "terminals.wait"),
+        next_actions=("terminals.screen", "terminals.send", "terminals.wait"),
         aliases=("history", "last output", "scroll back", "command output"),
         examples=(
             Example(title="Last 200 lines of history", input={**_TARGET, "lines": 200}),
@@ -753,7 +753,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=ProcessesInput,
         Output=TerminalProcesses,
         handler=_processes,
-        affordances=("terminals.wait", "terminals.send"),
+        next_actions=("terminals.wait", "terminals.send"),
         aliases=("what is running", "is it busy", "terminal processes"),
         examples=(Example(title="Processes in a terminal", input=_TARGET),),
         **_READ,
@@ -765,7 +765,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=SendInput,
         Output=SendResult,
         handler=_send,
-        affordances=("terminals.wait", "terminals.screen", "terminals.scrollback"),
+        next_actions=("terminals.wait", "terminals.screen", "terminals.scrollback"),
         aliases=("type into terminal", "press keys", "ctrl+c", "send text"),
         examples=(
             Example(
@@ -794,7 +794,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=RunInput,
         Output=RunResult,
         handler=_run,
-        affordances=("terminals.scrollback", "terminals.wait", "terminals.send"),
+        next_actions=("terminals.scrollback", "terminals.wait", "terminals.send"),
         aliases=("execute in terminal", "shell command in kitty"),
         documentation="wait=true appends a visible completion sentinel and waits for it (or for at_prompt when kitty reports it). Captured shells disable prompt marks, so the sentinel is the reliable completion signal. exit_status is parsed from that sentinel.",
         examples=(
@@ -827,7 +827,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=WaitInput,
         Output=WaitResult,
         handler=_wait,
-        affordances=("terminals.screen", "terminals.scrollback", "terminals.send"),
+        next_actions=("terminals.screen", "terminals.scrollback", "terminals.send"),
         aliases=("wait for prompt", "wait for output", "wait until done"),
         examples=(
             Example(
@@ -852,7 +852,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=FocusInput,
         Output=FocusResult,
         handler=_focus,
-        affordances=("terminals.send", "terminals.screen"),
+        next_actions=("terminals.send", "terminals.screen"),
         aliases=("switch to terminal", "bring terminal to front"),
         examples=(
             Example(
@@ -868,7 +868,7 @@ ACTIONS: tuple[Action, ...] = (
         Input=OpenInput,
         Output=OpenResult,
         handler=_open,
-        affordances=(
+        next_actions=(
             "terminals.send",
             "terminals.run",
             "terminals.screen",

@@ -26,12 +26,12 @@ class Verification(GatewayModel):
     checked: int
     head_hash: str | None = None
     broken_at: int | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _verify(runtime: Runtime, _inp: VerifyInput) -> Verification:
     return Verification(
-        **runtime.audit.verify(), affordances=["audit.receipt", "events.tail"]
+        **runtime.audit.verify(), next_actions=["audit.receipt", "events.tail"]
     )
 
 
@@ -108,7 +108,7 @@ class Operation(GatewayModel):
     request_sha256: str | None = None
     created_at: float | None = None
     updated_at: float | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _operation(runtime: Runtime, inp: OperationInput) -> Operation:
@@ -118,7 +118,7 @@ def _operation(runtime: Runtime, inp: OperationInput) -> Operation:
         action=inp.action,
         idempotency_key=inp.key,
         receipt_ref=f"sinnix://receipts/{receipt_id}" if receipt_id else None,
-        affordances=["audit.receipt"] if receipt_id else [],
+        next_actions=["audit.receipt"] if receipt_id else [],
         **row,
     )
 
@@ -199,7 +199,7 @@ class Capabilities(GatewayModel):
     cursor: int | None = None
     next_cursor: int | None = None
     rows: list[dict[str, Any]] = Field(default_factory=list)
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _capabilities(runtime: Runtime, inp: CapabilitiesInput) -> Capabilities:
@@ -219,7 +219,7 @@ def _capabilities(runtime: Runtime, inp: CapabilitiesInput) -> Capabilities:
     return Capabilities(
         operation=op.operation,
         **{k: v for k, v in payload.items() if k in Capabilities.model_fields},
-        affordances=["capabilities.query"],
+        next_actions=["capabilities.query"],
     )
 
 
@@ -233,7 +233,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=Verification,
         handler=_verify,
         resource_kinds=("receipt",),
-        affordances=("audit.receipt", "events.tail"),
+        next_actions=("audit.receipt", "events.tail"),
         aliases=("audit chain", "integrity", "tamper check"),
         examples=(Example(title="Verify", input={}),),
     ),
@@ -246,7 +246,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=Receipt,
         handler=_receipt,
         resource_kinds=("receipt",),
-        affordances=("audit.verify", "events.tail"),
+        next_actions=("audit.verify", "events.tail"),
         aliases=("receipt", "what happened in that call"),
         examples=(
             Example(
@@ -273,7 +273,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=Operation,
         handler=_operation,
         resource_kinds=("receipt",),
-        affordances=("audit.receipt",),
+        next_actions=("audit.receipt",),
         aliases=("lost response", "did my write commit", "operation status"),
         examples=(
             Example(
@@ -294,7 +294,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=ResultSnapshot,
         handler=_result,
         resource_kinds=("result", "context_snapshot"),
-        affordances=("audit.receipt",),
+        next_actions=("audit.receipt",),
         aliases=("result snapshot", "replay response"),
         examples=(Example(title="By id", input={"result_id": "example-result"}),),
     ),
@@ -307,7 +307,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=Capabilities,
         handler=_capabilities,
         resource_kinds=("capability",),
-        affordances=("capabilities.query",),
+        next_actions=("capabilities.query",),
         aliases=(
             "what can this machine do",
             "scripts",

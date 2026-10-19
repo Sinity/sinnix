@@ -32,7 +32,7 @@ def _sha256(path: Path) -> str:
 
 
 def _snapshot(source: Path, destination: Path) -> tuple[int, str]:
-    """Copy an attested source into private artifact storage while hashing it."""
+    """Copy a gateway-owned source into private artifact storage while hashing it."""
     digest = hashlib.sha256()
     size = 0
     fd, temporary = tempfile.mkstemp(prefix=".content-", dir=destination.parent)
@@ -65,7 +65,7 @@ class ArtifactService:
         config.initialize_state()
         self.root = config.state_dir / "artifacts"
 
-    def _source_is_attested(self, source: Path) -> bool:
+    def _source_in_gateway_state(self, source: Path) -> bool:
         for directory_name, schema, identifier in (
             ("captures", "sinnix.gateway-capture-receipt.v1", "capture_id"),
             ("diagnostics", "sinnix.gateway-diagnostic-receipt.v1", "diagnostic_id"),
@@ -98,7 +98,7 @@ class ArtifactService:
         directory = directory.resolve(strict=True)
         captures_root = (self.config.state_dir / "captures").resolve()
         if directory == captures_root or captures_root not in directory.parents:
-            raise ArtifactError("capture directory is outside attested gateway state")
+            raise ArtifactError("capture directory is outside gateway state")
         if not isinstance(source, str) or not source or not isinstance(target, dict):
             raise ArtifactError("capture receipt is malformed")
         names = []
@@ -183,8 +183,8 @@ class ArtifactService:
 
     def register(self, source: Path, *, kind: str, owner_id: str) -> str:
         source = source.resolve(strict=True)
-        if not source.is_file() or not self._source_is_attested(source):
-            raise ArtifactError("artifact source is outside attested gateway state")
+        if not source.is_file() or not self._source_in_gateway_state(source):
+            raise ArtifactError("artifact source is outside gateway state")
         artifact_id = str(uuid.uuid4())
         directory = self.root / artifact_id
         directory.mkdir(mode=0o700)
@@ -261,7 +261,7 @@ class ArtifactService:
         except (FileNotFoundError, json.JSONDecodeError) as exc:
             raise ArtifactError("unknown or malformed artifact") from exc
         source = Path(metadata["source"]).resolve(strict=True)
-        if not source.is_file() or not self._source_is_attested(source):
+        if not source.is_file() or not self._source_in_gateway_state(source):
             raise ArtifactError("artifact source is no longer valid")
         content = self.root / str(parsed) / "content"
         if not content.is_file():

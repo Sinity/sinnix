@@ -62,7 +62,7 @@ def test_context_public_retrieval_after_restart_retains_provenance(
     context = ok(
         server,
         "context.compose",
-        {"intent": "project.orientation", "project": {"project": "fixture"}},
+        {"intent": "project.overview", "project": {"project": "fixture"}},
     )
     reference = context["snapshot_ref"]
     restarted = create_server(config)
@@ -173,6 +173,4 @@ def test_published_prompt_accepts_its_declared_target(tmp_path: Path) -> None:
         )
 
     prompt = anyio.run(get)
-    assert (
-        json.loads(prompt.messages[0].content.text)["intent"] == "project.orientation"
-    )
+    assert json.loads(prompt.messages[0].content.text)["intent"] == "project.overview"

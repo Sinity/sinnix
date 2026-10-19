@@ -276,7 +276,7 @@ def test_changing_git_does_not_hide_beads_revision(tmp_path: Path) -> None:
     )
 
 
-def test_v2_cursor_continues_with_v3_source_rotation(tmp_path: Path) -> None:
+def test_cursor_continues_with_v3_source_rotation(tmp_path: Path) -> None:
     events, _projects, _beads, _audit = service(tmp_path)
     state = events.cursor._initial_state()
     state.pop("source_turn")

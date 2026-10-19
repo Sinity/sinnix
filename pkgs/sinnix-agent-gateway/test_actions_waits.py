@@ -95,7 +95,7 @@ def test_wait_for_file_exists_polls_until_the_deadline(
     )["data"]
     assert missing["outcome"] == "timeout" and missing["polls"] >= 1
     assert missing["evidence"] == {"path": str(target), "exists": False}
-    assert missing["continuation"] and missing["affordances"] == ["wait.for"]
+    assert missing["continuation"] and missing["next_actions"] == ["wait.for"]
 
     target.write_text("x")
     present = call(

@@ -12,7 +12,7 @@ from sinnix_agent_gateway.contexts import ContextSnapshotStore
 def historical_context() -> dict:
     value = {
         "schema": "sinnix.gateway-context.v1",
-        "intent": "project.orientation",
+        "intent": "project.overview",
         "target_ref": "sinnix://projects/fixture",
         "components": [
             {

@@ -75,7 +75,7 @@ class ServersInput(RequestControls):
 
 class Servers(GatewayModel):
     servers: list[ServerRow]
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _server_row(
@@ -137,7 +137,7 @@ async def _servers(runtime: Runtime, inp: ServersInput) -> Servers:
 
     rows = await asyncio.gather(*(timed(name) for name in names))
     return Servers(
-        servers=list(rows), affordances=["mcp.tools", "mcp.call", "artifacts.read"]
+        servers=list(rows), next_actions=["mcp.tools", "mcp.call", "artifacts.read"]
     )
 
 
@@ -183,7 +183,7 @@ class Tools(GatewayModel):
         description="Server name to reason when upstream tools/list did not finish.",
     )
     catalog_artifact: dict[str, Any] | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 async def _tools(runtime: Runtime, inp: ToolsInput) -> Tools:
@@ -241,7 +241,7 @@ async def _tools(runtime: Runtime, inp: ToolsInput) -> Tools:
         servers_unavailable=unavailable,
         coverage_incomplete=incomplete,
         catalog_artifact=catalog.get("catalog_artifact"),
-        affordances=["mcp.call", "mcp.change", "mcp.servers"],
+        next_actions=["mcp.call", "mcp.change", "mcp.servers"],
     )
 
 
@@ -270,7 +270,7 @@ class CallResult(GatewayModel):
     truncated: bool
     artifact: dict[str, Any] | None = None
     artifact_id: str | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 _SELF_SERVER_NAMES = frozenset({"sinnix-agent-gateway", "sinnix-gateway"})
@@ -342,7 +342,7 @@ async def _invoke_self(
                 details={"problems": exc.errors(include_url=False)[:8]},
             ) from exc
 
-    nested = await runtime.execute_v2_async(
+    nested = await runtime.execute_async(
         action, callback, request_input.model_dump(mode="json")
     )
     if nested["result"]["outcome"] != "ok":
@@ -359,7 +359,7 @@ async def _invoke_self(
         mode="read",
         response=nested["data"],
         truncated=False,
-        affordances=[tool],
+        next_actions=[tool],
     )
     return ActionResult(result, blocks=blocks) if blocks else result
 
@@ -406,7 +406,7 @@ async def _invoke(
     return CallResult(
         ref=ref,
         **result,
-        affordances=(
+        next_actions=(
             ["artifacts.read", "mcp.tools"]
             if result.get("truncated")
             else ["mcp.tools"]
@@ -444,7 +444,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=Servers,
         handler=_servers,
         resource_kinds=("mcp_tool",),
-        affordances=("mcp.tools", "mcp.call", "artifacts.read"),
+        next_actions=("mcp.tools", "mcp.call", "artifacts.read"),
         aliases=(
             "mcp health",
             "is polylogue mcp up",
@@ -466,7 +466,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=Tools,
         handler=_tools,
         resource_kinds=("mcp_tool",),
-        affordances=("mcp.call", "mcp.change", "mcp.servers"),
+        next_actions=("mcp.call", "mcp.change", "mcp.servers"),
         aliases=("list mcp tools", "upstream tools", "tool schema"),
         examples=(
             Example(
@@ -484,7 +484,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=CallResult,
         handler=_call,
         resource_kinds=("mcp_tool",),
-        affordances=("mcp.tools", "artifacts.read"),
+        next_actions=("mcp.tools", "artifacts.read"),
         aliases=("call mcp tool", "query upstream", "polylogue search"),
         documentation="Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only). A target using server=sinnix-agent-gateway is routed to the named direct read action, preserving its native content blocks; changes stay direct-only.",
         examples=(
@@ -506,7 +506,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=CallResult,
         handler=_change,
         resource_kinds=("mcp_tool",),
-        affordances=("mcp.tools", "artifacts.read", "audit.receipt"),
+        next_actions=("mcp.tools", "artifacts.read", "audit.receipt"),
         aliases=("write mcp tool", "mutate upstream", "refresh"),
         examples=(
             Example(

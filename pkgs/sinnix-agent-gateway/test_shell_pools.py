@@ -1,9 +1,9 @@
-"""Where shell.run places a command: agent CLIs start in the long lane."""
+"""Where shell.run places a command: agent CLIs start in the long pool."""
 
 from __future__ import annotations
 
 import pytest
-from sinnix_agent_gateway import shell_lanes
+from sinnix_agent_gateway import shell_pools
 
 
 @pytest.mark.parametrize(
@@ -79,13 +79,13 @@ from sinnix_agent_gateway import shell_lanes
 def test_auto_lane_follows_the_command_word(
     argv: list[str], expected: tuple[str, str]
 ) -> None:
-    assert shell_lanes.choose(argv, "auto") == expected
+    assert shell_pools.choose(argv, "auto") == expected
 
 
 def test_a_declared_lane_is_taken_as_given() -> None:
-    assert shell_lanes.choose(["claude", "-p", "x"], "quick") == ("quick", "declared")
-    assert shell_lanes.choose(["make", "all"], "long") == ("long", "declared")
+    assert shell_pools.choose(["claude", "-p", "x"], "quick") == ("quick", "declared")
+    assert shell_pools.choose(["make", "all"], "long") == ("long", "declared")
 
 
 def test_each_lane_is_its_own_pueue_group() -> None:
-    assert shell_lanes.GROUPS == {"quick": "shell-quick", "long": "shell-long"}
+    assert shell_pools.GROUPS == {"quick": "shell-quick", "long": "shell-long"}

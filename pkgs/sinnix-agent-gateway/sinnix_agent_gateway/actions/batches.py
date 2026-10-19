@@ -149,7 +149,7 @@ class RunView(GatewayModel):
         default=None, description="The landing's record: candidate, beads, residual."
     )
     abandoned: dict[str, Any] | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _state(raw: Any) -> JobState | None:
@@ -204,7 +204,7 @@ def _worker_view(project_id: str, payload: Mapping[str, Any]) -> WorkerView:
     )
 
 
-def _affordances(stage: str | None, accepted: bool, abandoned: Any) -> list[str]:
+def _next_actions(stage: str | None, accepted: bool, abandoned: Any) -> list[str]:
     if accepted or abandoned or (stage in _TERMINAL_STAGES):
         return ["batches.list"]
     if stage == "working":
@@ -251,7 +251,7 @@ def _run_view(payload: Mapping[str, Any]) -> RunView:
         ),
         acceptance=payload.get("acceptance"),
         abandoned=payload.get("abandoned"),
-        affordances=_affordances(stage, accepted, payload.get("abandoned")),
+        next_actions=_next_actions(stage, accepted, payload.get("abandoned")),
     )
 
 
@@ -430,7 +430,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=RunPage,
         handler=_list,
         resource_kinds=("project", "run", "job"),
-        affordances=("batches.status", "jobs.logs", "jobs.wait"),
+        next_actions=("batches.status", "jobs.logs", "jobs.wait"),
         aliases=("runs", "agentctl batch list", "which batches", "active runs"),
         examples=(
             Example(title="Recent runs", input={"limit": 10}),
@@ -448,7 +448,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=RunView,
         handler=_status,
         resource_kinds=("run", "bead", "job"),
-        affordances=("jobs.logs", "jobs.wait", "batches.land", "batches.resume"),
+        next_actions=("jobs.logs", "jobs.wait", "batches.land", "batches.resume"),
         aliases=(
             "batch status",
             "run status",
@@ -470,7 +470,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=RunStarted,
         handler=_start,
         resource_kinds=("project", "bead", "run", "job"),
-        affordances=("batches.status", "jobs.wait", "jobs.logs", "jobs.cancel"),
+        next_actions=("batches.status", "jobs.wait", "jobs.logs", "jobs.cancel"),
         aliases=("dispatch", "agentctl batch start", "work on bead", "start agents"),
         documentation="backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.",
         examples=(
@@ -505,7 +505,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=LandQueued,
         handler=_land,
         resource_kinds=("run", "job"),
-        affordances=("jobs.wait", "jobs.logs", "batches.status"),
+        next_actions=("jobs.wait", "jobs.logs", "batches.status"),
         aliases=("land", "agentctl batch land", "publish the batch", "merge the run"),
         documentation="batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.",
         examples=(
@@ -524,7 +524,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=ResumeQueued,
         handler=_resume,
         resource_kinds=("run", "job"),
-        affordances=("jobs.wait", "jobs.logs", "batches.status"),
+        next_actions=("jobs.wait", "jobs.logs", "batches.status"),
         aliases=("resume worker", "agentctl batch resume", "retry the agent"),
         documentation="backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.",
         examples=(

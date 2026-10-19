@@ -87,7 +87,7 @@ def render_reference() -> str:
         "Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool "
         "whose `tools/list` input schema is the one below; the catalog hash changes "
         "when any action catalog row changes, including its schema, example or "
-        "affordance.",
+        "next action.",
         "",
         f"Revision: `{catalog['revision']}`. Catalog SHA-256: `{catalog['action_catalog_hash']}`.",
         "",
@@ -120,11 +120,11 @@ def render_reference() -> str:
         )
         if row["aliases"]:
             lines.extend([f"Aliases: {', '.join(row['aliases'])}.", ""])
-        if row["affordances"]:
+        if row["next_actions"]:
             lines.extend(
                 [
                     "Follow-up actions: "
-                    + ", ".join(f"`{name}`" for name in row["affordances"])
+                    + ", ".join(f"`{name}`" for name in row["next_actions"])
                     + ".",
                     "",
                 ]
@@ -139,7 +139,7 @@ def render_reference() -> str:
                 "",
                 "Output: the response envelope's `data` field is `"
                 + action_set.BY_NAME[row["name"]].Output.__name__
-                + "`; the full envelope schema is the `sinnix://gateway/v2/actions/"
+                + "`; the full envelope schema is the `sinnix://gateway/actions/"
                 + row["name"]
                 + "` resource and `sinnix-agent-gateway catalog "
                 + row["name"]
@@ -190,7 +190,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 # Agent Gateway
 
-Every gateway action is one MCP tool named after the action; its input schema in `tools/list` is the contract and its output envelope schema is the `sinnix://gateway/v2/actions/<name>` resource. Paths, ids, titles and unit names are accepted where a canonical `sinnix://` ref is; responses return the canonical ref and `affordances` naming the next actions. Images arrive as image content blocks, other binary as resource blocks.
+Every gateway action is one MCP tool named after the action; its input schema in `tools/list` is the contract and its output envelope schema is the `sinnix://gateway/actions/<name>` resource. Paths, ids, titles and unit names are accepted where a canonical `sinnix://` ref is; responses return the canonical ref and `next_actions` naming the next actions. Images arrive as image content blocks, other binary as resource blocks.
 
 ## Invocation
 

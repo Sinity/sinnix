@@ -47,7 +47,7 @@ class ListInput(RequestControls):
 
 class Listing(GatewayModel):
     artifacts: list[ArtifactRow]
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _row(raw: dict[str, Any]) -> ArtifactRow:
@@ -100,7 +100,7 @@ def _list(runtime: Runtime, inp: ListInput) -> ActionResult:
             raise
     return ActionResult(
         Listing(
-            artifacts=snapshot["rows"], affordances=["artifacts.get", "artifacts.read"]
+            artifacts=snapshot["rows"], next_actions=["artifacts.get", "artifacts.read"]
         ),
         page={
             "kind": "snapshot",
@@ -119,7 +119,7 @@ class GetInput(RequestControls):
 
 class Metadata(ArtifactRow):
     source_name: str | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _metadata(
@@ -146,7 +146,7 @@ def _get(runtime: Runtime, inp: GetInput) -> Metadata:
     return Metadata(
         **_row(raw).model_dump(),
         source_name=source.name,
-        affordances=["artifacts.read"],
+        next_actions=["artifacts.read"],
     )
 
 
@@ -179,7 +179,7 @@ class Content(GatewayModel):
         default=None,
         description="Set for binary artifacts; bytes are represented by a canonical read-only link.",
     )
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
@@ -195,7 +195,7 @@ def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
         "owner_id": raw.get("owner_id"),
         "content_type": media,
         "bytes": size,
-        "affordances": ["artifacts.get", "artifacts.list"],
+        "next_actions": ["artifacts.get", "artifacts.list"],
     }
     textual = inp.representation == "text" or (
         inp.representation == "auto" and is_text(media) and media not in IMAGE_TYPES
@@ -272,7 +272,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=Listing,
         handler=_list,
         resource_kinds=("artifact",),
-        affordances=("artifacts.get", "artifacts.read"),
+        next_actions=("artifacts.get", "artifacts.read"),
         aliases=("captures", "diagnostics", "stored responses", "large results"),
         examples=(
             Example(
@@ -290,7 +290,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=Metadata,
         handler=_get,
         resource_kinds=("artifact",),
-        affordances=("artifacts.read", "artifacts.list"),
+        next_actions=("artifacts.read", "artifacts.list"),
         aliases=("artifact info", "artifact metadata"),
         examples=(
             Example(
@@ -312,7 +312,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=Content,
         handler=_read,
         resource_kinds=("artifact",),
-        affordances=("artifacts.get", "artifacts.list"),
+        next_actions=("artifacts.get", "artifacts.list"),
         aliases=(
             "open artifact",
             "diagnostic log",

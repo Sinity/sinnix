@@ -190,7 +190,7 @@ class DesktopSnapshot(GatewayModel):
     active_window: Window | None
     windows: list[Window]
     cursor: Point | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _snapshot(runtime: Runtime, inp: SnapshotInput) -> DesktopSnapshot:
@@ -217,7 +217,7 @@ def _snapshot(runtime: Runtime, inp: SnapshotInput) -> DesktopSnapshot:
         else None,
         windows=[_window(c) for c in clients] if inp.include_windows else [],
         cursor=Point(**cursor) if isinstance(cursor, dict) else None,
-        affordances=["desktop.screenshot", "desktop.operate", "desktop.tree"],
+        next_actions=["desktop.screenshot", "desktop.operate", "desktop.tree"],
     )
 
 
@@ -289,7 +289,7 @@ class Screenshot(GatewayModel):
     variants: list[ScreenshotVariant]
     receipt: dict[str, Any]
     capture: dict[str, Any]
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _screenshot(runtime: Runtime, inp: ScreenshotInput) -> ActionResult:
@@ -360,7 +360,7 @@ def _screenshot(runtime: Runtime, inp: ScreenshotInput) -> ActionResult:
             variants=variants,
             receipt=result["receipt"],
             capture=result["capture"],
-            affordances=["desktop.snapshot", "desktop.operate", "artifacts.read"],
+            next_actions=["desktop.snapshot", "desktop.operate", "artifacts.read"],
         ),
         blocks=blocks,
     )
@@ -392,7 +392,7 @@ class AccessibleTree(GatewayModel):
     application: str | None
     nodes: int
     root: TreeNode | None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _walk(
@@ -475,7 +475,7 @@ def _tree(runtime: Runtime, inp: TreeInput) -> AccessibleTree:
         application=application.name or None,
         nodes=nodes,
         root=TreeNode.model_validate(root) if root else None,
-        affordances=["desktop.operate", "desktop.screenshot"],
+        next_actions=["desktop.operate", "desktop.screenshot"],
     )
 
 
@@ -639,7 +639,7 @@ class OperateResult(GatewayModel):
     result: Any = None
     waited_seconds: float | None = None
     active_window: Window | None = Field(description="Observed after the operation.")
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _selector(
@@ -788,7 +788,7 @@ def _operate(runtime: Runtime, inp: OperateInput) -> OperateResult:
         result=result,
         waited_seconds=waited,
         active_window=_active(runtime),
-        affordances=["desktop.snapshot", "desktop.screenshot", "desktop.operate"],
+        next_actions=["desktop.snapshot", "desktop.screenshot", "desktop.operate"],
     )
 
 
@@ -802,7 +802,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=DesktopSnapshot,
         handler=_snapshot,
         resource_kinds=("desktop",),
-        affordances=("desktop.screenshot", "desktop.operate", "desktop.tree"),
+        next_actions=("desktop.screenshot", "desktop.operate", "desktop.tree"),
         aliases=(
             "windows",
             "clients",
@@ -817,12 +817,12 @@ ACTIONS: tuple[Action, ...] = (
         name="desktop.screenshot",
         family=VerbFamily.QUERY,
         owner="desktop",
-        summary="Capture the focused output, one monitor, one window, or a rectangle; the PNG rides in an image block and is retained as an attested artifact.",
+        summary="Capture the focused output, one monitor, one window, or a rectangle; the PNG rides in an image block and is retained as a stored artifact.",
         Input=ScreenshotInput,
         Output=Screenshot,
         handler=_screenshot,
         resource_kinds=("desktop", "artifact"),
-        affordances=("desktop.snapshot", "desktop.operate", "artifacts.read"),
+        next_actions=("desktop.snapshot", "desktop.operate", "artifacts.read"),
         aliases=(
             "screen capture",
             "grab screen",
@@ -850,7 +850,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=AccessibleTree,
         handler=_tree,
         resource_kinds=("desktop",),
-        affordances=("desktop.operate", "desktop.screenshot"),
+        next_actions=("desktop.operate", "desktop.screenshot"),
         aliases=("accessibility tree", "a11y", "widgets", "ui elements"),
         documentation="Walks the AT-SPI tree through pyatspi in the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.",
         examples=(Example(title="Active window tree", input={"max_depth": 10}),),
@@ -867,7 +867,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=OperateResult,
         handler=_operate,
         resource_kinds=("desktop",),
-        affordances=("desktop.snapshot", "desktop.screenshot", "desktop.tree"),
+        next_actions=("desktop.snapshot", "desktop.screenshot", "desktop.tree"),
         aliases=(
             "focus window",
             "launch app",

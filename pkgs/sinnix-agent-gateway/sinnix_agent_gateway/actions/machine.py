@@ -240,7 +240,7 @@ class MachineSnapshot(GatewayModel):
     network: SnapshotSection
     incidents: SnapshotSection
     ops_revision: SnapshotSection
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 class SnapshotInput(RequestControls):
@@ -378,7 +378,7 @@ def _snapshot(runtime: Runtime, inp: SnapshotInput) -> MachineSnapshot:
         ),
         incidents=_incidents(runtime, inp.incident_limit),
         ops_revision=ops_section,
-        affordances=[
+        next_actions=[
             "machine.query",
             "machine.units.list",
             "processes.list",
@@ -536,7 +536,7 @@ class UnitDetail(GatewayModel):
     process_ref: str | None = None
     control_group: str | None = None
     properties: dict[str, str]
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _unit_show(
@@ -608,7 +608,7 @@ def _units_get(runtime: Runtime, inp: UnitGetInput) -> UnitDetail:
         process_ref=process_ref,
         control_group=shown.get("ControlGroup") or None,
         properties=shown,
-        affordances=["machine.units.logs", "machine.units.operate", "processes.list"],
+        next_actions=["machine.units.logs", "machine.units.operate", "processes.list"],
     )
 
 
@@ -653,7 +653,7 @@ class UnitLogs(GatewayModel):
     entries: list[LogEntry]
     returned: int
     truncated: bool
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _units_logs(runtime: Runtime, inp: UnitLogsInput) -> UnitLogs:
@@ -733,7 +733,7 @@ def _units_logs(runtime: Runtime, inp: UnitLogsInput) -> UnitLogs:
         entries=entries,
         returned=len(entries),
         truncated=truncated or result.output_exceeded,
-        affordances=["machine.units.get", "machine.units.operate"],
+        next_actions=["machine.units.get", "machine.units.operate"],
     )
 
 
@@ -756,7 +756,7 @@ class PreparedAction(GatewayModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     expected_target: dict[str, Any]
     observed_at: str
-    affordances: list[str] = Field(default_factory=lambda: ["machine.operate"])
+    next_actions: list[str] = Field(default_factory=lambda: ["machine.operate"])
 
 
 def _prepare(runtime: Runtime, inp: PrepareInput) -> PreparedAction:
@@ -791,7 +791,7 @@ class OperateResult(GatewayModel):
     ref: str
     action: str
     owner_receipt: dict[str, Any]
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _operate_via_hub(
@@ -817,7 +817,7 @@ def _operate_via_hub(
             )
         preconditions["expected_target"] = expected_target
     try:
-        payload = runtime.v2_operate(
+        payload = runtime.operate(
             reference=target,
             action=action,
             parameters=parameters,
@@ -835,7 +835,7 @@ def _operate_via_hub(
             else "owner_failed"
         )
         raise ProtocolError(code, message) from exc
-    return OperateResult(**payload, affordances=["machine.query", "audit.receipt"])
+    return OperateResult(**payload, next_actions=["machine.query", "audit.receipt"])
 
 
 def _operate(runtime: Runtime, inp: OperateInput) -> OperateResult:
@@ -877,7 +877,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=MachineSnapshot,
         handler=_snapshot,
         resource_kinds=("machine_unit",),
-        affordances=(
+        next_actions=(
             "machine.query",
             "machine.units.list",
             "processes.list",
@@ -896,7 +896,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=MachineSection,
         handler=_query,
         resource_kinds=("machine_unit", "process"),
-        affordances=(
+        next_actions=(
             "machine.operate",
             "machine.units.get",
             "processes.get",
@@ -920,7 +920,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=UnitsListing,
         handler=_units_list,
         resource_kinds=("machine_unit",),
-        affordances=(
+        next_actions=(
             "machine.units.get",
             "machine.units.logs",
             "machine.units.operate",
@@ -941,7 +941,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=UnitDetail,
         handler=_units_get,
         resource_kinds=("machine_unit",),
-        affordances=("machine.units.logs", "machine.units.operate", "processes.get"),
+        next_actions=("machine.units.logs", "machine.units.operate", "processes.get"),
         aliases=("systemctl status", "unit status", "service status", "is it running"),
         examples=(
             Example(
@@ -959,7 +959,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=UnitLogs,
         handler=_units_logs,
         resource_kinds=("machine_unit",),
-        affordances=("machine.units.get", "machine.units.operate"),
+        next_actions=("machine.units.get", "machine.units.operate"),
         aliases=("journalctl", "logs", "journal", "why did it fail"),
         examples=(
             Example(
@@ -977,7 +977,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=PreparedAction,
         handler=_prepare,
         resource_kinds=("job", "machine_unit", "process"),
-        affordances=("machine.operate",),
+        next_actions=("machine.operate",),
         examples=(
             Example(
                 title="Prepare unit restart",
@@ -997,7 +997,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=OperateResult,
         handler=_operate,
         resource_kinds=("job", "machine_unit", "process"),
-        affordances=("machine.query", "machine.units.get", "audit.receipt"),
+        next_actions=("machine.query", "machine.units.get", "audit.receipt"),
         aliases=(
             "restart service",
             "freeze",
@@ -1060,7 +1060,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=OperateResult,
         handler=_units_operate,
         resource_kinds=("machine_unit",),
-        affordances=("machine.units.get", "machine.units.logs", "audit.receipt"),
+        next_actions=("machine.units.get", "machine.units.logs", "audit.receipt"),
         aliases=("systemctl restart", "systemctl start", "systemctl stop", "bounce"),
         supports_precondition=True,
         examples=(

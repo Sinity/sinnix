@@ -59,7 +59,7 @@ class Page(GatewayModel):
     owned: bool = Field(
         description="Opened by the gateway; the only kind that can be read, captured or operated."
     )
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _listing(runtime: Runtime, *, pages_only: bool = True) -> list[dict[str, Any]]:
@@ -84,7 +84,7 @@ def _page(item: dict[str, Any]) -> Page:
         url=str(item.get("url", "") or ""),
         type=str(item.get("type", "page") or "page"),
         owned=owned,
-        affordances=["browser.page", "browser.screenshot", "browser.operate"]
+        next_actions=["browser.page", "browser.screenshot", "browser.operate"]
         if owned
         else [],
     )
@@ -124,7 +124,7 @@ class PageListing(GatewayModel):
     workspace_ref: str = WORKSPACE_REF
     pages: list[Page]
     owned_refs: list[str]
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _pages(runtime: Runtime, inp: PagesInput) -> PageListing:
@@ -134,7 +134,7 @@ def _pages(runtime: Runtime, inp: PagesInput) -> PageListing:
     return PageListing(
         pages=pages,
         owned_refs=[p.ref for p in pages if p.owned],
-        affordances=["browser.page", "browser.operate", "browser.screenshot"],
+        next_actions=["browser.page", "browser.operate", "browser.screenshot"],
     )
 
 
@@ -199,7 +199,7 @@ class PageSnapshot(GatewayModel):
     elements: list[Element]
     links: list[Link]
     forms: list[Form]
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 class PageInput(RequestControls):
@@ -268,7 +268,7 @@ def _page_snapshot(runtime: Runtime, inp: PageInput) -> PageSnapshot:
             )
             for f in raw.get("forms", [])
         ],
-        affordances=["browser.operate", "browser.screenshot"],
+        next_actions=["browser.operate", "browser.screenshot"],
     )
 
 
@@ -289,7 +289,7 @@ class BrowserScreenshot(GatewayModel):
     artifact_ref: str
     receipt: dict[str, Any]
     capture: dict[str, Any]
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _screenshot(runtime: Runtime, inp: BrowserScreenshotInput) -> ActionResult:
@@ -313,7 +313,7 @@ def _screenshot(runtime: Runtime, inp: BrowserScreenshotInput) -> ActionResult:
             artifact_ref=artifact.ref,
             receipt=result["receipt"],
             capture=result["capture"],
-            affordances=["browser.page", "browser.operate", "artifacts.read"],
+            next_actions=["browser.page", "browser.operate", "artifacts.read"],
         ),
         blocks=blocks,
     )
@@ -487,7 +487,7 @@ class BrowserOperateResult(GatewayModel):
     page: Page | None = Field(default=None, description="Observed after the operation.")
     artifact: Artifact | None = None
     artifact_ref: str | None = None
-    affordances: list[str] = Field(default_factory=list)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 def _text(value: Any) -> Any:
@@ -560,7 +560,7 @@ def _operate(runtime: Runtime, inp: BrowserOperateInput) -> ActionResult:
                 operation="new",
                 result=created,
                 page=_observe(runtime, page_id),
-                affordances=["browser.page", "browser.operate", "browser.screenshot"],
+                next_actions=["browser.page", "browser.operate", "browser.screenshot"],
             )
         )
     page, ref = _resolve_owned(runtime, inp.target)
@@ -717,7 +717,7 @@ def _operate(runtime: Runtime, inp: BrowserOperateInput) -> ActionResult:
             page=None if isinstance(op, CloseOp) else _observe(runtime, page_id),
             artifact=artifact,
             artifact_ref=artifact.ref if artifact else None,
-            affordances=["browser.page", "browser.screenshot", "browser.operate"],
+            next_actions=["browser.page", "browser.screenshot", "browser.operate"],
         ),
         blocks=blocks,
     )
@@ -735,7 +735,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=PageListing,
         handler=_pages,
         resource_kinds=("browser_page", "browser_workspace"),
-        affordances=("browser.page", "browser.operate", "browser.screenshot"),
+        next_actions=("browser.page", "browser.operate", "browser.screenshot"),
         aliases=("tabs", "open pages", "list tabs", "what is open in chrome"),
         examples=(Example(title="List pages", input={}),),
         **_READ,
@@ -748,7 +748,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=PageSnapshot,
         handler=_page_snapshot,
         resource_kinds=("browser_page",),
-        affordances=("browser.operate", "browser.screenshot"),
+        next_actions=("browser.operate", "browser.screenshot"),
         aliases=(
             "page text",
             "read page",
@@ -769,7 +769,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=BrowserScreenshot,
         handler=_screenshot,
         resource_kinds=("browser_page", "artifact"),
-        affordances=("browser.page", "browser.operate", "artifacts.read"),
+        next_actions=("browser.page", "browser.operate", "artifacts.read"),
         aliases=("page screenshot", "capture page", "picture of the page"),
         examples=(
             Example(title="Full-page PNG", input={**_TARGET, "full_page": True}),
@@ -785,7 +785,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=BrowserOperateResult,
         handler=_operate,
         resource_kinds=("browser_page", "browser_workspace"),
-        affordances=("browser.page", "browser.screenshot", "browser.pages"),
+        next_actions=("browser.page", "browser.screenshot", "browser.pages"),
         aliases=(
             "open url",
             "click link",
