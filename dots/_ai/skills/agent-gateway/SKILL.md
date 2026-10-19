@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 00859495e03ea04323acc855a75a5b0b7b2d802ad825d4cc2db5d1c8178acca1 -->
+<!-- gateway-catalog-sha256: 00ff37cb6093e9f0f1bd8979de8f367fc12fcfedddb3d45f2e7aeb476ba512ef -->
 
 # Agent Gateway
 
@@ -17,7 +17,7 @@ Every gateway action is one MCP tool named after the action; its input schema in
 - CLI: `sinnix-agent-gateway call <action> --input '{...}'` or `--set key=value` (values parse as JSON); `--principal` selects authority. `sinnix-agent-gateway catalog <action> --schema` prints the live schemas, `--example` the examples, `catalog --complete <prefix>` lists names.
 - Discovery: `gateway.catalog` with a plain-words `query` finds actions, resources and brokered MCP tools; `gateway.status` reports contract hashes and route availability.
 
-Effectful actions (families change, operate, run) require `idempotency_key`. Confirmed responses replay unchanged. Pending calls refuse concurrent execution; interrupted calls become indeterminate and never retry their effects automatically. `operations.run` and `shell.run` reconcile through durable agentctl launch identities; reducer-backed machine actions and process stop reconcile only exact confirmed owner receipts. Other interrupted mutations remain indeterminate. Preconditions are owner-specific checks, best effort unless the owner explicitly guarantees atomic comparison and mutation.
+Effectful actions (families change, operate, run) require `idempotency_key`. Confirmed responses replay unchanged. Pending calls refuse concurrent execution; interrupted calls become indeterminate and never retry their effects automatically. `operations.run` and `shell.run` reconcile through durable agentctl launch identities; hub-backed machine actions and process stop reconcile only exact confirmed owner receipts. Other interrupted mutations remain indeterminate. Preconditions are owner-specific checks, best effort unless the owner explicitly guarantees atomic comparison and mutation.
 
 Run ordinary commands through `shell.run` and declared jobs through `operations.run`. `terminals.open` and `terminals.run` operate graphical Kitty windows; use them when the task needs an interactive terminal. If a checkout is unregistered, register its project and environment before running its jobs.
 
@@ -75,7 +75,7 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 - `terminals.scrollback` — The last N lines of a terminal's history, screen, or last command output.
 - `terminals.processes` — Foreground processes of one terminal and whether its shell is at a prompt.
 - `browser.screenshot` — Screenshot a gateway-owned page through CDP; the image rides in an image block and is retained as an artifact.
-- `machine.query` — Read one sinnix-observe section with cursor paging, or the ops-reducer revision (operation=actions).
+- `machine.query` — Read one sinnix-observe section with cursor paging, or the hub-server revision (operation=actions).
 - `machine.units.list` — List systemd units of one manager with load/active/sub state and a canonical ref each.
 - `machine.units.logs` — Journal entries for one unit (journalctl -o json), bounded by line count and bytes.
 - `processes.list` — List live processes filtered by name, pid, unit, cgroup or user, with a canonical ref each.
@@ -171,9 +171,9 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 - `terminals.focus` — Focus one kitty window.
 - `terminals.open` — Open a graphical Kitty window, split or tab for an interactive terminal task. For ordinary command execution use shell.run.
 - `browser.operate` — Operator tabs are never accepted as targets, even when a locator matches one. Element targets take a snapshot ref or a CSS selector.
-- `machine.operate` — expected_target must match the target identity returned by machine.prepare; the reducer receipt is verified against the submitted action and target.
-- `machine.units.operate` — Start, stop or restart one unit through the ops reducer (reload and wait are not reducer actions).
-- `processes.signal` — The reducer path is the attested one and needs expected_target; the direct path is receipted by the gateway audit chain only.
+- `machine.operate` — expected_target must match the target identity returned by machine.prepare; the hub server receipt is verified against the submitted action and target.
+- `machine.units.operate` — Start, stop or restart one unit through the hub server (reload and wait are not hub actions).
+- `processes.signal` — The hub server path is the attested one and needs expected_target; the direct path is receipted by the gateway audit chain only.
 
 ### run
 
@@ -187,4 +187,4 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 
 `sinnix-agent-gateway-generate --reference` prints every schema and example.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `00859495e03ea04323acc855a75a5b0b7b2d802ad825d4cc2db5d1c8178acca1`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `00ff37cb6093e9f0f1bd8979de8f367fc12fcfedddb3d45f2e7aeb476ba512ef`.

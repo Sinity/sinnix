@@ -48,52 +48,52 @@ class MachineActionService:
     ) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"} if body is not None else {}
         try:
-            connection = self.connection_factory(str(self.config.ops_socket_path))
+            connection = self.connection_factory(str(self.config.hub_socket_path))
             connection.request(method, path, body, headers)
             response = connection.getresponse()
             payload_bytes = response.read(self.config.max_result_bytes + 1)
         except (OSError, http.client.HTTPException) as exc:
-            raise MachineActionError("ops reducer endpoint is unavailable") from exc
+            raise MachineActionError("hub server endpoint is unavailable") from exc
         finally:
             try:
                 connection.close()
             except (OSError, UnboundLocalError):
                 pass
         if len(payload_bytes) > self.config.max_result_bytes:
-            raise MachineActionError("ops reducer response exceeded response bound")
+            raise MachineActionError("hub server response exceeded response bound")
         try:
             payload = json.loads(payload_bytes)
         except json.JSONDecodeError as exc:
             raise MachineActionError(
-                "ops reducer returned a malformed response"
+                "hub server returned a malformed response"
             ) from exc
         if response.status == 404 and missing_ok:
             return {}
         if response.status >= 400:
             message = payload.get("error") if isinstance(payload, dict) else None
             if isinstance(message, str):
-                raise MachineActionError(f"ops reducer rejected request: {message}")
-            raise MachineActionError("ops reducer rejected request")
+                raise MachineActionError(f"hub server rejected request: {message}")
+            raise MachineActionError("hub server rejected request")
         if not isinstance(payload, dict):
-            raise MachineActionError("ops reducer returned a malformed response")
+            raise MachineActionError("hub server returned a malformed response")
         return payload
 
     def snapshot(self) -> dict[str, Any]:
-        """Read current reducer observation status."""
+        """Read current hub observation status."""
         self.principal.require(Permission.MACHINE_READ)
         payload = self._request("GET", "/v1/revision")
         if (
-            payload.get("schema") != "sinnix-ops-v1"
+            payload.get("schema") != "sinnix-hub-v1"
             or isinstance(payload.get("sequence"), bool)
             or not isinstance(payload.get("sequence"), int)
             or payload["sequence"] < 0
             or not isinstance(payload.get("observed_at"), str)
         ):
-            raise MachineActionError("ops reducer returned a malformed snapshot")
+            raise MachineActionError("hub server returned a malformed snapshot")
         return {
             "available": True,
             "operation": "actions",
-            "owner": "ops-reducer",
+            "owner": "hub-server",
             "schema": payload["schema"],
             "observed_at": payload["observed_at"],
             "revision": payload["sequence"],
@@ -122,7 +122,7 @@ class MachineActionService:
             or not isinstance(payload.get("observed_at"), str)
         ):
             raise MachineActionError(
-                "ops reducer returned malformed action preparation"
+                "hub server returned malformed action preparation"
             )
         return payload
 

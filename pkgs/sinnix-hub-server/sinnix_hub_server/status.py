@@ -1,7 +1,7 @@
 """`sinnix-hub-server status` -- one-call system status for agents.
 
 Thin, read-only composition over sources that are already authoritative
-elsewhere: the reducer's own /v1/snapshot (which embeds the runtime
+elsewhere: the hub server's own /v1/snapshot (which embeds the runtime
 inventory and the live systemd unit list), /v1/health/lanes (the sentinel
 sweep's believed status per key), and this repo's Beads workspace, resolved
 from the caller's CWD. No new
@@ -44,7 +44,7 @@ def default_static_inventory_path() -> Path:
 
 
 class UnixConnection(http.client.HTTPConnection):
-    """HTTP over the reducer's Unix socket -- same shape as cli.py's, kept
+    """HTTP over the hub server's Unix socket -- same shape as cli.py's, kept
     local so this module has no import-time dependency on the CLI module."""
 
     def __init__(self, path: str, timeout: float = SOCKET_TIMEOUT) -> None:
@@ -62,8 +62,8 @@ class UnixConnection(http.client.HTTPConnection):
 def fetch_socket_json(
     socket_path: Path, route: str, timeout: float = SOCKET_TIMEOUT
 ) -> dict[str, Any] | None:
-    """GET `route` over the reducer's socket. None on any failure: the
-    reducer is not running, the socket is stale, the response is not JSON --
+    """GET `route` over the hub server's socket. None on any failure: the
+    hub server is not running, the socket is stale, the response is not JSON --
     all degrade to "unavailable" rather than raising."""
     connection: UnixConnection | None = None
     try:
@@ -173,7 +173,7 @@ def acknowledged_outages(inventory: dict[str, Any] | None) -> list[dict[str, Any
 
 
 def capture_freshness(lanes: dict[str, Any] | None) -> dict[str, Any]:
-    """Counts plus the non-healthy list from the reducer's merged health state
+    """Counts plus the non-healthy list from the hub server's merged health state
     (capture/payload/publisher/service/socket/mount keys alike)."""
     if not isinstance(lanes, dict) or not isinstance(lanes.get("keys"), dict):
         return {"available": False}
@@ -365,7 +365,7 @@ def acknowledged_only_report(
 ) -> str:
     """The fast path the folded session-start hook actually takes: a direct
     static-file read, same as the shell hook it replaces, with the socket as
-    fallback only -- so a healthy host pays no reducer round trip for
+    fallback only -- so a healthy host pays no hub server round trip for
     something a `jq` one-liner used to answer alone."""
     inventory = read_static(static_inventory_path)
     if inventory is None:
@@ -379,7 +379,7 @@ def default_socket_path() -> Path:
     return (
         Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"))
         / "sinnix"
-        / "ops.sock"
+        / "hub.sock"
     )
 
 

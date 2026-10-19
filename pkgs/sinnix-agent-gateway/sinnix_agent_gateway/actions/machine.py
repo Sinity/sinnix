@@ -1,4 +1,4 @@
-"""Machine actions: sinnix-observe sections, systemd units, ops-reducer operations."""
+"""Machine actions: sinnix-observe sections, systemd units, hub-server operations."""
 
 from __future__ import annotations
 
@@ -150,7 +150,7 @@ def _failed(result: ExecutionResult, what: str) -> ProtocolError:
 
 class QueryInput(RequestControls):
     operation: SectionOperation = Field(
-        description="One sinnix-observe section, or actions for the ops-reducer revision."
+        description="One sinnix-observe section, or actions for the hub-server revision."
     )
     cursor: int = Field(
         default=0,
@@ -189,7 +189,7 @@ def _ops_revision(runtime: Runtime) -> dict[str, Any]:
         return {
             "available": False,
             "operation": "actions",
-            "owner": "ops-reducer",
+            "owner": "hub-server",
             "failure_class": "owner_unavailable",
             "reason": str(exc),
         }
@@ -352,7 +352,7 @@ def _snapshot(runtime: Runtime, inp: SnapshotInput) -> MachineSnapshot:
     ops = _ops_revision(runtime)
     ops_section = SnapshotSection(
         available=bool(ops.get("available")),
-        source="ops-reducer",
+        source="hub-server",
         data=(
             {k: ops.get(k) for k in ("revision", "observed_at", "degradation")}
             if ops.get("available")
@@ -786,7 +786,7 @@ class OperateInput(MutationControls):
         description="Canonical job, unit or process ref.",
     )
     request: MachineRequest = Field(
-        discriminator="action", description="The reducer action and its parameters."
+        discriminator="action", description="The hub server action and its parameters."
     )
     expected_target: dict[str, Any] | None = Field(
         default=None,
@@ -801,7 +801,7 @@ class OperateResult(GatewayModel):
     affordances: list[str] = Field(default_factory=list)
 
 
-def _operate_via_reducer(
+def _operate_via_hub(
     runtime: Runtime,
     inp: MutationControls,
     *,
@@ -846,7 +846,7 @@ def _operate_via_reducer(
 
 
 def _operate(runtime: Runtime, inp: OperateInput) -> OperateResult:
-    return _operate_via_reducer(
+    return _operate_via_hub(
         runtime,
         inp,
         target=inp.target,
@@ -864,7 +864,7 @@ class UnitOperateInput(MutationControls):
 
 def _units_operate(runtime: Runtime, inp: UnitOperateInput) -> OperateResult:
     _unit, _scope, ref = inp.target.resolve()
-    return _operate_via_reducer(
+    return _operate_via_hub(
         runtime,
         inp,
         target=ref,
@@ -899,7 +899,7 @@ ACTIONS: tuple[Action, ...] = (
         name="machine.query",
         family=VerbFamily.QUERY,
         owner="machine",
-        summary="Read one sinnix-observe section with cursor paging, or the ops-reducer revision (operation=actions).",
+        summary="Read one sinnix-observe section with cursor paging, or the hub-server revision (operation=actions).",
         Input=QueryInput,
         Output=MachineSection,
         handler=_query,
@@ -983,7 +983,7 @@ ACTIONS: tuple[Action, ...] = (
     Action(
         name="machine.prepare",
         family=VerbFamily.GET,
-        owner="ops-reducer",
+        owner="hub-server",
         summary="Read the selected target identity and action preconditions without changing it.",
         Input=PrepareInput,
         Output=PreparedAction,
@@ -1004,8 +1004,8 @@ ACTIONS: tuple[Action, ...] = (
     Action(
         name="machine.operate",
         family=VerbFamily.OPERATE,
-        owner="ops-reducer",
-        summary="Submit one target-checked ops-reducer action against a canonical job, unit or process ref.",
+        owner="hub-server",
+        summary="Submit one target-checked hub-server action against a canonical job, unit or process ref.",
         Input=OperateInput,
         Output=OperateResult,
         handler=_operate,
@@ -1022,7 +1022,7 @@ ACTIONS: tuple[Action, ...] = (
         ),
         supports_precondition=True,
         receipt_policy="owner",
-        documentation="expected_target must match the target identity returned by machine.prepare; the reducer receipt is verified against the submitted action and target.",
+        documentation="expected_target must match the target identity returned by machine.prepare; the hub server receipt is verified against the submitted action and target.",
         examples=(
             Example(
                 title="Restart a unit",
@@ -1069,8 +1069,8 @@ ACTIONS: tuple[Action, ...] = (
     Action(
         name="machine.units.operate",
         family=VerbFamily.OPERATE,
-        owner="ops-reducer",
-        summary="Start, stop or restart one unit through the ops reducer (reload and wait are not reducer actions).",
+        owner="hub-server",
+        summary="Start, stop or restart one unit through the hub server (reload and wait are not hub actions).",
         Input=UnitOperateInput,
         Output=OperateResult,
         handler=_units_operate,

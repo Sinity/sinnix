@@ -273,7 +273,7 @@ mkServiceModule {
           # this list is only the things a link is the *only* way to reach.
           links = [
             {
-              label = "Ops snapshot (JSON)";
+              label = "Hub snapshot (JSON)";
               href = "/ops/v1/snapshot";
               note = "the hub server's current-state document";
             }
@@ -291,7 +291,7 @@ mkServiceModule {
       # systemd expands %t for the units; Caddy expands {$VAR} in its own
       # config text, so the units hand the same directory to both and neither
       # side needs the uid at evaluation time.
-      opsSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/ops.sock";
+      hubSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/hub.sock";
       phoneSocket = "{$SINNIX_HUB_RUNTIME}/sinnix/phone-dispatcher.sock";
 
       accessLog = ''
@@ -368,7 +368,7 @@ mkServiceModule {
               "/v1/actions/prepare"
               "/v1/health/failure"
             ]}
-            reverse_proxy unix/${opsSocket}
+            reverse_proxy unix/${hubSocket}
           }
 
           # Not handle_path: the hub server routes on `/feedback` itself, and
@@ -377,7 +377,7 @@ mkServiceModule {
           handle /feedback* {
             ${browserGuard "feedback" true cfg.port}
             ${jsonGuard "feedback" [ "/feedback" ]}
-            reverse_proxy unix/${opsSocket}
+            reverse_proxy unix/${hubSocket}
           }
 
           # The phone's native live plane. The receiver rejects browser
@@ -420,7 +420,7 @@ mkServiceModule {
               "/v1/actions/prepare"
               "/v1/health/failure"
             ]}
-            reverse_proxy unix/${opsSocket}
+            reverse_proxy unix/${hubSocket}
           }
           }
         }
@@ -448,7 +448,7 @@ mkServiceModule {
             handle /feedback* {
               ${browserGuard "reportFeedback" true cfg.port}
               ${jsonGuard "reportFeedback" [ "/feedback" ]}
-              reverse_proxy unix/${opsSocket}
+              reverse_proxy unix/${hubSocket}
             }
             handle_path /reports/* {
               root * ${cfg.reportsDir}

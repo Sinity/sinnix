@@ -98,7 +98,7 @@ end = [
   "sinity/sinnix-bar:capture-strip",
   "sinity/sinnix-bar:capabilities",
   "sinity/sinnix-bar:reading-stack",
-  "sinity/sinnix-ops:capsule",
+  "sinity/sinnix-hub:capsule",
   "sysmon",
 ]
 
@@ -147,7 +147,7 @@ show_actions = true
 show_app_name = true
 background_opacity = 0.96
 
-[plugin_settings."sinity/sinnix-ops"]
+[plugin_settings."sinity/sinnix-hub"]
 now_placement = "floating"
 now_position = "center"
 now_open_near_click = false

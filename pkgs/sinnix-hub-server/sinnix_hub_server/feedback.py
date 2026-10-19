@@ -10,7 +10,7 @@ Deliberately minimal, and each omission is a decision carried over intact:
   * no database -- a JSONL file per UTC day is grep-able, tail-able, and
     survives every failure mode a database introduces;
   * no auth of its own -- the tailnet is the security boundary, same as the
-    rest of the hub, and the reducer's socket is the operator's;
+    rest of the hub, and the hub server's socket is the operator's;
   * no read endpoint on the spool itself -- agents read the annotation spool
     from the filesystem. Serving arbitrary posted payloads back would turn a
     write-only sink into an exfiltration surface for the personal analysis

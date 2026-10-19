@@ -86,7 +86,7 @@ def runtime(
         state_dir=tmp_path / "state",
         projects={},
         max_result_bytes=max_result_bytes,
-        ops_socket_path=tmp_path / "ops.sock",
+        hub_socket_path=tmp_path / "hub.sock",
         mcp_broker_servers={
             "fixture": {
                 "description": "Fixture",

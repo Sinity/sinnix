@@ -339,7 +339,7 @@ class NormalizedEventService:
                     event = self._event(
                         event_id=str(row.get("event_id") or f"offset:{start}"),
                         kind="runtime_transition",
-                        source="ops-reducer.transitions",
+                        source="hub-server.transitions",
                         source_revision=revision,
                         data=row,
                         exact=row.get("schema") == "sinnix-health-transition-v1",
@@ -421,7 +421,7 @@ class NormalizedEventService:
                 owner = payload.get("owner") if isinstance(payload, Mapping) else None
                 kind = (
                     "ops_receipt"
-                    if owner == "ops-reducer"
+                    if owner == "hub-server"
                     or row.get("operation") == "machine.operate"
                     else "gateway_receipt"
                 )
@@ -617,7 +617,7 @@ class NormalizedEventService:
                 limit - len(events),
                 lambda event: self._accept(events, sources, event, limit),
             )
-            sources["ops-reducer.transitions"] = runtime_source
+            sources["hub-server.transitions"] = runtime_source
             truncated = truncated or runtime_more
 
         # A busy source can fill any page. Start the next page at the next

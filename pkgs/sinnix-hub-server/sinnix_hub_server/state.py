@@ -1,11 +1,11 @@
-"""One declared table of the reducer's persistence stores.
+"""One declared table of the hub server's persistence stores.
 
 The stores use three writer contracts:
 
   * "atomic-doc" -- a whole-file overwrite, or a locked read-modify-write, via
     ``sinnix_lib.atomic_json``: no history, the latest write is the whole
     truth. The status snapshot (overwritten every ``refresh()``, decided to
-    stay that way -- see ``reducer.Reducer.refresh``), the reducer's own
+    stay that way -- see ``snapshot.SnapshotBuilder.refresh``), the hub server's own
     sequence state, the auth token, and health.py's
     per-key confirm-2 state document all take this shape.
   * "ledger" -- append-only JSONL via ``sinnix_lib.ledger``, read back into an
@@ -45,12 +45,12 @@ class Store:
 
 @dataclass(frozen=True)
 class StateLayer:
-    """The reducer-instance-parameterized stores, resolved once from the
+    """The per-instance stores, resolved once from the
     CLI's ``--runtime-dir``/``--state-dir``/``--feedback-dir`` flags."""
 
     snapshot_path: Path
     token_path: Path
-    reducer_state_path: Path
+    sequence_path: Path
     receipts_path: Path
     feedback_spool_dir: Path
 
@@ -62,14 +62,14 @@ class StateLayer:
                 "snapshot",
                 self.snapshot_path,
                 "atomic-doc",
-                "reducer.Reducer.refresh",
+                "snapshot.SnapshotBuilder.refresh",
             ),
             Store("token", self.token_path, "atomic-doc", "server.ensure_token"),
             Store(
-                "reducer_state",
-                self.reducer_state_path,
+                "sequence",
+                self.sequence_path,
                 "atomic-doc",
-                "reducer.Reducer._save_sequence",
+                "snapshot.SnapshotBuilder._save_sequence",
             ),
             Store(
                 "action_receipts",
@@ -103,8 +103,8 @@ class StateLayer:
     ) -> "StateLayer":
         return cls(
             snapshot_path=runtime_root / "status.json",
-            token_path=runtime_root / "ops.token",
-            reducer_state_path=state_dir / "reducer.json",
+            token_path=runtime_root / "hub.token",
+            sequence_path=state_dir / "sequence.json",
             receipts_path=state_dir / "action-receipts.jsonl",
             feedback_spool_dir=feedback_dir,
         )

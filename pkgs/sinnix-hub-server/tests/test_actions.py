@@ -18,7 +18,7 @@ from sinnix_hub_server.actions import (
     validate_request,
 )
 from sinnix_hub_server.agent_jobs import AgentCtlError
-from sinnix_hub_server.reducer import Reducer
+from sinnix_hub_server.snapshot import SnapshotBuilder
 
 
 def receipt_service(root: Path) -> ActionService:
@@ -252,13 +252,13 @@ def test_action_fixtures_are_attested_and_idempotent_across_restart(
         "path": "/realm/worktree/sinnix-feature-packet-sinnix-1",
     }
     state = {"jobs": [job]}
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json",
         tmp_path / "token",
         lambda: state,
-        tmp_path / "reducer.json",
+        tmp_path / "sequence.json",
     )
-    reducer.refresh()
+    builder.refresh()
     calls: list[str] = []
 
     def adapter(value, resolved):
@@ -267,7 +267,7 @@ def test_action_fixtures_are_attested_and_idempotent_across_restart(
 
     receipts = tmp_path / "receipts.jsonl"
     actions = ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         inventory_path,
         receipts,
         adapter=adapter,
@@ -275,7 +275,7 @@ def test_action_fixtures_are_attested_and_idempotent_across_restart(
         unit_state_prober=fake_unit_state_prober,
     )
     first = actions.execute(request("interrupt", {"job_id": "job-1"}))
-    assert first["schema"] == "sinnix-ops-action-v1"
+    assert first["schema"] == "sinnix-hub-action-v1"
     assert actions.execute(request("interrupt", {"job_id": "job-1"})) == first
     assert calls == ["interrupt"]
     for action, target, key in [
@@ -291,7 +291,7 @@ def test_action_fixtures_are_attested_and_idempotent_across_restart(
             == "fixture"
         )
     resumed = ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         inventory_path,
         receipts,
         adapter=adapter,
@@ -305,12 +305,12 @@ def test_action_rejects_unknown_pid_stale_revision_and_unsafe_unit(
 ) -> None:
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
     )
-    reducer.refresh()
+    builder.refresh()
     actions = ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         inventory_path,
         tmp_path / "receipts.jsonl",
         adapter=lambda *_: {},
@@ -352,13 +352,13 @@ def test_action_rejects_unknown_pid_stale_revision_and_unsafe_unit(
 def test_policy_properties_and_rebuild_override_are_enumerated(tmp_path: Path) -> None:
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
     )
-    reducer.refresh()
+    builder.refresh()
     calls = []
     actions = ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         inventory_path,
         tmp_path / "receipts.jsonl",
         adapter=lambda value, _resolved: calls.append(value) or {"status": "accepted"},
@@ -402,13 +402,13 @@ def test_park_requires_a_bounded_deadline(tmp_path: Path) -> None:
 
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
     )
-    reducer.refresh()
+    builder.refresh()
     calls: list[dict] = []
     actions = ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         inventory_path,
         tmp_path / "receipts.jsonl",
         adapter=lambda value, _resolved: calls.append(value) or {"status": "fixture"},
@@ -425,12 +425,12 @@ def test_park_requires_a_bounded_deadline(tmp_path: Path) -> None:
 def test_valid_rejected_action_leaves_a_receipt(tmp_path: Path) -> None:
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
     )
-    reducer.refresh()
+    builder.refresh()
     actions = ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         inventory_path,
         tmp_path / "receipts.jsonl",
         adapter=lambda *_: {},
@@ -460,13 +460,13 @@ def test_interrupt_uses_agentctl_and_records_its_cancellation_truth(
         "exit_code": None,
         "path": "/realm/worktree/sinnix-feature-packet-sinnix-1",
     }
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
     )
-    reducer.refresh()
+    builder.refresh()
     agent_jobs = FakeAgentJobs([job])
     actions = ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         inventory_path,
         tmp_path / "receipts.jsonl",
         agent_jobs=agent_jobs,
@@ -481,7 +481,7 @@ def test_interrupt_uses_agentctl_and_records_its_cancellation_truth(
     # A terminal task has nothing to interrupt; the refusal is a receipt too.
     with pytest.raises(ActionError, match="already terminal"):
         ActionService(
-            reducer.snapshot,
+            builder.snapshot,
             inventory_path,
             tmp_path / "other-receipts.jsonl",
             agent_jobs=FakeAgentJobs([job | {"phase": "succeeded", "terminal": True}]),
@@ -492,7 +492,7 @@ def test_interrupt_uses_agentctl_and_records_its_cancellation_truth(
 def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_system(
     tmp_path: Path,
 ) -> None:
-    """sinnix-rd69: a unit-action receipt used to embed the ENTIRE reducer
+    """sinnix-rd69: a unit-action receipt used to embed the ENTIRE hub
     snapshot (every agent-gateway job's full lifecycle history, per-process
     chrome IO, blocked tasks) twice over, in previous_state and
     resulting_state, because both copied `snapshot["state"]` wholesale. A
@@ -524,18 +524,18 @@ def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_system(
         "agent_gateway": {"jobs": bloat_jobs},
         "chrome": {"processes": [{"pid": i, "io": "y" * 500} for i in range(50)]},
     }
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json",
         tmp_path / "token",
         lambda: state,
-        tmp_path / "reducer.json",
+        tmp_path / "sequence.json",
     )
-    reducer.refresh()
-    assert len(json.dumps(reducer.snapshot()["state"])) > 20_000, (
+    builder.refresh()
+    assert len(json.dumps(builder.snapshot()["state"])) > 20_000, (
         "fixture must reproduce the system-sized snapshot the bug embedded"
     )
     actions = ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         inventory_path,
         tmp_path / "receipts.jsonl",
         adapter=lambda *_: {"status": "accepted"},
@@ -546,11 +546,11 @@ def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_system(
     assert len(serialized) < 4096, (
         f"receipt grew to {len(serialized)} bytes -- previous_state/"
         "resulting_state must stay scoped to the resolved target, not the "
-        "whole reducer snapshot"
+        "whole hub snapshot"
     )
     # The full pre-action snapshot is not lost -- its sequence number stays
     # on the receipt so it is reachable via the snapshot store separately.
-    assert receipt["preconditions"]["revision"] == reducer.sequence
+    assert receipt["preconditions"]["revision"] == builder.sequence
 
 
 def test_receipts_append_prior_lines_never_rewritten(tmp_path: Path) -> None:
@@ -561,12 +561,12 @@ def test_receipts_append_prior_lines_never_rewritten(tmp_path: Path) -> None:
     first write."""
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
     )
-    reducer.refresh()
+    builder.refresh()
     actions = ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         inventory_path,
         tmp_path / "receipts.jsonl",
         adapter=lambda *_: {"status": "accepted"},
@@ -595,13 +595,13 @@ def test_receipts_replay_after_restart_reads_the_ledger(tmp_path: Path) -> None:
     fails the `resumed.lookup` assert."""
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
     )
-    reducer.refresh()
+    builder.refresh()
     receipts_path = tmp_path / "receipts.jsonl"
     original = ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         inventory_path,
         receipts_path,
         adapter=lambda *_: {"status": "accepted"},
@@ -610,7 +610,7 @@ def test_receipts_replay_after_restart_reads_the_ledger(tmp_path: Path) -> None:
     written = original.execute(request("restart", {"unit": "safe"}, key="k1"))
 
     resumed = ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         inventory_path,
         receipts_path,
         adapter=lambda *_: {"status": "accepted"},
@@ -676,10 +676,10 @@ def make_process_actions(
 ) -> ActionService:
     inventory_path = tmp_path / "inventory.json"
     inventory_writer(inventory_path)
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
     )
-    reducer.refresh()
+    builder.refresh()
     kwargs: dict = {
         "adapter": None,
         "unit_state_prober": fake_unit_state_prober,
@@ -694,7 +694,7 @@ def make_process_actions(
     if clock is not None:
         kwargs["clock"] = clock
     return ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         inventory_path,
         tmp_path / "receipts.jsonl",
         **kwargs,
@@ -805,11 +805,11 @@ def test_process_stop_admission_is_by_cgroup_membership_not_name(
     here) admits too, an unrelated slice (gpu-runtime, present in the
     inventory but never marked sacrificial) is refused, a process with no
     slice at all (a PID 1 direct child, e.g. init.scope) is refused, and the
-    reducer's own pid is refused regardless of which slice it is in.
+    hub server's own pid is refused regardless of which slice it is in.
 
     Mutation: admit by process/command name instead of cgroup and a process
     named `rg` outside every admitted slice would be accepted; drop the
-    self-pid check and the reducer could target itself.
+    self-pid check and the hub server could target itself.
     """
     slice_by_pid = {
         401: "agent.slice",
@@ -817,7 +817,7 @@ def test_process_stop_admission_is_by_cgroup_membership_not_name(
         403: "background.slice",  # sacrificial per inventory_with_sacrificial_slice
         404: "gpu-runtime.slice",  # in the inventory, never marked sacrificial
         405: "",  # PID 1 direct child: no slice segment at all
-        406: "agent.slice",  # would admit, but this pid IS the reducer itself
+        406: "agent.slice",  # would admit, but this pid IS the hub server itself
     }
 
     def prober(pid: int):
@@ -994,12 +994,12 @@ def test_process_stop_kills_a_real_process(tmp_path: Path) -> None:
 
         inventory_path = tmp_path / "inventory.json"
         inventory_with_sacrificial_slice(inventory_path)
-        reducer = Reducer(
+        builder = SnapshotBuilder(
             tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
         )
-        reducer.refresh()
+        builder.refresh()
         actions = ActionService(
-            reducer.snapshot,
+            builder.snapshot,
             inventory_path,
             tmp_path / "receipts.jsonl",
             unit_state_prober=fake_unit_state_prober,
@@ -1027,11 +1027,11 @@ def test_process_stop_kills_a_real_process(tmp_path: Path) -> None:
 def test_unrelated_refresh_does_not_invalidate_observed_target(tmp_path):
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
-    reducer = Reducer(tmp_path / "status.json", tmp_path / "token", lambda: {})
-    reducer.refresh()
+    builder = SnapshotBuilder(tmp_path / "status.json", tmp_path / "token", lambda: {})
+    builder.refresh()
     calls = []
     actions = ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         inventory_path,
         tmp_path / "receipts.jsonl",
         adapter=lambda *_: calls.append("restart") or {},
@@ -1040,7 +1040,7 @@ def test_unrelated_refresh_does_not_invalidate_observed_target(tmp_path):
     prepared = actions.prepare(
         {"action": "restart", "target": {"unit": "safe"}, "parameters": {}}
     )
-    reducer.refresh()
+    builder.refresh()
     receipt = actions.execute(
         {key: value for key, value in prepared.items() if key != "observed_at"}
         | {"idempotency_key": "refresh", "operator_reason": "fixture"}
@@ -1292,10 +1292,10 @@ def test_policy_adapter_changes_are_runtime_only(
     data = json.loads(inventory_path.read_text())
     data["surfaces"]["safe"]["manager"] = manager
     inventory_path.write_text(json.dumps(data))
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
     )
-    reducer.refresh()
+    builder.refresh()
     commands = []
 
     def run(command, **kwargs):
@@ -1304,7 +1304,7 @@ def test_policy_adapter_changes_are_runtime_only(
 
     monkeypatch.setattr(subprocess, "run", run)
     actions = ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         inventory_path,
         tmp_path / "receipts.jsonl",
         unit_state_prober=fake_unit_state_prober,

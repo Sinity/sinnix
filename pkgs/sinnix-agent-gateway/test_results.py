@@ -468,7 +468,7 @@ def test_v2_operate_maps_canonical_targets_and_validates_owner_receipts(
     ) -> dict[str, object]:
         calls.append({"target": received_target})
         return {
-            "schema": "sinnix-ops-action-v1",
+            "schema": "sinnix-hub-action-v1",
             "receipt_id": "owner-receipt",
             "idempotency_key": idempotency_key,
             "action": action,
@@ -517,7 +517,7 @@ def test_v2_operate_rejects_mismatched_owner_receipt(tmp_path) -> None:
     runtime = Runtime.create(config(tmp_path), "operator")
 
     runtime.machine_actions.execute = lambda *_args: {
-        "schema": "sinnix-ops-action-v1",
+        "schema": "sinnix-hub-action-v1",
         "receipt_id": "owner-receipt",
         "idempotency_key": "wrong-key",
         "action": "restart",

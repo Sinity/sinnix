@@ -1,4 +1,4 @@
-"""Typed machine actions: observe sections, systemd units, reducer operations."""
+"""Typed machine actions: observe sections, systemd units, hub operations."""
 
 from __future__ import annotations
 
@@ -175,11 +175,11 @@ def make_runtime(tmp_path: Path, principal: str = "operator") -> Runtime:
         journalctl_command=str(fake_journalctl(tmp_path)),
         observe_command=str(fake_observe(tmp_path)),
         runtime_transitions=transitions,
-        ops_socket_path=tmp_path / "ops.sock",
+        hub_socket_path=tmp_path / "hub.sock",
     )
     runtime = Runtime.create(cfg, principal)
     receipt = {
-        "schema": "sinnix-ops-action-v1",
+        "schema": "sinnix-hub-action-v1",
         "receipt_id": "owner-receipt",
         "idempotency_key": "restart-alpha",
         "action": "restart",
@@ -198,7 +198,7 @@ def make_runtime(tmp_path: Path, principal: str = "operator") -> Runtime:
             "/v1/revision": FakeResponse(
                 200,
                 {
-                    "schema": "sinnix-ops-v1",
+                    "schema": "sinnix-hub-v1",
                     "sequence": 17,
                     "observed_at": "2026-08-25T00:00:00Z",
                     "degradation": None,
@@ -281,8 +281,8 @@ def test_query_sections_and_actions_revision(tmp_path: Path) -> None:
     assert units["available"] and units["total"] == 3 and units["next_cursor"] == 2
     assert units["rows"][0]["unit"] == "beta.service"
     revision = call(runtime, "machine.query", {"operation": "actions"})["data"]
-    # The ops reducer counter retains its declared integer type.
-    assert revision["revision"] == 17 and revision["schema_name"] == "sinnix-ops-v1"
+    # The hub server counter retains its declared integer type.
+    assert revision["revision"] == 17 and revision["schema_name"] == "sinnix-hub-v1"
     bad = call(runtime, "machine.query", {"operation": "actions", "cursor": 3})
     assert bad["error"]["code"] == "invalid_request"
 
@@ -300,7 +300,7 @@ def test_snapshot_composes_sections_with_availability(tmp_path: Path) -> None:
     assert data["ops_revision"]["data"]["revision"] == 17
 
 
-def test_operate_and_units_operate_go_through_reducer(tmp_path: Path) -> None:
+def test_operate_and_units_operate_go_through_hub(tmp_path: Path) -> None:
     runtime = make_runtime(tmp_path)
     result = call(
         runtime,

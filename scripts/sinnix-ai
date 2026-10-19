@@ -16,7 +16,7 @@ PIN_PREFIX="sinnix-ai-pin-"
 DEFAULT_PIN_DURATION="2h"
 
 INVENTORY="${SINNIX_RUNTIME_INVENTORY_FILE:-/etc/sinnix/runtime-inventory.json}"
-OPS_SOCKET="${XDG_RUNTIME_DIR:-/run/user/1000}/sinnix/ops.sock"
+HUB_SOCKET="${XDG_RUNTIME_DIR:-/run/user/1000}/sinnix/hub.sock"
 
 # AI membership and service facts come from the runtime inventory, including
 # direct services. Discovery does not depend on the hub being enabled or up.
@@ -73,7 +73,7 @@ idle-aware proxy (open-webui) don't idle-teardown in the first place, so
 pinning them is a no-op refused with an explanation.
 
 start/stop delegate the backend unit's own lifecycle to the hub-server's
-action API (%t/sinnix/ops.sock), so restartability and idempotency stay
+action API (%t/sinnix/hub.sock), so restartability and idempotency stay
 single-sourced.
 Bringing the socket proxy back from a latched trigger-limit (reset-failed
 + start) has no equivalent action-API verb and stays a direct systemctl
@@ -244,8 +244,8 @@ cmd_status() {
   fi
 }
 
-ops_get() {
-  curl -fsS -m 3 --unix-socket "$OPS_SOCKET" "http://localhost$1" 2>/dev/null
+hub_get() {
+  curl -fsS -m 3 --unix-socket "$HUB_SOCKET" "http://localhost$1" 2>/dev/null
 }
 
 # All backend lifecycle actions use the hub server's admission and receipts.
@@ -254,7 +254,7 @@ ops_action() {
   local body prepared resp http_code err
   body="$(jq -nc --arg action "$action" --arg unit "$unit" \
     '{action:$action,target:{unit:$unit},parameters:{}}')"
-  prepared="$(curl --fail-with-body -sS -m 15 --unix-socket "$OPS_SOCKET" \
+  prepared="$(curl --fail-with-body -sS -m 15 --unix-socket "$HUB_SOCKET" \
     -H 'Content-Type: application/json' -d "$body" \
     'http://localhost/v1/actions/prepare')" || {
       echo "sinnix-ai: target observation failed: $prepared" >&2
@@ -262,7 +262,7 @@ ops_action() {
     }
   body="$(jq -c --arg key "$(cat /proc/sys/kernel/random/uuid)" --arg reason "$reason" \
     'del(.observed_at) + {idempotency_key:$key,operator_reason:$reason}' <<<"$prepared")"
-  resp="$(curl -sS -m 15 --unix-socket "$OPS_SOCKET" \
+  resp="$(curl -sS -m 15 --unix-socket "$HUB_SOCKET" \
     -H 'Content-Type: application/json' -d "$body" \
     -w $'\n%{http_code}' 'http://localhost/v1/actions')"
   http_code="${resp##*$'\n'}"

@@ -149,7 +149,7 @@ def test_cli_prints_every_group_and_filters_by_kind(tmp_path, capsys) -> None:
     assert {row["kind"] for row in view["rows"]} == {"service"}
 
 
-def test_the_wrapper_execs_the_reducer_view(tmp_path, monkeypatch) -> None:
+def test_the_wrapper_execs_the_hub_view(tmp_path, monkeypatch) -> None:
     root = Path(__file__).resolve().parents[3]
     index = write_index(tmp_path)
     launcher = tmp_path / "sinnix-hub-server"

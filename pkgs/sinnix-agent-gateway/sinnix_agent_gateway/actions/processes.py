@@ -1,4 +1,4 @@
-"""Process actions over /proc (psutil when importable), signals through the ops reducer or os.kill."""
+"""Process actions over /proc (psutil when importable), signals through the hub server or os.kill."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ from ..permissions import Permission
 from ..redaction import redact, redact_env
 from ..results import ProtocolError
 from ..schemas import GatewayModel
-from .machine import OperateResult, _operate_via_reducer
+from .machine import OperateResult, _operate_via_hub
 
 if TYPE_CHECKING:
     from ..runtime import Runtime
@@ -447,7 +447,7 @@ def _tree(runtime: Runtime, inp: TreeInput) -> ProcessTree:
 # ---------------------------------------------------------------------- signal
 
 
-class ReducerStop(GatewayModel):
+class HubStop(GatewayModel):
     operation: Literal["stop"] = "stop"
     expected_target: dict[str, Any] = Field(
         description="Target identity from machine.prepare for this process stop."
@@ -466,9 +466,9 @@ class DirectSignal(GatewayModel):
 
 class SignalInput(MutationControls):
     target: ProcessLocator
-    request: ReducerStop | DirectSignal = Field(
+    request: HubStop | DirectSignal = Field(
         discriminator="operation",
-        description="stop: attested SIGTERM/SIGKILL through the ops reducer (admitted slices only). signal: direct os.kill by the operator.",
+        description="stop: attested SIGTERM/SIGKILL through the hub server (admitted slices only). signal: direct os.kill by the operator.",
     )
 
 
@@ -485,8 +485,8 @@ class SignalResult(GatewayModel):
 def _signal(runtime: Runtime, inp: SignalInput) -> SignalResult:
     runtime.principal.require(Permission.MACHINE_ACTION)
     raw, ref = inp.target.resolve()
-    if isinstance(inp.request, ReducerStop):
-        receipt: OperateResult = _operate_via_reducer(
+    if isinstance(inp.request, HubStop):
+        receipt: OperateResult = _operate_via_hub(
             runtime,
             inp,
             target=ref,
@@ -660,7 +660,7 @@ ACTIONS: tuple[Action, ...] = (
         name="processes.signal",
         family=VerbFamily.OPERATE,
         owner="machine",
-        summary="Stop a process through the ops reducer (attested, admitted slices) or send one signal directly as the operator.",
+        summary="Stop a process through the hub server (attested, admitted slices) or send one signal directly as the operator.",
         Input=SignalInput,
         Output=SignalResult,
         handler=_signal,
@@ -669,10 +669,10 @@ ACTIONS: tuple[Action, ...] = (
         affordances=("processes.wait", "processes.get", "audit.receipt"),
         aliases=("kill", "pkill", "terminate", "sigterm", "sigkill"),
         supports_precondition=True,
-        documentation="The reducer path is the attested one and needs expected_target; the direct path is receipted by the gateway audit chain only.",
+        documentation="The hub server path is the attested one and needs expected_target; the direct path is receipted by the gateway audit chain only.",
         examples=(
             Example(
-                title="Reducer stop",
+                title="Hub stop",
                 input={
                     "target": {"pid": 4242},
                     "request": {

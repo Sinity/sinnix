@@ -385,7 +385,7 @@ def test_machine_recovery_requires_exact_confirmed_owner_request(
         owner_request["target"] = {"unit": "fixture.service", "manager": "system"}
     receipt = {
         **owner_request,
-        "schema": "sinnix-ops-action-v1",
+        "schema": "sinnix-hub-action-v1",
         "receipt_id": "receipt",
         "status": "confirmed",
         "request_hash": hashlib.sha256(
@@ -465,7 +465,7 @@ def test_stopped_process_reconciles_without_resolving_a_live_process(tmp_path):
     }
     receipt = {
         **owner_request,
-        "schema": "sinnix-ops-action-v1",
+        "schema": "sinnix-hub-action-v1",
         "status": "confirmed",
         "receipt_id": "stopped",
         "request_hash": hashlib.sha256(

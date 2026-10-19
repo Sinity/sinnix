@@ -20,7 +20,7 @@ def test_watchdog_remains_on_main_loop_during_blocking_io(monkeypatch, blocked_w
         entered.set()
         assert release.wait(1), "blocking I/O starved the main-loop watchdog"
 
-    class Reducer:
+    class SnapshotBuilder:
         calls = 0
 
         def refresh(self):
@@ -63,7 +63,7 @@ def test_watchdog_remains_on_main_loop_during_blocking_io(monkeypatch, blocked_w
     )
     try:
         with pytest.raises(Finished, match="refresh failures"):
-            server.serve(Reducer(), "fixture", [], 0.001, None, sweep_interval=60)
+            server.serve(SnapshotBuilder(), "fixture", [], 0.001, None, sweep_interval=60)
         assert len(pings) >= 2
     finally:
         release.set()

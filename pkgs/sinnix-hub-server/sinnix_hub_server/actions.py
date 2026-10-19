@@ -21,7 +21,7 @@ from .agent_jobs import AgentCtlClient, AgentCtlError
 
 # Properties captured for a receipt's previous_state/resulting_state on unit
 # targets -- the target's own live systemd shape, not the
-# whole reducer snapshot (see ActionService._target_state).
+# whole hub snapshot (see ActionService._target_state).
 UNIT_STATE_PROPERTIES = ("LoadState", "ActiveState", "SubState", "InvocationID")
 
 # Process targets support only stop -- see sinnix-mble / C3 in the
@@ -266,7 +266,7 @@ class ActionService:
         self.agent_jobs = agent_jobs or AgentCtlClient()
         self.unit_state_prober = unit_state_prober or self._live_unit_state_prober
         self.process_prober = process_prober or self._live_process_prober
-        # os.getpid() at construction time, not per-call: the reducer's own
+        # os.getpid() at construction time, not per-call: the hub server's own
         # pid never changes for the life of the process, and evaluating it
         # once here is what lets a test override it without patching os.
         self.self_pid = self_pid if self_pid is not None else os.getpid()
@@ -426,7 +426,7 @@ class ActionService:
                 409,
             )
         if pid == self.self_pid:
-            raise ActionError("the reducer may not target its own process", 403)
+            raise ActionError("the hub server may not target its own process", 403)
         admitted = process_admitted_slices(self._inventory())
         if slice_unit not in admitted:
             raise ActionError(
@@ -553,7 +553,7 @@ class ActionService:
 
     def _target_state(self, resolved: dict[str, Any]) -> dict[str, Any]:
         """The resolved target's OWN prior/current state, not the whole
-        reducer snapshot -- a prior receipt used to embed 25KB+ of
+        hub snapshot -- a prior receipt used to embed 25KB+ of
         unrelated agent-gateway job histories and per-process IO because
         previous_state/resulting_state copied `snapshot["state"]` wholesale
         (sinnix-rd69). The full snapshot stays reachable by its sequence
@@ -711,7 +711,7 @@ class ActionService:
                     "expected_target is stale: target identity or state changed", 409
                 )
             pending = {
-                "schema": "sinnix-ops-action-v1",
+                "schema": "sinnix-hub-action-v1",
                 "receipt_id": str(uuid.uuid4()),
                 "idempotency_key": request["idempotency_key"],
                 "request_hash": digest,
@@ -747,7 +747,7 @@ class ActionService:
             ):
                 raise
             rejected = {
-                "schema": "sinnix-ops-action-v1",
+                "schema": "sinnix-hub-action-v1",
                 "receipt_id": str(uuid.uuid4()),
                 "idempotency_key": request["idempotency_key"],
                 "request_hash": digest,
@@ -766,7 +766,7 @@ class ActionService:
             raise
         receipt = {
             "status": "confirmed",
-            "schema": "sinnix-ops-action-v1",
+            "schema": "sinnix-hub-action-v1",
             "receipt_id": pending["receipt_id"],
             "idempotency_key": request["idempotency_key"],
             "request_hash": digest,
@@ -838,7 +838,7 @@ class ActionService:
                 "systemd-run",
                 "--quiet",
                 "--collect",
-                f"--unit=sinnix-ops-thaw-{suffix}",
+                f"--unit=sinnix-hub-thaw-{suffix}",
                 f"--on-active={request['parameters']['deadline_seconds']}",
                 "systemctl",
                 "thaw",

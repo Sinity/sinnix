@@ -47,7 +47,7 @@ def runtime(
         state_dir=tmp_path / "state",
         projects={},
         runtime_inventory=inventory,
-        ops_socket_path=tmp_path / "ops.sock",
+        hub_socket_path=tmp_path / "hub.sock",
         capture_command="sinnix-capture-absent",
     )
     rt = Runtime.create(cfg, principal)

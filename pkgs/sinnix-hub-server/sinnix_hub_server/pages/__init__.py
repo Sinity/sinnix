@@ -1,4 +1,4 @@
-"""The hub's pages, rendered on request from the reducer's own state.
+"""The hub's pages, rendered on request from the hub server's own state.
 
 Every page is complete HTML: the browser fetches no data to show state. That
 is deliberate -- a phone on a flaky link, or a page left open overnight, still
@@ -18,13 +18,13 @@ because the capability index takes its `hub-page` rows from there: the routes
 are declared in Python and nothing in Nix can see them.
 
 These used to be written to static files by a 60s render-on-timer job. They
-are rendered on request instead because the reducer already holds the state
+are rendered on request instead because the hub server already holds the state
 they show: a page load reads the live snapshot rather than whatever the last
 timer tick happened to catch, and there is no window of pages describing a
 system that has since moved on.
 
 Rendering never fails the request on a missing input: a degraded dashboard that
-says "reducer snapshot unavailable" is more useful than no dashboard.
+says "hub snapshot unavailable" is more useful than no dashboard.
 """
 
 from __future__ import annotations

@@ -354,7 +354,7 @@ def links_card(manifest: dict[str, Any]) -> str:
     return card(
         "Elsewhere",
         f'<ul class="links">{items}</ul>' if items else empty("nothing published"),
-        "web UIs republished on the tailnet, and the reducer's raw documents",
+        "web UIs republished on the tailnet, and the hub server's raw documents",
     )
 
 

@@ -22,9 +22,9 @@ from typing import Any
 from sinnix_hub_server import actions as actions_module
 from sinnix_hub_server import health
 from sinnix_hub_server import status as hub_status
-from sinnix_hub_server import reducer as reducer_module
+from sinnix_hub_server import snapshot as snapshot_module
 from sinnix_hub_server.actions import ActionService
-from sinnix_hub_server.reducer import Reducer
+from sinnix_hub_server.snapshot import SnapshotBuilder
 
 UTC_TS = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 SENTINEL = "1999-12-31T23:59:58Z"
@@ -46,9 +46,9 @@ def _inventory(path: Path) -> Path:
     return path
 
 
-def _action_service(tmp_path: Path, reducer: Reducer) -> ActionService:
+def _action_service(tmp_path: Path, builder: SnapshotBuilder) -> ActionService:
     return ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         _inventory(tmp_path / "inventory.json"),
         tmp_path / "receipts.jsonl",
         adapter=lambda request, resolved: {"name": request["action"], "status": "fake"},
@@ -98,14 +98,14 @@ def _transition(tmp_path: Path) -> dict[str, Any]:
 def test_every_record_this_package_joins_carries_one_utc_grammar(
     tmp_path: Path,
 ) -> None:
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json",
         tmp_path / "token",
         lambda: {},
-        tmp_path / "reducer.json",
+        tmp_path / "sequence.json",
     )
-    snapshot = reducer.refresh()
-    actions = _action_service(tmp_path, reducer)
+    snapshot = builder.refresh()
+    actions = _action_service(tmp_path, builder)
     receipt = actions.execute(_request("grammar-1"))
 
     stamps = {
@@ -114,7 +114,7 @@ def test_every_record_this_package_joins_carries_one_utc_grammar(
         "snapshot source observed_at": snapshot["sources"]["sinnix-observe"][
             "observed_at"
         ],
-        "reducer health observed_at": reducer.health()["observed_at"],
+        "builder health observed_at": builder.health()["observed_at"],
         "action receipt created_at": receipt["created_at"],
     }
     off_grammar = {
@@ -134,30 +134,30 @@ def test_status_stamps_the_same_grammar(tmp_path: Path) -> None:
     assert UTC_TS.fullmatch(generated)
 
 
-def test_reducer_stamps_through_the_shared_helper(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(reducer_module, "utc_ts", lambda: SENTINEL)
-    reducer = Reducer(
+def test_snapshot_stamps_through_the_shared_helper(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(snapshot_module, "utc_ts", lambda: SENTINEL)
+    builder = SnapshotBuilder(
         tmp_path / "status.json",
         tmp_path / "token",
         lambda: {},
-        tmp_path / "reducer.json",
+        tmp_path / "sequence.json",
     )
-    assert reducer.refresh()["observed_at"] == SENTINEL
-    assert reducer.health()["observed_at"] == SENTINEL
+    assert builder.refresh()["observed_at"] == SENTINEL
+    assert builder.health()["observed_at"] == SENTINEL
 
 
 def test_action_receipts_stamp_through_the_shared_helper(
     tmp_path: Path, monkeypatch
 ) -> None:
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json",
         tmp_path / "token",
         lambda: {},
-        tmp_path / "reducer.json",
+        tmp_path / "sequence.json",
     )
-    reducer.refresh()
+    builder.refresh()
     monkeypatch.setattr(actions_module, "utc_ts", lambda: SENTINEL)
-    receipt = _action_service(tmp_path, reducer).execute(_request("grammar-2"))
+    receipt = _action_service(tmp_path, builder).execute(_request("grammar-2"))
     assert receipt["created_at"] == SENTINEL
 
 

@@ -1,4 +1,4 @@
-# Read-only operations reducer protocol and source-health fixture.
+# Read-only hub server protocol and source-health fixture.
 _: {
   perSystem =
     { sinnixScriptRegistry, ... }:

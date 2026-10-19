@@ -15,7 +15,7 @@ umask 077
 #   kitty-scrollback-capture --current # Capture current window only
 
 CAPTURE_DIR="${KITTY_SCROLLBACK_DIR:-/realm/activity/terminal/scrollback}"
-PROGRESS_MARKER="${KITTY_SCROLLBACK_PROGRESS_MARKER:-/realm/state/sinnix-ops/capture-progress/kitty-scrollback}"
+PROGRESS_MARKER="${KITTY_SCROLLBACK_PROGRESS_MARKER:-/realm/state/hub/capture-progress/kitty-scrollback}"
 TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
 HOSTNAME=$(hostname)
 RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"

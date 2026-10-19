@@ -233,8 +233,8 @@ def render_work(
     body += log_card()
     if snapshot is None:
         body += card(
-            "Reducer snapshot unavailable",
-            '<p class="sub">Slice budgets, the queue, the jobs and the project ledger need the reducer.</p>',
+            "Hub snapshot unavailable",
+            '<p class="sub">Slice budgets, the queue, the jobs and the project ledger need the hub server.</p>',
             wide=True,
         )
     return page(

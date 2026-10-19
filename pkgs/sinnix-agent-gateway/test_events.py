@@ -361,7 +361,7 @@ def test_full_page_still_checks_runtime_ledger_generation(tmp_path: Path) -> Non
     audit.append("fixture.read", "ok", {})
     page = events.read(limit=1)
     assert len(page["events"]) == 1
-    assert page["sources"]["ops-reducer.transitions"]["availability"] == "available"
+    assert page["sources"]["hub-server.transitions"]["availability"] == "available"
 
     replacement_path = tmp_path / "replacement.jsonl"
     replacement_path.write_text(

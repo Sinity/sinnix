@@ -27,7 +27,7 @@ import sinnix_phone_dispatcher.inbox as inbox_mod
 
 @pytest.fixture(autouse=True)
 def stub_generated(monkeypatch):
-    """The generated entry is built from live host state (the ops reducer's
+    """The generated entry is built from live host state (the hub server's
     socket); this suite is about the inbox mechanics, so it is replaced by a
     builder with no dependencies."""
     monkeypatch.setattr(

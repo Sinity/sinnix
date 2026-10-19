@@ -2,7 +2,7 @@
 -- Authenticated SSE bridge for the read-only Sinnix the hub server.
 
 local ENDPOINT = noctalia.getConfig("endpoint") or "http://127.0.0.1:3090"
-local TOKEN_PATH = noctalia.getConfig("token_path") or "$XDG_RUNTIME_DIR/sinnix/ops.token"
+local TOKEN_PATH = noctalia.getConfig("token_path") or "$XDG_RUNTIME_DIR/sinnix/hub.token"
 local STALE_SECONDS = tonumber(noctalia.getConfig("stale_seconds")) or 30
 local STREAM_PATH = ENDPOINT .. "/v1/events"
 -- Every async callback runs under Noctalia's 25 ms CPU budget, decode
@@ -63,22 +63,22 @@ local function publish(status, source, snapshot, reason, request)
     updated_at_ms = now,
     snapshot_request = request,
   }
-  noctalia.state.set("sinity-ops.view", value)
-  noctalia.state.set("sinity-ops.status", status)
+  noctalia.state.set("sinity-hub.view", value)
+  noctalia.state.set("sinity-hub.status", status)
 end
 
 local function fallback(reason)
-  local raw = noctalia.readFile(tokenPath():gsub("/ops.token$", "/status.json"))
+  local raw = noctalia.readFile(tokenPath():gsub("/hub.token$", "/status.json"))
   if raw ~= nil then
     local value = decodeJson(raw)
-    if type(value) == "table" and value.schema == "sinnix-ops-v1" and acceptSnapshot(value) then
+    if type(value) == "table" and value.schema == "sinnix-hub-v1" and acceptSnapshot(value) then
       local status = noctalia.nowMs() - lastReceived > STALE_SECONDS * 1000 and "stale" or "snapshot"
       publish(status, "atomic-snapshot", value, reason)
       return
     end
   end
   if acceptedSequence ~= nil then
-    publish("disconnected", "last-state", (noctalia.state.get("sinity-ops.view") or {}).snapshot, reason)
+    publish("disconnected", "last-state", (noctalia.state.get("sinity-hub.view") or {}).snapshot, reason)
     return
   end
   local stats = noctalia.systemStats()
@@ -123,7 +123,7 @@ requestSnapshot = function()
       return
     end
     local decoded = decodeJson(response.body)
-    if type(decoded) ~= "table" or decoded.schema ~= "sinnix-ops-v1" then
+    if type(decoded) ~= "table" or decoded.schema ~= "sinnix-hub-v1" then
       fallback("newer or unsupported hub server schema")
       finishSnapshot()
       return
@@ -141,14 +141,14 @@ requestSnapshot = function()
       publish("source-stale", "sse", decoded, source and source.degradation or "hub server source unavailable", request)
     end
     noctalia.http({ url = RECEIPTS_PATH, headers = { "Authorization: Bearer " .. value, "Accept: " .. "application/json" } }, function(receipts)
-      local current = noctalia.state.get("sinity-ops.view") or {}
+      local current = noctalia.state.get("sinity-hub.view") or {}
       -- Shared state may copy tables; correlate the request, not table identity.
       if current.snapshot_request ~= request then return end
       if receipts.ok and receipts.status == 200 then
         local decodedReceipts = decodeJson(receipts.body)
         if type(decodedReceipts) == "table" then
           current.receipts = decodedReceipts
-          noctalia.state.set("sinity-ops.view", current)
+          noctalia.state.set("sinity-hub.view", current)
         end
       end
     end)
@@ -199,7 +199,7 @@ startStream()
 function update()
   local now = noctalia.nowMs()
   if lastReceived > 0 and now - lastReceived > STALE_SECONDS * 1000 then
-    publish("stale", "last-state", (noctalia.state.get("sinity-ops.view") or {}).snapshot, "last state expired")
+    publish("stale", "last-state", (noctalia.state.get("sinity-hub.view") or {}).snapshot, "last state expired")
   end
   if stream == nil and now >= reconnectAt then startStream() end
 end

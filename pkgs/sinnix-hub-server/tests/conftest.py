@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 from sinnix_hub_server.feedback import FeedbackSpool
-from sinnix_hub_server.reducer import Reducer
+from sinnix_hub_server.snapshot import SnapshotBuilder
 from sinnix_hub_server.server import Handler
 
 
@@ -36,14 +36,14 @@ def hub_server_factory(tmp_path: Path) -> Iterator[Callable[..., str]]:
         elicit_model_dir: Path | None = None,
         actions: Any = None,
     ) -> str:
-        reducer = Reducer(tmp_path / "status.json", tmp_path / "token", sources)
-        reducer.refresh()
-        reducer.actions = actions
+        builder = SnapshotBuilder(tmp_path / "status.json", tmp_path / "token", sources)
+        builder.refresh()
+        builder.actions = actions
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        server.reducer = reducer
+        server.builder = builder
         server.token = "fixture-token"
-        # The unix-socket path: Caddy proxies the pages over the reducer's
-        # 0600 socket, which the reducer treats as authorized.
+        # The unix-socket path: Caddy proxies the pages over the hub server's
+        # 0600 socket, which the hub server treats as authorized.
         server.is_unix = True
         server.hub_manifest = hub_manifest
         server.inventory_path = inventory_path or tmp_path / "missing-inventory.json"

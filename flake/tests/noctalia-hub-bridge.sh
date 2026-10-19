@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Provably fails when: the plugin stops accepting the schema the ops reducer
-# stamps (verified by changing SCHEMA in the reducer), stops resuming the SSE
+# Provably fails when: the plugin stops accepting the schema the hub server
+# stamps (verified by changing SCHEMA in the hub server), stops resuming the SSE
 # stream, gains a direct shell-out or state read, fails Noctalia's own
 # plugin lint, an entry stops parsing as Luau (verified 2026-08-18 by
 # appending a malformed statement to bar-attention.luau: lint alone still
 # said ok, the luau-compile pass failed with a SyntaxError), or the panel
-# binds a snapshot state key the reducer does not publish (verified
+# binds a snapshot state key the hub server does not publish (verified
 # 2026-08-18 by binding stateValue("gpu") in panel.luau).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-plugin="${NOCTALIA_OPS_PLUGIN:-$repo_root/dots/noctalia/plugins/sinnix-ops}"
-reducer_root="${NOCTALIA_OPS_REDUCER:-$repo_root/pkgs/sinnix-hub-server}"
-observe_root="${NOCTALIA_OPS_OBSERVE:-$repo_root/pkgs/sinnix-observe}"
-contract="${NOCTALIA_OPS_CONTRACT:-$repo_root/flake/tests/noctalia-state-contract.py}"
+plugin="${NOCTALIA_HUB_PLUGIN:-$repo_root/dots/noctalia/plugins/sinnix-hub}"
+hub_root="${NOCTALIA_HUB_SERVER:-$repo_root/pkgs/sinnix-hub-server}"
+observe_root="${NOCTALIA_HUB_OBSERVE:-$repo_root/pkgs/sinnix-observe}"
+contract="${NOCTALIA_HUB_CONTRACT:-$repo_root/flake/tests/noctalia-state-contract.py}"
 
 test -f "$plugin/plugin.toml"
 test -f "$plugin/service.luau"
@@ -28,18 +28,18 @@ for entry in "$plugin"/*.luau; do
 done
 
 # Protocol agreement with the producer: the plugin must accept exactly the
-# schema the ops reducer stamps on its payloads, and must resume the stream
-# the way the reducer's SSE handler expects. Both sides are read from their
+# schema the hub server stamps on its payloads, and must resume the stream
+# the way the hub server's SSE handler expects. Both sides are read from their
 # own source, so this is an agreement between two components rather than a
 # literal restated from one.
-schema="$(sed -n 's/^SCHEMA = "\(.*\)"$/\1/p' "$reducer_root/sinnix_hub_server/__init__.py")"
+schema="$(sed -n 's/^SCHEMA = "\(.*\)"$/\1/p' "$hub_root/sinnix_hub_server/__init__.py")"
 test -n "$schema"
 grep -Fq "$schema" "$plugin/service.luau" ||
   {
-    echo "plugin does not accept the reducer's payload schema ($schema)" >&2
+    echo "plugin does not accept the hub server's payload schema ($schema)" >&2
     exit 1
   }
-resume_header="$(grep -o 'Last-Event-ID' "$reducer_root/sinnix_hub_server/server.py" | head -n1)"
+resume_header="$(grep -o 'Last-Event-ID' "$hub_root/sinnix_hub_server/server.py" | head -n1)"
 test -n "$resume_header"
 grep -Fq "$resume_header" "$plugin/service.luau" ||
   {
@@ -59,11 +59,11 @@ else
 fi
 
 # Schema agreement with both producers: every snapshot state key the plugin
-# binds must be published by sinnix-observe's report or the reducer's own
+# binds must be published by sinnix-observe's report or the hub server's own
 # state additions. Both sides are parsed from their source.
-NOCTALIA_OPS_PLUGIN="$plugin" \
-  NOCTALIA_OPS_REDUCER="$reducer_root" \
-  NOCTALIA_OPS_OBSERVE="$observe_root" \
+NOCTALIA_HUB_PLUGIN="$plugin" \
+  NOCTALIA_HUB_SERVER="$hub_root" \
+  NOCTALIA_HUB_OBSERVE="$observe_root" \
   python3 "$contract"
-python3 "${NOCTALIA_OPS_ORDERING:-$repo_root/flake/tests/noctalia-ops-ordering.py}"
-echo "noctalia ops bridge fixture passed"
+python3 "${NOCTALIA_HUB_ORDERING:-$repo_root/flake/tests/noctalia-hub-ordering.py}"
+echo "noctalia hub bridge fixture passed"

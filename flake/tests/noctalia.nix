@@ -42,8 +42,8 @@
     {
       checks = {
         noctalia-theme-defaults-migration = noctaliaThemeDefaultsMigration;
-        noctalia-ops-bridge =
-          pkgs.runCommand "noctalia-ops-bridge-check"
+        noctalia-hub-bridge =
+          pkgs.runCommand "noctalia-hub-bridge-check"
             {
               nativeBuildInputs = [
                 noctalia
@@ -56,12 +56,12 @@
               ];
             }
             ''
-              NOCTALIA_OPS_PLUGIN=${../../dots/noctalia/plugins/sinnix-ops} \
-              NOCTALIA_OPS_REDUCER=${../../pkgs/sinnix-hub-server} \
-              NOCTALIA_OPS_OBSERVE=${../../pkgs/sinnix-observe} \
-              NOCTALIA_OPS_CONTRACT=${../../flake/tests/noctalia-state-contract.py} \
-              NOCTALIA_OPS_ORDERING=${./noctalia-ops-ordering.py} \
-                ${pkgs.bash}/bin/bash ${../../flake/tests/noctalia-ops-bridge.sh}
+              NOCTALIA_HUB_PLUGIN=${../../dots/noctalia/plugins/sinnix-hub} \
+              NOCTALIA_HUB_SERVER=${../../pkgs/sinnix-hub-server} \
+              NOCTALIA_HUB_OBSERVE=${../../pkgs/sinnix-observe} \
+              NOCTALIA_HUB_CONTRACT=${../../flake/tests/noctalia-state-contract.py} \
+              NOCTALIA_HUB_ORDERING=${./noctalia-hub-ordering.py} \
+                ${pkgs.bash}/bin/bash ${../../flake/tests/noctalia-hub-bridge.sh}
               touch "$out"
             '';
         noctalia-bar-lint =

@@ -39,7 +39,7 @@ def runtime(tmp_path: Path, principal: str = "operator") -> Runtime:
         GatewayConfig(
             state_dir=tmp_path / "state",
             projects={},
-            ops_socket_path=tmp_path / "ops.sock",
+            hub_socket_path=tmp_path / "hub.sock",
             capability_index=index_path(tmp_path, ROWS),
         ),
         principal,

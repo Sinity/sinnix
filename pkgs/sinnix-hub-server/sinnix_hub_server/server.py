@@ -25,7 +25,7 @@ from .feedback import ELICIT_MODEL_DIR_DEFAULT, FeedbackSpool, resolve_elicit_mo
 from .feedback import ELICIT_SCHEMA as FEEDBACK_ELICIT_SCHEMA
 from .feedback import MAX_BODY as FEEDBACK_MAX_BODY
 from .feedback import SCHEMA as FEEDBACK_SCHEMA
-from .reducer import Reducer
+from .snapshot import SnapshotBuilder
 
 FEEDBACK_PATH = "/feedback"
 FEEDBACK_ELICIT_PREFIX = "/feedback/elicit/"
@@ -69,7 +69,7 @@ def ensure_token(path: Path) -> str:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "sinnix-ops/1"
+    server_version = "sinnix-hub/1"
 
     def _write(
         self, status: int, value: dict[str, Any], content_type: str = "application/json"
@@ -258,25 +258,25 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     @property
-    def reducer(self) -> Reducer:
-        return self.server.reducer  # type: ignore[attr-defined]
+    def builder(self) -> SnapshotBuilder:
+        return self.server.builder  # type: ignore[attr-defined]
 
     def _serve_page(self, path: str) -> None:
         """One hub page, rendered from the live snapshot at request time.
 
         The snapshot is this process's own, not a file re-read: a page shows
-        what the reducer currently believes, which is the whole reason the
+        what the hub server currently believes, which is the whole reason the
         pages moved here from a timer.
         """
         requested = {
             "/": ("storage", "drift"),
             "/work/": ("workloads", "ingestion", "slices"),
         }.get(pages.canonical(path), ())
-        snapshot = self.reducer.page_snapshot(requested)
+        snapshot = self.builder.page_snapshot(requested)
         error = None
         if not snapshot:
             snapshot = None
-            error = "the reducer has not published a snapshot yet"
+            error = "the hub server has not published a snapshot yet"
         manifest = pages.load_manifest(self.server.hub_manifest)  # type: ignore[attr-defined]
         inventory, _ = pages.load_json(self.server.inventory_path)  # type: ignore[attr-defined]
         self._write_html(
@@ -328,14 +328,14 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 self._write(
                     HTTPStatus.OK,
-                    self.reducer.observe(route.removeprefix("/v1/observe/")),
+                    self.builder.observe(route.removeprefix("/v1/observe/")),
                 )
             except ValueError as error:
                 self._write(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             except Exception as error:
                 self._write(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(error)[:240]})
         elif self.path == "/v1/health":
-            self._write(HTTPStatus.OK, self.reducer.health())
+            self._write(HTTPStatus.OK, self.builder.health())
         elif self.path == "/v1/health/lanes":
             # The sweep's believed status per key, as the state file holds it:
             # what the sentinel's state file answered, from the process that
@@ -353,10 +353,10 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/v1/snapshot":
             try:
                 value = json.loads(
-                    self.reducer.snapshot_path.read_text(encoding="utf-8")
+                    self.builder.snapshot_path.read_text(encoding="utf-8")
                 )
             except (OSError, json.JSONDecodeError):
-                value = self.reducer.health()
+                value = self.builder.health()
             # `?state=a,b` keeps only the named state keys. The Noctalia bridge
             # decodes the body inside a 25 ms Luau callback budget; the full
             # snapshot (runtime inventory, every unit, every workload row)
@@ -374,10 +374,10 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/v1/revision":
             try:
                 snapshot = json.loads(
-                    self.reducer.snapshot_path.read_text(encoding="utf-8")
+                    self.builder.snapshot_path.read_text(encoding="utf-8")
                 )
             except (OSError, json.JSONDecodeError):
-                snapshot = self.reducer.health()
+                snapshot = self.builder.health()
             self._write(
                 HTTPStatus.OK,
                 {
@@ -397,7 +397,7 @@ class Handler(BaseHTTPRequestHandler):
                 sequence = int(last) if last is not None else None
             except ValueError:
                 sequence = None
-            events = self.reducer.events_since(sequence)
+            events = self.builder.events_since(sequence)
             body = b"".join(
                 f"id: {event['sequence']}\ndata: {json.dumps(event, sort_keys=True)}\n\n".encode()
                 for event in events
@@ -414,14 +414,14 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 limit = 20
             limit = max(1, min(limit, 20))
-            receipts = list(self.reducer.actions.receipts.values())[-limit:]
+            receipts = list(self.builder.actions.receipts.values())[-limit:]
             self._write(
                 HTTPStatus.OK,
-                {"schema": "sinnix-ops-receipts-v1", "receipts": receipts},
+                {"schema": "sinnix-hub-receipts-v1", "receipts": receipts},
             )
         elif route.startswith("/v1/actions/"):
             key = unquote(route.removeprefix("/v1/actions/"))
-            receipt = self.reducer.actions.lookup(key)
+            receipt = self.builder.actions.lookup(key)
             if receipt is None:
                 self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
             else:
@@ -476,9 +476,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             value = read_json_object(self.headers, self.rfile, max_bytes=65536)
             if self.path == "/v1/actions/prepare":
-                self._write(HTTPStatus.OK, self.reducer.actions.prepare(value))
+                self._write(HTTPStatus.OK, self.builder.actions.prepare(value))
             else:
-                self._write(HTTPStatus.CREATED, self.reducer.actions.execute(value))
+                self._write(HTTPStatus.CREATED, self.builder.actions.execute(value))
         except RequestBodyError as error:
             if error.reason in BODY_LENGTH_ERRORS or error.reason == "body_too_large":
                 error = ActionError("request body is missing or too large")
@@ -495,12 +495,12 @@ def run_sweep(
     inventory_path: Path, emitter_factory: Callable[[], health.Emitter]
 ) -> None:
     """One health sweep, isolated: a broken probe or an unreadable inventory
-    must not take the reducer's snapshot loop down with it."""
+    must not take the hub server's snapshot loop down with it."""
     try:
         inventory, _ = pages.load_json(inventory_path)
         if inventory:
             health.sweep(inventory, emitter_factory())
-    except Exception as error:  # a sweep is advisory; the reducer is not
+    except Exception as error:  # a sweep is advisory; the hub server is not
         print(f"sinnix-hub-server: health sweep failed: {error}", file=sys.stderr)
 
 
@@ -512,7 +512,7 @@ class UnixServer(ThreadingHTTPServer):
 
 
 def serve(
-    reducer: Reducer,
+    builder: SnapshotBuilder,
     token: str,
     fds: list[int],
     interval: float,
@@ -525,7 +525,7 @@ def serve(
     sweep_interval: float = health.SWEEP_INTERVAL_SECONDS,
 ) -> None:
     def stamp(server: ThreadingHTTPServer, is_unix: bool) -> None:
-        server.reducer = reducer  # type: ignore[attr-defined]
+        server.builder = builder  # type: ignore[attr-defined]
         server.token = token  # type: ignore[attr-defined]
         server.is_unix = is_unix  # type: ignore[attr-defined]
         server.hub_manifest = hub_manifest  # type: ignore[attr-defined]
@@ -553,12 +553,12 @@ def serve(
                 return
 
     try:
-        await_work(reducer.refresh)
+        await_work(builder.refresh)
     except BaseException:
         worker.shutdown(wait=False, cancel_futures=True)
         raise
     http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    reducer.actions = actions  # type: ignore[attr-defined]
+    builder.actions = actions  # type: ignore[attr-defined]
     stamp(http, False)
     servers: list[ThreadingHTTPServer] = []
     if fds:
@@ -592,7 +592,7 @@ def serve(
     def refresh_and_sweep() -> None:
         nonlocal last_sweep
         time.sleep(interval)
-        reducer.refresh()
+        builder.refresh()
         # Preserve serial refreshes and the slower health-sweep cadence.
         if time.monotonic() - last_sweep >= sweep_interval:
             last_sweep = time.monotonic()

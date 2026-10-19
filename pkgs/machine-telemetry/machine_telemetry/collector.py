@@ -237,7 +237,7 @@ def rapl_watts(
 
 def parse_psi(path: str) -> dict[str, float]:
     # Keep the collector's flat field names and float values while sharing the
-    # text parser with observe and the reducer.
+    # text parser with observe and the hub server.
     return {
         f"{record}_{field}": float(value)
         for record, fields in parse_psi_text(read_text(path)).items()

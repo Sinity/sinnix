@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sinnix_hub_server.reducer import Reducer
+from sinnix_hub_server.snapshot import SnapshotBuilder
 
 
 def test_healthy_stale_missing_and_malformed_sources_are_distinct(
@@ -22,11 +22,11 @@ def test_healthy_stale_missing_and_malformed_sources_are_distinct(
             raise value
         return value
 
-    reducer = Reducer(tmp_path / "status.json", tmp_path / "token", source)
-    healthy = reducer.refresh()
-    stale = reducer.refresh()
-    missing = reducer.refresh()
-    malformed = reducer.refresh()
+    builder = SnapshotBuilder(tmp_path / "status.json", tmp_path / "token", source)
+    healthy = builder.refresh()
+    stale = builder.refresh()
+    missing = builder.refresh()
+    malformed = builder.refresh()
     assert healthy["sources"]["sinnix-observe"]["status"] == "healthy"
     assert healthy["state"]["agentctl"] == {
         "groups": {},
@@ -40,20 +40,20 @@ def test_healthy_stale_missing_and_malformed_sources_are_distinct(
         == "collector returned a non-object"
     )
     assert json.loads((tmp_path / "status.json").read_text())["sequence"] == 4
-    assert [event["status"] for event in reducer.events] == ["healthy", "unavailable"]
+    assert [event["status"] for event in builder.events] == ["healthy", "unavailable"]
 
 
 def test_sequence_persists_and_events_are_bounded(tmp_path: Path) -> None:
     state_path = tmp_path / "state.json"
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json",
         tmp_path / "token",
         lambda: {},
         state_path,
     )
-    reducer.refresh()
+    builder.refresh()
     assert json.loads(state_path.read_text())["sequence"] == 1
-    resumed = Reducer(
+    resumed = SnapshotBuilder(
         tmp_path / "status.json",
         tmp_path / "token",
         lambda: {},
@@ -66,7 +66,7 @@ def test_sequence_persists_and_events_are_bounded(tmp_path: Path) -> None:
 
 
 def test_agentctl_failure_degrades_only_the_job_source(tmp_path: Path) -> None:
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json",
         tmp_path / "token",
         lambda: {"report": 1},
@@ -74,7 +74,7 @@ def test_agentctl_failure_degrades_only_the_job_source(tmp_path: Path) -> None:
             RuntimeError("socket unavailable")
         ),
     )
-    snapshot = reducer.refresh()
+    snapshot = builder.refresh()
     assert snapshot["sources"]["sinnix-observe"]["status"] == "healthy"
     assert snapshot["sources"]["agentctl"] == {
         "status": "unavailable",
@@ -90,19 +90,19 @@ def test_agentctl_failure_degrades_only_the_job_source(tmp_path: Path) -> None:
     }
 
 
-def test_job_plane_survives_into_reducer_state(tmp_path: Path) -> None:
+def test_job_plane_survives_into_snapshot_state(tmp_path: Path) -> None:
     jobs = [
         {"job_id": number, "label": "p:op", "phase": "running"} for number in range(100)
     ]
     groups = {"agent": {"status": "Paused", "parallel": 4, "running": 1, "queued": 2}}
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json",
         tmp_path / "token",
         lambda: {"report": 1},
         agent_jobs_source=lambda: {"groups": groups, "jobs": jobs, "truncated": True},
     )
 
-    snapshot = reducer.refresh()
+    snapshot = builder.refresh()
 
     assert snapshot["state"]["agentctl"] == {
         "groups": groups,
@@ -111,7 +111,7 @@ def test_job_plane_survives_into_reducer_state(tmp_path: Path) -> None:
     }
     # A payload without groups is not a job-plane snapshot: the source
     # degrades rather than publishing half of one.
-    partial = Reducer(
+    partial = SnapshotBuilder(
         tmp_path / "status2.json",
         tmp_path / "token",
         lambda: {"report": 1},
@@ -130,14 +130,14 @@ def test_failed_observe_preserves_jobs_desktop_and_last_good_pressure(tmp_path):
         return value
 
     jobs = {"jobs": [{"job_id": 7}], "groups": {}, "truncated": False}
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json",
         tmp_path / "token",
         source,
         agent_jobs_source=lambda: jobs,
     )
-    first = reducer.refresh()
-    second = reducer.refresh()
+    first = builder.refresh()
+    second = builder.refresh()
     assert second["state"]["agentctl"] == jobs
     assert second["sections"]["agentctl"]["available"] is True
     assert second["state"]["hyprland_automation"] is not None
@@ -156,7 +156,7 @@ def test_detailed_sections_only_run_on_request_and_keep_partial_health(tmp_path)
         calls.append(section)
         return {"generated_at": "fixture-time", "storage": {"mounts": []}}
 
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json",
         tmp_path / "token",
         lambda: {
@@ -171,10 +171,10 @@ def test_detailed_sections_only_run_on_request_and_keep_partial_health(tmp_path)
         },
         section_source=detail,
     )
-    snapshot = reducer.refresh()
+    snapshot = builder.refresh()
     assert snapshot["sections"]["live_pressure"]["available"] is True
     assert snapshot["sections"]["systemd_units"]["available"] is False
     assert calls == []
-    assert reducer.page_snapshot(("storage",))["state"]["storage"] == {"mounts": []}
+    assert builder.page_snapshot(("storage",))["state"]["storage"] == {"mounts": []}
     assert calls == ["storage"]
-    assert "storage" not in reducer.snapshot()["state"]
+    assert "storage" not in builder.snapshot()["state"]

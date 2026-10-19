@@ -22,7 +22,7 @@ def runtime(tmp_path: Path, principal: str = "operator") -> Runtime:
         GatewayConfig(
             state_dir=tmp_path / "state",
             projects={},
-            ops_socket_path=tmp_path / "ops.sock",
+            hub_socket_path=tmp_path / "hub.sock",
         ),
         principal,
     )
@@ -134,7 +134,7 @@ def test_signal_is_operator_only_and_never_self(tmp_path: Path) -> None:
     assert refused["error"]["code"] == "policy_denied"
 
 
-def test_reducer_stop_forwards_target_identity(tmp_path: Path, monkeypatch) -> None:
+def test_hub_stop_forwards_target_identity(tmp_path: Path, monkeypatch) -> None:
     rt = runtime(tmp_path)
     raw, ref = ProcessLocator(pid=os.getpid()).resolve()
     expected = {"kind": "process", "pid": raw["pid"], "start_ticks": raw["start_ticks"]}

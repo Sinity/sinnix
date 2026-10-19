@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from sinnix_hub_server.clodex_usage import clodex_usage
-from sinnix_hub_server.reducer import Reducer
+from sinnix_hub_server.snapshot import SnapshotBuilder
 
 usage_module = importlib.import_module("sinnix_hub_server.clodex_usage")
 
@@ -140,14 +140,14 @@ def test_usage_fixture_is_published_with_source_health_and_is_mutable(
         )
         + "\n"
     )
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "status.json",
         tmp_path / "token",
         lambda: {"report": 1},
         clodex_usage_source=lambda: clodex_usage(path),
     )
 
-    snapshot = reducer.refresh()
+    snapshot = builder.refresh()
 
     assert snapshot["sources"]["clodex"] == {
         "status": "healthy",
@@ -173,10 +173,10 @@ def test_usage_fixture_is_published_with_source_health_and_is_mutable(
         )
         + "\n"
     )
-    changed = reducer.refresh()
+    changed = builder.refresh()
     assert changed["state"]["clodex"]["output_tokens"] == 9
 
     path.unlink()
-    unavailable = reducer.refresh()
+    unavailable = builder.refresh()
     assert unavailable["state"]["clodex"] == {}
     assert unavailable["sources"]["clodex"]["status"] == "unavailable"

@@ -16,7 +16,7 @@ let
   username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   scrollbackDir = "${config.sinnix.paths.capturePaths.kitty-scrollback}";
-  progressDir = "${config.sinnix.paths.stateRoot}/sinnix-ops/capture-progress";
+  progressDir = "${config.sinnix.paths.stateRoot}/hub/capture-progress";
   progressPath = "${progressDir}/kitty-scrollback";
   cfg = config.sinnix.services.capture-kitty-scrollback;
 in

@@ -1,4 +1,4 @@
-"""Live host probes the pages need and the reducer's snapshot does not carry.
+"""Live host probes the pages need and the hub server's snapshot does not carry.
 
 These probe systemd unit state and nvidia-smi's one-line GPU summary on
 request, so the numbers a page prints are the numbers at the moment it was

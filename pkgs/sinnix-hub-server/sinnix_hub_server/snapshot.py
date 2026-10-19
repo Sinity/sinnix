@@ -16,7 +16,7 @@ from .anchor import expire_anchor, reduce_anchor_event
 from .hyprland import HyprlandState, Socket2Adapter, reduce_socket_event
 
 
-class Reducer:
+class SnapshotBuilder:
     def __init__(
         self,
         snapshot_path: Path,

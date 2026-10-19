@@ -224,7 +224,7 @@ def render_services(
     body += (
         '<section class="card wide"><h2>Every governed unit</h2>'
         '<p class="sub">Grouped by the resource class that decides its slice, '
-        "weights, and ceilings. Lifecycle buttons post to the reducer's bounded "
+        "weights, and ceilings. Lifecycle buttons post to the hub server's bounded "
         "action API, which independently re-checks that the unit is attested and "
         "declares <code>observe.restartable</code>. <code>adjust</code> chips "
         "cover whichever properties the runtime inventory already declares for "

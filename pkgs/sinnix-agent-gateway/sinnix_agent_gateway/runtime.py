@@ -732,9 +732,9 @@ class Runtime:
             for key, value_type in required.items()
         ):
             raise ProtocolError(
-                "owner_failed", "ops reducer returned a malformed action receipt"
+                "owner_failed", "hub server returned a malformed action receipt"
             )
-        if receipt["schema"] != "sinnix-ops-action-v1" or (
+        if receipt["schema"] != "sinnix-hub-action-v1" or (
             receipt["idempotency_key"] != idempotency_key
             or receipt["action"] != action
             or receipt["target"] != target
@@ -744,7 +744,7 @@ class Runtime:
         ):
             raise ProtocolError(
                 "owner_failed",
-                "ops reducer receipt does not match the submitted action",
+                "hub server receipt does not match the submitted action",
             )
         return {
             key: receipt[key]
@@ -1428,17 +1428,17 @@ class Runtime:
                 "idempotency key was already used with a different request",
             )
         if state == "indeterminate":
-            reducer_stop = (
+            hub_stop = (
                 action.name == "processes.signal"
                 and isinstance(request.get("request"), Mapping)
                 and request["request"].get("operation") == "stop"
             )
             if (
                 action.name in {"machine.operate", "machine.units.operate"}
-                or reducer_stop
+                or hub_stop
             ):
                 inp = action.Input.model_validate(request)
-                if reducer_stop:
+                if hub_stop:
                     expected = inp.request.expected_target
                     reference = f"sinnix://processes/{expected.get('pid')}/{expected.get('start_ticks')}"
                     if (inp.target.ref is not None and inp.target.ref != reference) or (
@@ -1459,7 +1459,7 @@ class Runtime:
                     verb = inp.action
                     parameters = {}
                 reference, target = self._machine_target(reference)
-                if not reducer_stop:
+                if not hub_stop:
                     expected = inp.expected_target or (inp.preconditions or {}).get(
                         "expected_target"
                     )
@@ -1502,7 +1502,7 @@ class Runtime:
                         "owner_receipt": verified,
                         "affordances": ["machine.query", "audit.receipt"],
                     }
-                    if reducer_stop:
+                    if hub_stop:
                         recovered = {
                             "ref": reference,
                             "pid": target["process"]["pid"],

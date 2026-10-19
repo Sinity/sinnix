@@ -7,13 +7,13 @@
 -- bottom opens them -- so this panel stays a summary, not a second hub.
 --
 -- State access rule: snapshot state is read only through stateValue with a
--- literal key name. The noctalia-ops-bridge flake check parses those
+-- literal key name. The noctalia-hub-bridge flake check parses those
 -- literals and fails when a bound key is not published by the hub server's
 -- snapshot-building code, so a schema drift cannot silently render junk.
 
 local HUB_URL = noctalia.getConfig("hub_url") or "http://127.0.0.1:8880"
 
-local view = noctalia.state.get("sinity-ops.view") or { status = "disconnected" }
+local view = noctalia.state.get("sinity-hub.view") or { status = "disconnected" }
 
 local function text(value)
   if value == nil then return "?" end
@@ -217,7 +217,7 @@ local function render()
   panel.render(ui.column({ gap = 12, padding = 16 }, rows))
 end
 
-noctalia.state.watch("sinity-ops.view", function(value)
+noctalia.state.watch("sinity-hub.view", function(value)
   view = type(value) == "table" and value or { status = "disconnected" }
   render()
 end)

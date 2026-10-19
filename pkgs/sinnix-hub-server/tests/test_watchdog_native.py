@@ -17,12 +17,12 @@ def test_native_watchdog_survives_io_and_stops_with_the_process(tmp_path):
 import sys
 from pathlib import Path
 from sinnix_hub_server.server import serve
-class BlockedReducer:
+class BlockedBuilder:
     def refresh(self):
         Path(sys.argv[2]).touch()
         with Path(sys.argv[1]).open('rb') as source:
             source.read(1)
-serve(BlockedReducer(), 'neutral', [], 0.1, None)
+serve(BlockedBuilder(), 'neutral', [], 0.1, None)
 """
     with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as receiver:
         receiver.bind(str(address))

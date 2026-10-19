@@ -12,7 +12,7 @@ let
   hubServer = scriptPkgs.sinnix-hub-server;
   quota = scriptPkgs.sinnix-quota;
   observe = scriptPkgs.sinnix-observe;
-  stateDir = "/realm/state/sinnix-ops";
+  stateDir = "/realm/state/hub";
 in
 mkServiceModule {
   name = "hub-server";
@@ -36,7 +36,7 @@ mkServiceModule {
         quota.passthru.codexbar
         scriptPkgs.sinnix-rebuild-override
       ];
-      systemd.tmpfiles.rules = [ "d /realm/state/sinnix-ops 0700 ${userName} users -" ];
+      systemd.tmpfiles.rules = [ "d /realm/state/hub 0700 ${userName} users -" ];
       sinnix.runtime.surfaces.hub-server = {
         unit = "sinnix-hub-server.service";
         manager = "user";
@@ -64,7 +64,7 @@ mkServiceModule {
           };
           Socket = {
             ListenStream = [
-              "%t/sinnix/ops.sock"
+              "%t/sinnix/hub.sock"
               "127.0.0.1:${toString helpers.data.ports.hubServer}"
             ];
             SocketMode = "0600";

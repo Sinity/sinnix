@@ -12,7 +12,7 @@ import pytest
 from sinnix_hub_server import status as hub_status
 
 SNAPSHOT_HEALTHY: dict[str, Any] = {
-    "schema": "sinnix-ops-v1",
+    "schema": "sinnix-hub-v1",
     "sequence": 42,
     "observed_at": "2026-08-18T00:00:00Z",
     "sources": {
@@ -192,14 +192,14 @@ def test_bd_ready_head_absent_on_malformed_json() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_compose_healthy_reducer_and_beads() -> None:
+def test_compose_healthy_hub_and_beads() -> None:
     def fetch(_socket: Path, route: str) -> dict[str, Any] | None:
         return {"/v1/snapshot": SNAPSHOT_HEALTHY, "/v1/health/lanes": LANES_MIXED}[
             route
         ]
 
     data = hub_status.compose(
-        socket_path=Path("/nonexistent/ops.sock"),
+        socket_path=Path("/nonexistent/hub.sock"),
         fetch=fetch,
         bd_head=lambda: {
             "available": True,
@@ -214,7 +214,7 @@ def test_compose_healthy_reducer_and_beads() -> None:
     assert data["beads"]["available"] is True
 
 
-def test_compose_degraded_reducer_falls_back_to_static_inventory(
+def test_compose_degraded_hub_falls_back_to_static_inventory(
     tmp_path: Path,
 ) -> None:
     static_inventory = tmp_path / "runtime-inventory.json"
@@ -223,17 +223,17 @@ def test_compose_degraded_reducer_falls_back_to_static_inventory(
     )
 
     def fetch(_socket: Path, _route: str) -> dict[str, Any] | None:
-        return None  # the reducer is unreachable
+        return None  # the hub server is unreachable
 
     data = hub_status.compose(
-        socket_path=Path("/nonexistent/ops.sock"),
+        socket_path=Path("/nonexistent/hub.sock"),
         static_inventory_path=static_inventory,
         fetch=fetch,
         bd_head=lambda: {"available": False},
     )
     assert data["system"]["status"] == "unavailable"
     # Acknowledged outages still resolve from the static inventory even
-    # though the reducer itself could not be reached.
+    # though the hub server itself could not be reached.
     assert data["acknowledged_outages"][0]["surface"] == "sinex"
     assert data["capture_freshness"] == {"available": False}
 
@@ -245,7 +245,7 @@ def test_compose_no_beads_workspace() -> None:
         ]
 
     data = hub_status.compose(
-        socket_path=Path("/nonexistent/ops.sock"),
+        socket_path=Path("/nonexistent/hub.sock"),
         fetch=fetch,
         bd_head=lambda: {"available": False},
     )
@@ -282,7 +282,7 @@ def test_render_human_healthy_system_has_no_attention_rows() -> None:
 
 def test_render_human_includes_every_populated_section() -> None:
     data = hub_status.compose(
-        socket_path=Path("/nonexistent/ops.sock"),
+        socket_path=Path("/nonexistent/hub.sock"),
         fetch=lambda _s, route: {
             "/v1/snapshot": SNAPSHOT_HEALTHY,
             "/v1/health/lanes": LANES_MIXED,
@@ -340,7 +340,7 @@ def test_acknowledged_only_report_prefers_static_file(tmp_path: Path) -> None:
         return None
 
     text = hub_status.acknowledged_only_report(
-        socket_path=Path("/nonexistent/ops.sock"),
+        socket_path=Path("/nonexistent/hub.sock"),
         static_inventory_path=static_inventory,
         fetch=fetch,
     )
@@ -356,7 +356,7 @@ def test_acknowledged_only_report_falls_back_to_socket(tmp_path: Path) -> None:
         return SNAPSHOT_HEALTHY
 
     text = hub_status.acknowledged_only_report(
-        socket_path=Path("/nonexistent/ops.sock"),
+        socket_path=Path("/nonexistent/hub.sock"),
         static_inventory_path=missing,
         fetch=fetch,
     )

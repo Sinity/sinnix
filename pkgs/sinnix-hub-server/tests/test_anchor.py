@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from sinnix_hub_server.anchor import expire_anchor, reduce_anchor_event
-from sinnix_hub_server.reducer import Reducer
+from sinnix_hub_server.snapshot import SnapshotBuilder
 
 
 def test_long_afk_produces_reference_only_anchor_and_deduplicates() -> None:
@@ -44,7 +44,7 @@ def test_short_afk_is_ignored_and_anchor_expires() -> None:
     )
 
 
-def test_reducer_consumes_resume_event_once(tmp_path) -> None:
+def test_snapshot_consumes_resume_event_once(tmp_path) -> None:
     resumed_at = datetime.now(timezone.utc).replace(microsecond=0)
     started_at = resumed_at - timedelta(hours=1)
     event_path = tmp_path / "resume.json"
@@ -53,10 +53,10 @@ def test_reducer_consumes_resume_event_once(tmp_path) -> None:
             {"started_at": started_at.isoformat(), "resumed_at": resumed_at.isoformat()}
         )
     )
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         tmp_path / "snapshot.json", tmp_path / "token", lambda: {"schema": "observe"}
     )
-    reducer.anchor_event_path = event_path
-    snapshot = reducer.refresh()
+    builder.anchor_event_path = event_path
+    snapshot = builder.refresh()
     assert snapshot["state"]["session_anchor"]["schema"] == "sinnix-session-anchor-v1"
     assert not event_path.exists()

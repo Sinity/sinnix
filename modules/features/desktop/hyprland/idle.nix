@@ -10,7 +10,7 @@ let
   # Plain-text timestamp, not JSON -- afk-resume below is the only file the
   # hub server actually parses (sinnix_hub_server.cli: --anchor-events
   # defaults to %t/sinnix/afk-resume.json).
-  afkStart = pkgs.writeShellScript "sinnix-ops-afk-start" ''
+  afkStart = pkgs.writeShellScript "sinnix-hub-afk-start" ''
     set -euo pipefail
     dir="''${XDG_RUNTIME_DIR:?}/sinnix"
     mkdir -p "$dir"
@@ -19,7 +19,7 @@ let
   # Record an AFK resume event for the hub server. Exact file paths
   # and JSON shape are load-bearing: the hub server's anchor.reduce_anchor_event
   # reads started_at/resumed_at off this file at %t/sinnix/afk-resume.json.
-  afkResume = pkgs.writeShellScript "sinnix-ops-afk-resume" ''
+  afkResume = pkgs.writeShellScript "sinnix-hub-afk-resume" ''
     set -euo pipefail
     dir="''${XDG_RUNTIME_DIR:?}/sinnix"
     start="$dir/afk-start"

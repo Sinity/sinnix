@@ -1,4 +1,4 @@
-id = "sinity/sinnix-ops"
+id = "sinity/sinnix-hub"
 name = "Sinnix Operations"
 version = "0.3.0"
 plugin_api = 9
@@ -24,7 +24,7 @@ key = "token_path"
 type = "file"
 label_key = "settings.token_path.label"
 description_key = "settings.token_path.description"
-default = "$XDG_RUNTIME_DIR/sinnix/ops.token"
+default = "$XDG_RUNTIME_DIR/sinnix/hub.token"
 
 [[setting]]
 key = "hub_url"

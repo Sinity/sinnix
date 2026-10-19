@@ -53,8 +53,8 @@ class Handler(BaseHTTPRequestHandler):
         The hub mounts this behind `handle_path /phone/*`, which removes the
         mount prefix and leaves `/v1/ping`. Stripping the version here rather
         than mounting differently keeps the client's URL honest -- the phone
-        asks for /phone/v1/ping, which is what it is -- and matches how the ops
-        reducer sits behind the same kind of route.
+        asks for /phone/v1/ping, which is what it is -- and matches how the hub
+        server sits behind the same kind of route.
         """
         route = self.path.split("?", 1)[0].rstrip("/") or "/"
         for prefix in ("/phone/v1", "/v1"):

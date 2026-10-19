@@ -182,10 +182,10 @@ def test_the_lane_survives_the_sweeps_prune(lane) -> None:
     assert len(lane["recorder"].notifications) == 1
 
 
-def test_the_reducers_own_sweep_reads_the_machine_when_nothing_is_injected(
+def test_the_hubs_own_sweep_reads_the_machine_when_nothing_is_injected(
     tmp_path: Path,
 ) -> None:
-    """The wiring, end to end: `server.run_sweep` is what the reducer loop
+    """The wiring, end to end: `server.run_sweep` is what the hub server loop
     calls every 60 seconds, and it passes no sample, so the lane must read
     /proc itself.
 

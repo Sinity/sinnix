@@ -2,19 +2,19 @@
 -- Compact read-only capsule. It only consumes shared bridge state; a click
 -- opens the panel.
 
-local view = noctalia.state.get("sinity-ops.view") or { status = "disconnected" }
+local view = noctalia.state.get("sinity-hub.view") or { status = "disconnected" }
 
 -- The attention count lives on the dedicated attention widget; this capsule
 -- is the connection-status surface only.
 local function label()
-  local base = "OPS x"
-  if view.status == "connected" then base = "OPS" end
-  if view.status == "snapshot" then base = "OPS ~" end
-  if view.status == "source-stale" or view.status == "stale" then base = "OPS !" end
-  if view.status == "aggregate" then base = "OPS ?" end
+  local base = "HUB x"
+  if view.status == "connected" then base = "HUB" end
+  if view.status == "snapshot" then base = "HUB ~" end
+  if view.status == "source-stale" or view.status == "stale" then base = "HUB !" end
+  if view.status == "aggregate" then base = "HUB ?" end
   local sources = type(view.snapshot) == "table" and view.snapshot.sources or nil
   local agentctl = type(sources) == "table" and sources.agentctl or nil
-  if type(agentctl) == "table" and agentctl.status == "unavailable" then base = "OPS !" end
+  if type(agentctl) == "table" and agentctl.status == "unavailable" then base = "HUB !" end
   return base
 end
 
@@ -29,13 +29,13 @@ local function render()
   }))
 end
 
-noctalia.state.watch("sinity-ops.view", function(value)
+noctalia.state.watch("sinity-hub.view", function(value)
   view = type(value) == "table" and value or { status = "disconnected" }
   render()
 end)
 
 function onClick()
-  noctalia.togglePanel("sinity/sinnix-ops:now")
+  noctalia.togglePanel("sinity/sinnix-hub:now")
 end
 
 function update()

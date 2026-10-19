@@ -1,4 +1,4 @@
-"""Behaviour checks for the hub pages the reducer renders.
+"""Behaviour checks for the hub pages the hub server renders.
 
 The control surface mirrors the action API's admission rule: a lifecycle
 button may exist only where the runtime inventory declares

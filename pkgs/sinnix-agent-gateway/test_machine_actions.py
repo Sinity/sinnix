@@ -44,7 +44,7 @@ def service(
     config = GatewayConfig(
         state_dir=tmp_path / "state",
         projects={},
-        ops_socket_path=tmp_path / "ops.sock",
+        hub_socket_path=tmp_path / "hub.sock",
     )
     return (
         MachineActionService(
@@ -58,7 +58,7 @@ def service(
 
 def test_machine_action_forwards_exact_owner_request(tmp_path: Path) -> None:
     receipt = {
-        "schema": "sinnix-ops-action-v1",
+        "schema": "sinnix-hub-action-v1",
         "receipt_id": "owner-receipt",
         "status": "accepted",
     }
@@ -108,7 +108,7 @@ def test_machine_action_snapshot_exposes_bounded_authority_revision(
         FakeResponse(
             200,
             {
-                "schema": "sinnix-ops-v1",
+                "schema": "sinnix-hub-v1",
                 "sequence": 41,
                 "observed_at": "2026-08-25T00:00:00Z",
                 "degradation": None,
@@ -121,8 +121,8 @@ def test_machine_action_snapshot_exposes_bounded_authority_revision(
     assert actions.snapshot() == {
         "available": True,
         "operation": "actions",
-        "owner": "ops-reducer",
-        "schema": "sinnix-ops-v1",
+        "owner": "hub-server",
+        "schema": "sinnix-hub-v1",
         "observed_at": "2026-08-25T00:00:00Z",
         "revision": 41,
         "degradation": None,
@@ -138,7 +138,7 @@ def test_machine_action_snapshot_rejects_malformed_revision(tmp_path: Path) -> N
         "operator",
         FakeResponse(
             200,
-            {"schema": "sinnix-ops-v1", "sequence": True, "observed_at": "now"},
+            {"schema": "sinnix-hub-v1", "sequence": True, "observed_at": "now"},
         ),
     )
 

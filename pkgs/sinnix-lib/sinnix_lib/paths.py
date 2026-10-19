@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 def runtime_dir() -> Path:
-    """/run/sinnix (system scope) — the sentinel/reducer runtime root."""
+    """/run/sinnix (system scope) — the sentinel/hub server runtime root."""
     return Path(os.environ.get("SINNIX_RUNTIME_DIR", "/run/sinnix"))
 
 

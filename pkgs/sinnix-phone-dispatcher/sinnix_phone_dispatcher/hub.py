@@ -1,4 +1,4 @@
-"""Reads from the ops reducer's own Unix socket."""
+"""Reads from the hub server's own Unix socket."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import socket
 from typing import Any
 
 
-def ops_get(path: str) -> Any | None:
-    """Read the ops reducer over its Unix socket.
+def hub_get(path: str) -> Any | None:
+    """Read the hub server over its Unix socket.
 
     Straight to the socket rather than through the hub: this process runs on
     the same machine in the same user manager, and going out through Caddy to
@@ -17,7 +17,7 @@ def ops_get(path: str) -> Any | None:
     being asked about.
     """
     runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
-    sock_path = os.environ.get("SINNIX_OPS_SOCKET", f"{runtime}/sinnix/ops.sock")
+    sock_path = os.environ.get("SINNIX_HUB_SOCKET", f"{runtime}/sinnix/hub.sock")
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
             s.settimeout(4)

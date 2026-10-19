@@ -29,11 +29,11 @@ def default_state_dir() -> Path:
     return base / "sinnix" / "agent-gateway"
 
 
-def default_ops_socket_path() -> Path:
+def default_hub_socket_path() -> Path:
     return (
         Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"))
         / "sinnix"
-        / "ops.sock"
+        / "hub.sock"
     )
 
 
@@ -75,7 +75,7 @@ class GatewayConfig:
     systemd_run_command: str = "systemd-run"
     systemctl_command: str = "systemctl"
     journalctl_command: str = "journalctl"
-    ops_socket_path: Path = field(default_factory=default_ops_socket_path)
+    hub_socket_path: Path = field(default_factory=default_hub_socket_path)
     hypr_control_command: str = "sinnix-hypr-control"
     screenshot_control_command: str = "sinnix-screenshot-control"
     kitty_control_command: str = "sinnix-kitty-control"
@@ -313,7 +313,7 @@ class GatewayConfig:
             systemd_run_command=raw.get("systemdRunCommand", "systemd-run"),
             systemctl_command=raw.get("systemctlCommand", "systemctl"),
             journalctl_command=raw.get("journalctlCommand", "journalctl"),
-            ops_socket_path=Path(raw.get("opsSocketPath", default_ops_socket_path())),
+            hub_socket_path=Path(raw.get("hubSocketPath", default_hub_socket_path())),
             hypr_control_command=raw.get("hyprControlCommand", "sinnix-hypr-control"),
             screenshot_control_command=raw.get(
                 "screenshotControlCommand", "sinnix-screenshot-control"

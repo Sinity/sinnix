@@ -125,7 +125,7 @@ def test_the_json_api_is_untouched_by_the_page_routes(
     status, content_type, body = http_get(hub_server + "/v1/health")
     assert status == 200
     assert content_type == "application/json"
-    assert json.loads(body)["schema"] == "sinnix-ops-v1"
+    assert json.loads(body)["schema"] == "sinnix-hub-v1"
 
 
 def test_revision_route_is_a_bounded_projection_of_snapshot(

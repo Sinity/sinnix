@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 
 import pytest
 from sinnix_hub_server import cli, health
-from sinnix_hub_server.reducer import Reducer
+from sinnix_hub_server.snapshot import SnapshotBuilder
 from sinnix_hub_server.server import Handler
 
 INVENTORY: dict[str, Any] = {
@@ -47,16 +47,16 @@ class UnixHTTPServer(socketserver.ThreadingUnixStreamServer):
 
 
 @pytest.fixture
-def reducer_socket(tmp_path: Path):
+def hub_socket(tmp_path: Path):
     inventory = tmp_path / "inventory.json"
     inventory.write_text(json.dumps(INVENTORY))
     state = tmp_path / "state.json"
     ledger = tmp_path / "events.jsonl"
-    reducer = Reducer(tmp_path / "status.json", tmp_path / "token", lambda: {})
-    reducer.refresh()
-    path = tmp_path / "ops.sock"
+    builder = SnapshotBuilder(tmp_path / "status.json", tmp_path / "token", lambda: {})
+    builder.refresh()
+    path = tmp_path / "hub.sock"
     server = UnixHTTPServer(str(path), Handler)
-    server.reducer = reducer
+    server.builder = builder
     server.token = "fixture-token"
     server.is_unix = True
     server.hub_manifest = None
@@ -75,7 +75,7 @@ def transitions(ledger: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in ledger.read_text().splitlines()]
 
 
-def test_the_failure_reaches_the_running_reducer(reducer_socket) -> None:
+def test_the_failure_reaches_the_running_hub(hub_socket) -> None:
     exit_code = cli.emit_failure_command(
         [
             "--unit",
@@ -83,24 +83,24 @@ def test_the_failure_reaches_the_running_reducer(reducer_socket) -> None:
             "--result",
             "oom-kill",
             "--socket",
-            str(reducer_socket["socket"]),
+            str(hub_socket["socket"]),
             "--inventory",
-            str(reducer_socket["inventory"]),
+            str(hub_socket["inventory"]),
         ]
     )
     assert exit_code == 0
-    events = transitions(reducer_socket["ledger"])
+    events = transitions(hub_socket["ledger"])
     assert len(events) == 1
     # The bare unit name is completed, and the manager comes from the
     # inventory, so the key matches the one the sweep would use.
     assert events[0]["unit"] == "usersurf.service"
     assert events[0]["evidence"] == "manager=user;source=onfailure;result=oom-kill"
-    assert without_reminder_clock(json.loads(reducer_socket["state"].read_text())) == {
+    assert without_reminder_clock(json.loads(hub_socket["state"].read_text())) == {
         "service:user:usersurf.service": {"status": "failed"}
     }
 
 
-def test_a_dead_reducer_does_not_swallow_the_failure(
+def test_a_dead_hub_does_not_swallow_the_failure(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     state = tmp_path / "state.json"
@@ -124,7 +124,7 @@ def test_a_dead_reducer_does_not_swallow_the_failure(
         ]
     )
     assert exit_code == 0
-    assert "the reducer was unreachable" in capsys.readouterr().err
+    assert "the hub server was unreachable" in capsys.readouterr().err
     events = transitions(ledger)
     assert len(events) == 1
     assert events[0]["unit"] == "usersurf.service"
@@ -136,7 +136,7 @@ def test_a_dead_reducer_does_not_swallow_the_failure(
 
 
 def test_explicit_manager_survives_inventory_order_on_http_and_fallback(
-    tmp_path: Path, monkeypatch, capsys, reducer_socket
+    tmp_path: Path, monkeypatch, capsys, hub_socket
 ) -> None:
     mixed = {
         "schema": "sinnix-runtime-inventory-v1",
@@ -145,7 +145,7 @@ def test_explicit_manager_survives_inventory_order_on_http_and_fallback(
             {"kind": "service", "manager": "user", "unit": "dup.service"},
         ],
     }
-    reducer_socket["inventory"].write_text(json.dumps(mixed))
+    hub_socket["inventory"].write_text(json.dumps(mixed))
     assert (
         cli.emit_failure_command(
             [
@@ -156,14 +156,14 @@ def test_explicit_manager_survives_inventory_order_on_http_and_fallback(
                 "--manager",
                 "user",
                 "--socket",
-                str(reducer_socket["socket"]),
+                str(hub_socket["socket"]),
                 "--inventory",
-                str(reducer_socket["inventory"]),
+                str(hub_socket["inventory"]),
             ]
         )
         == 0
     )
-    events = transitions(reducer_socket["ledger"])
+    events = transitions(hub_socket["ledger"])
     assert events[-1]["evidence"].startswith("manager=user;")
     state = tmp_path / "state.json"
     ledger = tmp_path / "events.jsonl"
@@ -189,7 +189,7 @@ def test_explicit_manager_survives_inventory_order_on_http_and_fallback(
         )
         == 0
     )
-    assert "the reducer was unreachable" in capsys.readouterr().err
+    assert "the hub server was unreachable" in capsys.readouterr().err
     fallback = transitions(ledger)
     assert fallback[-1]["evidence"].startswith("manager=system;")
 

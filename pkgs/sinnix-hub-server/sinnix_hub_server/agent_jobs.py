@@ -31,7 +31,7 @@ class AgentCtlClient:
         self.timeout_seconds = timeout_seconds
 
     def snapshot(self) -> dict[str, Any]:
-        """The one bounded owner projection the reducer publishes each refresh."""
+        """The one bounded owner projection the hub server publishes each refresh."""
         value = self._call(
             (
                 self.command,

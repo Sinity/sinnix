@@ -4,7 +4,7 @@
 # runtimeInputs: bash coreutils jq
 set -euo pipefail
 
-state_dir="${SINNIX_REBUILD_OVERRIDE_DIR:-/realm/state/sinnix-ops}"
+state_dir="${SINNIX_REBUILD_OVERRIDE_DIR:-/realm/state/hub}"
 state_file="$state_dir/rebuild-override.json"
 usage() { echo "usage: sinnix-rebuild-override put --name NAME --value VALUE | consume" >&2; }
 mkdir -p "$state_dir"

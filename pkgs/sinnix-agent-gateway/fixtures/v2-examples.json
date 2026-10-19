@@ -1,5 +1,5 @@
 {
-  "action_catalog_hash": "00859495e03ea04323acc855a75a5b0b7b2d802ad825d4cc2db5d1c8178acca1",
+  "action_catalog_hash": "00ff37cb6093e9f0f1bd8979de8f367fc12fcfedddb3d45f2e7aeb476ba512ef",
   "examples": [
     {
       "action": "gateway.describe",
@@ -1981,7 +1981,7 @@
           "pid": 4242
         }
       },
-      "title": "Reducer stop"
+      "title": "Hub stop"
     },
     {
       "action": "processes.signal",

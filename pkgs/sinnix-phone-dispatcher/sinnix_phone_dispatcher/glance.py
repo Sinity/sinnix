@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from sinnix_lib.ledger import utc_ts
 
-from .ops import ops_get
+from .hub import hub_get
 
 
 def build_glance() -> dict:
@@ -15,7 +15,7 @@ def build_glance() -> dict:
     when nothing needs a human, because the phone renders absence as the
     resting state — a strip that always has content is a strip nobody reads.
     """
-    snapshot = ops_get("/v1/snapshot") or {}
+    snapshot = hub_get("/v1/snapshot") or {}
     attention: list[dict] = []
     tiles: list[dict] = []
 
@@ -70,12 +70,12 @@ def build_glance() -> dict:
         "verdict": verdict,
         "attention": attention,
         "tiles": tiles,
-        "reducer_seen": bool(snapshot),
+        "hub_seen": bool(snapshot),
     }
 
 
 def build_jobs() -> dict:
-    snapshot = ops_get("/v1/snapshot") or {}
+    snapshot = hub_get("/v1/snapshot") or {}
     gateway = snapshot.get("agent_gateway")
     jobs = gateway.get("jobs") if isinstance(gateway, dict) else []
     rows = []

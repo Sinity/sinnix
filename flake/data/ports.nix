@@ -16,7 +16,7 @@
 # WHY NOT UNIX SOCKETS EVERYWHERE. Where a service is genuinely local-only and
 # speaks a protocol we control, a unix socket IS better -- filesystem
 # permissions instead of "anything on loopback", no port space, no collisions
-# at all. The hub-server already does this (%t/sinnix/ops.sock). TCP survives
+# at all. The hub-server already does this (%t/sinnix/hub.sock). TCP survives
 # here for the cases that need it: OpenAI-compatible HTTP clients, containers
 # with their own network namespace, and anything reached across the tailnet.
 {

@@ -1,3 +1,3 @@
-"""Current-state reducer and bounded action contract for the Sinnix operator surface."""
+"""Current-state snapshot and bounded action contract for the Sinnix operator surface."""
 
-SCHEMA = "sinnix-ops-v1"
+SCHEMA = "sinnix-hub-v1"

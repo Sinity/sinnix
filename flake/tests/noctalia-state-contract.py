@@ -1,8 +1,8 @@
-"""Cross-component contract: panel bindings vs the reducer's published state.
+"""Cross-component contract: panel bindings vs the hub server's published state.
 
-The Noctalia ops plugin renders `snapshot.state.<key>` values that originate
+The Noctalia hub plugin renders `snapshot.state.<key>` values that originate
 in two producers: sinnix-observe's collect_report() dict (passed through by
-the reducer) and the reducer's own state additions in Reducer.refresh().
+the hub server) and the hub server's own state additions in SnapshotBuilder.refresh().
 A key the plugin binds but neither producer publishes can only ever render
 a placeholder -- which is exactly how the panel rotted into "reported"/"?"
 rows. Both sides are read from their own source (Python via ast, Luau via
@@ -37,9 +37,9 @@ def observe_report_keys(observe_root: Path) -> set[str]:
     raise SystemExit("could not find collect_report's returned dict in cli.py")
 
 
-def reducer_state_keys(reducer_root: Path) -> set[str]:
-    """Keys the reducer adds on top of the observe report in refresh()."""
-    tree = ast.parse((reducer_root / "sinnix_hub_server/reducer.py").read_text())
+def snapshot_state_keys(hub_root: Path) -> set[str]:
+    """Keys the hub server adds on top of the observe report in refresh()."""
+    tree = ast.parse((hub_root / "sinnix_hub_server/snapshot.py").read_text())
     keys: set[str] = set()
     for node in ast.walk(tree):
         # `report["attention"] = ...` style additions.
@@ -66,7 +66,7 @@ def reducer_state_keys(reducer_root: Path) -> set[str]:
                     if isinstance(key, ast.Constant) and isinstance(key.value, str)
                 )
     if not keys:
-        raise SystemExit("could not find reducer state additions in reducer.py")
+        raise SystemExit("could not find snapshot state additions in snapshot.py")
     return keys
 
 
@@ -95,16 +95,16 @@ def plugin_bound_keys(plugin_root: Path) -> dict[str, list[str]]:
 
 
 def main() -> int:
-    plugin_root = Path(os.environ["NOCTALIA_OPS_PLUGIN"])
-    reducer_root = Path(os.environ["NOCTALIA_OPS_REDUCER"])
-    observe_root = Path(os.environ["NOCTALIA_OPS_OBSERVE"])
-    published = observe_report_keys(observe_root) | reducer_state_keys(reducer_root)
+    plugin_root = Path(os.environ["NOCTALIA_HUB_PLUGIN"])
+    hub_root = Path(os.environ["NOCTALIA_HUB_SERVER"])
+    observe_root = Path(os.environ["NOCTALIA_HUB_OBSERVE"])
+    published = observe_report_keys(observe_root) | snapshot_state_keys(hub_root)
     failures = []
     for entry, keys in plugin_bound_keys(plugin_root).items():
         for key in keys:
             if key not in published:
                 failures.append(
-                    f'{entry}: bound state key "{key}" is not published by the reducer'
+                    f'{entry}: bound state key "{key}" is not published by the hub server'
                 )
     if failures:
         print("\n".join(failures), file=sys.stderr)

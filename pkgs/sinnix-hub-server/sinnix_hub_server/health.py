@@ -1,8 +1,8 @@
 """Inventory-driven health transitions: the sweep that watches every attested
 runtime surface for staleness, failure, and recovery.
 
-The reducer already reads the runtime inventory and already runs on a clock,
-so the sweep runs here, on its own 60s tick inside the reducer's loop, with a
+The hub server already reads the runtime inventory and already runs on a clock,
+so the sweep runs here, on its own 60s tick inside the hub server's loop, with a
 deduplicated transition ledger plus a desktop notification as its output. Two
 properties that follow from living here rather than as a separate root
 oneshot:

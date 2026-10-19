@@ -14,13 +14,13 @@ from .agent_jobs import AgentCtlClient
 from .ambient import product_source
 from .clodex_usage import clodex_usage
 from .feedback import CoalescingTrigger, FeedbackSpool
-from .reducer import Reducer, observe_source
+from .snapshot import SnapshotBuilder, observe_source
 from .server import FAILURE_PATH, ensure_token, serve
 from .state import StateLayer
 
 
 class UnixConnection(http.client.HTTPConnection):
-    """HTTP over the reducer's Unix socket, so the fast path speaks to the
+    """HTTP over the hub server's Unix socket, so the fast path speaks to the
     running process rather than to its state file behind its back."""
 
     def __init__(self, path: str, timeout: float = 5.0) -> None:
@@ -64,8 +64,8 @@ def post_failure(
 def emit_failure_command(argv: list[str]) -> int:
     """`sinnix-hub-server emit-failure` -- what systemd's OnFailure= runs.
 
-    It posts to the reducer first so that one process owns the dedup state; if
-    the reducer is down (which is itself a moment when units fail) it writes the
+    It posts to the hub server first so that one process owns the dedup state; if
+    the hub server is down (which is itself a moment when units fail) it writes the
     same transition directly, under the same lock and to the same files, so a
     failure is never lost to the recorder being the thing that failed.
     """
@@ -78,7 +78,7 @@ def emit_failure_command(argv: list[str]) -> int:
         type=Path,
         default=Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000"))
         / "sinnix"
-        / "ops.sock",
+        / "hub.sock",
     )
     parser.add_argument(
         "--inventory", type=Path, default=Path("/etc/sinnix/runtime-inventory.json")
@@ -93,7 +93,7 @@ def emit_failure_command(argv: list[str]) -> int:
     health.emit_failure(args.unit, args.result, inventory, manager=args.manager)
     print(
         f"sinnix-hub-server: recorded {args.unit} failure directly; "
-        "the reducer was unreachable",
+        "the hub server was unreachable",
         file=sys.stderr,
     )
     return 0
@@ -164,7 +164,7 @@ def main() -> None:
         default=Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")),
     )
     parser.add_argument(
-        "--state-dir", type=Path, default=Path("/realm/state/sinnix-ops")
+        "--state-dir", type=Path, default=Path("/realm/state/hub")
     )
     parser.add_argument(
         "--observe-command",
@@ -252,11 +252,11 @@ def main() -> None:
     )
     token = ensure_token(layer.token_path)
     agentctl = AgentCtlClient(args.agentctl)
-    reducer = Reducer(
+    builder = SnapshotBuilder(
         layer.snapshot_path,
         layer.token_path,
         observe_source(observe_command),
-        layer.reducer_state_path,
+        layer.sequence_path,
         section_source=lambda section: observe_source(
             [*observe_command[:-2], "--section", section], timeout=60
         )(),
@@ -264,10 +264,10 @@ def main() -> None:
         agent_jobs_source=agentctl.snapshot,
         clodex_usage_source=lambda: clodex_usage(args.clodex_usage),
     )
-    reducer.anchor_event_path = args.anchor_events or (root / "afk-resume.json")
-    reducer.hyprland_event_path = args.hyprland_events or (root / "hyprland-events")
+    builder.anchor_event_path = args.anchor_events or (root / "afk-resume.json")
+    builder.hyprland_event_path = args.hyprland_events or (root / "hyprland-events")
     actions = ActionService(
-        reducer.snapshot,
+        builder.snapshot,
         args.inventory,
         layer.receipts_path,
         agent_jobs=agentctl,
@@ -276,7 +276,7 @@ def main() -> None:
     feedback_spool = FeedbackSpool(layer.feedback_spool_dir, elicit=elicit)
     fds = list(range(3, 3 + int(os.environ.get("LISTEN_FDS", "0"))))
     serve(
-        reducer,
+        builder,
         token,
         fds,
         args.interval,
