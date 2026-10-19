@@ -19,62 +19,121 @@ mkFeatureModule {
       userRuntimeDirectory = "/run/user/${toString config.users.users.${user}.uid}";
     in
     lib.mkMerge [
-      # Worktree removal is coupled to the landing path: agentctl calls
-      # worktrunk_remove only from landing.py, so every non-landing exit
-      # (abandoned batch worker, baseline checkout, triage tree, a worker
-      # that errored) leaves its directory behind -- each carrying its own
-      # ~450 MB venv, because sharing the checkout venv is forbidden.
-      # `git worktree prune` does not close this: it disowns the metadata
-      # and leaves the directory. 28 such husks holding 72 GB were found
-      # and removed by hand on 2026-09-21.
+      # Worktrees are removed when their work is in the default branch, not
+      # when someone notices them. agentctl removes only the worktrees its
+      # landing step finishes, and Claude Code, forks and hand-made trees
+      # have no removal at all: 500+ piled up once and 184 on 2026-10-19,
+      # each needing a manual triage. Daily, for every project repository:
+      # `wt step prune` removes worktrees and branches whose changes are in
+      # the default branch (squash merges included) and skips dirty, locked
+      # and day-old ones; worktrees a live process is inside are locked for
+      # the run so they are never pulled out from under a session. Separately,
+      # directories under /realm/worktree without a .git are leftovers of an
+      # interrupted removal and are deleted. Unmerged worktrees untouched for
+      # 14 days stay (they hold commits nowhere else), and are announced.
       (lib.sinnix.mkScheduledJob
         {
           inherit config;
           unitName = "sinnix-worktree-reap";
-          description = "Remove orphaned worktree directories under /realm/worktree";
+          description = "Remove merged and orphaned worktrees";
         }
         {
           manager = "user";
           resourceClass = "background";
+          path = [
+            pkgs.coreutils
+            pkgs.findutils
+            pkgs.git
+            pkgs.gnugrep
+            pkgs.libnotify
+            pkgs.worktrunk
+          ];
+          serviceConfig.TimeoutStartSec = "1h";
           script = ''
             set -uo pipefail
-            root=/realm/worktree
-            [ -d "$root" ] || exit 0
-            for d in "$root"/*; do
-              [ -d "$d" ] || continue
-              # A live worktree always carries .git (file or dir). Since Git
-              # never removes the directory itself, a .git-less entry here is
-              # residue by definition -- this is the whole safety criterion.
-              if [ -e "$d/.git" ]; then continue; fi
-              # Refuse while any process is still working inside it.
-              busy=""
-              for proc in /proc/[0-9]*; do
-                cwd=$(readlink "$proc/cwd" 2>/dev/null) || continue
-                case "$cwd" in
-                  "$d" | "$d"/*)
-                    busy=1
-                    break
-                    ;;
-                esac
+            # Every directory a live process works in, read once.
+            held=$(for proc in /proc/[0-9]*; do readlink "$proc/cwd" 2>/dev/null; done | sort -u)
+            in_use() {
+              printf '%s\n' "$held" | grep -qxF -e "$1" || printf '%s\n' "$held" | grep -qF -e "$1/"
+            }
+
+            locked=()
+            unlock_all() {
+              for entry in "''${locked[@]}"; do
+                git -C "''${entry%%|*}" worktree unlock "''${entry#*|}" 2>/dev/null
               done
-              if [ -n "$busy" ]; then
+              locked=()
+            }
+            trap unlock_all EXIT
+
+            failed=0
+            stale=()
+            for repo in /realm/project/*/repo; do
+              [ -e "$repo/.git" ] || continue
+              # Claude Code locks the worktrees it creates for a session
+              # ("claude agent <name> (pid P start S)") and leaves the lock
+              # when the session ends; a lock whose process is gone would keep
+              # its worktree from ever being pruned.
+              git -C "$repo" worktree list --porcelain | awk '/^worktree /{w=substr($0,10)} /^locked claude agent /{print w "\t" $0}' |
+                while IFS=$'\t' read -r tree reason; do
+                  if [[ $reason =~ \(pid\ ([0-9]+)\ start\ ([0-9]+)\) ]]; then
+                    pid=''${BASH_REMATCH[1]} start=''${BASH_REMATCH[2]}
+                    now=$(cut -d' ' -f22 "/proc/$pid/stat" 2>/dev/null)
+                    if [ "$now" != "$start" ]; then
+                      echo "release stale Claude lock: $tree"
+                      git -C "$repo" worktree unlock "$tree"
+                    fi
+                  fi
+                done
+              while IFS= read -r line; do
+                tree=''${line#worktree }
+                [ "$tree" = "$repo" ] && continue
+                if in_use "$tree" && git -C "$repo" worktree lock --reason "in use during sinnix-worktree-reap" "$tree" 2>/dev/null; then
+                  locked+=("$repo|$tree")
+                fi
+              done < <(git -C "$repo" worktree list --porcelain | grep '^worktree ')
+              echo "prune: $repo"
+              wt -C "$repo" step prune --yes --foreground --min-age 1d || failed=1
+              unlock_all
+              # What is left and untouched for two weeks holds unmerged work.
+              while IFS= read -r line; do
+                tree=''${line#worktree }
+                [ "$tree" = "$repo" ] && continue
+                [ -d "$tree" ] || continue
+                if [ -z "$(find "$tree" -maxdepth 2 -newermt '-14 days' -print -quit 2>/dev/null)" ]; then
+                  stale+=("$tree")
+                fi
+              done < <(git -C "$repo" worktree list --porcelain | grep '^worktree ')
+            done
+
+            # A live worktree always carries .git (file or dir); Git never
+            # removes the directory itself, so a .git-less entry is residue.
+            for d in /realm/worktree/*; do
+              [ -d "$d" ] && [ ! -e "$d/.git" ] || continue
+              if in_use "$d"; then
                 echo "skip (in use): $d"
                 continue
               fi
               echo "reaping: $d"
               # Verification receipts are written 0o444 and archive templates
-              # read-only; without this the removal fails partway and leaves
-              # a partial tree that looks like a fresh husk next run.
+              # read-only; without this the removal fails partway.
               chmod -R u+w "$d" 2>/dev/null || true
               rm -rf "$d"
             done
+
+            if [ "''${#stale[@]}" -gt 0 ]; then
+              printf 'unmerged, untouched for 14 days: %s\n' "''${stale[@]}"
+              notify-send --app-name=sinnix "Worktrees" \
+                "''${#stale[@]} unmerged worktrees untouched for 14 days (journalctl --user -u sinnix-worktree-reap)" || true
+            fi
+            exit "$failed"
           '';
           timer = {
             onCalendar = "*-*-* 04:00:00";
             persistent = true;
             randomizedDelaySec = "20min";
             accuracySec = "5min";
-            description = "Daily orphaned-worktree reclaim";
+            description = "Daily merged and orphaned worktree removal";
           };
         }
       )
