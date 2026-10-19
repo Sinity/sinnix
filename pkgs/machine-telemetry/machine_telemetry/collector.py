@@ -2138,7 +2138,11 @@ def save_kill_event_cursor(conn: sqlite3.Connection, cursor: str) -> None:
 def scan_kill_events(
     host: str, boot_id: str | None, after_cursor: str | None
 ) -> tuple[list[dict[str, object]], str | None]:
-    cmd = ["journalctl", "-o", "json", "--no-pager", "-g", KILL_EVENT_GREP]
+    # --show-cursor reports where the scan stopped, matched or not. Resuming
+    # from the last MATCH instead re-read every entry since the last kill on
+    # each 30 s scan: 7.8 s of CPU and a re-read of the journal per scan on
+    # 2026-10-19, months after the last kill, growing every day.
+    cmd = ["journalctl", "-o", "json", "--no-pager", "--show-cursor", "-g", KILL_EVENT_GREP]
     if after_cursor:
         cmd += ["--after-cursor", after_cursor]
     else:
@@ -2157,6 +2161,9 @@ def scan_kill_events(
     rows: list[dict[str, object]] = []
     new_cursor = after_cursor
     for line in proc.stdout.decode("utf-8", "replace").splitlines():
+        if line.startswith("-- cursor: "):
+            new_cursor = line.removeprefix("-- cursor: ").strip()
+            continue
         try:
             entry = json.loads(line)
         except json.JSONDecodeError:

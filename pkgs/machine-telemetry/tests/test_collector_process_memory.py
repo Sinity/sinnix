@@ -263,6 +263,7 @@ def test_kill_event_scan_keeps_cursor_on_bounded_failure(monkeypatch) -> None:
                 "-o",
                 "json",
                 "--no-pager",
+                "--show-cursor",
                 "-g",
                 collector.KILL_EVENT_GREP,
                 "--after-cursor",
@@ -295,6 +296,22 @@ def test_kill_event_scan_parses_complete_bounded_output(monkeypatch) -> None:
     assert cursor == "next-cursor"
     assert rows[0]["killer"] == "earlyoom"
     assert rows[0]["victim_pid"] == 42
+
+
+def test_kill_event_scan_resumes_after_the_scanned_tail_without_matches(monkeypatch) -> None:
+    collector = _collector()
+    monkeypatch.setattr(
+        collector,
+        "run_bounded",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            error=None, stdout=b"-- cursor: tail-cursor\n"
+        ),
+    )
+
+    assert collector.scan_kill_events("host", "boot", "old-cursor") == (
+        [],
+        "tail-cursor",
+    )
 
 
 def test_psi_adapter_keeps_telemetry_flat_float_fields(monkeypatch) -> None:
