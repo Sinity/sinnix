@@ -22,7 +22,7 @@
   mkBorgCommonScript,
   realmExcludes,
   realmExcludeMatchesProtectedPath,
-  mkSinexBeadsDrillScript,
+  mkSinexBeadsCheckScript,
 }:
 [
   {
@@ -40,8 +40,8 @@
   }
 
   # Weekly integrity checks verify repository segment CRCs, then advance
-  # another partial check on persist and realm. The latter script retains its
-  # historical "drill" name, but its scheduled default does not restore data.
+  # another partial check on persist and realm (sinnix-borg-check), whose
+  # scheduled default does not restore data.
   # These checks were merged into one unit from borgbackup-check.service and
   # sinnix-borg-check.service (the separate Wed 04:00 timer was retired).
   (mkBackupJob "borgbackup-verify" {
@@ -106,7 +106,7 @@
       # and went red for two weeks while the backups themselves were fine.
       # The trap only ever writes "failed" -- "completed" is
       # written explicitly once the repository checks below succeed, so a
-      # later drill failure (which is a separate concern, not part of
+      # later sinnix-borg-check failure (which is a separate concern, not part of
       # expected_jobs) does not retroactively flip a completed integrity
       # check back to failed.
       trap receipt_failure_trap EXIT
@@ -131,10 +131,10 @@
       # sinnix-borg-check.service, with its own weekly timer, was merged here).
       # The no-argument default runs repository-only checks for persist and
       # realm; it does not restore or pass --verify-data. It shares the same
-      # receipt path as the manual `sinnix borg-drill [--verify-data]` verb.
+      # receipt path as the manual `sinnix borg-check [--verify-data]` verb.
       # The repository checks above
       # release the global Borg lock here (by closing fd 9) before
-      # invoking it: the drill script does its own `exec 9>...; flock -n`
+      # invoking it: sinnix-borg-check does its own `exec 9>...; flock -n`
       # in a fresh process against the same lock file, which would
       # otherwise always see the lock as already held by this script and
       # skip -- a re-entrant flock is per-open-file-description, not
@@ -226,15 +226,15 @@
     '';
   })
 
-  # The realm archive covers Sinex's external Beads task store. The drill
-  # extracts that store into scratch and reads a task and commit offline.
+  # The realm archive covers Sinex's external Beads task store. This restore
+  # check extracts that store into scratch and reads a task and commit offline.
   #
   # Its failure notification comes from the renderer, not from a hand-wired
-  # onFailure: the drill is deliberately not an observed surface (its
-  # evidence is the drill log, not unit state), so runtime.nix's
+  # onFailure: the check is deliberately not an observed surface (its
+  # evidence is its log, not unit state), so runtime.nix's
   # surface-driven attachment skips it and mkScheduledJob's does not.
-  (mkBackupJob "sinnix-borg-beads-drill" {
-    description = "Restore drill for the external Sinex Beads task store";
+  (mkBackupJob "sinnix-borg-beads-check" {
+    description = "Restore check for the external Sinex Beads task store";
     unit = {
       reloadIfChanged = false;
       stopIfChanged = false;
@@ -259,10 +259,10 @@
     };
     timer = {
       # Follow the regular realm archive and stay clear of the repository
-      # integrity check and restore drill on Sunday (borgbackup-verify).
+      # integrity check on Sunday (borgbackup-verify).
       onCalendar = "Thu 05:00:00";
       persistent = true;
     };
-    script = mkSinexBeadsDrillScript;
+    script = mkSinexBeadsCheckScript;
   })
 ]

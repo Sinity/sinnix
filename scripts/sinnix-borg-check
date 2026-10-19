@@ -10,10 +10,9 @@
 #
 # Scheduled invocation happens inside borgbackup-verify.service after its main
 # repository checks. The default mode below advances repository-only partial
-# CRC checks; despite the historical command name, it does not restore data.
-# The optional --verify-data mode checks archive data cryptographically but
-# also does not extract or restore a file. The manual verb remains
-# `sinnix borg-drill [--verify-data]`.
+# CRC checks; it does not restore data. The optional --verify-data mode checks
+# archive data cryptographically but also does not extract or restore a file.
+# The manual verb is `sinnix borg-check [--verify-data]`.
 #
 # Required environment:
 #   BORG_PASSCOMMAND  — how to fetch the passphrase (set by the systemd unit)
@@ -34,6 +33,7 @@ DEFAULT_REPOS=(
   "file:///outer-realm/backup/borg-persist-v1"
   "file:///outer-realm/backup/borg-realm-v2"
 )
+# Historical file name, kept because Lynchpin reads it by path.
 LOG_FILE="/realm/device/sinnix-prime/borg_drill.jsonl"
 WITHIN_DAYS=30
 MAX_DURATION=1800
@@ -124,13 +124,13 @@ overall_exit=0
 started_at="$(date -u -Iseconds)"
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
-  echo "another Borg operation is active; skipping drill and keeping it queued for the next timer run" >&2
+  echo "another Borg operation is active; skipping the check and keeping it queued for the next timer run" >&2
   emit_jsonl "all" "" "$started_at" "$(date -u -Iseconds)" 0 0 "skipped_busy" "another Borg operation holds $LOCK_FILE" "repository_partial"
   exit 0
 fi
 
 for repo in "${REPOS[@]}"; do
-  echo "=== drill: $repo ==="
+  echo "=== check: $repo ==="
   if [ "$VERIFY_DATA" -eq 0 ]; then
     started_at="$(date -u -Iseconds)"
     start_epoch="$(date +%s)"

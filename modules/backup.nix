@@ -112,10 +112,11 @@ let
       sinexTaskAuthority != null
       && lib.hasPrefix "${realmRoot}/" sinexTaskAuthority.workspace
       && lib.hasPrefix "${sinexTaskAuthority.workspace}/" sinexTaskAuthority.database
-    ) "The Sinex Beads drill requires a task authority and database inside /realm";
+    ) "The Sinex Beads restore check requires a task authority and database inside /realm";
     lib.removePrefix "${realmRoot}/" sinexTaskAuthority.workspace;
   sinexBeadsDatabaseRelativePath = lib.removePrefix "${sinexTaskAuthority.workspace}/" sinexTaskAuthority.database;
-  sinexBeadsDrillLog = "${config.sinnix.paths.machineRoot}/borg_beads_drill.jsonl";
+  # The file keeps its historical name: Lynchpin reads it by path.
+  sinexBeadsCheckLog = "${config.sinnix.paths.machineRoot}/borg_beads_drill.jsonl";
   # Ranking domains (items and the append-only comparison log): operator
   # judgments that cannot be recomputed from anything.
   rankingArchivePath = "activity/shared/ranking";
@@ -938,20 +939,20 @@ let
     paths = protectedRealmArchivePaths;
   };
 
-  mkSinexBeadsDrillScript = ''
+  mkSinexBeadsCheckScript = ''
     set -euo pipefail
 
     archive_path=${lib.escapeShellArg sinexBeadsArchivePath}
 
     exec 9>${lib.escapeShellArg borgGlobalLock}
     if ! flock -n 9; then
-      echo "another Borg operation is active; skipping Beads restore drill" >&2
+      echo "another Borg operation is active; skipping Beads restore check" >&2
       exit 0
     fi
 
     mapfile -t archives < <(borg list --short --glob-archives 'realm-*' ${lib.escapeShellArg borgRepoRealm} | sort)
     if [ "''${#archives[@]}" -eq 0 ]; then
-      echo "no realm Borg archive is available for the Sinex Beads restore drill" >&2
+      echo "no realm Borg archive is available for the Sinex Beads restore check" >&2
       exit 1
     fi
     archive="''${archives[$(( ''${#archives[@]} - 1 ))]}"
@@ -988,7 +989,7 @@ let
       -q 'SELECT id, title FROM issues ORDER BY id LIMIT 1' -r json \
       | jq -cer '.rows[0] | select(.id != null and .id != "" and .title != null and .title != "")')"
 
-    install -d -m 0755 ${lib.escapeShellArg (builtins.dirOf sinexBeadsDrillLog)}
+    install -d -m 0755 ${lib.escapeShellArg (builtins.dirOf sinexBeadsCheckLog)}
     jq -nc \
       --arg type sinex_beads_restore_drill \
       --arg archive "$archive" \
@@ -997,7 +998,7 @@ let
       --argjson issue "$issue" \
       --arg ts "$(date -Iseconds)" \
       '{ts:$ts,type:$type,archive:$archive,authority_path:$authority_path,dolt_commit:$dolt_commit,issue:$issue,ok:true}' \
-      | tee -a ${lib.escapeShellArg sinexBeadsDrillLog}
+      | tee -a ${lib.escapeShellArg sinexBeadsCheckLog}
   '';
 
   # Persist and realm freshness probes read snapshot timestamps from their
@@ -1357,7 +1358,7 @@ in
               };
               captures = [
                 {
-                  name = "borg-drill";
+                  name = "borg-check";
                   path = "${config.sinnix.paths.machineRoot}/borg_drill.jsonl";
                   eventDriven = true;
                   # borgbackup-verify.timer runs weekly (604800s); budget 3x
@@ -1368,7 +1369,7 @@ in
                   name = "borg-integrity-receipt";
                   path = borgIntegrityReceipt;
                   eventDriven = true;
-                  # Same 3x-weekly-cadence budget as the drill lane above: the
+                  # Same 3x-weekly-cadence budget as the borg-check lane above: the
                   # receipt only updates on a verify run.
                   staleAfterSeconds = 1814400;
                   # Staleness alone reads a run stuck mid-check (state=="running"
@@ -1404,13 +1405,13 @@ in
               unit = "borgbackup-root-snapshots.service";
               resourceClass = "backup";
             };
-            sinnix-borg-beads-drill = {
-              unit = "sinnix-borg-beads-drill.service";
+            sinnix-borg-beads-check = {
+              unit = "sinnix-borg-beads-check.service";
               resourceClass = "backup";
               captures = [
                 {
-                  name = "borg-beads-drill";
-                  path = sinexBeadsDrillLog;
+                  name = "borg-beads-check";
+                  path = sinexBeadsCheckLog;
                   eventDriven = true;
                   staleAfterSeconds = 1814400;
                 }
@@ -1536,7 +1537,7 @@ in
           mkBorgCommonScript
           realmExcludes
           realmExcludeMatchesProtectedPath
-          mkSinexBeadsDrillScript
+          mkSinexBeadsCheckScript
           ;
       })
     )

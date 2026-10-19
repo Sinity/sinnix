@@ -4,7 +4,7 @@ A ledger line's atomicity requirement is one line, not read-modify-write.
 Short writes require a destination lock through the complete append. Nine-plus scripts carried their
 own version of this; the receipt shape (``run_id``/``operation_kind``/
 ``state``/``ts``) existed in at least three dialects (borg integrity
-receipts, drill records, drain receipts) — this is the one schema new
+receipts, backup check records, drain receipts) — this is the one schema new
 emissions use.
 """
 

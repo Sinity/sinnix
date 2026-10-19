@@ -91,7 +91,7 @@ assert lib.assertMsg (
             # as fresh while nothing produces the marker (and the reverse: a
             # marker nobody watches). The writer is the unit's own script plus
             # the sources of the packaged scripts that unit invokes -- the
-            # drill receipt, for one, is written by scripts/sinnix-borg-check
+            # check receipt, for one, is written by scripts/sinnix-borg-check
             # rather than inline. Both sides come from the evaluated config,
             # so neither is a restated literal.
             assertion =
@@ -478,11 +478,11 @@ assert lib.assertMsg (
         }
       ];
 
-      sinexBeadsDrillScript =
+      sinexBeadsCheckScript =
         assert lib.assertMsg
-          (lib.hasInfix "authority/sinex/.beads" customAuthorityEval.config.systemd.services.sinnix-borg-beads-drill.script)
-          "The Beads drill must follow a configured Sinex task authority outside state/tasks";
-        rewriteBackupHook backupRuntimeEval.config.systemd.services.sinnix-borg-beads-drill.script [
+          (lib.hasInfix "authority/sinex/.beads" customAuthorityEval.config.systemd.services.sinnix-borg-beads-check.script)
+          "The Beads restore check must follow a configured Sinex task authority outside state/tasks";
+        rewriteBackupHook backupRuntimeEval.config.systemd.services.sinnix-borg-beads-check.script [
           {
             from = "/outer-realm/backup/borg-realm-v2";
             to = "$TMPDIR/repos/borg-realm-v2";
@@ -580,7 +580,7 @@ assert lib.assertMsg (
               verify = backupRuntimeEval.config.systemd.services.borgbackup-verify;
               timer = backupRuntimeEval.config.systemd.timers.borgbackup-verify;
               script = verify.script;
-              drillScript = builtins.readFile ../../scripts/sinnix-borg-check;
+              checkScript = builtins.readFile ../../scripts/sinnix-borg-check;
               audit = backupRuntimeEval.config.systemd.services.borgbackup-coverage-audit-realm;
               auditTimer = backupRuntimeEval.config.systemd.timers.borgbackup-coverage-audit-realm;
             in
@@ -591,11 +591,11 @@ assert lib.assertMsg (
             && lib.hasInfix "--max-duration 7200 file:///outer-realm/backup/borg-realm-v2" script
             && lib.hasInfix "--max-duration 1800 file:///outer-realm/backup/borg-sinex-blobs-v1" script
             && lib.hasInfix "/bin/sinnix-borg-check\n" script
-            && lib.hasInfix "MAX_DURATION=1800" drillScript
-            && lib.hasInfix "VERIFY_DATA=0" drillScript
-            && lib.hasInfix "file:///outer-realm/backup/borg-persist-v1" drillScript
-            && lib.hasInfix "file:///outer-realm/backup/borg-realm-v2" drillScript
-            && lib.hasInfix "borg check --repository-only --max-duration \"$MAX_DURATION\" \"$repo\"" drillScript
+            && lib.hasInfix "MAX_DURATION=1800" checkScript
+            && lib.hasInfix "VERIFY_DATA=0" checkScript
+            && lib.hasInfix "file:///outer-realm/backup/borg-persist-v1" checkScript
+            && lib.hasInfix "file:///outer-realm/backup/borg-realm-v2" checkScript
+            && lib.hasInfix "borg check --repository-only --max-duration \"$MAX_DURATION\" \"$repo\"" checkScript
             && audit.serviceConfig.TimeoutStartSec == "2h"
             && auditTimer.timerConfig.OnCalendar == "*-*-* *:35:00"
             && lib.hasInfix "status=deferred reason=borg-lock-contention remains_due=true" audit.script
@@ -604,7 +604,7 @@ assert lib.assertMsg (
             && lib.hasInfix "--mode sampled --sample-bytes 1073741824 --sample-files 128" audit.script
             && lib.hasInfix "flock -n -x 8" realmBorgDrainScript
           )
-          "Weekly Borg verification must keep its CRC budgets and drill semantics while ending before the next archive window";
+          "Weekly Borg verification must keep its CRC budgets and partial-check semantics while ending before the next archive window";
         assert lib.assertMsg (lib.all
           (name: backupRuntimeEval.config.systemd.services.${name}.serviceConfig.TimeoutStartSec == "4h")
           [
@@ -673,7 +673,7 @@ assert lib.assertMsg (
                     missing = missingRealmBorgDrainScript;
                     sinex = sinexBlobBorgScript;
                     polylogue = polylogueStateBorgScript;
-                    beads = sinexBeadsDrillScript;
+                    beads = sinexBeadsCheckScript;
                     liveLock = liveHolderLockScript;
                     deadLock = deadHolderLockScript;
                   }

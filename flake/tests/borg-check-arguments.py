@@ -31,4 +31,4 @@ with tempfile.TemporaryDirectory() as directory:
             result.returncode == 2 and "BORG_PASSCOMMAND must be set" in result.stderr
         ), result
         assert not list(Path(directory).iterdir()), arguments
-print("Borg drill argument boundaries passed")
+print("Borg check argument boundaries passed")

@@ -42,7 +42,7 @@
     "borg-persist-archive"
     "borg-realm-archive"
     "borg-sinex-blobs-archive"
-    "borg-drill"
+    "borg-check"
     "borg-integrity-receipt"
     "audio-devices"
     "audio-topology"
@@ -61,7 +61,7 @@
     "machine-telemetry"
     "machine-telemetry-sqlite-structural-verification"
     "phone-logcat"
-    "borg-beads-drill"
+    "borg-beads-check"
     "url-ledger-state"
     "url-ledger-coverage"
   ];

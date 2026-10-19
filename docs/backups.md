@@ -76,7 +76,7 @@ Borg stores mostly new data; the `/realm` snapshots archive them.
 | ------------------------ | --------------------------------- | -------------------------------- | ------------------------------------------------------------------------------- |
 | Repository integrity     | `borgbackup-verify`               | Sunday 13:00                     | Borg's segment CRCs, advanced in time-limited partial passes                    |
 | `/realm` coverage sample | `borgbackup-coverage-audit-realm` | hourly while due, at most weekly | all paths and metadata match, plus up to 128 files / 1 GiB of contents compared |
-| Beads restore drill      | `sinnix-borg-beads-drill`         | Thursday 05:00                   | a real restore of the Beads database from the latest archive                    |
+| Beads restore check      | `sinnix-borg-beads-check`         | Thursday 05:00                   | a real restore of the Beads database from the latest archive                    |
 | Sealed telemetry         | `machine-telemetry-seal`          | Sunday 04:30                     | each sealed SQLite file passes a structural check once                          |
 
 The coverage sample checks only the newest archive, so files that exist only

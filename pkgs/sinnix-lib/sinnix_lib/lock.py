@@ -2,7 +2,7 @@
 
 Ten scripts opened their own lock fd and reasoned about ``flock -n``
 semantics separately; this is that pattern once. The lock is per-open-file-
-description (the same property the borg drill had to document by hand), so
+description (the same property sinnix-borg-check had to document by hand), so
 nesting the same path in one process deadlocks by design — do not.
 """
 
