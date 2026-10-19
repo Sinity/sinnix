@@ -5,16 +5,16 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 661847dfd90c854cce1a05cde9c32acb0c928660324ca7c683cc5177b9fda293 -->
+<!-- gateway-catalog-sha256: 92c3e5336dbd37c5ddae785d441e0fc7f10a201c9af8e4fcd7218f0db11a8be6 -->
 
 # Agent Gateway
 
-Every gateway action is one MCP tool named after the action; its input schema in `tools/list` is the contract and its output envelope schema is the `sinnix://gateway/v2/actions/<name>` resource. Paths, ids, titles and unit names are accepted where a canonical `sinnix://` ref is; responses return the canonical ref and `affordances` naming the next actions. Images arrive as image content blocks, other binary as resource blocks.
+Every gateway action is one MCP tool named after the action; its input schema in `tools/list` is the contract and its output envelope schema is the `sinnix://gateway/actions/<name>` resource. Paths, ids, titles and unit names are accepted where a canonical `sinnix://` ref is; responses return the canonical ref and `next_actions` naming the next actions. Images arrive as image content blocks, other binary as resource blocks.
 
 ## Invocation
 
 - MCP: call the tool by action name with the fields of its input schema.
-- CLI: `sinnix-agent-gateway call <action> --input '{...}'` or `--set key=value` (values parse as JSON); `--principal` selects authority. `sinnix-agent-gateway catalog <action> --schema` prints the live schemas, `--example` the examples, `catalog --complete <prefix>` lists names.
+- CLI: `sinnix-agent-gateway call <action> --input '{...}'` or `--set key=value` (values parse as JSON); `sinnix-agent-gateway catalog <action> --schema` prints the live schemas, `--example` the examples, `catalog --complete <prefix>` lists names.
 - Discovery: `gateway.catalog` with a plain-words `query` finds actions, resources and brokered MCP tools; `gateway.status` reports contract hashes and route availability.
 
 Effectful actions (families change, operate, run) require `idempotency_key`. Confirmed responses replay unchanged. Pending calls refuse concurrent execution; interrupted calls become indeterminate and never retry their effects automatically. `operations.run` and `shell.run` reconcile through durable agentctl launch identities; hub-backed machine actions and process stop reconcile only exact confirmed owner receipts. Other interrupted mutations remain indeterminate. Preconditions are owner-specific checks, best effort unless the owner explicitly guarantees atomic comparison and mutation.
@@ -25,7 +25,7 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 
 ### status
 
-- `gateway.status` — Report the principal, contract hashes, tool count and per-route availability.
+- `gateway.status` — Report the contract hashes, tool count and per-route availability.
 - `desktop.snapshot` — One observation of the desktop: monitors, workspaces, focus, every window with geometry, and a generation stamp.
 - `machine.snapshot` — Each section carries its own availability and source; GPU and network report unavailable because no owner exposes them.
 - `mcp.servers` — Each probe runs initialize + tools/list within the configured call timeout, capped at 30 seconds. A timeout stores the upstream stderr as an artifact and returns its ref.
@@ -33,11 +33,11 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 
 ### catalog
 
-- `gateway.catalog` — limit bounds inline rows per category. matched_counts and returned_counts distinguish observed matches from this response. matches_artifact retains every filtered match when cropped; artifacts.read retrieves its immutable bytes. Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).
+- `gateway.catalog` — limit bounds inline rows per category. matched_counts and returned_counts distinguish observed matches from this response. matches_artifact retains every filtered match when cropped; artifacts.read retrieves its immutable bytes. Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, next_actions, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).
 - `terminals.list` — Every kitty window with its ref, title, cwd, shell pid, focus and foreground processes.
 - `browser.pages` — List every open Chrome page with its ref; flags the gateway-owned pages that can be read, captured or operated.
 - `mcp.tools` — Catalog of every admitted upstream tool with its namespaced ref, input schema and read/change effect.
-- `artifacts.list` — List principal-visible artifacts with kind, owner, size and canonical ref.
+- `artifacts.list` — List artifacts with kind, owner, size and canonical ref.
 - `capabilities.query` — Search the generated machine capability index or describe one capability exactly.
 
 ### query
@@ -55,7 +55,7 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 - `projects.export` — Exports tracked and nonignored untracked files, excluding sensitive and local-only paths. Symlink entries retain their link targets; symlinked parent directories are refused. Optional file and byte bounds return next_start_after; pass it with checkout_revision as expected_revision to continue. Fetch the ZIP through its artifact ref; its manifest_path holds the complete per-file manifest.
 - `projects.diff` — Show uncommitted changes in a checkout, optionally against a git ref.
 - `projects.search` — max_matches selects retained matches; page_size sizes responses. next_cursor pages the immutable observation after checkout edits. checkout_revision identifies its captured source; truncated reports additional matches beyond max_matches. Cursors bind the principal, checkout and query.
-- `beads.closure` — Read native dependency closure, cycles, readiness and incomplete frontier at one revision.
+- `beads.dependency_graph` — Read native dependency closure, cycles, readiness and incomplete frontier at one revision.
 - `beads.query` — The owner filters, projects and counts before serialization. limit sizes immutable observation pages; cursors never reread live rows. Owner coverage reports any bounded prefix; beads.read exposes native offset paging. at pins historical reads to an exact resolved Dolt revision. aggregate counts or groups without fetching issue bodies.
 - `beads.read` — Read native Beads queries, counts or dependency closure with owner revisions and paging.
 - `beads.dependencies.count` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
@@ -67,7 +67,7 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 - `beads.memories` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 - `beads.related` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 - `jobs.list` — List queued jobs (pueue tasks) newest first, optionally for one project.
-- `jobs.queues` — shell-quick and shell-long are the shell.run groups. Reads only unfinished tasks, so it stays cheap however long the queue history is.
+- `jobs.queues` — shell-quick and shell-long are the shell.run pools. Reads only unfinished tasks, so it stays cheap however long the queue history is.
 - `batches.list` — List batch runs newest first, with each worker's stage and task.
 - `desktop.screenshot` — full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.
 - `desktop.tree` — Walks the AT-SPI tree through pyatspi in the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.
@@ -115,18 +115,18 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 - `machine.prepare` — Read the selected target identity and action preconditions without changing it.
 - `processes.get` — Describe one process: cmdline, cwd, exe, redacted env, cgroup/unit, parent, children, sockets, cpu and memory.
 - `artifacts.get` — Metadata of one artifact without its bytes.
-- `audit.receipt` — Read one principal-scoped audit receipt by ref or id.
+- `audit.receipt` — Read one audit receipt by ref or id.
 - `audit.operation` — Every change, operate or run call is addressed by the idempotency_key its caller chose before sending it. When the response was lost (a tunnel 502 or deadline), read the outcome here instead of sending the mutation again: a confirmed operation returns its success or failure response, including created ids on success, and nothing runs twice.
 - `results.get` — Read one immutable stored response snapshot by ref or id.
 
 ### context
 
-- `projects.context` — Project-scoped view of context.compose with the same owner coverage, compact presentation and snapshot retrieval, plus project navigation affordances.
+- `projects.context` — Project-scoped view of context.compose with the same owner coverage, compact presentation and snapshot retrieval, plus project navigation next_actions.
 - `context.compose` — The owner supplies domain composition and a compact presentation when full data exceeds the inline budget. snapshot_ref retains the exact observation. availability and component presentation report usability independently of transport success; omitted data is unavailable.
 
 ### events
 
-- `events.tail` — Pass next_cursor back to continue; a cursor from another principal or project scope fails stale_cursor.
+- `events.tail` — Pass next_cursor back to continue; a cursor from another project scope fails stale_cursor.
 
 ### wait
 
@@ -163,7 +163,7 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 ### operate
 
 - `beads.operate` — Beads maintenance: publish the export snapshot, push or pull sync, create, list or restore backups.
-- `jobs.cancel` — Pass expected_phase to refuse when the job already moved on. The owner retains reason with the gateway principal label before stopping the job. Request metadata is separate from completion; survivors is null when the owner did not report a process inspection.
+- `jobs.cancel` — Pass expected_phase to refuse when the job already moved on. The owner retains reason with the gateway caller label before stopping the job. Request metadata is separate from completion; survivors is null when the owner did not report a process inspection.
 - `jobs.retry` — Re-run a terminal job in place with the same launch input and id (pueue restart).
 - `jobs.clean` — Refused while the job is still queued or running; cancel it first.
 - `desktop.operate` — Pointer clicks, drags and scrolls need a virtual pointer tool (ydotool) on the host and fail unavailable without one; cursor moves always work. Window targets are natural locators; ambiguity returns candidates.
@@ -173,13 +173,13 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 - `browser.operate` — Operator tabs are never accepted as targets, even when a locator matches one. Element targets take a snapshot ref or a CSS selector.
 - `machine.operate` — expected_target must match the target identity returned by machine.prepare; the hub server receipt is verified against the submitted action and target.
 - `machine.units.operate` — Start, stop or restart one unit through the hub server (reload and wait are not hub actions).
-- `processes.signal` — The hub server path is the attested one and needs expected_target; the direct path is receipted by the gateway audit chain only.
+- `processes.signal` — The hub-server path is the checked one and needs expected_target; the direct path is receipted by the gateway audit chain only.
 
 ### run
 
 - `gateway.run` — Pass controls at the top level and ordinary action input in arguments. The response is the selected action's native envelope and receipt.
 - `operations.run` — Queue one project-declared operation in its declared pool on the root or a worktree.
-- `shell.run` — cwd is confined to the checkout. lane=auto sends agent CLI launches (claude, codex, ...) to the long lane and everything else to the quick lane. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) and returns output; outcome running or queued is a continuation with queue occupancy, never a failure: pass continuation and output.next_offset to jobs.wait. timeout_seconds is an optional kill ceiling; omitted, the job runs until it finishes.
+- `shell.run` — cwd is confined to the checkout. pool=auto sends agent CLI launches (claude, codex, ...) to the long pool and everything else to the quick pool. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) and returns output; outcome running or queued is a continuation with queue occupancy, never a failure: pass continuation and output.next_offset to jobs.wait. timeout_seconds is an optional kill ceiling; omitted, the job runs until it finishes.
 - `batches.start` — backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.
 - `batches.land` — batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.
 - `batches.resume` — backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.
@@ -187,4 +187,4 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 
 `sinnix-agent-gateway-generate --reference` prints every schema and example.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `661847dfd90c854cce1a05cde9c32acb0c928660324ca7c683cc5177b9fda293`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `92c3e5336dbd37c5ddae785d441e0fc7f10a201c9af8e4fcd7218f0db11a8be6`.
