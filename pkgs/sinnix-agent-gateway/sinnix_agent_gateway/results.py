@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass
 from itertools import islice
 from pathlib import Path
-from typing import Any, Mapping, get_args
+from typing import Any, Mapping
 
 from sinnix_lib.atomic import atomic_publish
 
@@ -20,11 +20,7 @@ from .artifacts import ArtifactService
 from .config import GatewayConfig
 from .payloads import canonical_chunks, canonical_size, retain_json
 from .permissions import Permission, Principal
-from .schemas import StableErrorCode, V2ToolEnvelope
-
-# `StableErrorCode` types `V2Error.code`, so it is the enum the published
-# envelope schema renders: a code the gateway may raise is a code it may send.
-EXPECTED_ERROR_CODES = frozenset(get_args(StableErrorCode))
+from .schemas import ERROR_CODES, V2ToolEnvelope
 
 
 class ProtocolError(ValueError):
@@ -38,7 +34,7 @@ class ProtocolError(ValueError):
         details: Mapping[str, Any] | None = None,
         diagnostic_refs: list[str] | None = None,
     ) -> None:
-        if code not in EXPECTED_ERROR_CODES:
+        if code not in ERROR_CODES:
             raise ValueError(f"unknown protocol error code: {code}")
         self.code = code
         self.details = dict(details or {})

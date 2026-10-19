@@ -184,11 +184,6 @@ in
                       default = true;
                       description = "Whether this repository supplies an agentctl project descriptor.";
                     };
-                    checkoutDiscovery = mkOption {
-                      type = types.enum [ "git-worktree" ];
-                      default = "git-worktree";
-                      description = "Declared owner used to enumerate code checkouts.";
-                    };
                     devtoolsEntrypoint = mkOption {
                       type = types.nullOr types.str;
                       default = null;

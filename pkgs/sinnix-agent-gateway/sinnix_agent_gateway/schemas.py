@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -9,7 +9,7 @@ class GatewayModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-StableErrorCode = Literal[
+ErrorCode = Literal[
     "invalid_request",
     "not_found",
     "unavailable",
@@ -26,10 +26,11 @@ StableErrorCode = Literal[
     "indeterminate",
     "unsupported_capability",
 ]
+ERROR_CODES = frozenset(get_args(ErrorCode))
 
 
 class V2Error(GatewayModel):
-    code: StableErrorCode
+    code: ErrorCode
     message: str = Field(min_length=1, max_length=2_000)
     diagnostic_refs: list[str] = Field(default_factory=list, max_length=32)
     details: dict[str, Any] = Field(default_factory=dict)

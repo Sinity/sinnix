@@ -30,7 +30,6 @@ from .locators import decode_file_ref
 from .machine_actions import MachineActionService
 from .mcp_broker import McpBrokerService
 from .observe import ObserveService
-from .owner_errors import ErrorCode
 from .owner_execution import OwnerDiagnosticError
 from .permissions import Permission, PolicyError, Principal
 from .projects import ProjectService
@@ -40,18 +39,6 @@ from .results import ProtocolError, RequestContext, ResultError, ResultService
 from .route_preflight import GatewayRoutePreflight
 from .terminals import TerminalService
 from .waits import BoundedWaitService, WaitEvidence, WaitRequest, WaitTarget
-
-DAEMON_ERROR_CLASSES = {
-    ErrorCode.INVALID_ARGUMENT: "invalid_request",
-    ErrorCode.STALE_CURSOR: "stale_cursor",
-    ErrorCode.POLICY_DENIED: "policy_denied",
-    ErrorCode.OWNER_UNAVAILABLE: "unavailable",
-    ErrorCode.AUTHORITY_MISMATCH: "policy_denied",
-    ErrorCode.RESOURCE_DEFERRED: "unavailable",
-    ErrorCode.RESOURCE_EXHAUSTED: "response_bound",
-    ErrorCode.OPERATION_FAILED: "owner_failed",
-    ErrorCode.RESULT_INVALID: "owner_failed",
-}
 
 
 def _by_ref(field: str) -> Callable[[str, Mapping[str, str]], dict[str, Any]]:
@@ -398,7 +385,7 @@ class Runtime:
             result = handler(**call_arguments)
         except JobOwnerError as error:
             raise ProtocolError(
-                DAEMON_ERROR_CLASSES[error.code],
+                error.code,
                 str(error),
                 details=error.details,
             ) from error
@@ -1153,7 +1140,7 @@ class Runtime:
             "target_refs": sorted(set(target_refs)),
             "owner": action.owner,
             "owner_route": (
-                owner_route if isinstance(owner_route, str) else action.route
+                owner_route if isinstance(owner_route, str) else action.name
             ),
             "owner_version": (
                 owner_version
@@ -1181,7 +1168,6 @@ class Runtime:
                 else None
             ),
             "post_write": dict(post_write) if isinstance(post_write, Mapping) else None,
-            "effects": sorted(effect.value for effect in action.storage_effects),
             "created_objects": created_objects,
             "artifact_refs": sorted(set(artifact_refs)),
             "owner_receipt_id": (
@@ -1283,7 +1269,7 @@ class Runtime:
         return self.results.record(
             action=action.name,
             owner=action.owner,
-            route=action.route,
+            route=action.name,
             outcome="ok",
             payload=result,
             receipt=receipt,
@@ -1376,7 +1362,7 @@ class Runtime:
         return self.results.record(
             action=action.name,
             owner=action.owner,
-            route=action.route,
+            route=action.name,
             outcome="error",
             payload=error,
             receipt=receipt,

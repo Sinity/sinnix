@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 from typing import TYPE_CHECKING, Any
 
@@ -362,15 +361,3 @@ def _description(action: Action) -> str:
     if action.affordances:
         lines.append("Follow-up actions: " + ", ".join(action.affordances))
     return "\n".join(lines)
-
-
-def tool_signature_matches(tool: Tool, action: Action) -> bool:
-    """Canary: the published parameters equal the Input model schema."""
-    published = tool.parameters
-    declared = action.input_schema()
-    accepted = set(tool.fn_metadata.arg_model.model_fields)
-    return (
-        published == declared
-        and accepted == set(action.Input.model_fields)
-        and inspect.iscoroutinefunction(tool.fn)
-    )

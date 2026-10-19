@@ -5,6 +5,7 @@ from enum import StrEnum
 from typing import Any, Callable, Mapping
 
 from .refs import RefTemplate
+from .schemas import ERROR_CODES
 
 KNOWN_PRINCIPALS = frozenset({"operator"})
 
@@ -32,38 +33,7 @@ class EffectMode(StrEnum):
     RUN = "run"
 
 
-class StorageEffect(StrEnum):
-    """Gateway-owned persistence that can accompany a protocol action."""
-
-    AUDIT_APPEND = "audit_append"
-    RESULT_SNAPSHOT = "result_snapshot"
-
-
-OBSERVABILITY_PERSISTENCE = frozenset(
-    {StorageEffect.AUDIT_APPEND, StorageEffect.RESULT_SNAPSHOT}
-)
-
-BASE_TYPED_FAILURES = frozenset(
-    {
-        "invalid_request",
-        "not_found",
-        "unavailable",
-        "response_bound",
-        "owner_failed",
-        "policy_denied",
-    }
-)
-KNOWN_TYPED_FAILURES = BASE_TYPED_FAILURES | {
-    "precondition_failed",
-    "idempotency_conflict",
-    "indeterminate",
-    "stale_cursor",
-    "source_changed",
-    "conflict",
-    "partial_completion",
-    "deadline",
-    "unsupported_capability",
-}
+KNOWN_TYPED_FAILURES = ERROR_CODES
 
 
 @dataclass(frozen=True)

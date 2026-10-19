@@ -26,7 +26,6 @@ from sinnix_agent_gateway.cli_support import (
     load_json_input,
 )
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_agent_gateway.gateway_codegen import FIXTURE_PATH
 from sinnix_agent_gateway.runtime import Runtime
 
 
@@ -541,22 +540,19 @@ def test_catalog_display_exposes_schema_example_and_completion() -> None:
 def test_generated_examples_replay_and_validate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fixture_path = Path(__file__).parent / "fixtures" / FIXTURE_PATH.name
-    fixtures = json.loads(fixture_path.read_text())
+    examples = [
+        (action.name, example.input)
+        for action in action_set.visible("operator")
+        for example in action.examples
+    ]
     calls: list[tuple[str, dict[str, object]]] = []
     monkeypatch.setattr(
         cli_support, "create_server", lambda _config, _principal: FakeServer(calls)
     )
-    assert fixtures["examples"]
-    for fixture in fixtures["examples"]:
-        anyio.run(
-            cli_support.invoke_mcp,
-            _config(tmp_path),
-            "operator",
-            fixture["action"],
-            fixture["input"],
-        )
-    assert [name for name, _ in calls] == [f["action"] for f in fixtures["examples"]]
-    assert {f["action"] for f in fixtures["examples"]} == {
+    assert examples
+    for name, payload in examples:
+        anyio.run(cli_support.invoke_mcp, _config(tmp_path), "operator", name, payload)
+    assert [name for name, _ in calls] == [name for name, _ in examples]
+    assert {name for name, _ in examples} == {
         a.name for a in action_set.visible("operator")
     }

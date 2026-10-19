@@ -53,7 +53,6 @@ class ProjectConfig:
     remote: str | None = None
     default_ref: str = "master"
     default_checkout: Path | None = None
-    checkout_discovery: str = "git-worktree"
     devtools_entrypoint: str | None = None
     task_authority: TaskAuthorityConfig | None = None
 
@@ -230,11 +229,6 @@ class GatewayConfig:
                     project_uuid=project_uuid,
                     publication_policy=publication_policy,
                 )
-            checkout_discovery = row.get("checkoutDiscovery", "git-worktree")
-            if checkout_discovery != "git-worktree":
-                raise ValueError(
-                    f"project {project_id} checkoutDiscovery must be 'git-worktree'"
-                )
             devtools_entrypoint = row.get("devtoolsEntrypoint")
             if devtools_entrypoint is not None and (
                 not isinstance(devtools_entrypoint, str) or not devtools_entrypoint
@@ -260,7 +254,6 @@ class GatewayConfig:
                     if default_checkout_value is not None
                     else None
                 ),
-                checkout_discovery=checkout_discovery,
                 devtools_entrypoint=devtools_entrypoint,
                 task_authority=task_authority,
             )

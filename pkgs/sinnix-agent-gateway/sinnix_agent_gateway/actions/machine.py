@@ -1021,7 +1021,6 @@ ACTIONS: tuple[Action, ...] = (
             "interrupt job",
         ),
         supports_precondition=True,
-        receipt_policy="owner",
         documentation="expected_target must match the target identity returned by machine.prepare; the hub server receipt is verified against the submitted action and target.",
         examples=(
             Example(
@@ -1079,7 +1078,6 @@ ACTIONS: tuple[Action, ...] = (
         affordances=("machine.units.get", "machine.units.logs", "audit.receipt"),
         aliases=("systemctl restart", "systemctl start", "systemctl stop", "bounce"),
         supports_precondition=True,
-        receipt_policy="owner",
         examples=(
             Example(
                 title="Restart by name",

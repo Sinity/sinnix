@@ -31,8 +31,6 @@
                 "test_.*[.]py"
                 "conftest[.]py"
                 "pyproject[.]toml"
-                "fixtures"
-                "fixtures/.*"
                 "generate_.*[.]py"
               ];
           python = pkgs.python3.withPackages (ps: [

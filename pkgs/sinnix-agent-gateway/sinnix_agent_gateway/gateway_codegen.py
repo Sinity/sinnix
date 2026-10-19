@@ -1,4 +1,4 @@
-"""Generate the agent skill and CLI fixtures from the actions; render the reference on demand.
+"""Generate the agent skill from the actions; render the reference on demand.
 
 The full reference (every schema and example) is printed by `--reference`
 rather than tracked: `sinnix-agent-gateway catalog <action> --schema` serves
@@ -17,7 +17,6 @@ from . import actions as action_set
 from .contracts import VerbFamily
 
 SKILL_PATH = Path("dots/_ai/skills/agent-gateway/SKILL.md")
-FIXTURE_PATH = Path("pkgs/sinnix-agent-gateway/fixtures/v2-examples.json")
 PRINCIPAL = "operator"
 
 
@@ -54,7 +53,7 @@ def _action_table(rows: list[dict[str, Any]]) -> list[str]:
         [
             [
                 f"`{row['name']}`",
-                f"`{row['verb']}`",
+                f"`{row['family']}`",
                 f"`{row['owner']}`",
                 f"`{', '.join(row['principals'])}`",
                 row["documentation"],
@@ -116,7 +115,7 @@ def render_reference() -> str:
                 "",
                 row["documentation"],
                 "",
-                f"Family: `{row['verb']}`. Owner: `{row['owner']}`. "
+                f"Family: `{row['family']}`. Owner: `{row['owner']}`. "
                 f"Principals: `{', '.join(row['principals'])}`. "
                 f"Typed failures: `{', '.join(row['typed_failures'])}`.",
                 "",
@@ -171,7 +170,7 @@ def render_skill() -> str:
     catalog = catalog_payload()
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in catalog["actions"]:
-        grouped[row["verb"]].append(row)
+        grouped[row["family"]].append(row)
     index = []
     for family in VerbFamily:
         rows = grouped.get(family.value)
@@ -216,29 +215,9 @@ Catalog revision: `{catalog["revision"]}`. Catalog SHA-256: `{catalog["action_ca
 """
 
 
-def render_fixtures() -> dict[str, Any]:
-    catalog = catalog_payload()
-    return {
-        "schema": "sinnix.gateway-cli-fixtures.v2",
-        "revision": catalog["revision"],
-        "action_catalog_hash": catalog["action_catalog_hash"],
-        "examples": [
-            {
-                "action": row["name"],
-                "family": row["verb"],
-                "title": example["title"],
-                "input": example["input"],
-            }
-            for row in catalog["actions"]
-            for example in row["examples"]
-        ],
-    }
-
-
 def generated_files(root: Path) -> dict[Path, str]:
     return {
         root / SKILL_PATH: render_skill(),
-        root / FIXTURE_PATH: _json(render_fixtures()) + "\n",
     }
 
 
@@ -262,7 +241,7 @@ def check_artifacts(root: Path) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Generate the gateway skill and fixtures, or print the reference"
+        description="Generate the gateway skill, or print the reference"
     )
     parser.add_argument("--root", type=Path, default=Path("."))
     mode = parser.add_mutually_exclusive_group(required=True)

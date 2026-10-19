@@ -18,7 +18,7 @@ from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.contracts import VerbFamily
 from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.results import (
-    EXPECTED_ERROR_CODES,
+    ERROR_CODES,
     ProtocolError,
     ResultError,
     ResultService,
@@ -238,7 +238,7 @@ def test_large_snapshot_row_survives_paging_and_artifact_transport(tmp_path) -> 
 
 def test_accepted_failure_classes_are_exactly_the_rendered_envelope_enum() -> None:
     # The enum below is what a caller reads off the published envelope schema;
-    # `EXPECTED_ERROR_CODES` is what `ProtocolError` may raise. They are one
+    # `ERROR_CODES` is what `ProtocolError` may raise. They are one
     # definition, so a code the gateway can raise is always a code it can send.
     rendered = set(
         V2ToolEnvelope.model_json_schema()["$defs"]["V2Error"]["properties"]["code"][
@@ -246,7 +246,7 @@ def test_accepted_failure_classes_are_exactly_the_rendered_envelope_enum() -> No
         ]
     )
 
-    assert rendered == set(EXPECTED_ERROR_CODES)
+    assert rendered == set(ERROR_CODES)
     for code in sorted(rendered):
         assert ProtocolError(code, "safe failure").code == code
     with pytest.raises(ValueError, match="unknown protocol error code"):
@@ -257,7 +257,7 @@ def test_runtime_v2_keeps_each_expected_failure_in_a_typed_envelope(tmp_path) ->
     runtime = Runtime.create(config(tmp_path), "operator")
     action = _fixture_action("fixture.typed-failure", VerbFamily.QUERY, {"operator"})
 
-    for code in EXPECTED_ERROR_CODES:
+    for code in ERROR_CODES:
         response = _execute(
             runtime,
             action,

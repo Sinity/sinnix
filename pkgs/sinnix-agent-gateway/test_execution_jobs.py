@@ -9,10 +9,8 @@ from conftest import DirectJobs
 from sinnix_agent_gateway.actions import BY_NAME as ACTIONS
 from sinnix_agent_gateway.app import Runtime
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
-from sinnix_agent_gateway.owner_errors import ErrorCode
 from sinnix_agent_gateway.registry import REGISTRY
 from sinnix_agent_gateway.runtime import (
-    DAEMON_ERROR_CLASSES,
     RESOURCE_READERS,
     ProtocolError,
 )
@@ -40,10 +38,6 @@ async def invoke(target: Any, name: str, arguments: dict[str, Any]) -> dict[str,
     response = await target.call_tool(name, arguments)
     assert response.structured_content is not None
     return response.structured_content
-
-
-def test_gateway_preserves_stale_task_cursor_class() -> None:
-    assert DAEMON_ERROR_CLASSES[ErrorCode.STALE_CURSOR] == "stale_cursor"
 
 
 def test_v2_get_reads_a_canonical_ref_through_the_action_that_owns_the_kind(

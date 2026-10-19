@@ -8,7 +8,6 @@ from agentctl import artifacts, batch, launch, pueue
 from agentctl.config import Config
 from agentctl.limits import MAX_AGENT_TIMEOUT_SECONDS
 from sinnix_agent_gateway.execution import JobOwnerError, LocalJobs
-from sinnix_agent_gateway.owner_errors import ErrorCode
 
 DESCRIPTOR = """
 schema = 1
@@ -199,7 +198,7 @@ def test_shell_start_queues_the_argv_inside_the_checkout(
                 "timeout_seconds": 60,
             },
         )
-    assert escaped.value.code is ErrorCode.POLICY_DENIED
+    assert escaped.value.code == "policy_denied"
     assert len(seen) == 9
 
     long = _call(
@@ -227,7 +226,7 @@ def test_shell_start_queues_the_argv_inside_the_checkout(
                 "group": "bulk",
             },
         )
-    assert foreign.value.code is ErrorCode.INVALID_ARGUMENT
+    assert foreign.value.code == "invalid_request"
 
 
 def test_job_list_cursor_is_bound_to_the_project_filter(
@@ -257,7 +256,7 @@ def test_job_list_cursor_is_bound_to_the_project_filter(
 
     with pytest.raises(JobOwnerError) as stale:
         adapter.list(limit=1, project_id="b", cursor=first["next_cursor"])
-    assert stale.value.code is ErrorCode.STALE_CURSOR
+    assert stale.value.code == "stale_cursor"
 
 
 RUN_DOCUMENT = {
@@ -358,7 +357,7 @@ def test_batch_start_hands_the_beads_to_agentctl_and_answers_from_the_manifest(
     monkeypatch.setattr(batch, "start", refuse)
     with pytest.raises(JobOwnerError) as refused:
         _call(adapter, "batch.start", {"project_id": "fixture", "beads": ["fixture-1"]})
-    assert refused.value.code is ErrorCode.OPERATION_FAILED
+    assert refused.value.code == "owner_failed"
     assert refused.value.details == {"refusal": "members"}
     assert "claimed by agent-x" in str(refused.value)
 
@@ -388,7 +387,7 @@ def test_batch_land_queues_a_landing_task_and_reports_the_refusal_class(
     monkeypatch.setattr(batch, "queue", refuse)
     with pytest.raises(JobOwnerError) as refused:
         _call(adapter, "batch.land", {"run_id": "a2c81926"})
-    assert refused.value.code is ErrorCode.OPERATION_FAILED
+    assert refused.value.code == "owner_failed"
     assert refused.value.details == {"refusal": "landing_in_progress"}
 
 
@@ -407,7 +406,7 @@ def test_batch_verbs_refuse_a_run_that_belongs_to_another_project(
             "batch.status",
             {"run_id": "a2c81926", "project_id": "fixture"},
         )
-    assert refused.value.code is ErrorCode.INVALID_ARGUMENT
+    assert refused.value.code == "invalid_request"
     assert "belongs to other" in str(refused.value)
 
 
@@ -505,7 +504,7 @@ def test_a_launch_reference_that_is_a_path_is_refused(adapter: LocalJobs) -> Non
             "job.get",
             {"job_id": 41, "launch_reference": "../../etc/passwd"},
         )
-    assert refused.value.code is ErrorCode.INVALID_ARGUMENT
+    assert refused.value.code == "invalid_request"
 
 
 def test_job_logs_reads_the_log_of_the_job_the_reference_addresses(

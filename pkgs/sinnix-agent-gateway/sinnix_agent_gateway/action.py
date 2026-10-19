@@ -15,7 +15,6 @@ import json
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
 from typing import Any, Literal
-from urllib.parse import quote
 
 from mcp.types import ContentBlock, ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -23,9 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 from .contracts import (
     KNOWN_PRINCIPALS,
     KNOWN_TYPED_FAILURES,
-    OBSERVABILITY_PERSISTENCE,
     EffectMode,
-    StorageEffect,
     VerbFamily,
 )
 from .revisions import token_input_schema
@@ -142,16 +139,12 @@ class Action:
     Output: type[BaseModel]
     handler: Handler = field(compare=False)
     principals: frozenset[str] = ALL_PRINCIPALS
-    domain: str = ""
     resource_kinds: tuple[str, ...] = ()
     affordances: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
     examples: tuple[Example, ...] = ()
     documentation: str = ""
     supports_precondition: bool = False
-    execution_profile: str | None = None
-    receipt_policy: str = "audit"
-    storage_effects: frozenset[StorageEffect] = OBSERVABILITY_PERSISTENCE
     failure_codes: frozenset[str] | None = None
     # The input field that bounds how long a read action blocks. The remote
     # tunnel caps it so the answer precedes the control plane's deadline.
@@ -168,8 +161,6 @@ class Action:
             raise ValueError(f"action {self.name!r} requires an owner and summary")
         if not self.principals or not self.principals <= KNOWN_PRINCIPALS:
             raise ValueError(f"action {self.name!r} names unknown principals")
-        if not self.domain:
-            object.__setattr__(self, "domain", self.name.split(".", 1)[0])
         if not issubclass(self.Input, RequestControls):
             raise ValueError(f"action {self.name!r} Input must extend RequestControls")
         mutating = issubclass(self.Input, MutationControls)
@@ -179,8 +170,6 @@ class Action:
             raise ValueError(f"mutating action {self.name!r} needs MutationControls")
         if len(set(self.resource_kinds)) != len(self.resource_kinds):
             raise ValueError(f"action {self.name!r} repeats resource kinds")
-        if self.receipt_policy not in {"none", "audit", "owner"}:
-            raise ValueError(f"action {self.name!r} has unknown receipt policy")
         if (
             self.failure_codes is not None
             and not self.failure_codes <= KNOWN_TYPED_FAILURES
@@ -203,19 +192,13 @@ class Action:
         for example in self.examples:
             self.Input.model_validate(example.input)
 
-    # -- ActionSpec-compatible surface consumed by the runtime kernel -------
-
     @property
-    def verb(self) -> VerbFamily:
-        return self.family
+    def domain(self) -> str:
+        return self.name.split(".", 1)[0]
 
     @property
     def effect(self) -> EffectMode:
         return FAMILY_EFFECT[self.family]
-
-    @property
-    def route(self) -> str:
-        return self.name
 
     @property
     def supports_idempotency(self) -> bool:
@@ -234,10 +217,6 @@ class Action:
         )
 
     @property
-    def schema_ref(self) -> str:
-        return f"sinnix://gateway/v2/actions/{quote(self.name, safe='.')}"
-
-    @property
     def annotations(self) -> ToolAnnotations:
         return FAMILY_ANNOTATIONS[self.family]
 
@@ -254,12 +233,8 @@ class Action:
     def catalog_row(self) -> dict[str, Any]:
         return {
             "name": self.name,
-            "schema_ref": self.schema_ref,
-            "verb": self.family.value,
-            "domain": self.domain,
+            "family": self.family.value,
             "owner": self.owner,
-            "route": self.route,
-            "availability": "declared",
             "effect": self.effect.value,
             "principals": sorted(self.principals),
             "resource_kinds": list(self.resource_kinds),
@@ -267,9 +242,6 @@ class Action:
             "aliases": list(self.aliases),
             "supports_idempotency": self.supports_idempotency,
             "supports_precondition": self.supports_precondition,
-            "execution_profile": self.execution_profile,
-            "receipt_policy": self.receipt_policy,
-            "storage_effects": sorted(effect.value for effect in self.storage_effects),
             "typed_failures": sorted(self.typed_failures),
             "input_schema": self.input_schema(),
             "output_schema": self.output_schema(),

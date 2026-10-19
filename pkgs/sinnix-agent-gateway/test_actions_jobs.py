@@ -14,7 +14,6 @@ from sinnix_agent_gateway.actions import contexts, jobs, waits
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.locators import JobLocator
-from sinnix_agent_gateway.owner_errors import ErrorCode
 
 OWNED = (*jobs.ACTIONS, *waits.ACTIONS, *contexts.ACTIONS)
 
@@ -507,7 +506,7 @@ def test_operations_run_targets_the_root_or_a_linked_worktree(
     assert on_worktree["result"]["outcome"] == "ok", on_worktree.get("error")
     assert fake.calls[-1].arguments["workspace_id"] == str(worktree.resolve())
 
-    fake.errors["job.start"] = (ErrorCode.INVALID_ARGUMENT, "unknown operation: nope")
+    fake.errors["job.start"] = ("invalid_request", "unknown operation: nope")
     refused = call(
         server,
         "operations.run",
@@ -560,7 +559,7 @@ def test_shell_run_is_operator_only_and_keeps_cwd_inside_the_checkout(
         "idempotency_key": runtime.launch_idempotency_key("shell.run", "sh-1"),
     }
     fake.errors["job.shell.start"] = (
-        ErrorCode.POLICY_DENIED,
+        "policy_denied",
         "cwd must stay inside the checkout",
     )
     escaped = call(

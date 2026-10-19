@@ -22,7 +22,7 @@ from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.contracts import VerbFamily
 from sinnix_agent_gateway.locators import BeadLocator, CheckoutLocator, ProjectLocator
 from sinnix_agent_gateway.projects import ProjectError, ProjectPreconditionError
-from sinnix_agent_gateway.tooling import build_tool, tool_signature_matches
+from sinnix_agent_gateway.tooling import build_tool
 
 ACTIONS = validate_actions(
     (*files.ACTIONS, *projects.ACTIONS),
@@ -240,7 +240,10 @@ def test_actions_publish_honest_schemas(tmp_path: Path) -> None:
     runtime = server._sinnix_revision_publisher.runtime
     for action in projects.ACTIONS:
         tool = build_tool(action, runtime)
-        assert tool_signature_matches(tool, action), action.name
+        assert tool.parameters == action.input_schema(), action.name
+        assert set(tool.fn_metadata.arg_model.model_fields) == set(
+            action.Input.model_fields
+        ), action.name
         assert tool.parameters.get("additionalProperties") is False
         assert action.examples and action.aliases and action.affordances
         mutating = action.family in {VerbFamily.CHANGE, VerbFamily.OPERATE}

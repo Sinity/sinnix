@@ -26,7 +26,7 @@ from sinnix_agent_gateway.locators import (
 )
 from sinnix_agent_gateway.owner_execution import ExecutionResult
 from sinnix_agent_gateway.schemas import GatewayModel
-from sinnix_agent_gateway.tooling import build_tool, tool_signature_matches
+from sinnix_agent_gateway.tooling import build_tool
 
 
 def config(tmp_path: Path) -> GatewayConfig:
@@ -226,7 +226,10 @@ def test_every_action_publishes_its_model_schema(tmp_path: Path) -> None:
     runtime = server._sinnix_revision_publisher.runtime
     for action in ALL_ACTIONS:
         tool = build_tool(action, runtime)
-        assert tool_signature_matches(tool, action), action.name
+        assert tool.parameters == action.input_schema(), action.name
+        assert set(tool.fn_metadata.arg_model.model_fields) == set(
+            action.Input.model_fields
+        ), action.name
         schema = tool.parameters
         assert schema.get("additionalProperties") is False, action.name
         assert "parameters" not in schema["properties"], action.name

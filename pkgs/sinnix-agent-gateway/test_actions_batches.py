@@ -16,7 +16,6 @@ from sinnix_agent_gateway.actions import batches, jobs
 from sinnix_agent_gateway.app import Runtime, create_server
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.locators import RunLocator
-from sinnix_agent_gateway.owner_errors import ErrorCode
 
 OWNED = (*batches.ACTIONS, *jobs.ACTIONS)
 RUN_ID = "fixture-20260906-012123-a2c81926"
@@ -177,7 +176,7 @@ def test_start_sends_the_beads_and_the_worker_grouping(
     }
 
     fake.errors["batch.start"] = (
-        ErrorCode.OPERATION_FAILED,
+        "owner_failed",
         "members: fixture-7 is claimed by agent-x",
         {"refusal": "members"},
     )

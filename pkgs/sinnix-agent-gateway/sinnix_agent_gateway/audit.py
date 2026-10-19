@@ -177,7 +177,7 @@ class AuditService:
                 if row[0] != request_sha256:
                     connection.execute("commit")
                     return "conflict", None
-                if row[1] not in {"complete", "confirmed"} or row[2] is None:
+                if row[1] != "confirmed" or row[2] is None:
                     # The released process lock proves the caller ended, not
                     # whether its owner accepted the effect. Never rerun here.
                     state = "indeterminate" if descriptor is not None else "pending"
@@ -214,7 +214,7 @@ class AuditService:
         with self._connect() as connection:
             connection.execute("begin immediate")
             updated = connection.execute(
-                "update idempotency set state = 'confirmed', response_json = ?, receipt_id = ?, updated_at = ? where principal = ? and action = ? and idempotency_key = ? and request_sha256 = ? and state in ('pending', 'in_progress', 'indeterminate')",
+                "update idempotency set state = 'confirmed', response_json = ?, receipt_id = ?, updated_at = ? where principal = ? and action = ? and idempotency_key = ? and request_sha256 = ? and state in ('pending', 'indeterminate')",
                 (
                     json.dumps(response, sort_keys=True, separators=(",", ":")),
                     receipt_id,
@@ -227,7 +227,7 @@ class AuditService:
             ).rowcount
             if updated != 1:
                 row = connection.execute(
-                    "select response_json from idempotency where principal = ? and action = ? and idempotency_key = ? and request_sha256 = ? and state in ('confirmed','complete')",
+                    "select response_json from idempotency where principal = ? and action = ? and idempotency_key = ? and request_sha256 = ? and state = 'confirmed'",
                     (self.principal.name, action, idempotency_key, request_sha256),
                 ).fetchone()
                 if row is None or row[0] is None:
@@ -242,7 +242,7 @@ class AuditService:
         """Persist uncertainty after interruption; no lease expiry permits retry."""
         with self._connect() as connection:
             connection.execute(
-                "update idempotency set state = 'indeterminate', updated_at = ? where principal = ? and action = ? and idempotency_key = ? and state in ('pending','in_progress')",
+                "update idempotency set state = 'indeterminate', updated_at = ? where principal = ? and action = ? and idempotency_key = ? and state = 'pending'",
                 (time.time(), self.principal.name, action, idempotency_key),
             )
         self.release_idempotency(action, idempotency_key)
@@ -293,18 +293,14 @@ class AuditService:
         if row is None:
             return {"state": "unknown"}
         state = row[1]
-        if state in {"complete", "confirmed"} and row[2] is not None:
+        if state == "confirmed" and row[2] is not None:
             state, response = "confirmed", json.loads(row[2])
         else:
             response = None
-            if state in {"pending", "in_progress"} and not self._claim_is_live(
-                action, idempotency_key
-            ):
+            if state == "pending" and not self._claim_is_live(action, idempotency_key):
                 # The claimant ended (a restart, a kill) without recording an
                 # outcome; the owner may or may not have applied the effect.
                 state = "indeterminate"
-            elif state == "in_progress":
-                state = "pending"
         return {
             "state": state,
             "request_sha256": row[0],

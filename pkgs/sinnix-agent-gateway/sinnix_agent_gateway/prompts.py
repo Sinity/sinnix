@@ -111,7 +111,7 @@ class PromptGenerator:
         actions = [
             {
                 "name": row.get("name"),
-                "family": row.get("verb"),
+                "family": row.get("family"),
                 "effect": row.get("effect"),
                 "resource_kinds": row.get("resource_kinds", []),
             }

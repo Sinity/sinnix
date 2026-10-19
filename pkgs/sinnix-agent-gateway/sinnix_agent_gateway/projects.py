@@ -430,8 +430,6 @@ class ProjectService:
         return records
 
     def _checkout_candidates(self, project: ProjectConfig) -> list[dict[str, Any]]:
-        if project.checkout_discovery != "git-worktree":
-            raise ProjectError("project checkout discovery is unsupported")
         configured_root = project.path.resolve(strict=True)
         repository_kind = self._repository_kind(project)
         default_path = self._default_checkout_path(project)
@@ -1344,28 +1342,6 @@ class ProjectService:
             "changes": changes,
             "latest_commit": commit,
         }
-
-    def summary_revision(self, project_id: str) -> str:
-        """Return the semantic inputs that determine ``summary``."""
-        project = self._project(project_id)
-        status = self._run_spooled(
-            ["git", "status", "--porcelain=v2", "--branch"], project.path
-        )
-        head = next(
-            (
-                line.removeprefix("# branch.oid ")
-                for line in status.splitlines()
-                if line.startswith("# branch.oid ")
-            ),
-            "",
-        )
-        return hashlib.sha256(
-            json.dumps(
-                {"head": head, "status": status},
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode()
-        ).hexdigest()
 
     def write(
         self,

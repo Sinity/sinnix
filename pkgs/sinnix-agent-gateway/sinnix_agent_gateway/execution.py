@@ -20,7 +20,7 @@ from agentctl.pueue import PueueError
 from agentctl.worktrunk import WorktrunkError
 
 from . import shell_lanes
-from .owner_errors import ErrorCode
+from .schemas import ErrorCode
 
 OWNER = "systemd-jobs"
 JOB_LIST_ORDERING = "created_at_desc_job_id_desc"
@@ -55,23 +55,21 @@ class JobOwnerError(Exception):
 def _require_int(arguments: Mapping[str, Any], name: str) -> int:
     value = arguments.get(name)
     if isinstance(value, bool):
-        raise _Refusal(ErrorCode.INVALID_ARGUMENT, f"{name} must be an integer")
+        raise _Refusal("invalid_request", f"{name} must be an integer")
     if isinstance(value, int):
         return value
     if isinstance(value, str):
         try:
             return int(value)
         except ValueError as error:
-            raise _Refusal(
-                ErrorCode.INVALID_ARGUMENT, f"{name} must be an integer"
-            ) from error
-    raise _Refusal(ErrorCode.INVALID_ARGUMENT, f"{name} must be an integer")
+            raise _Refusal("invalid_request", f"{name} must be an integer") from error
+    raise _Refusal("invalid_request", f"{name} must be an integer")
 
 
 def _require_str(arguments: Mapping[str, Any], name: str) -> str:
     value = arguments.get(name)
     if not isinstance(value, str) or not value:
-        raise _Refusal(ErrorCode.INVALID_ARGUMENT, f"{name} must be a non-empty string")
+        raise _Refusal("invalid_request", f"{name} must be a non-empty string")
     return value
 
 
@@ -80,7 +78,7 @@ def _optional_str(arguments: Mapping[str, Any], name: str) -> str | None:
     if value is None:
         return None
     if not isinstance(value, str) or not value:
-        raise _Refusal(ErrorCode.INVALID_ARGUMENT, f"{name} must be a non-empty string")
+        raise _Refusal("invalid_request", f"{name} must be a non-empty string")
     return value
 
 
@@ -92,9 +90,7 @@ def _launch_reference(arguments: Mapping[str, Any]) -> str | None:
     """
     reference = _optional_str(arguments, "launch_reference")
     if reference is not None and not launch.REFERENCE.match(reference):
-        raise _Refusal(
-            ErrorCode.INVALID_ARGUMENT, "launch_reference must be a launch reference"
-        )
+        raise _Refusal("invalid_request", "launch_reference must be a launch reference")
     return reference
 
 
@@ -114,11 +110,9 @@ def _decode_cursor(cursor: str) -> tuple[tuple[str, str], str | None]:
     try:
         value = json.loads(base64.urlsafe_b64decode(cursor.encode()).decode())
     except (ValueError, json.JSONDecodeError) as error:
-        raise _Refusal(
-            ErrorCode.STALE_CURSOR, "job list cursor is unreadable"
-        ) from error
+        raise _Refusal("stale_cursor", "job list cursor is unreadable") from error
     if not isinstance(value, dict):
-        raise _Refusal(ErrorCode.STALE_CURSOR, "job list cursor is unreadable")
+        raise _Refusal("stale_cursor", "job list cursor is unreadable")
     key = value.get("key")
     project_id = value.get("project_id")
     if (
@@ -127,7 +121,7 @@ def _decode_cursor(cursor: str) -> tuple[tuple[str, str], str | None]:
         or any(not isinstance(item, str) for item in key)
         or (project_id is not None and not isinstance(project_id, str))
     ):
-        raise _Refusal(ErrorCode.STALE_CURSOR, "job list cursor is unreadable")
+        raise _Refusal("stale_cursor", "job list cursor is unreadable")
     return (key[0], key[1]), project_id
 
 
@@ -284,14 +278,14 @@ class LocalJobs:
             raise JobOwnerError(refusal.code, str(refusal)) from refusal
         except batch.BatchRefusal as refusal:
             raise JobOwnerError(
-                ErrorCode.INVALID_ARGUMENT
+                "invalid_request"
                 if refusal.code in ARGUMENT_REFUSALS
-                else ErrorCode.OPERATION_FAILED,
+                else "owner_failed",
                 str(refusal),
                 {"refusal": refusal.code},
             ) from refusal
         except PueueError as error:
-            raise JobOwnerError(ErrorCode.OWNER_UNAVAILABLE, str(error)) from error
+            raise JobOwnerError("unavailable", str(error)) from error
         except (
             launch.JobError,
             batch.BatchError,
@@ -302,14 +296,14 @@ class LocalJobs:
             KeyError,
             OSError,
         ) as error:
-            raise JobOwnerError(ErrorCode.OPERATION_FAILED, str(error)) from error
+            raise JobOwnerError("owner_failed", str(error)) from error
         except ValueError as error:
-            raise JobOwnerError(ErrorCode.INVALID_ARGUMENT, str(error)) from error
+            raise JobOwnerError("invalid_request", str(error)) from error
         try:
             json.dumps(payload, sort_keys=True, separators=(",", ":"))
         except (TypeError, ValueError) as error:
             raise JobOwnerError(
-                ErrorCode.RESULT_INVALID, "job owner response is not JSON serializable"
+                "owner_failed", "job owner response is not JSON serializable"
             ) from error
         return payload
 
@@ -382,7 +376,7 @@ class LocalJobs:
             return resolve_project(self.config, project_id)
         except (KeyError, PromptError) as error:
             raise _Refusal(
-                ErrorCode.INVALID_ARGUMENT, f"unknown project: {project_id}"
+                "invalid_request", f"unknown project: {project_id}"
             ) from error
 
     def _worktree(self, project: Any, checkout_id: Any) -> Path:
@@ -391,7 +385,7 @@ class LocalJobs:
         if isinstance(checkout_id, str) and checkout_id.startswith("/"):
             return Path(checkout_id)
         raise _Refusal(
-            ErrorCode.INVALID_ARGUMENT,
+            "invalid_request",
             "checkout must be 'default' or an absolute worktree path",
         )
 
@@ -401,20 +395,20 @@ class LocalJobs:
         try:
             operation = project.operation(name)
         except KeyError as error:
-            raise _Refusal(ErrorCode.INVALID_ARGUMENT, str(error)) from error
+            raise _Refusal("invalid_request", str(error)) from error
         workspace_id = arguments.get("workspace_id")
         workspace = (
             None if workspace_id is None else self._worktree(project, workspace_id)
         )
         parameters = arguments.get("parameters") or {}
         if not isinstance(parameters, Mapping):
-            raise _Refusal(ErrorCode.INVALID_ARGUMENT, "parameters must be an object")
+            raise _Refusal("invalid_request", "parameters must be an object")
         extra_argv = parameters.get("argv", [])
         if not isinstance(extra_argv, list) or not all(
             isinstance(item, str) and item for item in extra_argv
         ):
             raise _Refusal(
-                ErrorCode.INVALID_ARGUMENT,
+                "invalid_request",
                 "parameters.argv must be a list of non-empty strings",
             )
         job = launch.start_operation(
@@ -480,9 +474,7 @@ class LocalJobs:
             not isinstance(groups, list)
             or any(not isinstance(group, str) or not group for group in groups)
         ):
-            raise _Refusal(
-                ErrorCode.INVALID_ARGUMENT, "groups must be a list of group names"
-            )
+            raise _Refusal("invalid_request", "groups must be a list of group names")
         states = launch.queue_state(self.config, groups)
         return {"queues": [states[name] for name in sorted(states)]}
 
@@ -556,7 +548,7 @@ class LocalJobs:
             after, cursor_project_id = _decode_cursor(cursor)
             if cursor_project_id != project_id:
                 raise _Refusal(
-                    ErrorCode.STALE_CURSOR,
+                    "stale_cursor",
                     "job list cursor does not match the project filter",
                 )
             rows = [row for row in rows if _sort_key(row) < after]
@@ -646,7 +638,7 @@ class LocalJobs:
             or any(not isinstance(item, str) or not item for item in beads)
         ):
             raise _Refusal(
-                ErrorCode.INVALID_ARGUMENT, "beads must be a non-empty list of bead ids"
+                "invalid_request", "beads must be a non-empty list of bead ids"
             )
         workers = arguments.get("workers")
         if workers is not None and (
@@ -659,7 +651,7 @@ class LocalJobs:
             )
         ):
             raise _Refusal(
-                ErrorCode.INVALID_ARGUMENT,
+                "invalid_request",
                 "workers must be a list of non-empty bead id lists",
             )
         run = batch.start(
@@ -718,16 +710,16 @@ class LocalJobs:
             or not argv
             or any(not isinstance(item, str) or not item for item in argv)
         ):
-            raise _Refusal(ErrorCode.INVALID_ARGUMENT, "argv must be a non-empty list")
+            raise _Refusal("invalid_request", "argv must be a non-empty list")
         cwd = (worktree / str(arguments.get("cwd") or ".")).resolve()
         if worktree.resolve() not in (cwd, *cwd.parents):
-            raise _Refusal(ErrorCode.POLICY_DENIED, "cwd must stay inside the checkout")
+            raise _Refusal("policy_denied", "cwd must stay inside the checkout")
         if not cwd.is_dir():
-            raise _Refusal(ErrorCode.INVALID_ARGUMENT, f"cwd does not exist: {cwd}")
+            raise _Refusal("invalid_request", f"cwd does not exist: {cwd}")
         group = _require_str(arguments, "group")
         if group not in SHELL_GROUPS:
             raise _Refusal(
-                ErrorCode.INVALID_ARGUMENT,
+                "invalid_request",
                 f"group must be one of {sorted(SHELL_GROUPS)}",
             )
         # No ceiling requested: the job runs until it finishes, under the same

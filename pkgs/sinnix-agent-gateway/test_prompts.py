@@ -13,16 +13,14 @@ def test_generated_prompts_use_canonical_refs_and_principal_filtered_catalog() -
             "actions": [
                 {
                     "name": "beads.query",
-                    "verb": "query",
+                    "family": "query",
                     "effect": "read",
-                    "route": "beads.query",
                     "resource_kinds": ["bead"],
                 },
                 {
                     "name": "beads.update",
-                    "verb": "change",
+                    "family": "change",
                     "effect": "change",
-                    "route": "beads.write",
                     "resource_kinds": ["bead"],
                 },
             ],
