@@ -18,7 +18,6 @@ import re
 import shlex
 import stat
 import subprocess
-import sys
 import time
 import uuid
 from contextlib import contextmanager
@@ -29,19 +28,9 @@ from typing import Any, Callable, Iterator, Mapping, Sequence, TextIO
 from sinnix_lib.secrets import mask_secret_values, masked_window, secret_values
 
 from . import artifacts, gitcmd, manifest, pools, pueue
-from .checkout import (
-    CheckoutError,
-    base_commit,
-    candidate_branch,
-    candidate_tree,
-    release_candidate_checkout,
-    remove_candidate_tree,
-)
-from .config import Config, PoolPolicy
+from .config import Config
 from .launch_input import scratch_path, secret_environment, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
-from .manifest import BatchRefusal
-from .outcome import read_outcome
 from .projects import AdmissionEnvelope, ProjectAdapter, ProjectOperation
 from .pueue import PueueError, PueueGroupError, PueueTimeout, Task
 from .run import (
@@ -60,14 +49,13 @@ from .run import (
     unit_for,
     unit_pool,
 )
-from .worktrunk import WorktrunkError
 
 QUEUE_RUN_EXECUTABLE = "agentctl-run"
 # A launch input carries argv and a resolved environment; the largest this
 # workstation has queued is 21 KB. The bound is what keeps a task from naming
 # an arbitrarily large file and having agentctl read it.
 MAX_LAUNCH_INPUT_BYTES = 1_048_576
-# Bound transported metadata; large manifest inventories remain referenced.
+# Bound on an outcome file read back; the largest historical one is 1.4 MB.
 MAX_OUTCOME_BYTES = 2 * MAX_LAUNCH_INPUT_BYTES
 # The label kinds under which a batch queues agents rather than declared operations.
 AGENT_OPERATIONS = frozenset({"worker", "resume", "integrate", "review"})
@@ -99,6 +87,29 @@ class EnqueueUncertain(JobError):
         self.reference = reference
         self.error = error
         super().__init__(f"pueue acceptance is unknown for launch {reference}: {error}")
+
+
+def read_outcome(path: Path | None, limit: int) -> dict[str, Any] | None:
+    """The outcome record at ``path``, or None when absent, oversized or invalid.
+
+    Symlinks and nonregular files are refused, so a log alias cannot point
+    the reader at an arbitrary file.
+    """
+    if path is None:
+        return None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    except OSError:
+        return None
+    with os.fdopen(descriptor, "rb") as handle:
+        try:
+            info = os.fstat(handle.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size > limit:
+                return None
+            result = json.loads(handle.read(limit + 1))
+        except (OSError, ValueError, UnicodeError, RecursionError):
+            return None
+    return result if isinstance(result, dict) else None
 
 
 def label_for(project_id: str, operation: str) -> str:
@@ -175,19 +186,7 @@ def _matching_task(
         if launch_input is None:
             continue
         if (
-            (
-                operation.checkout != "candidate"
-                and launch_input.get("working_directory") != str(working_directory)
-            )
-            or (
-                operation.checkout == "candidate"
-                and (
-                    not isinstance(launch_input.get("checkout"), dict)
-                    or launch_input["checkout"].get("commit")
-                    != tree_receipt.get("head")
-                    or launch_input["checkout"].get("kind") != "candidate"
-                )
-            )
+            launch_input.get("working_directory") != str(working_directory)
             or launch_input.get("tree_receipt") != dict(tree_receipt)
             or launch_input.get("environment_receipt") != dict(environment_receipt)
         ):
@@ -309,16 +308,12 @@ def enqueue(
     group: str,
     argv: Sequence[str],
     working_directory: Path,
-    queue_directory: Path | None = None,
     timeout_seconds: int,
     result_kind: str,
     environment: Mapping[str, str],
     kind: str = "declared-operation",
     scratch: str = "none",
-    execution_readiness: str = "exec",
-    exit_type: str = "cgroup",
     admission: AdmissionEnvelope | None = None,
-    checkout: Mapping[str, Any] | None = None,
     after: Sequence[int] = (),
     stashed: bool = False,
     unit_properties: Sequence[str] = (),
@@ -327,7 +322,7 @@ def enqueue(
     binding: Mapping[str, Any] | None = None,
     reference: str | None = None,
     before_enqueue: Callable[[str], None] | None = None,
-    owner_request_key: str | None = None,
+    idempotency_key: str | None = None,
     request_digest: str | None = None,
 ) -> dict[str, Any]:
     """Write the launch input, add the pueue task, return the job view.
@@ -358,14 +353,12 @@ def enqueue(
         "environment": environment,
         "working_directory": str(working_directory),
         "timeout_seconds": timeout_seconds,
-        "execution_readiness": execution_readiness,
-        "exit_type": exit_type,
         "result_kind": result_kind,
         "log_path": str(log_path),
         "event_spool_path": str(config.event_spool),
     }
-    if owner_request_key is not None:
-        launch["owner_request_key"] = owner_request_key
+    if idempotency_key is not None:
+        launch["idempotency_key"] = idempotency_key
         launch["request_digest"] = request_digest
     if unit_properties:
         launch["unit_properties"] = list(unit_properties)
@@ -376,10 +369,6 @@ def enqueue(
         launch["admission"] = admission.catalog_row()
         environment["AGENTCTL_ADMISSION_MEMORY_MIB"] = str(admission.memory_mib)
         launch["environment"] = environment
-    if checkout is not None:
-        # Requested tree and commit; execution observations decide the actual
-        # content named by a terminal receipt.
-        launch["checkout"] = dict(checkout)
     if tree_receipt is not None:
         launch["tree_receipt"] = dict(tree_receipt)
     if environment_receipt is not None:
@@ -404,12 +393,12 @@ def enqueue(
                 group=group,
                 label=label,
                 command=(QUEUE_RUN_EXECUTABLE, str(input_path)),
-                working_directory=queue_directory or working_directory,
+                working_directory=working_directory,
                 after=after,
                 stashed=stashed or hold is not None,
             )
         except PueueGroupError:
-            if not (owner_request_key is not None and after):
+            if not (idempotency_key is not None and after):
                 input_path.unlink(missing_ok=True)
             raise
         except PueueError as error:
@@ -424,7 +413,6 @@ def enqueue(
                 config.event_spool,
                 {"kind": "pool-hold", "action": "held", "task_id": task_id, **hold},
             )
-    promote_overdue(config, group)
     task = pueue.task(task_id)
     return (
         job_view(task)
@@ -445,112 +433,6 @@ def _age_seconds(stamp: str | None, now: datetime) -> float | None:
     return max(0.0, (now - moment).total_seconds())
 
 
-def _overdue(task: Task, horizon: int | None, now: datetime) -> bool:
-    """Whether a running task has outlived its pool's promotion horizon."""
-    if horizon is None or task.status != "Running":
-        return False
-    age = _age_seconds(task.started_at, now)
-    return age is not None and age >= horizon
-
-
-def promote_overdue(
-    config: Config, group: str, *, now: datetime | None = None
-) -> list[int]:
-    """Start queued tasks whose only obstacle is long-running work in the pool.
-
-    A pool declaring ``promote_after_seconds`` counts only the running tasks
-    younger than that against its width; older ones have shown they are long
-    work, and they keep running untouched. When every slot is held by such
-    tasks, the oldest queued tasks without dependencies are force-started
-    until the young ones fill the width again. Every start is an event in the
-    spool. Returns the started task ids.
-    """
-    policy = config.pools.get(group)
-    horizon = policy.promote_after_seconds if policy is not None else None
-    if policy is None or horizon is None:
-        return []
-    try:
-        started, overdue = _promote(config, group, policy, horizon, now)
-    except (PueueError, JobError) as error:
-        # Promotion only shortens a wait, so its failure fails no launch or
-        # read: the task stays queued, its queue state says what holds it,
-        # and the spool records why it was not admitted.
-        append_event(
-            config.event_spool,
-            {
-                "kind": "pool-promotion",
-                "action": "failed",
-                "pool": group,
-                "error": str(error),
-                "at": manifest.now(),
-            },
-        )
-        return []
-    if started:
-        append_event(
-            config.event_spool,
-            {
-                "kind": "pool-promotion",
-                "action": "started",
-                "pool": group,
-                "started": started,
-                "overdue": overdue,
-                "promote_after_seconds": horizon,
-                "at": manifest.now(),
-            },
-        )
-    return started
-
-
-def _promote(
-    config: Config,
-    group: str,
-    policy: PoolPolicy,
-    horizon: int,
-    now: datetime | None,
-) -> tuple[list[int], list[int]]:
-    with admission_lock(config):
-        live = pueue.live()
-        if str((live.groups.get(group) or {}).get("status") or "") != "Running":
-            # A paused pool stays closed; promotion never reopens it.
-            return [], []
-        moment = now or datetime.now(UTC)
-        members = [task for task in live.tasks.values() if task.group == group]
-        running = [task for task in members if task.status == "Running"]
-        if len(running) < policy.parallel:
-            # pueue itself still has a free slot and will start the next task.
-            return [], []
-        young = [task for task in running if not _overdue(task, horizon, moment)]
-        queued = sorted(
-            (
-                task
-                for task in members
-                if task.status == "Queued" and not task.dependencies
-            ),
-            key=lambda task: task.task_id,
-        )
-        admitted = queued[: max(0, policy.parallel - len(young))]
-        started: list[int] = []
-        for candidate in admitted:
-            try:
-                pueue.start(candidate.task_id)
-            except PueueError:
-                # pueue refuses a task that already left the queue: its own
-                # scheduler started it, or it was removed. Anything else is
-                # a failure of the daemon, raised to the caller's handler.
-                current = pueue.task(candidate.task_id)
-                if current is not None and current.status == "Queued":
-                    raise
-                continue
-            started.append(candidate.task_id)
-        if not started:
-            return [], []
-    overdue = sorted(
-        task.task_id for task in running if _overdue(task, horizon, moment)
-    )
-    return started, overdue
-
-
 def queue_state(
     config: Config,
     groups: Sequence[str] | None = None,
@@ -562,8 +444,6 @@ def queue_state(
 
     What a caller needs to tell "queued behind X" from "hung": the width,
     who holds each slot and for how long, what is waiting and since when.
-    Running tasks past a promoting pool's horizon are marked ``promoted``:
-    they no longer hold a slot against new work.
     """
     live = live or pueue.live()
     moment = now or datetime.now(UTC)
@@ -571,8 +451,6 @@ def queue_state(
     states: dict[str, dict[str, Any]] = {}
     for name in selected:
         detail = live.groups.get(name) or {}
-        policy = config.pools.get(name)
-        horizon = policy.promote_after_seconds if policy is not None else None
         members = sorted(
             (task for task in live.tasks.values() if task.group == name),
             key=lambda task: task.task_id,
@@ -595,9 +473,7 @@ def queue_state(
             }
 
         running = [
-            {**row(task, task.started_at), "promoted": _overdue(task, horizon, moment)}
-            for task in members
-            if task.status == "Running"
+            row(task, task.started_at) for task in members if task.status == "Running"
         ]
         queued = [
             {**row(task, task.enqueued_at), "dependencies": list(task.dependencies)}
@@ -610,10 +486,8 @@ def queue_state(
             "known": name in live.groups,
             "status": str(detail.get("status") or "") or None,
             "parallel": int(detail.get("parallel_tasks") or 0) or None,
-            "promote_after_seconds": horizon,
             "running": running,
             "running_count": len(running),
-            "holding_count": sum(1 for entry in running if not entry["promoted"]),
             "queued": queued,
             "queued_count": len(queued),
             "held_count": sum(
@@ -653,9 +527,7 @@ def job_queue(
         "position": len(ahead) + 1 if queued else None,
         "ahead": ahead,
         "waiting_for": list(job.get("dependencies") or []) if queued else [],
-        "occupied_by": [entry for entry in state["running"] if not entry["promoted"]]
-        if queued
-        else [],
+        "occupied_by": state["running"] if queued else [],
     }
 
 
@@ -787,42 +659,42 @@ def release_holds(config: Config) -> dict[str, list[dict[str, Any]]]:
         return {"released": [], "waiting": [{"error": str(error)}]}
 
 
-def _owner_reference(key: str) -> str:
+def _idempotent_reference(key: str) -> str:
     if not isinstance(key, str) or not key or len(key) > 4096:
         raise JobError(
-            "owner_request_key must be a nonempty string of at most 4096 characters"
+            "idempotency_key must be a nonempty string of at most 4096 characters"
         )
     return "request-" + hashlib.sha256(key.encode()).hexdigest()
 
 
 def lookup_operation_request(
-    config: Config, owner_request_key: str, request_digest: str | None = None
+    config: Config, idempotency_key: str, request_digest: str | None = None
 ) -> dict[str, Any] | None:
-    """Reconcile the owner key against retained input and pueue; never submit.
+    """Reconcile the idempotency key against retained input and pueue; never submit.
 
     An input without a queue acknowledgement or execution evidence represents
     an uncertain submission. An absent queue row alone cannot prove rejection.
     """
-    reference = _owner_reference(owner_request_key)
+    reference = _idempotent_reference(idempotency_key)
     path = config.inputs_dir / f"{reference}.json"
     raw = read_bounded(path, MAX_LAUNCH_INPUT_BYTES)
     if raw is None:
         if path.exists():
-            raise JobError(f"unreadable owner launch {reference}")
+            raise JobError(f"unreadable idempotent launch {reference}")
         return None
     try:
         document = json.loads(raw)
     except (ValueError, UnicodeDecodeError) as error:
-        raise JobError(f"invalid owner launch {reference}") from error
+        raise JobError(f"invalid idempotent launch {reference}") from error
     if (
         not isinstance(document, dict)
-        or document.get("owner_request_key") != owner_request_key
+        or document.get("idempotency_key") != idempotency_key
         or (
             request_digest is not None
             and document.get("request_digest") != request_digest
         )
     ):
-        raise JobError(f"owner launch identity mismatch for {reference}")
+        raise JobError(f"idempotent launch identity mismatch for {reference}")
     task = find_task(pueue.tasks(), document.get("queue_task_id", -1), reference)
     if task is not None:
         return {**get_job(task.task_id, config, reference), "reused": True}
@@ -839,22 +711,22 @@ def lookup_operation_request(
 def enqueue_request(
     config: Config,
     *,
-    owner_request_key: str,
+    idempotency_key: str,
     request_digest: str,
     **arguments: Any,
 ) -> dict[str, Any]:
     """Submit one keyed job, or read its exact retained launch under the key lock."""
-    reference = _owner_reference(owner_request_key)
+    reference = _idempotent_reference(idempotency_key)
     config.inputs_dir.mkdir(parents=True, exist_ok=True)
     with (config.inputs_dir / f"{reference}.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        existing = lookup_operation_request(config, owner_request_key, request_digest)
+        existing = lookup_operation_request(config, idempotency_key, request_digest)
         if existing is not None:
             return existing
         return enqueue(
             config,
             reference=reference,
-            owner_request_key=owner_request_key,
+            idempotency_key=idempotency_key,
             request_digest=request_digest,
             **arguments,
         )
@@ -867,19 +739,18 @@ def start_operation(
     *,
     workspace: Path | None = None,
     extra_argv: Sequence[str] = (),
-    owner_request_key: str | None = None,
+    idempotency_key: str | None = None,
 ) -> dict[str, Any]:
-    """Launch an operation; an optional durable owner key prevents resubmission."""
-    if owner_request_key is None:
+    """Launch an operation; an idempotency key makes a repeated launch return the same job."""
+    if idempotency_key is None:
         return _start_operation(
             config,
             project,
             operation,
             workspace=workspace,
             extra_argv=extra_argv,
-            stack=(),
         )
-    reference = _owner_reference(owner_request_key)
+    reference = _idempotent_reference(idempotency_key)
     config.inputs_dir.mkdir(parents=True, exist_ok=True)
     fingerprint = hashlib.sha256(
         json.dumps(
@@ -901,15 +772,15 @@ def start_operation(
             try:
                 previous = json.loads(raw)
             except (ValueError, UnicodeDecodeError) as error:
-                raise JobError(f"invalid owner launch {reference}") from error
+                raise JobError(f"invalid idempotent launch {reference}") from error
             if (
                 not isinstance(previous, dict)
                 or previous.get("request_digest") != fingerprint
             ):
                 raise JobError(
-                    "owner_request_key was already used for a different launch request"
+                    "idempotency_key was already used for a different launch request"
                 )
-        existing = lookup_operation_request(config, owner_request_key)
+        existing = lookup_operation_request(config, idempotency_key)
         if existing is not None:
             return existing
         return _start_operation(
@@ -918,41 +789,26 @@ def start_operation(
             operation,
             workspace=workspace,
             extra_argv=extra_argv,
-            stack=(),
-            owner_request_key=owner_request_key,
+            idempotency_key=idempotency_key,
             request_digest=fingerprint,
         )
 
 
 def _working_directory(
     project: ProjectAdapter, operation: ProjectOperation, workspace: Path | None
-) -> tuple[Path, str | None]:
-    """The tree this operation runs in, and the commit when agentctl chose it.
+) -> Path:
+    """The tree this operation runs in.
 
     `any` takes the caller's tree. `default` refuses every tree but the
     project root; it selects nothing, so a caller that passes no workspace
-    still lands in whatever state that checkout is in. `candidate` resolves
-    its own tree, which is the point: a scheduled `job fire` passes no
-    workspace, and correctness must not depend on a caller remembering a flag.
+    still lands in whatever state that checkout is in.
     """
-    if operation.checkout == "candidate":
-        if workspace is not None and workspace.resolve() != project.root:
-            raise JobError(
-                f"{project.project_id}.{operation.name} resolves its own candidate "
-                "checkout; it does not take a workspace"
-            )
-        try:
-            return project.root, base_commit(project)
-        except (CheckoutError, BatchRefusal) as error:
-            raise JobError(
-                f"{project.project_id}.{operation.name} could not resolve its candidate checkout: {error}"
-            ) from error
     working_directory = (workspace or project.root).resolve()
     if operation.checkout == "default" and working_directory != project.root:
         raise JobError(
             f"{project.project_id}.{operation.name} runs only on the project's main checkout"
         )
-    return working_directory, None
+    return working_directory
 
 
 def _start_operation(
@@ -962,19 +818,10 @@ def _start_operation(
     *,
     workspace: Path | None,
     extra_argv: Sequence[str],
-    stack: tuple[str, ...],
-    owner_request_key: str | None = None,
+    idempotency_key: str | None = None,
     request_digest: str | None = None,
 ) -> dict[str, Any]:
-    """Start one operation after its declared pueue dependencies."""
-    if operation.name in stack:
-        raise JobError(
-            f"{project.project_id} operation dependencies contain a cycle at "
-            f"{operation.name}"
-        )
-    working_directory, candidate_commit = _working_directory(
-        project, operation, workspace
-    )
+    working_directory = _working_directory(project, operation, workspace)
     if operation.arguments == "required" and not any(
         argument.strip() for argument in extra_argv
     ):
@@ -990,16 +837,8 @@ def _start_operation(
             environment[key] = value
     tree_receipt = None
     environment_receipt = None
-    if operation.cache == "tree+environment" and owner_request_key is None:
-        tree_receipt = (
-            {
-                "head": candidate_commit,
-                "tree": _git(project.root, "rev-parse", f"{candidate_commit}^{{tree}}"),
-                "dirty": False,
-            }
-            if candidate_commit is not None
-            else _tree_receipt(working_directory)
-        )
+    if operation.cache == "tree+environment" and idempotency_key is None:
+        tree_receipt = _tree_receipt(working_directory)
         if tree_receipt["dirty"]:
             tree_receipt = None
         else:
@@ -1026,122 +865,30 @@ def _start_operation(
                     },
                 }
     reference = (
-        _owner_reference(owner_request_key)
-        if owner_request_key is not None
+        _idempotent_reference(idempotency_key)
+        if idempotency_key is not None
         else _reference(label_for(project.project_id, operation.name))
     )
-    if owner_request_key is not None and operation.dependencies:
-        # Persist the parent intent before any dependency can be submitted.
-        # A crash here is uncertain, not permission to duplicate dependencies.
-        reference = _owner_reference(owner_request_key)
-        write_input(
-            config.inputs_dir / f"{reference}.json",
-            {
-                "job_id": reference,
-                "owner_request_key": owner_request_key,
-                "request_digest": request_digest,
-                "project_id": project.project_id,
-                "operation": operation.name,
-                "label": label_for(project.project_id, operation.name),
-                "pool": operation.pool,
-                "working_directory": str(working_directory),
-                "log_path": str(config.jobs_dir / f"{reference}.log"),
-                "submission": "preparing-dependencies",
-            },
-        )
-    dependency_ids: list[int] = []
-    for dependency_name in operation.dependencies:
-        try:
-            dependency = project.operation(dependency_name)
-        except KeyError as error:
-            raise JobError(
-                f"{project.project_id}.{operation.name} depends on undeclared "
-                f"operation {dependency_name}"
-            ) from error
-        started = _start_operation(
-            config,
-            project,
-            dependency,
-            workspace=workspace,
-            extra_argv=(),
-            stack=(*stack, operation.name),
-        )
-        dependency_id = started.get("job_id")
-        if not isinstance(dependency_id, int):
-            raise JobError(
-                f"{project.project_id}.{dependency_name} did not return a task id"
-            )
-        dependency_ids.append(dependency_id)
-    if candidate_commit is not None:
-        try:
-            working_directory = candidate_tree(project, reference, candidate_commit)
-        except (CheckoutError, WorktrunkError, BatchRefusal) as error:
-            raise JobError(
-                f"{project.project_id}.{operation.name} could not resolve its candidate checkout: {error}"
-            ) from error
-    try:
-        started = enqueue(
-            config,
-            project=project,
-            operation=operation.name,
-            label=label_for(project.project_id, operation.name),
-            group=operation.pool,
-            argv=project.environment.command_for(
-                (
-                    sys.executable,
-                    str(Path(__file__).with_name("service_run.py")),
-                    json.dumps(
-                        [
-                            {
-                                "name": name,
-                                "command": project.operation(name).command,
-                                "ready_probe": project.operation(name).ready_probe,
-                                "ready_timeout_seconds": project.operation(
-                                    name
-                                ).ready_timeout_seconds,
-                            }
-                            for name in operation.requires
-                        ]
-                    ),
-                    "--",
-                    *operation.command,
-                    *extra_argv,
-                )
-                if operation.requires
-                else (*operation.command, *extra_argv)
-            ),
-            working_directory=working_directory,
-            queue_directory=project.root if candidate_commit is not None else None,
-            timeout_seconds=operation.timeout_seconds,
-            execution_readiness=operation.execution_readiness,
-            exit_type="main" if operation.requires else "cgroup",
-            result_kind=operation.result,
-            environment=environment,
-            scratch=operation.scratch,
-            admission=operation.admission,
-            unit_properties=operation.unit_properties,
-            checkout={
-                "kind": operation.checkout,
-                "commit": candidate_commit,
-                "root": str(project.root),
-                "branch": candidate_branch(reference),
-                "cache_path": str(config.state_dir / "candidate-cache" / reference),
-            }
-            if candidate_commit is not None
-            else None,
-            after=dependency_ids,
-            reference=reference,
-            owner_request_key=owner_request_key,
-            request_digest=request_digest,
-            tree_receipt=tree_receipt,
-            environment_receipt=environment_receipt,
-        )
-    except EnqueueUncertain:
-        raise
-    except Exception:
-        if candidate_commit is not None:
-            remove_candidate_tree(project, reference)
-        raise
+    started = enqueue(
+        config,
+        project=project,
+        operation=operation.name,
+        label=label_for(project.project_id, operation.name),
+        group=operation.pool,
+        argv=project.environment.command_for((*operation.command, *extra_argv)),
+        working_directory=working_directory,
+        timeout_seconds=operation.timeout_seconds,
+        result_kind=operation.result,
+        environment=environment,
+        scratch=operation.scratch,
+        admission=operation.admission,
+        unit_properties=operation.unit_properties,
+        reference=reference,
+        idempotency_key=idempotency_key,
+        request_digest=request_digest,
+        tree_receipt=tree_receipt,
+        environment_receipt=environment_receipt,
+    )
     if tree_receipt is not None:
         started["tree_receipt"] = tree_receipt
     if environment_receipt is not None:
@@ -1149,31 +896,14 @@ def _start_operation(
     return started
 
 
-def fire(
-    config: Config, project: ProjectAdapter, operation: ProjectOperation
-) -> dict[str, Any]:
-    """A timer's launch: skipped while the same operation is still queued or running.
-
-    It passes no workspace and never could: a timer has no caller to supply
-    one. The operation's declared `checkout` is therefore the only thing that
-    decides which tree its receipt is evidence about -- `candidate` resolves
-    a tree at the project's base, `any` and `default` both land in the
-    project's own checkout, whatever state it happens to be in.
-    """
+def active_tasks(project: ProjectAdapter, operation: ProjectOperation) -> list[int]:
+    """Unfinished tasks of this operation; `job start --if-idle` skips while any exist."""
     label = label_for(project.project_id, operation.name)
-    active = [
-        task
+    return [
+        task.task_id
         for task in pueue.tasks().values()
         if task.label == label and not task.terminal
     ]
-    if active:
-        return {
-            "fired": False,
-            "label": label,
-            "active": [task.task_id for task in active],
-        }
-    started = start_operation(config, project, operation)
-    return {"fired": True, **started}
 
 
 def phase_of(task: Task) -> str:
@@ -1543,8 +1273,6 @@ def get_job(
     )
     if config is None:
         return job_view(task)
-    if task.status == "Queued" and promote_overdue(config, task.group):
-        task = locate(task.task_id, launch_reference(task)) or task
     return _job_detail(config, task, attempt, attempt_offset, attempt_limit)
 
 
@@ -1557,19 +1285,11 @@ def _job_detail(
 ) -> dict[str, Any]:
     view = job_view(task)
     launch_input = _launch_input(config, task) or {}
-    if task.terminal and launch_input.get("checkout"):
-        try:
-            release_candidate_checkout(
-                launch_input.get("checkout"), launch_input.get("working_directory", "")
-            )
-        except (CheckoutError, WorktrunkError):
-            pass
     binding = launch_input.get("binding")
     if binding:
         view["binding"] = binding
-    for key in ("admission", "checkout"):
-        if launch_input.get(key):
-            view[key] = launch_input[key]
+    if launch_input.get("admission"):
+        view["admission"] = launch_input["admission"]
     view.update(_artifact_view(config, task, attempt))
     selected_outcome = view["artifacts"].get("outcome")
     outcome_path = Path(selected_outcome).resolve() if selected_outcome else None
@@ -1886,7 +1606,7 @@ def _unfinished_attempt(config: Config, task: Task) -> bool:
     if not document.get("log_path"):
         return False
     records = artifacts.attempts(document)
-    if not records or records[-1].get("legacy"):
+    if not records:
         return False
     outcome = records[-1]["artifacts"].get("outcome")
     return not (isinstance(outcome, str) and Path(outcome).exists())
@@ -2166,12 +1886,6 @@ def _cancel_not_started(
             except (OSError, UnicodeDecodeError, json.JSONDecodeError, AttributeError):
                 pass
         _retain_disposition(config, task, confirmed, owned=owned)
-        try:
-            release_candidate_checkout(
-                document.get("checkout"), document.get("working_directory", "")
-            )
-        except (CheckoutError, WorktrunkError):
-            pass
         return _cancelled_not_started(view, confirmed)
     finally:
         if lock_handle is not None:
@@ -2575,15 +2289,6 @@ def wait(
         if remaining <= 0 or detail is not None:
             timed_out = {**view, "wait_timed_out": True}
             return timed_out if detail is None else {**timed_out, "detail": detail}
-        if (
-            task.status == "Queued"
-            and config is not None
-            and promote_overdue(config, task.group)
-        ):
-            # Something started; this job may be among it. Re-read before
-            # blocking so the slice and the answer follow its real state.
-            task, view = observe()
-            continue
         blocking = _wait_slice(task, remaining)
         try:
             pueue.wait(task.task_id, timeout_seconds=blocking)

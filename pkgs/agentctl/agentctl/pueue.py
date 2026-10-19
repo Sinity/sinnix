@@ -357,17 +357,6 @@ def live() -> Status:
     return _status(("status!=success", "status!=failed"))
 
 
-def start(task_id: int) -> None:
-    """Start one queued task now, whatever its group's width.
-
-    The one admission pueue lets a client force; promotion uses it so a pool
-    whose slots are held by long-running tasks still admits new ones. pueue
-    refuses a task that is no longer queued, including one its own scheduler
-    started a moment earlier.
-    """
-    _run(["start", str(task_id)])
-
-
 def enqueue(task_id: int) -> None:
     """Release a stashed task into its group's queue."""
     _run(["enqueue", str(task_id)])

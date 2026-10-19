@@ -592,7 +592,7 @@ in
           [
             {
               assertion =
-                lib.hasInfix "/bin/agentctl job fire sinnix sinex_cache_prebuild" service.ExecStart
+                lib.hasInfix "/bin/agentctl job start --if-idle sinnix sinex_cache_prebuild" service.ExecStart
                 && service.TimeoutStartSec == "1min";
               message = "the Sinex cache-prebuild timer must submit the bounded named AgentCTL operation";
             }
@@ -619,7 +619,7 @@ in
           [
             {
               assertion =
-                lib.hasInfix "/bin/agentctl job fire lynchpin converge --wait" service.ExecStart
+                lib.hasInfix "/bin/agentctl job start --if-idle lynchpin converge --wait" service.ExecStart
                 && service.TimeoutStartSec == "4h"
                 && surface.resourceClass == "ordinary";
               message = "the Lynchpin timer must fire (coalesce) the bounded convergence operation";

@@ -63,22 +63,9 @@ def attempts(launch: Mapping[str, Any]) -> list[dict[str, Any]]:
         (path for path in root.glob("[0-9]*") if path.is_dir() and path.name.isdigit()),
         key=lambda path: int(path.name),
     )
-    if not directories:
-        return (
-            [
-                {
-                    "attempt": 1,
-                    "legacy": True,
-                    "artifacts": {key: str(path) for key, path in paths.items()},
-                }
-            ]
-            if any(path.exists() for path in paths.values())
-            else []
-        )
     return [
         {
             "attempt": int(directory.name),
-            "legacy": False,
             "artifacts": {key: str(directory / CANONICAL_NAMES[key]) for key in paths},
         }
         for directory in directories
@@ -86,10 +73,10 @@ def attempts(launch: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def begin(launch: Mapping[str, Any], launch_input: str) -> dict[str, Any]:
-    """Allocate an invocation, preserving pre-upgrade files before replacing aliases.
+    """Allocate an invocation and point the compatibility names at it.
 
-    The short allocation lock protects the migration and numbering only. Pueue
-    and the wrapper's unit remain the owners of execution and admission.
+    The short allocation lock protects the numbering only. Pueue and the
+    wrapper's unit remain the owners of execution and admission.
     """
     paths = paths_for(launch)
     root = root_for(paths["log"])
@@ -97,25 +84,6 @@ def begin(launch: Mapping[str, Any], launch_input: str) -> dict[str, Any]:
     with (root / ".allocation.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         existing = attempts(launch)
-        migration = root / ".legacy-migration.json"
-        if migration.exists() or (existing and existing[0]["legacy"]):
-            if not migration.exists():
-                write_input(migration, {key: str(path) for key, path in paths.items()})
-            sources = json.loads(migration.read_text())
-            directory = root / "1"
-            directory.mkdir(mode=0o700, exist_ok=True)
-            for key, source in sources.items():
-                path = Path(source)
-                if path.exists() or path.is_symlink():
-                    target = directory / CANONICAL_NAMES[key]
-                    if target.exists() or target.is_symlink():
-                        raise FileExistsError(
-                            f"legacy migration would overwrite {target}"
-                        )
-                    path.replace(target)
-            write_input(directory / "attempt.json", {"attempt": 1, "legacy": True})
-            migration.unlink()
-            existing = attempts(launch)
         number = max((item["attempt"] for item in existing), default=0) + 1
         # Cancellation can arrive after pueue has started the wrapper but
         # before this allocation. The canceller records the attempt it expects

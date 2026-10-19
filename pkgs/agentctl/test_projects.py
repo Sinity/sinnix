@@ -39,38 +39,6 @@ def test_operation_refuses_nonlimiting_or_malformed_unit_properties(
         load_project_adapter(project_root)
 
 
-def test_required_service_cannot_silently_lose_its_unit_limits(
-    project_root: Path,
-) -> None:
-    descriptor = project_root / ".agentctl/project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            'exec = ["fixture-verify"]',
-            'exec = ["fixture-verify"]\nrequires=["bounded_service"]',
-        )
-        + '\n[operations.bounded_service]\ndescription="test"\nexec=["true"]\n'
-        'ready_probe=["true"]\nunit_properties=["MemoryMax=1G"]\n'
-    )
-    with pytest.raises(ProjectConfigError, match="self-contained foreground"):
-        load_project_adapter(project_root)
-
-
-@pytest.mark.parametrize("readiness", ['"unknown"', "true", "3"])
-def test_descriptor_rejects_invalid_execution_readiness(
-    tmp_path: Path, readiness: str
-) -> None:
-    root = write_project(tmp_path / "project")
-    descriptor = root / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text()
-        + '\n[operations.admitted]\ndescription="test"\nexec=["true"]\nexecution_readiness='
-        + readiness
-        + "\n"
-    )
-    with pytest.raises(ProjectConfigError, match="execution_readiness"):
-        load_project_adapter(root)
-
-
 def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -> None:
     project = load_project_adapter(project_root)
 
@@ -86,12 +54,10 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
     }
     assert project.workspace.review == "agent"
     nightly = project.operation("nightly")
-    assert nightly.schedule == "*-*-* 03:17:00"
     assert nightly.checkout == "default"
     assert nightly.pool == "bulk"
     verify = project.operation("verify")
     assert (verify.result, verify.timeout_seconds) == ("json", 120)
-    assert verify.dependencies == ()
     # A descriptor that declares no scratch tier gets none.
     assert [operation.scratch for operation in project.operations] == ["none"] * 4
     assert [operation.name for operation in project.operations] == [
@@ -237,10 +203,6 @@ def test_unknown_packet_and_operation_fields_warn_and_load(
         ),
         ('[operations.bad]\ndescription = "x"\nexec = []\n', "non-empty list"),
         (
-            '[operations.bad]\ndescription = "x"\nexec = ["x"]\nschedule = ""\n',
-            "OnCalendar",
-        ),
-        (
             '[operations.bad]\ndescription = "x"\nexec = ["x"]\ncheckout = "lane"\n',
             "checkout is invalid",
         ),
@@ -273,13 +235,13 @@ def test_a_declared_scratch_tier_is_carried_by_the_operation(tmp_path: Path) -> 
     descriptor = root / ".agentctl" / "project.toml"
     descriptor.write_text(
         descriptor.read_text()
-        + '\n[operations.heavy]\ndescription = "x"\nexec = ["x"]\nscratch = "nvme"\n'
+        + '\n[operations.heavy]\ndescription = "x"\nexec = ["x"]\nscratch = "disk"\n'
     )
 
     project = load_project_adapter(root)
 
-    assert project.operation("heavy").scratch == "nvme"
-    assert project.operation("heavy").catalog_row()["scratch"] == "nvme"
+    assert project.operation("heavy").scratch == "disk"
+    assert project.operation("heavy").catalog_row()["scratch"] == "disk"
     assert project.operation("check").scratch == "none"
 
 
@@ -292,30 +254,6 @@ def test_a_malformed_agent_ceiling_is_a_typed_refusal(tmp_path: Path) -> None:
         )
     )
     with pytest.raises(ProjectConfigError, match="agent_memory_max"):
-        load_project_adapter(root)
-
-
-def test_verification_operations_and_dependencies_are_validated(tmp_path: Path) -> None:
-    root = write_project(tmp_path / "p")
-    descriptor = root / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            'exec = ["fixture-verify"]\npool = "pytest"',
-            'exec = ["fixture-verify"]\npool = "pytest"\ndependencies = ["missing"]',
-        )
-    )
-    with pytest.raises(ProjectConfigError, match="undeclared.*missing"):
-        load_project_adapter(root)
-
-    descriptor.write_text(
-        descriptor.read_text()
-        .replace('dependencies = ["missing"]', 'dependencies = ["check"]')
-        .replace(
-            'exec = ["true"]\npool = "normal"',
-            'exec = ["true"]\npool = "normal"\ndependencies = ["verify"]',
-        )
-    )
-    with pytest.raises(ProjectConfigError, match="cycle"):
         load_project_adapter(root)
 
 
@@ -530,11 +468,7 @@ def test_packets_review_names_the_reviewer_agent_completely(tmp_path: Path) -> N
 # ----------------------------------------------- checkout and admission keys
 
 
-def test_an_operation_may_name_the_candidate_tree(tmp_path: Path) -> None:
-    """`default` refuses a tree; it never selects one. Breaks if the accepted
-    set goes back to {any, default}: an operation cannot say which tree its
-    receipt is evidence about, and a scheduled launch silently uses whatever
-    state the project checkout is in."""
+def test_an_operation_checkout_is_any_or_default(tmp_path: Path) -> None:
     root = write_project(tmp_path / "p")
     descriptor = root / ".agentctl" / "project.toml"
     base = descriptor.read_text()
@@ -542,17 +476,6 @@ def test_an_operation_may_name_the_candidate_tree(tmp_path: Path) -> None:
         base
         + '\n[operations.corpus]\ndescription = "Corpus"\nexec = ["c"]\n'
         + 'checkout = "candidate"\n'
-    )
-
-    operation = load_project_adapter(root).operation("corpus")
-
-    assert operation.checkout == "candidate"
-    assert operation.catalog_row()["checkout"] == "candidate"
-
-    descriptor.write_text(
-        base
-        + '\n[operations.corpus]\ndescription = "Corpus"\nexec = ["c"]\n'
-        + 'checkout = "worktree"\n'
     )
     with pytest.raises(ProjectConfigError, match="checkout is invalid"):
         load_project_adapter(root)
@@ -611,22 +534,21 @@ def test_every_existing_declaration_keeps_working_without_the_new_keys(
     assert project.operation("check").catalog_row()["admission"] is None
 
 
-def test_a_focused_profile_cannot_name_an_operation_that_picks_its_own_tree(
+def test_a_focused_profile_cannot_name_a_main_checkout_operation(
     tmp_path: Path,
 ) -> None:
-    """A worker verifies its own worktree. Breaks if the refusal keeps testing
-    only for `default`: a `candidate` focused operation would verify the base
-    commit and report it as the worker's evidence."""
+    """A worker verifies its own worktree, so a focused `default` operation
+    could never run for it."""
     root = write_project(tmp_path / "p")
     descriptor = root / ".agentctl" / "project.toml"
     descriptor.write_text(
         descriptor.read_text().replace(
             '[operations.verify_quick]\ndescription = "Fixture quick verification"',
-            '[operations.verify_quick]\ncheckout = "candidate"\n'
+            '[operations.verify_quick]\ncheckout = "default"\n'
             'description = "Fixture quick verification"',
         )
     )
-    with pytest.raises(ProjectConfigError, match='checkout = "candidate"'):
+    with pytest.raises(ProjectConfigError, match='checkout = "default"'):
         load_project_adapter(root)
 
 

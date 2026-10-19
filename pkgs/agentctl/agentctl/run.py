@@ -51,7 +51,7 @@ from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.ledger import append_jsonl
 from sinnix_lib.secrets import mask_secret_values, secret_values
 
-from . import artifacts, gitcmd, pueue, worktrunk
+from . import artifacts, gitcmd, pueue
 from .launch_input import QueueInputError, read_input, secret_environment
 from .limits import SYSTEMCTL_TIMEOUT_SECONDS
 from .pueue import PueueError
@@ -290,11 +290,53 @@ def _git_probe(
     return value, None
 
 
+def content_tree(cwd: Path) -> str | None:
+    """Git tree id of the working copy, including untracked nonignored files.
+
+    Built in a throwaway index seeded from the real one, so the real index is
+    never written and unchanged files keep their cached stat data. `git add`
+    stores blobs for changed files in the object database; Git's own gc
+    reclaims them if no commit ever refers to them.
+    """
+    index, error = _git_probe(cwd, "rev-parse", "--git-path", "index")
+    if error is not None or index is None:
+        return None
+    with tempfile.TemporaryDirectory(prefix="agentctl-tree-") as scratch:
+        scratch_index = Path(scratch) / "index"
+        real_index = Path(index) if Path(index).is_absolute() else cwd / index
+        try:
+            shutil.copyfile(real_index, scratch_index)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return None
+        environment = {
+            **os.environ,
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_INDEX_FILE": str(scratch_index),
+        }
+        try:
+            for arguments in (["add", "-A"], ["write-tree"]):
+                completed = subprocess.run(
+                    ["git", "-C", str(cwd), *arguments],
+                    capture_output=True,
+                    text=True,
+                    timeout=GIT_OBSERVATION_TIMEOUT_SECONDS * 6,
+                    env=environment,
+                )
+                if completed.returncode != 0:
+                    return None
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return completed.stdout.strip() or None
+
+
 def git_observation(cwd: Path, *, observed_at: str | None = None) -> dict[str, Any]:
     """Observe checkout identity at one bounded point in the job.
 
-    The three values are retained when available, while ``status`` and
-    ``reason`` make partial or failed probes explicit.  Matching start/end
+    The values are retained when available, while ``status`` and ``reason``
+    make partial or failed probes explicit. A dirty checkout also records
+    ``content_tree``, the tree id of its working copy. Matching start/end
     observations establish only unchanged endpoints; they cannot prove that a
     command did not modify and then restore the checkout between probes.
     """
@@ -313,19 +355,22 @@ def git_observation(cwd: Path, *, observed_at: str | None = None) -> dict[str, A
         )
         if error is not None
     ]
-    from .content_identity import content_manifest
-
-    content = content_manifest(cwd) if dirty is True else None
-    return {
+    observation: dict[str, Any] = {
         "observed_at": observed_at
         or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "head": head,
         "tree": tree,
         "dirty": dirty,
-        "content_manifest": content,
-        "status": "observed" if not errors else "unavailable",
-        "reason": None if not errors else "git_" + "_".join(errors) + "_unavailable",
     }
+    if dirty is True:
+        observation["content_tree"] = content_tree(cwd)
+        if observation["content_tree"] is None:
+            errors.append("content")
+    observation["status"] = "observed" if not errors else "unavailable"
+    observation["reason"] = (
+        None if not errors else "git_" + "_".join(errors) + "_unavailable"
+    )
+    return observation
 
 
 def stranded_index_locks(cwd: Path, *, since_ns: int) -> list[dict[str, str]]:
@@ -351,23 +396,14 @@ def stranded_index_locks(cwd: Path, *, since_ns: int) -> list[dict[str, str]]:
 def execution_receipt(
     start: Mapping[str, Any], end: Mapping[str, Any]
 ) -> dict[str, Any]:
-    """Bind two endpoint observations without claiming interval immutability."""
+    """Compare two endpoint observations without claiming interval immutability."""
     available = all(
         observation.get("status") == "observed" for observation in (start, end)
     )
     same = all(
-        start.get(field) == end.get(field) for field in ("head", "tree", "dirty")
+        start.get(field) == end.get(field)
+        for field in ("head", "tree", "dirty", "content_tree")
     )
-    content_start = start.get("content_manifest")
-    content_end = end.get("content_manifest")
-    if isinstance(content_start, Mapping) or isinstance(content_end, Mapping):
-        same = (
-            same
-            and isinstance(content_start, Mapping)
-            and isinstance(content_end, Mapping)
-        )
-        if isinstance(content_start, Mapping) and isinstance(content_end, Mapping):
-            same = same and content_start.get("sha256") == content_end.get("sha256")
     if not available:
         binding = "unavailable"
         reason = "git_observation_unavailable"
@@ -378,11 +414,10 @@ def execution_receipt(
         binding = "unchanged_endpoints"
         reason = None
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "start": dict(start),
         "end": dict(end),
         "binding": binding,
-        "immutable_execution_attestation": None,
         "reason": reason,
     }
 
@@ -537,33 +572,10 @@ def _wait_for_unit(unit: str, timeout_seconds: int) -> dict[str, str] | None:
         properties = _unit_snapshot(unit)
         if properties is not None:
             load_state = properties.get("LoadState")
-            active_state = properties.get("ActiveState")
             if load_state and load_state != "loaded":
                 return {}
             if _unit_is_terminal(properties):
                 return properties
-            if timeout_seconds and properties.get("Type") == "notify":
-                if active_state == "activating":
-                    # RuntimeMaxSec has not started. Keep a finite observation
-                    # allowance after the last confirmed admission wait, so a
-                    # lost manager connection still produces unresolved state.
-                    deadline = (
-                        time.monotonic()
-                        + timeout_seconds
-                        + UNIT_OBSERVATION_GRACE_SECONDS
-                    )
-                else:
-                    try:
-                        entered = (
-                            int(properties.get("ActiveEnterTimestampMonotonic", "0"))
-                            / 1_000_000
-                        )
-                    except (TypeError, ValueError):
-                        entered = 0.0
-                    if 0 < entered <= time.monotonic():
-                        deadline = (
-                            entered + timeout_seconds + UNIT_OBSERVATION_GRACE_SECONDS
-                        )
         if deadline is not None and time.monotonic() >= deadline:
             return None
         time.sleep(delay)
@@ -645,16 +657,10 @@ def _service_command(
     stdout: Path,
     log_path: Path,
 ) -> list[str]:
-    notify = launch.get("execution_readiness", "exec") == "notify"
-    environment = {
-        **environment,
-        "AGENTCTL_EXECUTION_READINESS": "notify" if notify else "exec",
-    }
     properties = [
         f"RuntimeMaxSec={launch['timeout_seconds'] or 'infinity'}",
-        "Type=notify" if notify else "Type=exec",
-        *(["NotifyAccess=all", "TimeoutStartSec=infinity"] if notify else []),
-        f"ExitType={launch.get('exit_type', 'cgroup')}",
+        "Type=exec",
+        "ExitType=cgroup",
         "KillMode=control-group",
         "RemainAfterExit=yes",
         "IOAccounting=yes",
@@ -667,7 +673,6 @@ def _service_command(
         "systemd-run",
         "--user",
         "--quiet",
-        *(["--no-block"] if notify else []),
         f"--unit={unit}",
         f"--slice={pool_slice(pool)}",
         f"--description={description}",
@@ -718,9 +723,6 @@ def _run_bare(
     log: Any,
 ) -> tuple[Outcome, int]:
     """Outside the queue there is no group and no unit; only the caller can cancel."""
-    if launch.get("execution_readiness", "exec") == "notify":
-        log.write(b"notify execution readiness requires a managed systemd unit\n")
-        return Outcome.FAILED, 78
     process = subprocess.Popen(
         argv,
         cwd=launch["working_directory"],
@@ -818,36 +820,6 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             },
         )
 
-    checkout = launch.get("checkout")
-
-    def candidate_parts() -> tuple[Path, str, Path, str] | None:
-        if not isinstance(checkout, Mapping) or checkout.get("kind") != "candidate":
-            return None
-        from .checkout import CANDIDATE_BRANCH_PREFIX
-
-        root, branch, commit = (
-            checkout.get(key) for key in ("root", "branch", "commit")
-        )
-        path = Path(launch["working_directory"])
-        if (
-            not all(isinstance(value, str) for value in (root, branch, commit))
-            or not branch.startswith(CANDIDATE_BRANCH_PREFIX)
-            or path == Path(root)
-        ):
-            raise ValueError("invalid candidate checkout ownership")
-        return Path(root), branch, path, commit
-
-    def release_candidate() -> None:
-        if not isinstance(checkout, Mapping) or checkout.get("kind") != "candidate":
-            return
-        from .checkout import CheckoutError, release_candidate_checkout
-
-        try:
-            release_candidate_checkout(checkout, launch["working_directory"])
-        except (CheckoutError, worktrunk.WorktrunkError) as error:
-            with log_path.open("ab") as log:
-                log.write(f"candidate cleanup deferred: {error}\n".encode())
-
     def refused(*, scratch_error: str | None = None) -> int:
         record: dict[str, Any] = {
             "outcome": "refused",
@@ -863,58 +835,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         if request:
             record["cancellation"] = request
         publish_outcome(record)
-        release_candidate()
         return REFUSED_EXIT_CODE
-
-    parts = candidate_parts()
-    if parts is not None:
-        root, branch, path, commit = parts
-        try:
-            registered = worktrunk.worktrunk_find(root, branch)
-            if registered is None or registered.path is None:
-                retained = (
-                    checkout.get("cache_path")
-                    if isinstance(checkout, Mapping)
-                    else None
-                )
-                cache_path = Path(retained) if isinstance(retained, str) else None
-                stub = path / ".cache"
-                if path.exists():
-                    if (
-                        cache_path is None
-                        or not stub.is_symlink()
-                        or stub.resolve() != cache_path
-                    ):
-                        raise worktrunk.WorktrunkError("candidate path is occupied")
-                    stub.unlink()
-                    path.rmdir()
-                try:
-                    worktrunk.worktrunk_create(root, branch, path=path, base=commit)
-                except worktrunk.WorktrunkError:
-                    if (
-                        cache_path is not None
-                        and cache_path.is_dir()
-                        and not path.exists()
-                    ):
-                        path.mkdir()
-                        stub.symlink_to(cache_path, target_is_directory=True)
-                    raise
-                if cache_path is not None and cache_path.is_dir():
-                    if (path / ".cache").is_dir():
-                        shutil.rmtree(path / ".cache")
-                    (path / ".cache").symlink_to(cache_path, target_is_directory=True)
-            elif registered.path != path:
-                raise worktrunk.WorktrunkError(
-                    "candidate branch belongs to another path"
-                )
-            observed, error = _git_probe(path, "rev-parse", "HEAD")
-            if error or observed != commit:
-                raise worktrunk.WorktrunkError(
-                    "candidate checkout moved from its pinned commit"
-                )
-        except worktrunk.WorktrunkError as error:
-            log_path.write_text(f"candidate preparation failed: {error}\n")
-            return refused()
 
     if not Path(launch["working_directory"]).is_dir():
         log_path.write_text(
@@ -1140,7 +1061,6 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
         if cleanup_error is not None:
             record["scratch"]["cleanup_error"] = cleanup_error
     publish_outcome(record)
-    release_candidate()
     return status
 
 

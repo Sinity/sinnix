@@ -515,7 +515,7 @@ class Runtime:
         cwd: str,
         group: str,
         timeout_seconds: int | None,
-        owner_request_key: str | None = None,
+        idempotency_key: str | None = None,
         request_digest: str | None = None,
     ) -> dict[str, Any]:
         self.principal.require(Permission.SHELL_RUN)
@@ -554,8 +554,8 @@ class Runtime:
             "timeout_seconds": timeout_seconds,
             "result": "exit-status",
         }
-        if owner_request_key is not None:
-            arguments["owner_request_key"] = owner_request_key
+        if idempotency_key is not None:
+            arguments["idempotency_key"] = idempotency_key
             arguments["request_digest"] = request_digest
         result = self._job(
             "job.shell.start",
@@ -579,7 +579,7 @@ class Runtime:
         operation: str | None,
         workspace_id: str | None,
         parameters: Mapping[str, Any] | None,
-        owner_request_key: str | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         self.principal.require(Permission.JOB_START)
         if not isinstance(project_id, str) or not 1 <= len(project_id) <= 128:
@@ -599,8 +599,8 @@ class Runtime:
             "operation": operation,
             "parameters": dict(parameters or {}),
         }
-        if owner_request_key is not None:
-            arguments["owner_request_key"] = owner_request_key
+        if idempotency_key is not None:
+            arguments["idempotency_key"] = idempotency_key
         if workspace_id is not None:
             arguments["workspace_id"] = workspace_id
         result = self._job("job.start", arguments)
@@ -1383,7 +1383,7 @@ class Runtime:
             request=context,
         )
 
-    def owner_request_key(self, action: str, idempotency_key: str) -> str:
+    def launch_idempotency_key(self, action: str, idempotency_key: str) -> str:
         return (
             "gateway-"
             + hashlib.sha256(
@@ -1518,7 +1518,9 @@ class Runtime:
                 try:
                     job = await anyio.to_thread.run_sync(
                         lambda: self.jobs.reconcile_start(
-                            self.owner_request_key(action.name, context.idempotency_key)
+                            self.launch_idempotency_key(
+                                action.name, context.idempotency_key
+                            )
                         )
                     )
                     recovered = (
@@ -1545,7 +1547,7 @@ class Runtime:
                 try:
                     job = await anyio.to_thread.run_sync(
                         lambda: self.jobs.reconcile_shell_start(
-                            self.owner_request_key(
+                            self.launch_idempotency_key(
                                 action.name, context.idempotency_key
                             ),
                             _shell_request_digest(inp),

@@ -129,7 +129,6 @@
         [
           ps.pytest
           ps.pytest-timeout
-          ps.ijson
         ]
         ++ builtins.filter (
           p:

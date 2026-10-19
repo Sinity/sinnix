@@ -7,8 +7,8 @@ Output: a read verb (``project``, ``result validate-worker``,
 ``job list|get|logs|result|wait``, ``batch status|list|task``, ``view``,
 ``events tail``) prints a table in local time with an age column, or the
 document with ``--json``. A write verb
-(``job start|fire|cancel|retry|clean``, ``batch start|land|abandon|clean|result|resume``,
-``schedule apply``, ``pools apply``, ``backpressure tick``) prints the
+(``job start|cancel|retry|clean``, ``batch start|land|abandon|clean|result|resume``,
+``pools apply``, ``pressure tick``) prints the
 document as JSON on stdout and one summary line on stderr. Tables show a
 run's 8-character suffix and 8 characters of a commit; ``--full`` prints
 them whole, and every verb that takes a run accepts either form.
@@ -23,7 +23,7 @@ Exit status, the one table for the package:
   1  refused (validation, policy, a missing object) or the action failed
   2  usage
   3  a tool agentctl drives failed (pueue, wt, gh, git, bd, systemd)
-  4  the waited job (``job wait``, ``job start --wait``, ``job fire --wait``) did not succeed
+  4  the waited job (``job wait``, ``job start --wait``) did not succeed
 """
 
 from __future__ import annotations
@@ -39,15 +39,13 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from . import (
-    backpressure,
     batch,
     evidence,
-    evidence_history,
     launch,
     operator_view,
     pools,
+    pressure,
     results,
-    schedule,
 )
 from .config import Config, ConfigError, load_config, resolve_project
 from .github import GithubError
@@ -69,7 +67,6 @@ from .projects import (
 )
 from .prompts import PromptError
 from .pueue import PueueError
-from .schedule import TimerError
 from .start import check_result_contract, load_dispatched_result
 from .worktrunk import WorktrunkError
 
@@ -91,9 +88,8 @@ _REFUSALS = (
     PromptError,
     ProjectConfigError,
     ProjectEnvironmentError,
-    evidence_history.GitHistoryError,
 )
-_SUBSTRATE_ERRORS = (BatchError, GithubError, PueueError, TimerError, WorktrunkError)
+_SUBSTRATE_ERRORS = (BatchError, GithubError, PueueError, WorktrunkError)
 
 PROJECT_HELP = "project id or checkout path (default: the checkout enclosing the working directory)"
 
@@ -202,17 +198,16 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument("--wait", action="store_true")
     start.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
     start.add_argument(
-        "--owner-request-key", help="durable owner identity for an idempotent launch"
+        "--idempotency-key",
+        help="caller key that makes a repeated launch return the same job",
+    )
+    start.add_argument(
+        "--if-idle",
+        action="store_true",
+        help="start nothing while the same operation is queued or running "
+        "(what a timer runs)",
     )
     _output_arguments(start)
-    fire = job_verbs.add_parser(
-        "fire", help="a timer's launch: skipped while the operation is active"
-    )
-    fire.add_argument("target", nargs="+", metavar="[project] operation")
-    _project_option(fire)
-    fire.add_argument("--wait", action="store_true")
-    fire.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
-    _output_arguments(fire)
     listing = job_verbs.add_parser(
         "list", help=f"the newest {DEFAULT_JOB_ROWS} tasks, newest first"
     )
@@ -434,16 +429,6 @@ def parser() -> argparse.ArgumentParser:
     evidence_get.add_argument("evidence_id")
     _project_option(evidence_get)
     _output_arguments(evidence_get)
-    evidence_discover = evidence_verbs.add_parser(
-        "discover", help="find bounded explicit Beads links in reachable Git history"
-    )
-    evidence_discover.add_argument("--bead", required=True)
-    _project_option(evidence_discover)
-    evidence_discover.add_argument("--ref", dest="reference", default="HEAD")
-    evidence_discover.add_argument(
-        "--limit", type=int, default=evidence_history.DEFAULT_HISTORY_LIMIT
-    )
-    _output_arguments(evidence_discover)
 
     view = verbs.add_parser("view", help="the operator screen")
     view.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
@@ -451,7 +436,7 @@ def parser() -> argparse.ArgumentParser:
     _output_arguments(view)
 
     events = verbs.add_parser(
-        "events", help="the event spool: started and finished tasks, backpressure"
+        "events", help="the event log: started and finished tasks, pressure pauses"
     )
     events_verbs = events.add_subparsers(dest="events_verb", required=True)
     tail = events_verbs.add_parser("tail")
@@ -460,21 +445,17 @@ def parser() -> argparse.ArgumentParser:
     tail.add_argument("--project", help="filter by project id")
     _output_arguments(tail)
 
-    timers = verbs.add_parser("schedule", help="calendar timers for declared schedules")
-    timers_verbs = timers.add_subparsers(dest="schedule_verb", required=True)
-    _output_arguments(timers_verbs.add_parser("apply"))
-
     admission = verbs.add_parser(
         "pools", help="the declared parallelism of every pueue group"
     )
     admission_verbs = admission.add_subparsers(dest="pools_verb", required=True)
     _output_arguments(admission_verbs.add_parser("apply"))
 
-    pressure = verbs.add_parser(
-        "backpressure", help="freeze or thaw the job queue against host pressure"
+    pause = verbs.add_parser(
+        "pressure", help="pause or reopen job groups against memory pressure"
     )
-    pressure_verbs = pressure.add_subparsers(dest="backpressure_verb", required=True)
-    _output_arguments(pressure_verbs.add_parser("tick"))
+    pause_verbs = pause.add_subparsers(dest="pressure_verb", required=True)
+    _output_arguments(pause_verbs.add_parser("tick"))
     return root
 
 
@@ -519,12 +500,22 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         if not rest:
             raise JobError("job start needs an operation")
         operation = _operation(project, rest[0])
+        if arguments.if_idle and (active := launch.active_tasks(project, operation)):
+            skipped = {
+                "skipped": True,
+                "label": launch.label_for(project.project_id, operation.name),
+                "active": active,
+            }
+            out.write(
+                skipped, f"{skipped['label']} skipped: task(s) {active} still active"
+            )
+            return EXIT_OK
         started = launch.start_operation(
             config,
             project,
             operation,
             workspace=arguments.workspace,
-            owner_request_key=arguments.owner_request_key,
+            idempotency_key=arguments.idempotency_key,
             extra_argv=(*rest[1:], *getattr(arguments, "extra", [])),
         )
         if arguments.wait:
@@ -540,30 +531,6 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                 EXIT_OK
                 if started.get("phase") == "succeeded"
                 else EXIT_JOB_NOT_SUCCEEDED
-            )
-        return EXIT_OK
-    if verb == "fire":
-        project, rest = _split_target(config, arguments.project, arguments.target)
-        if len(rest) != 1:
-            raise JobError("job fire needs exactly one operation")
-        fired = launch.fire(config, project, _operation(project, rest[0]))
-        if fired.get("fired") and arguments.wait:
-            waited = launch.wait(
-                fired["job_id"],
-                timeout_seconds=arguments.timeout_seconds,
-                reference=fired.get("reference"),
-                config=config,
-            )
-            fired = {**fired, **waited}
-        text = (
-            out.job_line(fired)
-            if fired.get("fired")
-            else f"{fired['label']} not fired: task(s) {fired['active']} still active"
-        )
-        out.write(fired, text)
-        if fired.get("terminal") or fired.get("wait_timed_out"):
-            return (
-                EXIT_OK if fired.get("phase") == "succeeded" else EXIT_JOB_NOT_SUCCEEDED
             )
         return EXIT_OK
     if verb == "list":
@@ -867,17 +834,6 @@ def _evidence(arguments: argparse.Namespace, config: Config, out: Output) -> int
         record = evidence.get_record(config, project.project_id, arguments.evidence_id)
         out.read(record, json.dumps(record, indent=2, sort_keys=True))
         return EXIT_OK
-    if arguments.evidence_verb == "discover":
-        project = resolve_project(config, arguments.project)
-        discovered = evidence_history.discover_git_history(
-            project.root,
-            project=project.project_id,
-            bead=arguments.bead,
-            reference=arguments.reference,
-            limit=arguments.limit,
-        )
-        out.read(discovered, json.dumps(discovered, indent=2, sort_keys=True))
-        return EXIT_OK
     raise AssertionError(arguments.evidence_verb)
 
 
@@ -897,8 +853,8 @@ def _event_line(event: Mapping[str, Any]) -> str:
         outcome = str(event.get("outcome") or "")
         exit_code = event.get("exit_code")
         return f"{stamp} {label} finished {outcome}{f' exit {exit_code}' if exit_code not in (None, '', '0', 0) else ''}{task}"
-    if kind == "backpressure":
-        return f"{stamp} backpressure {event.get('action')} {event.get('group') or ''}".rstrip()
+    if kind == pressure.EVENT_KIND:
+        return f"{stamp} pressure {event.get('action')} {event.get('group') or ''}".rstrip()
     if kind == "pool-hold":
         excluded = ", ".join(str(pool) for pool in event.get("excluded_by") or ())
         return (
@@ -1111,7 +1067,7 @@ def _project(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     out.read(
         rows,
         table(
-            ("operation", "pool", "result", "timeout", "schedule", "description"),
+            ("operation", "pool", "result", "timeout", "description"),
             [
                 (
                     row["name"],
@@ -1120,7 +1076,6 @@ def _project(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                     f"{row['timeout_seconds']}s"
                     if row["timeout_seconds"]
                     else "until cancelled",
-                    row["schedule"] or "-",
                     row["description"],
                 )
                 for row in rows
@@ -1173,15 +1128,6 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
         return EXIT_OK
     if verb == "events":
         return _events(arguments, config, out)
-    if verb == "schedule":
-        applied = schedule.apply(config)
-        out.write(
-            applied,
-            f"{len(applied['timers'])} timer(s): started {len(applied['started'])}, "
-            f"stopped {len(applied['stopped'])}, "
-            f"{len(applied['unavailable'])} project(s) out of service",
-        )
-        return EXIT_OK
     if verb == "pools":
         if not config.pools:
             raise ConfigError(f"{config.config_path} declares no pools")
@@ -1193,9 +1139,9 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
             f"unchanged {len(applied['unchanged'])}",
         )
         return EXIT_OK
-    if verb == "backpressure":
-        checkpoint = config.state_dir / "backpressure-spool.json"
-        decision = backpressure.tick(
+    if verb == "pressure":
+        checkpoint = config.state_dir / "pressure-state.json"
+        decision = pressure.tick(
             spool=config.event_spool, checkpoint=checkpoint, pools=config.pools
         )
         holds = (
@@ -1208,7 +1154,7 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
             "holds_released": holds["released"],
             "holds_waiting": holds["waiting"],
         }
-        summary = f"backpressure {decision.get('action')}"
+        summary = f"pressure {decision.get('action')}"
         if holds["released"] or holds["waiting"]:
             summary += (
                 f"; pool holds: released {len(holds['released'])}, "

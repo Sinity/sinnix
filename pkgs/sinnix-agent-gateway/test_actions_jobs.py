@@ -480,7 +480,7 @@ def test_operations_run_targets_the_root_or_a_linked_worktree(
         "project_id": "fixture",
         "operation": "check",
         "parameters": {},
-        "owner_request_key": runtime.owner_request_key("operations.run", "op-1"),
+        "idempotency_key": runtime.launch_idempotency_key("operations.run", "op-1"),
     }
 
     worktree = tmp_path / ("w" * 130) / "wt"
@@ -557,7 +557,7 @@ def test_shell_run_is_operator_only_and_keeps_cwd_inside_the_checkout(
         "group": "shell-quick",
         "timeout_seconds": 60,
         "result": "exit-status",
-        "owner_request_key": runtime.owner_request_key("shell.run", "sh-1"),
+        "idempotency_key": runtime.launch_idempotency_key("shell.run", "sh-1"),
     }
     fake.errors["job.shell.start"] = (
         ErrorCode.POLICY_DENIED,
@@ -581,7 +581,6 @@ QUEUE = {
     "known": True,
     "status": "Running",
     "parallel": 1,
-    "promote_after_seconds": None,
     "running": [
         {
             "job_id": 60,
@@ -590,11 +589,9 @@ QUEUE = {
             "argv": ["/bin/sh", "-c", "claude", "-p", "long work"],
             "since": "2026-09-29T10:00:00+00:00",
             "seconds": 1_800,
-            "promoted": False,
         }
     ],
     "running_count": 1,
-    "holding_count": 1,
     "queued": [
         {
             "job_id": 61,
@@ -765,7 +762,7 @@ def test_queues_report_each_groups_occupancy(
     page = call(server, "jobs.queues", {"groups": ["shell-long"]})
     assert page["result"]["outcome"] == "ok", page
     (row,) = page["data"]["queues"]
-    assert row["group"] == "shell-long" and row["holding_count"] == 1
+    assert row["group"] == "shell-long" and row["running_count"] == 1
     assert row["running"][0]["command"].endswith("'long work'")
     assert row["queued"][0]["ref"] == "sinnix://jobs/61"
     assert fake.calls[-1].arguments == {"groups": ["shell-long"]}

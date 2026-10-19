@@ -9,10 +9,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from agentctl import cli, evidence, launch
+from agentctl import evidence, launch
 from agentctl.config import Config, resolve_project
 from agentctl.run import outcome_path_for
-from conftest import SELF_REVIEW, FakeBd, FakePueue
+from conftest import SELF_REVIEW, FakeBd, FakePueue, begin_attempt
 
 SHA = "a" * 40
 
@@ -76,8 +76,8 @@ def _receipt_job(
         tree_receipt={"head": SHA, "tree": "b" * 40, "dirty": False},
     )
     fake_pueue.succeed(queued["job_id"])
+    begin_attempt(config, queued["reference"])
     outcome = outcome_path_for(config.jobs_dir / f"{queued['reference']}.log")
-    outcome.parent.mkdir(parents=True)
     outcome.write_text(
         json.dumps(
             {
@@ -523,29 +523,6 @@ def test_read_paths_need_no_owner_and_reject_misaddressed_reference(
     assert listed["coverage"] == "partial"
 
 
-def test_evidence_discover_parser_keeps_project_ref_and_limit_explicit() -> None:
-    arguments = cli.parser().parse_args(
-        [
-            "evidence",
-            "discover",
-            "--bead",
-            "fx-1",
-            "--project",
-            "fixture",
-            "--ref",
-            "HEAD~3",
-            "--limit",
-            "7",
-        ]
-    )
-
-    assert arguments.evidence_verb == "discover"
-    assert arguments.bead == "fx-1"
-    assert arguments.project == "fixture"
-    assert arguments.reference == "HEAD~3"
-    assert arguments.limit == 7
-
-
 @pytest.mark.parametrize("retained", [True, False])
 def test_cleaned_receipt_never_substitutes_an_unrelated_reused_queue_id(
     config: Config,
@@ -570,6 +547,7 @@ def test_cleaned_receipt_never_substitutes_an_unrelated_reused_queue_id(
     )
     fake_pueue.succeed(unrelated["job_id"])
     original_outcome = outcome_path_for(config.jobs_dir / f"{reference}.log")
+    begin_attempt(config, unrelated["reference"])
     other_outcome = outcome_path_for(config.jobs_dir / f"{unrelated['reference']}.log")
     successful = json.loads(original_outcome.read_text())
     successful["execution_receipt"]["start"]["head"] = SHA
@@ -605,7 +583,7 @@ def test_cleaned_receipt_still_requires_complete_project_bound_execution_evidenc
     launch.clean(config, job_id, reference)
     outcome_path = outcome_path_for(config.jobs_dir / f"{reference}.log")
     if damage == "missing-outcome":
-        outcome_path.unlink()
+        outcome_path.resolve().unlink()
     elif damage == "incomplete-endpoint":
         outcome = json.loads(outcome_path.read_text())
         outcome["execution_receipt"].pop("end")

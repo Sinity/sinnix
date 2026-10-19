@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from agentctl import batch, launch, pueue
+from agentctl import artifacts, batch, launch, pueue
 from agentctl.config import Config
 from agentctl.limits import MAX_AGENT_TIMEOUT_SECONDS
 from sinnix_agent_gateway.execution import JobOwnerError, LocalJobs
@@ -522,6 +522,7 @@ def test_job_logs_reads_the_log_of_the_job_the_reference_addresses(
     jobs_dir.mkdir(parents=True, exist_ok=True)
 
     def task(task_id: int, name: str) -> pueue.Task:
+        artifacts.begin({"log_path": str(jobs_dir / f"{name}.log")}, "fixture-input")
         (jobs_dir / f"{name}.log").write_text(f"log of {name}")
         return pueue.Task(
             task_id=task_id,

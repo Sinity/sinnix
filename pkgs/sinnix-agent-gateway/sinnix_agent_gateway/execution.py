@@ -318,15 +318,15 @@ class LocalJobs:
     def start(self, **arguments: Any) -> dict[str, Any]:
         return self._call(self._start, arguments)
 
-    def reconcile_start(self, owner_request_key: str) -> dict[str, Any] | None:
-        job = launch.lookup_operation_request(self.config, owner_request_key)
+    def reconcile_start(self, idempotency_key: str) -> dict[str, Any] | None:
+        job = launch.lookup_operation_request(self.config, idempotency_key)
         return job_payload(job) if job is not None else None
 
     def reconcile_shell_start(
-        self, owner_request_key: str, request_digest: str
+        self, idempotency_key: str, request_digest: str
     ) -> dict[str, Any] | None:
         job = launch.lookup_operation_request(
-            self.config, owner_request_key, request_digest
+            self.config, idempotency_key, request_digest
         )
         return job_payload(self._with_queue(job)) if job is not None else None
 
@@ -424,8 +424,8 @@ class LocalJobs:
             workspace=workspace,
             extra_argv=extra_argv,
             **(
-                {"owner_request_key": arguments["owner_request_key"]}
-                if arguments.get("owner_request_key") is not None
+                {"idempotency_key": arguments["idempotency_key"]}
+                if arguments.get("idempotency_key") is not None
                 else {}
             ),
         )
@@ -737,7 +737,7 @@ class LocalJobs:
             if arguments.get("timeout_seconds") is None
             else _require_int(arguments, "timeout_seconds")
         )
-        owner_request_key = arguments.get("owner_request_key")
+        idempotency_key = arguments.get("idempotency_key")
         submission = {
             "project": project,
             "operation": SHELL_OPERATION,
@@ -749,10 +749,10 @@ class LocalJobs:
             "result_kind": "exit",
             "environment": project.environment.values(),
         }
-        if owner_request_key is not None:
+        if idempotency_key is not None:
             job = launch.enqueue_request(
                 self.config,
-                owner_request_key=owner_request_key,
+                idempotency_key=idempotency_key,
                 request_digest=_require_str(arguments, "request_digest"),
                 **submission,
             )

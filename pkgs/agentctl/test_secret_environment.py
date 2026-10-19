@@ -13,7 +13,7 @@ import stat
 from pathlib import Path
 
 import pytest
-from agentctl import launch
+from agentctl import artifacts, launch
 from agentctl.config import Config
 from agentctl.launch_input import read_input, secret_environment, write_input
 from agentctl.projects import load_project_adapter
@@ -127,8 +127,8 @@ def test_job_log_reads_mask_a_secret_written_before_masking(
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("verify"))
     written = read_launch(config, fake_pueue.task(started["job_id"]))
+    artifacts.begin(written, "fixture-input")
     log_path = Path(written["log_path"])
-    log_path.parent.mkdir(parents=True, exist_ok=True)
     text = f"before {SECRET} after\n"
     log_path.write_text(text)
     fake_pueue.succeed(started["job_id"])

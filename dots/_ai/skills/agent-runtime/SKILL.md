@@ -1,6 +1,6 @@
 ---
 name: agent-runtime
-description: "Run, watch, recover, or clean AgentCTL work: declared operations as pueue jobs, batches of isolated workers, landing tasks, results, events, and backpressure."
+description: "Run, watch, recover, or clean AgentCTL work: declared operations as pueue jobs, batches of isolated workers, landing tasks, results, events, and pressure pauses."
 ---
 
 # Agent runtime
@@ -19,7 +19,7 @@ extension point is a declared operation in the project's
 - `agentctl view <project>`: queue pressure, active jobs, open runs, ready
   work. `--json` gives the same document.
 - `agentctl events tail --follow --project <project>`: every task start and
-  finish and every backpressure change. Keep one watch per concern; on
+  finish and every pressure pause. Keep one watch per concern; on
   takeover, inspect the existing watches' argv before adding one, and stop a
   watch you own when its purpose ends. Coordinators only: a batch worker
   waits on its own job with `agentctl job wait <id>`.
@@ -30,9 +30,9 @@ extension point is a declared operation in the project's
 
 Capture JSON job details and results locally, then print the fields needed for
 the decision: job/reference, terminal status and exit, candidate binding, result
-summary, and artifact paths. Ordinary responses can inline complete file
-manifests and repeat result encodings. Keep that evidence intact and inspect its
-full artifact only when needed; do not dump the envelope into agent context.
+summary, and artifact paths. Responses can repeat result encodings; inspect
+the full artifact only when needed, and do not dump the envelope into agent
+context.
 
 ## Jobs
 
@@ -44,7 +44,7 @@ instead of starting it again. Retry only after reading the terminal result and
 fixing its named cause. A wedged job gets one cancel, a check that it is
 terminal, then a retry.
 
-A paused pool is an admission hold. Run `agentctl backpressure tick` and wait
+A paused pool is an admission hold. Run `agentctl pressure tick` and wait
 for the release before dispatching more; running jobs continue.
 
 Agents spawned inside a Claude or Codex session are not pueue jobs. Heavy

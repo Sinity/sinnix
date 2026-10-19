@@ -59,12 +59,12 @@ UNIT_BANDWIDTH_VALUE = re.compile(r"/[^\x00-\x20:]+ [1-9][0-9]*[KMGTPE]?\Z")
 
 # A job-owned scratch directory: created before the command, exported as
 # `AGENTCTL_SCRATCH` and `TMPDIR`, measured at unit exit and removed. `tmpfs` is RAM,
-# `nvme` the scratch filesystem; the environment overrides exist so a test
+# `disk` the scratch filesystem; the environment overrides exist so a test
 # owns both roots.
-SCRATCH_KINDS = frozenset({"tmpfs", "nvme"})
+SCRATCH_KINDS = frozenset({"tmpfs", "disk"})
 SCRATCH_ROOTS = {
     "tmpfs": ("AGENTCTL_TMPFS_SCRATCH_ROOT", "/dev/shm/agentctl"),
-    "nvme": ("AGENTCTL_NVME_SCRATCH_ROOT", "/realm/tmp/work/agentctl"),
+    "disk": ("AGENTCTL_DISK_SCRATCH_ROOT", "/realm/tmp/work/agentctl"),
 }
 
 
@@ -247,16 +247,6 @@ def read_input(path: Path) -> dict[str, Any]:
         )
     if value["result_kind"] not in RESULT_KINDS:
         raise QueueInputError(f"unknown result kind: {value['result_kind']!r}")
-    readiness = value.get("execution_readiness", "exec")
-    exit_type = value.get("exit_type", "cgroup")
-    if not isinstance(exit_type, str) or exit_type not in {"main", "cgroup"}:
-        raise QueueInputError("launch input exit_type must be main or cgroup")
-    if not isinstance(readiness, str) or readiness not in {"exec", "notify"}:
-        raise QueueInputError("launch input execution_readiness must be exec or notify")
-    if readiness == "notify" and value.get("kind") != "declared-operation":
-        raise QueueInputError(
-            "notify execution readiness requires a declared operation"
-        )
     timeout = value["timeout_seconds"]
     if (
         not isinstance(timeout, int)

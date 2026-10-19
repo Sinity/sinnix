@@ -217,7 +217,7 @@ def test_interrupted_launch_reconciles_owner_identity_without_running_again(
     else:
         assert response["result"]["outcome"] == "ok", response
         assert response["data"]["launch_reference"] == "retained-launch"
-    assert seen == [runtime.owner_request_key("operations.run", "launch-key")]
+    assert seen == [runtime.launch_idempotency_key("operations.run", "launch-key")]
     if not malformed:
         assert anyio.run(invoke) == response
         assert len(seen) == 1
@@ -274,7 +274,7 @@ def test_interrupted_shell_launch_recovers_exact_job_or_stays_indeterminate(
     response = anyio.run(invoke, request)
     assert seen == [
         (
-            runtime.owner_request_key("shell.run", "shell-key"),
+            runtime.launch_idempotency_key("shell.run", "shell-key"),
             _shell_request_digest(ShellRunInput.model_validate(request)),
         )
     ]

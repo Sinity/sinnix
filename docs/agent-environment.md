@@ -95,7 +95,7 @@ Servers: context7, github, lynchpin, sinex.
 | Skill | When to use |
 | --- | --- |
 | `agent-gateway` | Use when invoking, inspecting, or documenting Sinnix Agent Gateway actions through their typed MCP tools or the sinnix-agent-gateway CLI. |
-| `agent-runtime` | "Run, watch, recover, or clean AgentCTL work: declared operations as pueue jobs, batches of isolated workers, landing tasks, results, events, and backpressure." |
+| `agent-runtime` | "Run, watch, recover, or clean AgentCTL work: declared operations as pueue jobs, batches of isolated workers, landing tasks, results, events, and pressure pauses." |
 | `android-device-control` | Control, configure, debloat, or capture from the rooted Android phone (Evolution X, Magisk) through adb, root shell, Termux, tailnet access, and resilient UI automation. |
 | `beads` | "Read, claim, update, relate, close, or write Beads tasks with bd: ready work, notes, dependency edges, acceptance criteria, campaign epics, and follow-up filing." |
 | `chatgpt-conversations` | Read complete ChatGPT conversations and retrieve explicitly requested linked files or input attachments from already open Chrome tabs, without navigating or submitting messages. |

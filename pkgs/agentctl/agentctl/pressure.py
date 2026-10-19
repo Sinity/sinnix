@@ -31,7 +31,7 @@ CLOSE_ORDER = {
 }
 MANAGED_GROUPS = ("agent", "pytest-heavy", "pytest", "pytest-quick", "normal", "bulk")
 OWNER = "agentctl"
-CHECKPOINT_SCHEMA = 2
+CHECKPOINT_SCHEMA = 1
 EVENT_KIND = "pressure"
 
 
@@ -376,9 +376,7 @@ def tick(
     signal = "+".join(signals) or None
     paused = [name for name in MANAGED_GROUPS if groups.get(name) == "Paused"]
     obsolete = [
-        name
-        for name in paused
-        if name in state.ours() and _can_reopen(pressure)
+        name for name in paused if name in state.ours() and _can_reopen(pressure)
     ]
     if obsolete:
         target = obsolete[0]

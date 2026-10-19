@@ -34,7 +34,7 @@ from agentctl.run import (
 from agentctl.run import (
     main as run_main,
 )
-from conftest import FakePueue, read_launch, write_project
+from conftest import FakePueue, begin_attempt, read_launch
 
 
 def test_declared_operation_limits_reach_its_queued_launch(
@@ -52,36 +52,6 @@ def test_declared_operation_limits_reach_its_queued_launch(
     started = launch.start_operation(config, project, project.operation("verify"))
     written = read_launch(config, fake_pueue.task(started["job_id"]))
     assert written["unit_properties"] == limits
-
-
-def test_required_services_share_the_verifiers_single_launch(
-    fake_pueue: FakePueue, config: Config, project_root: Path
-) -> None:
-    descriptor = project_root / ".agentctl/project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            'exec = ["fixture-verify"]',
-            'exec = ["fixture-verify"]\nrequires=["database"]',
-        )
-        + '\n[operations.database]\ndescription="Fixture database"\nexec=["fixture-db"]\nready_probe=["fixture-ready"]\nready_timeout_seconds=12\n'
-    )
-    project = load_project_adapter(project_root)
-    started = launch.start_operation(config, project, project.operation("verify"))
-    assert len(fake_pueue.added) == 1
-    written = read_launch(config, fake_pueue.task(started["job_id"]))
-    argv = written["argv"]
-    assert argv[0] == "env"
-    assert argv[2].endswith("/service_run.py")
-    assert json.loads(argv[3]) == [
-        {
-            "name": "database",
-            "command": ["fixture-db"],
-            "ready_probe": ["fixture-ready"],
-            "ready_timeout_seconds": 12,
-        }
-    ]
-    assert argv[4:] == ["--", "fixture-verify"]
-    assert written["exit_type"] == "main"
 
 
 def test_invalid_launch_input_preserves_existing_private_bytes(tmp_path: Path) -> None:
@@ -130,18 +100,6 @@ def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
     assert started["project"] == "fixture"
     assert started["operation"] == "verify"
     assert started["kind"] == "declared-operation"
-
-
-def test_declared_readiness_is_preserved_in_queued_input(
-    fake_pueue: FakePueue, config: Config, project_root: Path
-) -> None:
-    project = load_project_adapter(project_root)
-    operation = replace(project.operation("verify"), execution_readiness="notify")
-    started = launch.start_operation(config, project, operation)
-    written = read_launch(config, fake_pueue.task(started["job_id"]))
-    assert written["execution_readiness"] == "notify"
-    assert written["kind"] == "declared-operation"
-    assert written["timeout_seconds"] == operation.timeout_seconds
 
 
 def test_operation_started_by_an_agent_preserves_its_routing_principal(
@@ -333,30 +291,6 @@ def test_cached_operation_retries_success_that_executed_on_another_tree(
     }
 
 
-def test_operation_dependencies_are_pueue_edges(
-    fake_pueue: FakePueue,
-    config: Config,
-    project_root: Path,
-) -> None:
-    descriptor = project_root / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            'exec = ["fixture-verify"]\npool = "pytest"',
-            'exec = ["fixture-verify"]\npool = "pytest"\ndependencies = ["check"]',
-        )
-    )
-    project = load_project_adapter(project_root)
-
-    started = launch.start_operation(config, project, project.operation("verify"))
-
-    assert started["job_id"] == 2
-    assert [item["label"] for item in fake_pueue.added] == [
-        "fixture:check",
-        "fixture:verify",
-    ]
-    assert fake_pueue.added[1]["after"] == (1,)
-
-
 def test_a_default_checkout_operation_refuses_a_worktree(
     fake_pueue: FakePueue, config: Config, project_root: Path, tmp_path: Path
 ) -> None:
@@ -384,35 +318,22 @@ def test_an_unknown_pool_is_a_typed_refusal_and_leaves_no_input_behind(
     assert list(config.inputs_dir.glob("*")) == []
 
 
-@pytest.mark.parametrize("operation_name", ["nightly", "check"])
 @pytest.mark.parametrize("running", [False, True])
-def test_fire_skips_while_the_same_operation_is_active(
-    fake_pueue: FakePueue,
-    config: Config,
-    project_root: Path,
-    operation_name: str,
-    running: bool,
+def test_active_tasks_name_an_operation_queued_or_running(
+    fake_pueue: FakePueue, config: Config, project_root: Path, running: bool
 ) -> None:
-    """Descriptor timers and fixed Nix timers share the same admission rule."""
+    """What `job start --if-idle` reads to skip a timer's launch."""
     project = load_project_adapter(project_root)
-    operation = project.operation(operation_name)
+    operation = project.operation("check")
 
-    first = launch.fire(config, project, operation)
+    first = launch.start_operation(config, project, operation)
     if running:
         fake_pueue.running(first["job_id"])
     else:
         fake_pueue.queue(first["job_id"])
-    second = launch.fire(config, project, operation)
+    assert launch.active_tasks(project, operation) == [first["job_id"]]
     fake_pueue.succeed(first["job_id"])
-    third = launch.fire(config, project, operation)
-
-    assert first["fired"] is True
-    assert second == {
-        "fired": False,
-        "label": f"fixture:{operation_name}",
-        "active": [1],
-    }
-    assert third["fired"] is True and third["job_id"] == 2
+    assert launch.active_tasks(project, operation) == []
 
 
 def test_phases_come_from_pueue_results_and_the_wrapper_exit_codes(
@@ -455,7 +376,7 @@ def test_logs_and_result_are_read_by_the_reference_in_the_task_command(
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("verify"))
     written = read_launch(config, fake_pueue.task(started["job_id"]))
-    Path(written["log_path"]).parent.mkdir(parents=True, exist_ok=True)
+    artifacts.begin(written, "fixture-input")
     Path(written["log_path"]).write_text("ran\n")
     Path(written["result_path"]).write_text('{"passed": 3}')
     outcome_path_for(written["log_path"]).write_text('{"outcome": "success"}')
@@ -491,7 +412,7 @@ def test_result_of_an_exit_operation_keeps_the_wrapper_execution_receipt(
     started = launch.start_operation(config, project, project.operation("check"))
     task = fake_pueue.task(started["job_id"])
     written = read_launch(config, task)
-    Path(written["log_path"]).parent.mkdir(parents=True, exist_ok=True)
+    artifacts.begin(written, "fixture-input")
     outcome_path_for(written["log_path"]).write_text(
         json.dumps(
             {
@@ -970,8 +891,11 @@ def test_a_read_by_reference_answers_about_that_job_after_a_reorder(
     second = launch.start_operation(config, project, project.operation("verify"))
     fake_pueue.queue(first["job_id"])
     fake_pueue.queue(second["job_id"])
-    config.jobs_dir.mkdir(parents=True, exist_ok=True)
     for job, ran in ((first, "first"), (second, "second")):
+        begin_attempt(config, job["reference"])
+        (config.jobs_dir / f"{job['reference']}.outcome").write_text(
+            json.dumps({"outcome": "success", "exit_code": 0})
+        )
         (config.jobs_dir / f"{job['reference']}.log").write_text(f"{ran} log\n")
         (config.jobs_dir / f"{job['reference']}.result").write_text(
             json.dumps({"ran": ran})
@@ -1120,11 +1044,11 @@ def test_a_declared_scratch_tier_reaches_the_launch_input_and_job_get(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The wrapper is told which directory to own, and `job get` shows what it cost."""
-    monkeypatch.setenv("AGENTCTL_NVME_SCRATCH_ROOT", str(tmp_path / "nvme"))
+    monkeypatch.setenv("AGENTCTL_DISK_SCRATCH_ROOT", str(tmp_path / "disk"))
     descriptor = project_root / ".agentctl" / "project.toml"
     descriptor.write_text(
         descriptor.read_text() + '\n[operations.heavy]\ndescription = "Fixture heavy"\n'
-        'exec = ["fixture-heavy"]\npool = "bulk"\nresult = "exit"\nscratch = "nvme"\n'
+        'exec = ["fixture-heavy"]\npool = "bulk"\nresult = "exit"\nscratch = "disk"\n'
     )
     project = load_project_adapter(project_root)
 
@@ -1133,21 +1057,21 @@ def test_a_declared_scratch_tier_reaches_the_launch_input_and_job_get(
     written = read_launch(config, fake_pueue.task(started["job_id"]))
     reference = Path(fake_pueue.added[0]["command"][1]).stem
     assert written["scratch"] == {
-        "kind": "nvme",
-        "path": str(tmp_path / "nvme" / reference),
+        "kind": "disk",
+        "path": str(tmp_path / "disk" / reference),
     }
     plain = launch.start_operation(config, project, project.operation("check"))
     assert "scratch" not in read_launch(config, fake_pueue.task(plain["job_id"]))
 
+    artifacts.begin(written, "fixture-input")
     outcome = outcome_path_for(written["log_path"])
-    outcome.parent.mkdir(parents=True, exist_ok=True)
     outcome.write_text(
         json.dumps(
             {
                 "outcome": "success",
                 "exit_code": 0,
                 "scratch": {
-                    "kind": "nvme",
+                    "kind": "disk",
                     "path": written["scratch"]["path"],
                     "bytes": 2048,
                     "files": 3,
@@ -1223,7 +1147,7 @@ def test_cancelling_a_queued_retry_keeps_the_previous_attempt_and_its_output(
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("verify"))
     written = read_launch(config, fake_pueue.task(started["job_id"]))
-    Path(written["log_path"]).parent.mkdir(parents=True, exist_ok=True)
+    artifacts.begin(written, "fixture-input")
     Path(written["log_path"]).write_text("first-attempt-log\n")
     Path(written["result_path"]).write_text('{"passed": 4}')
     outcome_path_for(written["log_path"]).write_text(
@@ -1538,8 +1462,6 @@ def test_get_job_does_not_read_outcome_beside_an_outside_log_symlink(
 
     detail = launch.get_job(task_id, config)
 
-    assert detail["attempt"] == 1
-    assert detail["artifacts"] == {"log": str(outside_log)}
     assert "outcome" not in detail
 
 
@@ -1705,8 +1627,11 @@ def test_every_read_by_task_id_answers_about_the_job_that_id_now_holds(
     second = launch.start_operation(config, project, project.operation("verify"))
     fake_pueue.queue(first["job_id"])
     fake_pueue.queue(second["job_id"])
-    config.jobs_dir.mkdir(parents=True, exist_ok=True)
     for job, ran in ((first, "first"), (second, "second")):
+        begin_attempt(config, job["reference"])
+        (config.jobs_dir / f"{job['reference']}.outcome").write_text(
+            json.dumps({"outcome": "success", "exit_code": 0})
+        )
         (config.jobs_dir / f"{job['reference']}.log").write_text(f"{ran} log\n")
         (config.jobs_dir / f"{job['reference']}.result").write_text(
             json.dumps({"ran": ran})
@@ -1826,383 +1751,20 @@ def test_every_queued_task_carries_the_config_the_launch_was_started_with(
     assert written["environment"]["AGENTCTL_CONFIG"] == str(location)
 
 
-# ------------------------------------------------------- the candidate tree
-
-
-def _candidate_project(tmp_path: Path) -> Path:
-    """A project whose `corpus` operation names the candidate tree.
-
-    `origin/master` is a real remote-tracking ref pointing at the base commit,
-    and the project's own checkout is moved past it and left dirty -- exactly
-    the shape that made a scheduled complete-corpus run report a receipt from
-    the operator's working tree.
-    """
-    root = write_project(tmp_path / "fixture", worktrees=tmp_path / "worktrees")
-    descriptor = root / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text()
-        + '\n[operations.corpus]\ndescription = "Fixture corpus"\n'
-        + 'exec = ["fixture-corpus"]\npool = "bulk"\ncheckout = "candidate"\n'
-        + 'admission = { memory_mib = 12288 }\nschedule = "*-*-* 03:00"\n'
-    )
-    run = lambda *arguments: subprocess.run(  # noqa: E731
-        ["git", "-C", str(root), *arguments], check=True, capture_output=True
-    )
-    subprocess.run(["git", "init", "-q", "-b", "master", str(root)], check=True)
-    run("config", "user.name", "Fixture")
-    run("config", "user.email", "fixture@example.test")
-    run("add", "-A")
-    run("commit", "-q", "-m", "base")
-    base = subprocess.check_output(
-        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
-    ).strip()
-    run("update-ref", "refs/remotes/origin/master", base)
-    (root / "operator-work.txt").write_text("the operator's uncommitted work\n")
-    run("add", "operator-work.txt")
-    run("commit", "-q", "-m", "ahead of the base")
-    (root / "operator-work.txt").write_text("dirty\n")
-    return root, base
-
-
-def test_a_candidate_operation_resolves_its_own_tree_without_a_workspace(
-    fake_pueue: FakePueue, tmp_path: Path
-) -> None:
-    """A timer's `fire` passes no workspace and never can. Breaks if
-    `candidate` stops selecting a tree: the launch runs in the project
-    checkout -- the operator's branch, ahead of the base and dirty -- and its
-    receipt is not candidate evidence, which is the observed defect."""
-    root, base = _candidate_project(tmp_path)
-    subprocess.run(
-        ["git", "-C", str(root), "branch", "agentctl/candidate", base], check=True
-    )
-    config = Config(
-        project_roots=(root,),
-        agent_runner=root / "contract.md",
-        worker_contract=root / "contract.md",
-        event_spool=tmp_path / "events.jsonl",
-        state_dir=tmp_path / "state",
-        agentctl_executable="/fixture/agentctl",
-    )
-    project = load_project_adapter(root)
-
-    fired = launch.fire(config, project, project.operation("corpus"))
-
-    assert fired["fired"] is True
-    added = fake_pueue.added[0]
-    written = read_launch(config, fake_pueue.task(fired["job_id"]))
-    working = Path(written["working_directory"])
-    assert working != root
-    assert working.parent == tmp_path / "worktrees"
-    assert added["working_directory"] == root
-    head = subprocess.check_output(
-        ["git", "-C", str(working), "rev-parse", "HEAD"], text=True
-    ).strip()
-    assert head == base
-    assert written["checkout"]["kind"] == "candidate"
-    assert written["checkout"]["commit"] == base
-    assert written["working_directory"] == str(working)
-
-
-@pytest.mark.parametrize("phase", ["queued", "running"])
-@pytest.mark.parametrize("second_operation", ["corpus", "other"])
-def test_a_candidate_operation_keeps_each_launch_at_its_requested_commit(
-    fake_pueue: FakePueue, tmp_path: Path, phase: str, second_operation: str
-) -> None:
-    """A second request cannot reset a queued or running launch's tree."""
-    root, base = _candidate_project(tmp_path)
-    descriptor = root / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text()
-        + '\n[operations.other]\ndescription = "Other candidate"\nexec = ["true"]\npool = "normal"\ncheckout = "candidate"\n'
-    )
-    config = Config(
-        project_roots=(root,),
-        agent_runner=root / "contract.md",
-        worker_contract=root / "contract.md",
-        event_spool=tmp_path / "events.jsonl",
-        state_dir=tmp_path / "state",
-        agentctl_executable="/fixture/agentctl",
-    )
-    project = load_project_adapter(root)
-    first = launch.start_operation(config, project, project.operation("corpus"))
-    if phase == "queued":
-        fake_pueue.queue(first["job_id"])
-    first_input = read_launch(config, fake_pueue.task(first["job_id"]))
-    working = Path(first_input["working_directory"])
-    (working / "marker").write_text("A's private data\n")
-    (root / "operator-work.txt").write_text("B\n")
-    subprocess.run(["git", "-C", str(root), "add", "operator-work.txt"], check=True)
-    subprocess.run(["git", "-C", str(root), "commit", "-q", "-m", "B"], check=True)
-    b = subprocess.check_output(
-        ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
-    ).strip()
-    subprocess.run(
-        ["git", "-C", str(root), "update-ref", "refs/remotes/origin/master", b],
-        check=True,
-    )
-    second = launch.start_operation(
-        config, project, project.operation(second_operation)
-    )
-    second_input = read_launch(config, fake_pueue.task(second["job_id"]))
-
-    assert second_input["working_directory"] != first_input["working_directory"]
-    assert second_input["checkout"]["commit"] == b
-    assert Path(second_input["working_directory"]).is_dir()
-    assert (working / "marker").read_text() == "A's private data\n"
-    assert (
-        subprocess.check_output(
-            ["git", "-C", str(working), "rev-parse", "HEAD"], text=True
-        ).strip()
-        == base
-    )
-
-
-def test_candidate_execution_receipt_names_actual_sha_and_releases_tree(
-    fake_pueue: FakePueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root, base = _candidate_project(tmp_path)
-    config = Config(
-        project_roots=(root,),
-        agent_runner=root / "contract.md",
-        worker_contract=root / "contract.md",
-        event_spool=tmp_path / "events.jsonl",
-        state_dir=tmp_path / "state",
-        agentctl_executable="/fixture/agentctl",
-    )
-    project = load_project_adapter(root)
-    started = launch.start_operation(config, project, project.operation("corpus"))
-    task = fake_pueue.task(started["job_id"])
-    payload = read_launch(config, task)
-    path = Path(payload["working_directory"])
-    receipt = path / ".cache" / "verify" / "runs" / "fixture" / "run.json"
-    receipt.parent.mkdir(parents=True)
-    receipt.write_text('{"status":"passed"}\n')
-    graph = path / ".cache" / "testmon" / "testmondata"
-    graph.parent.mkdir(parents=True)
-    graph.write_bytes(b"fixture graph")
-    payload["argv"] = ["true"]
-    payload["pool"] = "bulk"
-    payload["environment"]["PATH"] = os.environ["PATH"]
-    input_path = Path(task.command.split()[-1])
-    write_input(input_path, payload)
-    monkeypatch.delenv("PUEUE_GROUP", raising=False)
-    monkeypatch.setattr("agentctl.run.unit_pool", lambda _pool: None)
-
-    assert run_main([str(input_path)]) == 0
-    outcome = json.loads(outcome_path_for(payload["log_path"]).read_text())
-    execution = outcome["execution_receipt"]
-    assert execution["binding"] == "unchanged_endpoints"
-    assert execution["start"]["head"] == execution["end"]["head"] == base
-    assert receipt.read_text() == '{"status":"passed"}\n'
-    assert graph.read_bytes() == b"fixture graph"
-    assert not (path / ".git").exists()
-    assert run_main([str(input_path)]) == 0
-    assert receipt.read_text() == '{"status":"passed"}\n'
-    assert graph.read_bytes() == b"fixture graph"
-    next_job = launch.start_operation(config, project, project.operation("corpus"))
-    next_path = Path(
-        read_launch(config, fake_pueue.task(next_job["job_id"]))["working_directory"]
-    )
-    assert next_path != path and next_path.is_dir()
-    assert not (next_path / ".cache" / "testmon" / "testmondata").exists()
-    assert receipt.read_text() == '{"status":"passed"}\n'
-
-
-def test_candidate_known_enqueue_failure_releases_tree_but_uncertain_add_retains_it(
-    fake_pueue: FakePueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root, _ = _candidate_project(tmp_path)
-    config = Config(
-        project_roots=(root,),
-        agent_runner=root / "contract.md",
-        worker_contract=root / "contract.md",
-        event_spool=tmp_path / "events.jsonl",
-        state_dir=tmp_path / "state",
-        agentctl_executable="/fixture/agentctl",
-    )
-    project = load_project_adapter(root)
-    monkeypatch.setattr(
-        pueue, "add", lambda **_kwargs: (_ for _ in ()).throw(PueueGroupError("bulk"))
-    )
-    with pytest.raises(PueueGroupError):
-        launch.start_operation(config, project, project.operation("corpus"))
-    assert not list((tmp_path / "worktrees").glob("fixture-agentctl-candidate-*"))
-
-    monkeypatch.setattr(
-        pueue, "add", lambda **_kwargs: (_ for _ in ()).throw(PueueError("ack lost"))
-    )
-    with pytest.raises(launch.EnqueueUncertain):
-        launch.start_operation(config, project, project.operation("corpus"))
-    assert len(list((tmp_path / "worktrees").glob("fixture-agentctl-candidate-*"))) == 1
-
-
-def test_candidate_wrapper_refuses_a_tree_moved_to_another_sha(
-    fake_pueue: FakePueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root, _ = _candidate_project(tmp_path)
-    config = Config(
-        project_roots=(root,),
-        agent_runner=root / "contract.md",
-        worker_contract=root / "contract.md",
-        event_spool=tmp_path / "events.jsonl",
-        state_dir=tmp_path / "state",
-        agentctl_executable="/fixture/agentctl",
-    )
-    project = load_project_adapter(root)
-    started = launch.start_operation(config, project, project.operation("corpus"))
-    task = fake_pueue.task(started["job_id"])
-    payload = read_launch(config, task)
-    input_path = Path(task.command.split()[-1])
-    subprocess.run(
-        ["git", "-C", payload["working_directory"], "reset", "--hard", "master"],
-        check=True,
-        capture_output=True,
-    )
-    monkeypatch.delenv("PUEUE_GROUP", raising=False)
-
-    assert run_main([str(input_path)]) == REFUSED_EXIT_CODE
-    outcome = json.loads(outcome_path_for(payload["log_path"]).read_text())
-    assert outcome["outcome"] == "refused"
-    assert "execution_receipt" not in outcome
-
-
-def test_candidate_cancelled_before_wrapper_start_releases_tree(
-    fake_pueue: FakePueue, tmp_path: Path
-) -> None:
-    root, _ = _candidate_project(tmp_path)
-    config = Config(
-        project_roots=(root,),
-        agent_runner=root / "contract.md",
-        worker_contract=root / "contract.md",
-        event_spool=tmp_path / "events.jsonl",
-        state_dir=tmp_path / "state",
-        agentctl_executable="/fixture/agentctl",
-    )
-    project = load_project_adapter(root)
-    started = launch.start_operation(config, project, project.operation("corpus"))
-    path = Path(
-        read_launch(config, fake_pueue.task(started["job_id"]))["working_directory"]
-    )
-    fake_pueue.queue(started["job_id"])
-    assert launch.cancel(config, started["job_id"])["phase"] == "cancelled"
-    assert not path.exists()
-
-
-def test_candidate_preparation_failure_does_not_enqueue_or_touch_an_active_tree(
-    fake_pueue: FakePueue, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root, _ = _candidate_project(tmp_path)
-    config = Config(
-        project_roots=(root,),
-        agent_runner=root / "contract.md",
-        worker_contract=root / "contract.md",
-        event_spool=tmp_path / "events.jsonl",
-        state_dir=tmp_path / "state",
-        agentctl_executable="/fixture/agentctl",
-    )
-    project = load_project_adapter(root)
-    first = launch.start_operation(config, project, project.operation("corpus"))
-    path = Path(
-        read_launch(config, fake_pueue.task(first["job_id"]))["working_directory"]
-    )
-    marker = path / "marker"
-    marker.write_text("A\n")
-    monkeypatch.setattr(
-        launch,
-        "candidate_tree",
-        lambda *_args: (_ for _ in ()).throw(
-            launch.CheckoutError("fixture preparation failed")
-        ),
-    )
-
-    with pytest.raises(JobError, match="fixture preparation failed"):
-        launch.start_operation(config, project, project.operation("corpus"))
-    assert len(fake_pueue.added) == 1
-    assert marker.read_text() == "A\n"
-
-
-def test_candidate_cache_reuses_active_and_completed_content_without_second_tree(
-    fake_pueue: FakePueue, tmp_path: Path
-) -> None:
-    root, _ = _candidate_project(tmp_path)
-    descriptor = root / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            'checkout = "candidate"',
-            'checkout = "candidate"\ncache = "tree+environment"',
-        )
-    )
-    config = Config(
-        project_roots=(root,),
-        agent_runner=root / "contract.md",
-        worker_contract=root / "contract.md",
-        event_spool=tmp_path / "events.jsonl",
-        state_dir=tmp_path / "state",
-        agentctl_executable="/fixture/agentctl",
-    )
-    project = load_project_adapter(root)
-    first = launch.start_operation(config, project, project.operation("corpus"))
-    again = launch.start_operation(config, project, project.operation("corpus"))
-    assert again["job_id"] == first["job_id"]
-    assert again["reused"] is True
-
-    written = read_launch(config, fake_pueue.task(first["job_id"]))
-    receipt = written["tree_receipt"]
-    fake_pueue.succeed(first["job_id"])
-    _write_execution_attempt(
-        config,
-        fake_pueue.task(first["job_id"]),
-        receipt["head"],
-        receipt["tree"],
-    )
-    completed = launch.start_operation(config, project, project.operation("corpus"))
-
-    assert completed["job_id"] == first["job_id"]
-    assert completed["reused"] is True
-    assert len(fake_pueue.added) == 1
-
-
-def test_a_candidate_operation_refuses_a_caller_supplied_workspace(
-    fake_pueue: FakePueue, tmp_path: Path
-) -> None:
-    """Breaks if a workspace silently overrides the declaration: the operation
-    would report a candidate receipt for a tree it did not choose."""
-    root, _ = _candidate_project(tmp_path)
-    config = Config(
-        project_roots=(root,),
-        agent_runner=root / "contract.md",
-        worker_contract=root / "contract.md",
-        event_spool=tmp_path / "events.jsonl",
-        state_dir=tmp_path / "state",
-        agentctl_executable="/fixture/agentctl",
-    )
-    project = load_project_adapter(root)
-
-    with pytest.raises(JobError, match="does not take a workspace"):
-        launch.start_operation(
-            config,
-            project,
-            project.operation("corpus"),
-            workspace=tmp_path / "elsewhere",
-        )
-
-
 def test_a_declared_admission_envelope_reaches_the_job_and_its_command(
-    fake_pueue: FakePueue, tmp_path: Path
+    fake_pueue: FakePueue, config: Config, project_root: Path
 ) -> None:
     """The declared side of the comparison a sizing receipt already measures.
     Breaks if the envelope stops being carried: the workload has no declared
     number to read, and the job record says nothing about what was expected."""
-    root, _ = _candidate_project(tmp_path)
-    config = Config(
-        project_roots=(root,),
-        agent_runner=root / "contract.md",
-        worker_contract=root / "contract.md",
-        event_spool=tmp_path / "events.jsonl",
-        state_dir=tmp_path / "state",
-        agentctl_executable="/fixture/agentctl",
+    descriptor = project_root / ".agentctl" / "project.toml"
+    descriptor.write_text(
+        descriptor.read_text()
+        + '\n[operations.corpus]\ndescription = "Fixture corpus"\n'
+        + 'exec = ["fixture-corpus"]\npool = "bulk"\n'
+        + "admission = { memory_mib = 12288 }\n"
     )
-    project = load_project_adapter(root)
+    project = load_project_adapter(project_root)
 
     started = launch.start_operation(config, project, project.operation("corpus"))
 

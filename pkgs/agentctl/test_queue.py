@@ -40,10 +40,16 @@ def test_queue_state_names_what_holds_each_slot_and_who_waits(
     )
     _until(long, "Running")
     first = pueue.add(
-        group=GROUP, label="fixture:shell", command=("true",), working_directory=tmp_path
+        group=GROUP,
+        label="fixture:shell",
+        command=("true",),
+        working_directory=tmp_path,
     )
     second = pueue.add(
-        group=GROUP, label="fixture:shell", command=("true",), working_directory=tmp_path
+        group=GROUP,
+        label="fixture:shell",
+        command=("true",),
+        working_directory=tmp_path,
     )
 
     state = launch.queue_state(config, [GROUP])[GROUP]

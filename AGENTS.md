@@ -70,16 +70,14 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
 - Declared operations choose a pueue group; the groups and their widths are
   `sinnix.services.agentctl.pools` (`modules/services/agentctl.nix`), applied
   with `agentctl pools apply`, never by restarting pueued.
-  Backpressure pauses and releases groups through pueue.
+  `agentctl pressure tick` pauses and reopens groups through pueue.
 - Memory is bounded by the slice hierarchy and the resource classes in
   `flake/data/runtime-defaults.nix`. Hard `MemoryMax` is reserved for explicit
   safety boundaries such as a batch worker's unit. The `bulk` group admits
   large Nix operations; nothing wraps `nix` by basename.
-- Two scheduling routes. A project descriptor's `schedule` becomes a
-  transient timer running `agentctl job fire`; use it for a project's own
-  operations. A module's `mkScheduledJob` timer runs host maintenance owned
-  by that module; when the work is a declared operation, its command is
-  `agentctl job fire <project> <operation>`.
+- Scheduled work is a module's `mkScheduledJob` timer. When the work is a
+  declared operation, its command is
+  `agentctl job start --if-idle <project> <operation>`.
 - Project MCP servers are launched from the generated client profiles
   (`flake/data/mcp-registry.nix`); do not configure them per client.
 

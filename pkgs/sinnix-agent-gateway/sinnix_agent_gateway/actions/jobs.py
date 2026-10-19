@@ -122,11 +122,6 @@ class QueueEntry(GatewayModel):
     seconds: int | None = Field(
         default=None, description="How long it has been running or waiting."
     )
-    promoted: bool | None = Field(
-        default=None,
-        description="Running past the pool's promotion horizon: it no longer "
-        "holds a slot against new work.",
-    )
     dependencies: list[int] = Field(default_factory=list)
 
 
@@ -137,12 +132,8 @@ class QueueState(GatewayModel):
     known: bool = Field(description="False when pueue has no such group.")
     status: str | None = Field(default=None, description="Running or Paused.")
     parallel: int | None = None
-    promote_after_seconds: int | None = None
     running: list[QueueEntry] = Field(default_factory=list)
     running_count: int = 0
-    holding_count: int = Field(
-        default=0, description="Running jobs that still hold a slot."
-    )
     queued: list[QueueEntry] = Field(default_factory=list)
     queued_count: int = 0
     held_count: int = Field(default=0, description="Stashed or paused jobs.")
@@ -184,7 +175,6 @@ def _entry(raw: Mapping[str, Any]) -> QueueEntry:
         command=_command(raw.get("argv")),
         since=raw.get("since"),
         seconds=raw.get("seconds"),
-        promoted=raw.get("promoted"),
         dependencies=[int(item) for item in raw.get("dependencies") or []],
     )
 
@@ -195,10 +185,8 @@ def _queue_fields(raw: Mapping[str, Any]) -> dict[str, Any]:
         "known": bool(raw.get("known")),
         "status": raw.get("status"),
         "parallel": raw.get("parallel"),
-        "promote_after_seconds": raw.get("promote_after_seconds"),
         "running": [_entry(row) for row in raw.get("running") or []],
         "running_count": int(raw.get("running_count") or 0),
-        "holding_count": int(raw.get("holding_count") or 0),
         "queued": [_entry(row) for row in raw.get("queued") or []],
         "queued_count": int(raw.get("queued_count") or 0),
         "held_count": int(raw.get("held_count") or 0),
@@ -861,7 +849,7 @@ def _run_operation(runtime: Runtime, inp: OperationRunInput) -> JobView:
         operation=inp.operation,
         workspace_id=workspace,
         parameters={"argv": inp.operation_args} if inp.operation_args else None,
-        owner_request_key=runtime.owner_request_key(
+        idempotency_key=runtime.launch_idempotency_key(
             "operations.run", inp.idempotency_key
         ),
     )
@@ -936,7 +924,9 @@ def _start_shell(runtime: Runtime, inp: ShellRunInput, lane: str) -> dict[str, A
         cwd=inp.cwd,
         group=shell_lanes.GROUPS[lane],
         timeout_seconds=inp.timeout_seconds,
-        owner_request_key=runtime.owner_request_key("shell.run", inp.idempotency_key),
+        idempotency_key=runtime.launch_idempotency_key(
+            "shell.run", inp.idempotency_key
+        ),
         request_digest=_shell_request_digest(inp),
     )
 
@@ -1111,7 +1101,7 @@ ACTIONS: tuple[Action, ...] = (
         resource_kinds=("job",),
         affordances=("jobs.get", "jobs.wait", "jobs.cancel"),
         aliases=("lanes", "occupancy", "queue length", "what is running", "backlog"),
-        documentation="shell-quick and shell-long are the shell.run lanes. A running job marked promoted has outlived its pool's promotion horizon and no longer holds a slot against new work. Reads only unfinished tasks, so it stays cheap however long the queue history is.",
+        documentation="shell-quick and shell-long are the shell.run groups. Reads only unfinished tasks, so it stays cheap however long the queue history is.",
         examples=(
             Example(title="Every group", input={}),
             Example(
@@ -1228,7 +1218,7 @@ ACTIONS: tuple[Action, ...] = (
         resource_kinds=("project", "checkout", "job"),
         affordances=("jobs.wait", "jobs.logs", "jobs.queues", "jobs.cancel"),
         aliases=("exec", "command", "bash", "run command"),
-        documentation="cwd is confined to the checkout. lane=auto sends agent CLI launches (claude, codex, ...) to the long lane and everything else to the quick lane, which long work never occupies: a quick-lane command still running after the pool's promotion horizon stops holding its slot (jobs.queues shows it as promoted). Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) and returns output; outcome running or queued is a continuation with queue occupancy, never a failure: pass continuation and output.next_offset to jobs.wait. timeout_seconds is an optional kill ceiling; omitted, the job runs until it finishes.",
+        documentation="cwd is confined to the checkout. lane=auto sends agent CLI launches (claude, codex, ...) to the long lane and everything else to the quick lane. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) and returns output; outcome running or queued is a continuation with queue occupancy, never a failure: pass continuation and output.next_offset to jobs.wait. timeout_seconds is an optional kill ceiling; omitted, the job runs until it finishes.",
         examples=(
             Example(
                 title="git status in sinnix",

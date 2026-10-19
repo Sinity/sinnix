@@ -40,15 +40,6 @@ def user_manager() -> None:
         pytest.skip("no user systemd bus is available")
 
 
-@pytest.mark.parametrize("value", [None, [], True, "unknown"])
-def test_launch_refuses_invalid_exit_type(tmp_path: Path, value: Any) -> None:
-    from agentctl.launch_input import QueueInputError, read_input
-
-    path = write_launch(tmp_path, exit_type=value)
-    with pytest.raises(QueueInputError, match="exit_type"):
-        read_input(path)
-
-
 def test_supervisor_import_rss_stays_small() -> None:
     # A queued job keeps this interpreter resident until its unit exits.
     child = subprocess.run(
@@ -116,15 +107,12 @@ def test_git_observation_is_read_only_and_fails_closed(
 
     monkeypatch.setattr(run_module.subprocess, "run", probe)
 
-    monkeypatch.setattr(
-        "agentctl.content_identity.content_manifest",
-        lambda _path: {"schema_version": 1, "sha256": "fixture"},
-    )
+    monkeypatch.setattr(run_module, "content_tree", lambda _path: "worktree-tree")
     observed = run_module.git_observation(tmp_path, observed_at="2026-09-11T00:00:00Z")
 
     assert observed == {
         "observed_at": "2026-09-11T00:00:00Z",
-        "content_manifest": {"schema_version": 1, "sha256": "fixture"},
+        "content_tree": "worktree-tree",
         "head": "head",
         "tree": "tree",
         "dirty": True,
@@ -208,8 +196,8 @@ def test_large_receipt_completion_reaches_tail_and_follow(
     capsys: pytest.CaptureFixture[str],
     follow: bool,
 ) -> None:
-    # Exercise the real producer and reader, not a fabricated compact event.
-    # Before the fix this inventory duplicated into the spool and disappeared.
+    # Exercise the real producer and reader, not a fabricated compact event:
+    # an outcome too large for one event line travels as an outcome_ref.
     inventory = {
         f"file-{i}.py": {"sha256": "a" * 64, "bytes": i} for i in range(15_000)
     }
@@ -218,7 +206,7 @@ def test_large_receipt_completion_reaches_tail_and_follow(
         "head": "a",
         "tree": "b",
         "dirty": False,
-        "content_manifest": {"sha256": "neutral", "files": inventory},
+        "padding": inventory,
     }
     monkeypatch.setattr(run_module, "git_observation", lambda *_args: observation)
     launch = write_launch(tmp_path)
@@ -423,12 +411,10 @@ def test_worker_exports_queue_identity_to_the_child(
     assert log_of(tmp_path) == "job-a fixture check pytest"
 
 
-@pytest.mark.parametrize("exit_type", ["main", "cgroup"])
-def test_a_declared_pool_runs_the_child_as_a_service_with_declared_exit_type(
+def test_a_declared_pool_runs_the_child_as_a_service(
     tmp_path: Path,
     fake_systemd: FakeSystemd,
     fake_pueue: FakePueue,
-    exit_type: str,
 ) -> None:
     """The unit is recoverable from pueue; wrapper completion follows its cgroup."""
     launch = write_launch(
@@ -436,10 +422,6 @@ def test_a_declared_pool_runs_the_child_as_a_service_with_declared_exit_type(
         pool="pytest",
         argv=["sh", "-c", 'printf "%s" "$AGENTCTL_QUEUE_WORKER"'],
     )
-    value = json.loads(launch.read_text())
-    value["exit_type"] = exit_type
-    launch.write_text(json.dumps(value))
-
     assert main([str(launch)]) == 0
 
     argv = fake_systemd.run_argv()
@@ -449,7 +431,7 @@ def test_a_declared_pool_runs_the_child_as_a_service_with_declared_exit_type(
     assert "--slice=agentctl-pytest.slice" in argv
     assert "--collect" not in argv
     for setting in (
-        f"ExitType={exit_type}",
+        "ExitType=cgroup",
         "KillMode=control-group",
         "RemainAfterExit=yes",
         "IOAccounting=yes",
@@ -1501,7 +1483,7 @@ def test_event_append_takes_the_spool_lock_and_repairs_a_torn_tail(
     """Breaks if a lifecycle event writes while another spool writer holds
     the ledger lock, or appends after an interrupted line."""
     spool = tmp_path / "events.jsonl"
-    spool.write_text('{"kind":"backpressure"}\n{"kind":"torn')
+    spool.write_text('{"kind":"pressure"}\n{"kind":"torn')
     lock = os.open(tmp_path / "events.jsonl.lock", os.O_RDWR | os.O_CREAT)
     fcntl.flock(lock, fcntl.LOCK_EX)
     writer = threading.Thread(
@@ -1516,7 +1498,7 @@ def test_event_append_takes_the_spool_lock_and_repairs_a_torn_tail(
     writer.join(timeout=5)
     assert not writer.is_alive()
     kinds = [json.loads(line)["kind"] for line in spool.read_text().splitlines()]
-    assert kinds == ["backpressure", "queue-task"]
+    assert kinds == ["pressure", "queue-task"]
 
 
 @pytest.mark.parametrize("dirty", [False, True])
@@ -1628,38 +1610,6 @@ def test_worker_does_not_invent_missing_checkout_evidence(
     )
     assert main([str(launch)]) == 0
     assert json.loads(log_of(tmp_path)) == {"CHECKOUT_ID": None, "CHECKOUT_HEAD": None}
-
-
-def test_notify_admission_wait_does_not_spend_execution_observation_budget(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A notify service gets its declared runtime after readiness, not submission."""
-    clock = [0.0]
-
-    def sleep(delay: float) -> None:
-        clock[0] += delay
-
-    def snapshot(_unit: str) -> dict[str, str]:
-        state = (
-            "activating" if clock[0] < 5 else "active" if clock[0] < 6 else "inactive"
-        )
-        return {
-            "LoadState": "loaded",
-            "ActiveState": state,
-            "Type": "notify",
-            "ActiveEnterTimestampMonotonic": "5000000" if clock[0] >= 5 else "0",
-        }
-
-    monkeypatch.setattr(run_module, "_unit_snapshot", snapshot)
-    monkeypatch.setattr(run_module.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(run_module.time, "sleep", sleep)
-    monkeypatch.setattr(run_module, "UNIT_OBSERVATION_GRACE_SECONDS", 0)
-
-    properties = run_module._wait_for_unit("fixture.service", timeout_seconds=2)
-
-    assert properties is not None
-    assert properties["ActiveState"] == "inactive"
-    assert clock[0] >= 6
 
 
 @pytest.mark.parametrize("status", [0, 1])
@@ -2200,3 +2150,58 @@ def test_scratch_cleanup_failure_is_reported_without_hiding_command_status(
     assert outcome["scratch"]["path"] == str(scratch)
     assert scratch.is_dir()
     assert "private-child-name" not in json.dumps(outcome)
+
+
+def _git(path: Path, *arguments: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(path), *arguments],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@example.invalid",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@example.invalid",
+        },
+    ).stdout.strip()
+
+
+def test_content_tree_sees_untracked_files_and_leaves_the_index_alone(
+    tmp_path: Path,
+) -> None:
+    _git(tmp_path, "init", "-q")
+    (tmp_path / ".gitignore").write_text("ignored.txt\n")
+    (tmp_path / "tracked.txt").write_text("one\n")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "-q", "-m", "base")
+    index = (tmp_path / ".git" / "index").read_bytes()
+
+    (tmp_path / "untracked.txt").write_text("new\n")
+    first = run_module.content_tree(tmp_path)
+    (tmp_path / "ignored.txt").write_text("not identity\n")
+    assert run_module.content_tree(tmp_path) == first
+    (tmp_path / "untracked.txt").write_text("changed\n")
+    second = run_module.content_tree(tmp_path)
+
+    assert first and second and first != second
+    assert first != _git(tmp_path, "rev-parse", "HEAD^{tree}")
+    assert (tmp_path / ".git" / "index").read_bytes() == index
+    assert _git(tmp_path, "status", "--porcelain") == "?? untracked.txt"
+
+
+def test_dirty_endpoints_with_different_content_are_changed() -> None:
+    start = {
+        "status": "observed",
+        "head": "h",
+        "tree": "t",
+        "dirty": True,
+        "content_tree": "a",
+    }
+    assert run_module.execution_receipt(start, start)["binding"] == (
+        "unchanged_endpoints"
+    )
+    changed = run_module.execution_receipt(start, {**start, "content_tree": "b"})
+    assert changed["binding"] == "changed"
+    assert "immutable_execution_attestation" not in changed

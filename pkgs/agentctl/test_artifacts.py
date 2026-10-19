@@ -99,26 +99,6 @@ def test_retry_preserves_complete_outputs_outcomes_and_reads_after_clean(
     assert canonical.read_bytes() == original
 
 
-def test_retry_preserves_legacy_artifacts_before_upgrading(
-    config: Config,
-    fake_pueue: FakePueue,
-    project_root: Path,
-):
-    job, document = execute(config, fake_pueue, project_root, stdout='{"new": true}')
-    log = Path(document["log_path"])
-    log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_bytes(b"legacy partial\xff")
-    Path(document["result_path"]).write_text('{"legacy":true}')
-    run.outcome_path_for(log).write_text('{"outcome":"failed","exit_code":3}')
-    assert launch.result(config, job["job_id"])["value"] == {"legacy": True}
-    assert run.run(document, launch_input="fixture-input") == 0
-    assert launch.result(config, job["job_id"])["attempt"] == 2
-    old = launch.result(config, job["job_id"], attempt=1)
-    assert old["value"] == {"legacy": True}
-    assert Path(old["artifacts"]["log"]).read_bytes() == b"legacy partial\xff"
-    assert old["outcome"]["exit_code"] == 3
-
-
 def test_interrupted_attempt_partial_output_survives_the_next_invocation(
     config: Config,
     fake_pueue: FakePueue,
@@ -161,7 +141,7 @@ def test_attempt_reference_survives_pueue_reordering(
     assert read["job_id"] == second["job_id"]
 
 
-def test_durable_owner_request_reconciles_acceptance_and_survives_clean(
+def test_durable_idempotent_request_reconciles_acceptance_and_survives_clean(
     config: Config,
     fake_pueue: FakePueue,
     project_root: Path,
@@ -171,13 +151,13 @@ def test_durable_owner_request_reconciles_acceptance_and_survives_clean(
         config,
         project,
         project.operation("verify"),
-        owner_request_key="fixture-request",
+        idempotency_key="fixture-request",
     )
     again = launch.start_operation(
         config,
         project,
         project.operation("verify"),
-        owner_request_key="fixture-request",
+        idempotency_key="fixture-request",
     )
     assert first["reference"] == again["reference"] and again["reused"]
     assert len(fake_pueue.added) == 1
@@ -191,7 +171,7 @@ def test_durable_owner_request_reconciles_acceptance_and_survives_clean(
             config,
             project,
             project.operation("verify"),
-            owner_request_key="fixture-request",
+            idempotency_key="fixture-request",
             extra_argv=("changed",),
         )
 
@@ -212,16 +192,16 @@ def test_keyed_shell_launch_reuses_exact_job_and_refuses_changed_request(
         "environment": {},
     }
     first = launch.enqueue_request(
-        config, owner_request_key="shell-key", request_digest="original", **arguments
+        config, idempotency_key="shell-key", request_digest="original", **arguments
     )
     again = launch.enqueue_request(
-        config, owner_request_key="shell-key", request_digest="original", **arguments
+        config, idempotency_key="shell-key", request_digest="original", **arguments
     )
     assert again["reference"] == first["reference"]
     assert len(fake_pueue.added) == 1
     with pytest.raises(launch.JobError, match="identity mismatch"):
         launch.enqueue_request(
-            config, owner_request_key="shell-key", request_digest="changed", **arguments
+            config, idempotency_key="shell-key", request_digest="changed", **arguments
         )
     assert len(fake_pueue.added) == 1
 
@@ -238,7 +218,7 @@ def test_keyed_shell_launch_recovers_lost_queue_ack_without_duplicate(
 
     monkeypatch.setattr(pueue, "add", uncertain)
     arguments = {
-        "owner_request_key": "shell-accepted",
+        "idempotency_key": "shell-accepted",
         "request_digest": "original",
         "project": project,
         "operation": "shell",
@@ -257,7 +237,7 @@ def test_keyed_shell_launch_recovers_lost_queue_ack_without_duplicate(
     assert len(fake_pueue.added) == 1
 
 
-def test_owner_request_does_not_repeat_an_uncertain_submission(
+def test_idempotent_request_does_not_repeat_an_uncertain_submission(
     config: Config,
     fake_pueue: FakePueue,
     project_root: Path,
@@ -277,12 +257,12 @@ def test_owner_request_does_not_repeat_an_uncertain_submission(
                 config,
                 project,
                 project.operation("verify"),
-                owner_request_key="uncertain",
+                idempotency_key="uncertain",
             )
     assert len(calls) == 1
 
 
-def test_owner_request_recovers_lost_acknowledgement_without_duplicate(
+def test_idempotent_request_recovers_lost_acknowledgement_without_duplicate(
     config: Config,
     fake_pueue: FakePueue,
     project_root: Path,
@@ -298,10 +278,10 @@ def test_owner_request_recovers_lost_acknowledgement_without_duplicate(
     monkeypatch.setattr(pueue, "add", uncertain)
     with pytest.raises(launch.EnqueueUncertain):
         launch.start_operation(
-            config, project, project.operation("verify"), owner_request_key="accepted"
+            config, project, project.operation("verify"), idempotency_key="accepted"
         )
     recovered = launch.start_operation(
-        config, project, project.operation("verify"), owner_request_key="accepted"
+        config, project, project.operation("verify"), idempotency_key="accepted"
     )
     assert recovered["reused"] and recovered["job_id"] == 1
     assert len(fake_pueue.added) == 1
@@ -330,75 +310,6 @@ def test_cancel_attempt_guard_rejects_a_newer_retry_before_mutating_queue(
     )
     assert cancelled["state"] == "removed"
     assert launch.result(config, job["job_id"], job["reference"])["attempt"] == 1
-
-
-def test_interrupted_legacy_migration_resumes_without_overwriting_remaining_files(
-    config: Config,
-    fake_pueue: FakePueue,
-    project_root: Path,
-    monkeypatch,
-):
-    job, document = execute(config, fake_pueue, project_root, stdout='{"new": true}')
-    log = Path(document["log_path"])
-    log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_text("legacy diagnostics")
-    result_path = Path(document["result_path"])
-    result_path.write_text('{"legacy":true}')
-    original = Path.replace
-
-    def interrupted(path, target):
-        if path == result_path:
-            raise KeyboardInterrupt
-        return original(path, target)
-
-    monkeypatch.setattr(Path, "replace", interrupted)
-    with pytest.raises(KeyboardInterrupt):
-        run.run(document, launch_input="fixture-input")
-    monkeypatch.setattr(Path, "replace", original)
-    assert result_path.read_text() == '{"legacy":true}'
-    assert run.run(document, launch_input="fixture-input") == 0
-    first = launch.result(config, job["job_id"], attempt=1)
-    assert first["value"] == {"legacy": True}
-    assert launch.logs(config, job["job_id"], attempt=1) == "legacy diagnostics"
-    assert launch.result(config, job["job_id"])["attempt"] == 2
-
-
-def test_legacy_queue_entry_without_input_keeps_conventional_artifact_reads(
-    config: Config,
-    fake_pueue: FakePueue,
-    project_root: Path,
-):
-    reference = "legacy-retained"
-    input_path = config.jobs_dir / f"{reference}.json"
-    task_id = fake_pueue.add(
-        group="normal",
-        label="fixture:legacy",
-        command=("agentctl-run", str(input_path)),
-        working_directory=project_root,
-    )
-    config.jobs_dir.mkdir(parents=True, exist_ok=True)
-    log = config.jobs_dir / f"{reference}.log"
-    log.write_text("retained legacy diagnostics")
-    (config.jobs_dir / f"{reference}.result").write_text('{"legacy":true}')
-    run.outcome_path_for(log).write_text('{"outcome":"success","exit_code":0}')
-    assert not input_path.exists()
-
-    page = launch.read_job_artifact(config, task_id, artifact="log", limit=8)
-    assert page["available"] and page["text"] == "retained"
-    assert page["attempt"] == 1 and page["next_offset"] == 8
-    detail = launch.get_job(task_id, config, reference, attempt=page["attempt"])
-    assert detail["artifacts"]["log"] == str(log)
-    assert detail["outcome"]["outcome"] == "success"
-    remainder = launch.read_job_artifact(
-        config,
-        task_id,
-        reference,
-        attempt=page["attempt"],
-        offset=8,
-    )
-    assert page["text"] + remainder["text"] == log.read_text()
-    result = launch.result(config, task_id, reference, attempt=page["attempt"])
-    assert result["value"] == {"legacy": True}
 
 
 def test_guarded_cancel_allows_real_wrapper_to_finalize(

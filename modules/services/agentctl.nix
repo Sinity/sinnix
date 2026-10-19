@@ -31,7 +31,7 @@ in
 mkServiceModule {
   name = "agentctl";
   defaultOnDesktop = true;
-  description = "agentctl: jobs over pueue, lanes over worktrunk, gh and bd, and their timers";
+  description = "agentctl: jobs over pueue, worktrees over worktrunk, gh and bd, and their timers";
   extraOptions.projectRoots = lib.mkOption {
     type = lib.types.nonEmptyListOf lib.types.str;
     default = map (project: project.path) (
@@ -78,11 +78,6 @@ mkServiceModule {
             default = [ ];
             description = "Pools whose live work holds new launches in this pool until they drain.";
           };
-          promoteAfterSeconds = lib.mkOption {
-            type = lib.types.nullOr lib.types.ints.positive;
-            default = null;
-            description = "A running task older than this stops counting against the width: when every slot is held by such tasks, agentctl starts the oldest queued task anyway. Null keeps the width absolute.";
-          };
         };
       }
     );
@@ -90,7 +85,7 @@ mkServiceModule {
       # Claude workers that run focused tests in their own process reach
       # 2-3 GiB each; twelve, then eight, held the 8G agentctl-agent slice at
       # 80-95% full memory pressure (2026-09-28), which also paused the pytest
-      # pools through backpressure. Six fit.
+      # pools through pressure pauses. Six fit.
       agent.parallel = 6;
       # The agents a landing owns (integration, review): a pool of their own so
       # a paused `agent` pool holds back new workers without stalling landings.
@@ -123,13 +118,9 @@ mkServiceModule {
       # Long-lived development dependencies must not occupy short-job capacity.
       service.parallel = 2;
       interactive.parallel = 4;
-      # The gateway's shell lanes. A quick command never waits behind long
-      # work: agent CLIs and commands declared long go to shell-long, and a
-      # quick-lane command still running after 20 s stops holding its slot.
-      shell-quick = {
-        parallel = 8;
-        promoteAfterSeconds = 20;
-      };
+      # The gateway's shell.run groups: agent CLIs and commands declared
+      # long go to shell-long, so quick commands don't wait behind them.
+      shell-quick.parallel = 8;
       # ChatGPT sessions launch 10-60 min `claude -p` workers here
       # (2026-09-29); four at once is what the old shared pool held.
       shell-long.parallel = 4;
@@ -187,9 +178,6 @@ mkServiceModule {
                 job_memory_bytes = pool.adaptive.jobMemoryBytes;
               };
             }
-            // lib.optionalAttrs (pool.promoteAfterSeconds != null) {
-              promote_after_seconds = pool.promoteAfterSeconds;
-            }
           ) cfg.pools;
         }
       );
@@ -198,7 +186,7 @@ mkServiceModule {
       (lib.sinnix.mkScheduledJob
         {
           inherit config;
-          unitName = "agentctl-backpressure";
+          unitName = "agentctl-pressure";
           description = "Reconcile queue admission against memory stall";
         }
         {
@@ -206,39 +194,17 @@ mkServiceModule {
           resourceClass = "background";
           # The pass pauses and resumes pueue groups through the pueue client.
           path = [ pkgs.pueue ];
-          execStart = "${scriptPkgs.agentctl}/bin/agentctl backpressure tick";
+          execStart = "${scriptPkgs.agentctl}/bin/agentctl pressure tick";
           serviceConfig = {
             TimeoutStartSec = "30s";
           };
           timer = {
             # Full-stall averages are 60-second means, so sampling faster reads
             # the same number twice. One group is paused or resumed per tick,
-            # with the signal-specific order defined by `agentctl backpressure tick`.
+            # with the signal-specific order defined by `agentctl pressure tick`.
             intervalSec = 60;
             onBootSec = 60;
             description = "Reconcile queue admission against memory stall";
-          };
-        }
-      )
-      (lib.sinnix.mkScheduledJob
-        {
-          inherit config;
-          unitName = "agentctl-schedule";
-          description = "Reconcile the calendar timers declared by project descriptors";
-        }
-        {
-          manager = "user";
-          resourceClass = "background";
-          # Each declared `schedule` becomes one transient timer running
-          # `agentctl job fire`; a changed or removed declaration is stopped.
-          execStart = "${scriptPkgs.agentctl}/bin/agentctl schedule apply";
-          serviceConfig = {
-            TimeoutStartSec = "60s";
-          };
-          timer = {
-            intervalSec = 900;
-            onBootSec = 120;
-            description = "Reconcile the calendar timers declared by project descriptors";
           };
         }
       )

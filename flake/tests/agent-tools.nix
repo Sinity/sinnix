@@ -415,17 +415,14 @@ in
           ];
           declaredPools = agentToolsRuntimeConfig.sinnix.services.agentctl.pools;
         in
-        # The gateway's shell.run lanes (sinnix_agent_gateway/shell_lanes.py)
-        # are declared pools with their own slices, and only the quick lane
-        # promotes: long work there must never hold a slot a read needs.
+        # The gateway's shell.run groups are declared pools with their own
+        # slices.
         assert lib.assertMsg (
           declaredPools ? shell-quick
           && declaredPools ? shell-long
-          && declaredPools.shell-quick.promoteAfterSeconds != null
-          && declaredPools.shell-long.promoteAfterSeconds == null
           && poolSlices ? agentctl-shell-quick
           && poolSlices ? agentctl-shell-long
-        ) "the gateway shell lanes must be declared agentctl pools with slices; only shell-quick promotes";
+        ) "the gateway shell.run groups must be declared agentctl pools with slices";
         assert lib.assertMsg (lib.all (token: !(lib.hasInfix token avoidPattern))
           forbiddenAvoidTokens
         ) "the earlyoom fallback must not exempt agents, browsers, runtimes, or generic shells";
@@ -1157,8 +1154,7 @@ in
       # The launch route on this repository's own descriptor: the queued
       # command is the descriptor's exec inside its environment, in its pool,
       # under its label, with its timeout.
-      # agentctl streams large outcome files through ijson.
-      fixturePython = pkgs.python3.withPackages (ps: [ ps.ijson ]);
+      fixturePython = pkgs.python3;
       agentctlOperationLaunchFixture =
         pkgs.runCommand "agentctl-operation-launch-fixture"
           {

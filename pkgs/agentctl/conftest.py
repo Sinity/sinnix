@@ -182,13 +182,6 @@ class FakePueue:
             queue.groups,
         )
 
-    def start(self, task_id: int) -> None:
-        task = self._tasks.get(task_id)
-        if task is None or task.status != "Queued":
-            raise PueueError(f"The command failed for tasks: {task_id}")
-        self.started.append(task_id)
-        self._set(task_id, status="Running", started_at="2026-09-03T08:10:00+00:00")
-
     def kill(self, task_id: int) -> None:
         task = self._tasks.get(task_id)
         # pueued kills a process; asked to kill a task that has none it fails
@@ -410,7 +403,6 @@ def fake_pueue(monkeypatch: pytest.MonkeyPatch) -> FakePueue:
         "tasks_by_command",
         "tasks_by_ids",
         "live",
-        "start",
         "kill",
         "restart",
         "remove",
@@ -592,7 +584,6 @@ description = "Fixture nightly corpus"
 exec = ["fixture-nightly"]
 pool = "bulk"
 checkout = "default"
-schedule = "*-*-* 03:17:00"
 """
 
 
@@ -644,3 +635,18 @@ def launched_environment(config: Config, task: Task) -> dict[str, str]:
     _, _, path = task.command.partition(" ")
     value = read_launch(config, task)
     return {**value["environment"], **secret_environment(Path(path), value)[0]}
+
+
+def begin_attempt(config: Config, reference: str) -> None:
+    """Allocate attempt 1 for a job, so its ``<ref>.log|outcome|result`` aliases
+    point into ``<ref>.attempts/1`` and fixture writes land where agentctl reads."""
+    from agentctl import artifacts
+
+    config.jobs_dir.mkdir(parents=True, exist_ok=True)
+    artifacts.begin(
+        {
+            "log_path": str(config.jobs_dir / f"{reference}.log"),
+            "result_path": str(config.jobs_dir / f"{reference}.result"),
+        },
+        "fixture-input",
+    )

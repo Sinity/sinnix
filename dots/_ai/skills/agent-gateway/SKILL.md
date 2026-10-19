@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 00ff37cb6093e9f0f1bd8979de8f367fc12fcfedddb3d45f2e7aeb476ba512ef -->
+<!-- gateway-catalog-sha256: 661847dfd90c854cce1a05cde9c32acb0c928660324ca7c683cc5177b9fda293 -->
 
 # Agent Gateway
 
@@ -67,7 +67,7 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 - `beads.memories` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 - `beads.related` — The native Beads operation owns validation and transaction semantics. Input fields come from its published OpenAPI contract. beads.changeset applies one project's ordered batch atomically; separate projects require separate batches. Interrupted effects remain indeterminate and are never automatically retried.
 - `jobs.list` — List queued jobs (pueue tasks) newest first, optionally for one project.
-- `jobs.queues` — shell-quick and shell-long are the shell.run lanes. A running job marked promoted has outlived its pool's promotion horizon and no longer holds a slot against new work. Reads only unfinished tasks, so it stays cheap however long the queue history is.
+- `jobs.queues` — shell-quick and shell-long are the shell.run groups. Reads only unfinished tasks, so it stays cheap however long the queue history is.
 - `batches.list` — List batch runs newest first, with each worker's stage and task.
 - `desktop.screenshot` — full captures the focused output through the HDR-aware screenshot owner; window/rect/monitor targets capture with grim. On HDR outputs a corrected SDR variant is produced and preferred for the image block.
 - `desktop.tree` — Walks the AT-SPI tree through pyatspi in the gateway environment; Chromium apps expose a tree only when launched with accessibility forced on.
@@ -179,7 +179,7 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 
 - `gateway.run` — Pass controls at the top level and ordinary action input in arguments. The response is the selected action's native envelope and receipt.
 - `operations.run` — Queue one project-declared operation in its declared pool on the root or a worktree.
-- `shell.run` — cwd is confined to the checkout. lane=auto sends agent CLI launches (claude, codex, ...) to the long lane and everything else to the quick lane, which long work never occupies: a quick-lane command still running after the pool's promotion horizon stops holding its slot (jobs.queues shows it as promoted). Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) and returns output; outcome running or queued is a continuation with queue occupancy, never a failure: pass continuation and output.next_offset to jobs.wait. timeout_seconds is an optional kill ceiling; omitted, the job runs until it finishes.
+- `shell.run` — cwd is confined to the checkout. lane=auto sends agent CLI launches (claude, codex, ...) to the long lane and everything else to the quick lane. Default execution is asynchronous. wait=true waits up to wait_timeout_seconds (default 5, maximum 30) and returns output; outcome running or queued is a continuation with queue occupancy, never a failure: pass continuation and output.next_offset to jobs.wait. timeout_seconds is an optional kill ceiling; omitted, the job runs until it finishes.
 - `batches.start` — backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.
 - `batches.land` — batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_job_id rather than on this call.
 - `batches.resume` — backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.
@@ -187,4 +187,4 @@ Run ordinary commands through `shell.run` and declared jobs through `operations.
 
 `sinnix-agent-gateway-generate --reference` prints every schema and example.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `00ff37cb6093e9f0f1bd8979de8f367fc12fcfedddb3d45f2e7aeb476ba512ef`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `661847dfd90c854cce1a05cde9c32acb0c928660324ca7c683cc5177b9fda293`.

@@ -18,7 +18,7 @@ from .pueue import PueueError
 
 AGENT_GROUP = "agent"
 # The pool carrying the agents a landing owns (integration, review). It is
-# not the `agent` pool, which backpressure and the operator pause to hold
+# not the `agent` pool, which pressure pauses and the operator pause to hold
 # back new worker dispatch, and not `<project>-land`, whose single slot the
 # landing task itself occupies while it waits.
 LANDING_AGENT_GROUP = "land-agent"

@@ -1,7 +1,7 @@
 """Project descriptors: the one thing agentctl owns outright.
 
 A descriptor (`.agentctl/project.toml`) declares what a project's operations
-mean — argv, pool, result contract, timeout, checkout policy, schedule — and
+mean — argv, pool, result contract, timeout, checkout policy — and
 how to enter its environment. Everything else (queueing, worktrees, review,
 tasks) belongs to pueue, worktrunk, GitHub and Beads.
 """
@@ -36,11 +36,10 @@ class ProjectConfigError(ValueError):
 # pueue's group name grammar; the value passes through as the pueue group.
 _POOL_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}")
 _ENVIRONMENT_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
-MAX_OPERATION_SCHEDULE_LENGTH = 256
 CACHE_KINDS = frozenset({"none", "tree+environment"})
 # Where an operation's job-owned scratch directory lives: nowhere, in RAM, or
-# on the NVMe scratch filesystem. `run` owns the roots and the removal.
-SCRATCH_KINDS = frozenset({"none", "tmpfs", "nvme"})
+# on disk. `run` owns the roots and the removal.
+SCRATCH_KINDS = frozenset({"none", "tmpfs", "disk"})
 # Whether `job start` may be invoked with extra argv. `required` is a
 # declaration that the operation cannot execute without a caller-supplied
 # selector. A focused profile can name such an operation; its packet command
@@ -118,15 +117,9 @@ _OPERATION_FIELDS = frozenset(
         "pool",
         "result",
         "timeout_seconds",
-        "execution_readiness",
-        "schedule",
         "checkout",
         "cache",
         "scratch",
-        "dependencies",
-        "requires",
-        "ready_probe",
-        "ready_timeout_seconds",
         "arguments",
         "admission",
         "unit_properties",
@@ -134,7 +127,7 @@ _OPERATION_FIELDS = frozenset(
 )
 
 #: Which tree an operation runs in; `checkout.py` states what each means.
-CHECKOUT_KINDS = frozenset({"any", "default", "candidate"})
+CHECKOUT_KINDS = frozenset({"any", "default"})
 #: An operation's declared memory envelope, in MiB. One key today; the table
 #: exists so a second dimension does not become a second top-level key.
 ADMISSION_FIELDS = frozenset({"memory_mib"})
@@ -290,16 +283,11 @@ class ProjectOperation:
     pool: str = "normal"
     result: str = "exit"
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
-    execution_readiness: str = "exec"
-    schedule: str | None = None
-    # Which tree the operation runs in; see `checkout.CHECKOUT_KINDS`.
+    # Which tree the operation runs in: `any` (the caller's) or `default`
+    # (only the project root).
     checkout: str = "any"
     cache: str = "none"
     scratch: str = "none"
-    dependencies: tuple[str, ...] = ()
-    requires: tuple[str, ...] = ()
-    ready_probe: tuple[str, ...] = ()
-    ready_timeout_seconds: int = 60
     arguments: str = "none"
     admission: AdmissionEnvelope | None = None
     unit_properties: tuple[str, ...] = ()
@@ -312,15 +300,9 @@ class ProjectOperation:
             "pool": self.pool,
             "result": self.result,
             "timeout_seconds": self.timeout_seconds,
-            "execution_readiness": self.execution_readiness,
-            "schedule": self.schedule,
             "checkout": self.checkout,
             "cache": self.cache,
             "scratch": self.scratch,
-            "dependencies": list(self.dependencies),
-            "requires": list(self.requires),
-            "ready_probe": list(self.ready_probe),
-            "ready_timeout_seconds": self.ready_timeout_seconds,
             "arguments": self.arguments,
             "admission": self.admission.catalog_row() if self.admission else None,
             "unit_properties": list(self.unit_properties),
@@ -609,13 +591,6 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
                 f"{MAX_DECLARED_OPERATION_TIMEOUT_SECONDS}"
             )
         fields["timeout_seconds"] = timeout_seconds
-    if "execution_readiness" in definition:
-        readiness = definition["execution_readiness"]
-        if not isinstance(readiness, str) or readiness not in {"exec", "notify"}:
-            raise ProjectConfigError(
-                f"operations.{name}.execution_readiness must be exec or notify"
-            )
-        fields["execution_readiness"] = readiness
     if "checkout" in definition:
         if definition["checkout"] not in CHECKOUT_KINDS:
             raise ProjectConfigError(f"operations.{name}.checkout is invalid")
@@ -630,18 +605,6 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
             f"operations.{name}.unit_properties must contain supported task resource or path limits"
         )
     fields["unit_properties"] = properties
-    schedule = definition.get("schedule")
-    if schedule is not None and (
-        not isinstance(schedule, str)
-        or not schedule
-        or len(schedule) > MAX_OPERATION_SCHEDULE_LENGTH
-        or any(
-            ord(character) < 0x20 or ord(character) == 0x7F for character in schedule
-        )
-    ):
-        raise ProjectConfigError(
-            f"operations.{name}.schedule must be a non-empty OnCalendar expression"
-        )
     if "cache" in definition:
         if definition["cache"] not in CACHE_KINDS:
             raise ProjectConfigError(f"operations.{name}.cache is invalid")
@@ -654,36 +617,10 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
         if definition["arguments"] not in ARGUMENTS_KINDS:
             raise ProjectConfigError(f"operations.{name}.arguments is invalid")
         fields["arguments"] = definition["arguments"]
-    for key in ("requires", "ready_probe"):
-        fields[key] = _optional_string_list(
-            definition.get(key), f"operations.{name}.{key}"
-        )
-    if name in fields["requires"] or len(set(fields["requires"])) != len(
-        fields["requires"]
-    ):
-        raise ProjectConfigError(f"operations.{name}.requires is invalid")
-    if "ready_timeout_seconds" in definition:
-        deadline = definition["ready_timeout_seconds"]
-        if (
-            not isinstance(deadline, int)
-            or isinstance(deadline, bool)
-            or not 1 <= deadline <= 7200
-        ):
-            raise ProjectConfigError(
-                f"operations.{name}.ready_timeout_seconds must be between 1 and 7200"
-            )
-        fields["ready_timeout_seconds"] = deadline
-    dependencies = _optional_string_list(
-        definition.get("dependencies"), f"operations.{name}.dependencies"
-    )
-    if name in dependencies or len(set(dependencies)) != len(dependencies):
-        raise ProjectConfigError(f"operations.{name}.dependencies is invalid")
     return ProjectOperation(
         name=name,
         description=description,
         command=command,
-        schedule=schedule,
-        dependencies=dependencies,
         **fields,
     )
 
@@ -732,35 +669,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         for name, definition in sorted(raw_operations.items())
     )
     operation_names = {operation.name for operation in operations}
-    unknown_dependencies = {
-        dependency
-        for operation in operations
-        for dependency in operation.dependencies
-        if dependency not in operation_names
-    }
-    if unknown_dependencies:
-        raise ProjectConfigError(
-            f"{descriptor} operation dependency/dependencies are undeclared: "
-            + ", ".join(sorted(unknown_dependencies))
-        )
-    for operation in operations:
-        for name in operation.requires:
-            service = next((item for item in operations if item.name == name), None)
-            if service is None or not service.ready_probe:
-                raise ProjectConfigError(
-                    f"{descriptor} operation {operation.name} requires service {name} with a ready_probe"
-                )
-            if (
-                service.requires
-                or service.dependencies
-                or service.arguments != "none"
-                or service.checkout != "any"
-                or service.execution_readiness != "exec"
-                or service.unit_properties
-            ):
-                raise ProjectConfigError(
-                    f"{descriptor} required service {name} must be a self-contained foreground operation"
-                )
     workspace = _workspace(raw, descriptor)
     if workspace is not None:
         unknown_verifiers = {
@@ -778,10 +686,8 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         # `job start <project> <focused> --workspace <worktree>` (start.py's
         # focused_verification), and launch refuses any checkout that names its
         # own tree anywhere but that tree. So a focused profile naming a
-        # `default` or `candidate` operation cannot execute for the batch it
-        # exists to serve -- every worker's verification would raise JobError,
-        # and a `candidate` one would verify the base instead of the worker's
-        # own commit. Refuse the declaration here rather than let each packet
+        # `default` operation cannot execute for the batch it exists to serve:
+        # every worker's verification would raise JobError. Refuse the declaration here rather than let each packet
         # discover it (sinnix-59zd). Required selectors are supported by adding
         # an explicit placeholder to that command.
         focused = workspace.verify.get("focused")
@@ -794,26 +700,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
                 f"on a worker worktree, but {focused} declares "
                 f'checkout = "{focused_operation.checkout}"'
             )
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def visit(name: str) -> None:
-        if name in visiting:
-            raise ProjectConfigError(
-                f"{descriptor} operation dependencies contain a cycle"
-            )
-        if name in visited:
-            return
-        visiting.add(name)
-        for dependency in next(
-            operation for operation in operations if operation.name == name
-        ).dependencies:
-            visit(dependency)
-        visiting.remove(name)
-        visited.add(name)
-
-    for operation in operations:
-        visit(operation.name)
     return ProjectAdapter(
         project_id=project_id,
         display_name=display_name,
@@ -873,13 +759,3 @@ class ProjectCatalog:
                         f"project {project_id} is out of service: {reason}"
                     ) from error
             raise KeyError(f"unknown project: {project_id}") from error
-
-    def scheduled_operations(
-        self,
-    ) -> tuple[tuple[ProjectAdapter, ProjectOperation], ...]:
-        return tuple(
-            (project, operation)
-            for project in self._adapters.values()
-            for operation in project.operations
-            if operation.schedule is not None
-        )

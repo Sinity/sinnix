@@ -5,9 +5,9 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agentctl"
 version = "0.1.0"
-description = "agentctl: jobs over pueue, lanes over worktrunk, gh and bd"
+description = "agentctl: jobs over pueue, worktrees over worktrunk, gh and bd"
 requires-python = ">=3.12"
-dependencies = ["ijson>=3.2"]
+dependencies = []
 
 [project.scripts]
 agentctl = "agentctl.cli:main"

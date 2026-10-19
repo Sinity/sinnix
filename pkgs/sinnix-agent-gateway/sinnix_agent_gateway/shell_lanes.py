@@ -2,10 +2,8 @@
 
 Two pueue groups carry gateway shells (declared as agentctl pools):
 ``shell-quick`` for reads and short commands, ``shell-long`` for agent CLIs
-and anything the caller declares long. A command the classifier leaves in the
-quick lane but that keeps running is promoted by agentctl after the pool's
-horizon, so a misclassification delays nobody; the classifier only decides
-where long work starts.
+and anything the caller declares long. A long command the classifier leaves
+in the quick lane holds one of its slots until it finishes.
 
 Nothing is refused here: the gateway is the operator's full-power shell, and a
 lane is a placement, not a permission.

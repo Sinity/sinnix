@@ -48,10 +48,6 @@ class PoolPolicy:
     parallel: int
     adaptive: AdaptivePool | None = None
     exclusive_with: tuple[str, ...] = ()
-    # A running task older than this stops counting against the width: when
-    # every slot is held by such tasks, a queued task is started anyway
-    # (`launch.promote_overdue`). None keeps the width absolute.
-    promote_after_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -150,7 +146,6 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
             "parallel",
             "adaptive",
             "exclusive_with",
-            "promote_after_seconds",
         }
         if unknown:
             raise ConfigError(
@@ -162,13 +157,6 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
             for pool in excluded
         ):
             raise ConfigError(f"pools.{name}.exclusive_with must name valid pools")
-        promote = declaration.get("promote_after_seconds")
-        if promote is not None and (
-            not isinstance(promote, int) or isinstance(promote, bool) or promote < 1
-        ):
-            raise ConfigError(
-                f"pools.{name}.promote_after_seconds must be a positive integer"
-            )
         adaptive = declaration.get("adaptive")
         if adaptive is not None:
             if not isinstance(adaptive, Mapping) or set(adaptive) != {
@@ -195,7 +183,6 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
             parallel=_parallel(name, declaration.get("parallel")),
             adaptive=adaptive,
             exclusive_with=tuple(excluded),
-            promote_after_seconds=promote,
         )
     for name, policy in parsed.items():
         unknown = set(policy.exclusive_with) - set(parsed)

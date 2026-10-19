@@ -10,7 +10,7 @@ External tools own the state it reads and writes:
 | worktrunk | worktree creation, provisioning hooks, removal             | `git worktree list --porcelain`    |
 | GitHub    | PRs, review, required checks, merge                        | `gh`                               |
 | Beads     | tasks and claims                                           | `bd ... --json`                    |
-| systemd   | each job's unit, and timers for declared schedules         | `systemctl --user`                 |
+| systemd   | each job's unit, and the timers that start operations      | `systemctl --user`                 |
 
 agentctl itself owns the project descriptors (`.agentctl/project.toml`), the
 prompt compiled from a task, each job's launch input and result artifacts, each
@@ -21,8 +21,7 @@ batch's run manifest, and the `view` screen.
 | Verb                                                                        | Does                                                                                                              |
 | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `project list \| get [p] \| operations [p]`                                 | the configured descriptors                                                                                        |
-| `job start [p] <op> [--workspace P] [--wait] [-- args…]`                    | queue an operation in its pool, label `<p>:<op>`; arguments after `--` append to the declared `exec`              |
-| `job fire [p] <op> [--wait]`                                                | what a timer runs: start on the main checkout unless the same label is already queued or running                  |
+| `job start [p] <op> [--workspace P] [--wait] [--if-idle] [-- args…]`        | queue an operation in its pool, label `<p>:<op>`; `--if-idle` skips it while the same label is queued or running  |
 | `job list [--project p] [--active] [--all]`                                 | job rows, newest first (40 unless `--all`)                                                                        |
 | `job snapshot [--limit N]`                                                  | group state and counts plus bounded job rows, unfinished first                                                    |
 | `job get \| logs \| result \| cancel \| retry \| wait <id>`                 | one job by pueue id or `--reference`; `--attempt` selects a retry; `logs`/`result` page with `--offset`/`--limit` |
@@ -38,14 +37,13 @@ batch's run manifest, and the `view` screen.
 | `batch abandon <run> [--reason R]`                                          | release a run that will not land                                                                                  |
 | `batch clean [p]`                                                           | remove worktrees of landed or abandoned runs, keeping any with uncommitted or unmerged work                       |
 | `result validate-worker <result.json>`                                      | validate a worker result without filing it (same checks as `batch result`)                                        |
-| `evidence file \| list \| get \| discover`                                  | retain or read evidence for work done outside a batch                                                             |
+| `evidence file \| list \| get`                                              | retain or read evidence for work done outside a batch                                                             |
 | `view [p]`                                                                  | queue groups, failures, active jobs, open runs and ready tasks                                                    |
-| `events tail [--lines N] [--follow] [--project p]`                          | the event spool (`/realm/state/agentctl/events.jsonl`)                                                            |
-| `schedule apply`                                                            | make the transient timers match the declared schedules                                                            |
+| `events tail [--lines N] [--follow] [--project p]`                          | the event log (`/realm/state/agentctl/events.jsonl`)                                                              |
 | `pools apply`                                                               | write the declared pool widths into the running pueued                                                            |
-| `backpressure tick`                                                         | one admission pass against memory pressure                                                                        |
+| `pressure tick`                                                             | one pass pausing or reopening groups against memory pressure                                                      |
 
-`job start`, `job fire` and `job wait` take `--timeout-seconds` for the wait.
+`job start` and `job wait` take `--timeout-seconds` for the wait.
 The project is `--project`, a leading positional naming a project or checkout
 path, or the checkout around the working directory. A run is named by its full
 id or its 8-character suffix.
@@ -68,9 +66,9 @@ resolved environment, working directory, timeout, result kind and artifact
 paths. It then runs `pueue add` with the command `agentctl-run <input>`.
 `pueue add` runs with a scrubbed environment because pueue stores the adding
 client's environment world-readably. The real environment rides in the launch
-input. `job start --owner-request-key` binds a caller's idempotent request to
-one launch: a replay reuses the accepted launch, and an unprovable submission
-raises instead of resubmitting.
+input. `job start --idempotency-key` binds a caller's request to one launch:
+a replay reuses the accepted launch, and an unprovable submission raises
+instead of resubmitting.
 
 `agentctl-run` runs the argv as a transient unit
 `agentctl-<group>-<stem>-<digest>.service` in `agentctl-<group>.slice`
@@ -114,7 +112,7 @@ access (`ReadOnlyPaths`, `ReadWritePaths`, `InaccessiblePaths`).
 
 ### Scratch
 
-An operation with `scratch = "tmpfs"` or `"nvme"` gets one job-owned directory,
+An operation with `scratch = "tmpfs"` or `"disk"` gets one job-owned directory,
 `/dev/shm/agentctl/<ref>` or `/realm/tmp/work/agentctl/<ref>` (mode 0700),
 exported as `AGENTCTL_SCRATCH` and `TMPDIR`. After the unit exits, agentctl
 records its size in the outcome and deletes it. If deletion fails, the outcome
@@ -135,10 +133,7 @@ A pool declaration may also set:
 - `exclusive_with`: cross-pool exclusion. `pytest-heavy` excludes `agent`, so a
   full corpus run and an implementation wave wait for each other. agentctl
   stashes the later task and releases it when the partner pool drains.
-- `promote_after_seconds`: tasks running longer than this stop counting
-  against the width. When every slot is held by such long tasks, the oldest
-  queued task is started anyway. `shell-quick` uses 20 s.
-- `adaptive` (`floor`, `job_memory_bytes`, `slice`): each backpressure tick
+- `adaptive` (`floor`, `job_memory_bytes`, `slice`): each pressure tick
   moves the width by at most one between the floor and `parallel`. It rises
   only when memory pressure is low and the slice has room for another job's
   budget, and falls otherwise.
@@ -147,13 +142,13 @@ A single-slot pool checks its slice before starting: a unit left by a dead
 wrapper whose task is terminal is stopped; a live one ends the run as
 `slot_occupied`.
 
-**Backpressure.** `agentctl-backpressure.timer` runs `backpressure tick` every
+**Pressure pauses.** `agentctl-pressure.timer` runs `pressure tick` every
 minute.
 
 - **Closing:** when host memory `full avg60` is at least 25%, the tick pauses
   one running group (`pueue pause --wait`, so running jobs finish), in the
   order `pytest-heavy`, `pytest`, `normal`, `bulk`, `pytest-quick`. It records
-  `closed` with `"owner": "agentctl"` in the event spool.
+  a `pressure` event `closed` with `"owner": "agentctl"` in the event log.
 - **Reopening:** a group whose last recorded pause is agentctl's reopens
   (`pueue start --group`) once memory `full avg10` is below 10%, one group per
   tick.
@@ -348,7 +343,6 @@ Work done by an agent outside a batch can still close tasks:
 agentctl evidence file result.json --project <project>
 agentctl evidence list <project> [--cursor C] --json
 agentctl evidence get <evidence_id> --project <project> --json
-agentctl evidence discover --bead <id> --project <project>
 ```
 
 The result names a candidate SHA, its tasks, their acceptance bindings and a
@@ -356,9 +350,7 @@ The result names a candidate SHA, its tasks, their acceptance bindings and a
 `agentctl://jobs/<id>/<launch-reference>`. Filing checks that the job
 succeeded on a clean checkout of the candidate, and records whether the
 candidate is published on the base branch. Records are immutable files under
-`$XDG_STATE_HOME/agentctl/native-evidence/`. `evidence discover` lists commits
-that mention a task; a mention is only an association, not evidence that the
-task is done.
+`$XDG_STATE_HOME/agentctl/native-evidence/`.
 
 ## Descriptors
 
@@ -400,29 +392,24 @@ exec = ["devtools", "verify", "--all"]
 pool = "pytest"
 result = "pytest"
 timeout_seconds = 14400
-checkout = "candidate"
+checkout = "default"
 admission = { memory_mib = 12288 }
-schedule = "*-*-* 03:17:00"
 ```
 
 ### Operation fields
 
-| Field                 | Meaning                                                                                                                                               |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `description`, `exec` | what it does; argv with no shell                                                                                                                      |
-| `pool`                | the pueue group                                                                                                                                       |
-| `result`              | `exit`, `json` or `pytest`                                                                                                                            |
-| `timeout_seconds`     | 1 to 28,800, or 0 for no limit; default 3,600                                                                                                         |
-| `arguments`           | `none`, or `required` when the caller must pass a selector after `--`                                                                                 |
-| `checkout`            | `any` (the caller's `--workspace` or the project root), `default` (the project root only), or `candidate` (a fresh worktree pinned to `default_base`) |
-| `schedule`            | an `OnCalendar` expression                                                                                                                            |
-| `cache`               | `none`, or `tree+environment` to reuse a matching active or completed job                                                                             |
-| `scratch`             | `none`, `tmpfs` or `nvme`                                                                                                                             |
-| `admission`           | `{ memory_mib }`: the expected footprint, exported as `AGENTCTL_ADMISSION_MEMORY_MIB`. It is not a limit                                              |
-| `unit_properties`     | resource limits for the unit, e.g. `["MemoryMax=3G", "IOReadBandwidthMax=/realm 20M"]`                                                                |
-| `dependencies`        | operations queued before this one (no cycles)                                                                                                         |
-| `requires`            | foreground service operations started inside this job's unit, each with a `ready_probe` and `ready_timeout_seconds`                                   |
-| `execution_readiness` | `exec` (default), or `notify`: the runtime budget starts when the workload sends `READY=1`                                                            |
+| Field                 | Meaning                                                                                                  |
+| --------------------- | -------------------------------------------------------------------------------------------------------- |
+| `description`, `exec` | what it does; argv with no shell                                                                         |
+| `pool`                | the pueue group                                                                                          |
+| `result`              | `exit`, `json` or `pytest`                                                                               |
+| `timeout_seconds`     | 1 to 28,800, or 0 for no limit; default 3,600                                                            |
+| `arguments`           | `none`, or `required` when the caller must pass a selector after `--`                                    |
+| `checkout`            | `any` (the caller's `--workspace` or the project root) or `default` (the project root only)              |
+| `cache`               | `none`, or `tree+environment` to reuse a matching active or completed job                                |
+| `scratch`             | `none`, `tmpfs` or `disk`                                                                                |
+| `admission`           | `{ memory_mib }`: the expected footprint, exported as `AGENTCTL_ADMISSION_MEMORY_MIB`. It is not a limit |
+| `unit_properties`     | resource limits for the unit, e.g. `["MemoryMax=3G", "IOReadBandwidthMax=/realm 20M"]`                   |
 
 Unknown operation fields are ignored with a warning.
 
@@ -444,18 +431,14 @@ Unknown operation fields are ignored with a warning.
 An unknown table takes the project out of service; an unknown field in a
 known table is ignored with a warning.
 
-Descriptor changes apply on the next call. Timers follow on the next
-`schedule apply`, which runs every fifteen minutes and at login.
+Descriptor changes apply on the next call.
 
-## Schedules
+## Timers
 
-Each declared `schedule` becomes a transient user timer running
-`agentctl job fire <project> <operation>`. `schedule apply` registers new
-timers before retiring obsolete ones, and keeps unproven timers rather than
-deleting them. Daily or rarer timers are persistent and catch up missed runs.
-Nix-owned timers may also call `job fire`. A firing skips an operation that is
-already queued or running. A timer passes no workspace, so an operation whose
-receipt must describe a clean candidate declares `checkout = "candidate"`.
+A module's `lib.sinnix.mkScheduledJob` timer starts a declared operation with
+`agentctl job start --if-idle <project> <operation>`, which skips the launch
+while the same operation is queued or running. A timer passes no workspace, so
+the operation runs on the project's main checkout.
 
 ## Limits
 
@@ -469,10 +452,10 @@ cancelled.
 `modules/services/agentctl.nix` renders `/etc/sinnix/agentctl.json`:
 `project_roots`, `agent_runner`, `worker_contract`, `event_spool` and `pools`,
 with each pool as `{parallel, ...}`. It installs `agentctl`, `wt`, `pueue` and
-`gh`, persists `~/.local/state/agentctl`, and declares three units:
+`gh`, persists `~/.local/state/agentctl`, and declares these units:
 
-- `agentctl-backpressure` (every minute).
-- `agentctl-schedule` (every fifteen minutes and at login).
+- `agentctl-pressure` (every minute).
+- `agentctl-clean` (daily: removes finished queue tasks, keeping results).
 - `agentctl-pools`, which reapplies pool widths whenever pueued starts or the
   configuration changes.
 

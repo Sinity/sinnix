@@ -303,12 +303,12 @@ def test_job_start_with_wait_reports_a_failure_in_the_exit_status(
     assert "failed exit 3" in captured.err
 
 
-def test_job_fire_with_wait_reports_failure(
+def test_job_start_if_idle_with_wait_reports_failure(
     fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake_pueue.finish_when_waited(1, lambda fake: fake.fail(1, exit_code=3))
     assert (
-        cli.main(["job", "fire", "fixture", "check", "--wait"])
+        cli.main(["job", "start", "--if-idle", "fixture", "check", "--wait"])
         == cli.EXIT_JOB_NOT_SUCCEEDED
     )
     captured = capsys.readouterr()
@@ -346,7 +346,7 @@ def test_job_get_renders_the_scratch_footprint(
     assert cli.main(["job", "start", "fixture", "check"]) == 0
     capsys.readouterr()
     reference = Path(fake_pueue.added[0]["command"][1]).stem
-    outcome = cli_config.jobs_dir / f"{reference}.outcome"
+    outcome = cli_config.jobs_dir / f"{reference}.attempts" / "1" / "output.outcome"
     outcome.parent.mkdir(parents=True, exist_ok=True)
     outcome.write_text(
         json.dumps(
@@ -451,7 +451,7 @@ def test_events_tail_prints_the_last_lines_filtered_by_project(
         '{"kind":"queue-task","emitted_at":"2026-09-03T08:00:00+00:00","label":"fixture:check","phase":"started","task_id":null}\n'
         '{"kind":"queue-task","emitted_at":"2026-09-03T08:05:00+00:00","label":"fixture:check","phase":"finished","outcome":"failed","exit_code":2,"task_id":4}\n'
         '{"kind":"queue-task","emitted_at":"2026-09-03T08:06:00+00:00","label":"other:check","phase":"finished","outcome":"success","exit_code":0,"task_id":5}\n'
-        '{"kind":"backpressure","emitted_at":"2026-09-03T08:07:00+00:00","action":"closed","group":"agent"}\n'
+        '{"kind":"pressure","emitted_at":"2026-09-03T08:07:00+00:00","action":"closed","group":"agent"}\n'
     )
     assert cli.main(["events", "tail", "--project", "fixture"]) == 0
     out = capsys.readouterr().out
@@ -459,9 +459,9 @@ def test_events_tail_prints_the_last_lines_filtered_by_project(
     assert "fixture:check finished failed exit 2 (task 4)" in out
     assert "other:check" not in out
     assert cli.main(["events", "tail", "--lines", "1"]) == 0
-    assert "backpressure closed agent" in capsys.readouterr().out
+    assert "pressure closed agent" in capsys.readouterr().out
     assert cli.main(["--json", "events", "tail", "--lines", "1"]) == 0
-    assert capsys.readouterr().out.strip().startswith('{"kind":"backpressure"')
+    assert capsys.readouterr().out.strip().startswith('{"kind":"pressure"')
 
 
 def test_last_matching_lines_match_a_full_scan_across_block_boundaries(
@@ -656,19 +656,17 @@ def test_view_json_is_the_snapshot(
     assert "== fixture at" in capsys.readouterr().out
 
 
-def test_backpressure_tick_reports_the_decision(
+def test_pressure_tick_reports_the_decision(
     cli_config: Config, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    from agentctl import backpressure, launch
+    from agentctl import launch, pressure
 
     monkeypatch.setattr(
-        backpressure,
+        pressure,
         "read_pressure",
         lambda _root: {"io_full_avg60": 0.0, "memory_full_avg60": 0.0},
     )
-    monkeypatch.setattr(
-        backpressure.pueue, "groups_status", lambda: {"agent": "Running"}
-    )
+    monkeypatch.setattr(pressure.pueue, "groups_status", lambda: {"agent": "Running"})
 
     calls = []
     monkeypatch.setattr(
@@ -676,14 +674,14 @@ def test_backpressure_tick_reports_the_decision(
         "release_holds",
         lambda config: calls.append(config) or {"released": [7], "waiting": []},
     )
-    assert cli.main(["backpressure", "tick"]) == 0
+    assert cli.main(["pressure", "tick"]) == 0
     output = capsys.readouterr()
     decision = json.loads(output.out)
     assert decision["action"] == "clear"
     assert decision["holds_released"] == [7]
     assert len(calls) == 1
     assert calls[0].event_spool == cli_config.event_spool
-    assert "backpressure clear" in output.err
+    assert "pressure clear" in output.err
 
 
 def test_default_state_dir_moves_the_previous_directory_once(
@@ -927,8 +925,6 @@ def test_an_unknown_operation_is_a_refusal_and_a_key_error_is_not(
 ) -> None:
     assert cli.main(["job", "start", "fixture", "nope"]) == cli.EXIT_REFUSED
     assert "unknown project operation: fixture.nope" in capsys.readouterr().err
-    assert cli.main(["job", "fire", "fixture", "nope"]) == cli.EXIT_REFUSED
-    assert "unknown project operation: fixture.nope" in capsys.readouterr().err
 
     def broken(project_id: str | None = None) -> list[dict[str, object]]:
         raise KeyError("phase")
@@ -1049,15 +1045,26 @@ def test_wait_reports_elapsed_age_after_blocking(
     assert "(10m) (wait timed out)" in text
 
 
-@pytest.mark.parametrize("verb", ["start", "fire"])
+@pytest.mark.parametrize("flags", [[], ["--if-idle"]])
 def test_job_launch_wait_timeout_is_not_success(
-    verb: str,
+    flags: list[str],
     fake_pueue: FakePueue,
     cli_config: Config,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     assert (
-        cli.main(["job", verb, "fixture", "check", "--wait", "--timeout-seconds", "1"])
+        cli.main(
+            [
+                "job",
+                "start",
+                *flags,
+                "fixture",
+                "check",
+                "--wait",
+                "--timeout-seconds",
+                "1",
+            ]
+        )
         == cli.EXIT_JOB_NOT_SUCCEEDED
     )
     observed = json.loads(capsys.readouterr().out)
@@ -1066,15 +1073,17 @@ def test_job_launch_wait_timeout_is_not_success(
     assert fake_pueue.task(observed["job_id"]).status == "Running"
 
 
-@pytest.mark.parametrize("verb", ["start", "fire"])
+@pytest.mark.parametrize("flags", [[], ["--if-idle"]])
 def test_job_launch_wait_success_is_success(
-    verb: str,
+    flags: list[str],
     fake_pueue: FakePueue,
     cli_config: Config,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
-    assert cli.main(["job", verb, "fixture", "check", "--wait"]) == cli.EXIT_OK
+    assert (
+        cli.main(["job", "start", *flags, "fixture", "check", "--wait"]) == cli.EXIT_OK
+    )
     assert json.loads(capsys.readouterr().out)["phase"] == "succeeded"
 
 

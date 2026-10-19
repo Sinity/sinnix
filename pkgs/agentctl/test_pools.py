@@ -232,7 +232,7 @@ def test_pool_apply_preserves_adaptive_width(monkeypatch):
 def test_adaptive_resize_keeps_live_mixed_jobs_and_operator_pause(
     live_pueue, tmp_path, monkeypatch
 ):
-    from agentctl import backpressure
+    from agentctl import pressure
     from agentctl.config import AdaptivePool
 
     subprocess.run(["pueue", "group", "add", "quick", "--parallel", "2"], check=True)
@@ -250,11 +250,11 @@ def test_adaptive_resize_keeps_live_mixed_jobs_and_operator_pause(
     while not all(pueue.task(job).status == "Running" for job in jobs):
         assert time.monotonic() < deadline
         time.sleep(0.1)
-    monkeypatch.setattr(backpressure, "slice_headroom", lambda unit: 2048)
+    monkeypatch.setattr(pressure, "slice_headroom", lambda unit: 2048)
     policy = {"quick": PoolPolicy(8, adaptive=AdaptivePool(1, 1024, "quick.slice"))}
     spool = tmp_path / "adaptive-events.jsonl"
     for psi, expected in [(0, 3), (11, 2)]:
-        result = backpressure.adaptive_widths(
+        result = pressure.adaptive_widths(
             policy,
             pueue.groups_status(),
             {"memory_full_avg10": psi, "memory_full_avg60": psi},
@@ -270,7 +270,7 @@ def test_adaptive_resize_keeps_live_mixed_jobs_and_operator_pause(
         time.sleep(0.1)
     before = [pueue.task(job).status for job in jobs]
     assert before == ["Paused", "Running"]
-    result = backpressure.adaptive_widths(
+    result = pressure.adaptive_widths(
         policy,
         pueue.groups_status(),
         {"memory_full_avg10": 0, "memory_full_avg60": 0},
