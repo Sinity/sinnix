@@ -94,7 +94,8 @@ running agents in parallel.
   names. In `pgrep -f` patterns, bracket one character so the search cannot
   match itself.
 - One accountable owner per concern, with one event watch; wait on completion
-  events rather than polling.
+  events rather than polling. Give long work an evidence-based duration and, at
+  about twice that, inspect it and decide to repair, cancel, or extend.
 
 ## Delivery
 
