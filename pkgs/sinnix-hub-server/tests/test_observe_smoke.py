@@ -8,7 +8,6 @@ import re
 import sqlite3
 
 import pytest
-from sinnix_lib.process import Result
 from sinnix_hub_server.observe import cli, joins, render, runtime_inventory, util
 from sinnix_hub_server.observe.sources import (
     agent_gateway,
@@ -22,6 +21,7 @@ from sinnix_hub_server.observe.sources import (
     systemd,
     xtask,
 )
+from sinnix_lib.process import Result
 
 
 def test_util_happy_path() -> None:

@@ -1433,10 +1433,7 @@ class Runtime:
                 and isinstance(request.get("request"), Mapping)
                 and request["request"].get("operation") == "stop"
             )
-            if (
-                action.name in {"machine.operate", "machine.units.operate"}
-                or hub_stop
-            ):
+            if action.name in {"machine.operate", "machine.units.operate"} or hub_stop:
                 inp = action.Input.model_validate(request)
                 if hub_stop:
                     expected = inp.request.expected_target

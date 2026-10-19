@@ -21,7 +21,9 @@ class PromptSpec:
 
 PROMPT_SPECS = (
     PromptSpec(
-        "project-overview", "project.orientation", "Get an overview of one project before acting."
+        "project-overview",
+        "project.orientation",
+        "Get an overview of one project before acting.",
     ),
     PromptSpec(
         "triage-beads", "project.triage", "Triage bounded Beads work for one project."

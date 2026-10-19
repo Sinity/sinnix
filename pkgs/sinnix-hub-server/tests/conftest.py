@@ -19,8 +19,8 @@ from typing import Any
 
 import pytest
 from sinnix_hub_server.feedback import FeedbackSpool
-from sinnix_hub_server.snapshot import SnapshotBuilder
 from sinnix_hub_server.server import Handler
+from sinnix_hub_server.snapshot import SnapshotBuilder
 
 
 @pytest.fixture

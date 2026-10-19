@@ -730,9 +730,7 @@ class ActionService:
                     "status": "indeterminate",
                     "error": str(error)[:240],
                 }
-                append_jsonl(
-                    self.receipts_path, uncertain, mode=0o600, fsync=True
-                )
+                append_jsonl(self.receipts_path, uncertain, mode=0o600, fsync=True)
                 self.receipts[request["idempotency_key"]] = uncertain
                 raise ActionError(
                     "action outcome is indeterminate; inspect target and receipt", 502

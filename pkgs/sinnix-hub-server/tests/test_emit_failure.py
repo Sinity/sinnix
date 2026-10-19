@@ -17,8 +17,8 @@ from urllib.parse import urlsplit
 
 import pytest
 from sinnix_hub_server import cli, health
-from sinnix_hub_server.snapshot import SnapshotBuilder
 from sinnix_hub_server.server import Handler
+from sinnix_hub_server.snapshot import SnapshotBuilder
 
 INVENTORY: dict[str, Any] = {
     "schema": "sinnix-runtime-inventory-v1",

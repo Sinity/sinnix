@@ -121,9 +121,7 @@ class MachineActionService:
             or not payload["expected_target"]
             or not isinstance(payload.get("observed_at"), str)
         ):
-            raise MachineActionError(
-                "hub server returned malformed action preparation"
-            )
+            raise MachineActionError("hub server returned malformed action preparation")
         return payload
 
     def lookup(self, idempotency_key: str) -> dict[str, Any] | None:

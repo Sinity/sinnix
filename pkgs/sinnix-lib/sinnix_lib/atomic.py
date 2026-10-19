@@ -57,7 +57,9 @@ def _allocate(directory: int, target_name: str, mode: int) -> tuple[int, str | N
     flag = getattr(os, "O_TMPFILE", 0)
     if flag:
         try:
-            return os.open(".", os.O_WRONLY | flag | _CLOEXEC, mode, dir_fd=directory), None
+            return os.open(
+                ".", os.O_WRONLY | flag | _CLOEXEC, mode, dir_fd=directory
+            ), None
         except OSError as error:
             if error.errno not in _NO_TMPFILE:
                 raise

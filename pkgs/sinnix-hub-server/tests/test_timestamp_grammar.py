@@ -21,8 +21,8 @@ from typing import Any
 
 from sinnix_hub_server import actions as actions_module
 from sinnix_hub_server import health
-from sinnix_hub_server import status as hub_status
 from sinnix_hub_server import snapshot as snapshot_module
+from sinnix_hub_server import status as hub_status
 from sinnix_hub_server.actions import ActionService
 from sinnix_hub_server.snapshot import SnapshotBuilder
 

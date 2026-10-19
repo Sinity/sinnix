@@ -185,7 +185,9 @@ def test_bd_ready_head_absent_on_missing_binary() -> None:
 
 
 def test_bd_ready_head_absent_on_malformed_json() -> None:
-    assert hub_status.bd_ready_head(runner=make_runner("not json")) == {"available": False}
+    assert hub_status.bd_ready_head(runner=make_runner("not json")) == {
+        "available": False
+    }
 
 
 # --------------------------------------------------------------------------

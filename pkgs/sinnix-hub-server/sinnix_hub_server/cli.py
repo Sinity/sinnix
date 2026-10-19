@@ -15,8 +15,8 @@ from .agent_jobs import AgentCtlClient
 from .ambient import product_source
 from .clodex_usage import clodex_usage
 from .feedback import CoalescingTrigger, FeedbackSpool
-from .snapshot import SnapshotBuilder, observe_section
 from .server import FAILURE_PATH, ensure_token, serve
+from .snapshot import SnapshotBuilder, observe_section
 from .state import StateLayer
 
 
@@ -165,9 +165,7 @@ def main() -> None:
         type=Path,
         default=Path(os.environ.get("XDG_RUNTIME_DIR", "/run/user/1000")),
     )
-    parser.add_argument(
-        "--state-dir", type=Path, default=Path("/realm/state/hub")
-    )
+    parser.add_argument("--state-dir", type=Path, default=Path("/realm/state/hub"))
     parser.add_argument("--interval", type=float, default=10.0)
     parser.add_argument(
         "--ambient-product",
