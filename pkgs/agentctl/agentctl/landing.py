@@ -15,6 +15,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from sinnix_lib.procfs import held_paths
+
 from . import gitcmd, github, launch, prompts, pueue, results, worktrunk
 from .agents import (
     LANDING_AGENT_GROUP,
@@ -1991,7 +1993,12 @@ def _under(path: Path, root: Path) -> bool:
 
 
 def _process_users(path: Path) -> list[str]:
-    """Current-directory and open-file users outside pueue's authority."""
+    """Current-directory and open-file users outside pueue's authority.
+
+    A same-user process whose /proc entries refuse a direct read is read
+    through sudo; a foreign one outside our inspection authority is reported
+    as neither an observed holder nor an observed non-holder.
+    """
     users: list[str] = []
     proc = Path("/proc")
     try:
@@ -2002,42 +2009,30 @@ def _process_users(path: Path) -> list[str]:
         if not entry.name.isdigit():
             continue
         try:
-            cwd = Path(os.readlink(entry / "cwd"))
-        except FileNotFoundError:
-            continue
+            cwds = [
+                Path(target)
+                for _, target in held_paths(
+                    str(entry), links=("cwd",), descriptors=False
+                )
+            ]
         except PermissionError:
-            try:
-                owner = entry.stat().st_uid
-            except OSError as stat_error:
-                if stat_error.errno in {errno.ENOENT, errno.ESRCH}:
-                    continue
-                raise BatchError(
-                    f"cannot inspect process {entry.name} ownership: {stat_error}"
-                ) from stat_error
-            if owner != os.getuid():
+            if not _owned_by_us(entry):
                 continue
             cwd = _stable_privileged_cwd(entry)
-            if cwd is None:
-                continue
+            cwds = [cwd] if cwd is not None else []
         except OSError as error:
-            if error.errno in {errno.ENOENT, errno.ESRCH}:
-                continue
             raise BatchError(
                 f"cannot inspect process {entry.name} cwd: {error}"
             ) from error
-        if _under(cwd, path):
-            users.append(f"pid {entry.name} cwd {cwd}")
+        if not cwds:
+            continue
+        if _under(cwds[0], path):
+            users.append(f"pid {entry.name} cwd {cwds[0]}")
             continue
         try:
             targets = _process_open_files(entry)
         except PermissionError:
-            try:
-                owner = entry.stat().st_uid
-            except FileNotFoundError:
-                continue
-            # As with cwd, foreign users outside our inspection authority
-            # are not represented as observed holders or observed non-holders.
-            if owner != os.getuid():
+            if not _owned_by_us(entry):
                 continue
             targets = _stable_privileged_open_files(entry)
         for target in targets:
@@ -2047,27 +2042,29 @@ def _process_users(path: Path) -> list[str]:
     return users
 
 
-def _process_open_files(entry: Path) -> list[Path]:
-    targets: list[Path] = []
+def _owned_by_us(entry: Path) -> bool:
     try:
-        descriptors = tuple((entry / "fd").iterdir())
-        for descriptor in descriptors:
-            try:
-                targets.append(Path(os.readlink(descriptor)))
-            except FileNotFoundError:
-                # A descriptor closed while the process was being inspected.
-                continue
-    except FileNotFoundError:
-        return []
+        return entry.stat().st_uid == os.getuid()
+    except OSError as error:
+        if error.errno in {errno.ENOENT, errno.ESRCH}:
+            return False
+        raise BatchError(
+            f"cannot inspect process {entry.name} ownership: {error}"
+        ) from error
+
+
+def _process_open_files(entry: Path) -> list[Path]:
+    try:
+        return [
+            Path(target)
+            for _, target in held_paths(str(entry), links=(), descriptors=True)
+        ]
     except PermissionError:
         raise
     except OSError as error:
-        if error.errno in {errno.ENOENT, errno.ESRCH}:
-            return []
         raise BatchError(
             f"cannot inspect process {entry.name} open files: {error}"
         ) from error
-    return targets
 
 
 def _privileged_open_files(entry: Path) -> list[Path]:

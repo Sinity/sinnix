@@ -1,8 +1,9 @@
-"""Pressure admission with an incremental, regenerable spool projection.
+"""Pressure pauses: stop admitting jobs to a group under memory pressure.
 
 Pueue owns dependencies and ordinary stashes. This module pauses a group's
-admission under memory pressure, records that pause in its event spool, and
-reopens only groups whose last recorded pause is its own.
+admission under memory pressure, records that pause in the event log, and
+reopens only groups whose last recorded pause is its own. The current pauses
+are an incremental, regenerable projection of that log.
 """
 
 from __future__ import annotations
@@ -30,19 +31,17 @@ CLOSE_ORDER = {
 }
 MANAGED_GROUPS = ("agent", "pytest-heavy", "pytest", "pytest-quick", "normal", "bulk")
 OWNER = "agentctl"
-CHECKPOINT_SCHEMA = 1
+CHECKPOINT_SCHEMA = 2
+EVENT_KIND = "pressure"
 
 
 @dataclass
 class SpoolState:
     pauses: dict[str, dict[str, Any]] = field(default_factory=dict)
-    # The complete last unresolved event, not just its task id: task ids can
-    # move under `pueue switch`, so retirement needs a corroborating identity.
-    legacy_holds: dict[int, dict[str, Any]] = field(default_factory=dict)
     cursor: dict[str, int] | None = None
 
     def apply(self, event: Mapping[str, Any]) -> None:
-        if event.get("kind") == "backpressure":
+        if event.get("kind") == EVENT_KIND:
             group, action = event.get("group"), event.get("action")
             if not isinstance(group, str):
                 return
@@ -54,14 +53,6 @@ class SpoolState:
                 }
             elif action in {"opened", "released", "ownership-lost"}:
                 self.pauses.pop(group, None)
-        elif event.get("kind") == "pool-hold":
-            task_id, action = event.get("task_id"), event.get("action")
-            if not isinstance(task_id, int):
-                return
-            if action == "held":
-                self.legacy_holds[task_id] = dict(event)
-            elif action in {"released", "retired"}:
-                self.legacy_holds.pop(task_id, None)
 
     def ours(self) -> set[str]:
         return {
@@ -74,7 +65,7 @@ class SpoolState:
 def _checkpoint_path(spool: Path | None, checkpoint: Path | None) -> Path | None:
     if checkpoint is not None:
         return checkpoint
-    return spool.with_name(f"{spool.name}.backpressure-state.json") if spool else None
+    return spool.with_name(f"{spool.name}.pressure-state.json") if spool else None
 
 
 def _load_checkpoint(path: Path | None) -> SpoolState:
@@ -92,14 +83,6 @@ def _load_checkpoint(path: Path | None) -> SpoolState:
             for group, record in raw["pauses"].items()
             if isinstance(group, str) and isinstance(record, dict)
         }
-    if isinstance(raw.get("legacy_holds"), dict):
-        state.legacy_holds = {
-            int(task_id): dict(event)
-            for task_id, event in raw["legacy_holds"].items()
-            if isinstance(task_id, str)
-            and task_id.isdigit()
-            and isinstance(event, dict)
-        }
     cursor = raw.get("cursor")
     if isinstance(cursor, dict) and all(
         isinstance(cursor.get(key), int) for key in ("device", "inode", "offset")
@@ -115,9 +98,6 @@ def _save_checkpoint(path: Path | None, state: SpoolState) -> None:
         "schema_version": CHECKPOINT_SCHEMA,
         "cursor": state.cursor,
         "pauses": state.pauses,
-        "legacy_holds": {
-            str(task_id): event for task_id, event in state.legacy_holds.items()
-        },
     }
     try:
         write_json_atomic(path, payload, fsync=False)
@@ -132,11 +112,7 @@ def event_state(spool: Path | None, *, checkpoint: Path | None = None) -> SpoolS
     if spool is None:
         return state
     previous = state
-    state = SpoolState(
-        pauses=dict(previous.pauses),
-        legacy_holds=dict(previous.legacy_holds),
-        cursor=previous.cursor,
-    )
+    state = SpoolState(pauses=dict(previous.pauses), cursor=previous.cursor)
     try:
         with spool.open("rb") as handle:
             # Attribute bytes to the inode actually opened, not a path that
@@ -233,31 +209,15 @@ def _pressure_complete(pressure: Mapping[str, float | None]) -> bool:
     )
 
 
-def _can_reopen(
-    group: str, record: Mapping[str, Any], pressure: Mapping[str, float | None]
-) -> bool:
-    signals = record.get("signals")
-    sources = (
-        tuple(signal for signal in signals if signal in CLOSE_ORDER)
-        if isinstance(signals, list)
-        else ()
-    )
-    # Retired I/O admission events no longer veto recovery. Memory remains
-    # the admission signal, including when releasing an old I/O-only pause.
-    # Unknown memory never silently becomes a quiet observation.
-    sources = sources or tuple(CLOSE_ORDER)
-    sources = tuple(
-        dict.fromkeys(
-            (
-                *sources,
-                *(signal for signal in CLOSE_ORDER if group in CLOSE_ORDER[signal]),
-            )
-        )
-    )
+def _can_reopen(pressure: Mapping[str, float | None]) -> bool:
+    """Every signal is known and below the resume threshold.
+
+    Unknown memory never silently becomes a quiet observation.
+    """
     return _pressure_complete(pressure) and all(
         (value := _recovery_pressure(pressure, signal)) is not None
         and value < RESUME_BELOW
-        for signal in sources
+        for signal in CLOSE_ORDER
     )
 
 
@@ -267,7 +227,7 @@ def _append(
     record = {
         "schema_version": 1,
         "emitted_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "kind": "backpressure",
+        "kind": EVENT_KIND,
         "owner": OWNER,
         **dict(event),
     }
@@ -284,33 +244,6 @@ def _append(
 
 def paused_by_us(spool: Path | None, *, checkpoint: Path | None = None) -> set[str]:
     return event_state(spool, checkpoint=checkpoint).ours()
-
-
-def _vanished_hold_retirements(state: SpoolState) -> list[dict[str, Any]]:
-    """Retire tracked holds whose task pueue no longer knows about.
-
-    A hold leaves the tracked set on its own ``released``/``retired`` event,
-    but a held task removed by ``pueue clean`` emits neither, so its entry
-    would otherwise be carried forever. pueue owns queue membership, so an
-    absent task is authoritative: reconcile against it rather than let this
-    checkpoint grow into a second ledger.
-    """
-    if not state.legacy_holds:
-        return []
-    try:
-        live = pueue.tasks()
-    except PueueError:
-        return []
-    return [
-        {
-            "kind": "pool-hold",
-            "action": "retired",
-            "task_id": task_id,
-            "reason": "task-absent-from-pueue",
-        }
-        for task_id in sorted(state.legacy_holds)
-        if task_id not in live
-    ]
 
 
 def slice_headroom(unit: str, root: Path = Path("/sys/fs/cgroup")) -> int:
@@ -437,8 +370,6 @@ def tick(
     for name in sorted(state.ours()):
         if groups.get(name) == "Running":
             state.apply(_append(spool, {"action": "released", "group": name}))
-    for event in _vanished_hold_retirements(state):
-        state.apply(_append(spool, event))
     _save_checkpoint(checkpoint_path, state)
     adaptive = adaptive_widths(pools or {}, groups, pressure, spool)
     signals = over_threshold(pressure)
@@ -447,7 +378,7 @@ def tick(
     obsolete = [
         name
         for name in paused
-        if name in state.ours() and _can_reopen(name, state.pauses[name], pressure)
+        if name in state.ours() and _can_reopen(pressure)
     ]
     if obsolete:
         target = obsolete[0]

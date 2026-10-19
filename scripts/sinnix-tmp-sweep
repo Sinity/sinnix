@@ -2,6 +2,7 @@
 # @sinnix-package
 # description: Remove unheld Nix devshell scratch directories from TMPDIR and /tmp
 # runtimeInputs: coreutils
+# pythonPackages: @sinnix-lib
 """Reclaim leaked devshell scratch trees.
 
 Nix creates `nix-shell.*` and `nix-develop-*` directories. Some `nix develop`
@@ -32,6 +33,8 @@ import stat
 import shutil
 import sys
 import time
+
+from sinnix_lib.procfs import held_paths
 
 HOLDER_VARS = (b"TMPDIR=", b"TMP=", b"TEMP=", b"NIX_BUILD_TOP=")
 PREFIXES = ("nix-shell.", "nix-develop-")
@@ -133,42 +136,24 @@ def held_directories(candidates: set[str], root_list: list[str]) -> set[str]:
         if not pid.isdigit():
             continue
         proc = "/proc/" + pid
-        for link in ("cwd", "root", "exe"):
-            try:
-                claim(os.readlink(proc + "/" + link))
-            except OSError as error:
-                vanished_entry(error, proc + "/" + link)
         try:
-            fds = os.listdir(proc + "/fd")
-        except OSError as error:
-            vanished_entry(error, proc + "/fd")
-            fds = []
-        for fd in fds:
-            try:
-                claim(os.readlink(proc + "/fd/" + fd))
-            except OSError as error:
-                vanished_entry(error, proc + "/fd/" + fd)
-        # Missing process records are normal churn. Denied reads are unknown.
-        try:
-            with open(proc + "/environ", "rb") as handle:
-                blob = handle.read()
-        except OSError as error:
-            vanished_entry(error, proc + "/environ")
-            continue
-        for item in blob.split(b"\0"):
-            if item.startswith(HOLDER_VARS):
-                value = item.partition(b"=")[2]
-                try:
-                    path = os.fsdecode(value)
+            for kind, path in held_paths(proc, environment=HOLDER_VARS):
+                if kind == "env":
                     if not path or path in root_list:
                         continue
                     # The process, not the sweeper, owns a relative spelling.
                     # realpath must resolve symlinks before consuming '..'.
                     if not os.path.isabs(path):
                         path = os.path.join(proc, "cwd", path)
-                    claim(os.path.realpath(path, strict=os.path.ALLOW_MISSING))
-                except (UnicodeDecodeError, ValueError):
-                    pass
+                    try:
+                        path = os.path.realpath(path, strict=os.path.ALLOW_MISSING)
+                    except ValueError:
+                        continue
+                claim(path)
+        except OSError as error:
+            # Missing process records are normal churn. Denied reads are unknown.
+            where = error.filename or proc
+            raise VisibilityError(f"cannot inspect {where}: {error.strerror}") from error
         if held == candidates:
             break
 

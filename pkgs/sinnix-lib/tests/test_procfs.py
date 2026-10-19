@@ -63,3 +63,25 @@ def test_parse_stat_start_time_rejects_missing_or_short_stat() -> None:
     assert parse_stat_start_time("321 (name) S 1 2") is None
     malformed = "321 (name) S " + " ".join(["x"] * 20)
     assert parse_stat_start_time(malformed) is None
+
+
+def test_held_paths_lists_links_descriptors_and_named_environment(tmp_path):
+    import os
+
+    from sinnix_lib.procfs import held_paths
+
+    process = tmp_path / "proc" / "42"
+    (process / "fd").mkdir(parents=True)
+    os.symlink("/work/tree", process / "cwd")
+    os.symlink("/work/tree/log", process / "fd" / "3")
+    (process / "environ").write_bytes(b"HOME=/home/x\0TMPDIR=/tmp/nix-shell.1\0")
+
+    assert list(
+        held_paths(str(process), links=("cwd",), environment=(b"TMPDIR=",))
+    ) == [("cwd", "/work/tree"), ("fd", "/work/tree/log"), ("env", "/tmp/nix-shell.1")]
+
+
+def test_held_paths_ends_quietly_when_the_process_is_gone(tmp_path):
+    from sinnix_lib.procfs import held_paths
+
+    assert list(held_paths(str(tmp_path / "proc" / "404"))) == []

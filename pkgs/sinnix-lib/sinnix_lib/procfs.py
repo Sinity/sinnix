@@ -1,18 +1,22 @@
-"""Pure parsers for Linux ``/proc`` and pressure-control text files.
+"""Linux ``/proc``: pure text parsers, and the paths a process holds.
 
-The functions in this module deliberately accept text rather than paths.  They
-do not read the filesystem and they do not attach policy to a parsed value;
-callers decide whether an absent or malformed observation is actionable.
+The parsers accept text rather than paths. They do not read the filesystem
+and they do not attach policy to a parsed value; callers decide whether an
+absent or malformed observation is actionable. Malformed records are ignored
+and never raise. This is useful for procfs, where a process can disappear
+between the directory walk and a file read, and where kernel versions may add
+fields. The individual functions document the slightly stricter rules for
+formats whose identity matters.
 
-Malformed records are ignored and never raise.  This is useful for procfs,
-where a process can disappear between the directory walk and a file read, and
-where kernel versions may add fields.  The individual functions document the
-slightly stricter rules for formats whose identity matters.
+``held_paths`` is the one reader: it lists what one process holds, for callers
+that decide whether a directory is in use.
 """
 
 from __future__ import annotations
 
-from typing import TypeAlias
+import errno
+import os
+from typing import Iterator, TypeAlias
 
 PSIValue: TypeAlias = float | int
 PSIRecord: TypeAlias = dict[str, PSIValue]
@@ -143,3 +147,62 @@ __all__ = [
     "parse_psi",
     "parse_stat_start_time",
 ]
+
+
+#: A process, or one of its descriptors, that went away mid-read.
+VANISHED = frozenset({errno.ENOENT, errno.ESRCH})
+
+
+def held_paths(
+    process: str,
+    *,
+    links: tuple[str, ...] = ("cwd", "root", "exe"),
+    descriptors: bool = True,
+    environment: tuple[bytes, ...] = (),
+) -> Iterator[tuple[str, str]]:
+    """``(kind, path)`` for each path ``process`` (a ``/proc/<pid>`` path) holds.
+
+    Kinds are the link names, ``fd``, and ``env`` for the value of one of the
+    named ``environment`` variables (spelled ``b"TMPDIR="``), returned as
+    written. A record that vanished mid-read (the process exited, a
+    descriptor closed) is skipped; every other read error, including
+    ``PermissionError``, is raised with its ``filename`` for the caller to
+    judge, since a denied read is unknown rather than empty.
+    """
+
+    def tolerated(error: OSError) -> None:
+        if error.errno not in VANISHED:
+            raise error
+
+    for link in links:
+        try:
+            yield link, os.readlink(f"{process}/{link}")
+        except OSError as error:
+            tolerated(error)
+    if descriptors:
+        try:
+            fds = os.listdir(f"{process}/fd")
+        except OSError as error:
+            tolerated(error)
+            fds = []
+        for fd in fds:
+            try:
+                yield "fd", os.readlink(f"{process}/fd/{fd}")
+            except OSError as error:
+                tolerated(error)
+    if environment:
+        path = f"{process}/environ"
+        try:
+            with open(path, "rb") as handle:
+                blob = handle.read()
+        except OSError as error:
+            if error.filename is None:
+                error.filename = path
+            tolerated(error)
+            return
+        for item in blob.split(b"\0"):
+            if item.startswith(environment):
+                try:
+                    yield "env", os.fsdecode(item.partition(b"=")[2])
+                except UnicodeDecodeError:
+                    continue

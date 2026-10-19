@@ -92,6 +92,7 @@ in
         name = "tmp-sweep-visibility";
         nativeBuildInputs = [ inputs.nixpkgs.legacyPackages.${system}.python3 ];
         script = ''
+          PYTHONPATH=${../../pkgs/sinnix-lib} \
           TMP_SWEEP_SOURCE=${../../scripts/sinnix-tmp-sweep} \
             python3 ${../../scripts/tests/test_tmp_sweep.py}
         '';
