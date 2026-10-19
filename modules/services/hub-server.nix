@@ -78,8 +78,8 @@ mkServiceModule {
               lib.optionalString (cfg.hubManifest != null) " --hub-manifest ${cfg.hubManifest}"
             }${
               lib.optionalString (
-                cfg.elicitCommand != null
-              ) " --elicit-command ${lib.escapeShellArg (builtins.toJSON cfg.elicitCommand)}"
+                cfg.rankIngestCommand != null
+              ) " --rank-ingest-command ${lib.escapeShellArg (builtins.toJSON cfg.rankIngestCommand)}"
             }";
             # nvidia-smi, journalctl, systemctl and hyprctl are what the pages
             # probe the live host with; /run/current-system/sw/bin is where
@@ -118,21 +118,21 @@ mkServiceModule {
       '';
     };
 
-    elicitCommand = lib.mkOption {
+    rankIngestCommand = lib.mkOption {
       type = lib.types.nullOr (lib.types.listOf lib.types.str);
       default = [
         "${scriptPkgs.agentctl}/bin/agentctl"
         "job"
         "start"
         "sinnix"
-        "rank_pairs_ingest"
+        "rank_ingest"
         "--wait"
       ];
       description = ''
-        AgentCTL argv run, coalesced, when a `sinnix-elicit-v1` record lands
+        AgentCTL argv run, coalesced, when a `sinnix-rank-v1` judgment lands
         in the feedback spool. The default waits for the declared
-        `rank_pairs_ingest` operation, so completion means the ingest and
-        model refit completed. Null disables arrival-triggered draining.
+        `rank_ingest` operation, so completion means the judgments are in
+        their domains. Null disables arrival-triggered draining.
       '';
     };
 

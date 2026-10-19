@@ -1,13 +1,12 @@
-"""The annotation spool's file contract, and the elicit drain arrival triggers.
+"""The annotation spool's file contract, and the ranking drain arrival triggers.
 
-The spool file is read directly by agents and by `sinnix-rank-pairs ingest`, so the
+The spool file is read directly by agents and by `sinnix rank ingest`, so the
 envelope shape is asserted against the exact JSON text that lands on disk, not
 against a re-parsed dict.
 """
 
 from __future__ import annotations
 
-import inspect
 import json
 import threading
 import time
@@ -19,14 +18,11 @@ from urllib.parse import urlsplit
 
 import pytest
 from sinnix_hub_server.feedback import (
-    ELICIT_MODEL_DIR_DEFAULT,
     CoalescingTrigger,
     FeedbackSpool,
-    is_elicit,
+    is_rank_judgment,
     parse_command_argv,
-    resolve_elicit_model,
 )
-from sinnix_hub_server.server import serve
 
 
 def test_spool_line_carries_the_v1_envelope(tmp_path: Path) -> None:
@@ -49,7 +45,7 @@ def test_spool_line_carries_the_v1_envelope(tmp_path: Path) -> None:
     assert spool.append({"note": "again"}, None, None)["sequence"] == 2
 
 
-def test_only_elicit_payloads_trigger_the_drain(tmp_path: Path) -> None:
+def test_only_rank_judgments_trigger_the_drain(tmp_path: Path) -> None:
     fired = threading.Event()
 
     class Recording(CoalescingTrigger):
@@ -58,11 +54,11 @@ def test_only_elicit_payloads_trigger_the_drain(tmp_path: Path) -> None:
             return True
 
     trigger = Recording(["true"], delay=0.05)
-    spool = FeedbackSpool(tmp_path, elicit=trigger)
+    spool = FeedbackSpool(tmp_path, rank_ingest=trigger)
     spool.append({"schema": "report-annotations", "note": "x"}, None, None)
     assert not fired.wait(0.3)
     spool.append(
-        {"schema": "sinnix-elicit-v1", "domain": "wallpaper", "a": "1", "b": "2"},
+        {"schema": "sinnix-rank-v1", "domain": "wallpaper", "set": ["1", "2"]},
         None,
         None,
     )
@@ -81,19 +77,19 @@ def test_a_burst_of_judgments_coalesces_into_one_run(tmp_path: Path) -> None:
     # instant -- which is exactly the property the production 5s buys against a
     # comparison session.
     trigger = Counting(["true"], delay=1.0)
-    spool = FeedbackSpool(tmp_path, elicit=trigger)
+    spool = FeedbackSpool(tmp_path, rank_ingest=trigger)
     for index in range(10):
         spool.append(
-            {"schema": "sinnix-elicit-v1", "domain": "d", "n": index}, None, None
+            {"schema": "sinnix-rank-v1", "domain": "d", "n": index}, None, None
         )
     time.sleep(2.5)
     assert len(runs) == 1
 
 
-def test_is_elicit_ignores_non_objects() -> None:
-    assert is_elicit({"schema": "sinnix-elicit-v1"})
-    assert not is_elicit(["sinnix-elicit-v1"])
-    assert not is_elicit(None)
+def test_is_rank_judgment_ignores_non_objects() -> None:
+    assert is_rank_judgment({"schema": "sinnix-rank-v1"})
+    assert not is_rank_judgment(["sinnix-rank-v1"])
+    assert not is_rank_judgment(None)
 
 
 def test_drain_command_is_a_typed_argv() -> None:
@@ -109,39 +105,10 @@ def test_drain_command_is_a_typed_argv() -> None:
         parse_command_argv("[]")
 
 
-def test_resolve_elicit_model_rejects_traversal_and_odd_charsets(
-    tmp_path: Path,
-) -> None:
-    assert resolve_elicit_model(tmp_path, "wallpapers") == tmp_path / "wallpapers" / (
-        "model.json"
-    )
-    assert resolve_elicit_model(tmp_path, "../etc") is None
-    assert resolve_elicit_model(tmp_path, "a/b") is None
-    assert resolve_elicit_model(tmp_path, "") is None
-    assert resolve_elicit_model(tmp_path, "a" * 65) is None
-    assert resolve_elicit_model(tmp_path, "a" * 64) is not None
-
-
-def test_the_elicit_model_root_default_is_the_owned_state_root() -> None:
-    """The hub reads the model from where sinnix-rank-pairs writes it. Neither
-    side is configured, so the two defaults are the contract; a server built
-    with no elicit argument at all has to resolve there."""
-    assert ELICIT_MODEL_DIR_DEFAULT == Path("/realm/state/elicit")
-    assert resolve_elicit_model(ELICIT_MODEL_DIR_DEFAULT, "wallpaper") == Path(
-        "/realm/state/elicit/wallpaper/model.json"
-    )
-    assert (
-        inspect.signature(serve).parameters["elicit_model_dir"].default
-        == ELICIT_MODEL_DIR_DEFAULT
-    )
-
-
 @pytest.fixture
 def hub_server(hub_server_factory, tmp_path: Path) -> tuple[str, Path]:
     spool = tmp_path / "spool"
-    base = hub_server_factory(
-        feedback=FeedbackSpool(spool), elicit_model_dir=tmp_path / "preferences"
-    )
+    base = hub_server_factory(feedback=FeedbackSpool(spool))
     return base, spool
 
 
@@ -204,89 +171,3 @@ def test_spool_rejects_invalid_content_length_before_append(hub_server) -> None:
     assert response.status == 411
     assert body == {"error": "Content-Length required"}
     assert not list(spool_dir.glob("*.jsonl"))
-
-
-def test_elicit_model_reads_the_domains_own_fit(hub_server, tmp_path: Path) -> None:
-    """GET /feedback/elicit/<domain> is the one read this write-only sink
-    grew: a domain's own model.json, read straight back for the in-session
-    'learning so far' preview -- never the spool itself."""
-    base, _ = hub_server
-    domain_dir = tmp_path / "preferences" / "wallpapers"
-    domain_dir.mkdir(parents=True)
-    (domain_dir / "model.json").write_text(
-        json.dumps({"schema": "sinnix-rank-pairs-model-v1", "theta": {"a": 1.2}})
-    )
-    with urllib.request.urlopen(
-        base + "/feedback/elicit/wallpapers", timeout=10
-    ) as response:
-        assert response.status == 200
-        assert response.headers["Access-Control-Allow-Origin"] == "*"
-        body = json.loads(response.read())
-    assert body["schema"] == "sinnix-elicit-v1"
-    assert body["domain"] == "wallpapers"
-    assert body["model"] == {
-        "schema": "sinnix-rank-pairs-model-v1",
-        "theta": {"a": 1.2},
-    }
-
-
-def test_elicit_model_404s_before_any_rank_has_run(hub_server) -> None:
-    base, _ = hub_server
-    with pytest.raises(urllib.error.HTTPError) as raised:
-        urllib.request.urlopen(base + "/feedback/elicit/never-ranked", timeout=10)
-    assert raised.value.code == 404
-
-
-def test_elicit_model_refuses_a_traversal_shaped_domain(hub_server) -> None:
-    base, _ = hub_server
-    with pytest.raises(urllib.error.HTTPError) as raised:
-        urllib.request.urlopen(base + "/feedback/elicit/..%2f..%2fetc", timeout=10)
-    assert raised.value.code == 400
-
-
-@pytest.mark.parametrize("stage", ["resolve", "read"])
-@pytest.mark.parametrize(
-    "failure", [PermissionError("denied"), OSError("device unavailable")]
-)
-def test_elicit_model_access_errors_are_unavailable(
-    hub_server, monkeypatch, stage, failure
-):
-    from sinnix_hub_server import server
-
-    base, _ = hub_server
-
-    def fail(*args, **kwargs):
-        raise failure
-
-    if stage == "resolve":
-        monkeypatch.setattr(server, "resolve_elicit_model", fail)
-    else:
-        monkeypatch.setattr(Path, "read_text", fail)
-    with pytest.raises(urllib.error.HTTPError) as raised:
-        urllib.request.urlopen(base + "/feedback/elicit/neutral", timeout=2)
-    assert raised.value.code == 503
-    assert "unavailable" in json.loads(raised.value.read())["error"]
-
-
-@pytest.mark.parametrize(
-    "kind, status",
-    [("directory", 503), ("broken-link", 503), ("utf8", 502), ("json", 502)],
-)
-def test_elicit_model_unusable_entries_are_not_absent(
-    hub_server, tmp_path, kind, status
-):
-    base, _ = hub_server
-    path = tmp_path / "preferences" / "neutral" / "model.json"
-    path.parent.mkdir(parents=True)
-    if kind == "directory":
-        path.mkdir()
-    elif kind == "broken-link":
-        path.symlink_to(path.parent / "missing-model.json")
-    elif kind == "utf8":
-        path.write_bytes(b"\xff")
-    else:
-        path.write_text("{invalid")
-    with pytest.raises(urllib.error.HTTPError) as raised:
-        urllib.request.urlopen(base + "/feedback/elicit/neutral", timeout=2)
-    assert raised.value.code == status
-    assert "no fitted model" not in json.loads(raised.value.read())["error"]

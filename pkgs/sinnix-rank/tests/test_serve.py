@@ -17,6 +17,7 @@ import zlib
 import pytest
 from rank_core import fit as rank_fit
 from rank_core import top_k_stability
+from rank_core.store import append_log
 
 
 # ── fixture images: synthetic PNGs, generated here, never repository content ──
@@ -40,7 +41,7 @@ def png(width=8, height=8, rgb=(200, 40, 40)):
 
 
 @pytest.fixture()
-def image_domain(domain, tmp_path):
+def image_domain(rank_module, domain, store, tmp_path):
     """A four-item image roster, each item's file written by this test."""
     stash = tmp_path / "stash"
     stash.mkdir()
@@ -48,10 +49,11 @@ def image_domain(domain, tmp_path):
     for index, name in enumerate(("alpha", "beta", "gamma", "delta")):
         path = stash / f"{name}.png"
         path.write_bytes(png(rgb=(40 * index, 200 - 40 * index, 90)))
-        items.append({"id": name, "label": f"{name} 8x8", "image": str(path)})
-    domain.dir.mkdir(parents=True, exist_ok=True)
-    domain.items_path.write_text(json.dumps(items))
-    return domain
+        items.append(
+            rank_module.Item(id=name, label=f"{name} 8x8", meta={"image": str(path)})
+        )
+    store.add_items(items)
+    return store
 
 
 class Client:
@@ -77,10 +79,8 @@ class Client:
 
 
 @pytest.fixture()
-def serving(elicit_module, image_domain):
-    server, state = elicit_module.build_serve_server(
-        image_domain, port=0, top_k=2, seed=7
-    )
+def serving(rank_module, domain, image_domain):
+    server, state = rank_module.build_serve_server(domain, port=0, top_k=2, seed=7)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -113,17 +113,16 @@ def test_a_judgment_lands_in_the_store_in_the_domains_own_record_shape(
 
     client.post(
         "/answer",
-        {"id": "j1", "a": pair["a"]["id"], "b": pair["b"]["id"], "outcome": 1},
+        {"id": "j1", "set": [pair["a"]["id"], pair["b"]["id"]], "winner": pair["a"]["id"]},
     )
 
     records = judgments(image_domain)
     assert len(records) == 1
     assert records[0]["kind"] == "pair"
-    assert records[0]["a"] == pair["a"]["id"]
-    assert records[0]["b"] == pair["b"]["id"]
-    assert records[0]["outcome"] == 1.0
+    assert records[0]["set"] == [pair["a"]["id"], pair["b"]["id"]]
+    assert records[0]["winner"] == pair["a"]["id"]
     assert records[0]["id"] == "j1"
-    assert records[0]["session"].startswith("serve")
+    assert records[0]["context"].startswith("serve")
     # The store, read back the way every other surface reads it.
     assert len(image_domain.load_comparisons()) == 1
 
@@ -137,7 +136,7 @@ def test_a_resubmitted_judgment_is_appended_once_even_after_it_was_undone(
     wallpaper log."""
     client, _state = serving
     pair = client.json_get("/next")["pair"]
-    body = {"id": "j1", "a": pair["a"]["id"], "b": pair["b"]["id"], "outcome": 1}
+    body = {"id": "j1", "set": [pair["a"]["id"], pair["b"]["id"]], "winner": pair["a"]["id"]}
 
     client.post("/answer", body)
     client.post("/answer", body)
@@ -152,26 +151,28 @@ def test_a_resubmitted_judgment_is_appended_once_even_after_it_was_undone(
 def test_a_judgment_another_writer_already_appended_is_not_appended_again(
     serving, image_domain
 ):
-    """`sinnix-rank-pairs autoingest` drains the hub spool into the same log while
-    this loop runs, so the id set the dedup asks must be re-read from the log
+    """`sinnix-rank ingest` drains the hub spool into the same log while this
+    loop runs, so the id set the dedup asks must be re-read from the log
     rather than frozen when the server started."""
     client, _state = serving
-    image_domain.append(
+    append_log(
+        image_domain.comparisons_path,
         {
             "id": "drained-1",
             "kind": "pair",
-            "a": "alpha",
-            "b": "beta",
-            "outcome": 1.0,
-            "session": "hub",
-        }
+            "set": ["alpha", "beta"],
+            "winner": "alpha",
+            "context": "hub",
+        },
     )
 
-    client.post("/answer", {"id": "drained-1", "a": "alpha", "b": "beta", "outcome": 0})
+    client.post(
+        "/answer", {"id": "drained-1", "set": ["alpha", "beta"], "winner": "beta"}
+    )
 
     records = judgments(image_domain)
     assert [r["id"] for r in records] == ["drained-1"]
-    assert records[0]["outcome"] == 1.0
+    assert records[0]["winner"] == "alpha"
 
 
 def test_undo_tombstones_rather_than_rewriting_the_log(serving, image_domain):
@@ -179,7 +180,7 @@ def test_undo_tombstones_rather_than_rewriting_the_log(serving, image_domain):
     pair = client.json_get("/next")["pair"]
     client.post(
         "/answer",
-        {"id": "j1", "a": pair["a"]["id"], "b": pair["b"]["id"], "outcome": 0},
+        {"id": "j1", "set": [pair["a"]["id"], pair["b"]["id"]], "winner": pair["b"]["id"]},
     )
 
     payload = client.post("/undo", {})
@@ -201,12 +202,7 @@ def test_an_already_judged_pair_is_not_asked_again_while_fresh_ones_remain(
         asked.append(key)
         client.post(
             "/answer",
-            {
-                "id": f"j{index}",
-                "a": pair["a"]["id"],
-                "b": pair["b"]["id"],
-                "outcome": 1,
-            },
+            {"id": f"j{index}", "set": [pair["a"]["id"], pair["b"]["id"]], "winner": pair["a"]["id"]},
         )
 
 
@@ -214,7 +210,7 @@ def test_skip_asks_something_else_and_records_nothing(serving, image_domain):
     client, _state = serving
     pair = client.json_get("/next")["pair"]
 
-    payload = client.post("/skip", {"a": pair["a"]["id"], "b": pair["b"]["id"]})
+    payload = client.post("/skip", {"set": [pair["a"]["id"], pair["b"]["id"]]})
 
     assert frozenset(
         (payload["pair"]["a"]["id"], payload["pair"]["b"]["id"])
@@ -223,21 +219,18 @@ def test_skip_asks_something_else_and_records_nothing(serving, image_domain):
 
 
 def test_status_reports_the_engines_own_fit_and_stopping_statistic(
-    serving, image_domain, elicit_module
+    serving, image_domain, rank_module
 ):
     client, _state = serving
     for index, (winner, loser) in enumerate([("alpha", "beta"), ("alpha", "gamma")]):
         client.post(
-            "/answer", {"id": f"j{index}", "a": winner, "b": loser, "outcome": 1}
+            "/answer", {"id": f"j{index}", "set": [winner, loser], "winner": winner}
         )
 
     status = client.json_get("/status")
 
-    ids = [str(i["id"]) for i in json.loads(image_domain.items_path.read_text())]
-    expected_fit = rank_fit(
-        ids,
-        elicit_module.to_comparisons(image_domain.load_comparisons(), set(ids)),
-    )
+    ids = list(image_domain.load_items())
+    expected_fit = rank_fit(ids, image_domain.load_comparisons())
     expected_stability = top_k_stability(expected_fit, k=2, samples=200, seed=0)
     assert [row["id"] for row in status["top"]] == [
         r.id for r in expected_fit.ranked()[:2]
@@ -288,9 +281,9 @@ def test_the_page_is_served_and_names_its_domain(serving):
 def test_a_malformed_judgment_is_refused_and_writes_nothing(serving, image_domain):
     client, _state = serving
     for body in (
-        {"id": "x", "a": "alpha", "b": "alpha", "outcome": 1},
-        {"id": "x", "a": "alpha", "b": "not-an-item", "outcome": 1},
-        {"id": "x", "a": "alpha", "b": "beta", "outcome": 0.7},
+        {"id": "x", "set": ["alpha", "alpha"], "winner": "alpha"},
+        {"id": "x", "set": ["alpha", "not-an-item"], "winner": "alpha"},
+        {"id": "x", "set": ["alpha", "beta"], "winner": "not-in-the-pair"},
     ):
         with pytest.raises(urllib.error.HTTPError) as excinfo:
             client.post("/answer", body)
@@ -298,15 +291,15 @@ def test_a_malformed_judgment_is_refused_and_writes_nothing(serving, image_domai
     assert judgments(image_domain) == []
 
 
-def test_a_second_run_resumes_from_the_log(elicit_module, image_domain, serving):
+def test_a_second_run_resumes_from_the_log(rank_module, domain, serving):
     client, _state = serving
     pair = client.json_get("/next")["pair"]
     client.post(
         "/answer",
-        {"id": "j1", "a": pair["a"]["id"], "b": pair["b"]["id"], "outcome": 1},
+        {"id": "j1", "set": [pair["a"]["id"], pair["b"]["id"]], "winner": pair["a"]["id"]},
     )
 
-    resumed = elicit_module.ServeSession(image_domain, top_k=2, seed=1)
+    resumed = rank_module.ServeSession(domain, top_k=2, seed=1)
 
     assert resumed.status()["comparisons"] == 1
     assert "j1" in resumed.known_ids
@@ -317,36 +310,26 @@ def test_a_second_run_resumes_from_the_log(elicit_module, image_domain, serving)
     )
 
 
-def test_quit_saves_the_refit_model(serving, image_domain):
+def test_quit_reports_the_final_state_and_writes_no_fit(serving, image_domain):
+    """The log is the only state; sinnix-rank refits on every read."""
     client, _state = serving
-    client.post("/answer", {"id": "j1", "a": "alpha", "b": "beta", "outcome": 1})
+    client.post("/answer", {"id": "j1", "set": ["alpha", "beta"], "winner": "alpha"})
 
     payload = client.post("/quit", {})
 
     assert payload["done"] is True
-    model = json.loads(image_domain.model_path.read_text())
-    assert model["n_comparisons"] == 1
-    assert model["ranking"][0]["id"] == "alpha"
+    assert payload["status"]["top"][0]["id"] == "alpha"
+    written = {p.name for p in image_domain.domain_dir.iterdir()}
+    assert {"comparisons.jsonl", "items.jsonl"} <= written
+    assert not [name for name in written if name.endswith(".json")]
 
 
-def test_elicit_publication_is_readable_and_atomic(
-    elicit_module, tmp_path, monkeypatch
-):
-    path = tmp_path / "model.json"
-    published = {}
+def test_a_tie_is_recorded_as_a_pair_without_a_winner(serving, image_domain):
+    client, _state = serving
+    client.post("/answer", {"id": "t1", "set": ["alpha", "beta"], "winner": None})
 
-    def record(target, payload, **kwargs):
-        published.update(target=target, payload=payload, **kwargs)
-        return True
-
-    monkeypatch.setattr(elicit_module, "atomic_publish", record)
-    elicit_module.publish_text(path, '{\n  "model": 1\n}\n')
-    assert published == {
-        "target": path,
-        "payload": b'{\n  "model": 1\n}\n',
-        "fsync": True,
-        "mode": 0o644,
-    }
+    [comparison] = image_domain.load_comparisons()
+    assert comparison.kind == "pair" and comparison.winner is None
 
 
 @pytest.mark.parametrize(
@@ -359,11 +342,11 @@ def test_elicit_publication_is_readable_and_atomic(
         ([("Content-Length", "1")], b"2"),
     ],
 )
-def test_bad_framing_or_nonobject_cannot_undo(elicit_module, framing, raw):
+def test_bad_framing_or_nonobject_cannot_undo(rank_module, framing, raw):
     import io
     from email.message import Message
 
-    handler = object.__new__(elicit_module.ServeHandler)
+    handler = object.__new__(rank_module.ServeHandler)
     handler.headers = Message()
     handler.headers["Host"] = "127.0.0.1:8080"
     handler.headers["Content-Type"] = "application/json"
@@ -388,11 +371,11 @@ def test_bad_framing_or_nonobject_cannot_undo(elicit_module, framing, raw):
     assert responses == [400]
 
 
-def test_empty_request_preserves_undo_protocol(elicit_module):
+def test_empty_request_preserves_undo_protocol(rank_module):
     import io
     from email.message import Message
 
-    handler = object.__new__(elicit_module.ServeHandler)
+    handler = object.__new__(rank_module.ServeHandler)
     handler.headers = Message()
     handler.headers["Host"] = "127.0.0.1:8080"
     handler.server = type(
@@ -436,7 +419,7 @@ def test_forged_browser_post_cannot_append(serving, image_domain, headers, code)
     request = urllib.request.Request(
         client.base + "/answer",
         data=json.dumps(
-            {"id": "forged", "a": "alpha", "b": "beta", "outcome": 1}
+            {"id": "forged", "set": ["alpha", "beta"], "winner": "alpha"}
         ).encode(),
         headers={"Content-Type": "application/json", **headers},
         method="POST",
@@ -452,7 +435,7 @@ def test_same_origin_page_can_append(serving, image_domain):
     request = urllib.request.Request(
         client.base + "/answer",
         data=json.dumps(
-            {"id": "same-origin", "a": "alpha", "b": "beta", "outcome": 1}
+            {"id": "same-origin", "set": ["alpha", "beta"], "winner": "alpha"}
         ).encode(),
         headers={
             "Content-Type": "application/json",
@@ -497,9 +480,9 @@ def test_duplicate_host_is_refused(serving):
 
 
 def test_explicit_listen_hostname_remains_an_allowed_authority(
-    elicit_module, image_domain
+    rank_module, domain, image_domain
 ):
-    server, _state = elicit_module.build_serve_server(image_domain, port=0)
+    server, _state = rank_module.build_serve_server(domain, port=0)
     # Model the declared hostname resolving to this listener, without using
     # external DNS or changing the machine's hosts file.
     server.configured_host = "ranking.example.invalid"

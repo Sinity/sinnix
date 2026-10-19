@@ -116,16 +116,16 @@ let
     lib.removePrefix "${realmRoot}/" sinexTaskAuthority.workspace;
   sinexBeadsDatabaseRelativePath = lib.removePrefix "${sinexTaskAuthority.workspace}/" sinexTaskAuthority.database;
   sinexBeadsDrillLog = "${config.sinnix.paths.machineRoot}/borg_beads_drill.jsonl";
-  # Elicitation state (items, the append-only comparison log, the fitted
-  # model): operator judgments that cannot be recomputed from anything.
-  elicitStateArchivePath = "state/elicit";
+  # Ranking domains (items and the append-only comparison log): operator
+  # judgments that cannot be recomputed from anything.
+  rankingArchivePath = "activity/shared/ranking";
   # Paths under /realm no exclude pattern may cover, ancestors included.
   protectedRealmArchivePaths = [
     sinexBeadsArchivePath
     "${sinexBeadsArchivePath}/metadata.json"
     "${sinexBeadsArchivePath}/config.yaml"
     "${sinexBeadsArchivePath}/${sinexBeadsDatabaseRelativePath}/sinex/.dolt"
-    elicitStateArchivePath
+    rankingArchivePath
     "library/model/control-vector"
   ];
   # A six-hour snapshot can take about an hour to archive after acquisition.

@@ -276,20 +276,24 @@
           scripts = [ "sinnix-quest-player" ];
           extraPythonPackages = [ sinnix-lib ];
         };
-        # Provably fails when: elicit's fit stops reproducing the model its
-        # live domains were ranked under (ties, choice sets, item priors, ids
-        # the roster no longer carries), `ingest` stops recognising a
-        # tombstoned record as one it has already seen and re-imports every
-        # undone judgment on every drain, or `serve` records a judgment the log already
+        # Provably fails when: a migrated rank-pairs domain stops fitting as
+        # the old tool fitted it (ties, choice sets, item priors, ids the
+        # roster no longer carries), `ingest` re-imports a tombstoned or
+        # already-seen judgment, or `serve` records a judgment the log already
         # carries, undoes one by rewriting rather than tombstoning, re-asks a
         # pair the operator has already judged, serves a file the roster does
-        # not name, or reports a ranking and stopping statistic that are not
-        # the engine's own.
-        rank-pairs-suite = mkScriptSuite {
-          name = "sinnix-rank-pairs";
-          suiteDir = ../../pkgs/sinnix-rank-pairs/tests;
-          scripts = [ "sinnix-rank-pairs" ];
-          extraPythonPackages = [ sinnix-rank-core ];
+        # not name, or reports a ranking that is not the engine's own.
+        rank-suite = mkScriptSuite {
+          name = "sinnix-rank";
+          suiteDir = ../../pkgs/sinnix-rank/tests;
+          scripts = [
+            "sinnix-rank"
+            "sinnix-rank-migrate-elicit"
+          ];
+          extraPythonPackages = [
+            sinnix-rank-core
+            sinnix-lib
+          ];
         };
       };
     };

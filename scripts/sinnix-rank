@@ -1,39 +1,59 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Pairwise/choice-set preference ranking CLI (backlog, ideas, any list) over the shared rank-core engine
-# runtimeInputs: coreutils
-# pythonPackages: @sinnix-rank-core
+# description: Preference ranking over any item domain (backlog, options, images) on the shared rank-core engine
+# runtimeInputs: coreutils xdg-utils @sinnix-image-features
+# pythonPackages: @sinnix-lib @sinnix-rank-core
 # docs: docs/ranking.md
 
-"""Text frontend for rank_core: register items into a domain, run resorter-
-style pairwise prompting sessions, check the fitted ranking + stopping
-statement, and draw one item per a configurable policy (Thompson sampling by
-default).
+"""Frontend for rank_core: register items into a domain, compare them (in a
+terminal, through an agent, on a hub page, or on a live loopback page for
+image domains), read the fitted ranking with its stopping statement, explain
+choices against item features, and draw one item per a policy.
 
-Store convention (design doc section 2): raw comparisons/items are
-behavioral capture, kept forever under
-/realm/activity/shared/ranking/<domain>/; derived fits are never written back
-into that directory, so a full refit from raw comparisons stays reproducible
-at any time -- `status`/`spin` always refit in memory rather than trusting a
-cached theta file.
+Store convention: raw comparisons and items are behavioral capture, kept
+forever under /realm/activity/shared/ranking/<domain>/; fits are never
+written back, so every read refits from the raw log.
+
+The registered items are the domain's roster. A comparison naming an id the
+roster does not carry is kept in the log but left out of the fit: it is
+evidence about an item that is no longer part of the domain.
 """
 
 from __future__ import annotations
 
 import argparse
+import datetime as dt
+import html
 import json
+import math
+import mimetypes
 import os
 import random
+import shutil
+import subprocess
 import sys
+import threading
+import urllib.parse
+import uuid
+from dataclasses import replace
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from rank_core import Item, Store, build_selector, draw, fit, top_k_stability
 from rank_core.draw import POLICIES
-from rank_core.store import VALID_KINDS, domain_path
+from rank_core.store import VALID_KINDS, append_log, domain_path, read_log
 
 CAPTURE_ROOT = Path(
     os.environ.get("SINNIX_RANK_ROOT", "/realm/activity/shared/ranking")
 )
+REPORTS_DIR = Path(os.environ.get("SINNIX_HUB_REPORTS_DIR", "/realm/report"))
+FEEDBACK_DIR = Path(
+    os.environ.get("SINNIX_HUB_FEEDBACK_DIR", "/realm/state/hub-feedback")
+)
+
+#: The schema a hub session page stamps on the judgments it posts to
+#: /feedback, and the one the hub server triggers `ingest` on.
+SCHEMA = "sinnix-rank-v1"
 
 #: Below this top-k stability the fitted order is a working hypothesis, not an
 #: answer. `status` refuses to call anything settled under it, and every
@@ -48,7 +68,8 @@ def domain_dir(domain: str) -> Path:
 def load_items_input(raw: str) -> list[Item]:
     """Accepts a JSON array (e.g. `bd ready --json`) or JSONL, one object per
     line. Each record needs an id; label falls back to `title` (bd's field)
-    then the id itself. Every other field is carried through as meta.
+    then the id itself. Every other field (image, description, features, ...)
+    is carried through as meta.
     """
     raw = raw.strip()
     if not raw:
@@ -90,9 +111,11 @@ def check_identity(
     """
     conflicts: list[str] = []
     to_add: list[Item] = []
-    labels: dict[str, str] = {} if allow_duplicate_labels else {
-        item.label: item_id for item_id, item in existing.items()
-    }
+    labels: dict[str, str] = (
+        {}
+        if allow_duplicate_labels
+        else {item.label: item_id for item_id, item in existing.items()}
+    )
     for item in incoming:
         prior = existing.get(item.id)
         if prior is not None and prior.label != item.label and not revise:
@@ -117,6 +140,36 @@ def check_identity(
     return to_add, conflicts
 
 
+def add_image_features(items: list[Item]) -> None:
+    """Give image items a feature vector so `explain` has something to fit.
+
+    Failures are reported, never silently dropped: an item quietly missing
+    its features degrades `explain` in a way nothing else surfaces.
+    """
+    computed = failed = 0
+    for item in items:
+        image = item.meta.get("image")
+        if not image or "features" in item.meta:
+            continue
+        try:
+            out = subprocess.run(
+                ["sinnix-image-features", image],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=True,
+            )
+            item.meta["features"] = json.loads(out.stdout)
+            computed += 1
+        except (subprocess.SubprocessError, json.JSONDecodeError, OSError) as exc:
+            print(f"  feature extraction failed for {item.id}: {exc}", file=sys.stderr)
+            failed += 1
+    print(
+        f"computed image features for {computed} item(s)"
+        + (f", {failed} failed" if failed else "")
+    )
+
+
 def cmd_add(args: argparse.Namespace) -> int:
     raw = sys.stdin.read() if args.items == "-" else Path(args.items).read_text()
     items = load_items_input(raw)
@@ -137,6 +190,8 @@ def cmd_add(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    if args.image_features:
+        add_image_features(to_add)
     n = store.add_items(to_add)
     print(
         f"added {n} new item(s) to domain {args.domain!r} "
@@ -145,11 +200,40 @@ def cmd_add(args: argparse.Namespace) -> int:
     return 0
 
 
+def roster_comparisons(items, comparisons):
+    """The comparisons restricted to registered items, as the fit uses them.
+
+    Unregistered members are dropped from a set; what is left still says the
+    winner beat the remaining members. A set left with fewer than two
+    members, or whose winner was dropped, carries no evidence.
+    """
+    out = []
+    for c in comparisons:
+        members = [member for member in c.set if member in items]
+        if len(members) < 2 or len(set(members)) != len(members):
+            continue
+        if c.winner is not None and c.winner not in members:
+            continue
+        out.append(c if members == c.set else replace(c, set=members))
+    return out
+
+
 def _fit_domain(store: Store):
     items = store.load_items()
-    comparisons = store.load_comparisons()
+    comparisons = roster_comparisons(items, store.load_comparisons())
     result = fit(list(items.keys()), comparisons)
     return items, comparisons, result
+
+
+def require_items(args, items, minimum: int = 1) -> bool:
+    if len(items) >= minimum:
+        return True
+    print(
+        f"domain {args.domain!r} has {len(items)} item(s), fewer than {minimum} "
+        f"-- `sinnix rank add {args.domain} --items ...`",
+        file=sys.stderr,
+    )
+    return False
 
 
 def evidence_report(items, comparisons, result, stability, stop_at: float) -> dict:
@@ -206,8 +290,7 @@ def evidence_report(items, comparisons, result, stability, stop_at: float) -> di
 def cmd_status(args: argparse.Namespace) -> int:
     store = Store(domain_dir(args.domain))
     items, comparisons, result = _fit_domain(store)
-    if not items:
-        print(f"domain {args.domain!r} has no items yet -- `sinnix-rank add {args.domain} --items ...`")
+    if not require_items(args, items):
         return 1
     stability = top_k_stability(result, k=args.k, seed=args.seed)
     ranked = result.ranked()
@@ -221,7 +304,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                     "items": [
                         {
                             "id": r.id,
-                            "label": items[r.id].label if r.id in items else r.id,
+                            "label": items[r.id].label,
                             "theta": r.theta,
                             "se": r.se,
                             "matches": r.matches,
@@ -229,7 +312,11 @@ def cmd_status(args: argparse.Namespace) -> int:
                         }
                         for r in ranked
                     ],
-                    "stability": {"top_k": stability.top_k, "p_stable": stability.p_stable, "k": stability.k},
+                    "stability": {
+                        "top_k": stability.top_k,
+                        "p_stable": stability.p_stable,
+                        "k": stability.k,
+                    },
                     "comparisons": len(comparisons),
                     "evidence": evidence,
                 },
@@ -238,11 +325,13 @@ def cmd_status(args: argparse.Namespace) -> int:
         )
         return 0
     for i, r in enumerate(ranked, start=1):
-        label = items[r.id].label if r.id in items else r.id
-        print(f"{i:>3}. {label}  theta={r.theta:+.3f} se={r.se:.3f} matches={r.matches:.0f} comp={r.component}")
+        print(
+            f"{i:>3}. {items[r.id].label}  theta={r.theta:+.3f} se={r.se:.3f} "
+            f"matches={r.matches:.0f} comp={r.component}"
+        )
     print(
         f"\ntop-{stability.k} stability: {stability.p_stable:.0%} "
-        f"({', '.join(items[i].label if i in items else i for i in stability.top_k)})"
+        f"({', '.join(items[i].label for i in stability.top_k)})"
     )
     if evidence["settled"]:
         print(f"settled: the top-{stability.k} order is supported by the comparisons")
@@ -263,12 +352,7 @@ def cmd_next(args: argparse.Namespace) -> int:
     """
     store = Store(domain_dir(args.domain))
     items, comparisons, result = _fit_domain(store)
-    if len(items) < args.grid:
-        print(
-            f"domain {args.domain!r} has {len(items)} item(s), fewer than the "
-            f"requested set size {args.grid}",
-            file=sys.stderr,
-        )
+    if not require_items(args, items, args.grid):
         return 1
     selector = build_selector(
         list(items),
@@ -283,9 +367,7 @@ def cmd_next(args: argparse.Namespace) -> int:
         "domain": args.domain,
         "strategy": strategy,
         "already_judged": frozenset(chosen) in seen,
-        "set": [
-            {"id": item_id, "label": items[item_id].label} for item_id in chosen
-        ],
+        "set": [{"id": item_id, "label": items[item_id].label} for item_id in chosen],
     }
     if args.json:
         print(json.dumps(payload, indent=2))
@@ -314,15 +396,16 @@ def cmd_record(args: argparse.Namespace) -> int:
     kind = args.kind
     if kind == "pair" and len(set_ids) > 2:
         kind = "choice-set"
-    if kind in ("pair", "choice-set"):
+    if args.tie:
+        if kind != "pair" or args.winner is not None:
+            print("--tie applies to a two-item pair without --winner", file=sys.stderr)
+            return 2
+    elif kind in ("pair", "choice-set"):
         if args.winner is None:
-            print(f"a {kind} comparison needs --winner", file=sys.stderr)
+            print(f"a {kind} comparison needs --winner (or --tie)", file=sys.stderr)
             return 2
         if args.winner not in set_ids:
-            print(
-                f"winner {args.winner!r} is not in the compared set",
-                file=sys.stderr,
-            )
+            print(f"winner {args.winner!r} is not in the compared set", file=sys.stderr)
             return 2
     comparison_id = store.record_comparison(
         set_ids,
@@ -351,19 +434,26 @@ def cmd_retract(args: argparse.Namespace) -> int:
 def cmd_compare(args: argparse.Namespace) -> int:
     store = Store(domain_dir(args.domain))
     items, comparisons, result = _fit_domain(store)
-    if len(items) < args.grid:
-        print(f"domain {args.domain!r} has fewer than {args.grid} items -- add more first")
+    if not require_items(args, items, args.grid):
         return 1
 
     selector = build_selector(list(items), comparisons, result, grid_n=args.grid)
     last_id: str | None = None
+    tie = " 't' tie," if args.grid == 2 else ""
 
     for round_n in range(1, args.rounds + 1):
         chosen, strategy = selector.pick_set()
         print(f"\n[{round_n}/{args.rounds}] ({strategy})")
         for i, item_id in enumerate(chosen, start=1):
             print(f"  {i}. {items[item_id].label}")
-        answer = input("  pick number, 's' skip, 'u' undo, 'q' quit: ").strip().lower()
+        try:
+            answer = (
+                input(f"  pick number,{tie} 's' skip, 'u' undo, 'q' quit: ")
+                .strip()
+                .lower()
+            )
+        except EOFError:
+            break
         if answer == "q":
             break
         if answer == "u":
@@ -373,15 +463,25 @@ def cmd_compare(args: argparse.Namespace) -> int:
                 last_id = None
             continue
         if answer == "s":
-            store.record_comparison(chosen, winner=None, kind="skip", context=args.context)
+            store.record_comparison(
+                chosen, winner=None, kind="skip", context=args.context
+            )
             continue
-        if not answer.isdigit() or not (1 <= int(answer) <= len(chosen)):
+        if answer == "t" and args.grid == 2:
+            winner = None
+        elif answer.isdigit() and 1 <= int(answer) <= len(chosen):
+            winner = chosen[int(answer) - 1]
+        else:
             print("  not understood, skipping")
             continue
-        winner = chosen[int(answer) - 1]
-        last_id = store.record_comparison(chosen, winner=winner, kind="pair" if args.grid == 2 else "choice-set", context=args.context)
+        last_id = store.record_comparison(
+            chosen,
+            winner=winner,
+            kind="pair" if args.grid == 2 else "choice-set",
+            context=args.context,
+        )
 
-        comparisons = store.load_comparisons()
+        comparisons = roster_comparisons(items, store.load_comparisons())
         result = fit(list(items.keys()), comparisons)
         selector.update_fit(result)
 
@@ -397,8 +497,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
 def cmd_spin(args: argparse.Namespace) -> int:
     store = Store(domain_dir(args.domain))
     items, _comparisons, result = _fit_domain(store)
-    if not items:
-        print(f"domain {args.domain!r} has no items yet")
+    if not require_items(args, items):
         return 1
     kwargs = {}
     if args.policy == "softmax":
@@ -407,18 +506,906 @@ def cmd_spin(args: argparse.Namespace) -> int:
     if picked is None:
         print("no items to draw from")
         return 1
-    label = items[picked].label if picked in items else picked
-    print(f"{label}  ({args.policy}, id={picked})")
+    print(f"{items[picked].label}  ({args.policy}, id={picked})")
+    return 0
+
+
+def iter_domains():
+    """Every domain under the root: a directory holding an items registry."""
+    if not CAPTURE_ROOT.is_dir():
+        return
+    for registry in sorted(CAPTURE_ROOT.rglob("items.jsonl")):
+        yield registry.parent.relative_to(CAPTURE_ROOT).as_posix()
+
+
+def cmd_list(_args: argparse.Namespace) -> int:
+    for name in iter_domains():
+        store = Store(domain_dir(name))
+        items = store.load_items()
+        comparisons = store.load_comparisons()
+        print(f"{name}: {len(items)} items, {len(comparisons)} comparisons")
+    return 0
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# explain: which item features the operator's choices track
+# ──────────────────────────────────────────────────────────────────────────
+def _logistic(x):
+    if x >= 0:
+        z = math.exp(-x)
+        return 1 / (1 + z)
+    z = math.exp(x)
+    return z / (1 + z)
+
+
+def pair_outcome(comparison):
+    """(a, b, y) for a two-item judgment: y=1 a won, 0 b won, 0.5 a tie."""
+    if comparison.kind != "pair" or len(comparison.set) != 2:
+        return None
+    a, b = comparison.set
+    if comparison.winner is None:
+        return a, b, 0.5
+    if comparison.winner == a:
+        return a, b, 1.0
+    if comparison.winner == b:
+        return a, b, 0.0
+    return None
+
+
+def explain(items, comparisons, result):
+    """Regress standardised feature deltas on the operator's pair choices.
+
+    A question about the items rather than the ranking, so it reads the
+    `features` an image domain's items carry (`add --image-features`).
+    """
+    feats = {}
+    for item_id, item in items.items():
+        f = item.meta.get("features")
+        if isinstance(f, dict):
+            feats[item_id] = {k: float(v) for k, v in f.items()}
+    if not feats:
+        return {
+            "note": "no items carry feature vectors; explain has nothing to work with"
+        }
+    keys = sorted({k for f in feats.values() for k in f})
+
+    def std(k):
+        vals = [f[k] for f in feats.values() if k in f]
+        if len(vals) < 2:
+            return None
+        m = sum(vals) / len(vals)
+        v = sum((x - m) ** 2 for x in vals) / (len(vals) - 1)
+        return math.sqrt(v) or None
+
+    stds = {k: std(k) for k in keys}
+    usable = [k for k in keys if stds[k]]
+
+    rows = []
+    for c in comparisons:
+        outcome = pair_outcome(c)
+        if outcome is None:
+            continue
+        a, b, y = outcome
+        fa, fb = feats.get(a), feats.get(b)
+        if not (fa and fb):
+            continue
+        rows.append(([(fa.get(k, 0.0) - fb.get(k, 0.0)) / stds[k] for k in usable], y))
+
+    weights = [0.0] * len(usable)
+    if rows:
+        lam = 1.0 / len(rows)
+        lr = 0.5
+        for _ in range(2000):
+            grad = [lam * w for w in weights]
+            for x, y in rows:
+                p = _logistic(sum(w * xi for w, xi in zip(weights, x, strict=True)))
+                for i, xi in enumerate(x):
+                    grad[i] += (p - y) * xi / len(rows)
+            weights = [w - lr * g for w, g in zip(weights, grad, strict=True)]
+
+    records = result.records
+
+    def pearson(k):
+        pts = [
+            (feats[i][k], records[i].theta)
+            for i in feats
+            if k in feats[i] and i in records
+        ]
+        if len(pts) < 3:
+            return None
+        mx = sum(p[0] for p in pts) / len(pts)
+        my = sum(p[1] for p in pts) / len(pts)
+        sx = math.sqrt(sum((p[0] - mx) ** 2 for p in pts))
+        sy = math.sqrt(sum((p[1] - my) ** 2 for p in pts))
+        if not sx or not sy:
+            return None
+        return sum((p[0] - mx) * (p[1] - my) for p in pts) / (sx * sy)
+
+    features = []
+    for k, w in zip(usable, weights, strict=True):
+        corr = pearson(k)
+        features.append(
+            {
+                "feature": k,
+                "choice_weight": round(w, 4),
+                "theta_correlation": round(corr, 4) if corr is not None else None,
+            }
+        )
+    features.sort(key=lambda r: -abs(r["choice_weight"]))
+    return {
+        "n_comparisons_used": len(rows),
+        "reading": "choice_weight > 0 means the operator tends to pick the item with the HIGHER value of that feature; theta_correlation is the same question asked of the fitted ranking. Agreement in sign across both = a real pattern; treat |weight| on <10 comparisons as anecdote.",
+        "features": features,
+    }
+
+
+def cmd_explain(args: argparse.Namespace) -> int:
+    store = Store(domain_dir(args.domain))
+    items, comparisons, result = _fit_domain(store)
+    if not require_items(args, items):
+        return 1
+    report = explain(items, comparisons, result)
+    if args.json:
+        print(json.dumps(report, indent=2))
+        return 0
+    if "features" not in report:
+        print(report.get("note", "nothing to explain"))
+        return 0
+    print(f"{report['n_comparisons_used']} feature-bearing comparisons")
+    print(f"({report['reading']})")
+    for f in report["features"]:
+        corr = f["theta_correlation"]
+        corr_s = f"{corr:+.2f}" if corr is not None else "  n/a"
+        print(f"  {f['choice_weight']:+7.3f}  (θ-corr {corr_s})  {f['feature']}")
+    return 0
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# session: a fixed pair page served by the hub, posting to its /feedback spool
+# ──────────────────────────────────────────────────────────────────────────
+PAGE_TEMPLATE = """<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rank: __DOMAIN__</title>
+<style>
+ body{margin:0;background:#111;color:#ddd;font-family:system-ui,sans-serif;display:flex;flex-direction:column;min-height:100vh}
+ #stage{flex:1;display:flex;gap:8px;padding:8px}
+ .opt{flex:1;display:flex;flex-direction:column;cursor:pointer;border:3px solid #333;border-radius:8px;overflow:hidden;background:#1a1a1a}
+ .opt:hover{border-color:#4ea1ff}
+ .opt img{width:100%;height:100%;object-fit:contain;min-height:0;flex:1}
+ .opt .txt{padding:16px;font-size:1.1em;white-space:pre-wrap}
+ .opt .cap{padding:6px 10px;font-size:.8em;color:#888;background:#161616}
+ @media (orientation:portrait){#stage{flex-direction:column}}
+ #bar{display:flex;gap:8px;align-items:center;padding:8px;background:#181818;font-size:.9em}
+ #bar button{background:#2a2a2a;color:#ddd;border:1px solid #444;border-radius:6px;padding:8px 14px;font-size:1em}
+ #done{padding:40px;text-align:center;font-size:1.2em;display:none}
+ #sync{margin-left:auto;color:#7a7}
+</style>
+<div id="stage"></div>
+<div id="done"></div>
+<div id="bar">
+ <span id="progress"></span>
+ <button onclick="answer(null)">tie</button>
+ <button onclick="skip()">skip</button>
+ <button onclick="undo()">undo</button>
+ <span id="sync"></span>
+</div>
+<script>
+const SESSION = __SESSION_JSON__;
+const KEY = "rank-" + SESSION.session;
+let idx = 0, log = JSON.parse(localStorage.getItem(KEY) || "[]");
+idx = log.filter(r => !r.undone).length;
+function card(item, side){
+  const el = document.createElement("div");
+  el.className = "opt";
+  el.onclick = () => answer(side);
+  if (item.image) { const im = document.createElement("img"); im.src = item.image; el.appendChild(im); }
+  if (item.description && !item.image) { const t = document.createElement("div"); t.className = "txt"; t.textContent = item.description; el.appendChild(t); }
+  const c = document.createElement("div"); c.className = "cap"; c.textContent = item.label || item.id; el.appendChild(c);
+  return el;
+}
+function render(){
+  const stage = document.getElementById("stage");
+  stage.innerHTML = "";
+  if (idx >= SESSION.pairs.length){
+    stage.style.display = "none";
+    const d = document.getElementById("done");
+    d.style.display = "block";
+    d.textContent = "Done — " + log.filter(r=>!r.undone).length + " judgments recorded. They are ingested a few seconds after you stop — check with: sinnix rank status " + SESSION.domain;
+    document.getElementById("progress").textContent = "complete";
+    return;
+  }
+  const [a, b] = SESSION.pairs[idx];
+  stage.appendChild(card(SESSION.items[a], a));
+  stage.appendChild(card(SESSION.items[b], b));
+  document.getElementById("progress").textContent = (idx+1) + " / " + SESSION.pairs.length;
+}
+function post(rec){
+  fetch("/feedback", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(rec)})
+    .then(r => { document.getElementById("sync").textContent = r.ok ? "synced" : "spool error " + r.status; })
+    .catch(() => { document.getElementById("sync").textContent = "offline — kept locally, re-open on the hub"; });
+}
+function answer(winner){
+  const pair = SESSION.pairs[idx];
+  const rec = {schema: SESSION.schema, domain: SESSION.domain, session: SESSION.session,
+               id: crypto.randomUUID(), set: pair, winner: winner, at: new Date().toISOString()};
+  log.push(rec);
+  localStorage.setItem(KEY, JSON.stringify(log));
+  post(rec);
+  idx++; render();
+}
+function skip(){ idx++; render(); }
+function undo(){
+  const last = log.filter(r=>!r.undone).pop();
+  if (!last) return;
+  last.undone = true;
+  localStorage.setItem(KEY, JSON.stringify(log));
+  post({schema: SESSION.schema, domain: SESSION.domain, session: SESSION.session, delete: last.id});
+  idx = Math.max(0, idx-1); render();
+}
+document.addEventListener("keydown", e => {
+  if (idx >= SESSION.pairs.length) return;
+  const [a, b] = SESSION.pairs[idx];
+  if (e.key === "1" || e.key === "ArrowLeft") answer(a);
+  else if (e.key === "2" || e.key === "ArrowRight") answer(b);
+  else if (e.key === "t") answer(null);
+  else if (e.key === "s") skip();
+  else if (e.key === "u") undo();
+});
+render();
+</script>
+"""
+
+
+def publish_text(path: Path, text: str) -> None:
+    """Publish a readable page without partial files."""
+    from sinnix_lib.atomic import atomic_publish
+
+    atomic_publish(path, text.encode("utf-8"), fsync=True, mode=0o644)
+
+
+def cmd_session(args: argparse.Namespace) -> int:
+    store = Store(domain_dir(args.domain))
+    items, comparisons, result = _fit_domain(store)
+    if not require_items(args, items, 2):
+        return 1
+    selector = build_selector(list(items), comparisons, result, grid_n=2)
+    pairs = [list(chosen) for chosen, _strategy in selector.pick_sets(args.pairs)]
+    session_id = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    out_dir = REPORTS_DIR / "rank" / args.domain
+    assets = out_dir / "assets"
+    page_items = {}
+    for pair in pairs:
+        for item_id in pair:
+            if item_id in page_items:
+                continue
+            item = items[item_id]
+            entry = {
+                "id": item_id,
+                "label": item.label,
+                "description": item.meta.get("description"),
+            }
+            if item.meta.get("image"):
+                src = Path(item.meta["image"])
+                if not src.exists():
+                    print(f"item {item_id}: image not found: {src}", file=sys.stderr)
+                    return 1
+                assets.mkdir(parents=True, exist_ok=True)
+                dest = assets / f"{item_id}{src.suffix}"
+                if not dest.exists():
+                    shutil.copy2(src, dest)
+                entry["image"] = f"assets/{dest.name}"
+            page_items[item_id] = entry
+    session = {
+        "schema": SCHEMA,
+        "domain": args.domain,
+        "session": session_id,
+        "pairs": pairs,
+        "items": page_items,
+    }
+    page = PAGE_TEMPLATE.replace("__DOMAIN__", html.escape(args.domain)).replace(
+        "__SESSION_JSON__", json.dumps(session)
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"session-{session_id}.html"
+    publish_text(out, page)
+    rel = out.relative_to(REPORTS_DIR)
+    print(f"session page: {out}")
+    print(f"hub URL:      <report-origin>/reports/{rel}   ({len(pairs)} pairs)")
+    return 0
+
+
+def ingest_payload(store, items, payload, seen, tombstoned):
+    """Append one spooled judgment or undo; 'judgment', 'undo' or None."""
+    if "delete" in payload:
+        target = str(payload["delete"])
+        if target in tombstoned:
+            return None
+        append_log(store.comparisons_path, {"delete": target})
+        tombstoned.add(target)
+        return "undo"
+    record_id = payload.get("id")
+    if not record_id or record_id in seen:
+        return None
+    members = payload.get("set")
+    if not isinstance(members, list) or len(members) != 2:
+        return None
+    members = [str(m) for m in members]
+    winner = payload.get("winner")
+    winner = str(winner) if winner is not None else None
+    if (
+        len(set(members)) != 2
+        or any(m not in items for m in members)
+        or (winner is not None and winner not in members)
+    ):
+        return None
+    append_log(
+        store.comparisons_path,
+        {
+            "id": str(record_id),
+            "at": str(payload.get("at") or ""),
+            "kind": "pair",
+            "set": members,
+            "winner": winner,
+            "weight": 1.0,
+            "context": payload.get("session"),
+        },
+    )
+    seen.add(record_id)
+    return "judgment"
+
+
+def cmd_ingest(args: argparse.Namespace) -> int:
+    """Drain the hub feedback spool into the domains its records name.
+
+    Idempotent: a record is appended only if its domain's log has never
+    carried that id (tombstoned ones included), so it runs safely on every
+    spool arrival and by hand.
+    """
+    wanted = set(args.domains) or None
+    payloads: dict[str, list[dict]] = {}
+    for spool in sorted(FEEDBACK_DIR.glob("*.jsonl")):
+        for line in spool.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line).get("payload") or {}
+            except (json.JSONDecodeError, AttributeError):
+                continue
+            if not isinstance(payload, dict) or payload.get("schema") != SCHEMA:
+                continue
+            name = payload.get("domain")
+            if isinstance(name, str) and (wanted is None or name in wanted):
+                payloads.setdefault(name, []).append(payload)
+    for name, records in sorted(payloads.items()):
+        try:
+            store = Store(domain_dir(name))
+        except ValueError as error:
+            print(f"{name!r}: skipped ({error})", file=sys.stderr)
+            continue
+        items = store.load_items()
+        if not items:
+            print(f"{name!r}: skipped (no such domain)", file=sys.stderr)
+            continue
+        replay = read_log(store.comparisons_path)
+        seen, tombstoned = set(replay.seen_ids), set(replay.tombstoned)
+        counts = {"judgment": 0, "undo": 0}
+        for payload in records:
+            outcome = ingest_payload(store, items, payload, seen, tombstoned)
+            if outcome:
+                counts[outcome] += 1
+        print(f"{name}: ingested {counts['judgment']} judgments, {counts['undo']} undos")
+    return 0
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# serve: live side-by-side comparison on a loopback page
+# ──────────────────────────────────────────────────────────────────────────
+# `session` renders a fixed pair list into a file the hub serves, so nothing
+# can refit between taps. `serve` is the same judgment against a live process:
+# it refits after every answer, so the next pair is chosen from what the
+# operator just said, and a 126-image roster is one sitting rather than rounds
+# of page, tap, drain, refit. It selects through `rank_core.build_selector`,
+# which deliberately bridges components; without that, a cold roster's thetas
+# stay mutually meaningless however long the operator clicks.
+SERVE_PAGE = """<!doctype html>
+<meta charset="utf-8">
+<title>rank: __DOMAIN__</title>
+<style>
+ html,body{margin:0;height:100%;background:#0b0b0b;color:#ddd;
+           font-family:system-ui,sans-serif;overflow:hidden}
+ #stage{position:absolute;inset:0 0 34px 0;display:flex;gap:6px;padding:6px}
+ .opt{flex:1;position:relative;display:flex;align-items:center;justify-content:center;
+      border:2px solid #222;border-radius:6px;overflow:hidden;background:#000;cursor:pointer}
+ .opt:hover{border-color:#4ea1ff}
+ .opt img{max-width:100%;max-height:100%;object-fit:contain}
+ .opt .cap{position:absolute;left:0;bottom:0;padding:2px 8px;font-size:12px;
+           color:#9a9a9a;background:rgba(0,0,0,.65)}
+ #bar{position:absolute;left:0;right:0;bottom:0;height:34px;display:flex;align-items:center;
+      gap:20px;padding:0 12px;font-size:13px;background:#141414;color:#8a8a8a;
+      white-space:nowrap;overflow:hidden}
+ #err{color:#e07a5f}
+ #done{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+       flex-direction:column;gap:12px;font-size:20px;text-align:center;padding:40px}
+</style>
+<div id="stage">
+ <div class="opt" id="left"></div>
+ <div class="opt" id="right"></div>
+</div>
+<div id="done"></div>
+<div id="bar">
+ <span>&larr;/&rarr; pick &middot; d draw &middot; s skip &middot; u undo &middot; q quit</span>
+ <span id="count"></span><span id="stab"></span><span id="lead"></span><span id="err"></span>
+</div>
+<script>
+const CONFIG = __CONFIG_JSON__;
+let cur = null, busy = false, over = false;
+const el = id => document.getElementById(id);
+function newId(){
+  if (self.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return "c-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+}
+function paint(side, item){
+  const box = el(side);
+  box.textContent = "";
+  const img = document.createElement("img");
+  img.src = item.src;
+  img.alt = item.label;
+  box.appendChild(img);
+  const cap = document.createElement("div");
+  cap.className = "cap";
+  cap.textContent = item.label;
+  box.appendChild(cap);
+  box.onclick = () => answer(side === "left" ? cur.a.id : cur.b.id);
+}
+function status(s){
+  el("count").textContent = s.comparisons + " comparisons · " + s.judged_items + "/" +
+    s.items + " items seen · " + s.components + " groups";
+  el("stab").textContent = "top-" + s.stability.k + " stability p=" +
+    s.stability.p_stable + (s.stability.settled ? " (settled)" : "");
+  el("lead").textContent = s.top.length ? "leader: " + s.top[0].label : "";
+}
+function finish(s){
+  over = true;
+  el("stage").style.display = "none";
+  const d = el("done");
+  d.style.display = "flex";
+  d.textContent = s.recorded_this_session + " judgments recorded this run, " +
+    s.comparisons + " in the domain. The server has stopped. " +
+    "Read the ranking with: sinnix rank status " + CONFIG.domain;
+}
+function show(payload){
+  if (payload.status) status(payload.status);
+  if (payload.done || !payload.pair){ finish(payload.status); return; }
+  cur = payload.pair;
+  paint("left", cur.a);
+  paint("right", cur.b);
+  (payload.preload || []).forEach(url => { const im = new Image(); im.src = url; });
+}
+async function call(path, body){
+  if (busy || over) return;
+  busy = true;
+  try {
+    const opts = body ? {method: "POST", headers: {"Content-Type": "application/json"},
+                         body: JSON.stringify(body)} : {};
+    const r = await fetch(path, opts);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    el("err").textContent = "";
+    show(await r.json());
+  } catch (e) {
+    el("err").textContent = "error: " + e.message + " (nothing recorded)";
+  } finally {
+    busy = false;
+  }
+}
+const answer = winner => cur && call("/answer",
+  {id: newId(), set: [cur.a.id, cur.b.id], winner: winner});
+const skip = () => cur && call("/skip", {set: [cur.a.id, cur.b.id]});
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowLeft" || e.key === "1") cur && answer(cur.a.id);
+  else if (e.key === "ArrowRight" || e.key === "2") cur && answer(cur.b.id);
+  else if (e.key === "d" || e.key === "t") answer(null);
+  else if (e.key === "s") skip();
+  else if (e.key === "u") call("/undo", {});
+  else if (e.key === "q") call("/quit", {});
+  else return;
+  e.preventDefault();
+});
+call("/next");
+</script>
+"""
+
+
+class ServeSession:
+    """The comparison loop's live state.
+
+    The append-only log is the truth and everything here is a view of it,
+    rebuilt after every judgment: a run is resumable because starting a second
+    time over the same domain reconstructs the same state.
+    """
+
+    def __init__(self, domain, top_k=10, seed=None, stability_samples=200, session=None):
+        self.domain = domain
+        self.store = Store(domain_dir(domain))
+        self.items = self.store.load_items()
+        self.ids = list(self.items)
+        self.top_k = max(1, min(top_k, len(self.ids)))
+        self.stability_samples = stability_samples
+        self.session = session or (
+            "serve-" + dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+        )
+        self.rng = random.Random(seed)
+        self.selector = None
+        self.lock = threading.RLock()
+        self.queue = []
+        self.recorded = []
+        self.done = False
+        self.reload()
+
+    # ── state ────────────────────────────────────────────────────────────
+    def reload(self):
+        # Dedup against every id the log has ever carried, tombstones
+        # included, re-read on every judgment: a record the operator undid is
+        # still one this domain has seen, and the hub drain appends to the
+        # same log while this loop runs.
+        replay = read_log(self.store.comparisons_path)
+        self.known_ids = replay.seen_ids | replay.tombstoned
+        self.comparisons = roster_comparisons(self.items, self.store.load_comparisons())
+        self.fit = fit(self.ids, self.comparisons)
+        self.selector = build_selector(
+            self.ids, self.comparisons, self.fit, grid_n=2, rng=self.rng
+        )
+        self.judged = {
+            frozenset(c.set)
+            for c in self.comparisons
+            if c.kind == "pair" and len(c.set) == 2
+        }
+
+    def status(self):
+        stability = top_k_stability(
+            self.fit, k=self.top_k, samples=self.stability_samples, seed=0
+        )
+        records = self.fit.records
+        return {
+            "domain": self.domain,
+            "items": len(self.ids),
+            "comparisons": len(self.comparisons),
+            "recorded_this_session": len(self.recorded),
+            "judged_items": sum(1 for r in records.values() if r.matches > 0),
+            "components": len({r.component for r in records.values()}),
+            "stability": {
+                "k": stability.k,
+                "p_stable": round(stability.p_stable, 3),
+                "settled": stability.p_stable >= DEFAULT_STOP_AT,
+                "top_k": list(stability.top_k),
+            },
+            "top": [
+                {
+                    "id": r.id,
+                    "label": self.items[r.id].label,
+                    "theta": round(r.theta, 3),
+                    "se": round(r.se, 3),
+                }
+                for r in self.fit.ranked()[: self.top_k]
+            ],
+        }
+
+    # ── pair supply ──────────────────────────────────────────────────────
+    def _pick(self):
+        queued = {frozenset(p) for p in self.queue}
+        chosen = None
+        for _ in range(40):
+            candidate, _strategy = self.selector.pick_set()
+            key = frozenset(candidate)
+            chosen = candidate
+            if len(key) == 2 and key not in self.judged and key not in queued:
+                return candidate
+        # Fresh pairs exhausted, or the selector keeps landing on judged ones:
+        # re-asking beats stalling the loop, and a repeated comparison is
+        # evidence about consistency rather than a duplicate record.
+        return chosen
+
+    def _fill(self):
+        while len(self.queue) < 2:
+            pair = self._pick()
+            if not pair or len(set(pair)) < 2:
+                break
+            self.queue.append(list(pair))
+
+    def _drop(self, members):
+        key = frozenset(members)
+        self.queue = [p for p in self.queue if frozenset(p) != key]
+
+    def _card(self, item_id):
+        return {
+            "id": item_id,
+            "label": self.items[item_id].label,
+            "src": f"/image/{urllib.parse.quote(item_id)}",
+        }
+
+    def next_payload(self):
+        with self.lock:
+            if self.done:
+                return {"done": True, "status": self.status()}
+            self._fill()
+            if not self.queue:
+                return {"done": True, "status": self.status()}
+            a, b = self.queue[0]
+            ahead = self.queue[1] if len(self.queue) > 1 else []
+            return {
+                "pair": {"a": self._card(a), "b": self._card(b)},
+                "preload": [self._card(i)["src"] for i in ahead],
+                "status": self.status(),
+            }
+
+    def _pair(self, members):
+        if not isinstance(members, list) or len(members) != 2:
+            raise ValueError(f"a judgment names exactly two items: {members!r}")
+        members = [str(m) for m in members]
+        if any(m not in self.items for m in members) or members[0] == members[1]:
+            raise ValueError(f"not a comparable pair of roster items: {members!r}")
+        return members
+
+    # ── judgments ────────────────────────────────────────────────────────
+    def answer(self, record_id, members, winner):
+        with self.lock:
+            members = self._pair(members)
+            winner = str(winner) if winner is not None else None
+            if winner is not None and winner not in members:
+                raise ValueError(f"winner {winner!r} is not one of {members!r}")
+            record_id = str(record_id or uuid.uuid4())
+            self.reload()
+            if record_id not in self.known_ids:
+                append_log(
+                    self.store.comparisons_path,
+                    {
+                        "id": record_id,
+                        "kind": "pair",
+                        "set": members,
+                        "winner": winner,
+                        "weight": 1.0,
+                        "context": self.session,
+                    },
+                )
+                self.recorded.append(record_id)
+                self.reload()
+            self._drop(members)
+            return self.next_payload()
+
+    def skip(self, members):
+        with self.lock:
+            self._drop(self._pair(members))
+            return self.next_payload()
+
+    def undo(self):
+        with self.lock:
+            if self.recorded:
+                self.store.undo(self.recorded.pop())
+                self.reload()
+            return self.next_payload()
+
+    def finish(self):
+        with self.lock:
+            self.done = True
+            return {"done": True, "status": self.status()}
+
+
+class ServeHandler(BaseHTTPRequestHandler):
+    """Loopback-only JSON/image surface for SERVE_PAGE."""
+
+    protocol_version = "HTTP/1.1"
+    server_version = "sinnix-rank"
+    sys_version = ""
+    session_state = None
+
+    def log_message(self, fmt, *args):
+        pass
+
+    # ── plumbing ─────────────────────────────────────────────────────────
+    def _send(self, code, body, content_type, extra=None):
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        for key, value in (extra or {}).items():
+            self.send_header(key, value)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, payload, code=200):
+        self._send(code, json.dumps(payload).encode(), "application/json")
+
+    def _read_body(self):
+        from sinnix_lib.http import read_body
+
+        raw = read_body(
+            self.headers,
+            self.rfile,
+            max_bytes=sys.maxsize,
+            require_content_length=False,
+        )
+        body = json.loads(raw or b"{}")
+        if not isinstance(body, dict):
+            raise ValueError("request body must be a JSON object")
+        return body
+
+    # ── routes ───────────────────────────────────────────────────────────
+    def _browser_request_allowed(self):
+        # Reachability is not authorization for web content. Validate Host
+        # before serving private views as well as mutations (DNS rebinding),
+        # and reject cross-origin browser requests before reading their body.
+        hosts = self.headers.get_all("Host", [])
+        origins = self.headers.get_all("Origin", [])
+        sites = self.headers.get_all("Sec-Fetch-Site", [])
+        bind_host, port = self.server.server_address[:2]
+        allowed = {str(bind_host).lower(), self.server.configured_host.lower()}
+        if allowed & {"127.0.0.1", "localhost", "::1"}:
+            allowed.update({"127.0.0.1", "localhost", "::1"})
+        try:
+            host = (
+                urllib.parse.urlsplit("http://" + hosts[0]) if len(hosts) == 1 else None
+            )
+            valid = (
+                host is not None
+                and host.hostname in allowed
+                and (host.port if host.port is not None else 80) == port
+                and host.username is None
+                and host.password is None
+                and not host.path
+                and not host.query
+                and not host.fragment
+                and len(origins) <= 1
+                and len(sites) <= 1
+                and (not sites or sites[0] in {"none", "same-origin"})
+            )
+            if valid and origins:
+                origin = urllib.parse.urlsplit(origins[0])
+                valid = (
+                    origin.scheme == "http"
+                    and origin.hostname == host.hostname
+                    and (origin.port if origin.port is not None else 80) == port
+                    and origin.username is None
+                    and origin.password is None
+                    and not origin.path
+                    and not origin.query
+                    and not origin.fragment
+                )
+        except ValueError:
+            valid = False
+        if not valid:
+            self.close_connection = True
+            self._json({"error": "browser request origin or host refused"}, 403)
+        return valid
+
+    def do_GET(self):
+        if not self._browser_request_allowed():
+            return
+        state = self.session_state
+        path = urllib.parse.urlparse(self.path).path
+        if path == "/":
+            page = SERVE_PAGE.replace("__DOMAIN__", html.escape(state.domain)).replace(
+                "__CONFIG_JSON__", json.dumps({"domain": state.domain})
+            )
+            self._send(200, page.encode(), "text/html; charset=utf-8")
+        elif path == "/next":
+            self._json(state.next_payload())
+        elif path == "/status":
+            self._json(state.status())
+        elif path.startswith("/image/"):
+            self._image(urllib.parse.unquote(path[len("/image/") :]))
+        else:
+            self._json({"error": "not found"}, 404)
+
+    def _image(self, item_id):
+        # The roster is the only source of paths, so a crafted request reaches
+        # no file the operator did not register.
+        item = self.session_state.items.get(item_id)
+        image = item.meta.get("image") if item else None
+        source = Path(image) if image else None
+        if source is None or not source.is_file():
+            self._json({"error": f"no image for item {item_id}"}, 404)
+            return
+        content_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+        self._send(
+            200, source.read_bytes(), content_type, {"Cache-Control": "max-age=3600"}
+        )
+
+    def do_POST(self):
+        if not self._browser_request_allowed():
+            return
+        content_types = self.headers.get_all("Content-Type", [])
+        if len(content_types) > 1 or (
+            content_types
+            and content_types[0].split(";", 1)[0].strip().lower() != "application/json"
+        ):
+            self.close_connection = True
+            self._json({"error": "expected application/json"}, 415)
+            return
+        state = self.session_state
+        path = urllib.parse.urlparse(self.path).path
+        try:
+            body = self._read_body()
+            if path == "/answer":
+                self._json(
+                    state.answer(body.get("id"), body.get("set"), body.get("winner"))
+                )
+            elif path == "/skip":
+                self._json(state.skip(body.get("set")))
+            elif path == "/undo":
+                self._json(state.undo())
+            elif path == "/quit":
+                self._json(state.finish())
+                threading.Thread(target=self.server.shutdown, daemon=True).start()
+            else:
+                self._json({"error": "not found"}, 404)
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+            self._json({"error": str(exc)}, 400)
+
+
+def build_serve_server(domain, host="127.0.0.1", port=0, top_k=10, seed=None):
+    """(bound server, session). Browser origin/host checks are not user authentication."""
+    state = ServeSession(domain, top_k=top_k, seed=seed)
+    handler = type("BoundServeHandler", (ServeHandler,), {"session_state": state})
+    server = ThreadingHTTPServer((host, port), handler)
+    server.configured_host = host
+    return server, state
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    store = Store(domain_dir(args.domain))
+    if not require_items(args, store.load_items(), 2):
+        return 1
+    server, state = build_serve_server(
+        args.domain, host=args.host, port=args.port, top_k=args.top_k
+    )
+    url = f"http://{args.host}:{server.server_port}/"
+    missing = [
+        item_id
+        for item_id, item in state.items.items()
+        if not Path(item.meta.get("image") or "").is_file()
+    ]
+    if missing:
+        print(
+            f"{len(missing)} item(s) have no readable image, e.g. {', '.join(missing[:5])}",
+            file=sys.stderr,
+        )
+    print(f"{args.domain}: {len(state.ids)} items, {len(state.comparisons)} comparisons")
+    # Flushed: the URL is the only way in, and a redirected stdout would hold
+    # it in the buffer until the server stops.
+    print(f"serving {url}  (left/right pick, d draw, s skip, u undo, q quit)", flush=True)
+    if args.open:
+        try:
+            subprocess.Popen(
+                ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+        except OSError as exc:
+            print(
+                f"could not open a browser ({exc}); the URL above still works",
+                file=sys.stderr,
+            )
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    print(f"recorded {len(state.recorded)} comparisons")
     return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Pairwise preference ranking over any domain")
+    parser = argparse.ArgumentParser(
+        description="Preference ranking over any item domain"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     add = sub.add_parser("add", help="register items into a domain")
     add.add_argument("domain")
-    add.add_argument("--items", required=True, help="path to a JSON array or JSONL of {id,label,...}, or '-' for stdin")
+    add.add_argument(
+        "--items",
+        required=True,
+        help="path to a JSON array or JSONL of {id,label,...}, or '-' for stdin; "
+        "image, description and features fields are kept",
+    )
     add.add_argument(
         "--allow-duplicate-labels",
         action="store_true",
@@ -428,6 +1415,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--revise",
         action="store_true",
         help="relabel existing ids instead of refusing them; comparisons already recorded against the id are kept",
+    )
+    add.add_argument(
+        "--image-features",
+        action="store_true",
+        help="compute a feature vector for each new item carrying an `image` path (for `explain`)",
     )
     add.set_defaults(func=cmd_add)
 
@@ -442,11 +1434,12 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("domain")
     record.add_argument("--set", required=True, help="comma-separated item ids that were compared")
     record.add_argument("--winner", default=None, help="the id the operator chose")
+    record.add_argument("--tie", action="store_true", help="a two-item pair judged equal")
     record.add_argument(
         "--kind",
         default="pair",
         choices=sorted(VALID_KINDS),
-        help="pair/choice-set need a winner; skip and incomparable do not",
+        help="pair/choice-set need a winner (or --tie for a pair); skip and incomparable do not",
     )
     record.add_argument("--context", default=None)
     record.set_defaults(func=cmd_record)
@@ -478,10 +1471,55 @@ def build_parser() -> argparse.ArgumentParser:
     spin.add_argument("domain")
     policy_group = spin.add_mutually_exclusive_group()
     policy_group.add_argument("--top", action="store_const", dest="policy", const="top")
-    policy_group.add_argument("--thompson", action="store_const", dest="policy", const="thompson")
-    policy_group.add_argument("--softmax", type=float, dest="softmax_temperature", default=None)
+    policy_group.add_argument(
+        "--thompson", action="store_const", dest="policy", const="thompson"
+    )
+    policy_group.add_argument(
+        "--softmax", type=float, dest="softmax_temperature", default=None
+    )
     spin.set_defaults(policy="thompson")
     spin.set_defaults(func=cmd_spin)
+
+    explain_parser = sub.add_parser(
+        "explain", help="which item features the operator's choices track"
+    )
+    explain_parser.add_argument("domain")
+    explain_parser.add_argument("--json", action="store_true")
+    explain_parser.set_defaults(func=cmd_explain)
+
+    session = sub.add_parser(
+        "session", help="render a pair page on the hub; taps post to its /feedback spool"
+    )
+    session.add_argument("domain")
+    session.add_argument("-n", "--pairs", type=int, default=20)
+    session.set_defaults(func=cmd_session)
+
+    ingest = sub.add_parser(
+        "ingest", help="move hub session judgments from the feedback spool into domains"
+    )
+    ingest.add_argument("domains", nargs="*", help="limit to these domains (default: all)")
+    ingest.set_defaults(func=cmd_ingest)
+
+    serve = sub.add_parser(
+        "serve", help="live side-by-side image comparison on a loopback page"
+    )
+    serve.add_argument("domain")
+    serve.add_argument("--host", default="127.0.0.1")
+    # Ephemeral by default: this is an operator-run foreground process, not a
+    # declared service, so it must not claim a number flake/data/ports.nix
+    # arbitrates. The URL is printed, and --open follows it.
+    serve.add_argument("--port", type=int, default=0)
+    serve.add_argument(
+        "--top-k",
+        type=int,
+        default=10,
+        help="how many leaders the stopping statistic must agree on",
+    )
+    serve.add_argument("--open", action="store_true", help="launch the page with xdg-open")
+    serve.set_defaults(func=cmd_serve)
+
+    listing = sub.add_parser("list", help="list domains with item and comparison counts")
+    listing.set_defaults(func=cmd_list)
 
     return parser
 
@@ -490,10 +1528,13 @@ def main(argv: list[str] | None = None) -> int:
     os.umask(0o077)
     parser = build_parser()
     args = parser.parse_args(argv)
-    try:
-        domain_dir(args.domain)
-    except (OSError, ValueError, RuntimeError) as error:
-        parser.error(f"invalid domain: {error}")
+    for name in [getattr(args, "domain", None), *getattr(args, "domains", [])]:
+        if name is None:
+            continue
+        try:
+            domain_dir(name)
+        except (OSError, ValueError, RuntimeError) as error:
+            parser.error(f"invalid domain: {error}")
     if args.command == "spin":
         if getattr(args, "softmax_temperature", None) is not None:
             args.policy = "softmax"

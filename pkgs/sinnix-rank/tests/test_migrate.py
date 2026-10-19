@@ -1,23 +1,37 @@
-"""`sinnix-rank-pairs`'s fit is `rank_core.fit`, and it fits what it used to.
+"""A migrated rank-pairs domain fits exactly as it did before the merge.
 
-`legacy_fit_bradley_terry` below is the fitter this file carried before the
-consolidation, kept verbatim as the reference the shared engine has to
-reproduce. It pins the numerical contract of a live domain: an existing
-`model.json` must not move because the model moved houses. Deleting it costs
-the only evidence that the ranking the operator has been reading is the same
-ranking.
-
-Parity is proved over randomised comparison sets against a 126-item roster
-matching the live wallpaper domain's shape, because that domain's own
-comparisons are all tombstoned -- a fit over it has nothing to disagree about.
+`legacy_fit_bradley_terry` is the fitter sinnix-rank-pairs carried before the
+engine consolidation, kept verbatim. The live wallpaper domain was ranked
+under it, so the one-shot `sinnix-rank-migrate-elicit` conversion must leave
+`sinnix-rank` producing the same theta, se and match counts from the
+converted store, over every record shape the old log could hold.
 """
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import math
 import random
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
 
 import pytest
+
+MIGRATE_PATH = (
+    Path(__file__).resolve().parents[3] / "scripts" / "sinnix-rank-migrate-elicit"
+)
+
+
+def _load_migrate():
+    loader = SourceFileLoader("sinnix_rank_migrate", str(MIGRATE_PATH))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+migrate = _load_migrate()
 
 BT_EPS = 1e-12
 ROSTER_SIZE = 126
@@ -235,90 +249,70 @@ def assert_same_fit(expected, actual):
         assert got["matches"] == pytest.approx(want["matches"])
 
 
+
+def write_legacy(directory: Path, items, records):
+    directory.mkdir(parents=True)
+    (directory / "items.json").write_text(json.dumps(items))
+    with (directory / "comparisons.jsonl").open("w") as handle:
+        for record in records:
+            record.setdefault("at", "2026-08-13T14:12:37Z")
+            handle.write(json.dumps(record) + "\n")
+
+
+def migrated_fit(rank, store):
+    _items, _comparisons, result = rank._fit_domain(store)
+    return {
+        r.id: {"id": r.id, "theta": r.theta, "se": r.se, "matches": r.matches}
+        for r in result.records.values()
+    }
+
+
 @pytest.mark.parametrize("seed", range(10))
-def test_fit_reproduces_the_pre_consolidation_model(seed, elicit_module):
+def test_a_migrated_domain_fits_as_the_old_tool_did(seed, rank_module, store, tmp_path):
     rng = random.Random(seed)
     items = synthetic_roster(rng, priors=seed % 2 == 0)
-    comparisons = synthetic_comparisons(
+    records = synthetic_comparisons(
         rng, items, count=60 * (seed % 5 + 1), dangling=seed * 3
     )
-    assert_same_fit(
-        legacy_fit_bradley_terry(items, comparisons),
-        elicit_module.fit_bradley_terry(items, comparisons),
-    )
+    legacy = tmp_path / "elicit" / "wallpaper"
+    write_legacy(legacy, items, records)
+
+    migrate.migrate(legacy, store.domain_dir)
+
+    assert_same_fit(legacy_fit_bradley_terry(items, records), migrated_fit(rank_module, store))
 
 
-def test_fit_reproduces_the_pre_consolidation_model_with_no_comparisons(elicit_module):
-    """The cold-start shape: every item present, flat, and the se the
-    selection heuristic sorts on."""
-    items = synthetic_roster(random.Random(99))
-    assert_same_fit(
-        legacy_fit_bradley_terry(items, []),
-        elicit_module.fit_bradley_terry(items, []),
-    )
-
-
-def test_a_tie_is_two_half_weight_records(elicit_module):
-    """The one representational change: a pairwise tie has no top-1 winner, so
-    it becomes two half-weight records. It must still be one comparison's worth
-    of evidence for each item, and must leave them level."""
-    items = [{"id": "a"}, {"id": "b"}]
-    fitted = elicit_module.fit_bradley_terry(
-        items, [{"id": "t", "kind": "pair", "a": "a", "b": "b", "outcome": 0.5}]
-    )
-    assert fitted["a"]["matches"] == 1.0
-    assert fitted["b"]["matches"] == 1.0
-    assert fitted["a"]["theta"] == pytest.approx(fitted["b"]["theta"])
-
-
-def test_a_comparison_naming_an_unknown_item_is_dropped_not_ranked(elicit_module):
-    """rank_core fits comparison-only ids; this domain must not.
-
-    items.json is the operator's declared roster. A record naming an id that
-    is no longer on it is evidence about something deleted, and letting the
-    engine seed it would put that item back into `rank` output and into the
-    pair selection.
-    """
-    items = [{"id": "a"}, {"id": "b"}]
-    comparisons = [
-        {"id": "1", "kind": "pair", "a": "a", "b": "b", "outcome": 1.0},
-        {"id": "2", "kind": "pair", "a": "ghost", "b": "b", "outcome": 1.0},
-        {
-            "id": "3",
-            "kind": "choice-set",
-            "set": ["a", "b", "ghost"],
-            "winner": "ghost",
-        },
+def test_tombstones_and_ids_survive_the_migration(rank_module, store, tmp_path):
+    items = [{"id": "a", "label": "A", "image": "/x/a.png"}, {"id": "b"}]
+    records = [
+        {"id": "kept", "kind": "pair", "a": "a", "b": "b", "outcome": 0.0},
+        {"id": "undone", "kind": "pair", "a": "a", "b": "b", "outcome": 1.0},
+        {"id": "t1", "delete": "undone"},
+        {"id": "undone", "kind": "pair", "a": "a", "b": "b", "outcome": 1.0},
+        {"id": "tie", "kind": "pair", "a": "a", "b": "b", "outcome": 0.5},
+        {"id": "broken", "kind": "pair", "a": "a", "b": "b", "outcome": "bad"},
     ]
-    fitted = elicit_module.fit_bradley_terry(items, comparisons)
-    assert set(fitted) == {"a", "b"}
+    legacy = tmp_path / "elicit" / "wallpaper"
+    write_legacy(legacy, items, records)
 
-    from rank_core import fit as rank_core_fit
+    migrate.migrate(legacy, store.domain_dir)
 
-    engine_ids = set(
-        rank_core_fit(
-            ["a", "b"], elicit_module.to_comparisons(comparisons, {"a", "b", "ghost"})
-        ).records
-    )
-    assert "ghost" in engine_ids
+    registry = store.load_items()
+    assert registry["a"].label == "A" and registry["a"].meta == {"image": "/x/a.png"}
+    assert registry["b"].label == "b"
+    live = {c.id: c for c in store.load_comparisons()}
+    assert set(live) == {"kept", "tie", "broken"}
+    assert live["kept"].winner == "b"
+    assert live["tie"].kind == "pair" and live["tie"].winner is None
+    assert live["broken"].kind == "incomparable"
+    lines = (store.domain_dir / "comparisons.jsonl").read_text().splitlines()
+    assert len(lines) == len(records)
 
 
-def test_item_prior_does_not_move_the_converged_fit(elicit_module):
-    """`prior` chose the MM starting point and nothing else. The anchored
-    objective has one maximum, so dropping it leaves the fit where it was --
-    which is why the engine has no prior to carry."""
-    rng = random.Random(7)
-    plain = synthetic_roster(rng, size=40)
-    comparisons = synthetic_comparisons(random.Random(8), plain, count=200)
-    primed = [
-        dict(item, prior=round(random.Random(item["id"]).uniform(-2, 2), 3))
-        for item in plain
-    ]
-    assert_same_fit(
-        legacy_fit_bradley_terry(plain, comparisons),
-        legacy_fit_bradley_terry(primed, comparisons),
-    )
-    assert_same_fit(
-        legacy_fit_bradley_terry(primed, comparisons),
-        elicit_module.fit_bradley_terry(primed, comparisons),
-    )
+def test_the_migration_refuses_a_populated_target(store, tmp_path):
+    legacy = tmp_path / "elicit" / "wallpaper"
+    write_legacy(legacy, [{"id": "a"}, {"id": "b"}], [])
+    store.domain_dir.mkdir(parents=True)
+    (store.domain_dir / "items.jsonl").write_text("{}\n")
+    with pytest.raises(SystemExit, match="not empty"):
+        migrate.migrate(legacy, store.domain_dir)

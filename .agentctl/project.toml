@@ -222,9 +222,9 @@ result = "exit"
 cache = "none"
 timeout_seconds = 3600
 
-[operations.rank_pairs_ingest]
-description = "Ingest queued comparison judgments and refit changed models"
-exec = ["sinnix-rank-pairs", "autoingest"]
+[operations.rank_ingest]
+description = "Move ranking judgments posted to the hub into their domains"
+exec = ["sinnix-rank", "ingest"]
 pool = "normal"
 result = "exit"
 cache = "none"

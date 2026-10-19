@@ -33,7 +33,6 @@ def hub_server_factory(tmp_path: Path) -> Iterator[Callable[..., str]]:
         inventory_path: Path | None = None,
         hub_manifest: Path | None = None,
         feedback: FeedbackSpool | None = None,
-        elicit_model_dir: Path | None = None,
         actions: Any = None,
     ) -> str:
         builder = SnapshotBuilder(tmp_path / "status.json", tmp_path / "token", sources)
@@ -48,7 +47,6 @@ def hub_server_factory(tmp_path: Path) -> Iterator[Callable[..., str]]:
         server.hub_manifest = hub_manifest
         server.inventory_path = inventory_path or tmp_path / "missing-inventory.json"
         server.feedback = feedback
-        server.elicit_model_dir = elicit_model_dir or tmp_path / "missing-elicit"
         servers.append(server)
         threading.Thread(target=server.serve_forever, daemon=True).start()
         return f"http://127.0.0.1:{server.server_address[1]}"

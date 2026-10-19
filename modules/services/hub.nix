@@ -28,9 +28,9 @@
 # `/feedback` is a route on that same hub server, writing the same append-only
 # JSONL an earlier standalone feedback daemon wrote (same envelope, same
 # file-per-UTC-day, same fsync per line -- agents read those files directly).
-# Arrival of a `sinnix-elicit-v1` record starts the ingest that a 120s timer used
-# to run, coalesced so a comparison session refits the model once rather than
-# once per tap.
+# Arrival of a `sinnix-rank-v1` judgment starts the ingest that a 120s timer used
+# to run, coalesced so a comparison session is drained once rather than once
+# per tap.
 #
 # Auth: the hub server treats its Unix socket as authorized (it is 0600 in the
 # operator's runtime dir) and still demands a bearer token on its loopback TCP
@@ -506,9 +506,9 @@ mkServiceModule {
 
       # The pages are rendered by the hub server, which needs the manifest this
       # module owns the content of; so is /feedback, which needs the spool
-      # directory. Rank-pairs ingest execution is the hub server's declared AgentCTL
+      # directory. Ranking ingest is the hub server's declared AgentCTL
       # operation: the hub server requests and waits for it without acquiring
-      # access to the elicit state itself.
+      # access to the ranking store itself.
       sinnix.services.hub-server = {
         hubManifest = manifest;
         feedbackDir = cfg.feedbackDir;
@@ -638,7 +638,7 @@ mkServiceModule {
 
       home-manager.users.${userName} = {
         home.packages = [
-          scriptPkgs.sinnix-rank-pairs
+          scriptPkgs.sinnix-rank
         ];
 
         systemd.user.services.sinnix-hub = {

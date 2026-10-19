@@ -22,14 +22,12 @@ from sinnix_lib.systemd import sd_notify, watchdog_period
 from . import health, pages
 from . import inventory as runtime_inventory
 from .actions import ActionError, ActionService
-from .feedback import ELICIT_MODEL_DIR_DEFAULT, FeedbackSpool, resolve_elicit_model
-from .feedback import ELICIT_SCHEMA as FEEDBACK_ELICIT_SCHEMA
+from .feedback import FeedbackSpool
 from .feedback import MAX_BODY as FEEDBACK_MAX_BODY
 from .feedback import SCHEMA as FEEDBACK_SCHEMA
 from .snapshot import SnapshotBuilder
 
 FEEDBACK_PATH = "/feedback"
-FEEDBACK_ELICIT_PREFIX = "/feedback/elicit/"
 FAILURE_PATH = "/v1/health/failure"
 BODY_LENGTH_ERRORS = frozenset(
     {
@@ -83,9 +81,9 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _cors(self) -> None:
-        """Only /feedback and its elicit-model read carry these.
+        """Only /feedback carries these.
 
-        A generated report (and an elicit comparison session, which is one)
+        A generated report (and a ranking session page, which is one)
         is often opened straight off disk as file://, whose Origin is null,
         and the handback must work from there. The action API deliberately
         gets the opposite treatment -- the hub's Caddy site refuses a
@@ -139,67 +137,6 @@ class Handler(BaseHTTPRequestHandler):
         )
         self._write_feedback(HTTPStatus.CREATED, {"schema": FEEDBACK_SCHEMA, **result})
 
-    def _serve_elicit_model(self, domain: str) -> None:
-        """GET /feedback/elicit/<domain> -- the domain's own latest fitted
-        model, read straight off disk. See feedback.py's module docstring for
-        why this is a different decision from the spool's own "no read
-        endpoint": this reads a derived fit over items the operator already
-        defined, not an arbitrary posted payload. `resolve_elicit_model`
-        does the admission (charset, path-under-root); a missing file is a
-        normal "no rank yet" 404, not a rejected request."""
-        base_dir: Path = self.server.elicit_model_dir  # type: ignore[attr-defined]
-        try:
-            model_path = resolve_elicit_model(base_dir, domain)
-            if model_path is None:
-                self._write_feedback(
-                    HTTPStatus.BAD_REQUEST, {"error": "invalid elicit domain name"}
-                )
-                return
-            raw = model_path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            try:
-                (base_dir / domain / "model.json").lstat()
-            except FileNotFoundError:
-                self._write_feedback(
-                    HTTPStatus.NOT_FOUND,
-                    {"error": "no fitted model for this domain yet"},
-                )
-                return
-            except OSError as error:
-                self._write_feedback(
-                    HTTPStatus.SERVICE_UNAVAILABLE,
-                    {"error": f"fitted model unavailable: {error}"},
-                )
-                return
-            self._write_feedback(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {"error": "fitted model entry exists but its target is unavailable"},
-            )
-            return
-        except OSError as error:
-            self._write_feedback(
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                {"error": f"fitted model unavailable: {error}"},
-            )
-            return
-        except UnicodeError as error:
-            self._write_feedback(
-                HTTPStatus.BAD_GATEWAY,
-                {"error": f"model.json is malformed: {error}"},
-            )
-            return
-        try:
-            model = json.loads(raw)
-        except json.JSONDecodeError as error:
-            self._write_feedback(
-                HTTPStatus.BAD_GATEWAY, {"error": f"model.json is malformed: {error}"}
-            )
-            return
-        self._write_feedback(
-            HTTPStatus.OK,
-            {"schema": FEEDBACK_ELICIT_SCHEMA, "domain": domain, "model": model},
-        )
-
     def _record_failure(self) -> None:
         """systemd's OnFailure hook, routed into the process that owns the
         dedup state so the fast path and the sweep cannot drift apart."""
@@ -239,7 +176,7 @@ class Handler(BaseHTTPRequestHandler):
         self._write(HTTPStatus.CREATED, {"status": "recorded", "unit": unit})
 
     def do_OPTIONS(self) -> None:
-        # application/json is not a CORS-simple content type, so every elicit
+        # application/json is not a CORS-simple content type, so every ranking
         # judgment is preflighted before it is posted.
         if self.path != FEEDBACK_PATH:
             self._write(HTTPStatus.NOT_FOUND, {"error": "not_found"})
@@ -323,8 +260,6 @@ class Handler(BaseHTTPRequestHandler):
                     "accepts": "POST application/json",
                 },
             )
-        elif self.path.startswith(FEEDBACK_ELICIT_PREFIX):
-            self._serve_elicit_model(self.path.removeprefix(FEEDBACK_ELICIT_PREFIX))
         elif route.startswith("/v1/observe/"):
             try:
                 self._write(
@@ -521,7 +456,6 @@ def serve(
     hub_manifest: Path | None = None,
     inventory_path: Path = Path("/etc/sinnix/runtime-inventory.json"),
     feedback: FeedbackSpool | None = None,
-    elicit_model_dir: Path = ELICIT_MODEL_DIR_DEFAULT,
     emitter_factory: Callable[[], health.Emitter] = health.Emitter,
     sweep_interval: float = health.SWEEP_INTERVAL_SECONDS,
 ) -> None:
@@ -532,7 +466,6 @@ def serve(
         server.hub_manifest = hub_manifest  # type: ignore[attr-defined]
         server.inventory_path = inventory_path  # type: ignore[attr-defined]
         server.feedback = feedback  # type: ignore[attr-defined]
-        server.elicit_model_dir = elicit_model_dir  # type: ignore[attr-defined]
         server.emitter_factory = emitter_factory  # type: ignore[attr-defined]
 
     watchdog = watchdog_period()

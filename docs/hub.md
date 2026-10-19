@@ -111,8 +111,6 @@ wrapped with receive time, referring page and a sequence number. There is no
 route that reads the inbox back. POST routes require exactly one
 `application/json` Content-Type.
 
-A `sinnix-elicit-v1` submission starts `sinnix-rank-pairs autoingest` a few
-seconds after the last tap, so a burst of comparisons is fitted once.
-`GET /feedback/elicit/<domain>` returns that domain's fitted `model.json`, so a
-comparison session can show progress; the domain name is checked and confined
-to the elicit state root.
+A `sinnix-rank-v1` submission (a `sinnix rank session` page) starts
+`sinnix-rank ingest` a few seconds after the last tap, so a burst of
+comparisons is drained once.

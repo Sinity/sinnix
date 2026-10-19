@@ -1,8 +1,8 @@
-"""The hub's annotation spool, and the elicit drain it triggers.
+"""The hub's annotation spool, and the ranking drain it triggers.
 
 Ported from an earlier standalone feedback daemon. The spool file format is
 the contract -- agents read `<spool>/<UTC-date>.jsonl` directly, and the
-generated reports and elicit sessions POST to `/feedback` -- so the envelope,
+generated reports and `sinnix rank session` pages POST to `/feedback` -- so the envelope,
 its key order, its spacing and its fsync-per-line are reproduced exactly rather
 than re-expressed through a shared ledger helper with compact separators.
 
@@ -18,32 +18,17 @@ Deliberately minimal, and each omission is a decision carried over intact:
   * permissive CORS -- reports are also opened straight off disk as file://
     (Origin: null), and the handback must work there too.
 
-What is new is the trigger. An elicit comparison session posts one record per
+What is new is the trigger. A ranking session page posts one record per
 judgment, and those records used to sit in the spool until a 120s timer drained
 them. Arrival is the event, so arrival is what runs the drain -- coalesced,
-because a session is a burst of posts and refitting a Bradley-Terry model once
-per tap would be absurd.
-
-Also new: a narrow, bounded READ for elicit's own fitted model
-(`resolve_elicit_model`), which is a different thing from the spool's "no
-read endpoint" decision above and does not revisit it. The spool refusal is
-about serving back *arbitrary posted payloads* -- the personal-analysis
-annotations an operator writes about a report, which the operator never
-asked to see echoed over the network. An elicit domain's `model.json` is
-not that: it is a derived Bradley-Terry fit over items the operator
-themselves defined (`sinnix rank-pairs init`), on this same host, and the
-in-session "learning so far" preview a comparison page wants to show is
-just that fit read back mid-session rather than after the next full page
-load. Bounded the same way the rest of the hub is bounded: domain names are
-validated against a fixed charset, and the resolved path must stay under
-the configured preferences root -- never an arbitrary filesystem read.
+because a session is a burst of posts and draining once per tap would be
+absurd.
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import json
-import re
 import subprocess
 import sys
 import threading
@@ -53,13 +38,9 @@ from typing import Any
 from sinnix_lib.ledger import append_jsonl
 
 SCHEMA = "sinnix-hub-feedback-v1"
-ELICIT_SCHEMA = "sinnix-elicit-v1"
+# Stamped by `sinnix rank session` pages on each judgment they post.
+RANK_SCHEMA = "sinnix-rank-v1"
 MAX_BODY = 1 << 20  # 1 MiB: a generous annotated report, not a file upload
-
-# Mirrors sinnix-rank-pairs's own BASE_DIR default (scripts/sinnix-rank-pairs); a
-# domain writes its model at <root>/<domain>/model.json.
-ELICIT_MODEL_DIR_DEFAULT = Path("/realm/state/elicit")
-ELICIT_DOMAIN_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 def parse_command_argv(raw: str) -> list[str]:
@@ -75,24 +56,6 @@ def parse_command_argv(raw: str) -> list[str]:
     ):
         raise ValueError("command must be a nonempty JSON argv array of strings")
     return command
-
-
-def resolve_elicit_model(base_dir: Path, domain: str) -> Path | None:
-    """The `model.json` path for *domain* under *base_dir*, or None if the
-    domain name is not a plain identifier or the resolved path would not
-    stay under the configured root (defence in depth alongside the charset
-    check -- a domain of "." or ".." never matches the regex, but a
-    resolved-path check costs nothing and does not rely on the regex being
-    the only guard). Existence is the caller's problem, not this
-    function's: a missing model.json (no `rank` run yet) is a normal state,
-    not a rejected request."""
-    if not ELICIT_DOMAIN_RE.match(domain):
-        return None
-    root = base_dir.resolve()
-    candidate = (base_dir / domain / "model.json").resolve()
-    if candidate != root and root not in candidate.parents:
-        return None
-    return candidate
 
 
 class CoalescingTrigger:
@@ -163,10 +126,10 @@ class CoalescingTrigger:
 
 class FeedbackSpool:
     def __init__(
-        self, directory: Path, elicit: CoalescingTrigger | None = None
+        self, directory: Path, rank_ingest: CoalescingTrigger | None = None
     ) -> None:
         self.directory = Path(directory)
-        self.elicit = elicit
+        self.rank_ingest = rank_ingest
         self.lock = threading.Lock()
         self.sequence = 0
 
@@ -190,8 +153,8 @@ class FeedbackSpool:
             append_jsonl(
                 target, envelope, mode=0o644, fsync=True, separators=(", ", ": ")
             )
-        if self.elicit is not None and is_elicit(payload):
-            self.elicit.trigger()
+        if self.rank_ingest is not None and is_rank_judgment(payload):
+            self.rank_ingest.trigger()
         return {
             "status": "spooled",
             "sequence": envelope["sequence"],
@@ -199,5 +162,5 @@ class FeedbackSpool:
         }
 
 
-def is_elicit(payload: Any) -> bool:
-    return isinstance(payload, dict) and payload.get("schema") == ELICIT_SCHEMA
+def is_rank_judgment(payload: Any) -> bool:
+    return isinstance(payload, dict) and payload.get("schema") == RANK_SCHEMA

@@ -192,24 +192,13 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--elicit-command",
+        "--rank-ingest-command",
         default=None,
         type=feedback.parse_command_argv,
         help=(
-            "Command run (coalesced) when a sinnix-rank-pairs record lands in the "
-            "feedback spool, replacing the periodic drain. Given as a JSON "
-            "argv array; absent means nothing is triggered."
-        ),
-    )
-    parser.add_argument(
-        "--elicit-model-dir",
-        type=Path,
-        default=feedback.ELICIT_MODEL_DIR_DEFAULT,
-        help=(
-            "sinnix-rank-pairs's own preferences root (its --items/rank state, one "
-            "directory per domain). Read-only: GET /feedback/elicit/<domain> "
-            "serves that domain's latest model.json back, so an elicit "
-            "comparison session can preview 'learning so far' mid-session."
+            "Command run (coalesced) when a `sinnix rank session` judgment lands "
+            "in the feedback spool. Given as a JSON argv array; absent means "
+            "nothing is triggered."
         ),
     )
     parser.add_argument(
@@ -261,8 +250,12 @@ def main() -> None:
         layer.receipts_path,
         agent_jobs=agentctl,
     )
-    elicit = CoalescingTrigger(args.elicit_command) if args.elicit_command else None
-    feedback_spool = FeedbackSpool(layer.feedback_spool_dir, elicit=elicit)
+    rank_ingest = (
+        CoalescingTrigger(args.rank_ingest_command)
+        if args.rank_ingest_command
+        else None
+    )
+    feedback_spool = FeedbackSpool(layer.feedback_spool_dir, rank_ingest=rank_ingest)
     fds = list(range(3, 3 + int(os.environ.get("LISTEN_FDS", "0"))))
     serve(
         builder,
@@ -273,5 +266,4 @@ def main() -> None:
         hub_manifest=args.hub_manifest,
         inventory_path=args.inventory,
         feedback=feedback_spool,
-        elicit_model_dir=args.elicit_model_dir,
     )
