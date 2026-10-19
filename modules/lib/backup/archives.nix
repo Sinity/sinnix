@@ -245,12 +245,14 @@
     '';
   })
 
-  # Backup policy is indefinite lossless retention: no archive is deleted
-  # because of its age, count or size. Compaction only reclaims segment
-  # space that no archive references, so every archive ever written stays
-  # addressable and restorable.
+  # Retention thins each archive series to: everything from the last 7 days,
+  # then one archive per day for 30 days, per week for 26 weeks and per month
+  # for 24 months. A file version that existed only between kept archives is
+  # gone after the prune. Each series is pruned on its own, because Borg
+  # treats every archive matched by one glob as a single timeline; repos hold
+  # older series under retired names.
   (mkBackupJob "borgbackup-maintenance" {
-    description = "Compact Borg backup repositories";
+    description = "Prune and compact Borg backup repositories";
     unit = {
       after = [
         outerRealmMountUnit
@@ -306,6 +308,7 @@
 
       maintain_repo() {
         repo="$1"
+        shift
         if [ ! -e "''${repo#file://}/config" ]; then
           echo "Skipping uninitialized repo $repo"
           return
@@ -313,14 +316,20 @@
 
         acquire_borg_global_lock_or_skip "Borg maintenance"
         recover_stale_borg_locks "$repo"
+        for series in "$@"; do
+          with_borg_lock borg prune --lock-wait ${toString borgLockWaitSec} --list \
+            --glob-archives "$series" \
+            --keep-within 7d --keep-daily 30 --keep-weekly 26 --keep-monthly 24 \
+            "$repo"
+        done
         with_borg_lock borg compact --lock-wait ${toString borgLockWaitSec} "$repo"
       }
 
-      maintain_repo ${lib.escapeShellArg borgRepoPersist}
-      maintain_repo ${lib.escapeShellArg borgRepoRealm}
-      maintain_repo ${lib.escapeShellArg borgRepoSinexBlobs}
-      maintain_repo ${lib.escapeShellArg borgRepoRootSnapshots}
-      maintain_repo ${lib.escapeShellArg borgRepoPolylogueState}
+      maintain_repo ${lib.escapeShellArg borgRepoPersist} 'persist-*' 'sinnix-prime-persist-*'
+      maintain_repo ${lib.escapeShellArg borgRepoRealm} 'realm-*' 'sinnix-prime-realm-*' 'machine-telemetry-dumps-*'
+      maintain_repo ${lib.escapeShellArg borgRepoSinexBlobs} 'sinex-blobs-*'
+      maintain_repo ${lib.escapeShellArg borgRepoRootSnapshots} 'root-*'
+      maintain_repo ${lib.escapeShellArg borgRepoPolylogueState} 'polylogue-state-*'
     '';
   })
 

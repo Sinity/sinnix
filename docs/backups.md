@@ -1,8 +1,17 @@
 # Backups
 
 Everything is backed up locally to Borg repositories on the HDD at
-`/outer-realm/backup/`. Nothing is stored off-site. Borg archives are never
-pruned automatically; the HDD's free space is the only limit.
+`/outer-realm/backup/`. Nothing is stored off-site.
+
+## Retention
+
+`borgbackup-maintenance` (daily 04:50) prunes every archive series, then
+compacts. Each series keeps everything from the last 7 days, then one archive
+per day for 30 days, per week for 26 weeks and per month for 24 months. A file
+version that existed only between kept archives cannot be restored after the
+prune, and nothing older than about two years survives. Archives written under
+retired names (`sinnix-prime-*`, `machine-telemetry-dumps-*`) are pruned as
+their own series.
 
 ## What is backed up
 
@@ -98,5 +107,6 @@ compressed telemetry dump, `agentctl job start sinnix verify_telemetry_restore
 ## Known gaps
 
 * **No off-site copy.** A failed HDD loses every backup.
-* **The HDD is close to full**, and archives are never pruned. When it fills,
-  new archives fail and snapshots accumulate on `/realm`.
+* **The HDD also holds `/outer-realm/archive`**, primary data with no other
+  copy. When the disk fills, new archives fail and snapshots accumulate on
+  `/realm`.
