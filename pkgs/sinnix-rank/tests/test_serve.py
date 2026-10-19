@@ -113,7 +113,11 @@ def test_a_judgment_lands_in_the_store_in_the_domains_own_record_shape(
 
     client.post(
         "/answer",
-        {"id": "j1", "set": [pair["a"]["id"], pair["b"]["id"]], "winner": pair["a"]["id"]},
+        {
+            "id": "j1",
+            "set": [pair["a"]["id"], pair["b"]["id"]],
+            "winner": pair["a"]["id"],
+        },
     )
 
     records = judgments(image_domain)
@@ -136,7 +140,11 @@ def test_a_resubmitted_judgment_is_appended_once_even_after_it_was_undone(
     wallpaper log."""
     client, _state = serving
     pair = client.json_get("/next")["pair"]
-    body = {"id": "j1", "set": [pair["a"]["id"], pair["b"]["id"]], "winner": pair["a"]["id"]}
+    body = {
+        "id": "j1",
+        "set": [pair["a"]["id"], pair["b"]["id"]],
+        "winner": pair["a"]["id"],
+    }
 
     client.post("/answer", body)
     client.post("/answer", body)
@@ -180,7 +188,11 @@ def test_undo_tombstones_rather_than_rewriting_the_log(serving, image_domain):
     pair = client.json_get("/next")["pair"]
     client.post(
         "/answer",
-        {"id": "j1", "set": [pair["a"]["id"], pair["b"]["id"]], "winner": pair["b"]["id"]},
+        {
+            "id": "j1",
+            "set": [pair["a"]["id"], pair["b"]["id"]],
+            "winner": pair["b"]["id"],
+        },
     )
 
     payload = client.post("/undo", {})
@@ -202,7 +214,11 @@ def test_an_already_judged_pair_is_not_asked_again_while_fresh_ones_remain(
         asked.append(key)
         client.post(
             "/answer",
-            {"id": f"j{index}", "set": [pair["a"]["id"], pair["b"]["id"]], "winner": pair["a"]["id"]},
+            {
+                "id": f"j{index}",
+                "set": [pair["a"]["id"], pair["b"]["id"]],
+                "winner": pair["a"]["id"],
+            },
         )
 
 
@@ -296,7 +312,11 @@ def test_a_second_run_resumes_from_the_log(rank_module, domain, serving):
     pair = client.json_get("/next")["pair"]
     client.post(
         "/answer",
-        {"id": "j1", "set": [pair["a"]["id"], pair["b"]["id"]], "winner": pair["a"]["id"]},
+        {
+            "id": "j1",
+            "set": [pair["a"]["id"], pair["b"]["id"]],
+            "winner": pair["a"]["id"],
+        },
     )
 
     resumed = rank_module.ServeSession(domain, top_k=2, seed=1)

@@ -894,7 +894,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             outcome = ingest_payload(store, items, payload, seen, tombstoned)
             if outcome:
                 counts[outcome] += 1
-        print(f"{name}: ingested {counts['judgment']} judgments, {counts['undo']} undos")
+        print(
+            f"{name}: ingested {counts['judgment']} judgments, {counts['undo']} undos"
+        )
     return 0
 
 
@@ -1024,7 +1026,9 @@ class ServeSession:
     time over the same domain reconstructs the same state.
     """
 
-    def __init__(self, domain, top_k=10, seed=None, stability_samples=200, session=None):
+    def __init__(
+        self, domain, top_k=10, seed=None, stability_samples=200, session=None
+    ):
         self.domain = domain
         self.store = Store(domain_dir(domain))
         self.items = self.store.load_items()
@@ -1304,7 +1308,9 @@ class ServeHandler(BaseHTTPRequestHandler):
         if source is None or not source.is_file():
             self._json({"error": f"no image for item {item_id}"}, 404)
             return
-        content_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+        content_type = (
+            mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+        )
         self._send(
             200, source.read_bytes(), content_type, {"Cache-Control": "max-age=3600"}
         )
@@ -1368,10 +1374,14 @@ def cmd_serve(args: argparse.Namespace) -> int:
             f"{len(missing)} item(s) have no readable image, e.g. {', '.join(missing[:5])}",
             file=sys.stderr,
         )
-    print(f"{args.domain}: {len(state.ids)} items, {len(state.comparisons)} comparisons")
+    print(
+        f"{args.domain}: {len(state.ids)} items, {len(state.comparisons)} comparisons"
+    )
     # Flushed: the URL is the only way in, and a redirected stdout would hold
     # it in the buffer until the server stops.
-    print(f"serving {url}  (left/right pick, d draw, s skip, u undo, q quit)", flush=True)
+    print(
+        f"serving {url}  (left/right pick, d draw, s skip, u undo, q quit)", flush=True
+    )
     if args.open:
         try:
             subprocess.Popen(
@@ -1425,16 +1435,24 @@ def build_parser() -> argparse.ArgumentParser:
 
     nxt = sub.add_parser("next", help="print the next comparison set without prompting")
     nxt.add_argument("domain")
-    nxt.add_argument("--grid", type=int, default=2, help="items per choice set (2 = pairwise)")
+    nxt.add_argument(
+        "--grid", type=int, default=2, help="items per choice set (2 = pairwise)"
+    )
     nxt.add_argument("--seed", type=int, default=None)
     nxt.add_argument("--json", action="store_true")
     nxt.set_defaults(func=cmd_next)
 
-    record = sub.add_parser("record", help="record one operator judgment non-interactively")
+    record = sub.add_parser(
+        "record", help="record one operator judgment non-interactively"
+    )
     record.add_argument("domain")
-    record.add_argument("--set", required=True, help="comma-separated item ids that were compared")
+    record.add_argument(
+        "--set", required=True, help="comma-separated item ids that were compared"
+    )
     record.add_argument("--winner", default=None, help="the id the operator chose")
-    record.add_argument("--tie", action="store_true", help="a two-item pair judged equal")
+    record.add_argument(
+        "--tie", action="store_true", help="a two-item pair judged equal"
+    )
     record.add_argument(
         "--kind",
         default="pair",
@@ -1449,17 +1467,25 @@ def build_parser() -> argparse.ArgumentParser:
     retract.add_argument("--comparison", required=True)
     retract.set_defaults(func=cmd_retract)
 
-    compare = sub.add_parser("compare", help="interactive pairwise/choice-set prompting session")
+    compare = sub.add_parser(
+        "compare", help="interactive pairwise/choice-set prompting session"
+    )
     compare.add_argument("domain")
-    compare.add_argument("--grid", type=int, default=2, help="items per choice set (2 = pairwise)")
+    compare.add_argument(
+        "--grid", type=int, default=2, help="items per choice set (2 = pairwise)"
+    )
     compare.add_argument("--rounds", type=int, default=20)
     compare.add_argument("--report-every", type=int, default=5)
-    compare.add_argument("--k", type=int, default=1, help="top-k for the stopping statistic")
+    compare.add_argument(
+        "--k", type=int, default=1, help="top-k for the stopping statistic"
+    )
     compare.add_argument("--stop-at", type=float, default=DEFAULT_STOP_AT)
     compare.add_argument("--context", default=None)
     compare.set_defaults(func=cmd_compare)
 
-    status = sub.add_parser("status", help="show the fitted ranking + stopping statement")
+    status = sub.add_parser(
+        "status", help="show the fitted ranking + stopping statement"
+    )
     status.add_argument("domain")
     status.add_argument("--k", type=int, default=1)
     status.add_argument("--stop-at", type=float, default=DEFAULT_STOP_AT)
@@ -1488,7 +1514,8 @@ def build_parser() -> argparse.ArgumentParser:
     explain_parser.set_defaults(func=cmd_explain)
 
     session = sub.add_parser(
-        "session", help="render a pair page on the hub; taps post to its /feedback spool"
+        "session",
+        help="render a pair page on the hub; taps post to its /feedback spool",
     )
     session.add_argument("domain")
     session.add_argument("-n", "--pairs", type=int, default=20)
@@ -1497,7 +1524,9 @@ def build_parser() -> argparse.ArgumentParser:
     ingest = sub.add_parser(
         "ingest", help="move hub session judgments from the feedback spool into domains"
     )
-    ingest.add_argument("domains", nargs="*", help="limit to these domains (default: all)")
+    ingest.add_argument(
+        "domains", nargs="*", help="limit to these domains (default: all)"
+    )
     ingest.set_defaults(func=cmd_ingest)
 
     serve = sub.add_parser(
@@ -1515,10 +1544,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=10,
         help="how many leaders the stopping statistic must agree on",
     )
-    serve.add_argument("--open", action="store_true", help="launch the page with xdg-open")
+    serve.add_argument(
+        "--open", action="store_true", help="launch the page with xdg-open"
+    )
     serve.set_defaults(func=cmd_serve)
 
-    listing = sub.add_parser("list", help="list domains with item and comparison counts")
+    listing = sub.add_parser(
+        "list", help="list domains with item and comparison counts"
+    )
     listing.set_defaults(func=cmd_list)
 
     return parser

@@ -249,7 +249,6 @@ def assert_same_fit(expected, actual):
         assert got["matches"] == pytest.approx(want["matches"])
 
 
-
 def write_legacy(directory: Path, items, records):
     directory.mkdir(parents=True)
     (directory / "items.json").write_text(json.dumps(items))
@@ -279,7 +278,9 @@ def test_a_migrated_domain_fits_as_the_old_tool_did(seed, rank_module, store, tm
 
     migrate.migrate(legacy, store.domain_dir)
 
-    assert_same_fit(legacy_fit_bradley_terry(items, records), migrated_fit(rank_module, store))
+    assert_same_fit(
+        legacy_fit_bradley_terry(items, records), migrated_fit(rank_module, store)
+    )
 
 
 def test_tombstones_and_ids_survive_the_migration(rank_module, store, tmp_path):

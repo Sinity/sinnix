@@ -6,9 +6,14 @@ import argparse
 import json
 
 
-def test_a_session_page_posts_rank_judgments_for_its_domain(rank_module, domain, store, tmp_path):
+def test_a_session_page_posts_rank_judgments_for_its_domain(
+    rank_module, domain, store, tmp_path
+):
     store.add_items(
-        [rank_module.Item(id=i, label=f"option {i}", meta={"description": i}) for i in "abcd"]
+        [
+            rank_module.Item(id=i, label=f"option {i}", meta={"description": i})
+            for i in "abcd"
+        ]
     )
 
     assert rank_module.cmd_session(argparse.Namespace(domain=domain, pairs=3)) == 0
@@ -29,7 +34,9 @@ def test_explain_tracks_the_feature_the_choices_follow(rank_module, domain, stor
             rank_module.Item(
                 id=f"i{n}",
                 label=f"item {n}",
-                meta={"features": {"brightness": float(n), "noise": float((n * 7) % 5)}},
+                meta={
+                    "features": {"brightness": float(n), "noise": float((n * 7) % 5)}
+                },
             )
             for n in range(6)
         ]

@@ -7,9 +7,7 @@ from pathlib import Path
 
 import pytest
 
-MODULE = runpy.run_path(
-    str(Path(__file__).parents[3] / "scripts/sinnix-file-catalog")
-)
+MODULE = runpy.run_path(str(Path(__file__).parents[3] / "scripts/sinnix-file-catalog"))
 TEMPLATE = '<html data-accent=""><head><title>Example</title></head><body><script>/* shared controls */</script></body></html>'
 
 
