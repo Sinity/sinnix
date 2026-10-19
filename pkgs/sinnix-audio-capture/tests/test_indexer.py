@@ -226,3 +226,30 @@ def test_historical_raw_reference_still_suppresses_duplicate_after_rename(tmp_pa
         "previous_paths": [str(tmp_path / "old-audio")]}]}))
     assert indexer.run_index_pass(capture_root=tmp_path, channels=("mic",), since_ts=0,
                                   catalog_path=catalog) == 0
+
+
+def test_undecodable_segment_is_recorded_once_and_does_not_stop_the_pass(
+    tmp_path: Path, monkeypatch
+):
+    import json
+    import subprocess
+
+    _fake_vad(monkeypatch)
+    _write_segment(tmp_path, "audio-mic-20260812T100000Z.opus").write_bytes(b"")
+    _write_segment(tmp_path, "audio-mic-20260812T110000Z.opus")
+
+    def decode(_bin, path):
+        if path.stat().st_size == 0:
+            raise subprocess.CalledProcessError(
+                183, ["ffmpeg"], stderr=b"Error opening input files: Invalid data found\n"
+            )
+        return b"\x00" * 32000
+
+    monkeypatch.setattr(indexer, "decode_to_pcm16k_mono", decode)
+
+    assert indexer.run_index_pass(capture_root=tmp_path, channels=("mic",), since_ts=0) == 2
+    assert indexer.run_index_pass(capture_root=tmp_path, channels=("mic",), since_ts=0) == 0
+    records = [json.loads(line) for line in _lane_records(tmp_path)]
+    failed = [r for r in records if "decode_error" in json.dumps(r)]
+    assert len(records) == 2 and len(failed) == 1
+    assert "decoded_seconds" not in json.dumps(failed[0])

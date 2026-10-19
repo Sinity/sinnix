@@ -319,9 +319,26 @@ def run_index_pass(
             # same string so a pass never re-decodes what it already recorded.
             if str(segment_path) in seen:
                 continue
-            pcm = decode_to_pcm16k_mono(ffmpeg_bin, segment_path)
-            spans = _speech_spans_for_segment(model, pcm)
             segment_start = segment_start_ts(segment_path)
+            try:
+                pcm = decode_to_pcm16k_mono(ffmpeg_bin, segment_path)
+            except subprocess.CalledProcessError as error:
+                # One undecodable segment (a recorder killed right after
+                # opening a file leaves it empty) must not fail every later
+                # pass. Record it once so it is neither retried nor read as
+                # measured silence.
+                stderr = (error.stderr or b"").decode(errors="replace").strip()
+                payload = build_index_payload(
+                    channel=channel,
+                    segment_path=segment_path,
+                    segment_start=segment_start,
+                    speech_spans=[],
+                )
+                payload["decode_error"] = stderr.splitlines()[-1] if stderr else f"exit {error.returncode}"
+                writer.write(payload, raw_ref=str(segment_path))
+                indexed += 1
+                continue
+            spans = _speech_spans_for_segment(model, pcm)
             payload = build_index_payload(
                 channel=channel,
                 segment_path=segment_path,
