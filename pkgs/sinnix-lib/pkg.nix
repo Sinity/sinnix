@@ -31,7 +31,6 @@ python3Packages.buildPythonPackage {
     "sinnix_lib.phone_inbox"
     "sinnix_lib.procfs"
     "sinnix_lib.process"
-    "sinnix_lib.spool"
     "sinnix_lib.systemd"
     "sinnix_lib.values"
     "sinnix_lib.layout"

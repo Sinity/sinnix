@@ -283,3 +283,30 @@ def test_publish_streams_bounded_chunks_and_retains_old_file_on_read_failure(
         os.close(directory)
     assert target.read_bytes() == (b"previous" if fail else payload)
     assert sorted(path.name for path in tmp_path.iterdir()) == ["state"]
+
+
+def test_a_writer_killed_mid_write_leaves_no_temporary(tmp_path):
+    """SIGKILL skips every cleanup path, so the content must have no name yet.
+
+    The hub's state directory collected two dozen ``.reducer.json.*tmp``
+    files from kills during write and fsync. Mutation: allocate the named
+    temporary first (drop the O_TMPFILE branch in ``_allocate``) and the
+    dying child leaves ``.state.atomic-tmp-*`` behind.
+    """
+    import io
+
+    target = tmp_path / "state"
+    target.write_bytes(b"previous")
+
+    class Dying(io.BytesIO):
+        def read(self, size=-1):
+            os._exit(9)
+
+    pid = os.fork()
+    if pid == 0:
+        atomic_publish(target, Dying(b"never"), fsync=True)
+        os._exit(0)
+    _, status = os.waitpid(pid, 0)
+    assert os.waitstatus_to_exitcode(status) == 9
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["state"]
+    assert target.read_bytes() == b"previous"
