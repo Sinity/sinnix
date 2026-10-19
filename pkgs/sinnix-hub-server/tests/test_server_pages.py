@@ -205,7 +205,7 @@ def test_prepare_and_execute_share_the_http_target_contract(
     actions = ActionService(
         lambda: {"sequence": 999},
         inventory,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         adapter=lambda *_: calls.append("restart") or {},
         unit_state_prober=lambda *_: live,
     )

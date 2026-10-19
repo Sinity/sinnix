@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 from sinnix_hub_server import actions as actions_module
 from sinnix_hub_server.actions import (
-    RECEIPTS_MIGRATION_SCHEMA,
     ActionError,
     ActionService,
     process_admitted_slices,
@@ -26,20 +25,15 @@ def receipt_service(root: Path) -> ActionService:
     return ActionService(
         lambda: {},
         root / "inventory.json",
-        root / "receipts.json",
+        root / "receipts.jsonl",
         adapter=lambda *_: pytest.fail("receipt loading must not dispatch actions"),
     )
 
 
 @pytest.mark.skipif(os.geteuid() == 0, reason="root bypasses read permissions")
-@pytest.mark.parametrize("name", ["receipts.json", "receipts.jsonl"])
-def test_receipts_unreadable_history_is_not_empty(tmp_path, name):
-    path = tmp_path / name
-    original = (
-        b'{"prior":{"idempotency_key":"prior","status":"accepted"}}'
-        if path.suffix == ".json"
-        else b'{"idempotency_key":"prior","status":"accepted"}\n'
-    )
+def test_receipts_unreadable_history_is_not_empty(tmp_path):
+    path = tmp_path / "receipts.jsonl"
+    original = b'{"idempotency_key":"prior","status":"accepted"}\n'
     path.write_bytes(original)
     path.chmod(0)
     try:
@@ -50,66 +44,20 @@ def test_receipts_unreadable_history_is_not_empty(tmp_path, name):
     finally:
         path.chmod(0o600)
     assert path.read_bytes() == original
-    if path.suffix == ".json":
-        assert not (tmp_path / "receipts.jsonl").exists()
 
 
-@pytest.mark.parametrize(
-    "name,body",
-    [
-        ("receipts.json", b"{invalid"),
-        ("receipts.json", b"[]"),
-        ("receipts.json", b'{"bad":"not a receipt"}'),
-        ("receipts.jsonl", b'{"idempotency_key":"prior"}\n{invalid\n'),
-    ],
-)
-def test_receipts_malformed_history_is_not_partial_success(tmp_path, name, body):
-    path = tmp_path / name
+def test_receipts_malformed_history_is_not_partial_success(tmp_path):
+    path = tmp_path / "receipts.jsonl"
+    body = b'{"idempotency_key":"prior"}\n{invalid\n'
     path.write_bytes(body)
     with pytest.raises(ActionError) as error:
         receipt_service(tmp_path)
     assert error.value.status == 503
     assert path.read_bytes() == body
-    if path.suffix == ".json":
-        assert not (tmp_path / "receipts.jsonl").exists()
 
 
-def test_receipts_migration_serialization_failure_publishes_nothing(
-    tmp_path, monkeypatch
-):
-    legacy = tmp_path / "receipts.json"
-    rows = {
-        "old-1": {"idempotency_key": "old-1", "status": "accepted"},
-        "old-2": {"idempotency_key": "old-2", "status": "rejected"},
-    }
-    legacy.write_text(json.dumps(rows))
-    before = legacy.read_bytes()
-    real_dumps = json.dumps
-    calls = 0
-
-    def fail_second(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            raise RuntimeError("synthetic serialization interruption")
-        return real_dumps(*args, **kwargs)
-
-    with monkeypatch.context() as patch:
-        patch.setattr(json, "dumps", fail_second)
-        with pytest.raises(RuntimeError, match="synthetic serialization"):
-            receipt_service(tmp_path)
-    assert not (tmp_path / "receipts.jsonl").exists()
-    assert legacy.read_bytes() == before
-    resumed = receipt_service(tmp_path)
-    assert resumed.lookup("old-1") == rows["old-1"]
-    assert resumed.lookup("old-2") == rows["old-2"]
-    assert (tmp_path / "receipts.jsonl").stat().st_mode & 0o777 == 0o600
-    assert legacy.read_bytes() == before
-
-
-@pytest.mark.parametrize("name", ["receipts.json", "receipts.jsonl"])
-def test_receipts_io_failure_is_unavailable(tmp_path, monkeypatch, name):
-    path = tmp_path / name
+def test_receipts_io_failure_is_unavailable(tmp_path, monkeypatch):
+    path = tmp_path / "receipts.jsonl"
     path.write_text("{}\n")
     before = path.read_bytes()
     real_open = os.open
@@ -126,17 +74,15 @@ def test_receipts_io_failure_is_unavailable(tmp_path, monkeypatch, name):
     assert path.read_bytes() == before
 
 
-@pytest.mark.parametrize("name", ["receipts.json", "receipts.jsonl"])
-def test_receipts_directory_is_unavailable(tmp_path, name):
-    (tmp_path / name).mkdir()
+def test_receipts_directory_is_unavailable(tmp_path):
+    (tmp_path / "receipts.jsonl").mkdir()
     with pytest.raises(ActionError) as error:
         receipt_service(tmp_path)
     assert error.value.status == 503
 
 
-@pytest.mark.parametrize("name", ["receipts.json", "receipts.jsonl"])
-def test_receipts_fifo_refuses_without_waiting(tmp_path, name):
-    os.mkfifo(tmp_path / name)
+def test_receipts_fifo_refuses_without_waiting(tmp_path):
+    os.mkfifo(tmp_path / "receipts.jsonl")
     result = subprocess.run(
         [
             sys.executable,
@@ -147,7 +93,7 @@ from pathlib import Path
 from sinnix_hub_server.actions import ActionService, ActionError
 root = Path(sys.argv[1])
 try:
-    ActionService(lambda: {}, root / 'inventory.json', root / 'receipts.json')
+    ActionService(lambda: {}, root / 'inventory.json', root / 'receipts.jsonl')
 except ActionError as error:
     assert error.status == 503
 else:
@@ -173,17 +119,6 @@ def test_receipts_regular_ledger_symlink_is_readable(tmp_path):
     target.write_text('{"idempotency_key":"prior","status":"accepted"}\n')
     (tmp_path / "receipts.jsonl").symlink_to(target)
     assert receipt_service(tmp_path).lookup("prior")["status"] == "accepted"
-
-
-def test_receipts_existing_partial_migration_is_unavailable(tmp_path):
-    ledger = tmp_path / "receipts.jsonl"
-    content = json.dumps({"schema": RECEIPTS_MIGRATION_SCHEMA, "count": 2}) + "\n"
-    content += '{"idempotency_key":"only-one","status":"accepted"}\n'
-    ledger.write_text(content)
-    with pytest.raises(ActionError, match="incomplete") as error:
-        receipt_service(tmp_path)
-    assert error.value.status == 503
-    assert ledger.read_text() == content
 
 
 def test_receipts_torn_completion_keeps_pending_replay_refusal(tmp_path):
@@ -330,7 +265,7 @@ def test_action_fixtures_are_attested_and_idempotent_across_restart(
         calls.append(value["action"])
         return {"name": value["action"], "status": "fixture"}
 
-    receipts = tmp_path / "receipts.json"
+    receipts = tmp_path / "receipts.jsonl"
     actions = ActionService(
         reducer.snapshot,
         inventory_path,
@@ -377,7 +312,7 @@ def test_action_rejects_unknown_pid_stale_revision_and_unsafe_unit(
     actions = ActionService(
         reducer.snapshot,
         inventory_path,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         adapter=lambda *_: {},
         unit_state_prober=fake_unit_state_prober,
     )
@@ -425,7 +360,7 @@ def test_policy_properties_and_rebuild_override_are_enumerated(tmp_path: Path) -
     actions = ActionService(
         reducer.snapshot,
         inventory_path,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         adapter=lambda value, _resolved: calls.append(value) or {"status": "accepted"},
         unit_state_prober=fake_unit_state_prober,
     )
@@ -475,7 +410,7 @@ def test_park_requires_a_bounded_deadline(tmp_path: Path) -> None:
     actions = ActionService(
         reducer.snapshot,
         inventory_path,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         adapter=lambda value, _resolved: calls.append(value) or {"status": "fixture"},
         unit_state_prober=fake_unit_state_prober,
     )
@@ -497,7 +432,7 @@ def test_valid_rejected_action_leaves_a_receipt(tmp_path: Path) -> None:
     actions = ActionService(
         reducer.snapshot,
         inventory_path,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         adapter=lambda *_: {},
         unit_state_prober=fake_unit_state_prober,
     )
@@ -533,7 +468,7 @@ def test_interrupt_uses_agentctl_and_records_its_cancellation_truth(
     actions = ActionService(
         reducer.snapshot,
         inventory_path,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         agent_jobs=agent_jobs,
         unit_state_prober=fake_unit_state_prober,
     )
@@ -548,7 +483,7 @@ def test_interrupt_uses_agentctl_and_records_its_cancellation_truth(
         ActionService(
             reducer.snapshot,
             inventory_path,
-            tmp_path / "other-receipts.json",
+            tmp_path / "other-receipts.jsonl",
             agent_jobs=FakeAgentJobs([job | {"phase": "succeeded", "terminal": True}]),
             unit_state_prober=fake_unit_state_prober,
         ).execute(request("interrupt", {"job_id": "job-1"}, key="terminal"))
@@ -602,7 +537,7 @@ def test_receipt_size_stays_bounded_by_the_resolved_target_not_the_system(
     actions = ActionService(
         reducer.snapshot,
         inventory_path,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         adapter=lambda *_: {"status": "accepted"},
         unit_state_prober=fake_unit_state_prober,
     )
@@ -633,83 +568,30 @@ def test_receipts_append_prior_lines_never_rewritten(tmp_path: Path) -> None:
     actions = ActionService(
         reducer.snapshot,
         inventory_path,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         adapter=lambda *_: {"status": "accepted"},
         unit_state_prober=fake_unit_state_prober,
     )
-    ledger = actions.receipts_ledger_path
-    assert ledger.name == "receipts.jsonl"
+    ledger = actions.receipts_path
 
     actions.execute(request("restart", {"unit": "safe"}, key="k1"))
     after_first = ledger.read_bytes()
-    # Marker line + pending and confirmed receipts.
-    assert len(after_first.splitlines()) == 3
+    # Pending and confirmed receipts.
+    assert len(after_first.splitlines()) == 2
 
     actions.execute(request("restart", {"unit": "safe"}, key="k2"))
     after_second = ledger.read_bytes()
-    assert len(after_second.splitlines()) == 5
+    assert len(after_second.splitlines()) == 4
     # Append-only: everything written for the first action is byte-identical
     # in the file after the second action, not re-serialized alongside it.
     assert after_second[: len(after_first)] == after_first
-    # The legacy whole-file store was never created or touched.
-    assert not (tmp_path / "receipts.json").exists()
-
-
-def test_receipts_migration_folds_legacy_dict_exactly_once(tmp_path: Path) -> None:
-    """A pre-existing whole-file receipts dict is folded into the ledger on
-    first start and left untouched; a second start (a restart) must not
-    re-fold it. Mutation: dropping the `if self.receipts_ledger_path.exists():
-    return` guard fails the second-instance line-count assert with a doubled
-    ledger."""
-    inventory_path = tmp_path / "inventory.json"
-    inventory(inventory_path)
-    legacy_path = tmp_path / "receipts.json"
-    legacy = {
-        "old-1": {"idempotency_key": "old-1", "status": "accepted"},
-        "old-2": {"idempotency_key": "old-2", "status": "rejected"},
-    }
-    legacy_path.write_text(json.dumps(legacy))
-    legacy_bytes_before = legacy_path.read_bytes()
-
-    reducer = Reducer(
-        tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
-    )
-    reducer.refresh()
-
-    first = ActionService(
-        reducer.snapshot,
-        inventory_path,
-        legacy_path,
-        adapter=lambda *_: {"status": "accepted"},
-        unit_state_prober=fake_unit_state_prober,
-    )
-    ledger = first.receipts_ledger_path
-    lines_after_first_start = ledger.read_text(encoding="utf-8").splitlines()
-    # One migration marker + the two folded legacy receipts.
-    assert len(lines_after_first_start) == 3
-    assert first.lookup("old-1") == legacy["old-1"]
-    assert first.lookup("old-2") == legacy["old-2"]
-
-    second = ActionService(
-        reducer.snapshot,
-        inventory_path,
-        legacy_path,
-        adapter=lambda *_: {"status": "accepted"},
-        unit_state_prober=fake_unit_state_prober,
-    )
-    lines_after_second_start = ledger.read_text(encoding="utf-8").splitlines()
-    assert lines_after_second_start == lines_after_first_start
-    assert second.lookup("old-1") == legacy["old-1"]
-    # The legacy file is read-only to the migration: never rewritten, never
-    # deleted.
-    assert legacy_path.read_bytes() == legacy_bytes_before
 
 
 def test_receipts_replay_after_restart_reads_the_ledger(tmp_path: Path) -> None:
     """A fresh ActionService pointed at the same receipts_path after a
     restart must answer idempotency lookups from the ledger it wrote, not
     from in-memory state that died with the old process. Mutation: skipping
-    the migration/index-fold in `_load_receipts` (returning `{}` instead)
+    the index fold in `_load_receipts` (returning `{}` instead)
     fails the `resumed.lookup` assert."""
     inventory_path = tmp_path / "inventory.json"
     inventory(inventory_path)
@@ -717,7 +599,7 @@ def test_receipts_replay_after_restart_reads_the_ledger(tmp_path: Path) -> None:
         tmp_path / "status.json", tmp_path / "token", lambda: {"jobs": []}
     )
     reducer.refresh()
-    receipts_path = tmp_path / "receipts.json"
+    receipts_path = tmp_path / "receipts.jsonl"
     original = ActionService(
         reducer.snapshot,
         inventory_path,
@@ -814,7 +696,7 @@ def make_process_actions(
     return ActionService(
         reducer.snapshot,
         inventory_path,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         **kwargs,
     )
 
@@ -1119,7 +1001,7 @@ def test_process_stop_kills_a_real_process(tmp_path: Path) -> None:
         actions = ActionService(
             reducer.snapshot,
             inventory_path,
-            tmp_path / "receipts.json",
+            tmp_path / "receipts.jsonl",
             unit_state_prober=fake_unit_state_prober,
             self_pid=-1,
             process_stop_grace_seconds=0.3,
@@ -1151,7 +1033,7 @@ def test_unrelated_refresh_does_not_invalidate_observed_target(tmp_path):
     actions = ActionService(
         reducer.snapshot,
         inventory_path,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         adapter=lambda *_: calls.append("restart") or {},
         unit_state_prober=fake_unit_state_prober,
     )
@@ -1176,7 +1058,7 @@ def test_new_unit_invocation_and_job_attempt_refuse_old_action(tmp_path):
     actions = ActionService(
         lambda: {"sequence": 99},
         inventory_path,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         adapter=lambda *_: calls.append("mutation") or {},
         agent_jobs=jobs,
         unit_state_prober=lambda *_: properties,
@@ -1218,7 +1100,7 @@ def test_uncertain_adapter_is_never_replayed_as_success(tmp_path):
     actions = ActionService(
         lambda: {},
         inventory_path,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         adapter=adapter,
         unit_state_prober=fake_unit_state_prober,
     )
@@ -1275,7 +1157,7 @@ def test_canonical_unit_manager_is_never_retargeted(tmp_path):
     actions = ActionService(
         lambda: {},
         inventory_path,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         adapter=lambda _request, resolved: (
             calls.append(resolved["surface"]["manager"]) or {}
         ),
@@ -1342,7 +1224,7 @@ def test_canonical_manager_search_survives_opposite_scope_surface_id_collision(
     actions = ActionService(
         lambda: {},
         inventory_path,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         adapter=lambda _request, resolved: (
             calls.append(resolved["surface"]["manager"]) or {}
         ),
@@ -1380,7 +1262,7 @@ def test_pressure_actions_refuse_user_scope_before_dispatch(tmp_path):
     actions = ActionService(
         lambda: {},
         inventory_path,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         adapter=lambda *_: calls.append("mutation") or {},
         unit_state_prober=fake_unit_state_prober,
     )
@@ -1424,7 +1306,7 @@ def test_policy_adapter_changes_are_runtime_only(
     actions = ActionService(
         reducer.snapshot,
         inventory_path,
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         unit_state_prober=fake_unit_state_prober,
     )
     payload = request(action, {"unit": "safe"}, key=f"runtime-{action}-{manager}")

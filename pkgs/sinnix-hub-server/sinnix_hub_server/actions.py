@@ -11,20 +11,13 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable
 
-from sinnix_lib.atomic import atomic_publish
-from sinnix_lib.files import open_regular, read_regular_text
+from sinnix_lib.files import open_regular
 from sinnix_lib.ledger import append_jsonl, utc_ts
-from sinnix_lib.lock import flock
 from sinnix_lib.procfs import parse_stat_start_time
 from sinnix_lib.systemd import show_units
 
 from . import pressure as pressure_model
 from .agent_jobs import AgentCtlClient, AgentCtlError
-
-# Schema of the one-time marker record written to the receipts ledger the
-# first time it is created. Its presence (not its content) is what makes
-# migration idempotent -- see ActionService._migrate_legacy_receipts.
-RECEIPTS_MIGRATION_SCHEMA = "sinnix-ops-action-receipts-migration-v1"
 
 # Properties captured for a receipt's previous_state/resulting_state on unit
 # targets -- the target's own live systemd shape, not the
@@ -267,18 +260,8 @@ class ActionService:
     ) -> None:
         self.snapshot = snapshot
         self.inventory_path = inventory_path
-        # The retired whole-file dict: left in place untouched, read once by
-        # the migration and never written again.
+        # Append-only JSONL, one line per receipt state.
         self.receipts_path = receipts_path
-        # The store of record: append-only, same directory and stem as
-        # receipts_path, ".jsonl" instead of ".json" (see
-        # state.StateLayer.receipts_ledger_path, which this mirrors so a
-        # caller that only has receipts_path -- every existing one -- still
-        # gets the right ledger file without threading a second parameter
-        # through cli.py).
-        self.receipts_ledger_path = receipts_path.with_name(
-            receipts_path.stem + ".jsonl"
-        )
         self.adapter = adapter or self._live_adapter
         self.agent_jobs = agent_jobs or AgentCtlClient()
         self.unit_state_prober = unit_state_prober or self._live_unit_state_prober
@@ -294,57 +277,10 @@ class ActionService:
         self.receipts: dict[str, dict[str, Any]] = self._load_receipts()
         self._action_lock = threading.RLock()
 
-    def _migrate_legacy_receipts(self) -> None:
-        """Fold the old whole-file receipts dict into the ledger once.
-
-        Publish the complete fold atomically under the append writer's lock.
-        Existence can then mark completion without exposing a partial fold.
-        The legacy source is never rewritten or removed. Only its genuine
-        absence permits a new, empty history.
-        """
-        ledger = self.receipts_ledger_path
-        with flock(ledger.with_name(ledger.name + ".lock")):
-            try:
-                ledger.lstat()
-            except FileNotFoundError:
-                pass
-            except OSError as error:
-                raise ActionError(
-                    f"action receipt ledger unavailable: {error}", 503
-                ) from error
-            else:
-                return
-            try:
-                legacy = json.loads(read_regular_text(self.receipts_path))
-            except FileNotFoundError:
-                legacy = {}
-            except (OSError, ValueError) as error:
-                raise ActionError(
-                    f"legacy action receipts unavailable: {error}", 503
-                ) from error
-            if not isinstance(legacy, dict):
-                raise ActionError("legacy action receipts must be an object", 503)
-            if not all(isinstance(record, dict) for record in legacy.values()):
-                raise ActionError("legacy action receipt rows must be objects", 503)
-            marker = {
-                "schema": RECEIPTS_MIGRATION_SCHEMA,
-                "migrated_from": str(self.receipts_path),
-                "count": len(legacy),
-                "migrated_at": utc_ts(),
-            }
-            records = [marker, *legacy.values()]
-            body = "".join(
-                json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n"
-                for record in records
-            )
-            atomic_publish(ledger, body.encode("utf-8"), mode=0o600, fsync=True)
-
     def _load_receipts(self) -> dict[str, dict[str, Any]]:
-        self._migrate_legacy_receipts()
         receipts: dict[str, dict[str, Any]] = {}
-        migration_remaining = 0
         try:
-            with open_regular(self.receipts_ledger_path, "r") as source:
+            with open_regular(self.receipts_path, "r") as source:
                 for line_number, line in enumerate(source, 1):
                     if not line.strip():
                         continue
@@ -362,27 +298,17 @@ class ActionService:
                         ) from error
                     if not isinstance(record, dict):
                         continue
-                    if record.get("schema") == RECEIPTS_MIGRATION_SCHEMA:
-                        count = record.get("count")
-                        if migration_remaining or type(count) is not int or count < 0:
-                            raise ActionError(
-                                "incomplete or invalid action receipt migration", 503
-                            )
-                        migration_remaining = count
-                        continue
-                    if migration_remaining:
-                        migration_remaining -= 1
                     key = record.get("idempotency_key")
                     if isinstance(key, str):
                         # The last record completes or marks the pending dispatch.
                         # An interrupted dispatch remains pending and cannot replay.
                         receipts[key] = record
+        except FileNotFoundError:
+            pass
         except (OSError, UnicodeError) as error:
             raise ActionError(
                 f"action receipt ledger unavailable: {error}", 503
             ) from error
-        if migration_remaining:
-            raise ActionError("incomplete action receipt migration", 503)
         return receipts
 
     def _inventory(self) -> dict[str, Any]:
@@ -797,7 +723,7 @@ class ActionService:
                 "operator_reason": request["operator_reason"],
                 "created_at": utc_ts(),
             }
-            append_jsonl(self.receipts_ledger_path, pending, mode=0o600, fsync=True)
+            append_jsonl(self.receipts_path, pending, mode=0o600, fsync=True)
             self.receipts[request["idempotency_key"]] = pending
             try:
                 adapter_receipt = self.adapter(request, resolved)
@@ -808,7 +734,7 @@ class ActionService:
                     "error": str(error)[:240],
                 }
                 append_jsonl(
-                    self.receipts_ledger_path, uncertain, mode=0o600, fsync=True
+                    self.receipts_path, uncertain, mode=0o600, fsync=True
                 )
                 self.receipts[request["idempotency_key"]] = uncertain
                 raise ActionError(
@@ -836,7 +762,7 @@ class ActionService:
                 "created_at": utc_ts(),
             }
             self.receipts[request["idempotency_key"]] = rejected
-            append_jsonl(self.receipts_ledger_path, rejected, mode=0o600, fsync=True)
+            append_jsonl(self.receipts_path, rejected, mode=0o600, fsync=True)
             raise
         receipt = {
             "status": "confirmed",
@@ -866,7 +792,7 @@ class ActionService:
             "created_at": utc_ts(),
         }
         self.receipts[request["idempotency_key"]] = receipt
-        append_jsonl(self.receipts_ledger_path, receipt, mode=0o600, fsync=True)
+        append_jsonl(self.receipts_path, receipt, mode=0o600, fsync=True)
         return receipt
 
     def lookup(self, key: str) -> dict[str, Any] | None:

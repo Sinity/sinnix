@@ -1,6 +1,6 @@
 """One declared table of the reducer's persistence stores.
 
-Five accreted shapes reduce to three writer contracts:
+The stores use three writer contracts:
 
   * "atomic-doc" -- a whole-file overwrite, or a locked read-modify-write, via
     ``sinnix_lib.atomic_json``: no history, the latest write is the whole
@@ -10,8 +10,7 @@ Five accreted shapes reduce to three writer contracts:
     per-key confirm-2 state document all take this shape.
   * "ledger" -- append-only JSONL via ``sinnix_lib.ledger``, read back into an
     in-memory index folded once at start: the action receipts store (one line
-    per receipt, replacing a dict rewritten whole on every action -- see
-    ``actions.ActionService``) and health.py's transition ledger.
+    per receipt) and health.py's transition ledger.
   * "spool" -- feedback.py's per-UTC-day annotation spool. It predates this
     table and deliberately keeps its own hand-written envelope (see
     ``feedback.py``'s module docstring): it is a stable contract external
@@ -55,18 +54,6 @@ class StateLayer:
     receipts_path: Path
     feedback_spool_dir: Path
 
-    @property
-    def receipts_ledger_path(self) -> Path:
-        """The append-only replacement for ``receipts_path``'s dict-JSON.
-
-        Derived, not configured: same directory, same stem, ``.jsonl``
-        instead of ``.json``, so the legacy whole-file dict and its ledger
-        replacement can never collide on one filename. ``receipts_path``
-        itself is never written again once the ledger exists -- see
-        ``actions.ActionService._migrate_legacy_receipts``.
-        """
-        return self.receipts_path.with_name(self.receipts_path.stem + ".jsonl")
-
     def stores(self) -> list[Store]:
         from . import health  # local: avoids a health<->state import cycle
 
@@ -85,15 +72,8 @@ class StateLayer:
                 "reducer.Reducer._save_sequence",
             ),
             Store(
-                "action_receipts_legacy",
-                self.receipts_path,
-                "atomic-doc",
-                "actions.ActionService (retired 2026-08-18; read-once at migration, "
-                "never written again)",
-            ),
-            Store(
                 "action_receipts",
-                self.receipts_ledger_path,
+                self.receipts_path,
                 "ledger",
                 "actions.ActionService.execute",
             ),
@@ -125,6 +105,6 @@ class StateLayer:
             snapshot_path=runtime_root / "status.json",
             token_path=runtime_root / "ops.token",
             reducer_state_path=state_dir / "reducer.json",
-            receipts_path=state_dir / "action-receipts.json",
+            receipts_path=state_dir / "action-receipts.jsonl",
             feedback_spool_dir=feedback_dir,
         )

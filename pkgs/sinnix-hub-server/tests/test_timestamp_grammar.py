@@ -49,7 +49,7 @@ def _action_service(tmp_path: Path, reducer: Reducer) -> ActionService:
     return ActionService(
         reducer.snapshot,
         _inventory(tmp_path / "inventory.json"),
-        tmp_path / "receipts.json",
+        tmp_path / "receipts.jsonl",
         adapter=lambda request, resolved: {"name": request["action"], "status": "fake"},
         unit_state_prober=lambda unit, manager: {
             "ActiveState": "active",
@@ -106,15 +106,6 @@ def test_every_record_this_package_joins_carries_one_utc_grammar(
     snapshot = reducer.refresh()
     actions = _action_service(tmp_path, reducer)
     receipt = actions.execute(_request("grammar-1"))
-    ledger_records = [
-        json.loads(line)
-        for line in (tmp_path / "receipts.jsonl").read_text().splitlines()
-    ]
-    migration = next(
-        record
-        for record in ledger_records
-        if record.get("schema") == actions_module.RECEIPTS_MIGRATION_SCHEMA
-    )
 
     stamps = {
         "health transition ts": _transition(tmp_path)["ts"],
@@ -123,7 +114,6 @@ def test_every_record_this_package_joins_carries_one_utc_grammar(
             "observed_at"
         ],
         "reducer health observed_at": reducer.health()["observed_at"],
-        "receipts migration migrated_at": migration["migrated_at"],
         "action receipt created_at": receipt["created_at"],
     }
     off_grammar = {
