@@ -187,7 +187,7 @@
           # by name in the project environment, never as a command shim.
           scriptPkgs.sinnix-sinex-cache-prebuild
           scriptPkgs.sinnix-rank
-          scriptPkgs.sinnix-navigation-audit
+          scriptPkgs.sinnix-file-catalog
           scriptPkgs.sinnix-url-ledger
           # Verification must use this checkout, not the installed CLI dispatcher.
           scriptPkgs.sinnix-sqlite-backup

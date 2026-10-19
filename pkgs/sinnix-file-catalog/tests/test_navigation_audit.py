@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "sinnix-navigation-audit"
+SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "sinnix-file-catalog"
 
 
 def test_audit_relative_reference_encoded_and_offline_links(tmp_path):
@@ -26,7 +26,7 @@ def test_audit_relative_reference_encoded_and_offline_links(tmp_path):
         )
     )
     result = subprocess.run(
-        [str(SCRIPT), "--manifest", str(manifest), "--json"],
+        [str(SCRIPT), "links", "--manifest", str(manifest), "--json"],
         capture_output=True,
         text=True,
     )
@@ -42,7 +42,7 @@ def test_audit_relative_reference_encoded_and_offline_links(tmp_path):
     document.write_text("[present](a%20b.md)\n")
     assert (
         subprocess.run(
-            [str(SCRIPT), "--manifest", str(manifest)], capture_output=True
+            [str(SCRIPT), "links", "--manifest", str(manifest)], capture_output=True
         ).returncode
         == 0
     )
@@ -500,7 +500,7 @@ def test_malformed_links_do_not_block_following_entrances(tmp_path, malformed):
     manifest = tmp_path / "manifest.json"
     manifest.write_text(json.dumps({"schema_version": 1, "documents": [str(document)]}))
     result = subprocess.run(
-        [str(SCRIPT), "--manifest", str(manifest), "--json"],
+        [str(SCRIPT), "links", "--manifest", str(manifest), "--json"],
         capture_output=True,
         text=True,
         timeout=2,
@@ -539,7 +539,7 @@ def test_manifest_fifo_fails_promptly(tmp_path):
     manifest = tmp_path / "manifest.fifo"
     os.mkfifo(manifest)
     result = subprocess.run(
-        [str(SCRIPT), "--manifest", str(manifest), "--json"],
+        [str(SCRIPT), "links", "--manifest", str(manifest), "--json"],
         capture_output=True,
         text=True,
         timeout=2,

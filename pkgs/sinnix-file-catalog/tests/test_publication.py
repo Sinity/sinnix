@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-BUILD = runpy.run_path(str(Path(__file__).parents[3] / "scripts/sinnix-report-site"))[
+BUILD = runpy.run_path(str(Path(__file__).parents[3] / "scripts/sinnix-file-catalog"))[
     "build"
 ]
 
@@ -188,7 +188,8 @@ def test_publication_fifo_is_rejected_before_creating_output(tmp_path):
     output = tmp_path / "site"
     result = subprocess.run(
         [
-            str(Path(__file__).parents[3] / "scripts/sinnix-report-site"),
+            str(Path(__file__).parents[3] / "scripts/sinnix-file-catalog"),
+            "publish",
             "--publication",
             str(manifest),
             "--output",
@@ -221,7 +222,8 @@ def test_utf16_publication_manifest_remains_supported(tmp_path):
     output = tmp_path / "site"
     result = subprocess.run(
         [
-            str(Path(__file__).parents[3] / "scripts/sinnix-report-site"),
+            str(Path(__file__).parents[3] / "scripts/sinnix-file-catalog"),
+            "publish",
             "--publication",
             str(manifest),
             "--output",
@@ -241,7 +243,8 @@ def test_oversized_publication_manifest_cannot_create_output(tmp_path):
     output = tmp_path / "site"
     result = subprocess.run(
         [
-            str(Path(__file__).parents[3] / "scripts/sinnix-report-site"),
+            str(Path(__file__).parents[3] / "scripts/sinnix-file-catalog"),
+            "publish",
             "--publication",
             str(manifest),
             "--output",

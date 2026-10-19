@@ -100,12 +100,12 @@ relationships. Distinguish a whole still image, a sampled video frame, an
 opening excerpt, embedded metadata and a filename-only classification. Keep
 private annotations outside the repository.
 
-`sinnix-file-catalog-report` renders an offline searchable HTML view from the
+`sinnix-file-catalog report` renders an offline searchable HTML view from the
 catalog and the HTML report template. It includes inspection limits, former
 paths and links between related records:
 
 ```sh
-sinnix-file-catalog-report --catalog /path/catalog.json \
+sinnix-file-catalog --catalog /path/catalog.json report \
   --template dots/_ai/skills/html-report/templates/report.html \
   --output /path/catalog.html
 ```
@@ -154,11 +154,11 @@ The renderer remains an offline projection of one JSON catalog. It sends no anno
 
 `resolve HISTORICAL-PATH` uses retained collection boundaries and path history to resolve references without filesystem aliases. An address reused for a different cataloged object requires `--id ASSET-UUID`; unavailable records remain unavailable.
 
-The report renderer accepts `--judgments` for authoritative current classifications, displayed separately from original asset observations. Shared role definitions normalize legacy categories while retaining their attributed wording. Raw catalog and navigation sources stay private. `sinnix-report-site` publishes an explicit manifest of individual files; it refuses directory links, unsafe URLs and sources beneath declared private roots. Subject homes own canonical analyses, while the site holds the selected publication projection.
+The report renderer accepts `--judgments` for authoritative current classifications, displayed separately from original asset observations. Shared role definitions normalize legacy categories while retaining their attributed wording. Raw catalog and navigation sources stay private. `sinnix-file-catalog publish --publication MANIFEST --output DIR` stages an explicit manifest of individual files; it refuses directory links, unsafe URLs and sources beneath declared private roots. Subject homes own canonical analyses, while the site holds the selected publication projection.
 
 ## Current navigation checks
 
-`sinnix-navigation-audit --manifest /path/navigation-audit.json` checks local
+`sinnix-file-catalog links --manifest /path/navigation-audit.json` checks local
 Markdown links in explicitly selected current index documents. The JSON
 manifest has `schema_version: 1`, an absolute-path `documents` list, and an
 optional absolute-path `external_roots` list. Targets below mounted external

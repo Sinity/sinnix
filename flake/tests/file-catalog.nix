@@ -22,9 +22,6 @@
           ''
             mkdir -p scripts pkgs/sinnix-file-catalog/tests
             cp ${../../scripts/sinnix-file-catalog} scripts/sinnix-file-catalog
-            cp ${../../scripts/sinnix-file-catalog-report} scripts/sinnix-file-catalog-report
-            cp ${../../scripts/sinnix-report-site} scripts/sinnix-report-site
-            cp ${../../scripts/sinnix-navigation-audit} scripts/sinnix-navigation-audit
             cp ${../../scripts/sinnix-realm-layout-check} scripts/sinnix-realm-layout-check
             chmod +x scripts/*
             patchShebangs scripts

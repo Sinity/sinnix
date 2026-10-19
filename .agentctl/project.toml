@@ -284,7 +284,7 @@ timeout_seconds = 1800
 
 [operations.navigation_audit]
 description = "Audit current entrance links against the private explicit manifest"
-exec = ["sinnix-navigation-audit", "--manifest", "/realm/report/catalog/navigation-audit.json"]
+exec = ["sinnix-file-catalog", "links", "--manifest", "/realm/report/catalog/navigation-audit.json"]
 pool = "normal"
 result = "exit"
 cache = "none"

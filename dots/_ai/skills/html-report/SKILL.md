@@ -32,7 +32,7 @@ only for the interaction patterns the artifact needs.
    the local path and say what was not published.
 6. Keep canonical reports beside their subject. Publish explicitly selected
    files and companion assets through `/realm/report/site/` with
-   `sinnix-report-site`; never link whole subject directories. Private catalog
+   `sinnix-file-catalog publish`; never link whole subject directories. Private catalog
    and navigation sources live in `/realm/report/catalog/`. Refresh the site
    index with the bundled generator and its explicit `--navigation` input.
 
