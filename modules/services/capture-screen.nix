@@ -2,7 +2,7 @@
 # per-window screen frame capture
 #
 # The frame-grab mechanism and idle-pause heuristic are documented in
-# pkgs/capture-screen/sinnix_capture_screen/daemon.py's module docstring --
+# pkgs/sinnix-capture-screen/sinnix_capture_screen/daemon.py's module docstring --
 # read that before touching the mechanism. Short version: Noctalia's
 # screenshot IPC (`noctalia msg screenshot-*`) is whole-output/region-only
 # with no scriptable raw-bytes interface, so this collector drives `grim`

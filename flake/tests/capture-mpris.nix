@@ -221,12 +221,12 @@
               pkgs.gnugrep
               pkgs.jq
             ];
-            ROUTER_PERIODS_SCRIPT = ../../pkgs/capture-router/remote-periods.sh;
-            ROUTER_POLL_SCRIPT = ../../pkgs/capture-router/poll.sh;
-            ROUTER_REMOTE_POLL_SCRIPT = ../../pkgs/capture-router/remote-poll.sh;
+            ROUTER_PERIODS_SCRIPT = ../../pkgs/sinnix-capture-router/remote-periods.sh;
+            ROUTER_POLL_SCRIPT = ../../pkgs/sinnix-capture-router/poll.sh;
+            ROUTER_REMOTE_POLL_SCRIPT = ../../pkgs/sinnix-capture-router/remote-poll.sh;
           }
           ''
-            python3 ${../../pkgs/capture-router/tests/test_periods.py}
+            python3 ${../../pkgs/sinnix-capture-router/tests/test_periods.py}
             touch "$out"
           '';
       checks.kitty-scrollback =
@@ -268,7 +268,7 @@
           }
           ''
             dbus-run-session --config-file=${pkgs.dbus}/share/dbus-1/session.conf -- python3 -m unittest discover -v \
-              -s ${../../pkgs/capture-mpris} -p 'test_monitor.py'
+              -s ${../../pkgs/sinnix-capture-mpris} -p 'test_monitor.py'
             touch "$out"
           '';
     };

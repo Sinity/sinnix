@@ -41,10 +41,10 @@ let
   cfg = config.sinnix.services.capture-peripherals;
 
   parseBluez = pkgs.writeText "capture-peripherals-parse-bluez.py" (
-    builtins.readFile ../../pkgs/capture-peripherals/parse_bluez.py
+    builtins.readFile ../../pkgs/sinnix-capture-peripherals/parse_bluez.py
   );
   parseSolaar = pkgs.writeText "capture-peripherals-parse-solaar.py" (
-    builtins.readFile ../../pkgs/capture-peripherals/parse_solaar.py
+    builtins.readFile ../../pkgs/sinnix-capture-peripherals/parse_solaar.py
   );
 
   poller = pkgs.writeShellApplication {
@@ -56,7 +56,7 @@ let
       pkgs.python3
       pkgs.coreutils
     ];
-    text = builtins.readFile ../../pkgs/capture-peripherals/poll.sh;
+    text = builtins.readFile ../../pkgs/sinnix-capture-peripherals/poll.sh;
   };
 in
 mkServiceModule (mkCaptureLane {

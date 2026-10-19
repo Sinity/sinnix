@@ -18,7 +18,7 @@
 # on the router, and it never touches dnsmasq query logging -- full DNS query
 # logs are both the CPU-heaviest and the most sensitive stream on the network.
 #
-# See pkgs/capture-router/ for the poller (poll.sh, run locally on prime) and
+# See pkgs/sinnix-capture-router/ for the poller (poll.sh, run locally on prime) and
 # the two remote scripts it pipes over ssh (remote-poll.sh,
 # remote-periods.sh); their headers document syslog rotation safety and the
 # nlbwmon once-per-closed-month backfill.
@@ -39,10 +39,10 @@ let
   cfg = config.sinnix.services.capture-router;
 
   remotePollScript = pkgs.writeText "capture-router-remote-poll.sh" (
-    builtins.readFile ../../pkgs/capture-router/remote-poll.sh
+    builtins.readFile ../../pkgs/sinnix-capture-router/remote-poll.sh
   );
   remotePeriodsScript = pkgs.writeText "capture-router-remote-periods.sh" (
-    builtins.readFile ../../pkgs/capture-router/remote-periods.sh
+    builtins.readFile ../../pkgs/sinnix-capture-router/remote-periods.sh
   );
 
   poller = pkgs.writeShellApplication {
@@ -54,7 +54,7 @@ let
       pkgs.coreutils
       pkgs.gnused
     ];
-    text = builtins.readFile ../../pkgs/capture-router/poll.sh;
+    text = builtins.readFile ../../pkgs/sinnix-capture-router/poll.sh;
   };
 in
 mkServiceModule (mkCaptureLane {

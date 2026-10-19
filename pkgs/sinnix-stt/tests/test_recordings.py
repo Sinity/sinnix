@@ -164,7 +164,9 @@ def test_lane_qualified_history_and_repaired_size(recordings):
         ([("Content-Length", "2")], b"{}", True),
     ],
 )
-def test_http_framing_precedes_transcription(recordings, monkeypatch, framing, raw, success):
+def test_http_framing_precedes_transcription(
+    recordings, monkeypatch, framing, raw, success
+):
     import io
     import socketserver
     from email.message import Message

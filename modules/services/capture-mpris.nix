@@ -6,7 +6,7 @@
 # lane on every track/status change, plus a periodic heartbeat while a
 # player's PlaybackStatus is "Playing" -- long single-track listening
 # sessions still carry position markers between track boundaries instead of
-# going silent for the whole session. See pkgs/capture-mpris/monitor.py for
+# going silent for the whole session. See pkgs/sinnix-capture-mpris/monitor.py for
 # the daemon and its rationale (why the playerctl follow format excludes
 # position, why writes shell out to the sinnix-capture CLI).
 {
@@ -33,7 +33,7 @@ let
     text = ''
       #!${monitorPython}/bin/python3
     ''
-    + builtins.readFile ../../pkgs/capture-mpris/monitor.py;
+    + builtins.readFile ../../pkgs/sinnix-capture-mpris/monitor.py;
   };
 in
 mkServiceModule (mkCaptureLane {

@@ -475,7 +475,7 @@ let
       scorePackage = discovered.registry.sinnix-score.package;
     };
 
-    sinnix-capture-screen = pkgs.callPackage ../pkgs/capture-screen/pkg.nix {
+    sinnix-capture-screen = pkgs.callPackage ../pkgs/sinnix-capture-screen/pkg.nix {
       inherit sinnix-lib;
     };
 
