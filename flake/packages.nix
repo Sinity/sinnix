@@ -28,7 +28,6 @@
         "sinnix-agent-environment-doc"
         "sinnix-agent-gateway"
         "agentctl"
-        "sinnix-deslop"
         "sinnix-hub-server"
         "sinnix-phone-app"
         "sinnix-phone-app-install"

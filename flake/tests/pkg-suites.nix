@@ -109,13 +109,6 @@
         # integration: 3 failed, 16 passed); reverted after confirming red.
         sinnix-capture-a11y-suite = pythonSuite { name = "sinnix-capture-a11y"; };
 
-        # Provably fails when: STRIP_SENTENCE rules stop dropping the
-        # sentence they match (keep everything else). Verified by inverting
-        # the `not pattern.search(s)` keep-predicate in filter.py -- caught
-        # by four tests including the STRIP_SENTENCE case (4 failed, 4
-        # passed); reverted after confirming red.
-        sinnix-deslop-suite = sinnixScriptRegistry.packageSet.sinnix-deslop;
-
         # Provably fails when: send_token dedup stops recognizing a token
         # it's already seen. Verified by making seen_token() always return
         # False in execute.py -- caught by

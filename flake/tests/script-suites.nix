@@ -107,23 +107,12 @@
             pkgs.util-linux
           ];
         };
-        memory-audit-suite = mkScriptSuite {
-          name = "sinnix-memory-audit";
-          suiteDir = ../../pkgs/sinnix-memory-audit/tests;
-          scripts = [ "sinnix-memory-audit" ];
-          nativeBuildInputs = [
-            pkgs.bash
-            pkgs.findutils
-            pkgs.gawk
-          ];
-        };
         device-remote-command-suite = mkScriptSuite {
           name = "sinnix-device-control";
           suiteDir = ../../pkgs/sinnix-device-control/tests;
           scripts = [
             "sinnix-phone"
             "sinnix-quest"
-            "sinnix-xr"
             "rawlog"
             "sinnix-remote-command"
           ];
@@ -173,19 +162,13 @@
           extraPythonPackages = [ sinnix-lib ];
           nativeBuildInputs = [ pkgs.zstd ];
         };
-        # Provably fails when: either runner stamps a grammar other than the
-        # estate's %Y-%m-%dT%H:%M:%SZ -- the offset-suffix spelling both
-        # carried before, for instance. Verified by restoring
-        # machine-experiment-run's local
-        # `dt.datetime.now(dt.UTC).replace(microsecond=0).isoformat()`, which
-        # fails the manifest assertion on `2026-09-05T23:39:12+00:00`.
-        experiment-manifest-suite = mkScriptSuite {
-          name = "machine-experiment-run";
-          suiteDir = ../../pkgs/machine-experiment-run/tests;
-          scripts = [
-            "machine-experiment-run"
-            "syslog-index"
-          ];
+        # Provably fails when: syslog-index stamps a grammar other than the
+        # estate's %Y-%m-%dT%H:%M:%SZ (the offset-suffix spelling, for
+        # instance).
+        syslog-index-suite = mkScriptSuite {
+          name = "syslog-index";
+          suiteDir = ../../pkgs/syslog-index/tests;
+          scripts = [ "syslog-index" ];
           extraPythonPackages = [ sinnix-lib ];
           nativeBuildInputs = [ pkgs.systemd ];
         };
@@ -219,13 +202,6 @@
           suiteDir = ../../pkgs/sinnix-stt-review/tests;
           scripts = [ "sinnix-stt-review" ];
           pythonPackages = [ "tzdata" ];
-          extraPythonPackages = [ sinnix-lib ];
-        };
-        speaker-verify-suite = mkScriptSuite {
-          name = "sinnix-speaker-verify";
-          suiteDir = ../../pkgs/sinnix-speaker-verify/tests;
-          scripts = [ "sinnix-speaker-verify" ];
-          pythonPackages = [ "numpy" ];
           extraPythonPackages = [ sinnix-lib ];
         };
         reading-stack-suite = mkScriptSuite {
@@ -299,31 +275,6 @@
           suiteDir = ../../pkgs/sinnix-quest-player/tests;
           scripts = [ "sinnix-quest-player" ];
           extraPythonPackages = [ sinnix-lib ];
-        };
-        # Provably fails when: a binding's ranking identity starts tracking
-        # source order or its /nix/store action path, a usage prior stops
-        # distinguishing "never measured" from "measured zero", operator
-        # comparisons stop displacing that prior at the documented evidence
-        # threshold, a retired binding survives into the next manifest, or
-        # deck-forge stops taking its drill order from the manifest.
-        rank-keybinds-suite = mkScriptSuite {
-          name = "sinnix-rank-keybinds";
-          suiteDir = ../../pkgs/sinnix-rank-keybinds/tests;
-          scripts = [
-            "sinnix-rank-keybinds"
-            "sinnix-rank"
-            "sinnix-deck-forge"
-          ];
-          extraPythonPackages = [
-            sinnix-rank-core
-            sinnix-lib
-          ];
-          extraFiles = [
-            {
-              source = ../../modules/features/desktop/hyprland/bindings.nix;
-              dest = "modules/features/desktop/hyprland/bindings.nix";
-            }
-          ];
         };
         # Provably fails when: elicit's fit stops reproducing the model its
         # live domains were ranked under (ties, choice sets, item priors, ids

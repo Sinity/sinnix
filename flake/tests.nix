@@ -57,7 +57,6 @@ in
     ./tests/ai-http-vm.nix
     ./tests/ai-http.nix
     ./tests/runtime.nix
-    ./tests/export-manifest.nix
     ./tests/script-suites.nix
     ./tests/phone-bcr.nix
     ./tests/file-catalog.nix
@@ -71,7 +70,6 @@ in
     ./tests/hyprland-rules.nix
     ./tests/hyprland-lua-tools.nix
     ./tests/machine-telemetry-cgroups.nix
-    ./tests/memory-audit.nix
     ./tests/sinex-nats-security.nix
     ./tests/sinex-postgres-dump.nix
     ./tests/sinex-user-mile.nix

@@ -499,8 +499,8 @@ def cmd_diarize(args: argparse.Namespace) -> int:
     """Who spoke when.
 
     Speaker turns, not speaker names. Enrollment (is this the operator?) is a
-    separate question handled by sinnix-speaker-verify, and it is deliberately
-    not fused here: the raw audio is kept, so identity can be recomputed
+    separate question, deliberately not fused here: the raw audio is kept, so
+    identity can be recomputed
     retroactively at any time, and a labelling mistake baked into the
     transcript would be much harder to undo than one recomputed on demand.
     """

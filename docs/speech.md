@@ -59,11 +59,8 @@ lane is on by default and restarts with the phone app.
 It never dispatches agents: an always-on microphone would take commands from
 anyone in the room or on a TV. Commands go through the phone's push-to-talk
 action. A speaker-match filter could later decide whether an utterance is
-meant as a command at all (a noise filter, not authentication).
-`scripts/sinnix-speaker-verify` (`enroll`, `score`, `calibrate`, `list`) is
-that filter's groundwork; `calibrate` needs separate labelled
-same-speaker and other-speaker recordings, which do not exist yet, so the lane
-stays unconnected.
+meant as a command at all (a noise filter, not authentication); none exists
+yet.
 
 ## Diarization
 

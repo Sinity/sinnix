@@ -11,8 +11,8 @@
 
   Name resolution prefers an exact registry match (covers scripts that are
   not `sinnix-`-prefixed, e.g. `rawlog`), then
-  falls back to a `sinnix-<name>` prefix lookup (`sinnix rerank` ->
-  `sinnix-rerank-docs`). Unknown names get a substring-based "did you mean"
+  falls back to a `sinnix-<name>` prefix lookup (`sinnix phone` ->
+  `sinnix-phone`). Unknown names get a substring-based "did you mean"
   suggestion list rather than a bare failure.
 
   The full data table (registered name / short display name / store binary
@@ -95,8 +95,8 @@ let
       sinnix <command> [args...]
       sinnix help
 
-    Commands may be invoked by their short name (e.g. `sinnix rerank`) or
-    their full script name (e.g. `sinnix sinnix-rerank-docs`).
+    Commands may be invoked by their short name (e.g. `sinnix phone`) or
+    their full script name (e.g. `sinnix sinnix-phone`).
 
     Commands:
     ${helpBody}

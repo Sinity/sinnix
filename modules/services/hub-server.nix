@@ -10,7 +10,6 @@ let
   userName = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   hubServer = scriptPkgs.sinnix-hub-server;
-  quota = scriptPkgs.sinnix-quota;
   stateDir = "/realm/state/hub";
 in
 mkServiceModule {
@@ -31,8 +30,6 @@ mkServiceModule {
       ];
       environment.systemPackages = [
         hubServer
-        quota
-        quota.passthru.codexbar
         scriptPkgs.sinnix-rebuild-override
       ];
       systemd.tmpfiles.rules = [ "d /realm/state/hub 0700 ${userName} users -" ];
@@ -52,11 +49,7 @@ mkServiceModule {
         };
       };
       home-manager.users.${userName} = {
-        home.packages = [
-          hubServer
-          quota
-          quota.passthru.codexbar
-        ];
+        home.packages = [ hubServer ];
         systemd.user.sockets.sinnix-hub-server = {
           Unit = {
             Description = "Sinnix hub server Unix and loopback sockets";

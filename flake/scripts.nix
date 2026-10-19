@@ -454,10 +454,6 @@ let
     # policies. scripts/sinnix-rank is its text frontend.
     sinnix-rank-core = pkgs.callPackage ../pkgs/sinnix-rank-core/pkg.nix { inherit sinnix-lib; };
 
-    sinnix-quota = pkgs.callPackage ../pkgs/sinnix-quota/pkg.nix { inherit sinnix-lib; };
-
-    sinnix-deslop = pkgs.callPackage ../pkgs/sinnix-deslop/pkg.nix { };
-
     sinnix-capture = sinnixCaptureLib;
 
     sinnix-capture-a11y = pkgs.callPackage ../pkgs/sinnix-capture-a11y/pkg.nix {
