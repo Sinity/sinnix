@@ -881,7 +881,10 @@ ACTIONS: tuple[Action, ...] = (
         examples=(
             Example(
                 title="New window in a project",
-                input={"cwd": "/realm/project/sinnix/repo", "idempotency_key": "open-1"},
+                input={
+                    "cwd": "/realm/project/sinnix/repo",
+                    "idempotency_key": "open-1",
+                },
             ),
             Example(
                 title="Run a command in a new tab",

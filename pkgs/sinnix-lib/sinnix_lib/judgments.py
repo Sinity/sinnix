@@ -1,5 +1,7 @@
 """Bounded authored classification reads; payloads and native stores are not opened."""
+
 from __future__ import annotations
+
 import datetime as dt
 import hashlib
 import json
@@ -7,6 +9,9 @@ import os
 import re
 from collections import Counter
 from pathlib import Path
+
+from .files import open_regular
+from .taxonomy import LEGACY_ROLES, ROLE_VOCABULARY, ROLE_VOCABULARY_VERSION
 
 # Read authored definitions directly. These operations neither inspect payloads
 # nor require a multi-million-row inventory/materialization to be current.
@@ -16,8 +21,6 @@ JUDGMENT_LIMIT_BYTES = 8 << 20
 # A small controlled role is distinct from the original descriptive wording.
 # The ledger retains detail and attributed source decisions; categories never
 # grant deletion permission or establish backup, lifecycle, or claim validity.
-from .files import open_regular
-from .taxonomy import ROLE_VOCABULARY, ROLE_VOCABULARY_VERSION, LEGACY_ROLES
 
 
 def validate_role_decisions(ledger: dict) -> list[dict]:
@@ -25,12 +28,20 @@ def validate_role_decisions(ledger: dict) -> list[dict]:
     issues = []
     for entry in ledger["valid"]:
         record = entry["record"]
-        if record["field"] != "role" or (record.get("observation") or "known") != "known":
+        if (
+            record["field"] != "role"
+            or (record.get("observation") or "known") != "known"
+        ):
             continue
         value = record["value"]
         if not isinstance(value, str) or value not in ROLE_VOCABULARY:
-            issues.append({"line": entry["line"], "value": value,
-                           "reason": "noncanonical role; choose a vocabulary value and retain wording in detail"})
+            issues.append(
+                {
+                    "line": entry["line"],
+                    "value": value,
+                    "reason": "noncanonical role; choose a vocabulary value and retain wording in detail",
+                }
+            )
         elif "detail" in record and not isinstance(record["detail"], str):
             issues.append({"line": entry["line"], "reason": "role detail must be text"})
     return issues
@@ -47,10 +58,14 @@ def effective_role_audit(ledger: dict, targets: list[str]) -> dict:
         elif isinstance(value, str) and value in ROLE_VOCABULARY:
             counts[value] += 1
         else:
-            noncanonical.append({"path": path, "via": result.get("via"), "value": value})
-    return {"vocabulary": ROLE_VOCABULARY_VERSION, "counts": dict(sorted(counts.items())),
-            "noncanonical": noncanonical}
-
+            noncanonical.append(
+                {"path": path, "via": result.get("via"), "value": value}
+            )
+    return {
+        "vocabulary": ROLE_VOCABULARY_VERSION,
+        "counts": dict(sorted(counts.items())),
+        "noncanonical": noncanonical,
+    }
 
 
 def judgment_target(target: str) -> tuple[str, str]:
@@ -63,9 +78,17 @@ def judgment_target(target: str) -> tuple[str, str]:
         raise ValueError("target must be prefix:/absolute/path or sha256:<full digest>")
     path = target[7:]
     if not path.startswith("/") or any(ord(c) < 32 for c in path):
-        raise ValueError("prefix target requires an absolute path without control characters")
-    if path.startswith("//") or os.path.normpath(path) != path.rstrip("/") and path != "/":
-        raise ValueError("prefix target must be normalized; dot segments are not interpreted")
+        raise ValueError(
+            "prefix target requires an absolute path without control characters"
+        )
+    if (
+        path.startswith("//")
+        or os.path.normpath(path) != path.rstrip("/")
+        and path != "/"
+    ):
+        raise ValueError(
+            "prefix target must be normalized; dot segments are not interpreted"
+        )
     return "prefix", path.rstrip("/") or "/"
 
 
@@ -82,9 +105,13 @@ def read_judgments(path: Path) -> dict:
         if total > 25000:
             raise ValueError("judgment ledger exceeds the 25,000-record bound")
         try:
-            record = json.loads(line, parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)))
+            record = json.loads(
+                line, parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x))
+            )
         except ValueError as exc:
-            raise ValueError(f"Malformed JSON at ledger line {number}; no partial result") from exc
+            raise ValueError(
+                f"Malformed JSON at ledger line {number}; no partial result"
+            ) from exc
         try:
             if not isinstance(record, dict):
                 raise ValueError("record is not an object")
@@ -97,14 +124,28 @@ def read_judgments(path: Path) -> dict:
             timestamp = dt.datetime.fromisoformat(record["ts"].replace("Z", "+00:00"))
             if timestamp.tzinfo is None:
                 raise ValueError("timestamp must state a timezone")
-            canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-            valid.append({"record": record, "line": number,
-                          "record_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
-                          "kind": kind, "address": address, "timestamp": timestamp.timestamp()})
+            canonical = json.dumps(
+                record, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            )
+            valid.append(
+                {
+                    "record": record,
+                    "line": number,
+                    "record_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
+                    "kind": kind,
+                    "address": address,
+                    "timestamp": timestamp.timestamp(),
+                }
+            )
         except (ValueError, TypeError) as exc:
             issues.append({"line": number, "reason": str(exc)})
-    return {"path": str(path), "sha256": hashlib.sha256(raw).hexdigest(),
-            "records": total, "valid": valid, "issues": issues}
+    return {
+        "path": str(path),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "records": total,
+        "valid": valid,
+        "issues": issues,
+    }
 
 
 def judgment_rank(entry: dict) -> tuple[bool, float]:
@@ -124,7 +165,9 @@ def effective_target_judgments(ledger: dict) -> list[dict]:
     """SQL and lexical resolution share validation, rank and ambiguity."""
     groups = {}
     for entry in ledger["valid"]:
-        groups.setdefault((entry["kind"], entry["address"], entry["record"]["field"]), []).append(entry)
+        groups.setdefault(
+            (entry["kind"], entry["address"], entry["record"]["field"]), []
+        ).append(entry)
     output = []
     for (kind, address, field), entries in sorted(groups.items()):
         rank = max(map(judgment_rank, entries))
@@ -136,7 +179,11 @@ def effective_target_judgments(ledger: dict) -> list[dict]:
         if len({judgment_signature(e) for e in selected}) > 1:
             record["observation"] = "ambiguous"
             record["value"] = None
-        elif field == "role" and record["observation"] == "known" and isinstance(record["value"], str):
+        elif (
+            field == "role"
+            and record["observation"] == "known"
+            and isinstance(record["value"], str)
+        ):
             record["value"] = LEGACY_ROLES.get(record["value"], record["value"])
         record["winning_records"] = [e["record_sha256"] for e in selected]
         output.append(record)
@@ -154,7 +201,9 @@ def resolve_judgments(ledger: dict, path: str) -> dict:
     grouped = {}
     for entry in ledger["valid"]:
         prefix = entry["address"]
-        if entry["kind"] != "prefix" or not (path == prefix or path.startswith(prefix.rstrip("/") + "/")):
+        if entry["kind"] != "prefix" or not (
+            path == prefix or path.startswith(prefix.rstrip("/") + "/")
+        ):
             continue
         grouped.setdefault((prefix, entry["record"]["field"]), []).append(entry)
     candidates = {}
@@ -166,27 +215,56 @@ def resolve_judgments(ledger: dict, path: str) -> dict:
     for field, options in sorted(candidates.items()):
         prefix, selected = max(options, key=lambda item: len(item[0]))
         signatures = {judgment_signature(entry) for entry in selected}
-        evidence = [{"line": e["line"], "record_sha256": e["record_sha256"],
-                     "decision": e["record"]} for e in sorted(selected,key=lambda e:e["line"])]
+        evidence = [
+            {
+                "line": e["line"],
+                "record_sha256": e["record_sha256"],
+                "decision": e["record"],
+            }
+            for e in sorted(selected, key=lambda e: e["line"])
+        ]
         if len(signatures) > 1:
             output[field] = {"status": "ambiguous", "via": prefix, "evidence": evidence}
         else:
             record = selected[0]["record"]
-            output[field] = {"status": record.get("observation") or "known",
-                             "value": record["value"], "via": prefix, "evidence": evidence}
-            details = list(dict.fromkeys(e["record"].get("detail") for e in selected
-                                         if isinstance(e["record"].get("detail"), str)))
+            output[field] = {
+                "status": record.get("observation") or "known",
+                "value": record["value"],
+                "via": prefix,
+                "evidence": evidence,
+            }
+            details = list(
+                dict.fromkeys(
+                    e["record"].get("detail")
+                    for e in selected
+                    if isinstance(e["record"].get("detail"), str)
+                )
+            )
             if field == "role":
-                details = list(dict.fromkeys([
-                    *(e["record"]["value"] for e in selected
-                      if isinstance(e["record"]["value"], str)
-                      and LEGACY_ROLES.get(e["record"]["value"], e["record"]["value"]) != e["record"]["value"]),
-                    *details,
-                ]))
+                details = list(
+                    dict.fromkeys(
+                        [
+                            *(
+                                e["record"]["value"]
+                                for e in selected
+                                if isinstance(e["record"]["value"], str)
+                                and LEGACY_ROLES.get(
+                                    e["record"]["value"], e["record"]["value"]
+                                )
+                                != e["record"]["value"]
+                            ),
+                            *details,
+                        ]
+                    )
+                )
             if details:
                 output[field]["details"] = details
     role = output.get("role", {})
-    if role.get("status") == "known" and isinstance(role.get("value"), str) and role["value"] in LEGACY_ROLES:
+    if (
+        role.get("status") == "known"
+        and isinstance(role.get("value"), str)
+        and role["value"] in LEGACY_ROLES
+    ):
         original = role["value"]
         role["value"] = LEGACY_ROLES[original]
         if original != role["value"]:
@@ -196,7 +274,9 @@ def resolve_judgments(ledger: dict, path: str) -> dict:
     return output
 
 
-def resolve_judgments_many(ledger: dict, paths: list[str], fields=JUDGMENT_FACETS) -> dict:
+def resolve_judgments_many(
+    ledger: dict, paths: list[str], fields=JUDGMENT_FACETS
+) -> dict:
     """Resolve selected fields in one prefix sweep, sharing read-only results.
 
     Each prefix uses the direct resolver's ranking/evidence semantics once.
@@ -212,7 +292,9 @@ def resolve_judgments_many(ledger: dict, paths: list[str], fields=JUDGMENT_FACET
     active, output = [], {}
     # Component order keeps /a descendants together before /a-sibling.
     for path in sorted(requested | by_prefix.keys(), key=lambda path: path.split("/")):
-        while active and not (path == active[-1][0] or path.startswith(active[-1][0].rstrip("/") + "/")):
+        while active and not (
+            path == active[-1][0] or path.startswith(active[-1][0].rstrip("/") + "/")
+        ):
             active.pop()
         if path in by_prefix:
             effective = dict(active[-1][1]) if active else {}

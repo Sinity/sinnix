@@ -21,9 +21,9 @@ from typing import Any, BinaryIO, Callable, Iterator, Mapping, TextIO
 from sinnix_lib.atomic import atomic_publish_at
 from sinnix_lib.lock import flock
 
-from .permissions import Permission, Principal
 from .config import GatewayConfig, ProjectConfig
 from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
+from .permissions import Permission, Principal
 
 
 class ProjectError(ValueError):
@@ -1027,12 +1027,16 @@ class ProjectService:
                 diagnostic = result.stderr.decode("utf-8", errors="replace").strip()
                 raise ProjectError(diagnostic or "project operation failed")
             with spool.open(
-                encoding="utf-8", errors="strict" if "-z" in command else "replace", newline=""
+                encoding="utf-8",
+                errors="strict" if "-z" in command else "replace",
+                newline="",
             ) as output:
                 try:
                     yield output
                 except UnicodeError as error:
-                    raise ProjectError("project owner output is not valid UTF-8; no partial inventory") from error
+                    raise ProjectError(
+                        "project owner output is not valid UTF-8; no partial inventory"
+                    ) from error
 
     @contextmanager
     def _locked_mutation(

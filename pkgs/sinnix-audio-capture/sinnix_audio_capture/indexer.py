@@ -229,7 +229,9 @@ def _speech_spans_for_segment(model, pcm16_bytes: bytes) -> list[SpeechSpan]:
     ]
 
 
-def already_indexed_refs(capture_root: Path, *, since_ts: float, catalog: dict | None = None) -> set[str]:
+def already_indexed_refs(
+    capture_root: Path, *, since_ts: float, catalog: dict | None = None
+) -> set[str]:
     """Segment paths this lane has already written an envelope for.
 
     The lookback window is NOT a de-duplication mechanism, and treating it as
@@ -281,6 +283,7 @@ def already_indexed_refs(capture_root: Path, *, since_ts: float, catalog: dict |
                     if ref:
                         if catalog is not None:
                             from sinnix_lib.catalog_paths import resolve_historical_path
+
                             ref = resolve_historical_path(catalog, ref)
                         refs.add(ref)
         except FileNotFoundError:
@@ -334,7 +337,9 @@ def run_index_pass(
                     segment_start=segment_start,
                     speech_spans=[],
                 )
-                payload["decode_error"] = stderr.splitlines()[-1] if stderr else f"exit {error.returncode}"
+                payload["decode_error"] = (
+                    stderr.splitlines()[-1] if stderr else f"exit {error.returncode}"
+                )
                 writer.write(payload, raw_ref=str(segment_path))
                 indexed += 1
                 continue

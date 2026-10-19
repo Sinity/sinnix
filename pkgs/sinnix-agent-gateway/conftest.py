@@ -121,5 +121,7 @@ class DirectJobs:
 def unix_socket_path():
     # AF_UNIX paths have a native byte limit; pytest's managed data scratch
     # can legitimately be much deeper. Only the socket lives in runtime tmp.
-    with tempfile.TemporaryDirectory(prefix="gw-", dir=os.environ.get("XDG_RUNTIME_DIR", "/tmp")) as directory:
+    with tempfile.TemporaryDirectory(
+        prefix="gw-", dir=os.environ.get("XDG_RUNTIME_DIR", "/tmp")
+    ) as directory:
         yield Path(directory) / "mcp.sock"

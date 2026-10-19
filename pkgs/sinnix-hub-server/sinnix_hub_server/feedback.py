@@ -149,9 +149,7 @@ class CoalescingTrigger:
                 timeout=self.timeout,
             )
         except (OSError, subprocess.TimeoutExpired) as error:
-            print(
-                f"sinnix-hub-server: feedback drain failed: {error}", file=sys.stderr
-            )
+            print(f"sinnix-hub-server: feedback drain failed: {error}", file=sys.stderr)
             return False
         if result.returncode != 0:
             print(

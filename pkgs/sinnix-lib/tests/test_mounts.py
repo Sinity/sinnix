@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-
 from sinnix_lib.mounts import has_mounted_ancestor, read_mountpoints
 
 

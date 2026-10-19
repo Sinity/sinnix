@@ -15,7 +15,10 @@ python3Packages.buildPythonApplication {
   # notification, batched systemd probes) the health sweep and the action
   # receipts are written against, rather than private copies of each.
   dependencies = [ sinnix-lib ];
-  nativeCheckInputs = [ python3Packages.pytest nodejs ];
+  nativeCheckInputs = [
+    python3Packages.pytest
+    nodejs
+  ];
   SINNIX_CAPABILITIES_WRAPPER = ../../scripts/sinnix-capabilities;
   checkPhase = ''
     runHook preCheck

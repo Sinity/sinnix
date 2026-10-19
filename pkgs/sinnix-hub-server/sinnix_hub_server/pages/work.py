@@ -24,6 +24,7 @@ from .shell import (
     tile,
 )
 
+
 def slice_rows(state: dict[str, Any]) -> list[dict[str, Any]]:
     slices = state.get("resource_slices")
     if not isinstance(slices, list):

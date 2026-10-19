@@ -54,15 +54,21 @@ def load_index(path: Path | None) -> dict[str, Any]:
             return DeclarationIndex(status="missing")
         except OSError as error:
             return DeclarationIndex(status="unavailable", reason=str(error))
-        return DeclarationIndex(status="unavailable", reason="index link target is unavailable")
+        return DeclarationIndex(
+            status="unavailable", reason="index link target is unavailable"
+        )
     except OSError as error:
         return DeclarationIndex(status="unavailable", reason=str(error))
     except (UnicodeError, json.JSONDecodeError) as error:
         return DeclarationIndex(status="invalid", reason=str(error))
     if not isinstance(value, dict) or value.get("schema") != SCHEMA:
-        return DeclarationIndex(status="invalid", reason="unsupported declaration schema")
+        return DeclarationIndex(
+            status="invalid", reason="unsupported declaration schema"
+        )
     if not isinstance(value.get("rows"), list):
-        return DeclarationIndex(status="invalid", reason="declaration rows must be an array")
+        return DeclarationIndex(
+            status="invalid", reason="declaration rows must be an array"
+        )
     return DeclarationIndex(value, status="selected")
 
 
@@ -106,7 +112,11 @@ def merge(
         # The hub supplies its own rows, so a non-empty view is NOT evidence
         # that the Nix-side index was read. Consumers say which one is missing.
         "index_present": index.get("schema") == SCHEMA,
-        "index_status": getattr(index, "metadata", {"status": "selected" if index.get("schema") == SCHEMA else "unavailable"}),
+        "index_status": getattr(
+            index,
+            "metadata",
+            {"status": "selected" if index.get("schema") == SCHEMA else "unavailable"},
+        ),
         "rows": rows,
         "groups": groups,
         "counts": {group["kind"]: len(group["rows"]) for group in groups},

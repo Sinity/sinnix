@@ -38,18 +38,28 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import dataclass, field
 from collections import deque
+from dataclasses import dataclass, field
 
 from sinnix_lib.process import run
 
 FOLLOW_FIELDS = ("player", "status", "title", "artist", "album")
-FOLLOW_FORMAT = "<mpris>" + "".join(
-    f"<{field}>{{{{markup_escape({source})}}}}</{field}>"
-    for field, source in zip(FOLLOW_FIELDS, ("playerName", "status", "title", "artist", "album"))
-) + "</mpris>"
+FOLLOW_FORMAT = (
+    "<mpris>"
+    + "".join(
+        f"<{field}>{{{{markup_escape({source})}}}}</{field}>"
+        for field, source in zip(
+            FOLLOW_FIELDS,
+            ("playerName", "status", "title", "artist", "album"),
+            strict=True,
+        )
+    )
+    + "</mpris>"
+)
 FOLLOW_RECORD = re.compile(
-    "<mpris>" + "".join(f"<{field}>([^<]*)</{field}>" for field in FOLLOW_FIELDS) + "</mpris>\n?",
+    "<mpris>"
+    + "".join(f"<{field}>([^<]*)</{field}>" for field in FOLLOW_FIELDS)
+    + "</mpris>\n?",
     re.DOTALL,
 )
 MARKUP_ENTITY = re.compile(r"&(?:#x([0-9a-fA-F]+)|#([0-9]+)|(amp|lt|gt|quot|apos));")
@@ -147,8 +157,9 @@ def write_envelope(
         check=False,
     )
     if result.returncode:
-        raise RuntimeError(f"sinnix-capture write failed (rc={result.returncode}): {result.stderr.strip()}")
-
+        raise RuntimeError(
+            f"sinnix-capture write failed (rc={result.returncode}): {result.stderr.strip()}"
+        )
 
 
 class EnvelopeWriter:
@@ -161,7 +172,9 @@ class EnvelopeWriter:
         self.current: tuple[float, dict] | None = None
         self.closing = False
         self.failure: Exception | None = None
-        self.thread = threading.Thread(target=self._drain, daemon=True, name="mpris-writer")
+        self.thread = threading.Thread(
+            target=self._drain, daemon=True, name="mpris-writer"
+        )
         self.thread.start()
 
     def enqueue(self, payload: dict, ts: float) -> None:
@@ -209,6 +222,7 @@ class EnvelopeWriter:
             self.closing = True
             self.condition.notify()
         self.thread.join()
+
 
 def classify_change(
     state: PlayerState, player: str, status: str, title: str, artist: str, album: str
@@ -304,7 +318,9 @@ def follow_loop(
                 try:
                     handle_follow_record(
                         record.decode("utf-8") if record is not None else None,
-                        state, playerctl_bin, writer,
+                        state,
+                        playerctl_bin,
+                        writer,
                     )
                 except Exception as exc:
                     handle_follow_record(None, state, playerctl_bin, writer)

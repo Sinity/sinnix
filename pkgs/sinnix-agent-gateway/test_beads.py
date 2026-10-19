@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 from sinnix_agent_gateway.beads import BeadsError, BeadsService
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import (
     GatewayConfig,
     ProjectConfig,
     TaskAuthorityConfig,
 )
+from sinnix_agent_gateway.permissions import Principal
 
 
 def beads_service(tmp_path: Path, principal: str = "operator"):
@@ -54,7 +54,7 @@ with pathlib.Path({str(log)!r}).open('a') as output:
     output.write(json.dumps({{'argv':args,'payload':payload}})+'\\n')
 root=args[args.index('--directory')+1]
 state=json.loads(pathlib.Path({str(state)!r}).read_text())
-if args[-1]=='where': value={{'path':{str(authority)!r},'database_path':{str(authority / 'dolt')!r}}}
+if args[-1]=='where': value={{'path':{str(authority)!r},'database_path':{str(authority / "dolt")!r}}}
 elif args[-1]=='status': value={{'summary':{{'total_issues':len(state['items'])}}}}
 elif args[-2:]==['owner','read']:
     rows=state['items']
@@ -98,14 +98,21 @@ def test_task_reads_and_mutations_do_not_require_source_checkout(tmp_path):
     project = beads.config.projects["fixture"]
     project.path.rmdir()
     assert beads.query(project_ids=["fixture"], view="all")["items"]
-    value = beads.native("fixture", "updateIssue", {
-        "path": {"id": "fixture-1"},
-        "body": {"actor": "operator", "patch": {"notes": "neutral fixture"}},
-    }, write=True)
+    value = beads.native(
+        "fixture",
+        "updateIssue",
+        {
+            "path": {"id": "fixture-1"},
+            "body": {"actor": "operator", "patch": {"notes": "neutral fixture"}},
+        },
+        write=True,
+    )
     assert value["native_operation"] == "updateIssue"
     for call in commands(log):
         argv = call["argv"]
-        assert argv[argv.index("--directory") + 1] == str(project.task_authority.workspace)
+        assert argv[argv.index("--directory") + 1] == str(
+            project.task_authority.workspace
+        )
         assert argv[argv.index("--db") + 1] == str(project.task_authority.database)
     assert not project.path.exists()
 
@@ -177,11 +184,14 @@ def test_native_mutation_preserves_body_and_owner_preconditions(tmp_path):
 
 
 @pytest.mark.parametrize("field", ["created", "updated", "closed"])
-@pytest.mark.parametrize("old,new", [
-    ("2026-10-16T01:30:00+02:00", "2026-10-16T00:00:00Z"),
-    ("2026-10-16T00:00:00Z", "2026-10-16T00:00:00.000000001Z"),
-    ("2026-10-15T23:00:00Z", "2026-10-15T22:00:00-02:00"),
-])
+@pytest.mark.parametrize(
+    "old,new",
+    [
+        ("2026-10-16T01:30:00+02:00", "2026-10-16T00:00:00Z"),
+        ("2026-10-16T00:00:00Z", "2026-10-16T00:00:00.000000001Z"),
+        ("2026-10-15T23:00:00Z", "2026-10-15T22:00:00-02:00"),
+    ],
+)
 def test_date_order_preserves_instants_and_nanoseconds(tmp_path, field, old, new):
     from sinnix_agent_gateway.actions.beads import Order
 
@@ -195,11 +205,15 @@ def test_date_order_preserves_instants_and_nanoseconds(tmp_path, field, old, new
         ("newest_first", ["fixture-2", "fixture-1"]),
         ("oldest_first", ["fixture-1", "fixture-2"]),
     ):
-        rows = beads.query(project_ids=["fixture"], order=Order(field=field, direction=direction).owner_order())
+        rows = beads.query(
+            project_ids=["fixture"],
+            order=Order(field=field, direction=direction).owner_order(),
+        )
         assert [row["id"] for row in rows["items"]] == expected
         # Canonical sorting must not rewrite the owner's timestamp evidence.
         assert {row["id"]: row["fields"][field + "_at"] for row in rows["items"]} == {
-            "fixture-1": old, "fixture-2": new,
+            "fixture-1": old,
+            "fixture-2": new,
         }
 
 

@@ -15,14 +15,14 @@ their own series.
 
 ## What is backed up
 
-| Source | How | When | Repository |
-|---|---|---|---|
-| `/realm` | btrbk read-only snapshot, archived by the Borg job | snapshots 00/06/12/18:00, drain at :05 and :25 | `borg-realm-v2` |
-| `/persist` | btrbk read-only snapshot, archived by the Borg job | same as `/realm` | `borg-persist-v1` |
-| The ephemeral root | snapshot the initrd takes before each wipe | daily | `borg-root-snapshots-v1` |
-| Sinex blob store | direct | daily 05:40 | `borg-sinex-blobs-v1` |
-| Polylogue state | hooks sealed from a read-only cut of its subvolume, plus the `state/polylogue-aside-20260926T182000Z` subvolume | daily 04:15 | `borg-polylogue-state-v1` |
-| Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm` | dumps 03:42, seal Sunday | `borg-realm-v2` |
+| Source                   | How                                                                                                             | When                                           | Repository                |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ------------------------- |
+| `/realm`                 | btrbk read-only snapshot, archived by the Borg job                                                              | snapshots 00/06/12/18:00, drain at :05 and :25 | `borg-realm-v2`           |
+| `/persist`               | btrbk read-only snapshot, archived by the Borg job                                                              | same as `/realm`                               | `borg-persist-v1`         |
+| The ephemeral root       | snapshot the initrd takes before each wipe                                                                      | daily                                          | `borg-root-snapshots-v1`  |
+| Sinex blob store         | direct                                                                                                          | daily 05:40                                    | `borg-sinex-blobs-v1`     |
+| Polylogue state          | hooks sealed from a read-only cut of its subvolume, plus the `state/polylogue-aside-20260926T182000Z` subvolume | daily 04:15                                    | `borg-polylogue-state-v1` |
+| Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm`                                          | dumps 03:42, seal Sunday                       | `borg-realm-v2`           |
 
 Left out of the `/realm` archive (`realmExcludes` in `modules/backup.nix`):
 downloaded model weights (including embeddings), Steam libraries and runtimes,
@@ -58,26 +58,26 @@ Borg stores mostly new data; the `/realm` snapshots archive them.
 
 ## Is it healthy?
 
-* **Notifications.** A failed backup unit raises a critical desktop
+- **Notifications.** A failed backup unit raises a critical desktop
   notification, repeated daily while it stays failed.
-* **Do not trust `systemctl --failed` alone.** Every NixOS switch resets the
+- **Do not trust `systemctl --failed` alone.** Every NixOS switch resets the
   failed state of all units. Use the hub's health view
   (`sinnix-hub-server orient`) or the journal.
-* **Journal.** Drains log `backup_phase=create` and `backup_phase=verify`
+- **Journal.** Drains log `backup_phase=create` and `backup_phase=verify`
   lines: `journalctl -u borgbackup-job-realm -u borgbackup-job-persist`.
-* **Markers.** Per-repository state, including the latest archived snapshot
+- **Markers.** Per-repository state, including the latest archived snapshot
   and coverage results, lives in `/persist/root/.cache/borg-drain/`.
-* **Snapshots piling up** in `/realm/.btrfs/snapshot/` or `/persist/.btrfs/snapshot/`
+- **Snapshots piling up** in `/realm/.btrfs/snapshot/` or `/persist/.btrfs/snapshot/`
   means archives are not being accepted.
 
 ## Checks that run on their own
 
-| Check | Unit | When | What it shows |
-|---|---|---|---|
-| Repository integrity | `borgbackup-verify` | Sunday 13:00 | Borg's segment CRCs, advanced in time-limited partial passes |
+| Check                    | Unit                              | When                             | What it shows                                                                   |
+| ------------------------ | --------------------------------- | -------------------------------- | ------------------------------------------------------------------------------- |
+| Repository integrity     | `borgbackup-verify`               | Sunday 13:00                     | Borg's segment CRCs, advanced in time-limited partial passes                    |
 | `/realm` coverage sample | `borgbackup-coverage-audit-realm` | hourly while due, at most weekly | all paths and metadata match, plus up to 128 files / 1 GiB of contents compared |
-| Beads restore drill | `sinnix-borg-beads-drill` | Thursday 05:00 | a real restore of the Beads database from the latest archive |
-| Sealed telemetry | `machine-telemetry-seal` | Sunday 04:30 | each sealed SQLite file passes a structural check once |
+| Beads restore drill      | `sinnix-borg-beads-drill`         | Thursday 05:00                   | a real restore of the Beads database from the latest archive                    |
+| Sealed telemetry         | `machine-telemetry-seal`          | Sunday 04:30                     | each sealed SQLite file passes a structural check once                          |
 
 The coverage sample checks only the newest archive, so files that exist only
 in older archives are covered by the repository check, not by a content
@@ -106,7 +106,7 @@ compressed telemetry dump, `agentctl job start sinnix verify_telemetry_restore
 
 ## Known gaps
 
-* **No off-site copy.** A failed HDD loses every backup.
-* **The HDD also holds `/outer-realm/archive`**, primary data with no other
+- **No off-site copy.** A failed HDD loses every backup.
+- **The HDD also holds `/outer-realm/archive`**, primary data with no other
   copy. When the disk fills, new archives fail and snapshots accumulate on
   `/realm`.

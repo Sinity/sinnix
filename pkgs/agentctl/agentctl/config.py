@@ -154,8 +154,7 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
         }
         if unknown:
             raise ConfigError(
-                f"pools.{name} declares unknown field(s): "
-                + ", ".join(sorted(unknown))
+                f"pools.{name} declares unknown field(s): " + ", ".join(sorted(unknown))
             )
         excluded = declaration.get("exclusive_with", [])
         if not isinstance(excluded, list) or any(
@@ -172,13 +171,25 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
             )
         adaptive = declaration.get("adaptive")
         if adaptive is not None:
-            if not isinstance(adaptive, Mapping) or set(adaptive) != {"floor", "job_memory_bytes", "slice"}:
-                raise ConfigError(f"pools.{name}.adaptive requires floor, job_memory_bytes and slice")
+            if not isinstance(adaptive, Mapping) or set(adaptive) != {
+                "floor",
+                "job_memory_bytes",
+                "slice",
+            }:
+                raise ConfigError(
+                    f"pools.{name}.adaptive requires floor, job_memory_bytes and slice"
+                )
             floor = _parallel(name, adaptive["floor"])
             budget = _parallel(name, adaptive["job_memory_bytes"])
             unit = adaptive["slice"]
-            if floor > _parallel(name, declaration.get("parallel")) or not isinstance(unit, str) or not re.fullmatch(r"[a-zA-Z0-9_-]+\.slice", unit):
-                raise ConfigError(f"pools.{name}.adaptive has an invalid floor or slice")
+            if (
+                floor > _parallel(name, declaration.get("parallel"))
+                or not isinstance(unit, str)
+                or not re.fullmatch(r"[a-zA-Z0-9_-]+\.slice", unit)
+            ):
+                raise ConfigError(
+                    f"pools.{name}.adaptive has an invalid floor or slice"
+                )
             adaptive = AdaptivePool(floor=floor, job_memory_bytes=budget, slice=unit)
         parsed[name] = PoolPolicy(
             parallel=_parallel(name, declaration.get("parallel")),

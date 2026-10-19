@@ -19,12 +19,12 @@ Charts and reports stay in the hub; the app links to it.
 
 ## Where it lives
 
-| Piece                    | Path                                                                  |
-| ------------------------ | --------------------------------------------------------------------- |
-| App source and packaging | github:Sinity/sinnix-phone-app (`pkg.nix`, `deps.json`); flake input  |
-| Desktop CLI              | `scripts/sinnix-phone` (`sinnix phone ...`)                           |
-| Prime's receiving side   | `pkgs/sinnix-phone-dispatcher`, routes in `modules/services/hub.nix`  |
-| System-log and call pull | `modules/services/phone-logcat.nix`                                   |
+| Piece                    | Path                                                                 |
+| ------------------------ | -------------------------------------------------------------------- |
+| App source and packaging | github:Sinity/sinnix-phone-app (`pkg.nix`, `deps.json`); flake input |
+| Desktop CLI              | `scripts/sinnix-phone` (`sinnix phone ...`)                          |
+| Prime's receiving side   | `pkgs/sinnix-phone-dispatcher`, routes in `modules/services/hub.nix` |
+| System-log and call pull | `modules/services/phone-logcat.nix`                                  |
 
 ## Build and install
 
@@ -121,21 +121,21 @@ SHA-256). Uploads to `/phone/v1/*` go to `sinnix-phone-dispatcher` on port 8940,
 tailnet only; requests carrying browser `Origin` or Fetch-Metadata headers are
 refused.
 
-| File on the phone                         | Direction | Route and destination                                  |
-| ----------------------------------------- | --------- | ------------------------------------------------------ |
+| File on the phone                         | Direction | Route and destination                                 |
+| ----------------------------------------- | --------- | ----------------------------------------------------- |
 | `ambient-*.m4a`                           | out       | `POST /chunk?lane=ambient` → capture store            |
-| `sensor-*.bin` + `.json`                  | out       | `POST /chunk?lane=outbox`                              |
-| `events/events-*.jsonl`                   | out       | `POST /events?day=&offset=` → that day's file          |
-| `outbox/intent-*.json`                    | out       | `POST /intent` → executed, receipt sent back           |
-| `outbox/{voice,trace,shared}-*` + `.json` | out       | `POST /chunk?lane=outbox`                              |
-| `/sdcard/DCIM`                            | out       | `POST /chunk?lane=camera` (`SINNIX_PHONE_CAMERA_DIR`)  |
-| `/sdcard/Download`                        | out       | `POST /chunk?lane=download`                            |
-| `inbox/glance.json`                       | in        | built on request (`GET /inbox/file`)                   |
-| `inbox/receipts/*`, `inbox/notify/*`      | in        | fetched, confirmed, shown, then deleted                |
-| `inbox/decks/*`                           | in        | fetched and kept; adds instruments                     |
-| `status.json`                             | read      | over ADB by `app-status`                               |
-| logcat                                    | pulled    | `sinnix phone logcat` over ADB                         |
-| BCR call recordings                       | pulled    | scheduled ADB pull → `phone-calls` lane                |
+| `sensor-*.bin` + `.json`                  | out       | `POST /chunk?lane=outbox`                             |
+| `events/events-*.jsonl`                   | out       | `POST /events?day=&offset=` → that day's file         |
+| `outbox/intent-*.json`                    | out       | `POST /intent` → executed, receipt sent back          |
+| `outbox/{voice,trace,shared}-*` + `.json` | out       | `POST /chunk?lane=outbox`                             |
+| `/sdcard/DCIM`                            | out       | `POST /chunk?lane=camera` (`SINNIX_PHONE_CAMERA_DIR`) |
+| `/sdcard/Download`                        | out       | `POST /chunk?lane=download`                           |
+| `inbox/glance.json`                       | in        | built on request (`GET /inbox/file`)                  |
+| `inbox/receipts/*`, `inbox/notify/*`      | in        | fetched, confirmed, shown, then deleted               |
+| `inbox/decks/*`                           | in        | fetched and kept; adds instruments                    |
+| `status.json`                             | read      | over ADB by `app-status`                              |
+| logcat                                    | pulled    | `sinnix phone logcat` over ADB                        |
+| BCR call recordings                       | pulled    | scheduled ADB pull → `phone-calls` lane               |
 
 Retries are safe: an event batch is written at the offset it declares, a chunk
 prime already has is acknowledged again, and each intent carries a token so a
@@ -241,7 +241,7 @@ enough.
   which does not implement it).
 - **Sleep estimate** from motion, light, screen and charging.
 - **Xiaomi cloud** band data, independent of Health Connect: `sinnix
-  capture-xiaomi-cloud` syncs once; `sinnix xiaomi-cloud-login` prints a
+capture-xiaomi-cloud` syncs once; `sinnix xiaomi-cloud-login` prints a
   `LOGIN_URL` to confirm in a logged-in browser after the credential expires.
   Runs overlap seven days; `agentctl job start sinnix xiaomi_cloud_backfill`
   covers 35 days after an outage.
@@ -256,7 +256,7 @@ enough.
 - **Phone → desktop notifications:** the dispatcher shows each newly uploaded
   phone notification on the desktop, skipping ongoing ones.
 - **Desktop → phone notifications:** `sinnix-phone-dispatcher notify TITLE
-  BODY [--route R]` queues one; nothing sends them automatically yet.
+BODY [--route R]` queues one; nothing sends them automatically yet.
 
 Whether KDE Connect should take over commodity continuity is open in
 `sinnix-z8iq.5`; remaining continuity work is `sinnix-uyvt.5`.

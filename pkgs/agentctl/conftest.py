@@ -174,7 +174,11 @@ class FakePueue:
     def live(self) -> Status:
         queue = self.status()
         return Status(
-            {task_id: task for task_id, task in queue.tasks.items() if not task.terminal},
+            {
+                task_id: task
+                for task_id, task in queue.tasks.items()
+                if not task.terminal
+            },
             queue.groups,
         )
 
@@ -348,7 +352,10 @@ def live_pueue(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
         # directory inherited from the invoking user resolves to the operator's
         # live socket, where `shutdown` stops the machine's real queue.
         resolved = subprocess.run(
-            ["pueue", "status", "--json"], env=environment, capture_output=True, text=True
+            ["pueue", "status", "--json"],
+            env=environment,
+            capture_output=True,
+            text=True,
         )
         assert resolved.returncode != 0, (
             "a daemon answered before this fixture started one: the environment "
@@ -380,8 +387,10 @@ def live_pueue(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
         try:
             if started:
                 subprocess.run(
-                    ["pueue", "shutdown"], env=environment,
-                    capture_output=True, timeout=30,
+                    ["pueue", "shutdown"],
+                    env=environment,
+                    capture_output=True,
+                    timeout=30,
                 )
         finally:
             shutil.rmtree(root, ignore_errors=True)

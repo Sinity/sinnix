@@ -8,7 +8,9 @@ from pathlib import Path
 
 import pytest
 
-BUILD = runpy.run_path(str(Path(__file__).parents[3] / "scripts/sinnix-report-site"))["build"]
+BUILD = runpy.run_path(str(Path(__file__).parents[3] / "scripts/sinnix-report-site"))[
+    "build"
+]
 
 
 def test_only_selected_files_are_published_with_stable_relative_urls(tmp_path):
@@ -18,7 +20,13 @@ def test_only_selected_files_are_published_with_stable_relative_urls(tmp_path):
     report.write_text("<p>report</p>")
     (subject / "unpublished.txt").write_text("private")
     output = tmp_path / "site"
-    BUILD({"schema_version": 1, "files": [{"url": "existing/report.html", "source": str(report)}]}, output)
+    BUILD(
+        {
+            "schema_version": 1,
+            "files": [{"url": "existing/report.html", "source": str(report)}],
+        },
+        output,
+    )
     link = output / "existing/report.html"
     assert link.is_symlink() and link.read_text() == "<p>report</p>"
     assert not (output / "existing/unpublished.txt").exists()
@@ -26,13 +34,18 @@ def test_only_selected_files_are_published_with_stable_relative_urls(tmp_path):
     assert not (output / "existing/added-later.txt").exists()
 
 
-@pytest.mark.parametrize("url", ["../escape", "/absolute", "a/../escape", "a//b", ".hidden", "a\\b"])
+@pytest.mark.parametrize(
+    "url", ["../escape", "/absolute", "a/../escape", "a//b", ".hidden", "a\\b"]
+)
 def test_unsafe_urls_refuse_before_creating_any_site(tmp_path, url):
     source = tmp_path / "report.html"
     source.touch()
     output = tmp_path / "site"
     with pytest.raises(ValueError):
-        BUILD({"schema_version": 1, "files": [{"url": url, "source": str(source)}]}, output)
+        BUILD(
+            {"schema_version": 1, "files": [{"url": url, "source": str(source)}]},
+            output,
+        )
     assert not output.exists()
 
 
@@ -43,43 +56,93 @@ def test_private_input_and_directory_publication_are_refused(tmp_path):
     source.write_text("{}")
     for file in [source, private]:
         with pytest.raises(ValueError):
-            BUILD({"schema_version": 1, "private_roots": [str(private)],
-                   "files": [{"url": "data", "source": str(file)}]}, tmp_path / "site")
+            BUILD(
+                {
+                    "schema_version": 1,
+                    "private_roots": [str(private)],
+                    "files": [{"url": "data", "source": str(file)}],
+                },
+                tmp_path / "site",
+            )
     assert not (tmp_path / "site").exists()
 
 
-def test_companions_and_translations_keep_their_urls_but_conflicts_are_refused(tmp_path):
+def test_companions_and_translations_keep_their_urls_but_conflicts_are_refused(
+    tmp_path,
+):
     source = tmp_path / "source"
     source.write_text("data")
     output = tmp_path / "site"
-    BUILD({"schema_version": 1, "files": [{"url": url, "source": str(source)}
-        for url in ["report.html", "report.pl.html", "assets/data.json"]]}, output)
-    assert sorted(p.relative_to(output).as_posix() for p in output.rglob("*") if p.is_file()) == [
-        "assets/data.json", "report.html", "report.pl.html"]
+    BUILD(
+        {
+            "schema_version": 1,
+            "files": [
+                {"url": url, "source": str(source)}
+                for url in ["report.html", "report.pl.html", "assets/data.json"]
+            ],
+        },
+        output,
+    )
+    assert sorted(
+        p.relative_to(output).as_posix() for p in output.rglob("*") if p.is_file()
+    ) == ["assets/data.json", "report.html", "report.pl.html"]
     for urls in [["a", "a"], ["a", "a/b"]]:
         with pytest.raises(ValueError):
-            BUILD({"schema_version": 1, "files": [{"url": url, "source": str(source)} for url in urls]}, tmp_path / "conflict")
+            BUILD(
+                {
+                    "schema_version": 1,
+                    "files": [{"url": url, "source": str(source)} for url in urls],
+                },
+                tmp_path / "conflict",
+            )
     assert not (tmp_path / "conflict").exists()
 
 
-@pytest.mark.parametrize("url,filename", [("report%20one.html", "report one.html"),
-    ("caf%C3%A9.html", "café.html"), ("report%25.html", "report%.html")])
+@pytest.mark.parametrize(
+    "url,filename",
+    [
+        ("report%20one.html", "report one.html"),
+        ("caf%C3%A9.html", "café.html"),
+        ("report%25.html", "report%.html"),
+    ],
+)
 def test_encoded_urls_map_to_the_served_filename(tmp_path, url, filename):
     source = tmp_path / "source"
     source.write_text("neutral report")
     output = tmp_path / "site"
-    BUILD({"schema_version": 1, "files": [{"url": "reports/" + url, "source": str(source)}]}, output)
+    BUILD(
+        {
+            "schema_version": 1,
+            "files": [{"url": "reports/" + url, "source": str(source)}],
+        },
+        output,
+    )
     assert (output / "reports" / filename).read_text() == "neutral report"
     assert not (output / "reports" / url).exists()
 
 
-@pytest.mark.parametrize("url", ["a?query=1", "a#fragment", "https:external", "a%zz", "%2e%2e/escape", "%2fabsolute", "a%5cb", "a%00b"])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "a?query=1",
+        "a#fragment",
+        "https:external",
+        "a%zz",
+        "%2e%2e/escape",
+        "%2fabsolute",
+        "a%5cb",
+        "a%00b",
+    ],
+)
 def test_invalid_serving_urls_refuse_before_publication(tmp_path, url):
     source = tmp_path / "source"
     source.touch()
     output = tmp_path / "site"
     with pytest.raises(ValueError):
-        BUILD({"schema_version": 1, "files": [{"url": url, "source": str(source)}]}, output)
+        BUILD(
+            {"schema_version": 1, "files": [{"url": url, "source": str(source)}]},
+            output,
+        )
     assert not output.exists()
 
 
@@ -88,8 +151,16 @@ def test_encoded_and_literal_urls_cannot_publish_the_same_file(tmp_path):
     source.touch()
     output = tmp_path / "site"
     with pytest.raises(ValueError, match="duplicate"):
-        BUILD({"schema_version": 1, "files": [{"url": url, "source": str(source)}
-            for url in ["report one.html", "report%20one.html"]]}, output)
+        BUILD(
+            {
+                "schema_version": 1,
+                "files": [
+                    {"url": url, "source": str(source)}
+                    for url in ["report one.html", "report%20one.html"]
+                ],
+            },
+            output,
+        )
     assert not output.exists()
 
 
@@ -98,8 +169,16 @@ def test_encoded_file_directory_collision_is_refused(tmp_path):
     source.touch()
     output = tmp_path / "site"
     with pytest.raises(ValueError, match="collision"):
-        BUILD({"schema_version": 1, "files": [{"url": url, "source": str(source)}
-            for url in ["assets", "%61ssets/report.html"]]}, output)
+        BUILD(
+            {
+                "schema_version": 1,
+                "files": [
+                    {"url": url, "source": str(source)}
+                    for url in ["assets", "%61ssets/report.html"]
+                ],
+            },
+            output,
+        )
     assert not output.exists()
 
 
@@ -108,9 +187,16 @@ def test_publication_fifo_is_rejected_before_creating_output(tmp_path):
     os.mkfifo(manifest)
     output = tmp_path / "site"
     result = subprocess.run(
-        [str(Path(__file__).parents[3] / "scripts/sinnix-report-site"),
-         "--publication", str(manifest), "--output", str(output)],
-        capture_output=True, text=True, timeout=2,
+        [
+            str(Path(__file__).parents[3] / "scripts/sinnix-report-site"),
+            "--publication",
+            str(manifest),
+            "--output",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=2,
     )
     assert result.returncode == 2
     assert "regular file" in result.stderr
@@ -122,14 +208,28 @@ def test_utf16_publication_manifest_remains_supported(tmp_path):
     source = tmp_path / "source.html"
     source.write_text("neutral report")
     manifest = tmp_path / "publication.json"
-    manifest.write_bytes(json.dumps({"schema_version": 1, "files": [
-        {"url": "report.html", "source": str(source)},
-    ]}).encode("utf-16"))
+    manifest.write_bytes(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "files": [
+                    {"url": "report.html", "source": str(source)},
+                ],
+            }
+        ).encode("utf-16")
+    )
     output = tmp_path / "site"
     result = subprocess.run(
-        [str(Path(__file__).parents[3] / "scripts/sinnix-report-site"),
-         "--publication", str(manifest), "--output", str(output)],
-        capture_output=True, text=True, timeout=2,
+        [
+            str(Path(__file__).parents[3] / "scripts/sinnix-report-site"),
+            "--publication",
+            str(manifest),
+            "--output",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=2,
     )
     assert result.returncode == 0, result.stderr
     assert (output / "report.html").read_text() == "neutral report"
@@ -140,9 +240,16 @@ def test_oversized_publication_manifest_cannot_create_output(tmp_path):
     manifest.write_bytes(b'{"schema_version": 1, "files": []}' + b" " * (4 << 20))
     output = tmp_path / "site"
     result = subprocess.run(
-        [str(Path(__file__).parents[3] / "scripts/sinnix-report-site"),
-         "--publication", str(manifest), "--output", str(output)],
-        capture_output=True, text=True, timeout=2,
+        [
+            str(Path(__file__).parents[3] / "scripts/sinnix-report-site"),
+            "--publication",
+            str(manifest),
+            "--output",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=2,
     )
     assert result.returncode == 2
     assert "bound" in result.stderr
@@ -162,14 +269,18 @@ def test_manifest_byte_budget_is_enforced_during_read(tmp_path, monkeypatch):
     @contextmanager
     def observed(path, *args, **kwargs):
         with original(path, *args, **kwargs) as handle:
+
             class Reader:
                 def read(self, size=-1):
                     nonlocal consumed
-                    assert size >= 0, "a bounded input must not request an unbounded read"
+                    assert size >= 0, (
+                        "a bounded input must not request an unbounded read"
+                    )
                     raw = handle.read(size)
                     consumed += len(raw)
                     assert consumed <= 17
                     return raw
+
             yield Reader()
 
     monkeypatch.setattr(files, "open_regular", observed)

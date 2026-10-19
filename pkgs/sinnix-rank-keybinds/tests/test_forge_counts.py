@@ -26,7 +26,9 @@ def forge(tmp_path, monkeypatch):
     (tmp_path / "phone" / "ambient").mkdir(parents=True)
     (tmp_path / "phone" / "ambient-levels.jsonl").write_text("")
     with sqlite3.connect(module.ATUIN_DB) as db:
-        db.execute("CREATE TABLE history(command TEXT COLLATE NOCASE, deleted_at TEXT, timestamp INTEGER)")
+        db.execute(
+            "CREATE TABLE history(command TEXT COLLATE NOCASE, deleted_at TEXT, timestamp INTEGER)"
+        )
     return module
 
 
@@ -69,7 +71,10 @@ def test_transcript_line_counts_are_not_audio_file_counts(forge):
 
 def test_history_facts_are_not_a_capped_recent_sample(forge):
     with sqlite3.connect(forge.ATUIN_DB) as db:
-        db.executemany("INSERT INTO history VALUES (?,NULL,?)", (("git status", i) for i in range(200001)))
+        db.executemany(
+            "INSERT INTO history VALUES (?,NULL,?)",
+            (("git status", i) for i in range(200001)),
+        )
         db.execute("INSERT INTO history VALUES ('nix build',NULL,-1)")
         db.execute("INSERT INTO history VALUES ('GIT status',NULL,-2)")
         db.execute("INSERT INTO history VALUES ('deleted','removed',999999)")
@@ -91,7 +96,9 @@ def test_missing_history_is_reported_as_unavailable_not_empty(forge, capsys):
 
 
 def test_unreadable_day_does_not_become_a_complete_typing_profile(forge):
-    (forge.KEYLOG / "2026-10-16.jsonl").write_text(json.dumps({"event": "press", "keycode": "KEY_A"}) + "\n")
+    (forge.KEYLOG / "2026-10-16.jsonl").write_text(
+        json.dumps({"event": "press", "keycode": "KEY_A"}) + "\n"
+    )
     good = forge.KEYLOG / "2026-10-15.jsonl"
     good.write_text((json.dumps({"event": "press", "keycode": "KEY_A"}) + "\n") * 1100)
     denied = forge.KEYLOG / "2026-10-16.jsonl"
@@ -116,18 +123,30 @@ def test_typing_does_not_validate_unselected_historical_entries(forge):
     assert profile["presses"] == 1100 and profile["days"] == 1
 
 
-def test_failed_typing_publication_preserves_the_previous_profile(forge, tmp_path, monkeypatch):
+def test_failed_typing_publication_preserves_the_previous_profile(
+    forge, tmp_path, monkeypatch
+):
     root = tmp_path / "profiles"
     root.mkdir()
     monkeypatch.setenv("SINNIX_TYPING_OUTPUT", str(root))
-    dest = root / f"{forge.dt.datetime.now(forge.dt.timezone.utc).date().isoformat()}.json"
+    dest = (
+        root / f"{forge.dt.datetime.now(forge.dt.timezone.utc).date().isoformat()}.json"
+    )
     dest.write_bytes(b'{"verified":"previous profile"}\n')
     before = dest.read_bytes()
-    monkeypatch.setattr(forge, "analyse_typing", lambda *_: {
-        "presses": 1100, "correction_rate": 0, "weakest": [],
-    })
+    monkeypatch.setattr(
+        forge,
+        "analyse_typing",
+        lambda *_: {
+            "presses": 1100,
+            "correction_rate": 0,
+            "weakest": [],
+        },
+    )
+
     def failed_barrier(_fd):
         raise OSError("synthetic persistence failure")
+
     monkeypatch.setattr(os, "fsync", failed_barrier)
     with pytest.raises(OSError):
         forge.cmd_typing(SimpleNamespace(days=1, max_lines=1000))
@@ -135,9 +154,9 @@ def test_failed_typing_publication_preserves_the_previous_profile(forge, tmp_pat
 
 
 def test_personalized_deck_is_private_and_unchanged(forge, tmp_path, monkeypatch):
-    directory = tmp_path / 'private-decks'
-    monkeypatch.setattr(forge, 'DECKS_DIR', directory)
-    payload = {'id': 'fixture', 'trials': [{'stimulus': 'synthetic input'}]}
+    directory = tmp_path / "private-decks"
+    monkeypatch.setattr(forge, "DECKS_DIR", directory)
+    payload = {"id": "fixture", "trials": [{"stimulus": "synthetic input"}]}
     previous = os.umask(0o022)
     try:
         path = forge.write_deck(payload)

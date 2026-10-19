@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import Field
 
 from ..action import OPERATOR_ONLY, Action, Example, MutationControls, RequestControls
-from ..permissions import Permission
 from ..contracts import VerbFamily
 from ..files import move_source_refusal
 from ..locators import FileLocator, encode_file_ref
@@ -18,6 +17,7 @@ from ..organization import (
     file_identity,
     identity_matches,
 )
+from ..permissions import Permission
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 from .files import SearchInput, _search

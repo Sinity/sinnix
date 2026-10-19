@@ -16,7 +16,6 @@ from typing import Any, Sequence, TextIO
 import anyio
 import pytest
 from sinnix_agent_gateway.artifacts import ArtifactService
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.mcp_broker import (
     McpBrokerDeadlineError,
@@ -29,6 +28,7 @@ from sinnix_agent_gateway.owner_execution import (
     ExecutionResult,
     OwnerExecution,
 )
+from sinnix_agent_gateway.permissions import Principal
 
 
 class FakeTransport:
@@ -1373,8 +1373,9 @@ asyncio.run(main())
     ]
 
 
-
-def test_persistent_cancel_releases_active_call_without_cancelling_its_peer(tmp_path, monkeypatch):
+def test_persistent_cancel_releases_active_call_without_cancelling_its_peer(
+    tmp_path, monkeypatch
+):
     broker = broker_service(tmp_path, "operator")
     holding = asyncio.Event()
     timed_out = asyncio.Event()
@@ -1397,23 +1398,35 @@ def test_persistent_cancel_releases_active_call_without_cancelling_its_peer(tmp_
                     cancelled.set()
             return await super().call_tool(name, arguments)
 
-    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.stdio_client", lambda *a, **k: FakeTransport())
-    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", BlockingSession)
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client", lambda *a, **k: FakeTransport()
+    )
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.ClientSession", BlockingSession
+    )
 
     async def invoke():
         async with broker.lifespan():
-            proxy = await broker._persistent_session("fixture", broker._server("fixture"), {}, tmp_path / "stderr")
+            proxy = await broker._persistent_session(
+                "fixture", broker._server("fixture"), {}, tmp_path / "stderr"
+            )
             with anyio.fail_after(2):
                 peer = asyncio.create_task(proxy.call_tool("lookup", {"query": "peer"}))
                 await holding.wait()
-                expired = asyncio.create_task(proxy.call_tool("lookup", {"query": "timeout"}))
+                expired = asyncio.create_task(
+                    proxy.call_tool("lookup", {"query": "timeout"})
+                )
                 await timed_out.wait()
                 expired.cancel()
                 await asyncio.gather(expired, return_exceptions=True)
                 with anyio.move_on_after(0.1):
                     await cancelled.wait()
-                assert cancelled.is_set(), "caller cancellation left its upstream operation running"
-                assert not peer.done(), "cancellation propagated onto an independent peer"
+                assert cancelled.is_set(), (
+                    "caller cancellation left its upstream operation running"
+                )
+                assert not peer.done(), (
+                    "cancellation propagated onto an independent peer"
+                )
                 assert broker._sessions["fixture"] is proxy
                 release.set()
                 await peer
@@ -1463,7 +1476,9 @@ async def main():
 asyncio.run(main())
 """)
     broker = broker_service(tmp_path, "operator")
-    broker.config.mcp_broker_servers["fixture"].update(command=sys.executable, args=[str(script), str(events)], env={})
+    broker.config.mcp_broker_servers["fixture"].update(
+        command=sys.executable, args=[str(script), str(events)], env={}
+    )
 
     def rows():
         return [json.loads(line) for line in events.read_text().splitlines()]
@@ -1471,16 +1486,30 @@ asyncio.run(main())
     async def invoke():
         async with broker.lifespan():
             with anyio.fail_after(10):
-                proxy = await broker._persistent_session("fixture", broker._server("fixture"), {}, tmp_path / "stderr")
+                proxy = await broker._persistent_session(
+                    "fixture", broker._server("fixture"), {}, tmp_path / "stderr"
+                )
                 with pytest.raises(McpBrokerDeadlineError):
-                    await broker.call("fixture", "lookup", {"query": "blocked"}, write=False, deadline_at=time.time() + 1)
-                assert ["call", "blocked"] in rows(), "deadline expired before request dispatch"
+                    await broker.call(
+                        "fixture",
+                        "lookup",
+                        {"query": "blocked"},
+                        write=False,
+                        deadline_at=time.time() + 1,
+                    )
+                assert ["call", "blocked"] in rows(), (
+                    "deadline expired before request dispatch"
+                )
                 with anyio.move_on_after(2):
                     while ["cancelled", "blocked"] not in rows():
                         await anyio.sleep(0.01)
-                assert ["cancelled", "blocked"] in rows(), "deadline did not reach actual SDK upstream cancellation"
+                assert ["cancelled", "blocked"] in rows(), (
+                    "deadline did not reach actual SDK upstream cancellation"
+                )
                 assert broker._sessions["fixture"] is proxy
-                result = await broker.call("fixture", "lookup", {"query": "after"}, write=False)
+                result = await broker.call(
+                    "fixture", "lookup", {"query": "after"}, write=False
+                )
                 assert result["response"]["content"][0]["text"] == "after"
 
     anyio.run(invoke)

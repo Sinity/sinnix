@@ -112,7 +112,9 @@ class AgentCtlClient:
             # agentctl starts native clients of its own. End the whole probe
             # before closing pipes, so cancellation cannot orphan those clients.
             probe = run_bounded(
-                argv, timeout=deadline, stdout_limit=MAX_RESPONSE_BYTES,
+                argv,
+                timeout=deadline,
+                stdout_limit=MAX_RESPONSE_BYTES,
                 stderr_limit=65_536,
             )
             if probe.limited:
@@ -120,7 +122,9 @@ class AgentCtlClient:
             if probe.error is not None:
                 raise AgentCtlError(f"{argv[0]} is unavailable: {probe.error}")
             result = subprocess.CompletedProcess(
-                argv, probe.returncode, probe.stdout.decode("utf-8", "replace"),
+                argv,
+                probe.returncode,
+                probe.stdout.decode("utf-8", "replace"),
             )
         else:
             result = self._run_injected(argv, deadline)
@@ -135,7 +139,9 @@ class AgentCtlClient:
             raise AgentCtlError(f"{argv[0]} returned malformed JSON") from error
 
     def _run_injected(
-        self, argv: Sequence[str], timeout: float,
+        self,
+        argv: Sequence[str],
+        timeout: float,
     ) -> subprocess.CompletedProcess[str]:
         assert self.runner is not None
         try:

@@ -16,7 +16,6 @@ import anyio
 from pydantic import Field
 
 from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
-from ..permissions import Permission
 from ..contexts import source_revision
 from ..contracts import VerbFamily
 from ..locators import (
@@ -26,6 +25,7 @@ from ..locators import (
     ProjectLocator,
     project_ref,
 )
+from ..permissions import Permission
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 from .jobs import JobView, _job_view

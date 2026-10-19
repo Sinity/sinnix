@@ -66,7 +66,9 @@ def _regular_file(target: Path, flags: int):
         fd = os.open(target, os.O_RDONLY | safe_flags)
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise OSError(errno.EINVAL, "capture destination is not a regular file", str(target))
+            raise OSError(
+                errno.EINVAL, "capture destination is not a regular file", str(target)
+            )
         yield fd
     finally:
         os.close(fd)
@@ -75,8 +77,13 @@ def _regular_file(target: Path, flags: int):
 def _verify_capture_path(target: Path, fd: int) -> None:
     opened = os.fstat(fd)
     current = target.lstat()
-    if not stat.S_ISREG(current.st_mode) or (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
-        raise OSError(errno.ESTALE, "capture destination changed during verification", str(target))
+    if not stat.S_ISREG(current.st_mode) or (current.st_dev, current.st_ino) != (
+        opened.st_dev,
+        opened.st_ino,
+    ):
+        raise OSError(
+            errno.ESTALE, "capture destination changed during verification", str(target)
+        )
 
 
 def _sync_capture_path(target: Path, fd: int, observed: os.stat_result) -> None:
@@ -86,7 +93,9 @@ def _sync_capture_path(target: Path, fd: int, observed: os.stat_result) -> None:
     os.fsync(fd)
     directory_path = target.parent.absolute()
     while True:
-        directory = os.open(directory_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        directory = os.open(
+            directory_path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        )
         try:
             info = os.fstat(directory)
             os.fsync(directory)
@@ -99,8 +108,14 @@ def _sync_capture_path(target: Path, fd: int, observed: os.stat_result) -> None:
         # cannot know which ancestor creation preceded an earlier failed sync.
         directory_path = parent
     current = os.fstat(fd)
-    if (current.st_size, current.st_mtime_ns, current.st_ctime_ns) != (observed.st_size, observed.st_mtime_ns, observed.st_ctime_ns):
-        raise OSError(errno.ESTALE, "capture contents changed during verification", str(target))
+    if (current.st_size, current.st_mtime_ns, current.st_ctime_ns) != (
+        observed.st_size,
+        observed.st_mtime_ns,
+        observed.st_ctime_ns,
+    ):
+        raise OSError(
+            errno.ESTALE, "capture contents changed during verification", str(target)
+        )
     _verify_capture_path(target, fd)
 
 
@@ -166,7 +181,9 @@ def safe_relative(lane_dir: Path, name: str) -> Path | None:
     if not name or name.endswith("/"):
         return None
     parts = name.split("/")
-    if len(parts) > MAX_NAME_DEPTH or not all(UPLOAD_NAME_RE.fullmatch(p) for p in parts):
+    if len(parts) > MAX_NAME_DEPTH or not all(
+        UPLOAD_NAME_RE.fullmatch(p) for p in parts
+    ):
         return None
     target = lane_dir.joinpath(*parts)
     try:
@@ -393,7 +410,9 @@ def append_events(
         EVENTS_DIR.mkdir(parents=True, exist_ok=True)
         with flock(EVENTS_DIR / ".write.lock"):
             try:
-                with _regular_file(target, os.O_RDWR | (os.O_CREAT if offset == 0 else 0)) as fd:
+                with _regular_file(
+                    target, os.O_RDWR | (os.O_CREAT if offset == 0 else 0)
+                ) as fd:
                     observed = os.fstat(fd)
                     size = observed.st_size
                     if offset > size:
@@ -444,7 +463,10 @@ def append_events(
                     except OSError as exc:
                         # Capture is durable; advisory mirroring cannot turn
                         # descriptor exhaustion into a failed upload.
-                        print(f"phone-dispatcher: notification descriptor: {exc}", file=sys.stderr)
+                        print(
+                            f"phone-dispatcher: notification descriptor: {exc}",
+                            file=sys.stderr,
+                        )
             except FileNotFoundError:
                 if offset == 0:
                     raise
@@ -511,7 +533,9 @@ def _capture_digest(target: Path) -> tuple[int, str]:
         _verify_capture_path(target, fd)
         after = os.fstat(fd)
         if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
-            after.st_size, after.st_mtime_ns, after.st_ctime_ns
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
         ):
             raise ValueError("capture changed during repair comparison")
         return size, digest.hexdigest()
@@ -538,7 +562,9 @@ def _event_source_digest(source: Path, output=None) -> tuple[int, str]:
         _verify_capture_path(source, fd)
         after = os.fstat(fd)
         if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
-            after.st_size, after.st_mtime_ns, after.st_ctime_ns
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
         ):
             raise ValueError("source changed during repair validation")
     if not size:

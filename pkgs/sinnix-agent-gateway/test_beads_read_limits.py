@@ -51,10 +51,13 @@ def test_owner_stderr_remains_bounded(tmp_path, write):
 
 
 @pytest.mark.parametrize("write", [False, True])
-@pytest.mark.parametrize("body", [
-    "print('{\"count\":' + '9'*5000 + '}')\n",
-    "sys.stdout.buffer.write(b'\\xff')\n",
-])
+@pytest.mark.parametrize(
+    "body",
+    [
+        "print('{\"count\":' + '9'*5000 + '}')\n",
+        "sys.stdout.buffer.write(b'\\xff')\n",
+    ],
+)
 def test_unusable_owner_json_is_a_typed_failure(tmp_path, write, body):
     service, _ = beads_service(tmp_path)
     owner_program(service, body)
@@ -148,7 +151,9 @@ def test_query_over_ten_thousand_rows_preserves_requested_immutable_pages(
 def test_paged_query_rejects_revision_change(tmp_path, monkeypatch):
     service, _ = beads_service(tmp_path)
     project = service.config.projects["fixture"]
-    monkeypatch.setattr(service, "_attest", lambda *_: (project, {"revision": REVISION}))
+    monkeypatch.setattr(
+        service, "_attest", lambda *_: (project, {"revision": REVISION})
+    )
 
     def read(_project, command, write, **kwargs):
         assert command == ["owner", "read"] and not write

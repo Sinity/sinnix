@@ -51,7 +51,10 @@ def apply(
         if policy.adaptive is not None:
             # A switch preserves an adaptive width instead of resetting it to
             # the ceiling. A newly created group starts at its floor.
-            slots = max(policy.adaptive.floor, min(live.get(group, policy.adaptive.floor), slots))
+            slots = max(
+                policy.adaptive.floor,
+                min(live.get(group, policy.adaptive.floor), slots),
+            )
         if group not in live:
             pueue.group_add(group, slots)
             created.append({"group": group, "parallel": slots})

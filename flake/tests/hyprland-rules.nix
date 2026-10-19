@@ -52,7 +52,8 @@ in
             }
           ];
       };
-      replayKeys = enabled:
+      replayKeys =
+        enabled:
         map (binding: builtins.head binding._args)
           (import ../../modules/features/desktop/hyprland/bindings.nix {
             inherit lib;
@@ -71,25 +72,25 @@ in
       checks.hyprctl-native-abi =
         assert lib.all (output: builtins.hasAttr output hyprland) hyprland.meta.outputsToInstall;
         pkgs.runCommand "sinnix-hyprctl-native-abi" { } ''
-        mkdir -p "$TMPDIR/foreign" "$TMPDIR/runtime/hypr"
-        export XDG_RUNTIME_DIR="$TMPDIR/runtime"
-        printf 'synthetic incompatible library' > "$TMPDIR/foreign/libstdc++.so.6"
-        if LD_LIBRARY_PATH="$TMPDIR/foreign" ${pkgs.hyprland}/bin/hyprctl instances -j > original.out 2>&1; then
-          echo "fixture did not exercise the foreign-library override" >&2
-          exit 1
-        fi
-        LD_LIBRARY_PATH="$TMPDIR/foreign" ${hyprland}/bin/hyprctl instances -j > guarded.out
-        test -s guarded.out
-        touch "$out"
-      '';
+          mkdir -p "$TMPDIR/foreign" "$TMPDIR/runtime/hypr"
+          export XDG_RUNTIME_DIR="$TMPDIR/runtime"
+          printf 'synthetic incompatible library' > "$TMPDIR/foreign/libstdc++.so.6"
+          if LD_LIBRARY_PATH="$TMPDIR/foreign" ${pkgs.hyprland}/bin/hyprctl instances -j > original.out 2>&1; then
+            echo "fixture did not exercise the foreign-library override" >&2
+            exit 1
+          fi
+          LD_LIBRARY_PATH="$TMPDIR/foreign" ${hyprland}/bin/hyprctl instances -j > guarded.out
+          test -s guarded.out
+          touch "$out"
+        '';
 
       checks.hyprland-rules =
-        assert lib.assertMsg
-          (!(builtins.elem "F10" (replayKeys false)) && !(builtins.elem "SHIFT + F10" (replayKeys false)))
-          "Replay shortcuts must be absent when their service and helper packages are disabled";
-        assert lib.assertMsg
-          (builtins.elem "F10" (replayKeys true) && builtins.elem "SHIFT + F10" (replayKeys true))
-          "Enabled replay service must retain both save and stop shortcuts";
+        assert lib.assertMsg (
+          !(builtins.elem "F10" (replayKeys false)) && !(builtins.elem "SHIFT + F10" (replayKeys false))
+        ) "Replay shortcuts must be absent when their service and helper packages are disabled";
+        assert lib.assertMsg (
+          builtins.elem "F10" (replayKeys true) && builtins.elem "SHIFT + F10" (replayKeys true)
+        ) "Enabled replay service must retain both save and stop shortcuts";
         assert lib.hasInfix "hyprctl" hm.xdg.configFile."hypr/hyprland.lua".onChange;
         assert lib.hasInfix "reload" hm.xdg.configFile."hypr/hyprland.lua".onChange;
         pkgs.runCommand "sinnix-hyprland-rules" { } ''

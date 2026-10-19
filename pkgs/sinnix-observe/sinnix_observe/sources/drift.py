@@ -29,7 +29,9 @@ def collect_config_drift(path: Path = REPORT) -> dict[str, Any]:
         return {
             "available": False,
             "status": "unavailable",
-            "reason": "report missing" if isinstance(error, FileNotFoundError) else str(error),
+            "reason": "report missing"
+            if isinstance(error, FileNotFoundError)
+            else str(error),
             "rows": [],
         }
     age_seconds = max(0, int(time.time() - modified_at))

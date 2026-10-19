@@ -1090,17 +1090,25 @@ def _start_operation(
                 (
                     sys.executable,
                     str(Path(__file__).with_name("service_run.py")),
-                    json.dumps([
-                        {"name": name,
-                         "command": project.operation(name).command,
-                         "ready_probe": project.operation(name).ready_probe,
-                         "ready_timeout_seconds": project.operation(name).ready_timeout_seconds}
-                        for name in operation.requires
-                    ]),
+                    json.dumps(
+                        [
+                            {
+                                "name": name,
+                                "command": project.operation(name).command,
+                                "ready_probe": project.operation(name).ready_probe,
+                                "ready_timeout_seconds": project.operation(
+                                    name
+                                ).ready_timeout_seconds,
+                            }
+                            for name in operation.requires
+                        ]
+                    ),
                     "--",
                     *operation.command,
                     *extra_argv,
-                ) if operation.requires else (*operation.command, *extra_argv)
+                )
+                if operation.requires
+                else (*operation.command, *extra_argv)
             ),
             working_directory=working_directory,
             queue_directory=project.root if candidate_commit is not None else None,
@@ -1405,16 +1413,25 @@ def attach_bindings(
     One selected-id read for the page. A queue id can move after listing,
     so a launch reference, when present, owns the binding's identity.
     """
-    tasks = pueue.tasks_by_ids([
-        value for row in rows
-        if isinstance(value := row.get("job_id"), int) and not isinstance(value, bool) and value >= 0
-    ])
+    tasks = pueue.tasks_by_ids(
+        [
+            value
+            for row in rows
+            if isinstance(value := row.get("job_id"), int)
+            and not isinstance(value, bool)
+            and value >= 0
+        ]
+    )
     references = index_task_references(tuple(tasks.values()))
     attached = []
     for row in rows:
         task_id, reference = row.get("job_id"), row.get("reference")
         task = find_task(tasks, task_id, reference, references=references)
-        if task is None and isinstance(reference, str) and REFERENCE.fullmatch(reference):
+        if (
+            task is None
+            and isinstance(reference, str)
+            and REFERENCE.fullmatch(reference)
+        ):
             task = locate(task_id, reference)
         binding = (_launch_input(config, task) or {}).get("binding") if task else None
         attached.append({**row, "binding": binding} if binding else dict(row))
@@ -2226,8 +2243,11 @@ def _cancel(
             records = artifacts.attempts(_launch_input(config, task) or {})
             latest = records[-1]["attempt"] if records else 0
             active_attempt = (
-                expected_attempt if allocation_lock is not None
-                else latest if latest and _unfinished_attempt(config, task) else latest + 1
+                expected_attempt
+                if allocation_lock is not None
+                else latest
+                if latest and _unfinished_attempt(config, task)
+                else latest + 1
             )
             request = _record_cancellation(
                 _launch_input(config, task) or {}, active_attempt, cancellation
@@ -2270,16 +2290,25 @@ def _cancel(
                     fcntl.flock(allocation_lock, fcntl.LOCK_EX)
                     try:
                         observed = pueue.task(task_id)
-                        if _artifact_view(config, task)["attempt"] != expected_attempt or (
-                            observed is not None and (
+                        if _artifact_view(config, task)[
+                            "attempt"
+                        ] != expected_attempt or (
+                            observed is not None
+                            and (
                                 launch_reference(observed) != launch_reference(task)
                                 or observed.started_at != task.started_at
                             )
                         ):
-                            raise JobError("execution attempt changed while waiting for cancellation")
+                            raise JobError(
+                                "execution attempt changed while waiting for cancellation"
+                            )
                         # A published receipt means finalization has passed the
                         # lock and may exit/restart while pueue acknowledges it.
-                        if observed is not None and not observed.terminal and _unfinished_attempt(config, task):
+                        if (
+                            observed is not None
+                            and not observed.terminal
+                            and _unfinished_attempt(config, task)
+                        ):
                             pueue.kill(task_id)
                     finally:
                         fcntl.flock(allocation_lock, fcntl.LOCK_UN)
@@ -2295,7 +2324,9 @@ def _cancel(
         "state": state,
         **({"unresolved": True} if state == "unresolved" else {}),
         "unit": unit,
-        **_outcome(config, current if current is not None else task, attempt=expected_attempt),
+        **_outcome(
+            config, current if current is not None else task, attempt=expected_attempt
+        ),
         "already_terminal": False,
         **({"cancellation": request} if log is not None else {}),
     }
@@ -2521,7 +2552,8 @@ def wait(
         nonlocal task_id
         task = (
             _read_task(config, task_id, reference)
-            if config is not None else addressed(task_id, reference)
+            if config is not None
+            else addressed(task_id, reference)
         )
         # Keep the current hint; every lookup still checks the launch reference.
         task_id = task.task_id

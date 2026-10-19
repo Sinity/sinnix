@@ -163,7 +163,9 @@ def prose_mask(text: str, header_end: int = 0) -> str:
     # Count future runs first so an unmatched opener stays literal without
     # repeatedly searching the remaining text or backtracking within a run.
     delimiters = re.compile(r"`+")
-    remaining = Counter(match.end() - match.start() for match in delimiters.finditer(masked))
+    remaining = Counter(
+        match.end() - match.start() for match in delimiters.finditer(masked)
+    )
     opener = None
     for match in delimiters.finditer(masked):
         length = match.end() - match.start()

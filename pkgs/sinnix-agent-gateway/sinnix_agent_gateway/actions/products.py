@@ -9,11 +9,11 @@ import anyio
 from pydantic import Field, model_validator
 
 from ..action import OPERATOR_ONLY, Action, Example, RequestControls
-from ..permissions import Permission, PolicyError
 from ..contracts import VerbFamily
 from ..generated_lynchpin_inputs import CampaignInput as OwnerCampaignInput
 from ..locators import ProjectLocator
 from ..mcp_broker import McpBrokerError
+from ..permissions import Permission, PolicyError
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 

@@ -197,8 +197,13 @@ def test_file_without_publication_workspace_retains_unknown_observation(
     job_id, reference = _receipt_job(config, fake_pueue, project)
     monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
     monkeypatch.setattr(
-        evidence, "_candidate",
-        lambda project, candidate: {"candidate_sha": candidate, "checked": True, "eligible": True},
+        evidence,
+        "_candidate",
+        lambda project, candidate: {
+            "candidate_sha": candidate,
+            "checked": True,
+            "eligible": True,
+        },
     )
 
     def unexpected_remote(*args, **kwargs):
@@ -206,9 +211,14 @@ def test_file_without_publication_workspace_retains_unknown_observation(
 
     monkeypatch.setattr(evidence.github, "remote_head", unexpected_remote)
     path = tmp_path / "native.json"
-    path.write_text(json.dumps(_claim(
-        receipt=f"agentctl://jobs/{job_id}/{reference}", schema_version=2,
-    )))
+    path.write_text(
+        json.dumps(
+            _claim(
+                receipt=f"agentctl://jobs/{job_id}/{reference}",
+                schema_version=2,
+            )
+        )
+    )
     record = evidence.file(config, project, path)
     publication = record["publication"]
     assert publication["state"] == "unknown"

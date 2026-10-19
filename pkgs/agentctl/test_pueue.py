@@ -785,13 +785,26 @@ def test_live_tasks_use_one_filtered_snapshot(monkeypatch):
     monkeypatch.setattr(pueue, "_run", run)
     result = pueue.live()
     assert len(calls) == 1
-    assert {row.status for row in result.tasks.values()} == {"Stashed", "Paused", "Queued", "Running"}
+    assert {row.status for row in result.tasks.values()} == {
+        "Stashed",
+        "Paused",
+        "Queued",
+        "Running",
+    }
     assert result.groups == groups
 
 
-def test_live_native_filter_keeps_stashes_and_excludes_all_terminal_results(live_pueue, tmp_path):
+def test_live_native_filter_keeps_stashes_and_excludes_all_terminal_results(
+    live_pueue, tmp_path
+):
     def add(name, command, **kwargs):
-        return pueue.add(group="default", label=f"fixture:{name}", command=command, working_directory=tmp_path, **kwargs)
+        return pueue.add(
+            group="default",
+            label=f"fixture:{name}",
+            command=command,
+            working_directory=tmp_path,
+            **kwargs,
+        )
 
     success = add("success", ("true",))
     failure = add("failure", ("sh", "-c", "exit 3"))
@@ -819,7 +832,9 @@ def test_selected_tasks_use_one_bounded_log_request(monkeypatch):
 
     def run(arguments):
         calls.append(arguments)
-        return json.dumps({str(i): {"task": LIVE_STATUS["tasks"][str(i)]} for i in (0, 1)})
+        return json.dumps(
+            {str(i): {"task": LIVE_STATUS["tasks"][str(i)]} for i in (0, 1)}
+        )
 
     monkeypatch.setattr(pueue, "_run", run)
     assert set(pueue.tasks_by_ids([1, 0, 1, 999])) == {0, 1}
@@ -829,11 +844,14 @@ def test_selected_tasks_use_one_bounded_log_request(monkeypatch):
 def test_empty_selected_task_page_does_not_query_pueue(monkeypatch):
     def query(arguments):
         raise AssertionError("empty page queried pueue")
+
     monkeypatch.setattr(pueue, "_run", query)
     assert pueue.tasks_by_ids([]) == {}
 
 
-@pytest.mark.parametrize("payload", [[], {"0": {"task": {"id": 1, "status": "Queued"}}}])
+@pytest.mark.parametrize(
+    "payload", [[], {"0": {"task": {"id": 1, "status": "Queued"}}}]
+)
 def test_selected_tasks_refuse_malformed_or_mismatched_records(monkeypatch, payload):
     monkeypatch.setattr(pueue, "_run", lambda arguments: json.dumps(payload))
     with pytest.raises(pueue.PueueError):
@@ -842,24 +860,38 @@ def test_selected_tasks_refuse_malformed_or_mismatched_records(monkeypatch, payl
 
 def test_history_tasks_request_metadata_without_output(monkeypatch):
     calls = []
+
     def query(arguments):
         calls.append(arguments)
         assert arguments == ["log", "--all", "--json", "--lines", "0"]
-        return json.dumps({key: {"task": row} for key, row in LIVE_STATUS["tasks"].items()})
+        return json.dumps(
+            {key: {"task": row} for key, row in LIVE_STATUS["tasks"].items()}
+        )
+
     monkeypatch.setattr(pueue, "_run", query)
     result = pueue.tasks()
     assert set(result) == {0, 1, 2}
     assert len(calls) == 1
 
 
-def test_native_history_metadata_preserves_every_task_field_and_state(live_pueue, tmp_path):
+def test_native_history_metadata_preserves_every_task_field_and_state(
+    live_pueue, tmp_path
+):
     def add(name, command, **kwargs):
-        return pueue.add(group="default", label=f"fixture:{name}", command=command, working_directory=tmp_path, **kwargs)
+        return pueue.add(
+            group="default",
+            label=f"fixture:{name}",
+            command=command,
+            working_directory=tmp_path,
+            **kwargs,
+        )
+
     def state(task_id, expected):
         deadline = time.monotonic() + 5
         while pueue.task(task_id).status != expected:
             assert time.monotonic() < deadline
             time.sleep(0.01)
+
     pueue.set_parallel("default", 2)
     success = add("success", ("true",))
     failure = add("failure", ("sh", "-c", "exit 3"))
@@ -887,7 +919,9 @@ def test_native_history_metadata_preserves_every_task_field_and_state(live_pueue
                 pueue.kill(task_id)
 
 
-def test_native_fixture_uses_short_socket_path_and_refuses_inherited_config(tmp_path, monkeypatch):
+def test_native_fixture_uses_short_socket_path_and_refuses_inherited_config(
+    tmp_path, monkeypatch
+):
     import conftest as fixtures
 
     deep = tmp_path / ("nested-" * 20)
@@ -905,13 +939,23 @@ def test_native_fixture_uses_short_socket_path_and_refuses_inherited_config(tmp_
         assert "PUEUE_CONFIG_PATH" not in os.environ
         assert "PUEUE_PROFILE" not in os.environ
         config = (home / ".config/pueue/pueue.yml").read_text()
-        runtime = Path(next(line.split(": ", 1)[1] for line in config.splitlines()
-                            if line.strip().startswith("runtime_directory:")))
+        runtime = Path(
+            next(
+                line.split(": ", 1)[1]
+                for line in config.splitlines()
+                if line.strip().startswith("runtime_directory:")
+            )
+        )
         assert runtime.parent == Path("/tmp")
         assert runtime.stat().st_mode & 0o777 == 0o700
         sockets = list(runtime.glob("*.socket"))
         assert sockets and all(len(str(path).encode()) < 108 for path in sockets)
-        task_id = pueue.add(group="default", label="fixture:isolated", command=("true",), working_directory=tmp_path)
+        task_id = pueue.add(
+            group="default",
+            label="fixture:isolated",
+            command=("true",),
+            working_directory=tmp_path,
+        )
         assert pueue.wait(task_id, timeout_seconds=5).succeeded
     finally:
         daemon.close()

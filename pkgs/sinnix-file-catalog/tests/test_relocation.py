@@ -9,7 +9,9 @@ def prepare(tmp_path, catalog, moves, *options):
     manifest = tmp_path / "moves.json"
     receipt = tmp_path / "receipt.json"
     manifest.write_text(json.dumps(moves))
-    result = invoke(catalog, "prepare-relocation", str(manifest), "--output", str(receipt), *options)
+    result = invoke(
+        catalog, "prepare-relocation", str(manifest), "--output", str(receipt), *options
+    )
     return result, receipt
 
 
@@ -31,7 +33,7 @@ def test_descendant_relocation_preserves_ids_evidence_and_reverses(tmp_path):
     assert result.returncode == 0, result.stderr
     old.rename(new)
     assert invoke(catalog, "relocate-batch", str(receipt)).returncode == 0
-    for before, after in zip(original, assets(catalog)):
+    for before, after in zip(original, assets(catalog), strict=False):
         assert after["id"] == before["id"]
         assert after["inspections"] == before["inspections"]
         assert after["previous_paths"] == [before["current_path"]]
@@ -39,7 +41,9 @@ def test_descendant_relocation_preserves_ids_evidence_and_reverses(tmp_path):
     assert resolved.returncode == 0 and resolved.stdout.strip() == str(new / "entry")
     # Reversal uses the same identity checks and appends history, not a reset.
     receipt.unlink()
-    result, receipt = prepare(tmp_path, catalog, [{"source": str(new), "destination": str(old)}])
+    result, receipt = prepare(
+        tmp_path, catalog, [{"source": str(new), "destination": str(old)}]
+    )
     assert result.returncode == 0
     new.rename(old)
     assert invoke(catalog, "relocate-batch", str(receipt)).returncode == 0
@@ -68,7 +72,11 @@ def test_collision_and_partial_external_rename_are_refused(tmp_path):
     other = tmp_path / "other"
     other.write_text("other")
     assert import_rows(catalog, [observation(other)]).returncode == 0
-    result, receipt = prepare(tmp_path, catalog, [*moves, {"source": str(other), "destination": str(new / "entry")}])
+    result, receipt = prepare(
+        tmp_path,
+        catalog,
+        [*moves, {"source": str(other), "destination": str(new / "entry")}],
+    )
     assert result.returncode != 0 and "collide" in result.stderr
     result, receipt = prepare(tmp_path, catalog, moves)
     assert result.returncode == 0
@@ -114,14 +122,18 @@ def test_reused_historical_address_requires_explicit_asset_identity(tmp_path):
 def test_original_address_can_become_a_new_parent_container(tmp_path):
     old, _, catalog, _ = fixture(tmp_path)
     new = old / "repo"
-    result, receipt = prepare(tmp_path, catalog, [{"source": str(old), "destination": str(new)}])
+    result, receipt = prepare(
+        tmp_path, catalog, [{"source": str(old), "destination": str(new)}]
+    )
     assert result.returncode == 0
     temporary = tmp_path / "staged"
     old.rename(temporary)
     old.mkdir()
     temporary.rename(new)
     assert invoke(catalog, "relocate-batch", str(receipt)).returncode == 0
-    assert invoke(catalog, "resolve", str(old / "entry")).stdout.strip() == str(new / "entry")
+    assert invoke(catalog, "resolve", str(old / "entry")).stdout.strip() == str(
+        new / "entry"
+    )
 
 
 def test_unavailable_history_remains_unavailable_without_inventing_continuity(tmp_path):
@@ -149,7 +161,13 @@ def observe_location(tmp_path, catalog, asset_id, action, source=None):
     import runpy
     from pathlib import Path
 
-    row = dict(id=asset_id, action=action, actor="synthetic-test", basis="reviewed fixture location", reason="location transition")
+    row = {
+        "id": asset_id,
+        "action": action,
+        "actor": "synthetic-test",
+        "basis": "reviewed fixture location",
+        "reason": "location transition",
+    }
     if source is not None:
         script = Path(__file__).parents[3] / "scripts" / "sinnix-file-catalog"
         row["expected_identity"] = runpy.run_path(str(script))["identity"](source)
@@ -160,7 +178,9 @@ def observe_location(tmp_path, catalog, asset_id, action, source=None):
     assert result.returncode == 0, result.stderr
 
 
-def test_single_relocation_replaces_unavailable_location_with_verified_destination(tmp_path):
+def test_single_relocation_replaces_unavailable_location_with_verified_destination(
+    tmp_path,
+):
     old, new, catalog, _ = fixture(tmp_path)
     original = assets(catalog)[1]
     destination = tmp_path / "moved-entry"
@@ -180,7 +200,9 @@ def test_single_relocation_replaces_unavailable_location_with_verified_destinati
     assert result.returncode == 0 and result.stdout.strip() == str(destination)
 
 
-def test_batch_relocation_advances_stale_location_metadata_after_reviewed_drift(tmp_path):
+def test_batch_relocation_advances_stale_location_metadata_after_reviewed_drift(
+    tmp_path,
+):
     old, new, catalog, moves = fixture(tmp_path)
     original = assets(catalog)[1]
     observe_location(tmp_path, catalog, original["id"], "metadata", old / "entry")
@@ -200,12 +222,16 @@ def test_batch_relocation_advances_stale_location_metadata_after_reviewed_drift(
     assert invoke(catalog, "audit").returncode == 0
 
 
-def test_relocation_uses_last_reviewed_identity_when_latest_observation_is_missing(tmp_path):
+def test_relocation_uses_last_reviewed_identity_when_latest_observation_is_missing(
+    tmp_path,
+):
     old, _, catalog, _ = fixture(tmp_path)
     import hashlib
 
     value = json.loads(catalog.read_text())
-    value["assets"][1]["identity"]["sha256"] = hashlib.sha256((old / "entry").read_bytes()).hexdigest()
+    value["assets"][1]["identity"]["sha256"] = hashlib.sha256(
+        (old / "entry").read_bytes()
+    ).hexdigest()
     catalog.write_text(json.dumps(value))
     original = assets(catalog)[1]
     (old / "entry").chmod(0o600)
@@ -232,7 +258,10 @@ def test_batch_preparation_uses_metadata_already_reviewed_in_catalog(tmp_path):
     assert result.returncode == 0, result.stderr
     old.rename(new)
     assert invoke(catalog, "relocate-batch", str(receipt)).returncode == 0
-    assert assets(catalog)[1]["relocations"][-1]["prior_catalog_identity"] == original["identity"]
+    assert (
+        assets(catalog)[1]["relocations"][-1]["prior_catalog_identity"]
+        == original["identity"]
+    )
 
 
 def test_single_relocation_refuses_a_dangling_link_at_the_old_address(tmp_path):
@@ -249,7 +278,9 @@ def test_single_relocation_refuses_a_dangling_link_at_the_old_address(tmp_path):
 
 def test_root_prefix_preparation_and_historical_cli_lookup(tmp_path):
     old, new, catalog, _ = fixture(tmp_path)
-    result, receipt = prepare(tmp_path, catalog, [{"source": "/", "destination": str(new)}])
+    result, receipt = prepare(
+        tmp_path, catalog, [{"source": "/", "destination": str(new)}]
+    )
     assert result.returncode == 0, result.stderr
     value = json.loads(receipt.read_text())
     for row in value["assets"]:
@@ -265,7 +296,11 @@ def test_import_refuses_addresses_the_history_resolver_cannot_use(tmp_path):
     source = tmp_path / "fixture"
     source.write_text("neutral fixture")
     (tmp_path / "child").mkdir()
-    addresses = [str(tmp_path) + "/child/../fixture", str(tmp_path) + "/./fixture", str(tmp_path) + "//fixture"]
+    addresses = [
+        str(tmp_path) + "/child/../fixture",
+        str(tmp_path) + "/./fixture",
+        str(tmp_path) + "//fixture",
+    ]
     for address in addresses:
         catalog = tmp_path / "catalog.json"
         result = import_rows(catalog, [observation(source, current_path=address)])
@@ -298,70 +333,108 @@ def test_import_rejects_an_unsupported_control_character_address(tmp_path):
     assert source.read_text() == "neutral fixture"
 
 
-
 def deny_entry(monkeypatch, denied):
     from pathlib import Path
+
     original = Path.lstat
+
     def lstat(path, *args, **kwargs):
         if path == denied:
             raise PermissionError("synthetic parent access denied")
         return original(path, *args, **kwargs)
+
     monkeypatch.setattr(Path, "lstat", lstat)
 
 
-def test_single_relocation_refuses_unknown_old_address_without_write(tmp_path, monkeypatch):
+def test_single_relocation_refuses_unknown_old_address_without_write(
+    tmp_path, monkeypatch
+):
     import runpy
     from types import SimpleNamespace
-    from test_catalog import SCRIPT
+
     import pytest
-    old = tmp_path / "original.txt"; old.write_text("neutral payload")
+    from test_catalog import SCRIPT
+
+    old = tmp_path / "original.txt"
+    old.write_text("neutral payload")
     catalog = tmp_path / "catalog.json"
     assert import_rows(catalog, [observation(old)]).returncode == 0
-    asset = assets(catalog)[0]; before = catalog.read_bytes()
-    new = tmp_path / "renamed.txt"; old.rename(new)
+    asset = assets(catalog)[0]
+    before = catalog.read_bytes()
+    new = tmp_path / "renamed.txt"
+    old.rename(new)
     module = runpy.run_path(str(SCRIPT))
     deny_entry(monkeypatch, old)
     with pytest.raises(module["CatalogError"], match="cannot establish path presence"):
-        module["cmd_relocate"](SimpleNamespace(catalog=str(catalog), id=asset["id"], new_path=str(new)))
+        module["cmd_relocate"](
+            SimpleNamespace(catalog=str(catalog), id=asset["id"], new_path=str(new))
+        )
     assert catalog.read_bytes() == before
     assert new.read_text() == "neutral payload"
 
 
-def test_prepare_cannot_turn_denied_source_into_unavailable_exception(tmp_path, monkeypatch):
+def test_prepare_cannot_turn_denied_source_into_unavailable_exception(
+    tmp_path, monkeypatch
+):
     import runpy
     from types import SimpleNamespace
-    from test_catalog import SCRIPT
+
     import pytest
+    from test_catalog import SCRIPT
+
     old, new, catalog, moves = fixture(tmp_path)
-    manifest = tmp_path / "moves.json"; manifest.write_text(json.dumps(moves))
-    receipt = tmp_path / "receipt.json"; before = catalog.read_bytes()
-    module = runpy.run_path(str(SCRIPT)); deny_entry(monkeypatch, old)
+    manifest = tmp_path / "moves.json"
+    manifest.write_text(json.dumps(moves))
+    receipt = tmp_path / "receipt.json"
+    before = catalog.read_bytes()
+    module = runpy.run_path(str(SCRIPT))
+    deny_entry(monkeypatch, old)
     with pytest.raises(module["CatalogError"], match="cannot establish path presence"):
-        module["cmd_prepare_relocation"](SimpleNamespace(catalog=str(catalog), moves=str(manifest), output=str(receipt), retain_unavailable=True, record_existing_drift=False))
+        module["cmd_prepare_relocation"](
+            SimpleNamespace(
+                catalog=str(catalog),
+                moves=str(manifest),
+                output=str(receipt),
+                retain_unavailable=True,
+                record_existing_drift=False,
+            )
+        )
     assert catalog.read_bytes() == before
     assert not receipt.exists()
 
 
-def test_batch_relocation_refuses_unknown_old_address_without_partial_publish(tmp_path, monkeypatch):
+def test_batch_relocation_refuses_unknown_old_address_without_partial_publish(
+    tmp_path, monkeypatch
+):
     import runpy
     from types import SimpleNamespace
-    from test_catalog import SCRIPT
+
     import pytest
+    from test_catalog import SCRIPT
+
     old, new, catalog, moves = fixture(tmp_path)
     result, receipt = prepare(tmp_path, catalog, moves)
     assert result.returncode == 0
-    before = catalog.read_bytes(); old.rename(new)
-    module = runpy.run_path(str(SCRIPT)); deny_entry(monkeypatch, old)
+    before = catalog.read_bytes()
+    old.rename(new)
+    module = runpy.run_path(str(SCRIPT))
+    deny_entry(monkeypatch, old)
     with pytest.raises(module["CatalogError"], match="cannot establish path presence"):
-        module["cmd_relocate_batch"](SimpleNamespace(catalog=str(catalog), receipt=str(receipt)))
+        module["cmd_relocate_batch"](
+            SimpleNamespace(catalog=str(catalog), receipt=str(receipt))
+        )
     assert catalog.read_bytes() == before
 
 
 def test_prepare_preserves_existing_dangling_receipt_pointer(tmp_path):
     old, new, catalog, moves = fixture(tmp_path)
-    receipt = tmp_path / "receipt.json"; receipt.symlink_to("retained-unavailable-receipt.json")
+    receipt = tmp_path / "receipt.json"
+    receipt.symlink_to("retained-unavailable-receipt.json")
     before = catalog.read_bytes()
     result, _ = prepare(tmp_path, catalog, moves)
     assert result.returncode != 0 and "refusing to overwrite" in result.stderr
-    assert receipt.is_symlink() and str(receipt.readlink()) == "retained-unavailable-receipt.json"
+    assert (
+        receipt.is_symlink()
+        and str(receipt.readlink()) == "retained-unavailable-receipt.json"
+    )
     assert catalog.read_bytes() == before

@@ -116,9 +116,7 @@ failed commands must name their tested SHA.
   "measured_usage": null,
   "candidate_sha": "<40-hex HEAD of the worker branch>",
   "self_review": {
-    "checklists": [
-      "worker-contract"
-    ],
+    "checklists": ["worker-contract"],
     "passes": 1,
     "items": [
       {

@@ -1374,7 +1374,8 @@ click)
 
   # CDP mouse coordinates are viewport-relative, not document-relative.
   # Scroll first, and refuse an obscured point rather than clicking another control.
-  click_js=$(cat <<'JS_CLICK'
+  click_js=$(
+    cat <<'JS_CLICK'
 (selector => {
   const e = document.querySelector(selector);
   if (!e) return null;
@@ -1388,7 +1389,7 @@ click)
   return {x: r.x, y: r.y, w: r.width, h: r.height};
 })
 JS_CLICK
-)
+  )
   box_json=$(cdp_send_with_result "$ws_url" "Runtime.evaluate" \
     "$(jq -nc --arg sel "$selector" --arg js "$click_js" '{expression: ($js + "(" + ($sel|tojson) + ")"), returnByValue: true}')")
 

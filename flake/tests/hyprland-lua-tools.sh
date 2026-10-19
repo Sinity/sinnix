@@ -41,4 +41,3 @@ activeworkspace -j
 eval hl.dispatch(hl.dsp.focus({ workspace = "name:agentbrowser" }))
 EOF
 cmp "$expected" "$calls"
-

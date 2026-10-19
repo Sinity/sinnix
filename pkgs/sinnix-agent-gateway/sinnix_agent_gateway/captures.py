@@ -8,9 +8,9 @@ from typing import Any
 
 from sinnix_lib.layout import ACTIVITY_LANES, capture_lane_path
 
-from .permissions import Permission, PolicyError, Principal
 from .config import GatewayConfig
 from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
+from .permissions import Permission, PolicyError, Principal
 
 
 class CaptureInventoryUnavailableError(RuntimeError):
@@ -42,7 +42,11 @@ class CaptureLane:
         return None
 
 
-def queryable_capture_lanes(runtime_inventory: Path, selectors: frozenset[str] = frozenset(), allowed_lanes: frozenset[str] | None = None) -> dict[str, CaptureLane]:
+def queryable_capture_lanes(
+    runtime_inventory: Path,
+    selectors: frozenset[str] = frozenset(),
+    allowed_lanes: frozenset[str] | None = None,
+) -> dict[str, CaptureLane]:
     """Derive capture query contracts from every declared runtime lane.
 
     The inventory is the capture authority.  Every valid declared path is
@@ -59,7 +63,9 @@ def queryable_capture_lanes(runtime_inventory: Path, selectors: frozenset[str] =
         raise CaptureInventoryUnavailableError(
             f"capture runtime inventory unavailable: {error}"
         ) from error
-    if not isinstance(inventory, dict) or not isinstance(inventory.get("captures"), list):
+    if not isinstance(inventory, dict) or not isinstance(
+        inventory.get("captures"), list
+    ):
         raise CaptureInventoryUnavailableError(
             "capture runtime inventory must contain a captures list"
         )
@@ -87,7 +93,7 @@ def queryable_capture_lanes(runtime_inventory: Path, selectors: frozenset[str] =
         root = lane_path.parent
         for identity, relative in ACTIVITY_LANES.items():
             parts = Path(relative).parts
-            if lane_path.parts[-len(parts):] == parts:
+            if lane_path.parts[-len(parts) :] == parts:
                 native_lane = identity
                 root = lane_path.parents[len(parts) - 1]
                 break
@@ -112,14 +118,22 @@ def queryable_capture_lanes(runtime_inventory: Path, selectors: frozenset[str] =
     return lanes
 
 
-def _selected_capture_names(inventory: dict, names: set[str], selectors: frozenset[str]) -> set[str]:
+def _selected_capture_names(
+    inventory: dict, names: set[str], selectors: frozenset[str]
+) -> set[str]:
     if not selectors:
         return names
     scope = inventory.get("capture_scopes")
     subjects = None
     if any(selector.startswith("subject:") for selector in selectors):
-        if not isinstance(scope, dict) or scope.get("schema") != "sinnix-capture-scope-v1" or not isinstance(scope.get("subjects"), dict):
-            raise CaptureScopeError("subject selectors require the versioned runtime capture subject registry")
+        if (
+            not isinstance(scope, dict)
+            or scope.get("schema") != "sinnix-capture-scope-v1"
+            or not isinstance(scope.get("subjects"), dict)
+        ):
+            raise CaptureScopeError(
+                "subject selectors require the versioned runtime capture subject registry"
+            )
         subjects = scope["subjects"]
     selected = set()
     for selector in sorted(selectors):
@@ -128,14 +142,22 @@ def _selected_capture_names(inventory: dict, names: set[str], selectors: frozens
             raise CaptureScopeError(f"invalid capture-scope-v1 selector: {selector}")
         if kind == "lane":
             if name not in names:
-                raise CaptureScopeError(f"unknown runtime capture lane selector: {selector}")
+                raise CaptureScopeError(
+                    f"unknown runtime capture lane selector: {selector}"
+                )
             selected.add(name)
         elif kind == "subject":
             if name not in subjects:
-                raise CaptureScopeError(f"unknown runtime capture subject selector: {selector}")
+                raise CaptureScopeError(
+                    f"unknown runtime capture subject selector: {selector}"
+                )
             members = subjects[name]
-            if not isinstance(members, list) or any(not isinstance(member, str) or member not in names for member in members):
-                raise CaptureScopeError(f"invalid runtime capture subject membership: {name}")
+            if not isinstance(members, list) or any(
+                not isinstance(member, str) or member not in names for member in members
+            ):
+                raise CaptureScopeError(
+                    f"invalid runtime capture subject membership: {name}"
+                )
             selected.update(members)
         else:
             raise CaptureScopeError(f"unknown capture selector kind: {kind}")
@@ -151,7 +173,11 @@ class CaptureService:
         self.execution = OwnerExecution()
 
     def _available_lanes(self) -> dict[str, CaptureLane]:
-        return queryable_capture_lanes(self.config.runtime_inventory, self.config.capture_scope, self.principal.allowed_lanes)
+        return queryable_capture_lanes(
+            self.config.runtime_inventory,
+            self.config.capture_scope,
+            self.principal.allowed_lanes,
+        )
 
     def lanes_visible(self) -> dict[str, Any]:
         """List runtime-declared native lane contracts visible to this principal."""

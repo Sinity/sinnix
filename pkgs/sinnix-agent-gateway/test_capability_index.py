@@ -4,12 +4,12 @@ import json
 from pathlib import Path
 
 import pytest
-from sinnix_agent_gateway.permissions import PolicyError, Principal
 from sinnix_agent_gateway.capability_index import (
     CapabilityIndexError,
     CapabilityIndexService,
 )
 from sinnix_agent_gateway.config import GatewayConfig
+from sinnix_agent_gateway.permissions import PolicyError, Principal
 
 
 def index_path(tmp_path: Path, rows: list[dict[str, object]]) -> Path:

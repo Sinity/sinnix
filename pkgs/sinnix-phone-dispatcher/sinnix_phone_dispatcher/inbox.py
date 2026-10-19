@@ -121,18 +121,23 @@ def list_inbox() -> tuple[HTTPStatus, dict]:
                     except FileNotFoundError:
                         # A concurrent confirmation can consume a one-shot.
                         continue
-                    files.append({
-                        "name": f"{sub}/{name}", "bytes": size,
-                        "sha256": digest, "generated": False,
-                        "one_shot": one_shot,
-                    })
+                    files.append(
+                        {
+                            "name": f"{sub}/{name}",
+                            "bytes": size,
+                            "sha256": digest,
+                            "generated": False,
+                            "one_shot": one_shot,
+                        }
+                    )
         except FileNotFoundError:
             # Optional inbox subdirectories do not exist before first use.
             continue
         except OSError as exc:
             # A partial inventory must not masquerade as an empty inbox.
             return HTTPStatus.INTERNAL_SERVER_ERROR, {
-                "ok": False, "detail": f"cannot enumerate inbox {sub!r}: {exc}",
+                "ok": False,
+                "detail": f"cannot enumerate inbox {sub!r}: {exc}",
             }
     return HTTPStatus.OK, {"ok": True, "at": utc_ts(), "files": files}
 
@@ -151,10 +156,13 @@ def open_inbox(name: str):
         return
     path = _resolve(name)
     if path is None:
-        yield HTTPStatus.BAD_REQUEST, {
-            "ok": False,
-            "detail": "unacceptable inbox name",
-        }
+        yield (
+            HTTPStatus.BAD_REQUEST,
+            {
+                "ok": False,
+                "detail": "unacceptable inbox name",
+            },
+        )
         return
     with ExitStack() as stack:
         try:
@@ -164,12 +172,17 @@ def open_inbox(name: str):
             size, digest = _inspect_stream(stream)
             after = os.fstat(stream.fileno())
             if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
-                after.st_size, after.st_mtime_ns, after.st_ctime_ns
+                after.st_size,
+                after.st_mtime_ns,
+                after.st_ctime_ns,
             ):
                 raise OSError("inbox entry changed while preparing download")
             stream.seek(0)
         except FileNotFoundError:
-            yield HTTPStatus.NOT_FOUND, {"ok": False, "detail": f"no inbox entry {name!r}"}
+            yield (
+                HTTPStatus.NOT_FOUND,
+                {"ok": False, "detail": f"no inbox entry {name!r}"},
+            )
         except OSError as exc:
             yield HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
         else:
@@ -213,8 +226,9 @@ def _entry_directory(sub: str):
     with ExitStack() as stack:
         root_fd = os.open(INBOX_DIR, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         stack.callback(os.close, root_fd)
-        sub_fd = os.open(sub, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                         dir_fd=root_fd)
+        sub_fd = os.open(
+            sub, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd
+        )
         stack.callback(os.close, sub_fd)
         yield root_fd, sub_fd
 
@@ -229,12 +243,20 @@ def _preserve_claim(root_fd: int, sub_fd: int, claim: str, original: str) -> dic
     """Restore visibility in the opened directory without overwriting a publisher."""
     restored = False
     try:
-        os.link(claim, original, src_dir_fd=root_fd, dst_dir_fd=sub_fd,
-                follow_symlinks=False)
+        os.link(
+            claim,
+            original,
+            src_dir_fd=root_fd,
+            dst_dir_fd=sub_fd,
+            follow_symlinks=False,
+        )
         restored = True
     except OSError:
         pass
-    return {"retained_at": _claim_path(root_fd, claim), "current_path_restored": restored}
+    return {
+        "retained_at": _claim_path(root_fd, claim),
+        "current_path_restored": restored,
+    }
 
 
 def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict]:
@@ -266,18 +288,24 @@ def confirm_inbox(name: str, declared_sha: str | None) -> tuple[HTTPStatus, dict
         return HTTPStatus.OK, {"ok": True, "name": name, "retained": True}
     try:
         with _entry_directory(sub) as (root_fd, sub_fd):
-            return confirm_directory_entry(name, path.name, declared_sha, root_fd, sub_fd)
+            return confirm_directory_entry(
+                name, path.name, declared_sha, root_fd, sub_fd
+            )
     except FileNotFoundError:
         # A repeated confirmation of a consumed one-shot is idempotent.
         return HTTPStatus.OK, {
-            "ok": True, "name": name, "deleted": False, "already_gone": True,
+            "ok": True,
+            "name": name,
+            "deleted": False,
+            "already_gone": True,
         }
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "detail": str(exc)}
 
 
-def confirm_directory_entry(name: str, entry: str, declared_sha: str | None,
-                   root_fd: int, sub_fd: int) -> tuple[HTTPStatus, dict]:
+def confirm_directory_entry(
+    name: str, entry: str, declared_sha: str | None, root_fd: int, sub_fd: int
+) -> tuple[HTTPStatus, dict]:
     """Consume only the acknowledged bytes in already-opened directories.
 
     Shared by phone confirmations and retained-intent dispatch. A changed
@@ -298,8 +326,12 @@ def confirm_directory_entry(name: str, entry: str, declared_sha: str | None,
     # merely because an earlier file at that name matched the acknowledgement.
     try:
         claim = f".confirmation-{secrets.token_hex(16)}.json"
-        fd = os.open(claim, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                     0o600, dir_fd=root_fd)
+        fd = os.open(
+            claim,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=root_fd,
+        )
         try:
             reserved = os.fstat(fd)
             reservation_identity = (reserved.st_dev, reserved.st_ino)
@@ -322,13 +354,17 @@ def confirm_directory_entry(name: str, entry: str, declared_sha: str | None,
         except OSError:
             preserved = {"retained_at": _claim_path(root_fd, claim)}
         return HTTPStatus.INTERNAL_SERVER_ERROR, {
-            "ok": False, "detail": str(exc), **preserved,
+            "ok": False,
+            "detail": str(exc),
+            **preserved,
         }
     try:
         _, claimed_digest = _inspect_regular(claim, dir_fd=root_fd)
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {
-            "ok": False, "detail": str(exc), **_preserve_claim(root_fd, sub_fd, claim, entry),
+            "ok": False,
+            "detail": str(exc),
+            **_preserve_claim(root_fd, sub_fd, claim, entry),
         }
     if claimed_digest != declared_sha.lower():
         return HTTPStatus.UNPROCESSABLE_ENTITY, {
@@ -342,6 +378,8 @@ def confirm_directory_entry(name: str, entry: str, declared_sha: str | None,
         os.unlink(claim, dir_fd=root_fd)
     except OSError as exc:
         return HTTPStatus.INTERNAL_SERVER_ERROR, {
-            "ok": False, "detail": str(exc), **_preserve_claim(root_fd, sub_fd, claim, entry),
+            "ok": False,
+            "detail": str(exc),
+            **_preserve_claim(root_fd, sub_fd, claim, entry),
         }
     return HTTPStatus.OK, {"ok": True, "name": name, "deleted": True, "at": utc_ts()}

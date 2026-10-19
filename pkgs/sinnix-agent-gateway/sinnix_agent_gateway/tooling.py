@@ -45,7 +45,9 @@ class _GatewayArgModel(ArgModelBase):
     def model_dump_one_level(self) -> dict[str, Any]:
         values = super().model_dump_one_level()
         values.update(self.model_extra or {})
-        return {key: value for key, value in values.items() if key in self.model_fields_set}
+        return {
+            key: value for key, value in values.items() if key in self.model_fields_set
+        }
 
 
 def _safe_failure_controls(arguments: dict[str, Any]) -> dict[str, Any]:
@@ -285,8 +287,8 @@ async def _dispatch_core(
         )
     except ProtocolError as failure:
 
-        async def failing() -> Any:
-            raise failure
+        async def failing(error=failure) -> Any:
+            raise error
 
         envelope = await runtime.execute_v2_async(
             core,

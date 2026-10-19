@@ -11,9 +11,9 @@ instead of segment by segment fails test_a_traversing_path_is_rejected.
 from __future__ import annotations
 
 import hashlib
+import multiprocessing
 import os
 import stat
-import multiprocessing
 import tracemalloc
 from http import HTTPStatus
 
@@ -32,22 +32,30 @@ def test_repair_serializes_with_late_upload_process(monkeypatch, tmp_path):
     ctx = multiprocessing.get_context("fork")
     started, finished = ctx.Event(), ctx.Event()
     parent, child = ctx.Pipe(duplex=False)
+
     def upload():
         started.set()
-        status, payload = uploads_mod.append_events("20200101", 0, original + b'{"n":2}\n', None)
+        status, payload = uploads_mod.append_events(
+            "20200101", 0, original + b'{"n":2}\n', None
+        )
         child.send(int(status))
         finished.set()
+
     process = ctx.Process(target=upload)
     real_replace = uploads_mod.os.replace
     finished_before_replace = []
+
     def replace(pending, destination):
         process.start()
         assert started.wait(5)
         finished_before_replace.append(finished.wait(0.2))
         real_replace(pending, destination)
+
     monkeypatch.setattr(uploads_mod.os, "replace", replace)
     try:
-        result = uploads_mod.repair_event_day("20200101", source, hashlib.sha256(original).hexdigest())
+        result = uploads_mod.repair_event_day(
+            "20200101", source, hashlib.sha256(original).hexdigest()
+        )
         process.join(5)
         assert not process.is_alive()
         assert parent.poll(1)
@@ -226,7 +234,9 @@ def test_closed_day_repair_streams_large_sources(monkeypatch, tmp_path):
     tracemalloc.start()
     try:
         result = uploads_mod.repair_event_day(
-            "20200101", source, hashlib.sha256(previous).hexdigest(),
+            "20200101",
+            source,
+            hashlib.sha256(previous).hexdigest(),
         )
         _, peak = tracemalloc.get_traced_memory()
     finally:
@@ -258,7 +268,9 @@ def test_unchanged_day_does_not_stage_a_full_copy(monkeypatch, tmp_path):
         raise AssertionError("unchanged repair must not allocate a staged copy")
 
     monkeypatch.setattr(tempfile, "NamedTemporaryFile", refuse_staging)
-    result = uploads_mod.repair_event_day("20200101", source, hashlib.sha256(body).hexdigest())
+    result = uploads_mod.repair_event_day(
+        "20200101", source, hashlib.sha256(body).hexdigest()
+    )
     assert result["ok"] and not result["changed"]
     assert not (tmp_path / ".repairs").exists()
 
@@ -280,7 +292,9 @@ def test_changed_source_during_staging_preserves_previous_day(monkeypatch, tmp_p
 
     monkeypatch.setattr(tempfile, "NamedTemporaryFile", change_source)
     with pytest.raises(ValueError, match="source changed"):
-        uploads_mod.repair_event_day("20200101", source, hashlib.sha256(previous).hexdigest())
+        uploads_mod.repair_event_day(
+            "20200101", source, hashlib.sha256(previous).hexdigest()
+        )
     assert target.read_bytes() == previous
     assert next((tmp_path / ".repairs").iterdir()).read_bytes() == previous
     assert not list(tmp_path.glob(".repair-*"))
@@ -352,7 +366,9 @@ def test_repair_refuses_nonregular_capture_destination(monkeypatch, tmp_path, ki
 
     monkeypatch.setattr(uploads_mod.os, "open", checked_open)
     with pytest.raises(OSError):
-        uploads_mod.repair_event_day("20200101", source, hashlib.sha256(b"old\n").hexdigest())
+        uploads_mod.repair_event_day(
+            "20200101", source, hashlib.sha256(b"old\n").hexdigest()
+        )
     assert source.read_bytes() == b"{}\n" and not (tmp_path / ".repairs").exists()
     if kind == "symlink":
         assert retained.read_bytes() == b"old\n"
@@ -369,7 +385,9 @@ def test_retained_digest_refuses_a_symlink(tmp_path):
 
 
 @pytest.mark.parametrize("fail_directory", [False, True])
-def test_existing_upload_is_not_acknowledged_after_failed_sync(monkeypatch, tmp_path, fail_directory):
+def test_existing_upload_is_not_acknowledged_after_failed_sync(
+    monkeypatch, tmp_path, fail_directory
+):
     lanes = {"camera": tmp_path / "camera"}
     monkeypatch.setattr(uploads_mod, "UPLOAD_LANES", lanes)
     target = lanes["camera"] / "fixture.jpg"
@@ -428,6 +446,8 @@ def test_repair_sync_failure_preserves_previous_payload(monkeypatch, tmp_path):
 
     monkeypatch.setattr(uploads_mod.os, "fsync", fail_directory)
     with pytest.raises(OSError):
-        uploads_mod.repair_event_day("20200101", source, hashlib.sha256(previous).hexdigest())
+        uploads_mod.repair_event_day(
+            "20200101", source, hashlib.sha256(previous).hexdigest()
+        )
     assert target.read_bytes() == previous and source.read_bytes() == b"{}\n"
     assert next((tmp_path / ".repairs").iterdir()).read_bytes() == previous

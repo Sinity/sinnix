@@ -159,7 +159,7 @@ def test_core_dispatch_uses_leaf_execution_and_refuses_wrong_routes(
     ):
         args = {"value": leaf, "idempotency_key": leaf, "reason": "test reason"}
 
-        async def invoke_direct():
+        async def invoke_direct(leaf=leaf, args=args):
             return await build_tool(BY_NAME[leaf], runtime).fn(**args)
 
         direct = structured(anyio.run(invoke_direct))
@@ -545,7 +545,8 @@ def test_unknown_input_field_is_typed_before_file_mutation(tmp_path: Path) -> No
 
 @pytest.mark.parametrize("via_core", [False, True])
 def test_mcp_adapter_distinguishes_omitted_fields_from_explicit_null(
-    tmp_path: Path, via_core: bool,
+    tmp_path: Path,
+    via_core: bool,
 ) -> None:
     server = create_server(config(tmp_path), "operator")
     target = tmp_path / "sample.txt"
@@ -553,10 +554,15 @@ def test_mcp_adapter_distinguishes_omitted_fields_from_explicit_null(
     request = {"target": {"path": str(target)}}
 
     def read(arguments):
-        return structured(call(
-            server, "gateway.read" if via_core else "files.read",
-            {"action": "files.read", "arguments": arguments} if via_core else arguments,
-        ))
+        return structured(
+            call(
+                server,
+                "gateway.read" if via_core else "files.read",
+                {"action": "files.read", "arguments": arguments}
+                if via_core
+                else arguments,
+            )
+        )
 
     omitted = read(request)
     nullable = read({**request, "line_start": None})
@@ -570,21 +576,39 @@ def test_mcp_adapter_distinguishes_omitted_fields_from_explicit_null(
     }
 
 
-def test_core_rejects_explicit_null_arguments_without_claiming_key(tmp_path: Path) -> None:
+def test_core_rejects_explicit_null_arguments_without_claiming_key(
+    tmp_path: Path,
+) -> None:
     server = create_server(config(tmp_path), "operator")
-    invalid = structured(call(server, "gateway.change", {
-        "action": "files.change", "arguments": None,
-        "idempotency_key": "core-null", "request_id": "core-correlation",
-    }))
+    invalid = structured(
+        call(
+            server,
+            "gateway.change",
+            {
+                "action": "files.change",
+                "arguments": None,
+                "idempotency_key": "core-null",
+                "request_id": "core-correlation",
+            },
+        )
+    )
     assert invalid["error"]["code"] == "invalid_request"
     assert invalid["result"]["request_id"] == "core-correlation"
     target = tmp_path / "after-invalid.txt"
-    valid = structured(call(server, "gateway.change", {
-        "action": "files.change",
-        "arguments": {"target": {"path": str(target)},
-                      "change": {"operation": "create", "content": "valid\n"}},
-        "idempotency_key": "core-null",
-    }))
+    valid = structured(
+        call(
+            server,
+            "gateway.change",
+            {
+                "action": "files.change",
+                "arguments": {
+                    "target": {"path": str(target)},
+                    "change": {"operation": "create", "content": "valid\n"},
+                },
+                "idempotency_key": "core-null",
+            },
+        )
+    )
     assert valid["result"]["outcome"] == "ok"
     assert target.read_text() == "valid\n"
 
@@ -655,8 +679,7 @@ def test_validation_failure_keeps_only_valid_request_controls(
     )
     assert malformed["error"]["code"] == "invalid_request"
     assert {"request_id", "reason", "deadline_at"} <= {
-        problem["field"]
-        for problem in malformed["error"]["details"]["problems"]
+        problem["field"] for problem in malformed["error"]["details"]["problems"]
     }
     assert seen.pop() == {}
     assert malformed["result"]["request_id"] != "7"
@@ -1355,13 +1378,14 @@ def test_files_search_keeps_a_bounded_page_of_one_huge_file_and_spills_the_rest(
     # A record includes its full path, so no fixed suffix size fits every TMPDIR.
     snapshot = runtime.artifacts.registered_content(result.overflow.artifact_id)
     with snapshot.open("rb") as handle:
-        for tail in handle:
-            pass
+        *_, tail = handle
     assert json.loads(tail)["text"] == "needle 10000"
     assert json.loads(tail)["line_number"] == 10_000
 
 
-def test_files_search_spills_lines_across_files_after_inline_budget(tmp_path: Path) -> None:
+def test_files_search_spills_lines_across_files_after_inline_budget(
+    tmp_path: Path,
+) -> None:
     cfg = replace(config(tmp_path), max_result_bytes=1_024)
     runtime = create_server(cfg, "operator")._sinnix_revision_publisher.runtime
     root = tmp_path / "many-matches"
@@ -1371,12 +1395,18 @@ def test_files_search_spills_lines_across_files_after_inline_budget(tmp_path: Pa
 
     result = files._search(
         runtime,
-        files.SearchInput(roots=[{"path": str(root)}], content_regex="needle", limit=12),
+        files.SearchInput(
+            roots=[{"path": str(root)}], content_regex="needle", limit=12
+        ),
     )
     assert result.returned == 12
-    assert sum(len(match.lines) + match.overflow_lines for match in result.matches) == 12
+    assert (
+        sum(len(match.lines) + match.overflow_lines for match in result.matches) == 12
+    )
     assert result.overflow is not None
-    assert result.overflow.lines == sum(match.overflow_lines for match in result.matches)
+    assert result.overflow.lines == sum(
+        match.overflow_lines for match in result.matches
+    )
     assert result.overflow.lines > 0
 
 
@@ -1436,19 +1466,34 @@ def test_line_excerpt_continues_at_exact_byte_offset(tmp_path, budget):
     prefix = "ignored界\n".encode()
     suffix = ("界" * 20 + "\nlast\n").encode()
     target.write_bytes(prefix + suffix)
-    first = structured(call(server, "files.read", {
-        "target": {"path": str(target)}, "line_start": 2,
-        "line_count": 1, "max_bytes": budget,
-    }))["data"]
+    first = structured(
+        call(
+            server,
+            "files.read",
+            {
+                "target": {"path": str(target)},
+                "line_start": 2,
+                "line_count": 1,
+                "max_bytes": budget,
+            },
+        )
+    )["data"]
     assert first["offset"] == len(prefix)
     recovered = first["text"].encode()
     page = first
     while page["next_offset"] is not None:
         assert page["next_offset"] == len(prefix) + len(recovered)
-        page = structured(call(server, "files.read", {
-            "target": {"path": str(target)}, "offset": page["next_offset"],
-            "max_bytes": budget,
-        }))["data"]
+        page = structured(
+            call(
+                server,
+                "files.read",
+                {
+                    "target": {"path": str(target)},
+                    "offset": page["next_offset"],
+                    "max_bytes": budget,
+                },
+            )
+        )["data"]
         recovered += page["text"].encode()
     assert recovered == suffix
 
@@ -1457,22 +1502,43 @@ def test_line_excerpt_refuses_nonprogressing_utf8_budget(tmp_path):
     server = create_server(config(tmp_path), "operator")
     target = tmp_path / "utf8.txt"
     target.write_text("skip\n界界\n")
-    result = call(server, "files.read", {
-        "target": {"path": str(target)}, "line_start": 2, "max_bytes": 1,
-    })
+    result = call(
+        server,
+        "files.read",
+        {
+            "target": {"path": str(target)},
+            "line_start": 2,
+            "max_bytes": 1,
+        },
+    )
     assert result.is_error
     assert "UTF-8" in str(structured(result))
 
 
 def test_catalog_retains_complete_filtered_matches(tmp_path, monkeypatch):
     from sinnix_agent_gateway.actions import gateway
+
     server = create_server(config(tmp_path), "operator")
     runtime = server._sinnix_revision_publisher.runtime
-    rows = [{"name": f"fixture.{i}", "family": "query", "domain": "fixture",
-             "owner": "fixture", "summary": "界" * 50, "documentation": "",
-             "aliases": [], "affordances": [], "resource_kinds": [],
-             "principals": ["operator"], "effect": "read"} for i in range(120)]
-    monkeypatch.setattr(gateway, "_action_matches", lambda *_: (rows, [], "fixture-hash"))
+    rows = [
+        {
+            "name": f"fixture.{i}",
+            "family": "query",
+            "domain": "fixture",
+            "owner": "fixture",
+            "summary": "界" * 50,
+            "documentation": "",
+            "aliases": [],
+            "affordances": [],
+            "resource_kinds": [],
+            "principals": ["operator"],
+            "effect": "read",
+        }
+        for i in range(120)
+    ]
+    monkeypatch.setattr(
+        gateway, "_action_matches", lambda *_: (rows, [], "fixture-hash")
+    )
     result = anyio.run(gateway._catalog, runtime, gateway.CatalogInput(limit=2))
     assert result.matched_counts == {"actions": 120, "resources": 0, "mcp_tools": 0}
     assert result.returned_counts == {"actions": 2, "resources": 0, "mcp_tools": 0}
@@ -1483,28 +1549,52 @@ def test_catalog_retains_complete_filtered_matches(tmp_path, monkeypatch):
     content = bytearray()
     offset = 0
     while True:
-        page = runtime.artifacts.read(artifact["artifact_id"], offset=offset, max_bytes=257)
+        page = runtime.artifacts.read(
+            artifact["artifact_id"], offset=offset, max_bytes=257
+        )
         content.extend(base64.b64decode(page["base64"]))
         if page["next_offset"] is None:
             break
         offset = page["next_offset"]
     retained = json.loads(content)
     assert len(content) == artifact["bytes"]
-    assert [row["name"] for row in retained["actions"]] == [f"fixture.{i}" for i in range(120)]
+    assert [row["name"] for row in retained["actions"]] == [
+        f"fixture.{i}" for i in range(120)
+    ]
     assert retained["actions"][-1]["summary"] == "界" * 50
     assert retained["matched_counts"] == result.matched_counts
 
 
 def test_catalog_combined_count_does_not_imply_cropping(tmp_path, monkeypatch):
     from sinnix_agent_gateway.actions import gateway
+
     server = create_server(config(tmp_path), "operator")
     runtime = server._sinnix_revision_publisher.runtime
-    resource = {"kind": "fixture", "owner": "fixture", "ref_template": "fixture://x", "actions": []}
-    monkeypatch.setattr(gateway, "_action_matches", lambda *_: ([], [resource], "fixture-hash"))
+    resource = {
+        "kind": "fixture",
+        "owner": "fixture",
+        "ref_template": "fixture://x",
+        "actions": [],
+    }
+    monkeypatch.setattr(
+        gateway, "_action_matches", lambda *_: ([], [resource], "fixture-hash")
+    )
+
     async def inventory(**_):
-        return {"servers": [{"name": "fixture", "availability": "available", "tools": [{"name": "fixture", "effect": "read"}]}]}
+        return {
+            "servers": [
+                {
+                    "name": "fixture",
+                    "availability": "available",
+                    "tools": [{"name": "fixture", "effect": "read"}],
+                }
+            ]
+        }
+
     monkeypatch.setattr(runtime.mcp_broker, "catalog", inventory)
-    result = anyio.run(gateway._catalog, runtime, gateway.CatalogInput(query="fixture", limit=1))
+    result = anyio.run(
+        gateway._catalog, runtime, gateway.CatalogInput(query="fixture", limit=1)
+    )
     assert len(result.resources) == len(result.mcp_tools) == 1
     assert result.truncated is False and result.matches_artifact is None
     assert result.matched_counts == result.returned_counts
@@ -1519,7 +1609,10 @@ def test_large_file_read_budgets_use_bounded_lossless_pages(tmp_path, budget, la
     raw = ("head\n" + "界" * 5000 + "\nlast\n").encode()
     target.write_bytes(raw)
     extra = {"line_start": 2, "line_count": 1} if lane == "lines" else {}
-    page = files._read(runtime, files.ReadInput(target={"path": str(target)}, max_bytes=budget, **extra)).data
+    page = files._read(
+        runtime,
+        files.ReadInput(target={"path": str(target)}, max_bytes=budget, **extra),
+    ).data
     start = page.offset
     recovered = bytearray()
     while True:
@@ -1528,7 +1621,12 @@ def test_large_file_read_budgets_use_bounded_lossless_pages(tmp_path, budget, la
         if page.next_offset is None:
             break
         assert page.next_offset == start + len(recovered)
-        page = files._read(runtime, files.ReadInput(target={"path": str(target)}, offset=page.next_offset, max_bytes=budget)).data
+        page = files._read(
+            runtime,
+            files.ReadInput(
+                target={"path": str(target)}, offset=page.next_offset, max_bytes=budget
+            ),
+        ).data
     assert bytes(recovered) == raw[start:]
 
 
@@ -1538,14 +1636,18 @@ def test_file_read_beyond_observed_eof_returns_an_empty_page(tmp_path, offset):
     target = tmp_path / "small.txt"
     target.write_text("fixture")
     runtime = server._sinnix_revision_publisher.runtime
-    page = files._read(runtime, files.ReadInput(target={"path": str(target)}, offset=offset)).data
+    page = files._read(
+        runtime, files.ReadInput(target={"path": str(target)}, offset=offset)
+    ).data
     assert page.offset == offset
     assert page.text == "" and page.returned_bytes == 0
     assert page.next_offset is None and page.truncated is False
 
 
 @pytest.mark.parametrize("bound", ["record", "output", "overflow"])
-def test_files_search_stops_at_resource_bound_with_explicit_partial_result(tmp_path, monkeypatch, bound):
+def test_files_search_stops_at_resource_bound_with_explicit_partial_result(
+    tmp_path, monkeypatch, bound
+):
     cfg = replace(config(tmp_path), max_result_bytes=1_024)
     runtime = create_server(cfg, "operator")._sinnix_revision_publisher.runtime
     root = tmp_path / "bounded-corpus"
@@ -1555,9 +1657,16 @@ def test_files_search_stops_at_resource_bound_with_explicit_partial_result(tmp_p
         monkeypatch.setattr(files, "MAX_SEARCH_RECORD_BYTES", 512, raising=False)
     else:
         (root / "input.txt").write_text(("needle " + "x" * 200 + "\n") * 100)
-        setting = "MAX_SEARCH_OUTPUT_BYTES" if bound == "output" else "MAX_SEARCH_OVERFLOW_BYTES"
+        setting = (
+            "MAX_SEARCH_OUTPUT_BYTES"
+            if bound == "output"
+            else "MAX_SEARCH_OVERFLOW_BYTES"
+        )
         monkeypatch.setattr(files, setting, 2048, raising=False)
-    result = files._search(runtime, files.SearchInput(roots=[{"path": str(root)}], content_regex="needle", limit=1))
+    result = files._search(
+        runtime,
+        files.SearchInput(roots=[{"path": str(root)}], content_regex="needle", limit=1),
+    )
     assert result.truncated is True
     assert result.timed_out is False
     assert any(bound + " limit" in warning for warning in result.warnings)
@@ -1577,14 +1686,18 @@ def test_files_search_stops_at_resource_bound_with_explicit_partial_result(tmp_p
 
 
 def test_files_search_overflow_preserves_non_utf8_filename(tmp_path, monkeypatch):
-    runtime = create_server(config(tmp_path), "operator")._sinnix_revision_publisher.runtime
+    runtime = create_server(
+        config(tmp_path), "operator"
+    )._sinnix_revision_publisher.runtime
     root = tmp_path / "raw-name-corpus"
     root.mkdir()
     raw_path = os.fsencode(root) + b"/raw-\xff.txt"
     with open(raw_path, "wb") as handle:
         handle.write(b"needle\n")
     monkeypatch.setattr(files, "INBAND_LINES_PER_FILE", 0)
-    result = files._search(runtime, files.SearchInput(roots=[{"path": str(root)}], content_regex="needle"))
+    result = files._search(
+        runtime, files.SearchInput(roots=[{"path": str(root)}], content_regex="needle")
+    )
     assert not result.truncated
     assert result.overflow is not None
     snapshot = runtime.artifacts.registered_content(result.overflow.artifact_id)

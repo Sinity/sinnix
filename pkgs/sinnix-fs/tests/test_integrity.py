@@ -292,24 +292,38 @@ def test_nested_prefix_ledger_completes_with_a_bounded_buffer(tmp_path, monkeypa
     fs = load()
     db = tmp_path / "inventory.duckdb"
     ctn = tmp_path / "content.duckdb"
-    sql(db, "CREATE TABLE nodes AS SELECT '/scope/' || repeat('branch/', 8) "
-        "|| 'dir-' || i::VARCHAR AS path FROM range(30000) r(i)")
-    sql(ctn, "CREATE TABLE files AS SELECT 'sinnix-fs-content-v2' AS schema, "
+    sql(
+        db,
+        "CREATE TABLE nodes AS SELECT '/scope/' || repeat('branch/', 8) "
+        "|| 'dir-' || i::VARCHAR AS path FROM range(30000) r(i)",
+    )
+    sql(
+        ctn,
+        "CREATE TABLE files AS SELECT 'sinnix-fs-content-v2' AS schema, "
         "'/scope/' || repeat('branch/', 8) || 'file-' || i::VARCHAR AS path, "
         "4 AS bytes, repeat('a', 64) AS sha256, 'sha256-full' AS fingerprint_kind, "
-        "NULL::VARCHAR AS error FROM range(30000) r(i)")
+        "NULL::VARCHAR AS error FROM range(30000) r(i)",
+    )
     judgments = [
-        {"target": "prefix:/scope/" + "branch/" * depth,
-         "field": field, "value": f"depth-{depth}", "confidence": 1.0,
-         "observation": "known", "method": "operator",
-         "evidence": "bounded memory fixture", "ts": "2026-01-01T00:00:00Z"}
+        {
+            "target": "prefix:/scope/" + "branch/" * depth,
+            "field": field,
+            "value": f"depth-{depth}",
+            "confidence": 1.0,
+            "observation": "known",
+            "method": "operator",
+            "evidence": "bounded memory fixture",
+            "ts": "2026-01-01T00:00:00Z",
+        }
         for depth in range(9)
         for field in ["subject", "owner", "lifecycle", "role", "topic", "preservation"]
     ]
     (tmp_path / "judgments.jsonl").write_text(
         "".join(json.dumps(j) + "\n" for j in judgments)
     )
-    monkeypatch.setattr(fs, "DUCKDB_SETTINGS", fs.DUCKDB_SETTINGS.replace("512MiB", "256MiB"))
+    monkeypatch.setattr(
+        fs, "DUCKDB_SETTINGS", fs.DUCKDB_SETTINGS.replace("512MiB", "256MiB")
+    )
     assert fs.ledger_run(tmp_path) == 0
     assert sql(db, "SELECT count(*) AS n FROM inherited_judgments") == [{"n": 360000}]
     assert sql(db, "SELECT DISTINCT value FROM inherited_judgments") == [
@@ -446,7 +460,9 @@ def test_generated_directory_exclusion_keeps_a_boundary_record(tmp_path):
 
 
 @pytest.mark.parametrize("address", [".", "../native", "../native/../ordinary"])
-def test_root_spellings_obey_physical_collection_boundary(tmp_path, monkeypatch, address):
+def test_root_spellings_obey_physical_collection_boundary(
+    tmp_path, monkeypatch, address
+):
     fs = load()
     native = tmp_path / "native"
     native.mkdir()
@@ -455,11 +471,17 @@ def test_root_spellings_obey_physical_collection_boundary(tmp_path, monkeypatch,
     ordinary.mkdir()
     (ordinary / "note.md").write_text("Ordinary fixture")
     monkeypatch.chdir(native)
-    monkeypatch.setattr(fs, "CONTENT_COLLECTION_BOUNDARIES", {str(native): "synthetic native owner"})
+    monkeypatch.setattr(
+        fs, "CONTENT_COLLECTION_BOUNDARIES", {str(native): "synthetic native owner"}
+    )
     original_walk = fs.os.walk
+
     def guarded_walk(path, *args, **kwargs):
-        assert Path(path).resolve() != native, "entered native root through an alternate spelling"
+        assert Path(path).resolve() != native, (
+            "entered native root through an alternate spelling"
+        )
         return original_walk(path, *args, **kwargs)
+
     monkeypatch.setattr(fs.os, "walk", guarded_walk)
     output = tmp_path / "files.jsonl"
     fs.content_walk([address], output, 0)
@@ -480,35 +502,55 @@ def test_relative_inventory_paths_are_absolute_and_joinable(tmp_path, monkeypatc
     monkeypatch.chdir(root)
     output = tmp_path / "nodes.jsonl"
     fs.inventory_scan(["."], -1, output, 0)
-    rows = {row["path"]: row for row in map(json.loads, output.read_text().splitlines())}
+    rows = {
+        row["path"]: row for row in map(json.loads, output.read_text().splitlines())
+    }
     assert set(rows) == {str(root), str(root / "child")}
     assert rows[str(root / "child")]["parent"] == str(root)
     index = tmp_path / "index"
     index.mkdir()
-    (index / "judgments.jsonl").write_text(json.dumps(dict(
-        target="prefix:" + str(root), field="topic", value="fixture",
-        method="operator", evidence="synthetic", ts="2026-01-01T00:00:00Z")) + "\n")
+    (index / "judgments.jsonl").write_text(
+        json.dumps(
+            {
+                "target": "prefix:" + str(root),
+                "field": "topic",
+                "value": "fixture",
+                "method": "operator",
+                "evidence": "synthetic",
+                "ts": "2026-01-01T00:00:00Z",
+            }
+        )
+        + "\n"
+    )
     assert fs.publish_generation(index, roots=["."]) == 0
     generation = fs.resolve_generation(index)
     manifest = json.loads((generation / "manifest.json").read_text())
     assert manifest["scan"]["roots"] == [str(root)]
-    assert sql(generation / "inventory.duckdb",
-        "SELECT path, value FROM inherited_judgments WHERE field='topic' ORDER BY path") == [
-            {"path": str(root), "value": "fixture"},
-            {"path": str(root / "child"), "value": "fixture"},
-        ]
+    assert sql(
+        generation / "inventory.duckdb",
+        "SELECT path, value FROM inherited_judgments WHERE field='topic' ORDER BY path",
+    ) == [
+        {"path": str(root), "value": "fixture"},
+        {"path": str(root / "child"), "value": "fixture"},
+    ]
 
 
-def test_native_boundary_through_parent_alias_is_still_not_walked(tmp_path, monkeypatch):
+def test_native_boundary_through_parent_alias_is_still_not_walked(
+    tmp_path, monkeypatch
+):
     fs = load()
     native = tmp_path / "physical" / "native"
     native.mkdir(parents=True)
     (native / "note.md").write_text("Synthetic native payload")
     alias = tmp_path / "alias"
     alias.symlink_to(native.parent, target_is_directory=True)
-    monkeypatch.setattr(fs, "CONTENT_COLLECTION_BOUNDARIES", {str(native): "synthetic native owner"})
+    monkeypatch.setattr(
+        fs, "CONTENT_COLLECTION_BOUNDARIES", {str(native): "synthetic native owner"}
+    )
+
     def forbidden(*a, **k):
         raise AssertionError("walked native root through an ancestor alias")
+
     monkeypatch.setattr(fs.os, "walk", forbidden)
     output = tmp_path / "files.jsonl"
     fs.content_walk([str(alias / "native")], output, 0)
@@ -547,11 +589,16 @@ def test_direct_root_alias_remains_an_error_without_enumeration(tmp_path, monkey
     target.mkdir()
     alias = tmp_path / "alias"
     alias.symlink_to(target, target_is_directory=True)
+
     def forbidden(*a, **k):
         raise AssertionError("enumerated a direct root alias")
+
     monkeypatch.setattr(fs.os, "walk", forbidden)
     monkeypatch.setattr(fs.os, "scandir", forbidden)
-    for scan, name in ((fs.content_walk, "files.jsonl"), (fs.inventory_scan, "nodes.jsonl")):
+    for scan, name in (
+        (fs.content_walk, "files.jsonl"),
+        (fs.inventory_scan, "nodes.jsonl"),
+    ):
         output = tmp_path / name
         if scan is fs.inventory_scan:
             scan([str(alias)], -1, output, 0)
@@ -594,8 +641,11 @@ def test_all_internal_duckdb_sessions_have_bounded_buffers_and_workers(tmp_path)
 
 @pytest.mark.parametrize("stage", ["classification", "stat"])
 @pytest.mark.parametrize("failure", [PermissionError, FileNotFoundError, OSError])
-def test_inventory_entry_errors_make_ancestor_totals_incomplete(tmp_path, monkeypatch, stage, failure):
+def test_inventory_entry_errors_make_ancestor_totals_incomplete(
+    tmp_path, monkeypatch, stage, failure
+):
     from contextlib import contextmanager
+
     fs = load()
     root = tmp_path / "source"
     child = root / "child"
@@ -607,20 +657,29 @@ def test_inventory_entry_errors_make_ancestor_totals_incomplete(tmp_path, monkey
     class Entry:
         def __init__(self, entry):
             self.entry = entry
+
         def __getattr__(self, name):
             return getattr(self.entry, name)
+
         def is_symlink(self):
             if stage == "classification":
                 raise failure("synthetic metadata failure")
             return self.entry.is_symlink()
+
         def stat(self, **kwargs):
             raise failure("synthetic metadata failure")
 
     @contextmanager
     def scan(path):
         with original(path) as entries:
-            yield iter([Entry(e) if Path(path) == child and e.name == "unavailable.txt" else e
-                        for e in entries])
+            yield iter(
+                [
+                    Entry(e)
+                    if Path(path) == child and e.name == "unavailable.txt"
+                    else e
+                    for e in entries
+                ]
+            )
 
     monkeypatch.setattr(fs.os, "scandir", scan)
     source = tmp_path / "nodes.jsonl"
@@ -633,5 +692,8 @@ def test_inventory_entry_errors_make_ancestor_totals_incomplete(tmp_path, monkey
     assert nodes[str(child)]["direct_bytes"] == 4
     db = tmp_path / "inventory.duckdb"
     fs.inventory_materialize(source, db, tmp_path / "nodes.parquet")
-    rows = sql(db, "SELECT total_bytes::BIGINT AS total_bytes, subtree_complete FROM inventory ORDER BY depth")
+    rows = sql(
+        db,
+        "SELECT total_bytes::BIGINT AS total_bytes, subtree_complete FROM inventory ORDER BY depth",
+    )
     assert rows == [{"total_bytes": 4, "subtree_complete": False}] * 2

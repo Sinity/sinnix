@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import importlib.util
 import fcntl
+import importlib.util
 import json
-from pathlib import Path
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -24,7 +24,10 @@ def _source_control(database):
     return {
         "schema": "sinnix-machine-sqlite-segments-v1",
         "state": "ready",
-        "current": {"file": database.name, "identity": {"inode": database.stat().st_ino}},
+        "current": {
+            "file": database.name,
+            "identity": {"inode": database.stat().st_ino},
+        },
     }
 
 
@@ -47,8 +50,21 @@ def test_writer_guard_preserves_lock_inode_and_excludes_rotation(tmp_path):
         assert lock.stat().st_mode & 0o777 == 0o600
 
 
-@pytest.mark.parametrize("defect", ["preparing", "malformed", "missing", "replacement", "wrong-file", "bool-inode", "symlink"])
-def test_writer_refuses_unexplained_current_before_opening_sqlite(tmp_path, monkeypatch, defect):
+@pytest.mark.parametrize(
+    "defect",
+    [
+        "preparing",
+        "malformed",
+        "missing",
+        "replacement",
+        "wrong-file",
+        "bool-inode",
+        "symlink",
+    ],
+)
+def test_writer_refuses_unexplained_current_before_opening_sqlite(
+    tmp_path, monkeypatch, defect
+):
     collector = _collector()
     database = tmp_path / "telemetry.sqlite"
     database.write_bytes(b"retained synthetic object")
@@ -70,19 +86,41 @@ def test_writer_refuses_unexplained_current_before_opening_sqlite(tmp_path, monk
         database.rename(tmp_path / "original")
         database.symlink_to(tmp_path / "original")
     control.write_text("invalid" if defect == "malformed" else json.dumps(payload))
-    monkeypatch.setattr(sys, "argv", ["machine-telemetry", "--db", str(database), "--manifest", str(tmp_path / "hardware.json"), "--host", "fixture", "--user-name", "fixture"])
-    monkeypatch.setattr(collector, "collect", lambda args: pytest.fail("SQLite opening must not be reached"))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "machine-telemetry",
+            "--db",
+            str(database),
+            "--manifest",
+            str(tmp_path / "hardware.json"),
+            "--host",
+            "fixture",
+            "--user-name",
+            "fixture",
+        ],
+    )
+    monkeypatch.setattr(
+        collector,
+        "collect",
+        lambda args: pytest.fail("SQLite opening must not be reached"),
+    )
     with pytest.raises((RuntimeError, OSError, ValueError)):
         collector.main()
     if defect == "missing":
         assert not database.exists()
 
 
-def test_writer_guard_releases_descriptor_after_failure_and_allows_active_growth(tmp_path):
+def test_writer_guard_releases_descriptor_after_failure_and_allows_active_growth(
+    tmp_path,
+):
     collector = _collector()
     database = tmp_path / "telemetry.sqlite"
     database.write_bytes(b"current")
-    database.with_name(database.name + ".segments.json").write_text(json.dumps(_source_control(database)))
+    database.with_name(database.name + ".segments.json").write_text(
+        json.dumps(_source_control(database))
+    )
     with pytest.raises(RuntimeError, match="synthetic"):
         with collector.writer_guard(database):
             with database.open("ab") as stream:

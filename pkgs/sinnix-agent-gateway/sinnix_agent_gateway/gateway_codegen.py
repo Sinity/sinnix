@@ -268,7 +268,9 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--write", action="store_true")
     mode.add_argument("--check", action="store_true")
-    mode.add_argument("--reference", action="store_true", help="print the full reference")
+    mode.add_argument(
+        "--reference", action="store_true", help="print the full reference"
+    )
     args = parser.parse_args()
     if args.reference:
         print(render_reference(), end="")

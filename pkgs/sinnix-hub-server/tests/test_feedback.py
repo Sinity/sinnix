@@ -224,7 +224,10 @@ def test_elicit_model_reads_the_domains_own_fit(hub_server, tmp_path: Path) -> N
         body = json.loads(response.read())
     assert body["schema"] == "sinnix-elicit-v1"
     assert body["domain"] == "wallpapers"
-    assert body["model"] == {"schema": "sinnix-rank-pairs-model-v1", "theta": {"a": 1.2}}
+    assert body["model"] == {
+        "schema": "sinnix-rank-pairs-model-v1",
+        "theta": {"a": 1.2},
+    }
 
 
 def test_elicit_model_404s_before_any_rank_has_run(hub_server) -> None:
@@ -242,12 +245,19 @@ def test_elicit_model_refuses_a_traversal_shaped_domain(hub_server) -> None:
 
 
 @pytest.mark.parametrize("stage", ["resolve", "read"])
-@pytest.mark.parametrize("failure", [PermissionError("denied"), OSError("device unavailable")])
-def test_elicit_model_access_errors_are_unavailable(hub_server, monkeypatch, stage, failure):
+@pytest.mark.parametrize(
+    "failure", [PermissionError("denied"), OSError("device unavailable")]
+)
+def test_elicit_model_access_errors_are_unavailable(
+    hub_server, monkeypatch, stage, failure
+):
     from sinnix_hub_server import server
+
     base, _ = hub_server
+
     def fail(*args, **kwargs):
         raise failure
+
     if stage == "resolve":
         monkeypatch.setattr(server, "resolve_elicit_model", fail)
     else:
@@ -258,8 +268,13 @@ def test_elicit_model_access_errors_are_unavailable(hub_server, monkeypatch, sta
     assert "unavailable" in json.loads(raised.value.read())["error"]
 
 
-@pytest.mark.parametrize("kind, status", [("directory", 503), ("broken-link", 503), ("utf8", 502), ("json", 502)])
-def test_elicit_model_unusable_entries_are_not_absent(hub_server, tmp_path, kind, status):
+@pytest.mark.parametrize(
+    "kind, status",
+    [("directory", 503), ("broken-link", 503), ("utf8", 502), ("json", 502)],
+)
+def test_elicit_model_unusable_entries_are_not_absent(
+    hub_server, tmp_path, kind, status
+):
     base, _ = hub_server
     path = tmp_path / "preferences" / "neutral" / "model.json"
     path.parent.mkdir(parents=True)

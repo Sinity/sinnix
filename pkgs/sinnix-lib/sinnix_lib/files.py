@@ -20,7 +20,11 @@ class NotRegularFile(OSError, ValueError):
 
 @contextmanager
 def open_regular(
-    path: Path | str, mode: str = "rb", *, encoding: str | None = None, errors: str | None = None,
+    path: Path | str,
+    mode: str = "rb",
+    *,
+    encoding: str | None = None,
+    errors: str | None = None,
 ) -> Iterator[IO]:
     """Open without blocking on a FIFO and refuse anything but a regular file.
 
@@ -30,7 +34,10 @@ def open_regular(
     if "b" not in mode and encoding is None:
         encoding = "utf-8"
     with open(
-        path, mode, encoding=encoding, errors=errors,
+        path,
+        mode,
+        encoding=encoding,
+        errors=errors,
         opener=lambda name, flags: os.open(name, flags | os.O_NONBLOCK),
     ) as handle:
         if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):

@@ -23,7 +23,10 @@ def relocate_path(path: str, moves: list[dict]) -> str:
     path = normalized(path)
     matches = []
     for move in moves:
-        source, destination = normalized(move["source"]), normalized(move["destination"])
+        source, destination = (
+            normalized(move["source"]),
+            normalized(move["destination"]),
+        )
         if path == source or path.startswith(source.rstrip("/") + "/"):
             matches.append((len(source), _replace_prefix(path, source, destination)))
     if not matches:
@@ -35,7 +38,9 @@ def relocate_path(path: str, moves: list[dict]) -> str:
     return destinations.pop()
 
 
-def resolve_historical_path(catalog: dict, path: str, *, asset_id: str | None = None) -> str:
+def resolve_historical_path(
+    catalog: dict, path: str, *, asset_id: str | None = None
+) -> str:
     """Resolve old/current addresses; refuse reused addresses without an asset id.
 
     A collection permits descendant lookup. File records permit exact lookup
@@ -49,11 +54,26 @@ def resolve_historical_path(catalog: dict, path: str, *, asset_id: str | None = 
         current = normalized(asset["current_path"])
         for address in [current, *asset.get("previous_paths", [])]:
             address = normalized(address)
-            if path == address or (asset["kind"] == "collection" and path.startswith(address.rstrip("/") + "/")):
-                matches.append((len(address), None if asset.get("location_status") in {
-                    "unavailable", "missing", "denied", "offline_mount", "wrong_type", "inaccessible"
-                }
-                                else _replace_prefix(path, address, current)))
+            if path == address or (
+                asset["kind"] == "collection"
+                and path.startswith(address.rstrip("/") + "/")
+            ):
+                matches.append(
+                    (
+                        len(address),
+                        None
+                        if asset.get("location_status")
+                        in {
+                            "unavailable",
+                            "missing",
+                            "denied",
+                            "offline_mount",
+                            "wrong_type",
+                            "inaccessible",
+                        }
+                        else _replace_prefix(path, address, current),
+                    )
+                )
     if not matches:
         raise ValueError(f"path has no catalog identity history: {path}")
     longest = max(length for length, _ in matches)
@@ -61,5 +81,7 @@ def resolve_historical_path(catalog: dict, path: str, *, asset_id: str | None = 
     if None in targets:
         raise ValueError(f"historical asset is explicitly unavailable: {path}")
     if len(targets) != 1:
-        raise ValueError(f"reused or ambiguous historical address: {path}; specify asset id")
+        raise ValueError(
+            f"reused or ambiguous historical address: {path}; specify asset id"
+        )
     return targets.pop()

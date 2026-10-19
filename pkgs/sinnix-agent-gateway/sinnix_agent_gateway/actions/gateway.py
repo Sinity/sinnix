@@ -11,11 +11,11 @@ import anyio
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..action import ALL_PRINCIPALS, Action, Example, MutationControls, RequestControls
-from ..permissions import Permission
 from ..catalog import search_rows
 from ..contracts import VerbFamily
-from ..schemas import GatewayModel
+from ..permissions import Permission
 from ..results import ProtocolError
+from ..schemas import GatewayModel
 
 if TYPE_CHECKING:
     from ..runtime import Runtime
@@ -80,7 +80,12 @@ class CatalogInput(RequestControls):
     include_mcp_tools: bool = Field(
         default=True, description="Also search brokered MCP server tools."
     )
-    limit: int = Field(default=50, ge=1, le=500, description="Inline rows per category; cropped matches remain in matches_artifact.")
+    limit: int = Field(
+        default=50,
+        ge=1,
+        le=500,
+        description="Inline rows per category; cropped matches remain in matches_artifact.",
+    )
 
 
 class CatalogAction(GatewayModel):
@@ -276,7 +281,9 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
                     }
                 )
         mcp_tools = search_rows(mcp_tools, inp.query, ("server", "name", "description"))
-    actions = [{k: v for k, v in row.items() if k != "documentation"} for row in selected]
+    actions = [
+        {k: v for k, v in row.items() if k != "documentation"} for row in selected
+    ]
     matches = {"actions": actions, "resources": resources, "mcp_tools": mcp_tools}
     counts = {name: len(rows) for name, rows in matches.items()}
     cropped = any(count > inp.limit for count in counts.values())
@@ -293,11 +300,16 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
             "mcp_catalog_truncated": mcp_catalog_truncated,
             "mcp_catalog_artifact": catalog_artifact,
         }
-        matches_artifact = await anyio.to_thread.run_sync(partial(
-            runtime.artifacts.register_json, payload,
-            kind="catalog-matches", owner_id="gateway", source="gateway.catalog",
-            target={"principal": runtime.principal_name, "query": inp.query},
-        ))
+        matches_artifact = await anyio.to_thread.run_sync(
+            partial(
+                runtime.artifacts.register_json,
+                payload,
+                kind="catalog-matches",
+                owner_id="gateway",
+                source="gateway.catalog",
+                target={"principal": runtime.principal_name, "query": inp.query},
+            )
+        )
     return Catalog(
         revision=action_set.REVISION,
         catalog_sha256=catalog_sha256,

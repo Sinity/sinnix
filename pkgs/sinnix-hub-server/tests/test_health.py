@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sinnix_lib.atomic_json import write_json_atomic
 from sinnix_hub_server import health, pressure
+from sinnix_lib.atomic_json import write_json_atomic
 
 # Swap with headroom and nothing stalling: the swap lane's healthy path, held
 # fixed so these tests judge the inventory sweeps alone. The lane's own
@@ -649,9 +649,9 @@ def test_the_failure_fast_path_shares_the_sweeps_key(world) -> None:
     # The sweep then agrees with it and says nothing further, and its prune
     # keeps the key rather than resetting the memory.
     world["run"]()
-    assert without_reminder_clock(json.loads(world["state"].read_text()))["service:system:fixture.service"] == {
-        "status": "failed"
-    }
+    assert without_reminder_clock(json.loads(world["state"].read_text()))[
+        "service:system:fixture.service"
+    ] == {"status": "failed"}
     assert (
         len(
             [

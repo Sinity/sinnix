@@ -5,15 +5,19 @@
 import copy
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import textwrap
 import unittest
+from pathlib import Path
 
-
-MODULE = Path(os.environ.get("SINNIX_CLODEX_MODULE", Path(__file__).resolve().parents[2] / "modules/services/clodex.nix"))
+MODULE = Path(
+    os.environ.get(
+        "SINNIX_CLODEX_MODULE",
+        Path(__file__).resolve().parents[2] / "modules/services/clodex.nix",
+    )
+)
 SOURCE = MODULE.read_text()
 VALIDATOR = textwrap.dedent(
     SOURCE.split("python3 -c '\n", 1)[1].split("\n              '", 1)[0]
@@ -36,8 +40,17 @@ class PatchCheckTest(unittest.TestCase):
             (root / "manifest.json").write_text(json.dumps({"configHash": NATIVE_HASH}))
             (root / "config.json").write_text(json.dumps(preferences or {}))
             return subprocess.run(
-                [sys.executable, "-c", VALIDATOR, str(root / "manifest.json"), str(root / "config.json")],
-                input=json.dumps(rows), text=True, capture_output=True, check=False,
+                [
+                    sys.executable,
+                    "-c",
+                    VALIDATOR,
+                    str(root / "manifest.json"),
+                    str(root / "config.json"),
+                ],
+                input=json.dumps(rows),
+                text=True,
+                capture_output=True,
+                check=False,
             )
 
     def test_matches_native_hash_with_projected_effort(self):

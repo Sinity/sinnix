@@ -2,20 +2,20 @@
 
 This audit records every executable beneath `dots/_ai/skills`. pueue, through `agentctl`, is the only job lifecycle owner. The allowed native runner is a private argv translator queued by `agentctl batch start`; no skill executable owns job state, cancellation, retries, manifests, or process cleanup.
 
-| Executable                                                   | Positive caller                               | Retained role                                              |
-| ------------------------------------------------------------ | --------------------------------------------- | ---------------------------------------------------------- |
-| `orchestrate/scripts/probe_agent_runtime.sh`                 | `orchestrate` skill                           | Direct vendor and quota availability probe.                |
-| `agentctl-agent` (from the AgentCTL package)                 | `agentctl batch start`                        | Private backend argv translator for a worker's agent job.  |
-| `chatgpt-conversations/scripts/sinnix-chatgpt-conversations` | `chatgpt-conversations` skill                 | Conversation extraction and explicitly requested file retrieval. |
-| `chatgpt-conversations/scripts/download-native.mjs`         | `sinnix-chatgpt-conversations download-native` | Retrieve selected native file references and verify local copies. |
-| `desktop-control-plane/scripts/chrome-control.sh`            | Agent module and desktop-control-plane skill  | Visible browser UI helper.                                 |
-| `desktop-control-plane/scripts/hypr-control.sh`              | Agent module and desktop-control-plane skill  | Visible window-manager UI helper.                          |
-| `desktop-control-plane/scripts/keyboard-control.sh`          | Agent module                                  | Explicit keyboard UI helper.                               |
-| `desktop-control-plane/scripts/kitty-remote-control.sh`      | Agent module and desktop-control-plane skill  | Visible terminal UI helper.                                |
-| `desktop-control-plane/scripts/screenshot-color-lab.sh`      | Agent module and capture registry             | Screenshot and display diagnostic helper.                  |
-| `grok/scripts/defect_priors.py`                              | `grok` skill                                  | Ranks Polylogue modules for an audit wave.                 |
-| `grok/scripts/partition_by_size.sh`                          | `grok` skill                                  | Measured source partitioning for a code audit.             |
-| `html-report/generators/embed-path-popups.py`                | `html-report` skill                           | HTML report navigation generator.                          |
-| `investigate/scripts/freeze.sh`                              | `investigate` skill                           | Evidence preservation before recovery mutation.            |
-| `investigate/scripts/recover-probe.sh`                       | `investigate` skill                           | Read-only recovery authority probe.                        |
-| `skill-authoring/scripts/validate_skill.py`                  | `skill-authoring` skill and agent-tools check | Skill metadata and structure validation.                   |
+| Executable                                                   | Positive caller                                | Retained role                                                     |
+| ------------------------------------------------------------ | ---------------------------------------------- | ----------------------------------------------------------------- |
+| `orchestrate/scripts/probe_agent_runtime.sh`                 | `orchestrate` skill                            | Direct vendor and quota availability probe.                       |
+| `agentctl-agent` (from the AgentCTL package)                 | `agentctl batch start`                         | Private backend argv translator for a worker's agent job.         |
+| `chatgpt-conversations/scripts/sinnix-chatgpt-conversations` | `chatgpt-conversations` skill                  | Conversation extraction and explicitly requested file retrieval.  |
+| `chatgpt-conversations/scripts/download-native.mjs`          | `sinnix-chatgpt-conversations download-native` | Retrieve selected native file references and verify local copies. |
+| `desktop-control-plane/scripts/chrome-control.sh`            | Agent module and desktop-control-plane skill   | Visible browser UI helper.                                        |
+| `desktop-control-plane/scripts/hypr-control.sh`              | Agent module and desktop-control-plane skill   | Visible window-manager UI helper.                                 |
+| `desktop-control-plane/scripts/keyboard-control.sh`          | Agent module                                   | Explicit keyboard UI helper.                                      |
+| `desktop-control-plane/scripts/kitty-remote-control.sh`      | Agent module and desktop-control-plane skill   | Visible terminal UI helper.                                       |
+| `desktop-control-plane/scripts/screenshot-color-lab.sh`      | Agent module and capture registry              | Screenshot and display diagnostic helper.                         |
+| `grok/scripts/defect_priors.py`                              | `grok` skill                                   | Ranks Polylogue modules for an audit wave.                        |
+| `grok/scripts/partition_by_size.sh`                          | `grok` skill                                   | Measured source partitioning for a code audit.                    |
+| `html-report/generators/embed-path-popups.py`                | `html-report` skill                            | HTML report navigation generator.                                 |
+| `investigate/scripts/freeze.sh`                              | `investigate` skill                            | Evidence preservation before recovery mutation.                   |
+| `investigate/scripts/recover-probe.sh`                       | `investigate` skill                            | Read-only recovery authority probe.                               |
+| `skill-authoring/scripts/validate_skill.py`                  | `skill-authoring` skill and agent-tools check  | Skill metadata and structure validation.                          |

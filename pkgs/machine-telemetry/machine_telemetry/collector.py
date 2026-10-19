@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import glob
 import fcntl
-from contextlib import contextmanager
+import glob
 import json
 import os
 import pwd
@@ -15,6 +14,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
@@ -129,19 +129,33 @@ def writer_guard(database: Path) -> Iterator[None]:
             if not stat.S_ISREG(metadata.st_mode):
                 raise RuntimeError("telemetry source manifest is not a regular file")
             payload = json.loads(control.read_text(encoding="utf-8"))
-            if not isinstance(payload, dict) or payload.get("schema") != "sinnix-machine-sqlite-segments-v1":
+            if (
+                not isinstance(payload, dict)
+                or payload.get("schema") != "sinnix-machine-sqlite-segments-v1"
+            ):
                 raise RuntimeError("unsupported telemetry source manifest")
             if payload.get("state") != "ready":
-                raise RuntimeError("telemetry source cutover is incomplete; owner recovery required")
+                raise RuntimeError(
+                    "telemetry source cutover is incomplete; owner recovery required"
+                )
             current = payload.get("current")
             if not isinstance(current, dict) or current.get("file") != database.name:
-                raise RuntimeError("telemetry source manifest has the wrong current entrance")
+                raise RuntimeError(
+                    "telemetry source manifest has the wrong current entrance"
+                )
             identity = current.get("identity")
             if not isinstance(identity, dict) or type(identity.get("inode")) is not int:
-                raise RuntimeError("telemetry source manifest has an invalid current identity")
+                raise RuntimeError(
+                    "telemetry source manifest has an invalid current identity"
+                )
             observed = database.lstat()
-            if not stat.S_ISREG(observed.st_mode) or observed.st_ino != identity["inode"]:
-                raise RuntimeError("telemetry current SQLite identity changed; owner recovery required")
+            if (
+                not stat.S_ISREG(observed.st_mode)
+                or observed.st_ino != identity["inode"]
+            ):
+                raise RuntimeError(
+                    "telemetry current SQLite identity changed; owner recovery required"
+                )
         yield
     finally:
         os.close(descriptor)

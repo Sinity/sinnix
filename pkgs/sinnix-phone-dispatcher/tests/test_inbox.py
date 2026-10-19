@@ -182,7 +182,8 @@ def test_confirmation_hashing_has_bounded_memory(isolated_state_dirs, correct_di
     tracemalloc.start()
     try:
         status, payload = inbox_mod.confirm_inbox(
-            "receipts/large.json", digest.hexdigest() if correct_digest else "0" * 64,
+            "receipts/large.json",
+            digest.hexdigest() if correct_digest else "0" * 64,
         )
         _, peak = tracemalloc.get_traced_memory()
     finally:
@@ -199,7 +200,9 @@ def test_confirmation_hashing_has_bounded_memory(isolated_state_dirs, correct_di
 
 @pytest.mark.parametrize("publish_again", [False, True])
 def test_confirmation_preserves_replacement_before_claim(
-    isolated_state_dirs, monkeypatch, publish_again,
+    isolated_state_dirs,
+    monkeypatch,
+    publish_again,
 ):
     original = b'{"title":"original"}\n'
     replacement = b'{"title":"replacement"}\n'
@@ -228,7 +231,9 @@ def test_confirmation_preserves_replacement_before_claim(
     assert payload["current_path_restored"] is not publish_again
 
 
-def test_confirmation_keeps_new_publication_after_claim(isolated_state_dirs, monkeypatch):
+def test_confirmation_keeps_new_publication_after_claim(
+    isolated_state_dirs, monkeypatch
+):
     original = b'{"title":"original"}\n'
     replacement = b'{"title":"replacement"}\n'
     _write(isolated_state_dirs, "receipts", "r1.json", original.decode())
@@ -264,14 +269,19 @@ def test_claim_read_failure_preserves_receipt(isolated_state_dirs, monkeypatch):
 
     monkeypatch.setattr(os, "open", fail_claim)
     status, payload = inbox_mod.confirm_inbox(
-        "receipts/r1.json", hashlib.sha256(text.encode()).hexdigest(),
+        "receipts/r1.json",
+        hashlib.sha256(text.encode()).hexdigest(),
     )
     assert status == HTTPStatus.INTERNAL_SERVER_ERROR
     assert Path(payload["retained_at"]).read_bytes() == text.encode()
-    assert (isolated_state_dirs["receipts_dir"] / "r1.json").read_bytes() == text.encode()
+    assert (
+        isolated_state_dirs["receipts_dir"] / "r1.json"
+    ).read_bytes() == text.encode()
 
 
-def test_nonregular_replacement_is_preserved_without_blocking(isolated_state_dirs, monkeypatch):
+def test_nonregular_replacement_is_preserved_without_blocking(
+    isolated_state_dirs, monkeypatch
+):
     text = '{"title":"original"}\n'
     _write(isolated_state_dirs, "receipts", "r1.json", text)
     path = isolated_state_dirs["receipts_dir"] / "r1.json"
@@ -291,7 +301,9 @@ def test_nonregular_replacement_is_preserved_without_blocking(isolated_state_dir
     assert Path(payload["retained_at"]).is_fifo() and path.is_fifo()
 
 
-def test_interrupted_confirmation_retains_claimed_bytes(isolated_state_dirs, monkeypatch):
+def test_interrupted_confirmation_retains_claimed_bytes(
+    isolated_state_dirs, monkeypatch
+):
     text = '{"title":"retained"}\n'
     _write(isolated_state_dirs, "receipts", "r1.json", text)
     sha = inbox_mod._sha
@@ -313,7 +325,9 @@ def test_interrupted_confirmation_retains_claimed_bytes(isolated_state_dirs, mon
     assert len(claims) == 1 and claims[0].read_bytes() == text.encode()
 
 
-def test_ambiguous_rename_failure_never_removes_claimed_receipt(isolated_state_dirs, monkeypatch):
+def test_ambiguous_rename_failure_never_removes_claimed_receipt(
+    isolated_state_dirs, monkeypatch
+):
     text = '{"title":"retained"}\n'
     _write(isolated_state_dirs, "receipts", "r1.json", text)
     rename = os.rename
@@ -324,11 +338,14 @@ def test_ambiguous_rename_failure_never_removes_claimed_receipt(isolated_state_d
 
     monkeypatch.setattr(os, "rename", committed_then_failed)
     status, payload = inbox_mod.confirm_inbox(
-        "receipts/r1.json", hashlib.sha256(text.encode()).hexdigest(),
+        "receipts/r1.json",
+        hashlib.sha256(text.encode()).hexdigest(),
     )
     assert status == HTTPStatus.INTERNAL_SERVER_ERROR
     assert Path(payload["retained_at"]).read_bytes() == text.encode()
-    assert (isolated_state_dirs["receipts_dir"] / "r1.json").read_bytes() == text.encode()
+    assert (
+        isolated_state_dirs["receipts_dir"] / "r1.json"
+    ).read_bytes() == text.encode()
 
 
 def test_reconfirming_a_gone_receipt_is_a_success(isolated_state_dirs) -> None:
@@ -384,129 +401,155 @@ def test_a_missing_entry_is_a_404(isolated_state_dirs) -> None:
 
 
 @pytest.mark.parametrize("subdirectory_link", [False, True])
-def test_symlinks_cannot_expose_outside_inbox(isolated_state_dirs, tmp_path, subdirectory_link):
-    outside = tmp_path / 'outside'
+def test_symlinks_cannot_expose_outside_inbox(
+    isolated_state_dirs, tmp_path, subdirectory_link
+):
+    outside = tmp_path / "outside"
     outside.mkdir()
-    target = outside / 'entry.json'
-    target.write_bytes(b'synthetic outside inbox')
-    root = isolated_state_dirs['inbox_dir']
+    target = outside / "entry.json"
+    target.write_bytes(b"synthetic outside inbox")
+    root = isolated_state_dirs["inbox_dir"]
     root.mkdir(parents=True)
     if subdirectory_link:
-        (root / 'receipts').symlink_to(outside, target_is_directory=True)
+        (root / "receipts").symlink_to(outside, target_is_directory=True)
     else:
-        (root / 'receipts').mkdir()
-        (root / 'receipts' / 'entry.json').symlink_to(target)
+        (root / "receipts").mkdir()
+        (root / "receipts" / "entry.json").symlink_to(target)
     before = target.stat()
-    status, body = _download_bytes('receipts/entry.json')
+    status, body = _download_bytes("receipts/entry.json")
     assert status == HTTPStatus.INTERNAL_SERVER_ERROR
-    assert isinstance(body, dict) and not body['ok']
+    assert isinstance(body, dict) and not body["ok"]
     listing_status, listing = inbox_mod.list_inbox()
     assert listing_status == HTTPStatus.INTERNAL_SERVER_ERROR
-    assert not listing['ok'] and 'files' not in listing
-    status, body = inbox_mod.confirm_inbox('receipts/entry.json', hashlib.sha256(target.read_bytes()).hexdigest())
+    assert not listing["ok"] and "files" not in listing
+    status, body = inbox_mod.confirm_inbox(
+        "receipts/entry.json", hashlib.sha256(target.read_bytes()).hexdigest()
+    )
     assert status == HTTPStatus.INTERNAL_SERVER_ERROR
     after = target.stat()
-    assert (after.st_ino, after.st_size, after.st_mtime_ns) == (before.st_ino, before.st_size, before.st_mtime_ns)
-    assert target.read_bytes() == b'synthetic outside inbox'
-    assert (root / 'receipts' / 'entry.json').exists()
+    assert (after.st_ino, after.st_size, after.st_mtime_ns) == (
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+    )
+    assert target.read_bytes() == b"synthetic outside inbox"
+    assert (root / "receipts" / "entry.json").exists()
 
 
 @pytest.mark.parametrize("kind", ["directory", "fifo"])
 def test_wrong_type_is_unavailable_not_already_consumed(isolated_state_dirs, kind):
-    root = isolated_state_dirs['receipts_dir']
+    root = isolated_state_dirs["receipts_dir"]
     root.mkdir(parents=True)
-    path = root / 'entry.json'
-    if kind == 'directory':
+    path = root / "entry.json"
+    if kind == "directory":
         path.mkdir()
     else:
         os.mkfifo(path)
-    for status, body in [_download_bytes('receipts/entry.json'),
-                         inbox_mod.confirm_inbox('receipts/entry.json', '0' * 64)]:
+    for status, body in [
+        _download_bytes("receipts/entry.json"),
+        inbox_mod.confirm_inbox("receipts/entry.json", "0" * 64),
+    ]:
         assert status == HTTPStatus.INTERNAL_SERVER_ERROR
-        assert not body['ok'] and not body.get('already_gone')
-    assert path.is_dir() if kind == 'directory' else path.is_fifo()
+        assert not body["ok"] and not body.get("already_gone")
+    assert path.is_dir() if kind == "directory" else path.is_fifo()
 
 
 def test_refused_entry_reads_do_not_leak_descriptors(isolated_state_dirs):
-    root = isolated_state_dirs['receipts_dir']
+    root = isolated_state_dirs["receipts_dir"]
     root.mkdir(parents=True)
-    path = root / 'entry.json'
+    path = root / "entry.json"
     path.mkdir()
-    before = set(os.listdir('/proc/self/fd'))
+    before = set(os.listdir("/proc/self/fd"))
     for _ in range(8):
-        assert _download_bytes('receipts/entry.json')[0] == HTTPStatus.INTERNAL_SERVER_ERROR
-    assert set(os.listdir('/proc/self/fd')) == before
+        assert (
+            _download_bytes("receipts/entry.json")[0]
+            == HTTPStatus.INTERNAL_SERVER_ERROR
+        )
+    assert set(os.listdir("/proc/self/fd")) == before
 
 
 @pytest.mark.parametrize("denied_at", ["root", "directory", "entry", "enumeration"])
-def test_listing_access_errors_are_not_empty_inboxes(isolated_state_dirs, monkeypatch, denied_at):
-    _write(isolated_state_dirs, 'receipts', 'entry.json', '{}')
+def test_listing_access_errors_are_not_empty_inboxes(
+    isolated_state_dirs, monkeypatch, denied_at
+):
+    _write(isolated_state_dirs, "receipts", "entry.json", "{}")
     original_open = os.open
     original_listdir = os.listdir
+
     def guarded_open(path, *args, **kwargs):
         target = str(path)
-        if ((denied_at == 'root' and target == str(isolated_state_dirs['inbox_dir'])) or
-            (denied_at == 'directory' and target == 'receipts') or
-            (denied_at == 'entry' and target == 'entry.json')):
-            raise PermissionError('synthetic denied inbox')
+        if (
+            (denied_at == "root" and target == str(isolated_state_dirs["inbox_dir"]))
+            or (denied_at == "directory" and target == "receipts")
+            or (denied_at == "entry" and target == "entry.json")
+        ):
+            raise PermissionError("synthetic denied inbox")
         return original_open(path, *args, **kwargs)
+
     def guarded_listdir(path):
-        if denied_at == 'enumeration' and isinstance(path, int):
-            raise PermissionError('synthetic denied inbox')
+        if denied_at == "enumeration" and isinstance(path, int):
+            raise PermissionError("synthetic denied inbox")
         return original_listdir(path)
-    before = set(os.listdir('/proc/self/fd'))
-    monkeypatch.setattr(os, 'open', guarded_open)
-    monkeypatch.setattr(os, 'listdir', guarded_listdir)
+
+    before = set(os.listdir("/proc/self/fd"))
+    monkeypatch.setattr(os, "open", guarded_open)
+    monkeypatch.setattr(os, "listdir", guarded_listdir)
     status, payload = inbox_mod.list_inbox()
     assert status == HTTPStatus.INTERNAL_SERVER_ERROR
-    assert not payload['ok'] and 'files' not in payload
-    assert 'synthetic denied inbox' in payload['detail']
-    assert set(os.listdir('/proc/self/fd')) == before
+    assert not payload["ok"] and "files" not in payload
+    assert "synthetic denied inbox" in payload["detail"]
+    assert set(os.listdir("/proc/self/fd")) == before
 
 
 def test_missing_inbox_is_empty_but_wrong_type_is_unavailable(isolated_state_dirs):
     inbox_mod.GENERATED.clear()
-    assert inbox_mod.list_inbox()[1]['files'] == []
-    root = isolated_state_dirs['inbox_dir']
+    assert inbox_mod.list_inbox()[1]["files"] == []
+    root = isolated_state_dirs["inbox_dir"]
     root.parent.mkdir(parents=True)
-    root.write_bytes(b'synthetic wrong object')
+    root.write_bytes(b"synthetic wrong object")
     status, payload = inbox_mod.list_inbox()
-    assert status == HTTPStatus.INTERNAL_SERVER_ERROR and not payload['ok']
-    assert root.read_bytes() == b'synthetic wrong object'
+    assert status == HTTPStatus.INTERNAL_SERVER_ERROR and not payload["ok"]
+    assert root.read_bytes() == b"synthetic wrong object"
 
 
-def test_listing_handles_concurrently_consumed_receipt(isolated_state_dirs, monkeypatch):
-    _write(isolated_state_dirs, 'receipts', 'entry.json', '{}')
+def test_listing_handles_concurrently_consumed_receipt(
+    isolated_state_dirs, monkeypatch
+):
+    _write(isolated_state_dirs, "receipts", "entry.json", "{}")
     original = inbox_mod._inspect_regular
+
     def consumed(path, **kwargs):
-        if path == 'entry.json':
-            raise FileNotFoundError('synthetic concurrent confirmation')
+        if path == "entry.json":
+            raise FileNotFoundError("synthetic concurrent confirmation")
         return original(path, **kwargs)
-    monkeypatch.setattr(inbox_mod, '_inspect_regular', consumed)
+
+    monkeypatch.setattr(inbox_mod, "_inspect_regular", consumed)
     status, payload = inbox_mod.list_inbox()
-    assert status == HTTPStatus.OK and payload['ok']
-    assert not any(f['name'] == 'receipts/entry.json' for f in payload['files'])
+    assert status == HTTPStatus.OK and payload["ok"]
+    assert not any(f["name"] == "receipts/entry.json" for f in payload["files"])
 
 
 @pytest.mark.parametrize("replace_root", [False, True])
 @pytest.mark.parametrize("after_claim", [False, True])
-def test_confirmation_stays_with_opened_directories(isolated_state_dirs, tmp_path, monkeypatch,
-                                                     replace_root, after_claim):
-    content = b'synthetic same bytes'
-    _write(isolated_state_dirs, 'receipts', 'entry.json', content.decode())
-    root = isolated_state_dirs['inbox_dir']
-    original = root if replace_root else root / 'receipts'
-    retained = tmp_path / 'retained-original'
-    outside = tmp_path / 'outside'
+def test_confirmation_stays_with_opened_directories(
+    isolated_state_dirs, tmp_path, monkeypatch, replace_root, after_claim
+):
+    content = b"synthetic same bytes"
+    _write(isolated_state_dirs, "receipts", "entry.json", content.decode())
+    root = isolated_state_dirs["inbox_dir"]
+    original = root if replace_root else root / "receipts"
+    retained = tmp_path / "retained-original"
+    outside = tmp_path / "outside"
     outside.mkdir()
-    external_parent = outside / 'receipts' if replace_root else outside
+    external_parent = outside / "receipts" if replace_root else outside
     external_parent.mkdir(exist_ok=True)
-    external_file = external_parent / 'entry.json'
+    external_file = external_parent / "entry.json"
     external_file.write_bytes(content)
     before = external_file.stat()
     sha = inbox_mod._sha
     inspect = inbox_mod._inspect_regular
     calls = 0
+
     def digest(entry, **kwargs):
         result = inspect(entry, **kwargs)
         nonlocal calls
@@ -515,58 +558,74 @@ def test_confirmation_stays_with_opened_directories(isolated_state_dirs, tmp_pat
             original.rename(retained)
             original.symlink_to(outside, target_is_directory=True)
         return result
-    monkeypatch.setattr(inbox_mod, '_inspect_regular', digest)
-    status, payload = inbox_mod.confirm_inbox('receipts/entry.json', sha(content))
-    assert status == HTTPStatus.OK and payload['deleted']
+
+    monkeypatch.setattr(inbox_mod, "_inspect_regular", digest)
+    status, payload = inbox_mod.confirm_inbox("receipts/entry.json", sha(content))
+    assert status == HTTPStatus.OK and payload["deleted"]
     after = external_file.stat()
-    assert (after.st_ino, after.st_size, after.st_mtime_ns) == (before.st_ino, before.st_size, before.st_mtime_ns)
+    assert (after.st_ino, after.st_size, after.st_mtime_ns) == (
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+    )
     assert external_file.read_bytes() == content
-    retained_entry = retained / 'receipts' / 'entry.json' if replace_root else retained / 'entry.json'
+    retained_entry = (
+        retained / "receipts" / "entry.json"
+        if replace_root
+        else retained / "entry.json"
+    )
     assert not retained_entry.exists()
-    assert not list(retained.rglob('.confirmation-*.json'))
+    assert not list(retained.rglob(".confirmation-*.json"))
 
 
-def test_claim_recovery_reports_relocated_root(isolated_state_dirs, tmp_path, monkeypatch):
-    _write(isolated_state_dirs, 'receipts', 'entry.json', 'original')
-    root = isolated_state_dirs['inbox_dir']
-    retained = tmp_path / 'retained-inbox'
-    outside = tmp_path / 'outside'
+def test_claim_recovery_reports_relocated_root(
+    isolated_state_dirs, tmp_path, monkeypatch
+):
+    _write(isolated_state_dirs, "receipts", "entry.json", "original")
+    root = isolated_state_dirs["inbox_dir"]
+    retained = tmp_path / "retained-inbox"
+    outside = tmp_path / "outside"
     outside.mkdir()
     sha = inbox_mod._sha
     inspect = inbox_mod._inspect_regular
     calls = 0
+
     def digest(entry, **kwargs):
         result = inspect(entry, **kwargs)
         nonlocal calls
         calls += 1
         if calls == 1:
-            (root / 'receipts' / 'entry.json').write_text('replacement')
+            (root / "receipts" / "entry.json").write_text("replacement")
             root.rename(retained)
             root.symlink_to(outside, target_is_directory=True)
         return result
-    monkeypatch.setattr(inbox_mod, '_inspect_regular', digest)
-    status, payload = inbox_mod.confirm_inbox('receipts/entry.json', sha(b'original'))
+
+    monkeypatch.setattr(inbox_mod, "_inspect_regular", digest)
+    status, payload = inbox_mod.confirm_inbox("receipts/entry.json", sha(b"original"))
     assert status == HTTPStatus.UNPROCESSABLE_ENTITY
-    claim = Path(payload['retained_at'])
-    assert claim.parent == retained and claim.read_bytes() == b'replacement'
-    assert (retained / 'receipts' / 'entry.json').read_bytes() == b'replacement'
-    assert payload['current_path_restored']
+    claim = Path(payload["retained_at"])
+    assert claim.parent == retained and claim.read_bytes() == b"replacement"
+    assert (retained / "receipts" / "entry.json").read_bytes() == b"replacement"
+    assert payload["current_path_restored"]
     assert list(outside.iterdir()) == []
 
 
 def test_atomic_temporary_is_not_offered_before_publication(isolated_state_dirs):
-    root = isolated_state_dirs['receipts_dir']
+    root = isolated_state_dirs["receipts_dir"]
     root.mkdir(parents=True)
-    temporary = root / '.fixture.json.atomic-tmp-test'
+    temporary = root / ".fixture.json.atomic-tmp-test"
     temporary.write_bytes(b'{"incomplete":')
     status, payload = inbox_mod.list_inbox()
-    assert status == HTTPStatus.OK and payload['ok']
-    assert not any(f['name'].startswith('receipts/') for f in payload['files'])
+    assert status == HTTPStatus.OK and payload["ok"]
+    assert not any(f["name"].startswith("receipts/") for f in payload["files"])
     assert temporary.read_bytes() == b'{"incomplete":'
     completed = b'{"fixture":"complete"}\n'
     temporary.write_bytes(completed)
-    temporary.rename(root / 'fixture.json')
+    temporary.rename(root / "fixture.json")
     status, payload = inbox_mod.list_inbox()
-    row = next(f for f in payload['files'] if f['name'] == 'receipts/fixture.json')
-    assert status == HTTPStatus.OK and row['sha256'] == hashlib.sha256(completed).hexdigest()
-    assert _download_bytes('receipts/fixture.json') == (HTTPStatus.OK, completed)
+    row = next(f for f in payload["files"] if f["name"] == "receipts/fixture.json")
+    assert (
+        status == HTTPStatus.OK
+        and row["sha256"] == hashlib.sha256(completed).hexdigest()
+    )
+    assert _download_bytes("receipts/fixture.json") == (HTTPStatus.OK, completed)

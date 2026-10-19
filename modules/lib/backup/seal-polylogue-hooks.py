@@ -290,7 +290,10 @@ def _copy_file(
                 # NoCoW files cannot reflink into a CoW destination. Unsupported
                 # cloning must not prevent sealing the immutable source cut.
                 if error.errno not in (
-                    errno.EINVAL, errno.EXDEV, errno.EOPNOTSUPP, errno.ENOTTY
+                    errno.EINVAL,
+                    errno.EXDEV,
+                    errno.EOPNOTSUPP,
+                    errno.ENOTTY,
                 ):
                     raise
                 os.ftruncate(output_fd, 0)
@@ -301,7 +304,9 @@ def _copy_file(
                         os.fdopen(os.dup(source_fd), "rb") as source_stream,
                         os.fdopen(os.dup(output_fd), "wb") as output_stream,
                     ):
-                        shutil.copyfileobj(source_stream, output_stream, length=1024 * 1024)
+                        shutil.copyfileobj(
+                            source_stream, output_stream, length=1024 * 1024
+                        )
                 _count("copied_files")
                 _count("copied_logical_bytes", before.st_size)
             else:

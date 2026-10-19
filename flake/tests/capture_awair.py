@@ -14,7 +14,7 @@ class PollerTest(unittest.TestCase):
             def do_GET(self):
                 self.send_response(200)
                 if length:
-                    self.send_header('Content-Length', str(len(body)))
+                    self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
                 try:
                     self.wfile.write(body)
@@ -26,20 +26,30 @@ class PollerTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            temporary = root / 'tmp'
+            temporary = root / "tmp"
             temporary.mkdir()
-            captured = root / 'captured'
-            sink = root / 'sink'
+            captured = root / "captured"
+            sink = root / "sink"
             sink.write_text('#!/bin/sh\ncat > "$CAPTURED"\n')
             sink.chmod(0o700)
-            server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+            server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
             thread = threading.Thread(target=server.serve_forever)
             thread.start()
             try:
                 proc = subprocess.run(
-                    [os.environ['AWAIR_POLLER'], f'127.0.0.1:{server.server_port}', str(sink), str(root)],
-                    env={**os.environ, 'TMPDIR': str(temporary), 'CAPTURED': str(captured)},
-                    capture_output=True, timeout=15,
+                    [
+                        os.environ["AWAIR_POLLER"],
+                        f"127.0.0.1:{server.server_port}",
+                        str(sink),
+                        str(root),
+                    ],
+                    env={
+                        **os.environ,
+                        "TMPDIR": str(temporary),
+                        "CAPTURED": str(captured),
+                    },
+                    capture_output=True,
+                    timeout=15,
                 )
             finally:
                 server.shutdown()
@@ -56,20 +66,20 @@ class PollerTest(unittest.TestCase):
 
     def test_response_at_limit_is_preserved(self):
         prefix, suffix = b'{"score":83,"padding":"', b'"}'
-        body = prefix + b'x' * (1048576 - len(prefix) - len(suffix)) + suffix
+        body = prefix + b"x" * (1048576 - len(prefix) - len(suffix)) + suffix
         proc, result = self.poll(body, length=False)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(result, body)
 
     def test_malformed_response_never_reaches_capture(self):
-        for body in [b'{', b'{"co2":600}']:
+        for body in [b"{", b'{"co2":600}']:
             with self.subTest(body=body):
                 proc, result = self.poll(body)
                 self.assertNotEqual(proc.returncode, 0)
                 self.assertIsNone(result)
 
     def test_oversized_response_never_reaches_capture(self):
-        body = b'{"score":83,"padding":"' + b'x' * (1048576 + 1) + b'"}'
+        body = b'{"score":83,"padding":"' + b"x" * (1048576 + 1) + b'"}'
         for length in [True, False]:
             with self.subTest(content_length=length):
                 proc, result = self.poll(body, length)
@@ -77,5 +87,5 @@ class PollerTest(unittest.TestCase):
                 self.assertIsNone(result)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

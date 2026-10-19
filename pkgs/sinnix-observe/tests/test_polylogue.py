@@ -1,4 +1,5 @@
 """Current archive OPS schema and explicit source overrides."""
+
 import json
 import sqlite3
 
@@ -33,10 +34,37 @@ def test_attempt_projection_preserves_counts_and_order(tmp_path, monkeypatch):
     path = tmp_path / "ops#literal?name.db"
     make_ops(path)
     with sqlite3.connect(path) as conn:
-        conn.executemany("insert into ingest_attempts values(?,?,?,?,?,?,?,?,?,?,?)", [
-            ("first", "/fixture/one", "codex", "succeeded", "done", 1000, None, 3000, 7, 2, None),
-            ("second", "/fixture/two", "claude", "running", "parse", 2000, 4000, None, 3, 0, None),
-        ])
+        conn.executemany(
+            "insert into ingest_attempts values(?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    "first",
+                    "/fixture/one",
+                    "codex",
+                    "succeeded",
+                    "done",
+                    1000,
+                    None,
+                    3000,
+                    7,
+                    2,
+                    None,
+                ),
+                (
+                    "second",
+                    "/fixture/two",
+                    "claude",
+                    "running",
+                    "parse",
+                    2000,
+                    4000,
+                    None,
+                    3,
+                    0,
+                    None,
+                ),
+            ],
+        )
     monkeypatch.setenv("SINNIX_OBSERVE_POLYLOGUE_DB", str(path))
     rows = polylogue.collect_polylogue_live_attempts(2)["rows"]
     assert [row["attempt_id"] for row in rows] == ["second", "first"]

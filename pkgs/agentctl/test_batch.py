@@ -652,7 +652,10 @@ def harness(
     )
 
     def wait(
-        job_id: int, *, timeout_seconds: float, reference: str | None = None,
+        job_id: int,
+        *,
+        timeout_seconds: float,
+        reference: str | None = None,
         config: Config | None = None,
     ) -> dict[str, Any]:
         """Every waited task succeeds; a review task also leaves its verdict."""
@@ -2001,7 +2004,13 @@ def test_a_verification_queued_past_its_budget_waits_and_then_succeeds(
         harness.pueue.queue(job["job_id"])
         return job
 
-    def wait(job_id: int, *, timeout_seconds: float, reference: str | None = None, config: Config | None = None):
+    def wait(
+        job_id: int,
+        *,
+        timeout_seconds: float,
+        reference: str | None = None,
+        config: Config | None = None,
+    ):
         # The pool stays paused for three full budgets, then admits the job.
         if harness.pueue.clock < 3 * timeout:
             harness.pueue.clock += timeout_seconds
@@ -4754,7 +4763,9 @@ def test_abandon_and_prepare_serialize_and_reload(
         assert harness.beads.beads["fx-solo"]["assignee"] is None
 
 
-def test_clean_keeps_denied_recorded_checkout_instead_of_reporting_absent(harness: Harness) -> None:
+def test_clean_keeps_denied_recorded_checkout_instead_of_reporting_absent(
+    harness: Harness,
+) -> None:
     run = prepared_run(harness, "fx-solo")
     harness.land(run["run_id"])
     worker = run["workers"][0]
@@ -4794,7 +4805,9 @@ def test_attach_bindings_follows_launch_reference_after_queue_reorder(harness):
     run = harness.start("fx-lead", "fx-solo")
     first, second = [worker["task_id"] for worker in run["workers"]]
     for task_id in (first, second):
-        harness.pueue._tasks[task_id] = replace(harness.pueue.task(task_id), status="Queued")
+        harness.pueue._tasks[task_id] = replace(
+            harness.pueue.task(task_id), status="Queued"
+        )
     page = [row for row in launch.list_jobs("fixture") if row["job_id"] == first]
     expected = read_launch(harness.config, harness.pueue.task(first))["binding"]
     harness.pueue.switch(first, second)
@@ -4811,7 +4824,9 @@ def test_attach_bindings_never_uses_a_replacement_jobs_binding(harness):
     assert "binding" not in launch.attach_bindings(harness.config, page)[0]
 
 
-def test_unusable_integer_input_does_not_discard_other_page_bindings(harness, monkeypatch):
+def test_unusable_integer_input_does_not_discard_other_page_bindings(
+    harness, monkeypatch
+):
     import sys
 
     run = harness.start("fx-lead", "fx-solo")
@@ -4822,7 +4837,7 @@ def test_unusable_integer_input_does_not_discard_other_page_bindings(harness, mo
 
     def read(path, limit):
         if path == bad_path:
-            return b'{"invalid":' + b"9" * 4301 + b'}'
+            return b'{"invalid":' + b"9" * 4301 + b"}"
         return original_read(path, limit)
 
     monkeypatch.setattr(launch, "read_bounded", read)

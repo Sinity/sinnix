@@ -9,7 +9,10 @@ from pathlib import Path
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
-        self.send_header("Content-Type", "text/event-stream" if self.path == "/hold" else "text/plain")
+        self.send_header(
+            "Content-Type",
+            "text/event-stream" if self.path == "/hold" else "text/plain",
+        )
         self.end_headers()
         if self.path == "/hold":
             while True:

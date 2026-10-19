@@ -40,12 +40,24 @@ class Inhibitors(unittest.TestCase):
             state = {"title": "synthetic title " * 12000}
             with (
                 patch.object(m, "snapshot", return_value=state),
-                patch.object(sys, "argv", ["inhibitors", "--capture-bin", str(writer),
-                                          "--capture-root", str(root), "--once"]),
+                patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "inhibitors",
+                        "--capture-bin",
+                        str(writer),
+                        "--capture-root",
+                        str(root),
+                        "--once",
+                    ],
+                ),
             ):
                 m.main()
             observed = json.loads(receipt.read_text())
-            self.assertEqual(observed["payload"], {"event": "change", "provenance": state})
+            self.assertEqual(
+                observed["payload"], {"event": "change", "provenance": state}
+            )
             self.assertNotIn("--payload", observed["argv"])
             self.assertNotIn(state["title"], observed["argv"])
 

@@ -25,7 +25,6 @@ from ..action import (
     MutationControls,
     RequestControls,
 )
-from ..permissions import Permission
 from ..content import Artifact, attach, is_text, sha256_of, sniff_media_type
 from ..contracts import VerbFamily
 from ..files import FileError
@@ -36,6 +35,7 @@ from ..owner_execution import (
     OwnerExecution,
     OwnerRoute,
 )
+from ..permissions import Permission
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 from ..text_paging import decode_utf8_page
@@ -301,7 +301,9 @@ class ReadInput(RequestControls):
     target: FileLocator
     offset: int = Field(default=0, ge=0, description="Byte offset for raw reads.")
     max_bytes: int = Field(
-        default=64_000, ge=1, description="Maximum text bytes; each source read is capped by the gateway frame budget."
+        default=64_000,
+        ge=1,
+        description="Maximum text bytes; each source read is capped by the gateway frame budget.",
     )
     with_sha256: bool = Field(
         default=False,
@@ -637,7 +639,11 @@ def _run(
 def _raise_search_failure(argv: list[str], result: ExecutionResult) -> None:
     if result.timed_out:
         return
-    if result.stopped_early and result.failure_class is None and not result.output_exceeded:
+    if (
+        result.stopped_early
+        and result.failure_class is None
+        and not result.output_exceeded
+    ):
         return
     if result.failure_class and result.failure_class.startswith("command_unavailable"):
         raise ProtocolError("unavailable", f"{argv[0]} is not installed")
@@ -712,11 +718,14 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
 
         def overflow(path_text: str, line: MatchLine) -> bool:
             nonlocal spill_path, spill, spilled, overflow_bytes
-            serialized = json_module.dumps(
-                {"path": path_text, **line.model_dump()},
-                ensure_ascii=True,
-                separators=(",", ":"),
-            ) + "\n"
+            serialized = (
+                json_module.dumps(
+                    {"path": path_text, **line.model_dump()},
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                )
+                + "\n"
+            )
             size = len(serialized.encode("utf-8"))
             if overflow_bytes + size > MAX_SEARCH_OVERFLOW_BYTES:
                 return False
@@ -737,7 +746,9 @@ def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
         def stop_at_bound(kind: str, limit: int) -> bool:
             nonlocal resource_bound
             resource_bound = kind
-            warn_once(f"Search stopped at the {kind} limit ({limit} bytes); results contain only complete retained records")
+            warn_once(
+                f"Search stopped at the {kind} limit ({limit} bytes); results contain only complete retained records"
+            )
             pending.clear()
             return False
 

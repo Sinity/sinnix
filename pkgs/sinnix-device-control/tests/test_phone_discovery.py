@@ -99,22 +99,34 @@ def test_explicit_address_override_does_not_enroll_or_probe_candidates(tmp_path)
     assert (state / "last-host").read_text() == "198.51.100.42\n"
 
 
-def run_command(tmp_path, command, *, adb_mode='usb', override=None, serial='phone-fixture'):
-    binary = tmp_path / 'bin'
+def run_command(
+    tmp_path, command, *, adb_mode="usb", override=None, serial="phone-fixture"
+):
+    binary = tmp_path / "bin"
     binary.mkdir()
-    peers = json.dumps({'Peer': {'fixture': {'Online': True, 'OS': 'android',
-                       'HostName': 'Redmi Note 11', 'TailscaleIPs': ['198.51.100.66']}}})
+    peers = json.dumps(
+        {
+            "Peer": {
+                "fixture": {
+                    "Online": True,
+                    "OS": "android",
+                    "HostName": "Redmi Note 11",
+                    "TailscaleIPs": ["198.51.100.66"],
+                }
+            }
+        }
+    )
     fixtures = {
-        'tailscale': 'printf %s ' + shlex.quote(peers),
-        'timeout': 'case "$2" in adb|avahi-browse) shift; exec "$@";; esac; printf "%s\\n" "$*" >> "$PROBE_CALLS"; exit 1',
-        'ip': 'printf "LAN\\n" >> "$PROBE_CALLS"; exit 1',
-        'ssh': 'printf "%s\\n" "$*" >> "$SSH_CALLS"; exit 0',
-        'sinnix-phone-dispatcher': 'printf \'{"state":"missing"}\\n\'',
-        'avahi-browse': r'''if [ "$ADB_MODE" = cached ]; then
+        "tailscale": "printf %s " + shlex.quote(peers),
+        "timeout": 'case "$2" in adb|avahi-browse) shift; exec "$@";; esac; printf "%s\\n" "$*" >> "$PROBE_CALLS"; exit 1',
+        "ip": 'printf "LAN\\n" >> "$PROBE_CALLS"; exit 1',
+        "ssh": 'printf "%s\\n" "$*" >> "$SSH_CALLS"; exit 0',
+        "sinnix-phone-dispatcher": 'printf \'{"state":"missing"}\\n\'',
+        "avahi-browse": r"""if [ "$ADB_MODE" = cached ]; then
  printf '=;fixture;IPv4;adb-phone-fixture-random;_adb-tls-connect._tcp;local;fixture;198.51.100.42;37743;\n'
 fi
-''',
-        'adb': r'''printf '%s %s\n' "${ANDROID_SERIAL:-none}" "$*" >> "$ADB_CALLS"
+""",
+        "adb": r"""printf '%s %s\n' "${ANDROID_SERIAL:-none}" "$*" >> "$ADB_CALLS"
 target="${ANDROID_SERIAL:-}"
 if [ "$1" = -s ]; then target="$2"; shift 2; fi
 case "$1" in
@@ -131,80 +143,98 @@ case "$1" in
  connect) exit 1 ;;
  *) exit 0 ;;
 esac
-''',
+""",
     }
     for name, body in fixtures.items():
         path = binary / name
-        path.write_text(f"#!{shutil.which('bash')}\n" + body + '\n')
+        path.write_text(f"#!{shutil.which('bash')}\n" + body + "\n")
         path.chmod(0o755)
-    env = {**os.environ, 'PATH': f"{binary}:{os.environ['PATH']}",
-           'SINNIX_PHONE_STATE_DIR': str(tmp_path / 'state'),
-           'SINNIX_PHONE_SSH_CONTROL_DIR': str(tmp_path / 'control'),
-           'SINNIX_PHONE_LAKE': str(tmp_path / 'lake'),
-           'SINNIX_PHONE_ADB_SERIAL': serial,
-           'ADB_MODE': adb_mode, 'ADB_CALLS': str(tmp_path / 'adb-calls'),
-           'SSH_CALLS': str(tmp_path / 'ssh-calls'), 'PROBE_CALLS': str(tmp_path / 'probes')}
-    env.pop('SINNIX_PHONE_IP', None)
-    env.pop('ADB_RESOLVED', None)
+    env = {
+        **os.environ,
+        "PATH": f"{binary}:{os.environ['PATH']}",
+        "SINNIX_PHONE_STATE_DIR": str(tmp_path / "state"),
+        "SINNIX_PHONE_SSH_CONTROL_DIR": str(tmp_path / "control"),
+        "SINNIX_PHONE_LAKE": str(tmp_path / "lake"),
+        "SINNIX_PHONE_ADB_SERIAL": serial,
+        "ADB_MODE": adb_mode,
+        "ADB_CALLS": str(tmp_path / "adb-calls"),
+        "SSH_CALLS": str(tmp_path / "ssh-calls"),
+        "PROBE_CALLS": str(tmp_path / "probes"),
+    }
+    env.pop("SINNIX_PHONE_IP", None)
+    env.pop("ADB_RESOLVED", None)
     if override:
-        env['SINNIX_PHONE_IP'] = override
-    (tmp_path / 'state').mkdir()
-    (tmp_path / 'state/last-host').write_text('198.51.100.42')
-    result = subprocess.run(['bash', str(SCRIPT), *command], env=env,
-                            capture_output=True, text=True, timeout=10)
+        env["SINNIX_PHONE_IP"] = override
+    (tmp_path / "state").mkdir()
+    (tmp_path / "state/last-host").write_text("198.51.100.42")
+    result = subprocess.run(
+        ["bash", str(SCRIPT), *command],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
     return result
 
 
-@pytest.mark.parametrize('mode', ['usb', 'tailnet', 'absent'])
+@pytest.mark.parametrize("mode", ["usb", "tailnet", "absent"])
 def test_adb_status_does_not_probe_ssh_or_lan(tmp_path, mode):
-    result = run_command(tmp_path, ['app-status'], adb_mode=mode)
+    result = run_command(tmp_path, ["app-status"], adb_mode=mode)
     assert result.returncode == 0, result.stderr
-    assert not (tmp_path / 'ssh-calls').exists()
-    probes = (tmp_path / 'probes').read_text() if (tmp_path / 'probes').exists() else ''
-    assert 'LAN' not in probes and '/dev/tcp' not in probes
-    if mode == 'usb':
-        assert 'phone-fixture shell pm list packages' in (tmp_path / 'adb-calls').read_text()
-    if mode == 'absent':
-        assert 'capture and upload state unavailable' in result.stdout
+    assert not (tmp_path / "ssh-calls").exists()
+    probes = (tmp_path / "probes").read_text() if (tmp_path / "probes").exists() else ""
+    assert "LAN" not in probes and "/dev/tcp" not in probes
+    if mode == "usb":
+        assert (
+            "phone-fixture shell pm list packages"
+            in (tmp_path / "adb-calls").read_text()
+        )
+    if mode == "absent":
+        assert "capture and upload state unavailable" in result.stdout
 
 
 def test_multiple_usb_devices_are_not_selected_arbitrarily(tmp_path):
-    result = run_command(tmp_path, ['app-status'], adb_mode='multiple')
+    result = run_command(tmp_path, ["app-status"], adb_mode="multiple")
     assert result.returncode == 0
-    assert 'phone-fixture shell pm list' in (tmp_path / 'adb-calls').read_text()
-    assert 'quest-fixture shell pm list' not in (tmp_path / 'adb-calls').read_text()
+    assert "phone-fixture shell pm list" in (tmp_path / "adb-calls").read_text()
+    assert "quest-fixture shell pm list" not in (tmp_path / "adb-calls").read_text()
 
 
 def test_ssh_command_keeps_explicit_routing_and_strict_identity(tmp_path):
-    result = run_command(tmp_path, ['shell', 'true'], override='198.51.100.77')
+    result = run_command(tmp_path, ["shell", "true"], override="198.51.100.77")
     assert result.returncode == 0, result.stderr
-    calls = (tmp_path / 'ssh-calls').read_text()
-    assert '@198.51.100.77' in calls and 'StrictHostKeyChecking=yes' in calls
-    assert not (tmp_path / 'probes').exists()
+    calls = (tmp_path / "ssh-calls").read_text()
+    assert "@198.51.100.77" in calls and "StrictHostKeyChecking=yes" in calls
+    assert not (tmp_path / "probes").exists()
 
 
 def test_help_does_not_probe_any_transport(tmp_path):
-    result = run_command(tmp_path, ['--help'])
+    result = run_command(tmp_path, ["--help"])
     assert result.returncode == 0
-    assert 'sinnix-phone <command>' in result.stdout
-    assert not (tmp_path / 'ssh-calls').exists()
-    assert not (tmp_path / 'adb-calls').exists()
-    assert not (tmp_path / 'probes').exists()
+    assert "sinnix-phone <command>" in result.stdout
+    assert not (tmp_path / "ssh-calls").exists()
+    assert not (tmp_path / "adb-calls").exists()
+    assert not (tmp_path / "probes").exists()
 
 
 def test_known_lan_adb_route_does_not_require_ssh(tmp_path):
-    result = run_command(tmp_path, ['app-status'], adb_mode='cached')
+    result = run_command(tmp_path, ["app-status"], adb_mode="cached")
     assert result.returncode == 0, result.stderr
-    assert '198.51.100.42:37743 shell pm list packages' in (tmp_path / 'adb-calls').read_text()
-    assert not (tmp_path / 'ssh-calls').exists()
-    assert not (tmp_path / 'probes').exists()
+    assert (
+        "198.51.100.42:37743 shell pm list packages"
+        in (tmp_path / "adb-calls").read_text()
+    )
+    assert not (tmp_path / "ssh-calls").exists()
+    assert not (tmp_path / "probes").exists()
 
 
 def test_other_usb_devices_cannot_replace_enrolled_phone(tmp_path):
-    result = run_command(tmp_path, ['app-status'], adb_mode='multiple', serial='absent-phone')
+    result = run_command(
+        tmp_path, ["app-status"], adb_mode="multiple", serial="absent-phone"
+    )
     assert result.returncode == 0
-    assert 'capture and upload state unavailable' in result.stdout
-    assert 'shell pm list' not in (tmp_path / 'adb-calls').read_text()
+    assert "capture and upload state unavailable" in result.stdout
+    assert "shell pm list" not in (tmp_path / "adb-calls").read_text()
 
 
 @pytest.mark.parametrize("duration", ["0", "-1", "invalid", "9999999999999999999"])
@@ -215,10 +245,15 @@ def test_soak_rejects_invalid_observation_windows(tmp_path, duration):
 
 
 def test_soak_preserves_false_mute_state_and_does_not_certify_observations(tmp_path):
-    body = SCRIPT.read_text().split("\napp-soak)\n", 1)[1].split("\n  ;;\napp-grants)", 1)[0]
+    body = (
+        SCRIPT.read_text()
+        .split("\napp-soak)\n", 1)[1]
+        .split("\n  ;;\napp-grants)", 1)[0]
+    )
     # One synthetic sample; no phone, audio, real wait or host state mutation.
     body = body.replace("date -u +%s", "clock_now")
-    shell = r'''
+    shell = (
+        r"""
 set -euo pipefail
 clock_now() {
   count=$(cat "$CLOCK")
@@ -237,13 +272,23 @@ adb_any() {
   esac
 }
 run_soak() {
-''' + body + "\n}\nrun_soak 1\n"
+"""
+        + body
+        + "\n}\nrun_soak 1\n"
+    )
     clock = tmp_path / "clock"
     clock.write_text("0")
-    result = subprocess.run(["bash", "-c", shell], env={**os.environ, "CLOCK": str(clock)},
-                            text=True, capture_output=True, timeout=5)
+    result = subprocess.run(
+        ["bash", "-c", shell],
+        env={**os.environ, "CLOCK": str(clock)},
+        text=True,
+        capture_output=True,
+        timeout=5,
+    )
     assert result.returncode == 0, result.stderr
     assert "PASS:" not in result.stdout
-    sample = next(line for line in result.stdout.splitlines() if "example/.Main" in line)
+    sample = next(
+        line for line in result.stdout.splitlines() if "example/.Main" in line
+    )
     assert sample.split()[3:5] == ["true", "false"]
     assert "Review required" in result.stdout

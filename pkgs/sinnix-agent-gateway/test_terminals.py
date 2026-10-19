@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 from sinnix_agent_gateway.artifacts import ArtifactService
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.owner_execution import OwnerExecution
+from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.terminals import (
     TerminalDiagnosticError,
     TerminalError,

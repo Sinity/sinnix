@@ -365,7 +365,9 @@ def queue_landing(
         working_directory=project.root,
         timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS,
         result_kind="exit",
-        environment=project.environment.values(host_values=config.inherited_environment),
+        environment=project.environment.values(
+            host_values=config.inherited_environment
+        ),
         after=after,
         stashed=stashed,
         before_enqueue=record_pending,

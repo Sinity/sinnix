@@ -46,8 +46,12 @@ def test_context_snapshot_survives_store_recreation_and_rejects_tampering(
         ContextSnapshotStore(tmp_path, "operator").get(snapshot_id)
 
 
-@pytest.mark.parametrize("value", [{"unicode": "界😀", "nested": [True, None]}, {2: "two", 10: "ten"}])
+@pytest.mark.parametrize(
+    "value", [{"unicode": "界😀", "nested": [True, None]}, {2: "two", 10: "ten"}]
+)
 def test_streamed_revision_matches_existing_canonical_identity(value):
     import hashlib
+
     from sinnix_agent_gateway.contexts import canonical_bytes, source_revision
+
     assert source_revision(value) == hashlib.sha256(canonical_bytes(value)).hexdigest()

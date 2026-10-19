@@ -12,10 +12,10 @@ from pydantic import Field
 
 from ..action import ALL_PRINCIPALS, Action, ActionResult, Example, RequestControls
 from ..artifacts import ArtifactError
-from ..permissions import Permission
 from ..content import IMAGE_TYPES, Artifact, attach, is_text
 from ..contracts import VerbFamily
 from ..locators import ARTIFACT_REF_PREFIX, ArtifactLocator
+from ..permissions import Permission
 from ..results import ProtocolError, ResultError
 from ..schemas import GatewayModel
 from ..text_paging import decode_utf8_page

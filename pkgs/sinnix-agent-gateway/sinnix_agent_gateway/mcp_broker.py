@@ -23,7 +23,6 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.types import PaginatedRequestParams
 
 from .artifacts import ArtifactService
-from .permissions import Permission, Principal
 from .config import (
     DEFAULT_MCP_CALL_TIMEOUT_SECONDS,
     GatewayConfig,
@@ -35,6 +34,7 @@ from .owner_execution import (
     OwnerRoute,
 )
 from .payloads import canonical_size
+from .permissions import Permission, Principal
 
 
 class McpBrokerError(ValueError):
@@ -216,7 +216,11 @@ class McpBrokerService:
                                     request.cancel_scope = scope
                                     # Admission must recheck the reply endpoint after
                                     # waiting: a queued caller may have disconnected.
-                                    if request.abandoned or request.reply.statistics().open_receive_streams == 0:
+                                    if (
+                                        request.abandoned
+                                        or request.reply.statistics().open_receive_streams
+                                        == 0
+                                    ):
                                         return
                                     tool = (
                                         request.payload[0]
@@ -950,8 +954,11 @@ class McpBrokerService:
         self, server_name: str, tool_name: str, payload: Any
     ) -> dict[str, Any]:
         return self.artifacts.register_json(
-            payload, kind="mcp-response", owner_id=server_name,
-            source="mcp-upstream", target={"server": server_name, "tool": tool_name},
+            payload,
+            kind="mcp-response",
+            owner_id=server_name,
+            source="mcp-upstream",
+            target={"server": server_name, "tool": tool_name},
         )
 
     def _store_json_artifact(

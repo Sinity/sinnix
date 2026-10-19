@@ -237,29 +237,55 @@ def test_privileged_collection_publishes_as_operator(tmp_path, monkeypatch):
     account = SimpleNamespace(pw_name="operator", pw_uid=1234, pw_gid=2345)
     monkeypatch.setattr(os, "geteuid", lambda: 0)
     monkeypatch.setattr(pwd, "getpwnam", lambda name: account)
-    monkeypatch.setattr(os, "initgroups", lambda name, gid: calls.append(("groups", name, gid)))
+    monkeypatch.setattr(
+        os, "initgroups", lambda name, gid: calls.append(("groups", name, gid))
+    )
     monkeypatch.setattr(os, "setgid", lambda gid: calls.append(("gid", gid)))
     monkeypatch.setattr(os, "setuid", lambda uid: calls.append(("uid", uid)))
     main.__globals__["collect"] = lambda *args: calls.append(("collect",)) or []
-    main.__globals__["atomic_publish"] = lambda *args, **kwargs: calls.append(("publish", kwargs["mode"]))
+    main.__globals__["atomic_publish"] = lambda *args, **kwargs: calls.append(
+        ("publish", kwargs["mode"])
+    )
     manifest = tmp_path / "config.json"
     manifest.write_text("{}")
-    main(["--manifest", str(manifest), "--output", str(tmp_path / "report.jsonl"), "--user-name", "operator"])
-    assert calls == [("collect",), ("groups", "operator", 2345), ("gid", 2345), ("uid", 1234), ("publish", 0o600)]
+    main(
+        [
+            "--manifest",
+            str(manifest),
+            "--output",
+            str(tmp_path / "report.jsonl"),
+            "--user-name",
+            "operator",
+        ]
+    )
+    assert calls == [
+        ("collect",),
+        ("groups", "operator", 2345),
+        ("gid", 2345),
+        ("uid", 1234),
+        ("publish", 0o600),
+    ]
 
 
 def test_swap_order_does_not_change_identity(tmp_path):
     rows = run(
         tmp_path,
-        {"sysctls": {}, "slices": {}, "swap": [
-            {"device": "/fixture/swap", "priority": 10},
-            {"device": "/dev/zram0", "priority": 100},
-        ], "generation": {"revision": "fixture"}},
-        proc_files={"proc/swaps": (
-            "Filename Type Size Used Priority\n"
-            "/dev/zram0 partition 100 0 100\n"
-            "/fixture/swap file 100 0 10\n"
-        )},
+        {
+            "sysctls": {},
+            "slices": {},
+            "swap": [
+                {"device": "/fixture/swap", "priority": 10},
+                {"device": "/dev/zram0", "priority": 100},
+            ],
+            "generation": {"revision": "fixture"},
+        },
+        proc_files={
+            "proc/swaps": (
+                "Filename Type Size Used Priority\n"
+                "/dev/zram0 partition 100 0 100\n"
+                "/fixture/swap file 100 0 10\n"
+            )
+        },
     )
     assert next(row for row in rows if row["check"] == "swap")["match"] is True
 
@@ -267,10 +293,17 @@ def test_swap_order_does_not_change_identity(tmp_path):
 def test_swap_priority_difference_is_still_drift(tmp_path):
     rows = run(
         tmp_path,
-        {"sysctls": {}, "slices": {}, "swap": [
-            {"device": "/fixture/swap", "priority": 10},
-        ], "generation": {"revision": "fixture"}},
-        proc_files={"proc/swaps": "Filename Type Size Used Priority\n/fixture/swap file 100 0 -2\n"},
+        {
+            "sysctls": {},
+            "slices": {},
+            "swap": [
+                {"device": "/fixture/swap", "priority": 10},
+            ],
+            "generation": {"revision": "fixture"},
+        },
+        proc_files={
+            "proc/swaps": "Filename Type Size Used Priority\n/fixture/swap file 100 0 -2\n"
+        },
     )
     assert next(row for row in rows if row["check"] == "swap")["match"] is False
 
@@ -284,12 +317,16 @@ def test_root_noctalia_probe_runs_as_configured_operator(tmp_path, monkeypatch):
     compare = runpy.run_path(str(SCRIPT))["compare_noctalia"]
     config_home = tmp_path / "noctalia"
     config_home.mkdir()
-    (config_home / "config.toml").write_text('[accessibility]\nui_scale = 1.5\n')
-    args = SimpleNamespace(noctalia_config_home=str(config_home),
-                           noctalia_state_home=str(tmp_path / "state/noctalia"),
-                           noctalia="/user/profile/noctalia", user_name="operator")
-    account = SimpleNamespace(pw_name="operator", pw_uid=1234, pw_gid=2345,
-                              pw_dir="/home/operator")
+    (config_home / "config.toml").write_text("[accessibility]\nui_scale = 1.5\n")
+    args = SimpleNamespace(
+        noctalia_config_home=str(config_home),
+        noctalia_state_home=str(tmp_path / "state/noctalia"),
+        noctalia="/user/profile/noctalia",
+        user_name="operator",
+    )
+    account = SimpleNamespace(
+        pw_name="operator", pw_uid=1234, pw_gid=2345, pw_dir="/home/operator"
+    )
     monkeypatch.setattr(os, "geteuid", lambda: 0)
     monkeypatch.setattr(pwd, "getpwnam", lambda name: account)
     monkeypatch.setattr(os, "getgrouplist", lambda name, gid: [gid, 3456])
@@ -297,7 +334,7 @@ def test_root_noctalia_probe_runs_as_configured_operator(tmp_path, monkeypatch):
 
     def probe(argv, **kwargs):
         calls.append((argv, kwargs))
-        return SimpleNamespace(returncode=0, stdout='[accessibility]\nui_scale = 1.5\n')
+        return SimpleNamespace(returncode=0, stdout="[accessibility]\nui_scale = 1.5\n")
 
     monkeypatch.setattr(subprocess, "run", probe)
     assert compare(args)[0]["status"] == "matched"

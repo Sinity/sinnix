@@ -60,9 +60,8 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
-from sinnix_lib.layout import capture_lane_path
-
 from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.layout import capture_lane_path
 
 from .recorder import run_capture_stream
 from .segment import OpusSegmentWriter, device_profile, opusenc_argv_builder

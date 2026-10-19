@@ -224,9 +224,7 @@ class Snapshot:
     queue_read: bool = True
     # Global active counts and nominal width from the same queue response.
     # Missing metadata is unknown, never inferred from project-only tasks.
-    global_groups: Mapping[str, Mapping[str, int | None]] = field(
-        default_factory=dict
-    )
+    global_groups: Mapping[str, Mapping[str, int | None]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         references: dict[str, Task] = {}
@@ -484,11 +482,7 @@ def collect(
                 if isinstance(parallel, int) and not isinstance(parallel, bool)
                 else None,
             }
-        tasks = tuple(
-            task
-            for task in every
-            if task.label.startswith(prefix)
-        )
+        tasks = tuple(task for task in every if task.label.startswith(prefix))
     except PueueError as error:
         tasks, groups, queue_read = (), {}, False
         global_groups = {}

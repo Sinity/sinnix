@@ -121,8 +121,9 @@ def test_focus_loss_does_not_replace_focused_window_or_emit_dump(tmp_path):
     current = FakeAccessible("frame", "Current")
     daemon.on_focus(FakeEvent(current))
     written.clear()
-    event = FakeEvent(FakeAccessible("frame", "Previous"),
-                      type_="object:state-changed:focused")
+    event = FakeEvent(
+        FakeAccessible("frame", "Previous"), type_="object:state-changed:focused"
+    )
     event.detail1 = 0
     daemon.on_focus(event)
     assert written == []

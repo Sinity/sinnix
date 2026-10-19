@@ -35,11 +35,22 @@ class CopyTests(unittest.TestCase):
             original.chmod(0o600)
             record = sealer._file_record(original.stat())
             destination = root / "sealed"
-            with patch.object(sealer.fcntl, "ioctl", side_effect=OSError(errno.EINVAL, "incompatible NoCoW")), patch.object(sealer.shutil, "copyfileobj", wraps=sealer.shutil.copyfileobj) as copied:
+            with (
+                patch.object(
+                    sealer.fcntl,
+                    "ioctl",
+                    side_effect=OSError(errno.EINVAL, "incompatible NoCoW"),
+                ),
+                patch.object(
+                    sealer.shutil, "copyfileobj", wraps=sealer.shutil.copyfileobj
+                ) as copied,
+            ):
                 sealer._copy_file(source, "event", destination, record)
             self.assertEqual(destination.read_bytes(), payload)
             self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(destination.stat().st_mtime_ns, original.stat().st_mtime_ns)
+            self.assertEqual(
+                destination.stat().st_mtime_ns, original.stat().st_mtime_ns
+            )
             self.assertLessEqual(copied.call_args.kwargs["length"], 1024 * 1024)
             self.assertFalse(destination.with_name(".sealed.seal-tmp").exists())
 
@@ -53,7 +64,12 @@ class CopyTests(unittest.TestCase):
             record = sealer._file_record(original.stat())
             destination = root / "sealed"
             destination.write_text("previous verified payload")
-            with patch.object(sealer.fcntl, "ioctl", side_effect=OSError(errno.EIO, "read error")), patch.object(sealer.shutil, "copyfileobj") as copied:
+            with (
+                patch.object(
+                    sealer.fcntl, "ioctl", side_effect=OSError(errno.EIO, "read error")
+                ),
+                patch.object(sealer.shutil, "copyfileobj") as copied,
+            ):
                 with self.assertRaises(OSError):
                     sealer._copy_file(source, "event", destination, record)
                 copied.assert_not_called()

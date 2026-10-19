@@ -7,7 +7,9 @@ from typing import Any
 from .util import normalize_timestamp
 
 
-def format_number(value: int | float | None, divisor: int = 1, precision: int = 1) -> str:
+def format_number(
+    value: int | float | None, divisor: int = 1, precision: int = 1
+) -> str:
     return "unknown" if value is None else f"{value / divisor:.{precision}f}"
 
 

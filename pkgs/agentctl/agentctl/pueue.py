@@ -286,7 +286,10 @@ def _selected_tasks(group: str, query: str) -> dict[int, Task]:
 def tasks_by_ids(task_ids: Sequence[int]) -> dict[int, Task]:
     """Read selected task records in one log request, without output or history."""
     requested = tuple(task_ids)
-    if any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in requested):
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or value < 0
+        for value in requested
+    ):
         raise PueueError("task ids must be nonnegative integers")
     identifiers = sorted(set(requested))
     if not identifiers:
@@ -298,7 +301,9 @@ def tasks_by_ids(task_ids: Sequence[int]) -> dict[int, Task]:
     return _log_tasks(document, identifiers)
 
 
-def _log_tasks(document: Any, identifiers: Sequence[int] | None = None) -> dict[int, Task]:
+def _log_tasks(
+    document: Any, identifiers: Sequence[int] | None = None
+) -> dict[int, Task]:
     if not isinstance(document, Mapping):
         raise PueueError("pueue log did not print an object")
     if identifiers is None:

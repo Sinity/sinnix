@@ -12,8 +12,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Mapping
 
-from .permissions import Permission, Principal
 from .config import GatewayConfig
+from .permissions import Permission, Principal
 from .redaction import redact_structure
 
 GENESIS_HASH = "0" * 64

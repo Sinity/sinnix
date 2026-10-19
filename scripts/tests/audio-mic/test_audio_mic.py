@@ -37,7 +37,10 @@ class AudioMicTest(unittest.TestCase):
         )
         self.executable("notify-send", 'printf "notify %s\\n" "$*" >> "$CALL_LOG"\n')
         self.executable("pkill", 'printf "refresh %s\\n" "$*" >> "$CALL_LOG"\n')
-        self.executable("pw-dump", 'printf "dump\\n" >> "$CALL_LOG"\nprintf "%s" "${GRAPH:-[]}"\nexit "${DUMP_STATUS:-0}"\n')
+        self.executable(
+            "pw-dump",
+            'printf "dump\\n" >> "$CALL_LOG"\nprintf "%s" "${GRAPH:-[]}"\nexit "${DUMP_STATUS:-0}"\n',
+        )
 
     def executable(self, name, body):
         path = self.bin / name
@@ -80,11 +83,20 @@ class AudioMicTest(unittest.TestCase):
                 self.assertNotIn("refresh", calls)
 
     def test_output_switch_uses_one_graph_and_moves_current_streams(self):
-        self.env["GRAPH"] = json.dumps([
-            {"type": "PipeWire:Interface:Node", "id": identity,
-             "info": {"props": {"media.class": kind}}}
-            for identity, kind in [(2, "Audio/Sink"), (3, "Audio/Sink"), (9, "Stream/Output/Audio")]
-        ])
+        self.env["GRAPH"] = json.dumps(
+            [
+                {
+                    "type": "PipeWire:Interface:Node",
+                    "id": identity,
+                    "info": {"props": {"media.class": kind}},
+                }
+                for identity, kind in [
+                    (2, "Audio/Sink"),
+                    (3, "Audio/Sink"),
+                    (9, "Stream/Output/Audio"),
+                ]
+            ]
+        )
         self.run_audio("toggle", True)
         calls = self.log.read_text().splitlines()
         self.assertEqual(calls.count("dump"), 1)

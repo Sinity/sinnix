@@ -19,7 +19,6 @@ from ..action import (
     MutationControls,
     RequestControls,
 )
-from ..permissions import Permission
 from ..contracts import VerbFamily
 from ..locators import (
     ProcessLocator,
@@ -29,6 +28,7 @@ from ..locators import (
     proc_snapshot,
     process_ref,
 )
+from ..permissions import Permission
 from ..redaction import redact, redact_env
 from ..results import ProtocolError
 from ..schemas import GatewayModel

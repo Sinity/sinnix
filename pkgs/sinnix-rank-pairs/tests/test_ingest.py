@@ -135,10 +135,13 @@ def test_balanced_undo_and_new_answer_refreshes_model(elicit_module, domain):
     domain.append(judgment(elicit_module, "old"))
     elicit_module.cmd_rank(domain, argparse.Namespace(json=False))
     assert json.loads(domain.model_path.read_text())["ranking"][0]["id"] == "a"
-    spool(elicit_module, [
-        {"schema": elicit_module.SCHEMA, "domain": domain.name, "delete": "old"},
-        judgment(elicit_module, "new", outcome=0.0),
-    ])
+    spool(
+        elicit_module,
+        [
+            {"schema": elicit_module.SCHEMA, "domain": domain.name, "delete": "old"},
+            judgment(elicit_module, "new", outcome=0.0),
+        ],
+    )
     elicit_module.cmd_autoingest(None, argparse.Namespace())
     model = json.loads(domain.model_path.read_text())
     assert model["n_comparisons"] == 1
@@ -152,8 +155,10 @@ def test_failed_refit_retries_without_new_feedback(elicit_module, domain, monkey
     spool(elicit_module, [judgment(elicit_module, "one")])
     original = elicit_module.fit_and_save_model
     with monkeypatch.context() as patch:
+
         def fail(*args):
             raise RuntimeError("synthetic fit failure")
+
         patch.setattr(elicit_module, "fit_and_save_model", fail)
         with pytest.raises(RuntimeError, match="synthetic fit failure"):
             elicit_module.cmd_autoingest(None, argparse.Namespace())
@@ -176,7 +181,10 @@ def test_roster_change_refreshes_model_once(elicit_module, domain):
     assert model["ranking"][0]["label"] == "revised option label"
     before = domain.model_path.read_bytes(), domain.model_path.stat().st_mtime_ns
     elicit_module.cmd_autoingest(None, argparse.Namespace())
-    assert (domain.model_path.read_bytes(), domain.model_path.stat().st_mtime_ns) == before
+    assert (
+        domain.model_path.read_bytes(),
+        domain.model_path.stat().st_mtime_ns,
+    ) == before
 
 
 def test_domain_paths_cannot_escape_state_root(elicit_module, tmp_path, monkeypatch):

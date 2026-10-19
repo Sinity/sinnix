@@ -4,7 +4,6 @@ import json
 import subprocess
 
 import pytest
-
 from conftest import load_script
 
 picker = load_script("sinnix-picker")

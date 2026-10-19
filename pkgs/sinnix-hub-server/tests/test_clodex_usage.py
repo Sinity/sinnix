@@ -58,7 +58,9 @@ def test_invalid_counts_do_not_crash_or_manufacture_usage(
 
 
 @pytest.mark.parametrize("invalid", [b"9" * 5000, b'{"invalid":'])
-def test_decoder_errors_do_not_hide_valid_records(tmp_path: Path, invalid: bytes) -> None:
+def test_decoder_errors_do_not_hide_valid_records(
+    tmp_path: Path, invalid: bytes
+) -> None:
     path = tmp_path / "usage.jsonl"
     path.write_bytes(usage_row(7) + invalid + b"\n" + usage_row(91))
     value, _health = clodex_usage(path)

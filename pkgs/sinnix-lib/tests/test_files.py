@@ -2,8 +2,12 @@ import errno
 import os
 
 import pytest
-
-from sinnix_lib.files import NotRegularFile, open_regular, read_regular_bytes, read_regular_text
+from sinnix_lib.files import (
+    NotRegularFile,
+    open_regular,
+    read_regular_bytes,
+    read_regular_text,
+)
 
 
 def test_regular_file_reads_in_text_and_binary(tmp_path):

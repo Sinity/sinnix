@@ -6,10 +6,9 @@ import base64
 import hashlib
 import json
 import os
-
-import pytest
 from pathlib import Path
 
+import pytest
 from mcp.types import ImageContent
 from sinnix_agent_gateway.actions import artifacts
 from sinnix_agent_gateway.config import GatewayConfig
@@ -278,23 +277,47 @@ def test_paged_binary_read_hashes_the_snapshot_once(
 
 @pytest.mark.parametrize("representation", ["text", "binary"])
 @pytest.mark.parametrize("bound", [4096, 262144])
-def test_oversized_reads_stay_on_original_artifact_with_lossless_pages(tmp_path, representation, bound):
-    rt = Runtime.create(GatewayConfig(state_dir=tmp_path / "state", projects={}, max_result_bytes=bound), "operator")
-    original = ('🙂\"\\\n\t' * 30000).encode()
+def test_oversized_reads_stay_on_original_artifact_with_lossless_pages(
+    tmp_path, representation, bound
+):
+    rt = Runtime.create(
+        GatewayConfig(
+            state_dir=tmp_path / "state", projects={}, max_result_bytes=bound
+        ),
+        "operator",
+    )
+    original = ('🙂"\\\n\t' * 30000).encode()
     artifact_id = register(rt, "large.txt", original, "note")
     ref = f"sinnix://artifacts/{artifact_id}"
     offset = 0
     chunks = []
     while True:
-        request = {"target": {"ref": ref}, "representation": representation, "offset": offset, "max_bytes": 10000000}
+        request = {
+            "target": {"ref": ref},
+            "representation": representation,
+            "offset": offset,
+            "max_bytes": 10000000,
+        }
         response = call(rt, "artifacts.read", request, BY_NAME)
         assert response["result"]["outcome"] == "ok", response
-        assert len(json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode()) <= bound
+        assert (
+            len(
+                json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode()
+            )
+            <= bound
+        )
         data = response["data"]
         assert data["ref"] == ref and data["artifact_id"] == artifact_id
-        assert "artifact_refs" not in response["meta"] or not response["meta"]["artifact_refs"]
+        assert (
+            "artifact_refs" not in response["meta"]
+            or not response["meta"]["artifact_refs"]
+        )
         assert data["offset"] == offset
-        chunk = base64.b64decode(data["base64"], validate=True) if representation == "binary" else data["text"].encode()
+        chunk = (
+            base64.b64decode(data["base64"], validate=True)
+            if representation == "binary"
+            else data["text"].encode()
+        )
         assert data["returned_bytes"] == len(chunk)
         assert data["sha256"] == hashlib.sha256(original).hexdigest()
         assert data["bytes"] == len(original)
@@ -312,12 +335,21 @@ def test_oversized_reads_stay_on_original_artifact_with_lossless_pages(tmp_path,
 
 
 @pytest.mark.parametrize("representation", ["text", "binary"])
-def test_cached_snapshot_rewrite_with_restored_mtime_is_refused(tmp_path, representation):
+def test_cached_snapshot_rewrite_with_restored_mtime_is_refused(
+    tmp_path, representation
+):
     rt = runtime(tmp_path)
     artifact_id = register(rt, "warm-cache.txt", b"registered", "note")
-    first = call(rt, "artifacts.read", {
-        "target": {"artifact_id": artifact_id}, "representation": representation, "max_bytes": 4,
-    }, BY_NAME)
+    first = call(
+        rt,
+        "artifacts.read",
+        {
+            "target": {"artifact_id": artifact_id},
+            "representation": representation,
+            "max_bytes": 4,
+        },
+        BY_NAME,
+    )
     assert first["error"] is None
     content = rt.artifacts.root / artifact_id / "content"
     before = content.stat()
@@ -325,7 +357,14 @@ def test_cached_snapshot_rewrite_with_restored_mtime_is_refused(tmp_path, repres
     os.utime(content, ns=(before.st_atime_ns, before.st_mtime_ns))
     assert content.stat().st_size == before.st_size
     assert content.stat().st_mtime_ns == before.st_mtime_ns
-    result = call(rt, "artifacts.read", {
-        "target": {"artifact_id": artifact_id}, "representation": representation, "offset": 4,
-    }, BY_NAME)
+    result = call(
+        rt,
+        "artifacts.read",
+        {
+            "target": {"artifact_id": artifact_id},
+            "representation": representation,
+            "offset": 4,
+        },
+        BY_NAME,
+    )
     assert result["error"]["code"] == "invalid_request"

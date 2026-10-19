@@ -220,7 +220,9 @@ class ClaudeStateTest(unittest.TestCase):
         self.assertEqual(os.readlink(saved), "../skills/swarm/SKILL.md")
 
     def test_retired_hook_aliases_are_preserved_without_touching_custom_hooks(self):
-        source = self.home / "subject/repo/dots/claude/hooks/sessionstart-beads-prime.sh"
+        source = (
+            self.home / "subject/repo/dots/claude/hooks/sessionstart-beads-prime.sh"
+        )
         old_root = self.home / "subject/dots/claude/hooks"
         hooks = self.config / "hooks"
         hooks.mkdir()

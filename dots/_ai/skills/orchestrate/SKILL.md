@@ -65,8 +65,8 @@ next, not on supervising progress.
 
 ## Models
 
-| Work                                                        | Claude   | Codex           |
-| ----------------------------------------------------------- | -------- | --------------- |
+| Work                                                        | Claude   | Codex            |
+| ----------------------------------------------------------- | -------- | ---------------- |
 | Evidence collection, supervision, settled implementation    | `sonnet` | everyday, medium |
 | Substantial implementation, investigation, candidate review | `opus`   | strong, medium   |
 | Unresolved architecture, design-critical implementation     | `opus`   | strong, high     |

@@ -15,7 +15,9 @@ from sinnix_lib.atomic import atomic_publish
 def test_new_capture_data_is_private_even_with_permissive_umask(tmp_path):
     previous = os.umask(0)
     try:
-        writer = CaptureWriter(tmp_path / "new-root/nested", "private-fixture", host="fixture-host")
+        writer = CaptureWriter(
+            tmp_path / "new-root/nested", "private-fixture", host="fixture-host"
+        )
         writer.write({"note": "synthetic private content"}, ts=1_700_000_000)
     finally:
         os.umask(previous)
@@ -360,16 +362,21 @@ def test_recovery_tail_memory_does_not_grow_with_record_count(tmp_path: Path) ->
     assert peak < 1024 * 1024, f"recovery allocated {peak} bytes"
 
 
-def test_pending_index_recovery_has_bounded_memory_and_sequence_order(tmp_path, monkeypatch):
+def test_pending_index_recovery_has_bounded_memory_and_sequence_order(
+    tmp_path, monkeypatch
+):
     writer = CaptureWriter(tmp_path, "lane")
     count = 30000
     monkeypatch.setattr(writer, "_read_seq", lambda: count)
     monkeypatch.setattr(writer, "_last_indexed_seq", lambda: 0)
     monkeypatch.setattr(writer, "_daily_paths", lambda: [tmp_path / "day.jsonl"])
-    monkeypatch.setattr(writer, "_payload_records", lambda path: (
-        {"seq": seq, "ts": seq, "payload": "unused"}
-        for seq in range(count, 0, -1)
-    ))
+    monkeypatch.setattr(
+        writer,
+        "_payload_records",
+        lambda path: (
+            {"seq": seq, "ts": seq, "payload": "unused"} for seq in range(count, 0, -1)
+        ),
+    )
     seen = 0
 
     def append(path, entry, *, fsync, mode):
@@ -391,7 +398,9 @@ def test_pending_index_recovery_has_bounded_memory_and_sequence_order(tmp_path, 
 
 
 @pytest.mark.parametrize("failure", ["duplicate-sequence", "malformed-record"])
-def test_pending_index_recovery_failure_preserves_index_and_cleans_scratch(tmp_path, monkeypatch, failure):
+def test_pending_index_recovery_failure_preserves_index_and_cleans_scratch(
+    tmp_path, monkeypatch, failure
+):
     import sqlite3
     from tempfile import TemporaryDirectory
 
@@ -401,7 +410,11 @@ def test_pending_index_recovery_failure_preserves_index_and_cleans_scratch(tmp_p
     writer.write({"original": True}, ts=100)
     before = writer._index_path.read_bytes()
     payload_before = writer._record_path(100).read_bytes()
-    monkeypatch.setattr(writer_module, "TemporaryDirectory", lambda **kwargs: TemporaryDirectory(dir=tmp_path, **kwargs))
+    monkeypatch.setattr(
+        writer_module,
+        "TemporaryDirectory",
+        lambda **kwargs: TemporaryDirectory(dir=tmp_path, **kwargs),
+    )
     monkeypatch.setattr(writer, "_read_seq", lambda: 3)
     monkeypatch.setattr(writer, "_last_indexed_seq", lambda: 0)
     records = [{"seq": 1, "ts": 100}]
@@ -428,7 +441,9 @@ def test_recovery_tail_honors_exact_byte_window(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("counter_missing", [False, True])
-def test_recovery_refuses_unreadable_lane_without_modifying_payloads(tmp_path, counter_missing):
+def test_recovery_refuses_unreadable_lane_without_modifying_payloads(
+    tmp_path, counter_missing
+):
     writer = CaptureWriter(tmp_path, "lane", host="fixture")
     writer.write({"original": True}, ts=1_700_000_000)
     daily = writer._record_path(1_700_000_000)
@@ -449,4 +464,6 @@ def test_recovery_refuses_unreadable_lane_without_modifying_payloads(tmp_path, c
     else:
         assert writer._read_seq() == 1
     writer.write({"after_access_restored": True}, ts=1_700_000_002)
-    assert [json.loads(line)["seq"] for line in writer._index_path.read_text().splitlines()] == [1, 2]
+    assert [
+        json.loads(line)["seq"] for line in writer._index_path.read_text().splitlines()
+    ] == [1, 2]

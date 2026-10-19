@@ -7,9 +7,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from sinnix_lib.layout import capture_lane_path
 
 from sinnix_capture.cli import main
+from sinnix_lib.layout import capture_lane_path
 
 
 def _records(root: Path, lane: str) -> list[dict]:

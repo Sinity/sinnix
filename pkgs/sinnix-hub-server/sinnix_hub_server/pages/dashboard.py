@@ -407,7 +407,15 @@ def render_dashboard(
         body += live_work_card({}, now)
         body += links_card(manifest)
         body += reports_card(reports, now, manifest.get("reportsPort"))
-        return page("hub", host, ["degraded"], "/", body, tail=ACTION_SCRIPT, reports_port=manifest.get("reportsPort"))
+        return page(
+            "hub",
+            host,
+            ["degraded"],
+            "/",
+            body,
+            tail=ACTION_SCRIPT,
+            reports_port=manifest.get("reportsPort"),
+        )
 
     state = snapshot.get("state")
     state = state if isinstance(state, dict) else {}
@@ -485,4 +493,12 @@ def render_dashboard(
     observed = parse_iso(snapshot.get("observed_at"))
     if observed is not None:
         chips.append(f"observed {duration_human((now - observed).total_seconds())} ago")
-    return page("hub", host, chips, "/", body, tail=ACTION_SCRIPT, reports_port=manifest.get("reportsPort"))
+    return page(
+        "hub",
+        host,
+        chips,
+        "/",
+        body,
+        tail=ACTION_SCRIPT,
+        reports_port=manifest.get("reportsPort"),
+    )

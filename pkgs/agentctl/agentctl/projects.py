@@ -655,13 +655,23 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
             raise ProjectConfigError(f"operations.{name}.arguments is invalid")
         fields["arguments"] = definition["arguments"]
     for key in ("requires", "ready_probe"):
-        fields[key] = _optional_string_list(definition.get(key), f"operations.{name}.{key}")
-    if name in fields["requires"] or len(set(fields["requires"])) != len(fields["requires"]):
+        fields[key] = _optional_string_list(
+            definition.get(key), f"operations.{name}.{key}"
+        )
+    if name in fields["requires"] or len(set(fields["requires"])) != len(
+        fields["requires"]
+    ):
         raise ProjectConfigError(f"operations.{name}.requires is invalid")
     if "ready_timeout_seconds" in definition:
         deadline = definition["ready_timeout_seconds"]
-        if not isinstance(deadline, int) or isinstance(deadline, bool) or not 1 <= deadline <= 7200:
-            raise ProjectConfigError(f"operations.{name}.ready_timeout_seconds must be between 1 and 7200")
+        if (
+            not isinstance(deadline, int)
+            or isinstance(deadline, bool)
+            or not 1 <= deadline <= 7200
+        ):
+            raise ProjectConfigError(
+                f"operations.{name}.ready_timeout_seconds must be between 1 and 7200"
+            )
         fields["ready_timeout_seconds"] = deadline
     dependencies = _optional_string_list(
         definition.get("dependencies"), f"operations.{name}.dependencies"
@@ -737,11 +747,20 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         for name in operation.requires:
             service = next((item for item in operations if item.name == name), None)
             if service is None or not service.ready_probe:
-                raise ProjectConfigError(f"{descriptor} operation {operation.name} requires service {name} with a ready_probe")
-            if (service.requires or service.dependencies or service.arguments != "none"
-                    or service.checkout != "any" or service.execution_readiness != "exec"
-                    or service.unit_properties):
-                raise ProjectConfigError(f"{descriptor} required service {name} must be a self-contained foreground operation")
+                raise ProjectConfigError(
+                    f"{descriptor} operation {operation.name} requires service {name} with a ready_probe"
+                )
+            if (
+                service.requires
+                or service.dependencies
+                or service.arguments != "none"
+                or service.checkout != "any"
+                or service.execution_readiness != "exec"
+                or service.unit_properties
+            ):
+                raise ProjectConfigError(
+                    f"{descriptor} required service {name} must be a self-contained foreground operation"
+                )
     workspace = _workspace(raw, descriptor)
     if workspace is not None:
         unknown_verifiers = {

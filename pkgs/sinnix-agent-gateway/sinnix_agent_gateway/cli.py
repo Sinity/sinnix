@@ -11,7 +11,6 @@ import anyio
 
 from . import actions as action_set
 from .app import canonical_manifest, create_server
-from .permissions import ROLE_PERMISSIONS
 from .cli_support import (
     CliInputError,
     build_request,
@@ -20,6 +19,7 @@ from .cli_support import (
     invoke_mcp,
 )
 from .config import GatewayConfig
+from .permissions import ROLE_PERMISSIONS
 from .runtime import manifest_measurement
 
 LOCAL_CONFIG_PATH = Path("/etc/sinnix/agent-gateway.json")

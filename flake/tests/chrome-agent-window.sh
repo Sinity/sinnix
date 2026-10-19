@@ -411,7 +411,7 @@ assert_click_geometry() {
       FAKE_CLICK_CASE="$mode" FAKE_CLICK_FIXTURE="${CLICK_FIXTURE:?}" \
       "$helper" click agent-target --selector '#target' >"$state/stdout" 2>"$state/stderr" || status=$?
     case "$mode" in
-    normal|scrolled|offscreen)
+    normal | scrolled | offscreen)
       test "$status" = 0
       jq -se '[.[] | select(.method == "Input.dispatchMouseEvent")] as $mouse |
         ($mouse | length == 2) and

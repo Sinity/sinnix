@@ -753,12 +753,24 @@ def test_sqlite_read_helpers_close_their_connections(tmp_path, monkeypatch):
             connection.execute("select 1")
 
 
-def test_storage_includes_declared_mounts_without_duplicate_or_empty_paths(tmp_path, monkeypatch):
+def test_storage_includes_declared_mounts_without_duplicate_or_empty_paths(
+    tmp_path, monkeypatch
+):
     inventory = tmp_path / "runtime.json"
-    inventory.write_text(json.dumps({"mounts": [
-        {"path": "/fixture-backup"}, {"path": "/fixture-media"},
-        {"path": "/realm"}, {"path": ""}, {"path": None}, "invalid",
-    ]}))
+    inventory.write_text(
+        json.dumps(
+            {
+                "mounts": [
+                    {"path": "/fixture-backup"},
+                    {"path": "/fixture-media"},
+                    {"path": "/realm"},
+                    {"path": ""},
+                    {"path": None},
+                    "invalid",
+                ]
+            }
+        )
+    )
     monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", str(inventory))
     monkeypatch.setenv("SINNIX_OBSERVE_IOSTAT", "0")
     monkeypatch.setattr(storage, "polylogue_archive", lambda: {})
@@ -770,7 +782,23 @@ def test_storage_includes_declared_mounts_without_duplicate_or_empty_paths(tmp_p
         assert argv[0] == "findmnt"
         path = argv[2]
         probed.append(path)
-        return Result(tuple(argv), 0, json.dumps({"filesystems": [dict(target=path, source="/dev/fixture", fstype="btrfs", options="rw")]}), "")
+        return Result(
+            tuple(argv),
+            0,
+            json.dumps(
+                {
+                    "filesystems": [
+                        {
+                            "target": path,
+                            "source": "/dev/fixture",
+                            "fstype": "btrfs",
+                            "options": "rw",
+                        }
+                    ]
+                }
+            ),
+            "",
+        )
 
     monkeypatch.setattr(storage, "run", findmnt)
     result = storage.collect_storage(offline=False)
@@ -791,11 +819,24 @@ def test_storage_selects_visible_mount_above_automount(monkeypatch):
 
     def findmnt(argv, **kwargs):
         path = argv[2]
-        visible = dict(target=path, source="/dev/fixture", fstype="btrfs", options="rw,noatime")
+        visible = {
+            "target": path,
+            "source": "/dev/fixture",
+            "fstype": "btrfs",
+            "options": "rw,noatime",
+        }
         if "-d" in argv and argv[argv.index("-d") + 1] == "backward" and "-f" in argv:
             entries = [visible]
         else:
-            entries = [dict(target=path, source="systemd-1", fstype="autofs", options="rw"), visible]
+            entries = [
+                {
+                    "target": path,
+                    "source": "systemd-1",
+                    "fstype": "autofs",
+                    "options": "rw",
+                },
+                visible,
+            ]
         output = json.dumps({"filesystems": entries})
         return Result(tuple(argv), 0, output, "")
 
@@ -807,12 +848,15 @@ def test_storage_selects_visible_mount_above_automount(monkeypatch):
     assert mount["options"] == "rw,noatime"
 
 
-def test_runtime_inventory_invalid_utf8_is_explicitly_unavailable(tmp_path, monkeypatch):
+def test_runtime_inventory_invalid_utf8_is_explicitly_unavailable(
+    tmp_path, monkeypatch
+):
     inventory = tmp_path / "runtime.json"
     inventory.write_bytes(b'{"mounts": []}\xff')
     monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", str(inventory))
     assert runtime_inventory.load_inventory() == {
-        "available": False, "reason": "runtime inventory malformed",
+        "available": False,
+        "reason": "runtime inventory malformed",
     }
     assert runtime_inventory.monitored_mount_paths() == []
 
@@ -820,23 +864,37 @@ def test_runtime_inventory_invalid_utf8_is_explicitly_unavailable(tmp_path, monk
 def test_storage_mount_json_preserves_spaces_and_provider_failures(monkeypatch):
     monkeypatch.setenv("SINNIX_OBSERVE_IOSTAT", "0")
     monkeypatch.setattr(storage, "polylogue_archive", lambda: {})
-    monkeypatch.setattr(storage, "monitored_mount_paths", lambda: ["/fixture with space"])
+    monkeypatch.setattr(
+        storage, "monitored_mount_paths", lambda: ["/fixture with space"]
+    )
     monkeypatch.setattr(storage.glob, "glob", lambda pattern: [])
     monkeypatch.setattr(storage, "systemctl_show", lambda unit: {})
-    expected = {"target": "/fixture with space", "source": "/dev/fixture[/source with space]",
-                "fstype": "btrfs", "options": "rw,noatime"}
+    expected = {
+        "target": "/fixture with space",
+        "source": "/dev/fixture[/source with space]",
+        "fstype": "btrfs",
+        "options": "rw,noatime",
+    }
+
+    def findmnt_printing(text):
+        def findmnt(argv, **kwargs):
+            return Result(tuple(argv), 0, text, "")
+
+        return findmnt
+
     output = json.dumps({"filesystems": [expected]})
-
-    def findmnt(argv, **kwargs):
-        return Result(tuple(argv), 0, output, "")
-
-    monkeypatch.setattr(storage, "run", findmnt)
+    monkeypatch.setattr(storage, "run", findmnt_printing(output))
     result = storage.collect_storage(offline=False)
-    mount = next(row for row in result["mounts"] if row["path"] == "/fixture with space")
+    mount = next(
+        row for row in result["mounts"] if row["path"] == "/fixture with space"
+    )
     assert mount == {"path": "/fixture with space", **expected}
     for output in ("{", "[]", '{"filesystems": []}', '{"filesystems": [null]}'):
+        monkeypatch.setattr(storage, "run", findmnt_printing(output))
         result = storage.collect_storage(offline=False)
-        mount = next(row for row in result["mounts"] if row["path"] == "/fixture with space")
+        mount = next(
+            row for row in result["mounts"] if row["path"] == "/fixture with space"
+        )
         assert mount == {"path": "/fixture with space", "unresolved": True}
 
 
@@ -849,30 +907,62 @@ def test_chrome_partial_counters_preserve_unknown_and_measured_subtotals():
     assert row["rss_kb"] is None
     assert row["read_bytes"] is None
     assert row["write_bytes"] == 0
-    assert row["counter_coverage"]["rss_kb"] == {"measured": 1, "missing": 1, "measured_sum": 1024}
-    assert row["counter_coverage"]["read_bytes"] == {"measured": 1, "missing": 1, "measured_sum": 0}
+    assert row["counter_coverage"]["rss_kb"] == {
+        "measured": 1,
+        "missing": 1,
+        "measured_sum": 1024,
+    }
+    assert row["counter_coverage"]["read_bytes"] == {
+        "measured": 1,
+        "missing": 1,
+        "measured_sum": 0,
+    }
     assert chrome.is_chrome_process("chrome", "")
 
 
 def test_chrome_complete_counters_preserve_totals():
-    row = chrome.group_process_counters([
-        {"cgroup": "group", "rss_kb": 10, "io": {"read_bytes": 20, "write_bytes": 30}},
-        {"cgroup": "group", "rss_kb": 40, "io": {"read_bytes": 50, "write_bytes": 60}},
-    ])[0]
+    row = chrome.group_process_counters(
+        [
+            {
+                "cgroup": "group",
+                "rss_kb": 10,
+                "io": {"read_bytes": 20, "write_bytes": 30},
+            },
+            {
+                "cgroup": "group",
+                "rss_kb": 40,
+                "io": {"read_bytes": 50, "write_bytes": 60},
+            },
+        ]
+    )[0]
     assert (row["rss_kb"], row["read_bytes"], row["write_bytes"]) == (50, 70, 90)
     assert row["counter_coverage"]["read_bytes"]["missing"] == 0
 
 
 def test_chrome_render_distinguishes_unknown_from_measured_zero():
-    process = {"pid": 1, "cgroup": "group", "comm": "chrome", "rss_kb": None, "io": {"write_bytes": 0}}
-    report = {"generated_at": "synthetic", "window": {"since": "synthetic"}, "chrome_io": {
-        "available": True, "by_cgroup": chrome.group_process_counters([process]), "processes": [process],
-    }}
+    process = {
+        "pid": 1,
+        "cgroup": "group",
+        "comm": "chrome",
+        "rss_kb": None,
+        "io": {"write_bytes": 0},
+    }
+    report = {
+        "generated_at": "synthetic",
+        "window": {"since": "synthetic"},
+        "chrome_io": {
+            "available": True,
+            "by_cgroup": chrome.group_process_counters([process]),
+            "processes": [process],
+        },
+    }
     text = render.render_human(report)
     assert "rss_MiB=unknown read_MiB=unknown write_MiB=0.0" in text
 
 
-def test_chrome_collector_retains_counter_gaps_before_process_limit(tmp_path, monkeypatch):
+def test_chrome_collector_retains_counter_gaps_before_process_limit(
+    tmp_path, monkeypatch
+):
     for pid in ("1", "2"):
         directory = tmp_path / pid
         directory.mkdir()
@@ -882,29 +972,45 @@ def test_chrome_collector_retains_counter_gaps_before_process_limit(tmp_path, mo
     (tmp_path / "1/io").write_text("read_bytes: 1024\nwrite_bytes: 0\n")
     # The second process remains identifiable when cmdline/status/io are unreadable.
     monkeypatch.setattr(chrome, "chrome_profile_candidates", lambda: [])
-    monkeypatch.setattr(chrome, "Path", lambda path: tmp_path if path == "/proc" else None)
+    monkeypatch.setattr(
+        chrome, "Path", lambda path: tmp_path if path == "/proc" else None
+    )
     result = chrome.collect_chrome_io(False, {}, 1)
     assert len(result["processes"]) == 1
     group = result["by_cgroup"][0]
     assert group["processes"] == 2
     assert group["read_bytes"] is None
-    assert group["counter_coverage"]["read_bytes"] == {"measured": 1, "missing": 1, "measured_sum": 1024}
+    assert group["counter_coverage"]["read_bytes"] == {
+        "measured": 1,
+        "missing": 1,
+        "measured_sum": 1024,
+    }
 
 
 def test_missing_peak_counters_render_unknown_instead_of_crashing():
     peak = {"max_rw_bps": None, "max_rss_bytes": None, "max_cpu_pct": None}
-    report = {"generated_at": "synthetic", "window": {"since": "synthetic"},
-              "chrome_io": {"available": True, "below_process_peaks": [peak]},
-              "below": {"process_peaks": [peak]}}
+    report = {
+        "generated_at": "synthetic",
+        "window": {"since": "synthetic"},
+        "chrome_io": {"available": True, "below_process_peaks": [peak]},
+        "below": {"process_peaks": [peak]},
+    }
     text = render.render_human(report)
     assert "rw_Bps=unknown rss_MiB=unknown" in text
     assert "cpu=unknown" in text
 
 
-@pytest.mark.parametrize('failure,status', [(PermissionError('synthetic denial'), 'denied'),
-                                          (OSError('synthetic lookup error'), 'inaccessible')])
-def test_chrome_path_lookup_failure_is_unknown_not_missing(tmp_path, monkeypatch, failure, status):
-    path = tmp_path / 'profile'
+@pytest.mark.parametrize(
+    "failure,status",
+    [
+        (PermissionError("synthetic denial"), "denied"),
+        (OSError("synthetic lookup error"), "inaccessible"),
+    ],
+)
+def test_chrome_path_lookup_failure_is_unknown_not_missing(
+    tmp_path, monkeypatch, failure, status
+):
+    path = tmp_path / "profile"
     original = type(path).lstat
 
     def observed(self, *args, **kwargs):
@@ -912,90 +1018,107 @@ def test_chrome_path_lookup_failure_is_unknown_not_missing(tmp_path, monkeypatch
             raise failure
         return original(self, *args, **kwargs)
 
-    monkeypatch.setattr(type(path), 'lstat', observed)
+    monkeypatch.setattr(type(path), "lstat", observed)
     row = chrome.chrome_path_row(path)
-    assert row['exists'] is None
-    assert row['status'] == status
-    assert 'du_bytes' not in row
+    assert row["exists"] is None
+    assert row["status"] == status
+    assert "du_bytes" not in row
 
 
-def test_chrome_collection_retains_unavailable_profiles_and_text_diagnosis(tmp_path, monkeypatch):
-    path = tmp_path / 'profile'
-    row = dict(path=str(path), exists=None, status='denied', error='synthetic denial')
-    monkeypatch.setattr(chrome, 'chrome_profile_candidates', lambda: [path])
-    monkeypatch.setattr(chrome, 'chrome_path_row', lambda *args, **kwargs: dict(row))
-    monkeypatch.setattr(chrome.Path, 'glob', lambda *args, **kwargs: [])
+def test_chrome_collection_retains_unavailable_profiles_and_text_diagnosis(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "profile"
+    row = {
+        "path": str(path),
+        "exists": None,
+        "status": "denied",
+        "error": "synthetic denial",
+    }
+    monkeypatch.setattr(chrome, "chrome_profile_candidates", lambda: [path])
+    monkeypatch.setattr(chrome, "chrome_path_row", lambda *args, **kwargs: dict(row))
+    monkeypatch.setattr(chrome.Path, "glob", lambda *args, **kwargs: [])
     result = chrome.collect_chrome_io(False, {}, 1)
-    assert not result['available']
-    assert result['profiles'][0]['status'] == 'denied'
-    assert result['gaps'] == ['chrome_io.profile_unavailable']
-    text = render.render_human({'generated_at': 'synthetic', 'window': {'since': 'synthetic'}, 'chrome_io': result})
-    assert 'status=denied' in text and 'synthetic denial' in text
+    assert not result["available"]
+    assert result["profiles"][0]["status"] == "denied"
+    assert result["gaps"] == ["chrome_io.profile_unavailable"]
+    text = render.render_human(
+        {
+            "generated_at": "synthetic",
+            "window": {"since": "synthetic"},
+            "chrome_io": result,
+        }
+    )
+    assert "status=denied" in text and "synthetic denial" in text
 
 
 def test_chrome_profile_file_is_explicitly_wrong_type(tmp_path, monkeypatch):
-    path = tmp_path / 'profile'
-    path.write_text('neutral')
-    monkeypatch.setattr(chrome, 'chrome_profile_candidates', lambda: [path])
-    monkeypatch.setattr(chrome, 'find_mount_for_path', lambda path: {})
-    monkeypatch.setattr(chrome.Path, 'glob', lambda *args, **kwargs: [])
+    path = tmp_path / "profile"
+    path.write_text("neutral")
+    monkeypatch.setattr(chrome, "chrome_profile_candidates", lambda: [path])
+    monkeypatch.setattr(chrome, "find_mount_for_path", lambda path: {})
+    monkeypatch.setattr(chrome.Path, "glob", lambda *args, **kwargs: [])
     result = chrome.collect_chrome_io(False, {}, 1)
-    assert not result['available']
-    assert result['profiles'][0]['status'] == 'wrong-type'
+    assert not result["available"]
+    assert result["profiles"][0]["status"] == "wrong-type"
 
 
 def test_chrome_dangling_profile_link_is_not_an_absent_candidate(tmp_path, monkeypatch):
-    path = tmp_path / 'profile'
-    path.symlink_to(tmp_path / 'missing-target')
+    path = tmp_path / "profile"
+    path.symlink_to(tmp_path / "missing-target")
     row = chrome.chrome_path_row(path)
-    assert row['exists'] is False
-    assert row['is_symlink'] is True
-    assert row['status'] == 'dangling-link'
-    monkeypatch.setattr(chrome, 'chrome_profile_candidates', lambda: [path])
-    monkeypatch.setattr(chrome.Path, 'glob', lambda *args, **kwargs: [])
+    assert row["exists"] is False
+    assert row["is_symlink"] is True
+    assert row["status"] == "dangling-link"
+    monkeypatch.setattr(chrome, "chrome_profile_candidates", lambda: [path])
+    monkeypatch.setattr(chrome.Path, "glob", lambda *args, **kwargs: [])
     result = chrome.collect_chrome_io(False, {}, 1)
-    assert not result['available']
-    assert result['profiles'][0]['status'] == 'dangling-link'
+    assert not result["available"]
+    assert result["profiles"][0]["status"] == "dangling-link"
 
 
-def test_chrome_profile_discovery_uses_config_home_and_preserves_explicit_override(tmp_path, monkeypatch):
-    configured = tmp_path / 'configured-home'
-    override = tmp_path / 'selected-profile'
-    monkeypatch.setenv('XDG_CONFIG_HOME', str(configured))
-    monkeypatch.setenv('SINNIX_CHROME_PROFILE', str(override))
-    monkeypatch.setattr(chrome.glob, 'glob', lambda pattern: [])
-    assert chrome.chrome_profile_candidates() == [override, configured / 'chrome-ws']
+def test_chrome_profile_discovery_uses_config_home_and_preserves_explicit_override(
+    tmp_path, monkeypatch
+):
+    configured = tmp_path / "configured-home"
+    override = tmp_path / "selected-profile"
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(configured))
+    monkeypatch.setenv("SINNIX_CHROME_PROFILE", str(override))
+    monkeypatch.setattr(chrome.glob, "glob", lambda pattern: [])
+    assert chrome.chrome_profile_candidates() == [override, configured / "chrome-ws"]
 
 
-@pytest.mark.parametrize('helper', ['rows', 'columns', 'table'])
-def test_sqlite_filesystem_failure_is_recorded_without_aborting(tmp_path, monkeypatch, helper):
-    db = tmp_path / 'database.sqlite'
-    method = 'stat' if helper == 'table' else 'resolve'
+@pytest.mark.parametrize("helper", ["rows", "columns", "table"])
+def test_sqlite_filesystem_failure_is_recorded_without_aborting(
+    tmp_path, monkeypatch, helper
+):
+    db = tmp_path / "database.sqlite"
+    method = "stat" if helper == "table" else "resolve"
     original = getattr(type(db), method)
 
     def inaccessible(self, *args, **kwargs):
         if self == db:
-            raise PermissionError('synthetic database lookup denial')
+            raise PermissionError("synthetic database lookup denial")
         return original(self, *args, **kwargs)
 
     monkeypatch.setattr(type(db), method, inaccessible)
     sqlite_util.clear_sqlite_errors()
     try:
-        if helper == 'rows':
-            assert sqlite_util.sqlite_rows(db, 'select 1') == []
-        elif helper == 'columns':
-            assert sqlite_util.sqlite_columns(db, 'history') == set()
+        if helper == "rows":
+            assert sqlite_util.sqlite_rows(db, "select 1") == []
+        elif helper == "columns":
+            assert sqlite_util.sqlite_columns(db, "history") == set()
         else:
-            assert sqlite_util.table_exists(db, 'history') is False
+            assert sqlite_util.table_exists(db, "history") is False
         errors = sqlite_util.sqlite_errors()
         assert len(errors) == 1
-        assert errors[0]['db'] == str(db)
-        assert 'PermissionError' in errors[0]['error']
+        assert errors[0]["db"] == str(db)
+        assert "PermissionError" in errors[0]["error"]
     finally:
         sqlite_util.clear_sqlite_errors()
 
 
 def test_missing_optional_sqlite_table_probe_is_not_an_access_failure(tmp_path):
     sqlite_util.clear_sqlite_errors()
-    assert not sqlite_util.table_exists(tmp_path / 'missing.sqlite', 'history')
+    assert not sqlite_util.table_exists(tmp_path / "missing.sqlite", "history")
     assert sqlite_util.sqlite_errors() == []

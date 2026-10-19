@@ -1,7 +1,7 @@
-from pathlib import Path
 import json
 import multiprocessing
 import os
+from pathlib import Path
 
 import pytest
 from sinnix_capture.query import discover_lanes, lane_delta, query
@@ -88,10 +88,19 @@ def test_query_refuses_a_terminated_malformed_index_line(tmp_path: Path) -> None
         lane_delta(tmp_path, "lane-x")
 
 
-@pytest.mark.parametrize("patch", [
-    {"ts": float("nan")}, {"ts": float("inf")}, {"ts": True}, {"ts": "100"},
-    {"seq": True}, {"seq": 0}, {"seq": -1}, {"seq": 1.5},
-])
+@pytest.mark.parametrize(
+    "patch",
+    [
+        {"ts": float("nan")},
+        {"ts": float("inf")},
+        {"ts": True},
+        {"ts": "100"},
+        {"seq": True},
+        {"seq": 0},
+        {"seq": -1},
+        {"seq": 1.5},
+    ],
+)
 def test_query_rejects_invalid_index_fields(tmp_path, patch):
     writer = CaptureWriter(tmp_path, "lane")
     writer.write({"synthetic": True}, ts=100)
@@ -140,9 +149,11 @@ def test_query_refuses_fifo_index_without_blocking(tmp_path):
         child.close()
 
 
-@pytest.mark.parametrize("since", [float("nan"), float("inf"), True, "100", 2 ** 1024])
+@pytest.mark.parametrize("since", [float("nan"), float("inf"), True, "100", 2**1024])
 @pytest.mark.parametrize("operation", ["lane_delta", "query"])
-def test_query_rejects_invalid_since_timestamp_even_for_empty_lane(tmp_path, since, operation):
+def test_query_rejects_invalid_since_timestamp_even_for_empty_lane(
+    tmp_path, since, operation
+):
     with pytest.raises(ValueError, match="since timestamp"):
         if operation == "lane_delta":
             lane_delta(tmp_path, "missing-lane", since)
@@ -180,7 +191,9 @@ def test_query_closes_descriptor_when_index_is_a_directory(tmp_path):
 
 
 @pytest.mark.parametrize("operation", ["lane_delta", "discover"])
-def test_query_refuses_inaccessible_source_instead_of_reporting_zero(tmp_path, operation):
+def test_query_refuses_inaccessible_source_instead_of_reporting_zero(
+    tmp_path, operation
+):
     writer = CaptureWriter(tmp_path, "clipboard")
     writer.write({"fixture": True}, ts=100)
     blocked = writer.lane_dir if operation == "lane_delta" else writer.lane_dir.parent
@@ -232,7 +245,9 @@ def test_missing_and_working_link_roots_keep_their_meaning(tmp_path):
 
 
 @pytest.mark.parametrize("index_state", ["missing", "empty", "torn-first-record"])
-def test_retained_payload_without_complete_index_is_not_measured_zero(tmp_path, index_state):
+def test_retained_payload_without_complete_index_is_not_measured_zero(
+    tmp_path, index_state
+):
     writer = CaptureWriter(tmp_path, "lane")
     writer.write({"retained": True}, ts=100)
     if index_state == "missing":
@@ -283,11 +298,15 @@ def test_discovery_keeps_working_declared_directory_link(tmp_path):
 
 @pytest.mark.parametrize("operation", ["discover", "delta", "query", "explicit-query"])
 @pytest.mark.parametrize("location", ["known-parent", "root-parent"])
-def test_broken_intermediate_capture_entrance_is_unavailable(tmp_path, operation, location):
+def test_broken_intermediate_capture_entrance_is_unavailable(
+    tmp_path, operation, location
+):
     root = tmp_path / "capture"
     if location == "known-parent":
         root.mkdir()
-        (root / "desktop").symlink_to(tmp_path / "unavailable", target_is_directory=True)
+        (root / "desktop").symlink_to(
+            tmp_path / "unavailable", target_is_directory=True
+        )
     else:
         root.symlink_to(tmp_path / "unavailable", target_is_directory=True)
         root = root / "nested"

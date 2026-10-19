@@ -476,9 +476,7 @@ def test_bare_checkout_discovery_omits_missing_and_prunable_records(
     def with_missing_record(command: list[str], cwd: Path, timeout: int = 15) -> str:
         output = original(command, cwd, timeout)
         if command[1:4] == ["worktree", "list", "--porcelain"]:
-            output += (
-                f"worktree {missing}\0HEAD {git(store, 'rev-parse', 'HEAD')}\0\0"
-            )
+            output += f"worktree {missing}\0HEAD {git(store, 'rev-parse', 'HEAD')}\0\0"
         return output
 
     monkeypatch.setattr(service, "_run_spooled", with_missing_record)
@@ -1165,10 +1163,13 @@ def test_project_inline_frame_boundary_retains_artifact_alternative(size):
     )
 
 
-@pytest.mark.parametrize("start_line,max_bytes,expected,truncated", [
-    (1, 7, "雪雪", True),
-    (2, 32, "selected\n", False),
-])
+@pytest.mark.parametrize(
+    "start_line,max_bytes,expected,truncated",
+    [
+        (1, 7, "雪雪", True),
+        (2, 32, "selected\n", False),
+    ],
+)
 def test_project_read_bounds_giant_lines_before_slicing(
     tmp_path, monkeypatch, start_line, max_bytes, expected, truncated
 ):
@@ -1199,9 +1200,16 @@ def test_project_read_bounds_giant_lines_before_slicing(
             calls.append(size)
             return self.handle.readline(size)
 
-    monkeypatch.setattr(projects_module, "io", SimpleNamespace(TextIOWrapper=BoundedText))
-    result = runtime.projects.read("fixture", "giant.txt", start_line=start_line,
-                                   end_line=start_line, max_bytes=max_bytes)
+    monkeypatch.setattr(
+        projects_module, "io", SimpleNamespace(TextIOWrapper=BoundedText)
+    )
+    result = runtime.projects.read(
+        "fixture",
+        "giant.txt",
+        start_line=start_line,
+        end_line=start_line,
+        max_bytes=max_bytes,
+    )
     assert result["content"] == expected
     assert result["bytes"] == len(expected.encode("utf-8"))
     assert result["truncated"] is truncated

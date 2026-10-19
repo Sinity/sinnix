@@ -44,9 +44,7 @@ in
               message = "The navigation extension policy must come from the generated extension derivation.";
             }
             {
-              assertion = lib.elem (
-                "SINNIX_NAV_CAPTURE_EXTENSION_ID_FILE=${builtins.dirOf policySource}/extension-id"
-              ) hm.systemd.user.services.sinnix-capture-browser-nav.Service.Environment;
+              assertion = lib.elem ("SINNIX_NAV_CAPTURE_EXTENSION_ID_FILE=${builtins.dirOf policySource}/extension-id") hm.systemd.user.services.sinnix-capture-browser-nav.Service.Environment;
               message = "The receiver must trust the identity generated with Chrome's policy.";
             }
             {

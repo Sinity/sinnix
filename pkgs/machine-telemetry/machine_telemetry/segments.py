@@ -18,15 +18,15 @@ the recorded step.
 from __future__ import annotations
 
 import argparse
-from contextlib import closing
 import fcntl
 import json
 import os
-from pathlib import Path
 import sqlite3
 import stat
 import subprocess
 import time
+from contextlib import closing
+from pathlib import Path
 from typing import Callable
 
 from sinnix_lib.atomic import atomic_publish
@@ -48,12 +48,12 @@ def identity(path: Path) -> dict[str, int]:
     value = path.lstat()
     if not stat.S_ISREG(value.st_mode):
         raise RuntimeError(f"not a regular SQLite file: {path}")
-    return dict(
-        inode=value.st_ino,
-        size=value.st_size,
-        mtime_ns=value.st_mtime_ns,
-        ctime_ns=value.st_ctime_ns,
-    )
+    return {
+        "inode": value.st_ino,
+        "size": value.st_size,
+        "mtime_ns": value.st_mtime_ns,
+        "ctime_ns": value.st_ctime_ns,
+    }
 
 
 def _sync(directory: Path) -> None:
@@ -65,7 +65,9 @@ def _sync(directory: Path) -> None:
 
 
 def _publish(path: Path, value: dict) -> None:
-    atomic_publish(path, json.dumps(value, sort_keys=True).encode(), fsync=True, mode=0o600)
+    atomic_publish(
+        path, json.dumps(value, sort_keys=True).encode(), fsync=True, mode=0o600
+    )
     owner = path.parent.stat()
     if os.geteuid() == 0:
         os.chown(path, owner.st_uid, owner.st_gid)
@@ -123,16 +125,20 @@ def read_manifest(database: Path) -> dict | None:
 
 
 def _exclusive(database: Path):
-    descriptor = os.open(lock_path(database), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    descriptor = os.open(
+        lock_path(database), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600
+    )
     held = os.fdopen(descriptor, "r+b")
     if not stat.S_ISREG(os.fstat(held.fileno()).st_mode):
         held.close()
         raise RuntimeError("telemetry segment lock is not a regular file")
     try:
         fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+    except BlockingIOError as err:
         held.close()
-        raise RuntimeError("telemetry segments are locked by a running collector or seal")
+        raise RuntimeError(
+            "telemetry segments are locked by a running collector or seal"
+        ) from err
     return held
 
 
@@ -140,7 +146,9 @@ def _prepare_next(
     database: Path, staging: Path, initialize: Callable[[sqlite3.Connection], None]
 ) -> None:
     """Checkpoint the active file and create its successor beside it."""
-    with closing(sqlite3.connect(f"{database.as_uri()}?mode=rw", uri=True, timeout=5)) as old:
+    with closing(
+        sqlite3.connect(f"{database.as_uri()}?mode=rw", uri=True, timeout=5)
+    ) as old:
         if old.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
             raise RuntimeError("telemetry checkpoint is busy")
         if old.execute("PRAGMA journal_mode=DELETE").fetchone()[0] != "delete":
@@ -154,12 +162,16 @@ def _prepare_next(
         new.execute("BEGIN IMMEDIATE")
         # Row ids continue across segments, so a row keeps one identity.
         new.execute("DELETE FROM sqlite_sequence")
-        new.executemany("INSERT INTO sqlite_sequence(name, seq) VALUES (?, ?)", sequence)
+        new.executemany(
+            "INSERT INTO sqlite_sequence(name, seq) VALUES (?, ?)", sequence
+        )
         new.execute("DELETE FROM source_status")
         if statuses:
             fields = ",".join('"' + name.replace('"', '""') + '"' for name in columns)
             marks = ",".join("?" for _ in columns)
-            new.executemany(f"INSERT INTO source_status({fields}) VALUES ({marks})", statuses)
+            new.executemany(
+                f"INSERT INTO source_status({fields}) VALUES ({marks})", statuses
+            )
         new.commit()
         if new.execute("PRAGMA journal_mode=DELETE").fetchone()[0] != "delete":
             raise RuntimeError("new active file kept a journal")
@@ -181,30 +193,40 @@ def seal(
     directory = database.parent
     staging = database.with_name(database.name + ".next")
     with _exclusive(database):
-        manifest = read_manifest(database) or dict(
-            schema=SCHEMA,
-            state="ready",
-            generation="unsegmented",
-            sealed=[],
-            current=dict(id="active-unsegmented", file=database.name, identity=identity(database)),
-        )
+        manifest = read_manifest(database) or {
+            "schema": SCHEMA,
+            "state": "ready",
+            "generation": "unsegmented",
+            "sealed": [],
+            "current": {
+                "id": "active-unsegmented",
+                "file": database.name,
+                "identity": identity(database),
+            },
+        }
         if manifest.get("state") == "sealing":
             pending = manifest["pending"]
         elif manifest.get("state") == "ready":
             if staging.exists():
-                raise RuntimeError(f"{staging.name} exists without a recorded seal; inspect it")
+                raise RuntimeError(
+                    f"{staging.name} exists without a recorded seal; inspect it"
+                )
             busy = holders(database)
             if busy:
-                raise RuntimeError(f"the active telemetry file is open by {busy}; stop the collector")
+                raise RuntimeError(
+                    f"the active telemetry file is open by {busy}; stop the collector"
+                )
             stamp = stamp or time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-            pending = dict(stamp=stamp, file=f"{database.stem}.{stamp}.sqlite")
+            pending = {"stamp": stamp, "file": f"{database.stem}.{stamp}.sqlite"}
             if (directory / pending["file"]).exists():
                 raise RuntimeError(f"{pending['file']} already exists")
             _prepare_next(database, staging, initialize)
             manifest.update(state="sealing", pending=pending)
             _publish(manifest_path(database), manifest)
         else:
-            raise RuntimeError(f"unknown segment manifest state {manifest.get('state')!r}")
+            raise RuntimeError(
+                f"unknown segment manifest state {manifest.get('state')!r}"
+            )
 
         sealed = directory / pending["file"]
         if not sealed.exists():
@@ -217,9 +239,17 @@ def seal(
         stamp = pending["stamp"]
         manifest["sealed"] = [
             *manifest.get("sealed", []),
-            dict(id=f"segment-{stamp}", file=sealed.name, identity=identity(sealed)),
+            {
+                "id": f"segment-{stamp}",
+                "file": sealed.name,
+                "identity": identity(sealed),
+            },
         ]
-        manifest["current"] = dict(id=f"active-{stamp}", file=database.name, identity=identity(database))
+        manifest["current"] = {
+            "id": f"active-{stamp}",
+            "file": database.name,
+            "identity": identity(database),
+        }
         manifest["generation"] = f"sealed-{stamp}"
         manifest["state"] = "ready"
         manifest.pop("pending", None)
@@ -248,7 +278,9 @@ def _sealed_entries(database: Path) -> list[dict]:
     return manifest["sealed"]
 
 
-def verify(database: Path, records: Path, run: Callable[[list[str]], None] | None = None) -> list[str]:
+def verify(
+    database: Path, records: Path, run: Callable[[list[str]], None] | None = None
+) -> list[str]:
     """Check each sealed file's structure once; return the files checked now."""
     run = run or (lambda argv: subprocess.run(argv, check=True))
     records.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -258,14 +290,26 @@ def verify(database: Path, records: Path, run: Callable[[list[str]], None] | Non
         if _done(record, entry):
             continue
         source = database.parent / entry["file"]
-        run(["sinnix-sqlite-backup", "--immutable-source", "--verify-only", str(source)])
-        _publish(record, dict(file=entry["file"], identity=entry["identity"], ok=True, check="structural",
-                              time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
+        run(
+            ["sinnix-sqlite-backup", "--immutable-source", "--verify-only", str(source)]
+        )
+        _publish(
+            record,
+            {
+                "file": entry["file"],
+                "identity": entry["identity"],
+                "ok": True,
+                "check": "structural",
+                "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            },
+        )
         checked.append(entry["file"])
     return checked
 
 
-def archive(database: Path, output: Path, run: Callable[[list[str]], None] | None = None) -> list[str]:
+def archive(
+    database: Path, output: Path, run: Callable[[list[str]], None] | None = None
+) -> list[str]:
     """Compress each sealed file once into `output`; return the files archived now."""
     run = run or (lambda argv: subprocess.run(argv, check=True))
     output.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -279,16 +323,43 @@ def archive(database: Path, output: Path, run: Callable[[list[str]], None] | Non
         earlier = output / f"legacy-{entry['identity']['inode']}.sqlite.zst.json"
         if earlier.exists():
             previous = json.loads(earlier.read_text(encoding="utf-8"))
-            if previous.get("state") == "ready" and previous.get("source_identity") == entry["identity"]:
-                _publish(record, dict(file=entry["file"], identity=entry["identity"], ok=True,
-                                      artifact=Path(previous["artifact"]).name, time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
+            if (
+                previous.get("state") == "ready"
+                and previous.get("source_identity") == entry["identity"]
+            ):
+                _publish(
+                    record,
+                    {
+                        "file": entry["file"],
+                        "identity": entry["identity"],
+                        "ok": True,
+                        "artifact": Path(previous["artifact"]).name,
+                        "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    },
+                )
                 continue
         artifact = output / f"{entry['file']}.zst"
-        run(["sinnix-sqlite-backup", "--immutable-source", "--check-mode", "header",
-             str(database.parent / entry["file"]), str(artifact)])
+        run(
+            [
+                "sinnix-sqlite-backup",
+                "--immutable-source",
+                "--check-mode",
+                "header",
+                str(database.parent / entry["file"]),
+                str(artifact),
+            ]
+        )
         _match_owner(artifact, output)
-        _publish(record, dict(file=entry["file"], identity=entry["identity"], ok=True, artifact=artifact.name,
-                              time=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())))
+        _publish(
+            record,
+            {
+                "file": entry["file"],
+                "identity": entry["identity"],
+                "ok": True,
+                "artifact": artifact.name,
+                "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            },
+        )
         archived.append(entry["file"])
     return archived
 
@@ -297,8 +368,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("command", choices=("check", "seal", "verify", "archive"))
     parser.add_argument("--db", type=Path, required=True)
-    parser.add_argument("--records", type=Path, help="where verify keeps its per-file results")
-    parser.add_argument("--output", type=Path, help="where archive writes compressed copies")
+    parser.add_argument(
+        "--records", type=Path, help="where verify keeps its per-file results"
+    )
+    parser.add_argument(
+        "--output", type=Path, help="where archive writes compressed copies"
+    )
     args = parser.parse_args()
     from .collector import init_db, writer_guard
 

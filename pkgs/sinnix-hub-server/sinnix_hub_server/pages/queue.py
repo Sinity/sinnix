@@ -96,7 +96,7 @@ def job_row(job: dict[str, Any], now: dt.datetime) -> str:
     if job.get("terminal") is not True:
         controls = (
             f'<button class="act danger" data-expected-target="{esc(json.dumps(job.get("expected_target")))}" onclick="act(\'interrupt\',\'job_id\','
-            f"{js_arg(str(job.get('job_id')))},this)\">interrupt</button>"
+            f'{js_arg(str(job.get("job_id")))},this)">interrupt</button>'
         )
     headline = (
         f"<strong>{esc(str(job.get('label') or job.get('job_id') or '?'))}</strong>"
@@ -108,20 +108,27 @@ def job_row(job: dict[str, Any], now: dt.datetime) -> str:
 def jobs_card(state: dict[str, Any], now: dt.datetime) -> str:
     jobs = sorted(
         jobs_of(state),
-        key=lambda job: (job.get("terminal") is not True, str(job.get("enqueued_at") or "")),
+        key=lambda job: (
+            job.get("terminal") is not True,
+            str(job.get("enqueued_at") or ""),
+        ),
         reverse=True,
     )
-    blocks = "".join(job_row(job, now) for job in jobs[:12]) if jobs else empty("no jobs in this snapshot")
+    blocks = (
+        "".join(job_row(job, now) for job in jobs[:12])
+        if jobs
+        else empty("no jobs in this snapshot")
+    )
     omitted = job_plane(state).get("omitted")
     omitted = omitted if isinstance(omitted, dict) else {}
     return (
         '<section class="card wide"><h2>Jobs</h2>'
         '<p class="sub">Active jobs first, then recent completed jobs, labelled '
-        '<code>project:operation</code>. An interrupt is '
-        '<code>agentctl job cancel</code>. '
-        f'Showing {min(len(jobs), 12)} of {len(jobs)} snapshot jobs. '
-        f'Owner omitted: {esc(omitted.get("active", "unknown"))} active, '
-        f'{esc(omitted.get("terminal", "unknown"))} completed. '
-        'Project run and worker details: <code>agentctl view &lt;project&gt;</code>.'
-        f'</p>{blocks}</section>'
+        "<code>project:operation</code>. An interrupt is "
+        "<code>agentctl job cancel</code>. "
+        f"Showing {min(len(jobs), 12)} of {len(jobs)} snapshot jobs. "
+        f"Owner omitted: {esc(omitted.get('active', 'unknown'))} active, "
+        f"{esc(omitted.get('terminal', 'unknown'))} completed. "
+        "Project run and worker details: <code>agentctl view &lt;project&gt;</code>."
+        f"</p>{blocks}</section>"
     )

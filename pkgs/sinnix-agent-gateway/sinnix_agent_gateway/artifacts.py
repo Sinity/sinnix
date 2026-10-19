@@ -12,10 +12,10 @@ from typing import Any
 
 from sinnix_lib.atomic import atomic_publish
 
-from .permissions import Permission, Principal
 from .config import GatewayConfig
 from .owner_execution import ExecutionResult
 from .payloads import retain_json
+from .permissions import Permission, Principal
 from .redaction import redact
 
 
@@ -232,7 +232,9 @@ class ArtifactService:
         directory = self.config.state_dir / "captures" / uuid.uuid4().hex
         directory.mkdir(mode=0o700, parents=True)
         source_path = directory / f"{kind}.json"
-        retained = retain_json(self.config.state_dir / "payloads", payload, link=source_path)
+        retained = retain_json(
+            self.config.state_dir / "payloads", payload, link=source_path
+        )
         receipt = self.attest_capture(
             directory, source=source, target=target, files=[source_path], durable=True
         )
@@ -296,8 +298,12 @@ class ArtifactService:
         content: Path = metadata["_content"]
         info = content.stat()
         key = (
-            str(content), info.st_dev, info.st_ino, info.st_size,
-            info.st_mtime_ns, info.st_ctime_ns,
+            str(content),
+            info.st_dev,
+            info.st_ino,
+            info.st_size,
+            info.st_mtime_ns,
+            info.st_ctime_ns,
         )
         if (
             info.st_size == metadata["bytes"]

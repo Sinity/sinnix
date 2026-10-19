@@ -9,7 +9,9 @@ from pathlib import Path
 config = Path(os.environ["MAIL_CONFIG"]).read_text()
 channel = config.split("Channel capture-mail\n", 1)[1]
 directives = [line.strip() for line in channel.splitlines() if line.strip()]
-assert "Sync Pull" in directives, "the evaluated mail channel is not explicitly pull-only"
+assert "Sync Pull" in directives, (
+    "the evaluated mail channel is not explicitly pull-only"
+)
 assert "Create Near" in directives
 assert "Expunge None" in directives
 assert "TLSType IMAPS" in config
@@ -40,9 +42,13 @@ with tempfile.TemporaryDirectory() as scratch:
         # isync adds its own delivery identity header to copied messages.
         # Compare every original header/body byte while ignoring that field.
         header, separator, body = data.partition(b"\n\n")
-        return b"\n".join(
-            line for line in header.split(b"\n") if not line.startswith(b"X-TUID: ")
-        ) + separator + body
+        return (
+            b"\n".join(
+                line for line in header.split(b"\n") if not line.startswith(b"X-TUID: ")
+            )
+            + separator
+            + body
+        )
 
     def messages(directory):
         return {
@@ -55,7 +61,8 @@ with tempfile.TemporaryDirectory() as scratch:
     # Retain the generated channel's policy directives exactly. Replace only
     # transport/store addresses and folder selection for the local fixture.
     local_channel = "\n".join(
-        line for line in channel.splitlines()
+        line
+        for line in channel.splitlines()
         if not line.strip().startswith(("Far ", "Near ", "Patterns "))
     )
     fixture = root / "mbsyncrc"
@@ -63,11 +70,14 @@ with tempfile.TemporaryDirectory() as scratch:
         f"MaildirStore fixture-far\nPath {far}/\nInbox {far}/INBOX\nSubfolders Verbatim\n\n"
         f"MaildirStore fixture-near\nPath {near}/\nInbox {near}/INBOX\nSubfolders Verbatim\n\n"
         "Channel capture-mail\nFar :fixture-far:\nNear :fixture-near:\nPatterns INBOX\n"
-        + local_channel + "\n"
+        + local_channel
+        + "\n"
     )
 
     def sync():
-        subprocess.run(["mbsync", "-c", str(fixture), "capture-mail"], check=True, timeout=15)
+        subprocess.run(
+            ["mbsync", "-c", str(fixture), "capture-mail"], check=True, timeout=15
+        )
 
     original = message(far, "original", "remote original")
     sync()
@@ -77,11 +87,15 @@ with tempfile.TemporaryDirectory() as scratch:
     copied = next(path for path, value in messages(near).items() if value == original)
     copied.rename(copied.with_name(copied.name.split(":2,")[0] + ":2,S"))
     sync()
-    assert messages(far) == far_before, "local message or flag changes reached the far store"
+    assert messages(far) == far_before, (
+        "local message or flag changes reached the far store"
+    )
     assert local not in messages(far).values()
     for path in messages(far):
         path.unlink()
     sync()
-    assert original in messages(near).values(), "upstream deletion removed retained mail"
+    assert original in messages(near).values(), (
+        "upstream deletion removed retained mail"
+    )
     assert local in messages(near).values()
 print("evaluated mail policy and isolated pull/flags/deletion preservation passed")

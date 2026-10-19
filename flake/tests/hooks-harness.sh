@@ -93,5 +93,4 @@ PATH="$test_root/bin" SINEX_SESSIONSTART_RECALL_TIMEOUT_SECS=1 \
   HOME="$test_root/home" XDG_STATE_HOME="$test_root/state" \
   "$hooks_dir/sessionstart-sinex-recall.sh" </dev/null >/dev/null
 
-
 echo 'hooks harness passed'

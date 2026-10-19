@@ -13,9 +13,9 @@ from difflib import unified_diff
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from .permissions import Permission, Principal
 from .config import GatewayConfig, ProjectConfig, TaskAuthorityConfig
 from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
+from .permissions import Permission, Principal
 from .results import ProtocolError, ResultError, ResultService
 
 
@@ -40,17 +40,23 @@ _DATE_FIELDS = frozenset({"created", "updated", "closed"})
 def _date_sort_key(value: Any) -> str:
     """Order RFC3339 instants without losing the owner's nanoseconds."""
     try:
-        match = re.fullmatch(
-            r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})",
-            value,
-        ) if isinstance(value, str) else None
+        match = (
+            re.fullmatch(
+                r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,9}))?(Z|[+-]\d{2}:\d{2})",
+                value,
+            )
+            if isinstance(value, str)
+            else None
+        )
         if match is None:
             raise ValueError("not a zoned RFC3339 timestamp")
         instant = datetime.fromisoformat(match[1] + match[3]).astimezone(timezone.utc)
         seconds = instant.isoformat(timespec="seconds")[:-6]
         return seconds + "." + (match[2] or "").ljust(9, "0") + "Z"
     except (ValueError, OverflowError) as error:
-        raise BeadsError("Beads returned an invalid task timestamp", "owner_failed") from error
+        raise BeadsError(
+            "Beads returned an invalid task timestamp", "owner_failed"
+        ) from error
 
 
 class BeadsService:
@@ -556,28 +562,58 @@ class BeadsService:
             database = sqlite3.connect(Path(scratch) / "rows.sqlite")
             try:
                 return self._collect_query_pages(
-                    database, projects, key, page_limit, view, filters,
-                    expression, native_filters, order, includes, at, projection,
-                    aggregate, coverage, revisions, temporals,
+                    database,
+                    projects,
+                    key,
+                    page_limit,
+                    view,
+                    filters,
+                    expression,
+                    native_filters,
+                    order,
+                    includes,
+                    at,
+                    projection,
+                    aggregate,
+                    coverage,
+                    revisions,
+                    temporals,
                 )
             finally:
                 database.close()
 
     def _collect_query_pages(
-        self, database: sqlite3.Connection, projects: list[str],
-        key: str, page_limit: int, view: str, filters: Mapping[str, Any] | None,
-        expression: str | None, native_filters: Mapping[str, Any] | None,
-        order: Mapping[str, Any] | None, includes: list[str] | None,
-        at: str | None, projection: str, aggregate: Mapping[str, Any] | None,
-        coverage: dict[str, Any], revisions: dict[str, str],
+        self,
+        database: sqlite3.Connection,
+        projects: list[str],
+        key: str,
+        page_limit: int,
+        view: str,
+        filters: Mapping[str, Any] | None,
+        expression: str | None,
+        native_filters: Mapping[str, Any] | None,
+        order: Mapping[str, Any] | None,
+        includes: list[str] | None,
+        at: str | None,
+        projection: str,
+        aggregate: Mapping[str, Any] | None,
+        coverage: dict[str, Any],
+        revisions: dict[str, str],
         temporals: dict[str, Any],
     ) -> dict[str, Any]:
         database.execute(
             "CREATE TABLE rows (seq INTEGER PRIMARY KEY, project TEXT, bead_id TEXT, "
             "present INTEGER, sort_value, body TEXT)"
         )
-        field = (order or {}).get("field", "updated" if view == "recent" else "priority")
-        column = {"type": "issue_type", "created": "created_at", "updated": "updated_at", "closed": "closed_at"}.get(field, field)
+        field = (order or {}).get(
+            "field", "updated" if view == "recent" else "priority"
+        )
+        column = {
+            "type": "issue_type",
+            "created": "created_at",
+            "updated": "updated_at",
+            "closed": "closed_at",
+        }.get(field, field)
         for project_id in sorted(projects):
             try:
                 database.execute("SAVEPOINT project_read")
@@ -586,39 +622,77 @@ class BeadsService:
                 revision = None
                 returned = 0
                 while True:
-                    owner = self._run(project, ["owner", "read"], False, payload={
-                        "view": view,
-                        "filters": filters or {},
-                        "native_filters": native_filters or {},
-                        "order": order or {},
-                        "include": includes or [],
-                        "limit": _MAX_PAGE,
-                        "offset": offset,
-                        "projection": projection,
-                        **({"expression": expression} if expression else {}),
-                        **({"at": at} if at else {}),
-                        **({"aggregate": aggregate} if aggregate is not None else {}),
-                    })
+                    owner = self._run(
+                        project,
+                        ["owner", "read"],
+                        False,
+                        payload={
+                            "view": view,
+                            "filters": filters or {},
+                            "native_filters": native_filters or {},
+                            "order": order or {},
+                            "include": includes or [],
+                            "limit": _MAX_PAGE,
+                            "offset": offset,
+                            "projection": projection,
+                            **({"expression": expression} if expression else {}),
+                            **({"at": at} if at else {}),
+                            **(
+                                {"aggregate": aggregate}
+                                if aggregate is not None
+                                else {}
+                            ),
+                        },
+                    )
                     if revision is not None and owner["revision"] != revision:
-                        raise BeadsError("Beads changed during paged read", "source_changed")
+                        raise BeadsError(
+                            "Beads changed during paged read", "source_changed"
+                        )
                     revision = owner["revision"]
                     native_rows = owner["items"]
-                    if not isinstance(native_rows, list) or (owner["has_more"] and not native_rows):
-                        raise BeadsError("Beads returned an invalid page", "owner_failed")
+                    if not isinstance(native_rows, list) or (
+                        owner["has_more"] and not native_rows
+                    ):
+                        raise BeadsError(
+                            "Beads returned an invalid page", "owner_failed"
+                        )
                     for row in native_rows:
                         normalized = (
-                            {"project_id": project_id, "fields": row, "task_revision": revision}
-                            if aggregate is not None else
-                            {**self._normalize(project_id, row, revision), "includes": row.get("includes", {})}
+                            {
+                                "project_id": project_id,
+                                "fields": row,
+                                "task_revision": revision,
+                            }
+                            if aggregate is not None
+                            else {
+                                **self._normalize(project_id, row, revision),
+                                "includes": row.get("includes", {}),
+                            }
                         )
-                        value = normalized["id"] if field == "id" and aggregate is None else normalized["fields"].get(column)
-                        if aggregate is None and field in _DATE_FIELDS and value is not None:
+                        value = (
+                            normalized["id"]
+                            if field == "id" and aggregate is None
+                            else normalized["fields"].get(column)
+                        )
+                        if (
+                            aggregate is None
+                            and field in _DATE_FIELDS
+                            and value is not None
+                        ):
                             value = _date_sort_key(value)
                         database.execute(
                             "INSERT INTO rows (project, bead_id, present, sort_value, body) VALUES (?, ?, ?, ?, ?)",
-                            (project_id, normalized.get("id", ""), int(value is not None),
-                             value if isinstance(value, (int, float, str)) else str(value) if value is not None else "",
-                             json.dumps(normalized, separators=(",", ":"))),
+                            (
+                                project_id,
+                                normalized.get("id", ""),
+                                int(value is not None),
+                                value
+                                if isinstance(value, (int, float, str))
+                                else str(value)
+                                if value is not None
+                                else "",
+                                json.dumps(normalized, separators=(",", ":")),
+                            ),
                         )
                     returned += len(native_rows)
                     offset += len(native_rows)
@@ -643,7 +717,10 @@ class BeadsService:
             except BeadsError as exc:
                 database.execute("ROLLBACK TO SAVEPOINT project_read")
                 database.execute("RELEASE SAVEPOINT project_read")
-                if exc.code in {"invalid_request", "source_changed"} and project_id in self.config.projects:
+                if (
+                    exc.code in {"invalid_request", "source_changed"}
+                    and project_id in self.config.projects
+                ):
                     raise
                 coverage[project_id] = {
                     "state": "partial",
@@ -656,7 +733,9 @@ class BeadsService:
                 (order or {}).get("reverse", False)
             )
             direction = "DESC" if reverse else "ASC"
-            ordering = f"present {direction}, sort_value {direction}, project ASC, bead_id ASC"
+            ordering = (
+                f"present {direction}, sort_value {direction}, project ASC, bead_id ASC"
+            )
         else:
             ordering = "seq ASC"
         total_rows = database.execute("SELECT COUNT(*) FROM rows").fetchone()[0]
@@ -696,9 +775,17 @@ class BeadsService:
             json.dumps(revisions, sort_keys=True).encode()
         ).hexdigest()
         page_rows, page = self._snapshot_page(
-            key, revision_key,
-            (json.loads(body) for (body,) in database.execute(f"SELECT body FROM rows ORDER BY {ordering}")),
-            page_limit, None, metadata
+            key,
+            revision_key,
+            (
+                json.loads(body)
+                for (body,) in database.execute(
+                    f"SELECT body FROM rows ORDER BY {ordering}"
+                )
+            ),
+            page_limit,
+            None,
+            metadata,
         )
         page.pop("metadata")
         return {"kind": "bead_query", "items": page_rows, "page": page, **metadata}

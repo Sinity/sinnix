@@ -17,9 +17,9 @@ from typing import Any, Mapping, get_args
 from sinnix_lib.atomic import atomic_publish
 
 from .artifacts import ArtifactService
-from .permissions import Permission, Principal
 from .config import GatewayConfig
 from .payloads import canonical_chunks, canonical_size, retain_json
+from .permissions import Permission, Principal
 from .schemas import StableErrorCode, V2ToolEnvelope
 
 # `StableErrorCode` types `V2Error.code`, so it is the enum the published
@@ -119,7 +119,9 @@ def _normalized_json_keys(value: Any, active: set[int] | None = None) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     if not isinstance(value, (dict, list, tuple)):
-        raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
+        raise TypeError(
+            f"Object of type {type(value).__name__} is not JSON serializable"
+        )
     active = set() if active is None else active
     identity = id(value)
     if identity in active:
@@ -197,9 +199,16 @@ class ResultSnapshotWriter:
         # Read the retained bytes on demand; presentation cannot mutate them.
         if self.handle is not None and not self.handle.closed:
             self.handle.flush()
-        directory = self.service.snapshots_root / self.snapshot_id if self.published else self.directory
+        directory = (
+            self.service.snapshots_root / self.snapshot_id
+            if self.published
+            else self.directory
+        )
         with (directory / "rows.jsonl").open("rb") as handle:
-            return [json.loads(line) for line in islice(handle, min(self.page_size, self.row_count))]
+            return [
+                json.loads(line)
+                for line in islice(handle, min(self.page_size, self.row_count))
+            ]
 
     def append(self, row: Any) -> None:
         if self.closed:
@@ -224,7 +233,9 @@ class ResultSnapshotWriter:
             except BaseException:
                 self.abort()
                 raise
-            raise ResultError("JSONL owner row is not serializable", "owner_failed") from exc
+            raise ResultError(
+                "JSONL owner row is not serializable", "owner_failed"
+            ) from exc
         except BaseException:
             self.abort()
             raise

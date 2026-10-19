@@ -135,18 +135,53 @@ def test_job_review_rejects_another_launch(tmp_path, monkeypatch):
     assert "wrong output" not in str(response)
 
 
-def test_oversized_orientation_uses_owner_projection_and_retains_exact_snapshot(tmp_path, monkeypatch):
+def test_oversized_orientation_uses_owner_projection_and_retains_exact_snapshot(
+    tmp_path, monkeypatch
+):
     import json
-    from sinnix_agent_gateway.contexts import canonical_bytes
     from functools import partial
+
     import test_actions_jobs
     from sinnix_agent_gateway.config import GatewayConfig
-    monkeypatch.setattr(test_actions_jobs, "GatewayConfig", partial(GatewayConfig, max_result_bytes=16384))
+    from sinnix_agent_gateway.contexts import canonical_bytes
+
+    monkeypatch.setattr(
+        test_actions_jobs,
+        "GatewayConfig",
+        partial(GatewayConfig, max_result_bytes=16384),
+    )
     server, runtime, _ = make_server(tmp_path, "operator", monkeypatch, with_git=True)
-    projection = {"product": "project_context_compact", "outcome": "partial", "components": [{"name": "tasks", "status": "available", "full_data_pointer": "/components/0/data", "sections": {"work": {"items": [{"id": "fixture-1"}], "observed_count": 100, "omitted_count": 99}}}]}
-    product = {"outcome": "partial", "components": [{"name": "tasks", "data": {"description": "original bytes " * 20000}}], "presentation": projection}
+    projection = {
+        "product": "project_context_compact",
+        "outcome": "partial",
+        "components": [
+            {
+                "name": "tasks",
+                "status": "available",
+                "full_data_pointer": "/components/0/data",
+                "sections": {
+                    "work": {
+                        "items": [{"id": "fixture-1"}],
+                        "observed_count": 100,
+                        "omitted_count": 99,
+                    }
+                },
+            }
+        ],
+    }
+    product = {
+        "outcome": "partial",
+        "components": [
+            {"name": "tasks", "data": {"description": "original bytes " * 20000}}
+        ],
+        "presentation": projection,
+    }
     runtime.mcp_broker = Broker({"ok": True, "data": product})
-    response = call(server, "context.compose", {"intent": "project.orientation", "project": {"project": "fixture"}})
+    response = call(
+        server,
+        "context.compose",
+        {"intent": "project.orientation", "project": {"project": "fixture"}},
+    )
     assert response["result"]["outcome"] == "ok", response
     value = response["data"]
     assert "truncated" not in value
@@ -160,22 +195,42 @@ def test_oversized_orientation_uses_owner_projection_and_retains_exact_snapshot(
     saved = runtime.results.read(value["snapshot_ref"].rsplit("/", 1)[1])["rows"][0]
     assert saved["components"][0]["data"]["data"] == product
     # Retrieve the same immutable observation through the public route.
-    from sinnix_agent_gateway.actions import audit
     from sinnix_agent_gateway import server as server_module
+    from sinnix_agent_gateway.actions import audit
     from test_actions_jobs import OWNED
-    monkeypatch.setattr(server_module, "visible_actions", lambda principal: (*OWNED, *audit.ACTIONS))
+
+    monkeypatch.setattr(
+        server_module, "visible_actions", lambda principal: (*OWNED, *audit.ACTIONS)
+    )
     from sinnix_agent_gateway.app import create_server
+
     server = create_server(runtime.config, "operator")
     page = call(server, "results.get", {"ref": value["snapshot_ref"]})
     assert page["result"]["outcome"] == "ok", page
 
 
-@pytest.mark.parametrize("presentation", [None, {"product": "project_context_compact", "outcome": "unavailable", "components": []}])
-def test_unusable_oversized_orientation_is_explicitly_unavailable(tmp_path, monkeypatch, presentation):
+@pytest.mark.parametrize(
+    "presentation",
+    [
+        None,
+        {
+            "product": "project_context_compact",
+            "outcome": "unavailable",
+            "components": [],
+        },
+    ],
+)
+def test_unusable_oversized_orientation_is_explicitly_unavailable(
+    tmp_path, monkeypatch, presentation
+):
     server, runtime, _ = make_server(tmp_path, "operator", monkeypatch, with_git=True)
     product = {"components": [{"data": "界" * 200000}], "presentation": presentation}
     runtime.mcp_broker = Broker({"ok": True, "data": product})
-    response = call(server, "context.compose", {"intent": "project.orientation", "project": {"project": "fixture"}})
+    response = call(
+        server,
+        "context.compose",
+        {"intent": "project.orientation", "project": {"project": "fixture"}},
+    )
     assert response["result"]["outcome"] == "ok", response
     assert response["data"]["availability"] == "unavailable"
     component = response["data"]["components"][0]
@@ -183,20 +238,52 @@ def test_unusable_oversized_orientation_is_explicitly_unavailable(tmp_path, monk
     assert component["presentation"] == "unavailable"
     assert component["inline_omitted"]
     assert component["data"] is None
-    saved = runtime.results.read(response["data"]["snapshot_ref"].rsplit("/", 1)[1])["rows"][0]
+    saved = runtime.results.read(response["data"]["snapshot_ref"].rsplit("/", 1)[1])[
+        "rows"
+    ][0]
     assert saved["components"][0]["status"] == "available"
     assert saved["components"][0]["data"]["data"] == product
 
 
-def test_projects_context_uses_the_same_compact_component_contract(tmp_path, monkeypatch):
-    from sinnix_agent_gateway.actions import projects
+def test_projects_context_uses_the_same_compact_component_contract(
+    tmp_path, monkeypatch
+):
     from sinnix_agent_gateway import server as server_module
+    from sinnix_agent_gateway.actions import projects
     from sinnix_agent_gateway.app import create_server
     from test_actions_jobs import OWNED
+
     _, runtime, _ = make_server(tmp_path, "operator", monkeypatch, with_git=True)
-    projection = {"product": "project_context_compact", "outcome": "partial", "components": [{"name": "tasks", "status": "available", "sections": {"work": {"items": [{"id": "fixture-1"}], "observed_count": 1, "omitted_count": 0}}}]}
-    runtime.mcp_broker = Broker({"ok": True, "data": {"outcome": "partial", "evidence": "fixture" * 100000, "presentation": projection}})
-    monkeypatch.setattr(server_module, "visible_actions", lambda principal: (*OWNED, *projects.ACTIONS))
+    projection = {
+        "product": "project_context_compact",
+        "outcome": "partial",
+        "components": [
+            {
+                "name": "tasks",
+                "status": "available",
+                "sections": {
+                    "work": {
+                        "items": [{"id": "fixture-1"}],
+                        "observed_count": 1,
+                        "omitted_count": 0,
+                    }
+                },
+            }
+        ],
+    }
+    runtime.mcp_broker = Broker(
+        {
+            "ok": True,
+            "data": {
+                "outcome": "partial",
+                "evidence": "fixture" * 100000,
+                "presentation": projection,
+            },
+        }
+    )
+    monkeypatch.setattr(
+        server_module, "visible_actions", lambda principal: (*OWNED, *projects.ACTIONS)
+    )
     server = create_server(runtime.config, "operator")
     response = call(server, "projects.context", {"target": {"project": "fixture"}})
     assert response["result"]["outcome"] == "ok", response
@@ -208,26 +295,42 @@ def test_projects_context_uses_the_same_compact_component_contract(tmp_path, mon
     assert value["project_id"] == "fixture"
 
 
-def test_project_wrapper_metadata_cannot_hide_orientation_in_an_artifact(tmp_path, monkeypatch):
+def test_project_wrapper_metadata_cannot_hide_orientation_in_an_artifact(
+    tmp_path, monkeypatch
+):
     from functools import partial
+
     import test_actions_jobs
-    from sinnix_agent_gateway.config import GatewayConfig
-    from sinnix_agent_gateway.actions import projects
     from sinnix_agent_gateway import server as server_module
+    from sinnix_agent_gateway.actions import projects
     from sinnix_agent_gateway.app import create_server
+    from sinnix_agent_gateway.config import GatewayConfig
     from sinnix_agent_gateway.contexts import canonical_bytes
     from test_actions_jobs import OWNED
-    monkeypatch.setattr(test_actions_jobs, "GatewayConfig", partial(GatewayConfig, max_result_bytes=16384))
+
+    monkeypatch.setattr(
+        test_actions_jobs,
+        "GatewayConfig",
+        partial(GatewayConfig, max_result_bytes=16384),
+    )
     _, runtime, _ = make_server(tmp_path, "operator", monkeypatch, with_git=True)
-    projection = {"product": "project_context_compact", "outcome": "ok", "components": [{"name": "tasks", "status": "available"}]}
+    projection = {
+        "product": "project_context_compact",
+        "outcome": "ok",
+        "components": [{"name": "tasks", "status": "available"}],
+    }
     product = {"outcome": "ok", "evidence": "", "presentation": projection}
     runtime.mcp_broker = Broker({"ok": True, "data": product})
-    monkeypatch.setattr(server_module, "visible_actions", lambda principal: (*OWNED, *projects.ACTIONS))
+    monkeypatch.setattr(
+        server_module, "visible_actions", lambda principal: (*OWNED, *projects.ACTIONS)
+    )
     server = create_server(runtime.config, "operator")
     arguments = {"intent": "project.orientation", "project": {"project": "fixture"}}
     initial = call(server, "context.compose", arguments)
     assert initial["result"]["outcome"] == "ok", initial
-    product["evidence"] = "x" * (16384 - 4096 - len(canonical_bytes(initial["data"])) - 16)
+    product["evidence"] = "x" * (
+        16384 - 4096 - len(canonical_bytes(initial["data"])) - 16
+    )
     composed = call(server, "context.compose", arguments)
     assert composed["data"]["components"][0]["presentation"] == "full"
     response = call(server, "projects.context", {"target": {"project": "fixture"}})
@@ -238,27 +341,44 @@ def test_project_wrapper_metadata_cannot_hide_orientation_in_an_artifact(tmp_pat
 
 
 @pytest.mark.parametrize("available", [True, False])
-def test_oversized_context_metadata_spills_complete_original_without_refusal(tmp_path, monkeypatch, available):
+def test_oversized_context_metadata_spills_complete_original_without_refusal(
+    tmp_path, monkeypatch, available
+):
     import base64
     import hashlib
     import json
     from functools import partial
+
     import test_actions_jobs
     from sinnix_agent_gateway.config import GatewayConfig
 
-    monkeypatch.setattr(test_actions_jobs, "GatewayConfig", partial(GatewayConfig, max_result_bytes=16384))
+    monkeypatch.setattr(
+        test_actions_jobs,
+        "GatewayConfig",
+        partial(GatewayConfig, max_result_bytes=16384),
+    )
     server, runtime, _ = make_server(tmp_path, "operator", monkeypatch, with_git=True)
     reason = "complete metadata 界" * 2000
-    observation = {"available": available, "reason": reason, "coverage": {"complete": False}}
+    observation = {
+        "available": available,
+        "reason": reason,
+        "coverage": {"complete": False},
+    }
     monkeypatch.setattr(runtime.observe, "machine_query", lambda operation: observation)
-    response = call(server, "context.compose", {"intent": "incident", "project": {"project": "fixture"}})
+    response = call(
+        server,
+        "context.compose",
+        {"intent": "incident", "project": {"project": "fixture"}},
+    )
     assert response["result"]["outcome"] == "ok", response
     assert len(json.dumps(response, ensure_ascii=False).encode()) <= 16384
     artifact = response["data"]["artifact"]
     chunks = []
     offset = 0
     while offset is not None:
-        page = runtime.artifacts.read(artifact["artifact_id"], offset=offset, max_bytes=4096)
+        page = runtime.artifacts.read(
+            artifact["artifact_id"], offset=offset, max_bytes=4096
+        )
         chunks.append(base64.b64decode(page["base64"]))
         offset = page["next_offset"]
     original = b"".join(chunks)
@@ -276,30 +396,69 @@ def test_oversized_context_metadata_spills_complete_original_without_refusal(tmp
 def test_presentation_size_preserves_typed_defaults_and_any_serialization(kind):
     from dataclasses import dataclass
     from datetime import date
+
     from pydantic import BaseModel
-    from sinnix_agent_gateway.actions.contexts import ComposedContext, _presentation_size
+    from sinnix_agent_gateway.actions.contexts import (
+        ComposedContext,
+        _presentation_size,
+    )
     from sinnix_agent_gateway.contexts import canonical_bytes
+
     class Model(BaseModel):
         label: str
+
     @dataclass
     class Record:
         label: str
-    data = {"native": {"rows": ["界", (True, None)]}, "model": Model(label="界"),
-            "dataclass": Record(label="界"), "date": date(2026, 1, 1)}[kind]
-    context = {"ref": "fixture", "intent": "project.orientation", "target_ref": "fixture",
-               "snapshot_ref": "snapshot", "total_budget_bytes": 4096,
-               "components": [{"name": "fixture", "status": "available", "snapshot_ref": "snapshot", "data": data}]}
-    expected = len(canonical_bytes(ComposedContext.model_validate(context).model_dump()))
+
+    data = {
+        "native": {"rows": ["界", (True, None)]},
+        "model": Model(label="界"),
+        "dataclass": Record(label="界"),
+        "date": date(2026, 1, 1),
+    }[kind]
+    context = {
+        "ref": "fixture",
+        "intent": "project.orientation",
+        "target_ref": "fixture",
+        "snapshot_ref": "snapshot",
+        "total_budget_bytes": 4096,
+        "components": [
+            {
+                "name": "fixture",
+                "status": "available",
+                "snapshot_ref": "snapshot",
+                "data": data,
+            }
+        ],
+    }
+    expected = len(
+        canonical_bytes(ComposedContext.model_validate(context).model_dump())
+    )
     assert _presentation_size(context) == expected
 
 
 def test_context_budget_does_not_copy_complete_native_owner_tree():
     import tracemalloc
+
     from sinnix_agent_gateway.actions.contexts import _within_budget
+
     data = {"rows": ["x" * 64] * 100000}
-    context = {"ref": "fixture", "intent": "project.orientation", "target_ref": "fixture",
-               "snapshot_ref": "snapshot", "total_budget_bytes": 4096,
-               "components": [{"name": "fixture", "status": "available", "snapshot_ref": "snapshot", "data": data}]}
+    context = {
+        "ref": "fixture",
+        "intent": "project.orientation",
+        "target_ref": "fixture",
+        "snapshot_ref": "snapshot",
+        "total_budget_bytes": 4096,
+        "components": [
+            {
+                "name": "fixture",
+                "status": "available",
+                "snapshot_ref": "snapshot",
+                "data": data,
+            }
+        ],
+    }
     tracemalloc.start()
     try:
         result = _within_budget(context)

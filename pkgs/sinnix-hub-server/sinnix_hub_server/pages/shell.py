@@ -467,7 +467,9 @@ def nav(active: str, reports_port: int | None) -> str:
             if type(reports_port) is not int or not 1 <= reports_port <= 65535:
                 continue
             target = f"http://127.0.0.1:{reports_port}/reports/"
-            items += f'<a data-port="{reports_port}" href="{esc(target)}">{esc(label)}</a>'
+            items += (
+                f'<a data-port="{reports_port}" href="{esc(target)}">{esc(label)}</a>'
+            )
         else:
             items += f'<a href="{esc(href)}" class="{"on" if href == active else ""}">{esc(label)}</a>'
 

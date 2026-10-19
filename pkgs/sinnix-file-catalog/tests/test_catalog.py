@@ -429,12 +429,16 @@ def test_supplied_sha256_requires_full_hex_digest_without_mutating_catalog(tmp_p
     before = catalog.read_bytes()
     identity = runpy.run_path(str(SCRIPT))["identity"](payload)
     for digest in ("", "a" * 12, "a" * 63, "a" * 65, "g" * 64, "a" * 63 + "\n"):
-        result = import_rows(catalog, [observation(payload, identity={**identity, "sha256": digest})])
+        result = import_rows(
+            catalog, [observation(payload, identity={**identity, "sha256": digest})]
+        )
         assert result.returncode == 2, (digest, result.stderr)
         assert "64 hexadecimal" in result.stderr
         assert catalog.read_bytes() == before
     digest = "aB" * 32
-    result = import_rows(catalog, [observation(payload, identity={**identity, "sha256": digest})])
+    result = import_rows(
+        catalog, [observation(payload, identity={**identity, "sha256": digest})]
+    )
     assert result.returncode == 0, result.stderr
     assert assets(catalog)[0]["identity"]["sha256"] == digest
 
@@ -464,8 +468,9 @@ def test_invalid_utf8_catalog_is_rejected_without_rewriting_input(tmp_path):
     assert catalog.read_bytes() == b"\xff"
 
 
-
-def test_denied_import_keeps_the_access_error_and_catalog(tmp_path, monkeypatch, capsys):
+def test_denied_import_keeps_the_access_error_and_catalog(
+    tmp_path, monkeypatch, capsys
+):
     import runpy
 
     catalog = tmp_path / "catalog.json"
@@ -500,7 +505,9 @@ def test_nonregular_catalog_fails_promptly(tmp_path):
     os.mkfifo(catalog)
     result = subprocess.run(
         [str(SCRIPT), "--catalog", str(catalog), "coverage"],
-        text=True, capture_output=True, timeout=2,
+        text=True,
+        capture_output=True,
+        timeout=2,
     )
     assert result.returncode == 2
     assert "regular file" in result.stderr
@@ -541,7 +548,9 @@ else:
 """
     result = subprocess.run(
         [sys.executable, "-c", probe, str(source)],
-        capture_output=True, text=True, timeout=2,
+        capture_output=True,
+        text=True,
+        timeout=2,
     )
     assert result.returncode == 0, result.stderr
 
@@ -550,14 +559,18 @@ def test_nonregular_import_preserves_authored_catalog(tmp_path):
     import os
 
     catalog = tmp_path / "catalog.json"
-    original = json.dumps({"schema_version": 1, "updated_at": "2026-01-01", "assets": []}).encode()
+    original = json.dumps(
+        {"schema_version": 1, "updated_at": "2026-01-01", "assets": []}
+    ).encode()
     catalog.write_bytes(original)
     assert invoke(catalog, "coverage").returncode == 0
     source = tmp_path / "observations.fifo"
     os.mkfifo(source)
     result = subprocess.run(
         [str(SCRIPT), "--catalog", str(catalog), "import", str(source)],
-        text=True, capture_output=True, timeout=2,
+        text=True,
+        capture_output=True,
+        timeout=2,
     )
     assert result.returncode == 2
     assert "regular file" in result.stderr

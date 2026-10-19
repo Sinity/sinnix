@@ -14,9 +14,9 @@ from sinnix_agent_gateway.action import Action, MutationControls, RequestControl
 from sinnix_agent_gateway.actions import BY_NAME as ACTIONS
 from sinnix_agent_gateway.app import Runtime
 from sinnix_agent_gateway.audit import AuditService
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.contracts import VerbFamily
+from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.results import (
     EXPECTED_ERROR_CODES,
     ProtocolError,
@@ -681,69 +681,108 @@ def test_snapshot_page_refuses_corrupt_offset_index(tmp_path) -> None:
         results.continue_snapshot(cursor, query_sha256=query_sha)
 
 
-
 def test_snapshot_first_page_matches_serialized_rows_after_nested_mutation(tmp_path):
     results = ResultService(config(tmp_path), Principal.for_name("operator"))
-    writer = results.start_snapshot(query_sha256="query", source_revision="source", page_size=1)
+    writer = results.start_snapshot(
+        query_sha256="query", source_revision="source", page_size=1
+    )
     row = {"nested": {"values": [1, 2]}}
     writer.append(row)
     row["nested"]["values"].append(3)
-    exposed = writer.first_page; exposed[0]["nested"]["values"].append(4)
+    exposed = writer.first_page
+    exposed[0]["nested"]["values"].append(4)
     first = results.finish_snapshot(writer)
     snapshot = results.snapshots_root / writer.snapshot_id
-    assert first["rows"] == [json.loads((snapshot / "rows.jsonl").read_text())] == [{"nested": {"values": [1, 2]}}]
+    assert (
+        first["rows"]
+        == [json.loads((snapshot / "rows.jsonl").read_text())]
+        == [{"nested": {"values": [1, 2]}}]
+    )
     first["rows"][0]["nested"]["values"].append(5)
     assert writer.first_page == [{"nested": {"values": [1, 2]}}]
 
 
-@pytest.mark.parametrize("stage", ["rows_fsync", "offsets_fsync", "metadata", "rename", "parent_fsync"])
-def test_snapshot_failure_finalizes_resources_and_preserves_commit(tmp_path, monkeypatch, stage):
+@pytest.mark.parametrize(
+    "stage", ["rows_fsync", "offsets_fsync", "metadata", "rename", "parent_fsync"]
+)
+def test_snapshot_failure_finalizes_resources_and_preserves_commit(
+    tmp_path, monkeypatch, stage
+):
     import os
+
     import sinnix_agent_gateway.results as module
+
     results = ResultService(config(tmp_path), Principal.for_name("operator"))
-    writer = results.start_snapshot(query_sha256="query", source_revision="source", page_size=1)
+    writer = results.start_snapshot(
+        query_sha256="query", source_revision="source", page_size=1
+    )
     writer.append({"neutral": "row"})
     destination = results.snapshots_root / writer.snapshot_id
     original_sync, original_replace = os.fsync, os.replace
     row_fd, offset_fd = writer.handle.fileno(), writer.offsets_handle.fileno()
     fired = []
+
     def fsync(fd):
-        should_fail = ((stage == "rows_fsync" and fd == row_fd and not writer.handle.closed)
-                       or (stage == "offsets_fsync" and fd == offset_fd and not writer.offsets_handle.closed)
-                       or (stage == "parent_fsync" and destination.exists()))
+        should_fail = (
+            (stage == "rows_fsync" and fd == row_fd and not writer.handle.closed)
+            or (
+                stage == "offsets_fsync"
+                and fd == offset_fd
+                and not writer.offsets_handle.closed
+            )
+            or (stage == "parent_fsync" and destination.exists())
+        )
         if should_fail and not fired:
-            fired.append(stage); raise OSError("synthetic " + stage)
+            fired.append(stage)
+            raise OSError("synthetic " + stage)
         return original_sync(fd)
+
     def replace(source, target, **kwargs):
         if stage == "rename" and Path(source) == writer.directory:
-            fired.append(stage); raise OSError("synthetic rename")
+            fired.append(stage)
+            raise OSError("synthetic rename")
         return original_replace(source, target, **kwargs)
+
     monkeypatch.setattr(os, "fsync", fsync)
     monkeypatch.setattr(os, "replace", replace)
     if stage == "metadata":
-        def failed(*args, **kwargs): fired.append(stage); raise OSError("synthetic metadata")
+
+        def failed(*args, **kwargs):
+            fired.append(stage)
+            raise OSError("synthetic metadata")
+
         monkeypatch.setattr(module, "atomic_publish", failed)
     with pytest.raises(OSError, match="synthetic"):
         writer.finish()
     assert fired, "fault did not reach its intended stage"
-    writer.abort(); writer.abort()
+    writer.abort()
+    writer.abort()
     assert writer.handle.closed and writer.offsets_handle.closed
     assert not writer.directory.exists()
     assert destination.exists() == (stage == "parent_fsync")
     if destination.exists():
-        assert json.loads((destination / "rows.jsonl").read_text()) == {"neutral": "row"}
+        assert json.loads((destination / "rows.jsonl").read_text()) == {
+            "neutral": "row"
+        }
         assert (destination / "metadata.json").is_file()
 
 
 @pytest.mark.parametrize("attribute", ["handle", "offsets_handle"])
 def test_close_failure_still_closes_both_snapshot_resources(tmp_path, attribute):
     results = ResultService(config(tmp_path), Principal.for_name("operator"))
-    writer = results.start_snapshot(query_sha256="query", source_revision="source", page_size=1)
+    writer = results.start_snapshot(
+        query_sha256="query", source_revision="source", page_size=1
+    )
     writer.append({"neutral": True})
     original = getattr(writer, attribute)
+
     class Fault:
-        def __getattr__(self, name): return getattr(original, name)
-        def close(self): raise OSError("synthetic close failure")
+        def __getattr__(self, name):
+            return getattr(original, name)
+
+        def close(self):
+            raise OSError("synthetic close failure")
+
     setattr(writer, attribute, Fault())
     with pytest.raises(OSError, match="synthetic close"):
         writer.finish()
@@ -751,34 +790,53 @@ def test_close_failure_still_closes_both_snapshot_resources(tmp_path, attribute)
     assert not writer.directory.exists()
 
 
-def test_second_resource_open_failure_does_not_leak_first_resource_or_stage(tmp_path, monkeypatch):
+def test_second_resource_open_failure_does_not_leak_first_resource_or_stage(
+    tmp_path, monkeypatch
+):
     results = ResultService(config(tmp_path), Principal.for_name("operator"))
-    original = Path.open; opened = []
+    original = Path.open
+    opened = []
+
     def open_file(path, *args, **kwargs):
-        if path.name == "offsets.bin": raise OSError("synthetic second open")
+        if path.name == "offsets.bin":
+            raise OSError("synthetic second open")
         handle = original(path, *args, **kwargs)
-        if path.name == "rows.jsonl": opened.append(handle)
+        if path.name == "rows.jsonl":
+            opened.append(handle)
         return handle
+
     monkeypatch.setattr(Path, "open", open_file)
     with pytest.raises(OSError, match="synthetic second open"):
-        results.start_snapshot(query_sha256="query", source_revision="source", page_size=1)
+        results.start_snapshot(
+            query_sha256="query", source_revision="source", page_size=1
+        )
     assert opened and all(handle.closed for handle in opened)
     assert not list(results.snapshots_root.glob("*.writing"))
 
 
-@pytest.mark.parametrize("payload", [
-    None, {"unicode": "界\n😀", "nested": [True, False, None, 1.25]},
-    {2: "two", 10: "ten"}, [float("nan"), float("inf"), -0.0], ("a", "b"),
-])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,
+        {"unicode": "界\n😀", "nested": [True, False, None, 1.25]},
+        {2: "two", 10: "ten"},
+        [float("nan"), float("inf"), -0.0],
+        ("a", "b"),
+    ],
+)
 def test_frame_size_matches_canonical_json(payload):
-    from sinnix_agent_gateway.results import _canonical
     from sinnix_agent_gateway.payloads import canonical_size
+    from sinnix_agent_gateway.results import _canonical
+
     assert canonical_size(payload) == len(_canonical(payload))
 
 
 def test_oversized_frame_count_avoids_full_serialized_copy(tmp_path):
     import tracemalloc
-    results = ResultService(config(tmp_path, max_result_bytes=4096), Principal.for_name("operator"))
+
+    results = ResultService(
+        config(tmp_path, max_result_bytes=4096), Principal.for_name("operator")
+    )
     payload = {"rows": ["x" * 64] * 100000}
     tracemalloc.start()
     try:
@@ -793,19 +851,25 @@ def test_oversized_frame_count_avoids_full_serialized_copy(tmp_path):
 
 
 def test_oversized_prefix_does_not_hide_invalid_json_tail(tmp_path):
-    results = ResultService(config(tmp_path, max_result_bytes=4096), Principal.for_name("operator"))
+    results = ResultService(
+        config(tmp_path, max_result_bytes=4096), Principal.for_name("operator")
+    )
     with pytest.raises(ResultError) as refusal:
         results.require_payload_bound(["x" * 64] * 10000 + [object()])
     assert refusal.value.failure_class == "owner_failed"
 
 
-@pytest.mark.parametrize("payload", [
-    {"rows": ["界\n😀", True, None, {"x": 1.25}]},
-    {"nested": [{2: "two", 10: "ten"}, ("a", {False: "no", True: "yes"})]},
-    {float("inf"): "infinite", float("nan"): "not a number"},
-])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"rows": ["界\n😀", True, None, {"x": 1.25}]},
+        {"nested": [{2: "two", 10: "ten"}, ("a", {False: "no", True: "yes"})]},
+        {float("inf"): "infinite", float("nan"): "not a number"},
+    ],
+)
 def test_digest_preserves_json_roundtrip_semantics_without_mutating_input(payload):
     from sinnix_agent_gateway.results import _canonical
+
     envelope = {"result": {"sha256": "old", "id": "fixture"}, "data": payload}
     before = _canonical(envelope)
     predecessor = json.loads(before)
@@ -817,6 +881,7 @@ def test_digest_preserves_json_roundtrip_semantics_without_mutating_input(payloa
 
 def test_digest_avoids_copying_complete_row_payload():
     import tracemalloc
+
     envelope = {"result": {"sha256": "old"}, "data": {"rows": ["x" * 64] * 100000}}
     tracemalloc.start()
     try:
@@ -845,8 +910,11 @@ def test_digest_keeps_circular_and_ignored_field_validation():
 
 def test_snapshot_streams_large_row_without_retaining_first_page_bytes(tmp_path):
     import tracemalloc
+
     results = ResultService(config(tmp_path), Principal.for_name("operator"))
-    writer = results.start_snapshot(query_sha256="query", source_revision="source", page_size=1)
+    writer = results.start_snapshot(
+        query_sha256="query", source_revision="source", page_size=1
+    )
     row = {"rows": ["x" * 64] * 100000}
     tracemalloc.start()
     try:
@@ -862,7 +930,9 @@ def test_snapshot_streams_large_row_without_retaining_first_page_bytes(tmp_path)
 
 def test_invalid_row_tail_rolls_back_before_next_append(tmp_path):
     results = ResultService(config(tmp_path), Principal.for_name("operator"))
-    writer = results.start_snapshot(query_sha256="query", source_revision="source", page_size=3)
+    writer = results.start_snapshot(
+        query_sha256="query", source_revision="source", page_size=3
+    )
     writer.append({"first": True})
     with pytest.raises(ResultError, match="not serializable"):
         writer.append(["x" * 64] * 10000 + [object()])
@@ -874,17 +944,23 @@ def test_invalid_row_tail_rolls_back_before_next_append(tmp_path):
 
 def test_snapshot_row_write_failure_aborts_private_staging(tmp_path):
     results = ResultService(config(tmp_path), Principal.for_name("operator"))
-    writer = results.start_snapshot(query_sha256="query", source_revision="source", page_size=1)
+    writer = results.start_snapshot(
+        query_sha256="query", source_revision="source", page_size=1
+    )
     original = writer.handle
+
     class FailedWrite:
         calls = 0
+
         def __getattr__(self, name):
             return getattr(original, name)
+
         def write(self, data):
             self.calls += 1
             if self.calls > 1:
                 raise OSError("synthetic row write")
             return original.write(data)
+
     writer.handle = FailedWrite()
     with pytest.raises(OSError, match="synthetic"):
         writer.append({"row": "payload"})

@@ -20,7 +20,9 @@ class Output(io.StringIO):
 
 
 def load():
-    loader = importlib.machinery.SourceFileLoader("catalog_terminal_fixture", str(SCRIPT))
+    loader = importlib.machinery.SourceFileLoader(
+        "catalog_terminal_fixture", str(SCRIPT)
+    )
     spec = importlib.util.spec_from_loader(loader.name, loader)
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
@@ -36,7 +38,12 @@ def test_resolved_path_is_terminal_safe_and_pipe_exact(monkeypatch, terminal):
     output = Output(terminal)
     with monkeypatch.context() as patch:
         patch.setattr(module.sys, "stdout", output)
-        assert module.cmd_resolve(argparse.Namespace(catalog="neutral.json", path="old", id=None)) == 0
+        assert (
+            module.cmd_resolve(
+                argparse.Namespace(catalog="neutral.json", path="old", id=None)
+            )
+            == 0
+        )
     if terminal:
         assert json.loads(output.getvalue()) == value
         assert "\x1b" not in output.getvalue() and "\x9b" not in output.getvalue()
@@ -64,7 +71,9 @@ def test_terminal_quoting_does_not_change_unicode_search(monkeypatch, terminal):
     output = Output(terminal)
     with monkeypatch.context() as patch:
         patch.setattr(module.sys, "stdout", output)
-        args = argparse.Namespace(catalog="neutral.json", text="雪", kind=None, offset=0, limit=None)
+        args = argparse.Namespace(
+            catalog="neutral.json", text="雪", kind=None, offset=0, limit=None
+        )
         assert module.cmd_search(args) == 0
     assert json.loads(output.getvalue()) == asset
     if terminal:
@@ -81,4 +90,7 @@ def test_catalog_bytes_do_not_depend_on_terminal(monkeypatch, tmp_path, terminal
     with monkeypatch.context() as patch:
         patch.setattr(module.sys, "stdout", output)
         module.write_catalog(path, catalog)
-    assert path.read_text() == json.dumps(catalog, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    assert (
+        path.read_text()
+        == json.dumps(catalog, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    )

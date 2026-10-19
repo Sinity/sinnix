@@ -185,7 +185,10 @@ def _attempt_root_for_marker(marker: Path) -> Path:
 def _start_service(command: Sequence[str], marker: Path, attempt: int, log: Any):
     """Serialize startup with cancellation; retry only a confirmed absent unit."""
     root = _attempt_root_for_marker(marker)
-    unit = next((arg.removeprefix("--unit=") for arg in command if arg.startswith("--unit=")), None)
+    unit = next(
+        (arg.removeprefix("--unit=") for arg in command if arg.startswith("--unit=")),
+        None,
+    )
     deadline = None
     delay = 0.25
 
@@ -205,7 +208,10 @@ def _start_service(command: Sequence[str], marker: Path, attempt: int, log: Any)
             # must never be able to print its way into a startup retry.
             with tempfile.TemporaryFile(dir=root) as errors:
                 client = subprocess.run(
-                    command, stdout=subprocess.DEVNULL, stderr=errors, check=False,
+                    command,
+                    stdout=subprocess.DEVNULL,
+                    stderr=errors,
+                    check=False,
                     # Only the startup client needs a stable diagnostic locale;
                     # the payload environment is declared separately on the unit.
                     env={**systemd_environment(), "LC_ALL": "C"},
@@ -219,7 +225,9 @@ def _start_service(command: Sequence[str], marker: Path, attempt: int, log: Any)
                 errors.seek(0)
                 if log is None:
                     while block := errors.read(65536):
-                        sys.stderr.write(block.decode("utf-8", errors="backslashreplace"))
+                        sys.stderr.write(
+                            block.decode("utf-8", errors="backslashreplace")
+                        )
                 else:
                     shutil.copyfileobj(errors, log)
                     log.flush()
@@ -227,14 +235,18 @@ def _start_service(command: Sequence[str], marker: Path, attempt: int, log: Any)
             return client
         if deadline is None:
             deadline = time.monotonic() + BUS_CONNECT_RETRY_SECONDS
-            note("startup connection refused; waiting for confirmed unit absence before retry")
+            note(
+                "startup connection refused; waiting for confirmed unit absence before retry"
+            )
         # Neither backoff nor manager observation may retain the cancellation lock.
         while True:
             if _marker_targets(marker, attempt):
                 return None
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                note("startup connection recovery budget exhausted; service not resubmitted")
+                note(
+                    "startup connection recovery budget exhausted; service not resubmitted"
+                )
                 return client
             time.sleep(min(delay, remaining))
             delay = min(delay * 2, 1.0)
@@ -245,7 +257,9 @@ def _start_service(command: Sequence[str], marker: Path, attempt: int, log: Any)
                 note("startup unit is not confirmed absent; service not resubmitted")
                 return client
             if time.monotonic() < deadline and properties is not None:
-                note("user manager confirms unit absent; retrying the same service identity")
+                note(
+                    "user manager confirms unit absent; retrying the same service identity"
+                )
                 break
 
 
@@ -841,7 +855,10 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             "attempt": launch["attempt"],
         }
         if scratch_error is not None:
-            record["scratch"] = {"path": str(scratch_dir), "cleanup_error": scratch_error}
+            record["scratch"] = {
+                "path": str(scratch_dir),
+                "cleanup_error": scratch_error,
+            }
         request = artifacts.cancellation(declared_log_path, launch["attempt"])
         if request:
             record["cancellation"] = request
@@ -1030,14 +1047,21 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
                         else:
                             return_code = client.returncode
                             if return_code == 0:
-                                properties = _wait_for_unit(unit, launch["timeout_seconds"])
+                                properties = _wait_for_unit(
+                                    unit, launch["timeout_seconds"]
+                                )
                             else:
                                 properties = _unit_snapshot(unit)
-                                if (properties and properties.get("LoadState") == "loaded"
-                                        and not _unit_is_terminal(properties)):
+                                if (
+                                    properties
+                                    and properties.get("LoadState") == "loaded"
+                                    and not _unit_is_terminal(properties)
+                                ):
                                     # An acknowledgement can be lost after acceptance.
                                     # Observe that unit; never resubmit its payload.
-                                    properties = _wait_for_unit(unit, launch["timeout_seconds"])
+                                    properties = _wait_for_unit(
+                                        unit, launch["timeout_seconds"]
+                                    )
                             outcome, status = _classify(
                                 _marker_targets(marker, launch["attempt"]),
                                 properties,

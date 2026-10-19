@@ -486,7 +486,13 @@ def test_domain_cannot_escape_capture_root(tmp_path: Path, kind: str):
     items.write_text('{"id":"new","label":"New fixture"}\n')
     if kind == "symlink":
         (root / "link").symlink_to(outside, target_is_directory=True)
-    domain = {"parent": "../outside", "absolute": str(outside), "root": ".", "empty": "", "symlink": "link"}[kind]
+    domain = {
+        "parent": "../outside",
+        "absolute": str(outside),
+        "root": ".",
+        "empty": "",
+        "symlink": "link",
+    }[kind]
     before = sentinel.read_bytes()
     result = Rank(root).run("add", domain, "--items", str(items))
     assert result.returncode == 2, result.stderr

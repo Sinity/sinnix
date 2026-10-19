@@ -1,15 +1,16 @@
 """USB setup failure must not open WiVRn pairing."""
+
 import os
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[3] / "scripts/sinnix-xr"
 
 
 def test_failed_usb_reverse_does_not_open_pairing(tmp_path):
     commands = {
-        "sinnix": "case \"$*\" in *get-serialno*) echo synthetic-quest;; esac\n",
-        "adb": "case \"$*\" in *list\\ packages*) echo package:org.meumeu.wivrn;; *reverse*) exit 7;; esac\n",
+        "sinnix": 'case "$*" in *get-serialno*) echo synthetic-quest;; esac\n',
+        "adb": 'case "$*" in *list\\ packages*) echo package:org.meumeu.wivrn;; *reverse*) exit 7;; esac\n',
         "systemctl": "exit 0\n",
         "wivrnctl": 'echo pairing >> "$PAIRING_MARKER"\n',
     }
@@ -20,8 +21,13 @@ def test_failed_usb_reverse_does_not_open_pairing(tmp_path):
     marker = tmp_path / "pairing"
     result = subprocess.run(
         ["bash", str(SCRIPT), "wivrn-wired"],
-        env={**os.environ, "PATH": str(tmp_path) + ":" + os.environ["PATH"], "PAIRING_MARKER": str(marker)},
-        capture_output=True, text=True,
+        env={
+            **os.environ,
+            "PATH": str(tmp_path) + ":" + os.environ["PATH"],
+            "PAIRING_MARKER": str(marker),
+        },
+        capture_output=True,
+        text=True,
     )
     assert result.returncode != 0
     assert not marker.exists(), "pairing opened despite failed USB transport"

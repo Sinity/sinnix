@@ -27,7 +27,9 @@ serve(BlockedReducer(), 'neutral', [], 0.1, None)
     with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as receiver:
         receiver.bind(str(address))
         env = {**os.environ, "NOTIFY_SOCKET": str(address), "WATCHDOG_USEC": "200000"}
-        child = subprocess.Popen([sys.executable, "-c", code, str(fifo), str(entered)], env=env)
+        child = subprocess.Popen(
+            [sys.executable, "-c", code, str(fifo), str(entered)], env=env
+        )
         try:
             deadline = time.monotonic() + 5
             while not entered.exists():

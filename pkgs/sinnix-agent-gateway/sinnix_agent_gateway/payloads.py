@@ -17,7 +17,7 @@ def canonical_chunks(payload: Any, *, default=None) -> Iterator[bytes]:
     for fragment in encoder.iterencode(payload):
         # The encoder may materialize one string; avoid another complete byte copy.
         for start in range(0, len(fragment), 65_536):
-            yield fragment[start:start + 65_536].encode()
+            yield fragment[start : start + 65_536].encode()
 
 
 def canonical_size(payload: Any, *, default=None) -> int:

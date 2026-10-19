@@ -31,8 +31,8 @@ from mcp.shared.inbound import (
 )
 from sinnix_agent_gateway import calllog, serving, tooling
 from sinnix_agent_gateway import projects as projects_module
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
+from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.projects import ProjectService
 from test_actions_jobs import DONE, make_server
 
@@ -177,6 +177,7 @@ def test_a_blocking_shell_start_does_not_stall_concurrent_calls(
     jobs.responses["job.shell.start"] = {**DONE, "job_id": "51"}
     jobs.responses["job.list"] = EMPTY_PAGE
     runtime.jobs = jobs  # type: ignore[assignment]
+
     async def scenario() -> None:
         async with anyio.create_task_group() as group:
             group.start_soon(
@@ -426,9 +427,9 @@ main()
             assert response.status == 200, body
             result = json.loads(body)
             assert result["id"] == rid, result
-            assert (
-                result["result"]["structuredContent"]["result"]["outcome"] == "ok"
-            ), result
+            assert result["result"]["structuredContent"]["result"]["outcome"] == "ok", (
+                result
+            )
             data = result["result"]["structuredContent"]["data"]
             assert len(data["actions"]) == 1
             assert len(data["catalog_sha256"]) == 64

@@ -5,8 +5,8 @@ import sqlite3
 from pathlib import Path
 
 from sinnix_agent_gateway.audit import AuditService
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig
+from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.redaction import env_name_is_secret, redact, redact_env
 
 

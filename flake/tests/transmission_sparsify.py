@@ -2,10 +2,10 @@
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 
 def verify(start: Path, stop: Path) -> None:
@@ -24,7 +24,11 @@ def verify(start: Path, stop: Path) -> None:
             log = root / "calls.jsonl"
             payload = root / "fixture.part"
             payload.write_bytes(b"neutral payload")
-            mock = "#!" + sys.executable + "\n" + '''
+            mock = (
+                "#!"
+                + sys.executable
+                + "\n"
+                + """
 import json, os, pathlib, sys
 name = pathlib.Path(sys.argv[0]).name
 args = sys.argv[1:]
@@ -39,7 +43,8 @@ elif name == "systemctl":
         sys.exit(0 if os.environ["ACTIVE"] == "1" else 3)
     if args[0] == "stop" and os.environ["STOP_FAILS"] == "1":
         sys.exit(1)
-'''
+"""
+            )
             for name in ("systemctl", "find", "stat", "fallocate"):
                 command = binary / name
                 command.write_text(mock)
@@ -56,8 +61,12 @@ elif name == "systemctl":
                 "TRANSMISSION_SPARSIFY_MAX_LOGICAL_GIB": "256",
                 "TRANSMISSION_SPARSIFY_FORCE": "0",
             }
-            result = subprocess.run(["bash", str(start)], env=env, capture_output=True, timeout=10)
-            after = subprocess.run(["bash", str(stop)], env=env, capture_output=True, timeout=10)
+            result = subprocess.run(
+                ["bash", str(start)], env=env, capture_output=True, timeout=10
+            )
+            after = subprocess.run(
+                ["bash", str(stop)], env=env, capture_output=True, timeout=10
+            )
             calls = [json.loads(line) for line in log.read_text().splitlines()]
             context = (active, stop_fails, over_budget, calls)
             assert after.returncode == 0, context
@@ -67,7 +76,16 @@ elif name == "systemctl":
             punches = [call for call in calls if call[0] == "fallocate"]
             assert bool(punches) == (not stop_fails and not over_budget), context
             assert payload.read_bytes() == b"neutral payload", context
-            print(json.dumps({"active": active, "stop_fails": stop_fails, "over_budget": over_budget, "passed": True}))
+            print(
+                json.dumps(
+                    {
+                        "active": active,
+                        "stop_fails": stop_fails,
+                        "over_budget": over_budget,
+                        "passed": True,
+                    }
+                )
+            )
 
 
 if __name__ == "__main__":

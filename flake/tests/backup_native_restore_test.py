@@ -28,7 +28,8 @@ class RestoreProof(unittest.TestCase):
             "old_bytes": len(self.content),
         }
         self.header = {
-            "name": self.payload["old_archive"], "id": self.payload["old_archive_id"],
+            "name": self.payload["old_archive"],
+            "id": self.payload["old_archive_id"],
             "comment": "sinnix-snapshot-v1:" + self.payload["old_snapshot_uuid"],
         }
         self.calls = []
@@ -43,7 +44,9 @@ class RestoreProof(unittest.TestCase):
         proof = RESTORE.verify_target(self.payload, "old", self.read)
         self.assertEqual(proof["outcome"], "ok")
         self.assertEqual(proof["sha256"], self.payload["old_sha256"])
-        self.assertEqual([call[0][1] for call in self.calls], ["list", "extract", "list"])
+        self.assertEqual(
+            [call[0][1] for call in self.calls], ["list", "extract", "list"]
+        )
         self.assertEqual(self.calls[1][1:], (300, len(self.content) + 1))
         self.assertIn("--", self.calls[1][0])
 
@@ -65,10 +68,21 @@ class RestoreProof(unittest.TestCase):
             RESTORE.verify_target(self.payload, "old", self.read)
 
     def test_source_selection_is_validated_before_any_read(self):
-        for path in ("/absolute", "../outside", "project/../outside", "project//ambiguous"):
+        for path in (
+            "/absolute",
+            "../outside",
+            "project/../outside",
+            "project//ambiguous",
+        ):
             with self.subTest(path=path), self.assertRaises(ValueError):
-                RESTORE.verify_target(self.payload | {"relative_path": path}, "old", self.read)
-        for field, value in (("old_sha256", "prefix"), ("old_bytes", 1024 * 1024 + 1), ("old_bytes", True)):
+                RESTORE.verify_target(
+                    self.payload | {"relative_path": path}, "old", self.read
+                )
+        for field, value in (
+            ("old_sha256", "prefix"),
+            ("old_bytes", 1024 * 1024 + 1),
+            ("old_bytes", True),
+        ):
             with self.subTest(field=field), self.assertRaises(ValueError):
                 RESTORE.verify_target(self.payload | {field: value}, "old", self.read)
         self.assertEqual(self.calls, [])
@@ -96,12 +110,20 @@ class RestoreProof(unittest.TestCase):
                 "export BORG_CACHE_DIR='/synthetic/cache'\n"
             )
             responses = [f"{{ path={script} ; }}", "PATH=/synthetic/bin", ""]
-            with patch.object(RESTORE.subprocess, "check_output", side_effect=responses), \
-                 patch.object(RESTORE.pwd, "getpwnam", return_value=SimpleNamespace(pw_dir="/synthetic/root")), \
-                 patch.dict(RESTORE.os.environ, {"TMPDIR": "/synthetic/task-scratch"}):
+            with (
+                patch.object(RESTORE.subprocess, "check_output", side_effect=responses),
+                patch.object(
+                    RESTORE.pwd,
+                    "getpwnam",
+                    return_value=SimpleNamespace(pw_dir="/synthetic/root"),
+                ),
+                patch.dict(RESTORE.os.environ, {"TMPDIR": "/synthetic/task-scratch"}),
+            ):
                 shell, values = RESTORE.installed_owner()
             self.assertEqual(shell, "/bin/bash")
-            self.assertEqual(values["BORG_PASSCOMMAND"], "/synthetic/cat /run/secret/synthetic")
+            self.assertEqual(
+                values["BORG_PASSCOMMAND"], "/synthetic/cat /run/secret/synthetic"
+            )
             self.assertEqual(values["TMPDIR"], "/synthetic/task-scratch")
             self.assertEqual(values["HOME"], "/synthetic/root")
 

@@ -1,10 +1,10 @@
 """Exercise the generated deploy entrypoint without router access or credentials."""
 
-import os
 import json
+import os
 import re
-import shutil
 import runpy
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -99,11 +99,16 @@ print("router preview, argument and missing-secret controls passed")
 # No connection, real secret or router mutation is permitted by this fixture.
 root = Path.cwd() / "deploy-controls"
 root.mkdir(mode=0o700)
-for name, value in [("wifi", "synthetic-password"), ("mac", "02:00:00:00:00:01"),
-                    ("key", "ssh-ed25519 AAAAsynthetic fixture")]:
+for name, value in [
+    ("wifi", "synthetic-password"),
+    ("mac", "02:00:00:00:00:01"),
+    ("key", "ssh-ed25519 AAAAsynthetic fixture"),
+]:
     (root / name).write_text(value)
 mock = root / "transport"
-mock.write_text(f"#!{sys.executable}\n" + r"""
+mock.write_text(
+    f"#!{sys.executable}\n"
+    + r"""
 import io, json, os, shlex, shutil, subprocess, sys, tarfile
 from pathlib import Path
 record = Path(os.environ["HOME"]) / "stage.txt"
@@ -154,20 +159,27 @@ else:
         for source in sys.argv[1:-1]:
             if Path(source).is_file():
                 shutil.copyfile(source, stage / Path(source).name)
-""")
+"""
+)
 mock.chmod(0o700)
 for name in ["ssh", "scp"]:
     (root / name).symlink_to(mock)
+
+
 def relocate(program):
     body = Path(program).read_text()
     body = re.sub(r"/nix/store/[^/]+/bin/(ssh|scp)\b", lambda m: str(root / m[1]), body)
-    for original, name in [("wifi-psk", "wifi"), ("router-sinnix-prime-mac", "mac"),
-                           ("router-authorized-key", "key")]:
+    for original, name in [
+        ("wifi-psk", "wifi"),
+        ("router-sinnix-prime-mac", "mac"),
+        ("router-authorized-key", "key"),
+    ]:
         body = body.replace("/run/agenix/" + original, str(root / name))
     entry = root / Path(program).name
     entry.write_text(body)
     entry.chmod(0o700)
     return entry
+
 
 entry = relocate(executable)
 health_entry = relocate(health)
@@ -188,14 +200,24 @@ for name, overrides, expected, command in [
     home = root / name
     home.mkdir(mode=0o700)
     log = home / "transport.jsonl"
-    result = subprocess.run([str(command)], env=os.environ | {
-        "HOME": str(home), "ROUTER_FIXTURE_LOG": str(log), **overrides,
-    }, capture_output=True, text=True)
+    result = subprocess.run(
+        [str(command)],
+        env=os.environ
+        | {
+            "HOME": str(home),
+            "ROUTER_FIXTURE_LOG": str(log),
+            **overrides,
+        },
+        capture_output=True,
+        text=True,
+    )
     if expected is None:
         assert result.returncode != 0, name
     else:
         assert result.returncode == expected, (name, result.returncode, result.stderr)
-    assert ("deployment complete!" in result.stdout) == (expected == 0 and command == entry), name
+    assert ("deployment complete!" in result.stdout) == (
+        expected == 0 and command == entry
+    ), name
     assert "/tmp/health-check.sh" not in result.stderr, name
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     if "backup" in name or name == "copy-failed" or "stage" in name:

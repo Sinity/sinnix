@@ -75,12 +75,11 @@ def test_non_object_row_is_unavailable(tmp_path):
     assert "object" in report["reason"]
 
 
-
 def test_denied_report_is_not_missing(tmp_path):
     parent = tmp_path / "private"
     parent.mkdir()
     path = parent / "report.jsonl"
-    path.write_text('{}\n')
+    path.write_text("{}\n")
     parent.chmod(0)
     try:
         report = collect_config_drift(path)

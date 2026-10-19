@@ -1195,7 +1195,9 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
         return EXIT_OK
     if verb == "backpressure":
         checkpoint = config.state_dir / "backpressure-spool.json"
-        decision = backpressure.tick(spool=config.event_spool, checkpoint=checkpoint, pools=config.pools)
+        decision = backpressure.tick(
+            spool=config.event_spool, checkpoint=checkpoint, pools=config.pools
+        )
         holds = (
             launch.release_holds(config)
             if decision.get("action") in {"hold", "clear"}

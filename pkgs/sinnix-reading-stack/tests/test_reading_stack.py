@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 import io
+import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -27,17 +27,33 @@ def configure_state(monkeypatch, tmp_path):
 
 def test_push_json_stdin_preserves_fields(monkeypatch, tmp_path):
     configure_state(monkeypatch, tmp_path)
-    fields = {"url": "https://example.test/", "title": "Łódź 🙂",
-              "source_url": "https://source.test/", "source_title": "Source",
-              "anchor_text": "Anchor", "note": "quoted \"\nmultiline"}
+    fields = {
+        "url": "https://example.test/",
+        "title": "Łódź 🙂",
+        "source_url": "https://source.test/",
+        "source_title": "Source",
+        "anchor_text": "Anchor",
+        "note": 'quoted "\nmultiline',
+    }
     monkeypatch.setattr(reading_stack.sys, "stdin", io.StringIO(json.dumps(fields)))
     assert reading_stack.main(["push", "--json-stdin"]) == 0
-    entry, = reading_stack._load()
+    (entry,) = reading_stack._load()
     assert {key: entry[key] for key in fields} == fields
 
 
-@pytest.mark.parametrize("raw", ["{", "null", "[]", '{}', '{"url":7}', '{"url":""}',
-                                 '{"url":"x","note":[]}', '{"url":"x","extra":1}'])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "{",
+        "null",
+        "[]",
+        "{}",
+        '{"url":7}',
+        '{"url":""}',
+        '{"url":"x","note":[]}',
+        '{"url":"x","extra":1}',
+    ],
+)
 def test_invalid_push_json_preserves_state(raw, monkeypatch, tmp_path):
     configure_state(monkeypatch, tmp_path)
     reading_stack._save([{"url": "https://prior.test/"}])
@@ -49,10 +65,14 @@ def test_invalid_push_json_preserves_state(raw, monkeypatch, tmp_path):
     assert reading_stack.STATE_FILE.read_bytes() == before
 
 
-@pytest.mark.parametrize("flags", [["--url", "https://example.test/"], ["--title", "title"]])
+@pytest.mark.parametrize(
+    "flags", [["--url", "https://example.test/"], ["--title", "title"]]
+)
 def test_push_stdin_refuses_mixed_flags(flags, monkeypatch, tmp_path):
     configure_state(monkeypatch, tmp_path)
-    monkeypatch.setattr(reading_stack.sys, "stdin", io.StringIO('{"url":"https://example.test/"}'))
+    monkeypatch.setattr(
+        reading_stack.sys, "stdin", io.StringIO('{"url":"https://example.test/"}')
+    )
     with pytest.raises(SystemExit) as error:
         reading_stack.main(["push", "--json-stdin", *flags])
     assert error.value.code == 2

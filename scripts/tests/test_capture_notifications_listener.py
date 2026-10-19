@@ -20,8 +20,12 @@ import time
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
-SCRIPT_PATH = (
-    Path(os.environ.get("NOTIFICATIONS_LISTENER_SCRIPT", Path(__file__).resolve().parent.parent / "sinnix-capture-notifications-listener"))
+SCRIPT_PATH = Path(
+    os.environ.get(
+        "NOTIFICATIONS_LISTENER_SCRIPT",
+        Path(__file__).resolve().parent.parent
+        / "sinnix-capture-notifications-listener",
+    )
 )
 
 # The script has no `.py` suffix (it is a frontmatter-packaged sinnix
@@ -117,7 +121,9 @@ def test_hint_value_handles_missing_and_present_hints():
 
 def run_monitor_fixture(tmp_path, mode):
     monitor = tmp_path / "monitor"
-    monitor.write_text(f"#!{sys.executable}\n" + '''import json,os,signal,sys
+    monitor.write_text(
+        f"#!{sys.executable}\n"
+        + """import json,os,signal,sys
 mode=os.environ["MONITOR_MODE"]
 if mode == "killed":
     os.kill(os.getpid(), signal.SIGKILL)
@@ -129,18 +135,38 @@ if mode in ("diagnostics", "stop"):
 if mode == "stop":
     signal.pause()
 sys.exit(0)
-''')
+"""
+    )
     monitor.chmod(0o700)
     writer = tmp_path / "writer"
     marker = tmp_path / "forwarded.json"
-    writer.write_text(f"#!{sys.executable}\nimport os,sys,pathlib\npathlib.Path(os.environ['FORWARDED']).write_text(sys.stdin.read())\n")
+    writer.write_text(
+        f"#!{sys.executable}\nimport os,sys,pathlib\npathlib.Path(os.environ['FORWARDED']).write_text(sys.stdin.read())\n"
+    )
     writer.chmod(0o700)
-    command = [sys.executable, str(SCRIPT_PATH), "--busctl-bin", str(monitor),
-               "--capture-bin", str(writer), "--capture-root", str(tmp_path)]
-    with subprocess.Popen(command, env=dict(os.environ, MONITOR_MODE=mode,
-                          NOTIFY_RECORD=json.dumps(REAL_NOTIFY_RECORD), FORWARDED=str(marker)),
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                          start_new_session=True) as process:
+    command = [
+        sys.executable,
+        str(SCRIPT_PATH),
+        "--busctl-bin",
+        str(monitor),
+        "--capture-bin",
+        str(writer),
+        "--capture-root",
+        str(tmp_path),
+    ]
+    with subprocess.Popen(
+        command,
+        env=dict(
+            os.environ,
+            MONITOR_MODE=mode,
+            NOTIFY_RECORD=json.dumps(REAL_NOTIFY_RECORD),
+            FORWARDED=str(marker),
+        ),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    ) as process:
         try:
             if mode == "stop":
                 deadline = time.monotonic() + 3
@@ -171,7 +197,10 @@ def test_monitor_diagnostics_cannot_block_notification_forwarding(tmp_path):
     status, _, stderr, marker = run_monitor_fixture(tmp_path, "diagnostics")
     assert status == 1
     assert "synthetic monitor diagnostic" in stderr
-    assert json.loads(marker.read_text())["summary"] == REAL_NOTIFY_RECORD["payload"]["data"][3]
+    assert (
+        json.loads(marker.read_text())["summary"]
+        == REAL_NOTIFY_RECORD["payload"]["data"][3]
+    )
 
 
 def test_requested_listener_shutdown_is_successful(tmp_path):

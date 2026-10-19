@@ -13,7 +13,11 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(os.environ["SINNIX_SQLITE_BACKUP"]) if "SINNIX_SQLITE_BACKUP" in os.environ else Path(__file__).parents[3] / "scripts" / "sinnix-sqlite-backup"
+SCRIPT = (
+    Path(os.environ["SINNIX_SQLITE_BACKUP"])
+    if "SINNIX_SQLITE_BACKUP" in os.environ
+    else Path(__file__).parents[3] / "scripts" / "sinnix-sqlite-backup"
+)
 # The packaged wrapper fixes PATH. Dependency-fault injection executes its
 # exact declared Python payload, while ordinary CLI tests exercise the wrapper.
 SCRIPT_MODULE = Path(os.environ.get("SINNIX_SQLITE_BACKUP_MODULE", SCRIPT))
@@ -529,7 +533,9 @@ def test_cancellation_during_compression_leaves_no_partial_artifact(
     # exec so the sleeping compressor is the direct child holding the pipes,
     # as the real zstd is; otherwise an orphan outlives the cancelled run and
     # the test waits on it rather than on the run.
-    zstd.write_text(f'#!/bin/sh\nfor arg do target="$arg"; done\nprintf partial > "$target"\ntouch "{partial}"\nexec sleep 60\n')
+    zstd.write_text(
+        f'#!/bin/sh\nfor arg do target="$arg"; done\nprintf partial > "$target"\ntouch "{partial}"\nexec sleep 60\n'
+    )
     zstd.chmod(0o755)
 
     process = subprocess.Popen(
@@ -651,6 +657,7 @@ def test_immutable_snapshot_does_not_publish_when_compression_fails(
 
 def test_live_backup_keeps_native_selected_cut(tmp_path: Path, monkeypatch) -> None:
     import runpy
+
     helper = runpy.run_path(str(SCRIPT_MODULE))
     source = tmp_path / "source.sqlite"
     writer = sqlite3.connect(source)
@@ -676,9 +683,14 @@ def test_live_backup_keeps_native_selected_cut(tmp_path: Path, monkeypatch) -> N
     try:
         helper["backup_database"](source, output)
         restored = tmp_path / "restored.sqlite"
-        subprocess.run(["zstd", "-q", "-d", str(output), "-o", str(restored)], check=True)
+        subprocess.run(
+            ["zstd", "-q", "-d", str(output), "-o", str(restored)], check=True
+        )
         with original_connect(restored) as connection:
-            assert connection.execute("SELECT value FROM t").fetchall() == [("a",), ("b",)]
+            assert connection.execute("SELECT value FROM t").fetchall() == [
+                ("a",),
+                ("b",),
+            ]
             assert connection.execute("PRAGMA integrity_check").fetchone() == ("ok",)
         assert writer.execute("SELECT count(*) FROM t").fetchone() == (3,)
     finally:
@@ -694,7 +706,11 @@ def test_immutable_uri_checks_the_actual_archived_object(tmp_path: Path) -> None
     connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
     connection.close()
     output = tmp_path / "archive.zst"
-    result = subprocess.run([str(SCRIPT), str(actual), str(output), "--immutable-source"], capture_output=True, text=True)
+    result = subprocess.run(
+        [str(SCRIPT), str(actual), str(output), "--immutable-source"],
+        capture_output=True,
+        text=True,
+    )
     assert result.returncode == 0, result.stderr
     restored = tmp_path / "restored.sqlite"
     subprocess.run(["zstd", "-q", "-d", str(output), "-o", str(restored)], check=True)
@@ -702,14 +718,20 @@ def test_immutable_uri_checks_the_actual_archived_object(tmp_path: Path) -> None
         assert connection.execute("SELECT count(*) FROM samples").fetchone() == (1000,)
     retained = output.read_bytes()
     actual.write_bytes(b"not a SQLite database")
-    for args in ([str(output), "--immutable-source"], ["--immutable-source", "--verify-only", "--check-budget-seconds", "10"]):
-        result = subprocess.run([str(SCRIPT), str(actual), *args], capture_output=True, text=True)
+    for args in (
+        [str(output), "--immutable-source"],
+        ["--immutable-source", "--verify-only", "--check-budget-seconds", "10"],
+    ):
+        result = subprocess.run(
+            [str(SCRIPT), str(actual), *args], capture_output=True, text=True
+        )
         assert result.returncode != 0
         assert output.read_bytes() == retained
 
 
 def test_overlapping_backup_cleanup_keeps_outer_scratch(tmp_path: Path) -> None:
     import runpy
+
     helper = runpy.run_path(str(SCRIPT_MODULE))
     source = tmp_path / "source.sqlite"
     seed_database(source)
@@ -736,6 +758,7 @@ def test_overlapping_backup_cleanup_keeps_outer_scratch(tmp_path: Path) -> None:
 
 def test_acquisition_failure_preserves_selected_archive(tmp_path: Path) -> None:
     import runpy
+
     helper = runpy.run_path(str(SCRIPT_MODULE))
     source = tmp_path / "source.sqlite"
     seed_database(source)
@@ -749,9 +772,15 @@ def test_acquisition_failure_preserves_selected_archive(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("budget", ["nan", "inf", "-inf", "-1"])
 @pytest.mark.parametrize("verify_only", [False, True])
-def test_invalid_check_budget_refused_before_source_access(tmp_path, budget, verify_only):
-    command = [str(SCRIPT), str(tmp_path / "absent.sqlite"),
-               "--immutable-source", f"--check-budget-seconds={budget}"]
+def test_invalid_check_budget_refused_before_source_access(
+    tmp_path, budget, verify_only
+):
+    command = [
+        str(SCRIPT),
+        str(tmp_path / "absent.sqlite"),
+        "--immutable-source",
+        f"--check-budget-seconds={budget}",
+    ]
     command += ["--verify-only"] if verify_only else [str(tmp_path / "output.zst")]
     result = subprocess.run(command, capture_output=True, text=True, timeout=5)
     assert result.returncode == 2
@@ -769,7 +798,9 @@ def test_compressed_restore_checks_real_frame_and_sqlite(tmp_path, failure):
         data = bytearray(source.read_bytes())
         with sqlite3.connect(source) as connection:
             page_size = connection.execute("PRAGMA page_size").fetchone()[0]
-            rootpage = connection.execute("SELECT rootpage FROM sqlite_master WHERE name='sample'").fetchone()[0]
+            rootpage = connection.execute(
+                "SELECT rootpage FROM sqlite_master WHERE name='sample'"
+            ).fetchone()[0]
         # Damage the real table b-tree while retaining the valid SQLite header.
         data[(rootpage - 1) * page_size] = 0xFF
         assert data[:16] == b"SQLite format 3\x00"
@@ -784,17 +815,34 @@ def test_compressed_restore_checks_real_frame_and_sqlite(tmp_path, failure):
     archive_before = archive.read_bytes()
     scratch = tmp_path / "scratch"
     scratch.mkdir()
-    result = subprocess.run([str(SCRIPT), str(archive), "--immutable-source",
-        "--verify-only", "--compressed-source", "--max-restore-bytes",
-        str(1 if failure == "limit" else 1024 * 1024), "--check-budget-seconds", "10"],
-        env={**os.environ, "TMPDIR": str(scratch)}, capture_output=True, text=True, timeout=10)
+    result = subprocess.run(
+        [
+            str(SCRIPT),
+            str(archive),
+            "--immutable-source",
+            "--verify-only",
+            "--compressed-source",
+            "--max-restore-bytes",
+            str(1 if failure == "limit" else 1024 * 1024),
+            "--check-budget-seconds",
+            "10",
+        ],
+        env={**os.environ, "TMPDIR": str(scratch)},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
     assert source.read_bytes() == before and archive.read_bytes() == archive_before
     assert list(scratch.iterdir()) == []
     if failure is None:
         import hashlib
+
         assert result.returncode == 0, result.stderr
         assert "structural_check=ok" in result.stdout
-        assert f"archive_sha256={hashlib.sha256(archive_before).hexdigest()}" in result.stdout
+        assert (
+            f"archive_sha256={hashlib.sha256(archive_before).hexdigest()}"
+            in result.stdout
+        )
         assert f"restored_bytes={len(before)}" in result.stdout
         assert f"restored_sha256={hashlib.sha256(before).hexdigest()}" in result.stdout
     else:
@@ -805,32 +853,56 @@ def test_compressed_restore_checks_real_frame_and_sqlite(tmp_path, failure):
 @pytest.mark.parametrize("stop", ["cancel", "deadline"])
 @pytest.mark.parametrize("close_stdout", [False, True])
 @pytest.mark.parametrize("ignore_term", [False, True])
-def test_compressed_restore_stops_its_decoder(tmp_path, stop, close_stdout, ignore_term):
+def test_compressed_restore_stops_its_decoder(
+    tmp_path, stop, close_stdout, ignore_term
+):
     archive = tmp_path / "retained.zst"
     archive.write_bytes(b"unchanged archive")
     scratch = tmp_path / "scratch"
     scratch.mkdir()
     pidfile = tmp_path / "decoder.pid"
     decoder = tmp_path / "zstd"
-    decoder.write_text(f"#!{sys.executable}\nimport os, signal, time\nfrom pathlib import Path\n"
+    decoder.write_text(
+        f"#!{sys.executable}\nimport os, signal, time\nfrom pathlib import Path\n"
         + ("signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignore_term else "")
         + "os.write(1, b'x')\n"
         + ("os.close(1)\n" if close_stdout else "")
         + f"Path({str(pidfile)!r}).write_text(str(os.getpid()))\n"
-        + "time.sleep(30)\n")
+        + "time.sleep(30)\n"
+    )
     decoder.chmod(0o700)
-    process = subprocess.Popen([str(SCRIPT_MODULE), str(archive), "--immutable-source",
-        "--verify-only", "--compressed-source", "--max-restore-bytes", "1048576",
-        "--acquire-budget-seconds", "0.5" if stop == "deadline" else "10",
-        "--check-budget-seconds", "10"],
-        env={**os.environ, "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
-             "TMPDIR": str(scratch)}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    process = subprocess.Popen(
+        [
+            str(SCRIPT_MODULE),
+            str(archive),
+            "--immutable-source",
+            "--verify-only",
+            "--compressed-source",
+            "--max-restore-bytes",
+            "1048576",
+            "--acquire-budget-seconds",
+            "0.5" if stop == "deadline" else "10",
+            "--check-budget-seconds",
+            "10",
+        ],
+        env={
+            **os.environ,
+            "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
+            "TMPDIR": str(scratch),
+        },
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
     try:
         until = time.monotonic() + 5
-        while not pidfile.exists() and process.poll() is None and time.monotonic() < until:
+        while (
+            not pidfile.exists() and process.poll() is None and time.monotonic() < until
+        ):
             time.sleep(0.01)
         assert pidfile.exists(), (
-            process.communicate(timeout=5) if process.poll() is not None
+            process.communicate(timeout=5)
+            if process.poll() is not None
             else "decoder did not report startup within five seconds"
         )
         if stop == "cancel":
@@ -874,8 +946,14 @@ def test_structural_walk_disables_mmap_read_amplification(tmp_path, monkeypatch)
             assert connection.execute("PRAGMA mmap_size").fetchone()[0] == 0
             return original(connection, statement, deadline)
 
-        monkeypatch.setitem(helper["check_immutable_snapshot"].__globals__, "run_check", check_without_mapping)
-        assert helper["check_immutable_snapshot"](connection, None, mode="structural") == ("integrity_check", "ok")
+        monkeypatch.setitem(
+            helper["check_immutable_snapshot"].__globals__,
+            "run_check",
+            check_without_mapping,
+        )
+        assert helper["check_immutable_snapshot"](
+            connection, None, mode="structural"
+        ) == ("integrity_check", "ok")
 
 
 @pytest.mark.parametrize("route", ["backup", "verify"])
@@ -957,7 +1035,10 @@ def test_backup_rejects_nonregular_source_before_open(tmp_path, route, kind):
     assert not output.exists()
     after = source.stat()
     assert (before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns) == (
-        after.st_ino, after.st_mode, after.st_size, after.st_mtime_ns
+        after.st_ino,
+        after.st_mode,
+        after.st_size,
+        after.st_mtime_ns,
     )
 
 
@@ -992,14 +1073,18 @@ def test_walk_read_advice_is_scoped_to_open_main_database(tmp_path, monkeypatch,
     assert verdict == ("ok" if mode == "structural" else "limited")
     if mode == "structural":
         identity = main.stat()
-        assert advised == [(identity.st_dev, identity.st_ino, 0, 0, os.POSIX_FADV_RANDOM)]
+        assert advised == [
+            (identity.st_dev, identity.st_ino, 0, 0, os.POSIX_FADV_RANDOM)
+        ]
         assert check == "integrity_check"
     else:
         assert advised == []
     assert {path: path.read_bytes() for path in before} == before
 
 
-def test_unsupported_read_advice_does_not_hide_integrity_verdict(tmp_path, monkeypatch, capsys):
+def test_unsupported_read_advice_does_not_hide_integrity_verdict(
+    tmp_path, monkeypatch, capsys
+):
     import errno
     import runpy
 
@@ -1015,7 +1100,9 @@ def test_unsupported_read_advice_does_not_hide_integrity_verdict(tmp_path, monke
 
     monkeypatch.setattr(os, "posix_fadvise", unsupported)
     with sqlite3.connect(main) as connection:
-        assert helper["check_immutable_snapshot"](connection, None, mode="structural") == ("integrity_check", "ok")
+        assert helper["check_immutable_snapshot"](
+            connection, None, mode="structural"
+        ) == ("integrity_check", "ok")
     connection.close()
     assert "read advice unavailable" in capsys.readouterr().err
     assert main.read_bytes() == before
@@ -1050,7 +1137,9 @@ def test_verification_receipt_binds_exact_bytes_privately(tmp_path):
 
 
 @pytest.mark.parametrize("kind", ["source", "hardlink", "symlink", "directory"])
-def test_verification_receipt_refuses_source_alias_and_nonregular_output(tmp_path, kind):
+def test_verification_receipt_refuses_source_alias_and_nonregular_output(
+    tmp_path, kind
+):
     helper, source, receipt = receipt_fixture(tmp_path)
     before = source.read_bytes()
     if kind == "source":
@@ -1066,8 +1155,12 @@ def test_verification_receipt_refuses_source_alias_and_nonregular_output(tmp_pat
     assert source.read_bytes() == before
 
 
-@pytest.mark.parametrize("failure", ["corruption", "mutation", "cancel", "deadline", "publish"])
-def test_verification_receipt_failure_preserves_previous(tmp_path, monkeypatch, failure):
+@pytest.mark.parametrize(
+    "failure", ["corruption", "mutation", "cancel", "deadline", "publish"]
+)
+def test_verification_receipt_failure_preserves_previous(
+    tmp_path, monkeypatch, failure
+):
     helper, source, receipt = receipt_fixture(tmp_path)
     receipt.write_text("previous verified proof\n")
     scope = helper["verify_immutable_source"].__globals__
@@ -1075,12 +1168,15 @@ def test_verification_receipt_failure_preserves_previous(tmp_path, monkeypatch, 
         source.write_bytes(b"not a database")
         expected = sqlite3.DatabaseError
     elif failure == "publish":
+
         def refuse(*args):
             raise OSError("publication refused")
+
         monkeypatch.setattr(os, "replace", refuse)
         expected = OSError
     else:
         original = helper["check_immutable_snapshot"]
+
         def after_check(*args, **kwargs):
             result = original(*args, **kwargs)
             if failure == "mutation":
@@ -1091,6 +1187,7 @@ def test_verification_receipt_failure_preserves_previous(tmp_path, monkeypatch, 
             else:
                 monkeypatch.setattr(time, "monotonic", lambda: float("inf"))
             return result
+
         monkeypatch.setitem(scope, "check_immutable_snapshot", after_check)
         expected = helper["BackupCancelled"] if failure == "cancel" else RuntimeError
     with pytest.raises(expected):
@@ -1101,29 +1198,44 @@ def test_verification_receipt_failure_preserves_previous(tmp_path, monkeypatch, 
 
 def test_verification_receipt_cli_requires_raw_verify_mode(tmp_path):
     helper, source, receipt = receipt_fixture(tmp_path)
-    result = subprocess.run([str(SCRIPT), str(source), str(tmp_path / "backup.zst"),
-        "--verification-receipt", str(receipt)], capture_output=True, text=True)
+    result = subprocess.run(
+        [
+            str(SCRIPT),
+            str(source),
+            str(tmp_path / "backup.zst"),
+            "--verification-receipt",
+            str(receipt),
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert result.returncode == 2
     assert "requires raw --verify-only" in result.stderr
     assert not receipt.exists()
 
 
 @pytest.mark.parametrize("failure", ["cancel", "deadline"])
-def test_verification_receipt_interrupts_digest_without_publication(tmp_path, monkeypatch, failure):
+def test_verification_receipt_interrupts_digest_without_publication(
+    tmp_path, monkeypatch, failure
+):
     helper, source, receipt = receipt_fixture(tmp_path)
     scope = helper["verify_immutable_source"].__globals__
     real_digest = scope["hashlib"].sha256
+
     class InterruptingDigest:
         def __init__(self):
             self.digest = real_digest()
+
         def update(self, block):
             self.digest.update(block)
             if failure == "cancel":
                 scope["cancel_requested"] = True
             else:
                 monkeypatch.setattr(time, "monotonic", lambda: float("inf"))
+
         def hexdigest(self):
             return self.digest.hexdigest()
+
     monkeypatch.setattr(scope["hashlib"], "sha256", InterruptingDigest)
     expected = helper["BackupCancelled"] if failure == "cancel" else RuntimeError
     with pytest.raises(expected):
@@ -1135,8 +1247,20 @@ def test_verification_receipt_cli_publishes_success(tmp_path):
     import json
 
     _, source, receipt = receipt_fixture(tmp_path)
-    result = subprocess.run([str(SCRIPT), str(source), "--immutable-source", "--verify-only",
-        "--check-budget-seconds", "5", "--verification-receipt", str(receipt)], capture_output=True, text=True)
+    result = subprocess.run(
+        [
+            str(SCRIPT),
+            str(source),
+            "--immutable-source",
+            "--verify-only",
+            "--check-budget-seconds",
+            "5",
+            "--verification-receipt",
+            str(receipt),
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert result.returncode == 0, result.stderr
     assert json.loads(receipt.read_text())["structural_check"] == "ok"
 

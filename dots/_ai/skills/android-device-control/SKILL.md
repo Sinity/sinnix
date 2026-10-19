@@ -15,11 +15,11 @@ before applying anything below.
 
 ## Control surfaces
 
-| Surface                         | Reach                    | Good for                                         |
-| ------------------------------- | ------------------------ | ------------------------------------------------ |
-| `adb` (USB or wireless debugging) | USB, trusted Wi-Fi, tailnet | packages, settings, input, screenshots, UI dumps |
-| root shell (`adb shell su -c ...`) | wherever adb reaches    | system files, services, Magisk hooks             |
-| Termux `sshd` (:8022)           | tailnet                  | a real shell for scripted work                   |
+| Surface                            | Reach                       | Good for                                         |
+| ---------------------------------- | --------------------------- | ------------------------------------------------ |
+| `adb` (USB or wireless debugging)  | USB, trusted Wi-Fi, tailnet | packages, settings, input, screenshots, UI dumps |
+| root shell (`adb shell su -c ...`) | wherever adb reaches        | system files, services, Magisk hooks             |
+| Termux `sshd` (:8022)              | tailnet                     | a real shell for scripted work                   |
 
 Use the existing USB or wireless-debugging connection; `sinnix phone
 adb-connect` finds it and `sinnix phone adb-restore` re-enables it over USB.
@@ -75,15 +75,15 @@ a force-stopped app.
 
 ## Settings worth knowing
 
-| Setting                                                        | Why it matters                                             |
-| -------------------------------------------------------------- | ---------------------------------------------------------- |
-| `global audio_safe_volume_state`                               | `3` = EU headphone volume cap active; `1` disables it.     |
-| `global bluetooth_disable_absolute_volume`                     | Common cause of very quiet Bluetooth headsets.             |
-| `system screen_off_timeout`, `global stay_on_while_plugged_in` | A phone kept awake on AC is reliably drivable.             |
-| `global window/transition/animator_*_scale`                    | `0.5` is snappy; `0` breaks some transitions.              |
-| `secure ui_night_mode 2` + `cmd uimode night yes`              | Both are needed.                                           |
-| `appops set <pkg> POST_NOTIFICATION ignore`                    | Silence one app's notifications.                           |
-| `appops set <pkg> GET_USAGE_STATS allow`                       | What usage-tracking apps need; often the missed step.      |
+| Setting                                                        | Why it matters                                         |
+| -------------------------------------------------------------- | ------------------------------------------------------ |
+| `global audio_safe_volume_state`                               | `3` = EU headphone volume cap active; `1` disables it. |
+| `global bluetooth_disable_absolute_volume`                     | Common cause of very quiet Bluetooth headsets.         |
+| `system screen_off_timeout`, `global stay_on_while_plugged_in` | A phone kept awake on AC is reliably drivable.         |
+| `global window/transition/animator_*_scale`                    | `0.5` is snappy; `0` breaks some transitions.          |
+| `secure ui_night_mode 2` + `cmd uimode night yes`              | Both are needed.                                       |
+| `appops set <pkg> POST_NOTIFICATION ignore`                    | Silence one app's notifications.                       |
+| `appops set <pkg> GET_USAGE_STATS allow`                       | What usage-tracking apps need; often the missed step.  |
 
 ## Removing apps
 

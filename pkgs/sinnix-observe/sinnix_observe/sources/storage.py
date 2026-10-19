@@ -34,8 +34,17 @@ def collect_storage(offline: bool) -> dict[str, Any]:
         result = run(
             # A mounted filesystem can cover an autofs entrance. The reverse
             # search selects the visible top mount and emits exactly one row.
-            ["findmnt", "-T", path, "-d", "backward", "-f", "-J", "-o",
-             "TARGET,SOURCE,FSTYPE,OPTIONS"],
+            [
+                "findmnt",
+                "-T",
+                path,
+                "-d",
+                "backward",
+                "-f",
+                "-J",
+                "-o",
+                "TARGET,SOURCE,FSTYPE,OPTIONS",
+            ],
             timeout=5,
         )
         row = None
@@ -44,18 +53,34 @@ def collect_storage(offline: bool) -> dict[str, Any]:
                 document = json.loads(result.stdout)
             except json.JSONDecodeError:
                 document = None
-            entries = document.get("filesystems") if isinstance(document, dict) else None
-            if isinstance(entries, list) and len(entries) == 1 and isinstance(entries[0], dict):
+            entries = (
+                document.get("filesystems") if isinstance(document, dict) else None
+            )
+            if (
+                isinstance(entries, list)
+                and len(entries) == 1
+                and isinstance(entries[0], dict)
+            ):
                 candidate = entries[0]
-                if (isinstance(candidate.get("target"), str)
-                        and isinstance(candidate.get("fstype"), str)
-                        and all(candidate.get(key) is None or isinstance(candidate[key], str)
-                                for key in ("source", "options"))):
+                if (
+                    isinstance(candidate.get("target"), str)
+                    and isinstance(candidate.get("fstype"), str)
+                    and all(
+                        candidate.get(key) is None or isinstance(candidate[key], str)
+                        for key in ("source", "options")
+                    )
+                ):
                     row = candidate
         if row is not None:
-            mounts.append({"path": path, **{
-                key: row.get(key) for key in ("target", "source", "fstype", "options")
-            }})
+            mounts.append(
+                {
+                    "path": path,
+                    **{
+                        key: row.get(key)
+                        for key in ("target", "source", "fstype", "options")
+                    },
+                }
+            )
         else:
             mounts.append({"path": path, "unresolved": True})
 

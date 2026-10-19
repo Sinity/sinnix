@@ -52,7 +52,9 @@ class SupervisedPublisher:
             "state": (
                 "degraded"
                 if self.last_error
-                else "ready" if self.last_success_at is not None else "pending"
+                else "ready"
+                if self.last_success_at is not None
+                else "pending"
             ),
             "last_success_age_seconds": (
                 max(0.0, time.monotonic() - self.last_success_at)

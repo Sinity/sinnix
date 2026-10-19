@@ -62,7 +62,9 @@ def test_corrupting_an_action_name_or_field_fails_generation_check(
         target.write_text(content)
     assert check_artifacts(tmp_path) == []
     skill = tmp_path / SKILL_PATH
-    skill.write_text(skill.read_text().replace("`gateway.status`", "`gateway.corrupt`", 1))
+    skill.write_text(
+        skill.read_text().replace("`gateway.status`", "`gateway.corrupt`", 1)
+    )
     assert check_artifacts(tmp_path)
 
 

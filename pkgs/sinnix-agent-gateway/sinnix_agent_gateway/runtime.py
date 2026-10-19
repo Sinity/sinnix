@@ -17,7 +17,6 @@ from .artifacts import ArtifactService
 from .audit import AuditService
 from .beads import BeadsError, BeadsService
 from .browser import BrowserService
-from .permissions import Permission, PolicyError, Principal
 from .capability_index import CapabilityIndexService
 from .captures import CaptureService
 from .config import GatewayConfig
@@ -33,6 +32,7 @@ from .mcp_broker import McpBrokerService
 from .observe import ObserveService
 from .owner_errors import ErrorCode
 from .owner_execution import OwnerDiagnosticError
+from .permissions import Permission, PolicyError, Principal
 from .projects import ProjectService
 from .redaction import public_error
 from .registry import REGISTRY, RegistryError
@@ -227,9 +227,7 @@ class Runtime:
         for project_id in self.config.projects:
             summary = self.projects.summary(project_id)
             latest = (
-                summary.get("latest_commit")
-                if isinstance(summary, Mapping)
-                else None
+                summary.get("latest_commit") if isinstance(summary, Mapping) else None
             )
             revision = latest.get("id") if isinstance(latest, Mapping) else None
             if isinstance(revision, str) and revision:
@@ -238,12 +236,12 @@ class Runtime:
                 ] = revision
             authority = self.beads.task_authority_status(project_id)
             revision = (
-                authority.get("revision")
-                if isinstance(authority, Mapping)
-                else None
+                authority.get("revision") if isinstance(authority, Mapping) else None
             )
             if isinstance(revision, str) and revision:
-                observations[f"sinnix://projects/{project_id}/task-authority"] = revision
+                observations[f"sinnix://projects/{project_id}/task-authority"] = (
+                    revision
+                )
         return observations
 
     async def gateway_status(
@@ -1550,7 +1548,9 @@ class Runtime:
                 try:
                     job = await anyio.to_thread.run_sync(
                         lambda: self.jobs.reconcile_shell_start(
-                            self.owner_request_key(action.name, context.idempotency_key),
+                            self.owner_request_key(
+                                action.name, context.idempotency_key
+                            ),
                             _shell_request_digest(inp),
                         )
                     )

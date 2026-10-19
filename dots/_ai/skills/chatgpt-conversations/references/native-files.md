@@ -10,8 +10,18 @@ Write an explicit request array in a private scratch directory:
 
 ```json
 [
-  {"kind": "link", "name": "report.zip", "message_id": "native-message-id", "sandbox_path": "/mnt/data/report.zip"},
-  {"kind": "upload", "name": "input.zip", "file_id": "file_native_id", "expected_bytes": 1234}
+  {
+    "kind": "link",
+    "name": "report.zip",
+    "message_id": "native-message-id",
+    "sandbox_path": "/mnt/data/report.zip"
+  },
+  {
+    "kind": "upload",
+    "name": "input.zip",
+    "file_id": "file_native_id",
+    "expected_bytes": 1234
+  }
 ]
 ```
 

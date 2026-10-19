@@ -29,7 +29,9 @@ def domain_path(root: str | Path, domain: str) -> Path:
     """Resolve a named domain without escaping its configured capture root."""
     relative = Path(domain)
     if not domain or relative.is_absolute() or ".." in relative.parts:
-        raise ValueError("domain must be a relative path inside the ranking capture root")
+        raise ValueError(
+            "domain must be a relative path inside the ranking capture root"
+        )
     root = Path(root).resolve()
     target = (root / relative).resolve()
     if target == root or not target.is_relative_to(root):

@@ -296,7 +296,11 @@ def test_prune_refuses_a_corrupt_content_addressed_archive(device) -> None:
 
 def test_ambient_drain_preserves_remote_names(device) -> None:
     root, _env = device
-    names = ["ambient'; touch sentinel; #.m4a", "ambient-雪\n\r.m4a", "ambient-back\\slash.m4a"]
+    names = [
+        "ambient'; touch sentinel; #.m4a",
+        "ambient-雪\n\r.m4a",
+        "ambient-back\\slash.m4a",
+    ]
     for name in names:
         (root / "remote" / "ambient" / name).write_bytes(b"neutral fixture")
     result = run(device, "sinnix-phone", "pull-ambient")
@@ -359,7 +363,9 @@ def test_bcr_literal_filename_is_audited_only_once(device) -> None:
         result = run(device, "sinnix-phone", "bcr-sync")
         assert result.returncode == 0, result.stderr
     assert (root / "lake" / "calls" / name).read_bytes() == source.read_bytes()
-    assert (root / "lake" / "calls" / "debug" / metadata.name).read_bytes() == metadata.read_bytes()
+    assert (
+        root / "lake" / "calls" / "debug" / metadata.name
+    ).read_bytes() == metadata.read_bytes()
     ledger = root / "lake" / "calls" / "levels.jsonl"
     rows = [json.loads(line) for line in ledger.read_text().splitlines()]
     assert len(rows) == 1 and rows[0]["file"] == name
@@ -368,7 +374,14 @@ def test_bcr_literal_filename_is_audited_only_once(device) -> None:
 
 
 @pytest.mark.parametrize("existing", [None, b"", b"--------- beginning of main\n"])
-@pytest.mark.parametrize("incoming", [b"", b"--------- beginning of system\n", b"2026-10-09 00:00:01.123 neutral record\n"])
+@pytest.mark.parametrize(
+    "incoming",
+    [
+        b"",
+        b"--------- beginning of system\n",
+        b"2026-10-09 00:00:01.123 neutral record\n",
+    ],
+)
 def test_logcat_zero_matches_are_one_numeric_count(device, existing, incoming):
     root, env = device
     capture = root / "logcat-input"
@@ -391,8 +404,12 @@ def test_logcat_zero_matches_are_one_numeric_count(device, existing, incoming):
         assert not cursor.exists()
 
 
-@pytest.mark.parametrize("incoming", [b"", b"2026-10-09 00:00:02.123 incomplete record"])
-def test_failed_logcat_pull_preserves_bytes_and_cursor_and_still_checks_bcr(device, incoming):
+@pytest.mark.parametrize(
+    "incoming", [b"", b"2026-10-09 00:00:02.123 incomplete record"]
+)
+def test_failed_logcat_pull_preserves_bytes_and_cursor_and_still_checks_bcr(
+    device, incoming
+):
     root, env = device
     capture = root / "logcat-input"
     capture.write_bytes(incoming)
@@ -425,7 +442,9 @@ def test_invalid_or_future_logcat_cursor_requests_full_dump(device, previous):
     incoming = b"2026-10-09 00:00:01.123 complete record\n"
     capture.write_bytes(incoming)
     args = root / "logcat-args.json"
-    env.update(LOGCAT_CAPTURE=str(capture), LOGCAT_ENFORCE_CURSOR="1", LOGCAT_ARGS=str(args))
+    env.update(
+        LOGCAT_CAPTURE=str(capture), LOGCAT_ENFORCE_CURSOR="1", LOGCAT_ARGS=str(args)
+    )
     cursor = root / "phone-state" / "logcat.cursor"
     cursor.parent.mkdir()
     cursor.write_text(previous + "\n")
@@ -447,14 +466,22 @@ def test_logcat_without_transport_is_not_success(device):
     assert "no adb transport" in result.stdout
 
 
-@pytest.mark.parametrize("status,maximum,expected", [(1, "-1.0", None), (0, "", None), (0, "-91.0", True), (0, "-10.0", False)])
-def test_ambient_audit_distinguishes_failed_unknown_silent_and_sound(device, status, maximum, expected):
+@pytest.mark.parametrize(
+    "status,maximum,expected",
+    [(1, "-1.0", None), (0, "", None), (0, "-91.0", True), (0, "-10.0", False)],
+)
+def test_ambient_audit_distinguishes_failed_unknown_silent_and_sound(
+    device, status, maximum, expected
+):
     root, env = device
     ambient = root / "lake" / "ambient"
     ambient.mkdir(parents=True)
     (ambient / "neutral.m4a").write_bytes(b"neutral audio fixture")
     executable(root / "bin" / "ffprobe", "print('3600')")
-    executable(root / "bin" / "ffmpeg", f"import sys\nprint('mean_volume: -20.0 dB', file=sys.stderr)\nprint('max_volume: {maximum} dB', file=sys.stderr)\nsys.exit({status})")
+    executable(
+        root / "bin" / "ffmpeg",
+        f"import sys\nprint('mean_volume: -20.0 dB', file=sys.stderr)\nprint('max_volume: {maximum} dB', file=sys.stderr)\nsys.exit({status})",
+    )
     result = run(device, "sinnix-phone", "ambient-audit")
     assert result.returncode == 0, result.stderr
     row = json.loads((root / "lake" / "ambient-levels.jsonl").read_text())
@@ -462,7 +489,10 @@ def test_ambient_audit_distinguishes_failed_unknown_silent_and_sound(device, sta
     assert row["captured_nothing"] is expected
     assert row["sha256"] == hashlib.sha256(b"neutral audio fixture").hexdigest()
     if expected is None:
-        assert "1 unknown" in result.stdout and "0 hours in sound-bearing chunks" in result.stdout
+        assert (
+            "1 unknown" in result.stdout
+            and "0 hours in sound-bearing chunks" in result.stdout
+        )
 
 
 def test_ambient_audit_revises_legacy_and_same_size_replacements(device):
@@ -475,7 +505,10 @@ def test_ambient_audit_revises_legacy_and_same_size_replacements(device):
     original = '{"chunk":"neutral.m4a","bytes":5,"captured_nothing":false}\n'
     ledger.write_text(original)
     executable(root / "bin" / "ffprobe", "print('3600')")
-    executable(root / "bin" / "ffmpeg", "import sys\nprint('mean_volume: -20.0 dB\\nmax_volume: -10.0 dB', file=sys.stderr)")
+    executable(
+        root / "bin" / "ffmpeg",
+        "import sys\nprint('mean_volume: -20.0 dB\\nmax_volume: -10.0 dB', file=sys.stderr)",
+    )
     assert run(device, "sinnix-phone", "ambient-audit").returncode == 0
     assert ledger.read_text().startswith(original)
     assert len(ledger.read_text().splitlines()) == 2

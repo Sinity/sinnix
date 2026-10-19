@@ -1,9 +1,8 @@
 """Read the caller's mount table without probing external payload trees."""
 
+import re
 from collections.abc import Iterable
 from pathlib import Path
-import re
-
 
 _OCTAL_ESCAPE = re.compile(r"\\([0-7]{3})")
 
@@ -29,7 +28,9 @@ def read_mountpoints() -> frozenset[Path]:
     return frozenset(points)
 
 
-def has_mounted_ancestor(path: Path, boundary: Path, mountpoints: Iterable[Path]) -> bool:
+def has_mounted_ancestor(
+    path: Path, boundary: Path, mountpoints: Iterable[Path]
+) -> bool:
     """A mount inside the declared boundary must cover this exact path."""
     return any(
         point.is_relative_to(boundary) and path.is_relative_to(point)

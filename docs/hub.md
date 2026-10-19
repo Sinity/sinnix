@@ -12,14 +12,14 @@ Control pages use port 8880; generated reports use a separate port, 8883.
 Open WebUI and ComfyUI are republished on 8881 and 8882 (they cannot run under
 a sub-path).
 
-| Route            | What it is                                                     |
-| ---------------- | -------------------------------------------------------------- |
-| `/`              | Summary: a verdict, six tiles, then detail                     |
-| `/work/`         | What is running: project commands, pueue groups, jobs, budgets |
-| `/services/`     | Declared services grouped by resource class                    |
-| `/reports/`      | Generated reports (report port only)                           |
-| `/ops/v1/*`      | The hub-server's read and action API                          |
-| `/feedback`      | Write-only inbox for report annotations                        |
+| Route        | What it is                                                     |
+| ------------ | -------------------------------------------------------------- |
+| `/`          | Summary: a verdict, six tiles, then detail                     |
+| `/work/`     | What is running: project commands, pueue groups, jobs, budgets |
+| `/services/` | Declared services grouped by resource class                    |
+| `/reports/`  | Generated reports (report port only)                           |
+| `/ops/v1/*`  | The hub-server's read and action API                           |
+| `/feedback`  | Write-only inbox for report annotations                        |
 
 ## Actions
 
@@ -76,6 +76,7 @@ sinnix capabilities --kind script
   ```
 
   Every listen entry must be an explicit address; a bare `":8880"` is a bug.
+
 - **Host and Origin.** Requests with an unknown `Host` are refused before
   anything is served. Accepted names: localhost, loopback, the machine name,
   and its tailnet IP and DNS name. Republished frontends also refuse requests
@@ -98,7 +99,11 @@ Reports made with the html-report skill can send their annotations with one
 request:
 
 ```js
-fetch("/feedback", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(collectState()) });
+fetch("/feedback", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(collectState()),
+});
 ```
 
 Submissions are appended to `/realm/state/hub-feedback/<UTC-date>.jsonl`, each

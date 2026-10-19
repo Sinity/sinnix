@@ -19,7 +19,6 @@ from ..action import (
     MutationControls,
     RequestControls,
 )
-from ..permissions import Permission
 from ..catalog import search_rows
 from ..contracts import EffectMode, VerbFamily
 from ..locators import ARTIFACT_REF_PREFIX, McpToolLocator
@@ -29,6 +28,7 @@ from ..mcp_broker import (
     McpBrokerTimeoutError,
     McpEnvironmentError,
 )
+from ..permissions import Permission
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 

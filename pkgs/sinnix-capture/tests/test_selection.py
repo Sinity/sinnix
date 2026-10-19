@@ -389,7 +389,9 @@ def test_binary_paste_streams_to_a_private_file_before_blob_publication(
     def observe_run(argv, **kwargs):
         if str(argv[1]).endswith("paste.py"):
             output = kwargs.get("stdout")
-            assert output != subprocess.PIPE, "paste must not accumulate its payload in RAM"
+            assert output != subprocess.PIPE, (
+                "paste must not accumulate its payload in RAM"
+            )
             assert hasattr(output, "fileno")
             assert os.fstat(output.fileno()).st_mode & 0o777 == 0o600
             transfers.append(True)
@@ -398,7 +400,7 @@ def test_binary_paste_streams_to_a_private_file_before_blob_publication(
     monkeypatch.setattr(selection.subprocess, "run", observe_run)
     assert lane.run() == 0
     assert transfers == [True]
-    record, = lane.records()
+    (record,) = lane.records()
     assert record["payload"]["size"] == len(body)
     assert record["payload"]["sha256"] == hashlib.sha256(body).hexdigest()
     assert Path(record["raw_ref"]).read_bytes() == body
@@ -427,7 +429,10 @@ def test_conflicting_blob_is_not_accepted_or_replaced(lane, tmp_path, kind):
         lane.run("--dedup-state", str(state))
     after = blob.lstat()
     assert (after.st_ino, after.st_mode, after.st_size, after.st_mtime_ns) == (
-        before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns
+        before.st_ino,
+        before.st_mode,
+        before.st_size,
+        before.st_mtime_ns,
     )
     if kind == "wrong-bytes":
         assert blob.read_bytes() == b"retained conflicting evidence"
@@ -441,7 +446,7 @@ def test_binary_dedup_does_not_hide_a_corrupted_retained_blob(lane, tmp_path):
     state = tmp_path / "state" / "last-selection"
     assert lane.run("--dedup-state", str(state)) == 0
     marker = state.read_bytes()
-    record, = lane.records()
+    (record,) = lane.records()
     blob = Path(record["raw_ref"])
     blob.write_bytes(b"conflicting preimage")
     with pytest.raises(OSError, match="digest mismatch"):
@@ -455,7 +460,7 @@ def test_binary_dedup_restores_an_absent_blob_from_complete_transfer(lane, tmp_p
     lane.types_file.write_text("application/octet-stream\n")
     state = tmp_path / "state" / "last-selection"
     assert lane.run("--dedup-state", str(state)) == 0
-    record, = lane.records()
+    (record,) = lane.records()
     blob = Path(record["raw_ref"])
     blob.unlink()
     assert lane.run("--dedup-state", str(state)) == 0
@@ -477,4 +482,6 @@ def test_blob_collision_during_publication_is_verified(tmp_path, monkeypatch):
     monkeypatch.setattr(selection, "atomic_publish", conflicting_writer)
     with pytest.raises(OSError, match="digest mismatch"):
         store_blob(tmp_path, body, digest)
-    assert (tmp_path / "blobs" / digest[:2] / digest).read_bytes() == b"retained competing content"
+    assert (
+        tmp_path / "blobs" / digest[:2] / digest
+    ).read_bytes() == b"retained competing content"

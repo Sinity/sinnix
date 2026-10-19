@@ -99,10 +99,14 @@ class GatewayConfig:
             raise ValueError("endpoint.scope must be an object")
         capture_scope_values = scope.get("captures", [])
         if not isinstance(capture_scope_values, list) or any(
-            not isinstance(value, str) or value.partition(":")[0] not in {"lane", "subject"}
-            or not value.partition(":")[2] for value in capture_scope_values
+            not isinstance(value, str)
+            or value.partition(":")[0] not in {"lane", "subject"}
+            or not value.partition(":")[2]
+            for value in capture_scope_values
         ):
-            raise ValueError("endpoint.scope.captures requires capture-scope-v1 subject:<id> or lane:<id> selectors")
+            raise ValueError(
+                "endpoint.scope.captures requires capture-scope-v1 subject:<id> or lane:<id> selectors"
+            )
         capture_scope = frozenset(capture_scope_values)
         project_scope_values = scope.get("projects", [])
         if not isinstance(project_scope_values, list) or any(

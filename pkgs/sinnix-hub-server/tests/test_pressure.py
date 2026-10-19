@@ -233,6 +233,7 @@ def test_a_machine_without_swap_registers_the_lane_without_judging_it(lane) -> N
 
 # --------------------------------------------------------------------------
 
+
 def test_process_admission_widens_with_a_sacrificial_slice_marker() -> None:
     """A slice outside agent.slice/agenttool.slice is admitted only if the live
     inventory itself marks it sacrificial (ManagedOOMMemoryPressure=kill) --
@@ -253,4 +254,3 @@ def test_process_admission_widens_with_a_sacrificial_slice_marker() -> None:
     admitted = process_admitted_slices(inventory)
     assert admitted == {"agent.slice", "agenttool.slice", "background.slice"}
     assert "gpu-runtime.slice" not in admitted
-

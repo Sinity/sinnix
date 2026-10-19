@@ -77,12 +77,14 @@ def test_unusable_history_refuses_before_transcription(lake, kind):
 def test_denied_history_is_not_empty(lake, monkeypatch):
     module, calls, phone, mic = lake
     module.TRANSCRIPT_DIR.mkdir()
-    module.LEDGER.write_text('{}\n')
+    module.LEDGER.write_text("{}\n")
     original = os.open
+
     def denied(path, flags, *args, **kwargs):
         if Path(path) == module.LEDGER:
             raise PermissionError("synthetic denied ledger")
         return original(path, flags, *args, **kwargs)
+
     monkeypatch.setattr(module.os, "open", denied)
     with pytest.raises(PermissionError, match="synthetic denied ledger"):
         run_lake(module)
@@ -93,10 +95,14 @@ def test_history_streams_and_accepts_regular_symlink(lake, monkeypatch):
     module, calls, phone, mic = lake
     module.TRANSCRIPT_DIR.mkdir()
     target = module.TRANSCRIPT_DIR / "retained-ledger"
-    target.write_text(json.dumps({"lane": "phone", "file": phone.name, "bytes": 4}) + '\n')
+    target.write_text(
+        json.dumps({"lane": "phone", "file": phone.name, "bytes": 4}) + "\n"
+    )
     module.LEDGER.symlink_to(target.name)
+
     def no_whole_file(*args, **kwargs):
         raise AssertionError("ledger must be read incrementally")
+
     monkeypatch.setattr(Path, "read_text", no_whole_file)
     assert module.ledger_seen() == {("phone", phone.name, 4)}
 
@@ -148,28 +154,37 @@ def test_lane_qualified_history_and_repaired_size(lake):
     assert module.LEDGER.read_text().startswith(prior)
 
 
-@pytest.mark.parametrize("framing, raw, success", [
-    ([("Content-Length", "2"), ("Content-Length", "3")], b"{}", False),
-    ([("Content-Length", "2"), ("Transfer-Encoding", "chunked")], b"{}", False),
-    ([("Content-Length", "-1")], b"{}", False),
-    ([("Content-Length", "3")], b"{}", False),
-    ([("Content-Length", "2")], b"{}", True),
-])
+@pytest.mark.parametrize(
+    "framing, raw, success",
+    [
+        ([("Content-Length", "2"), ("Content-Length", "3")], b"{}", False),
+        ([("Content-Length", "2"), ("Transfer-Encoding", "chunked")], b"{}", False),
+        ([("Content-Length", "-1")], b"{}", False),
+        ([("Content-Length", "3")], b"{}", False),
+        ([("Content-Length", "2")], b"{}", True),
+    ],
+)
 def test_http_framing_precedes_transcription(lake, monkeypatch, framing, raw, success):
     import io
     import socketserver
     from email.message import Message
+
     module = lake[0]
     calls, statuses = [], []
-    monkeypatch.setattr(module, "_multipart_file", lambda body, ctype: calls.append(body) or b"audio")
+    monkeypatch.setattr(
+        module, "_multipart_file", lambda body, ctype: calls.append(body) or b"audio"
+    )
     monkeypatch.setattr(module, "transcribe_file", lambda path: {"text": "neutral"})
+
     class ShortReader(io.BytesIO):
         def read(self, size=-1):
             return super().read(min(size, 1))
+
     class Server:
         def __init__(self, address, handler):
             self.handler = handler
             self.server_address = address
+
         def serve_forever(self):
             handler = object.__new__(self.handler)
             handler.server = self
@@ -181,8 +196,10 @@ def test_http_framing_precedes_transcription(lake, monkeypatch, framing, raw, su
             handler.path = "/v1/audio/transcriptions"
             handler._json = lambda status, body: statuses.append(int(status))
             handler.do_POST()
+
         def server_close(self):
             pass
+
     monkeypatch.setattr(socketserver, "ThreadingTCPServer", Server)
     assert module.cmd_serve(argparse.Namespace(socket=None, listen="127.0.0.1:0")) == 0
     assert statuses == [200 if success else 400]
@@ -190,7 +207,9 @@ def test_http_framing_precedes_transcription(lake, monkeypatch, framing, raw, su
 
 
 @pytest.mark.parametrize("failure", [None, "write", "transcribe"])
-def test_upload_scratch_is_removed_even_after_partial_write(lake, monkeypatch, tmp_path, failure):
+def test_upload_scratch_is_removed_even_after_partial_write(
+    lake, monkeypatch, tmp_path, failure
+):
     import socketserver
     from email.message import Message
 
@@ -224,6 +243,7 @@ def test_upload_scratch_is_removed_even_after_partial_write(lake, monkeypatch, t
 
         def serve_forever(self):
             import io
+
             handler = object.__new__(self.handler)
             handler.server = self
             handler.headers = Message()
@@ -262,10 +282,17 @@ def test_native_http_guard_before_upload_and_transcription(lake, monkeypatch):
             worker = threading.Thread(target=super().serve_forever, daemon=True)
             worker.start()
             try:
-                for name in ("Origin", "Sec-Fetch-Site", "Sec-Fetch-Mode",
-                             "Sec-Fetch-Dest", "Sec-Fetch-User"):
+                for name in (
+                    "Origin",
+                    "Sec-Fetch-Site",
+                    "Sec-Fetch-Mode",
+                    "Sec-Fetch-Dest",
+                    "Sec-Fetch-User",
+                ):
                     for method in ("GET", "POST"):
-                        client = http.client.HTTPConnection("127.0.0.1", self.server_address[1], timeout=2)
+                        client = http.client.HTTPConnection(
+                            "127.0.0.1", self.server_address[1], timeout=2
+                        )
                         client.putrequest(method, "/v1/audio/transcriptions")
                         client.putheader(name, "")
                         client.putheader("Content-Length", "100")
@@ -275,27 +302,50 @@ def test_native_http_guard_before_upload_and_transcription(lake, monkeypatch):
                         client.close()
                         assert response.status == 403
                         statuses.append(response.status)
-                for hosts in ([], ["rebound.example.invalid:18090"],
-                              ["127.0.0.1:18090", "localhost:18090"],
-                              ["user@127.0.0.1:18090"], ["127.0.0.1:80"]):
-                    client = http.client.HTTPConnection("127.0.0.1", self.server_address[1], timeout=2)
+                for hosts in (
+                    [],
+                    ["rebound.example.invalid:18090"],
+                    ["127.0.0.1:18090", "localhost:18090"],
+                    ["user@127.0.0.1:18090"],
+                    ["127.0.0.1:80"],
+                ):
+                    client = http.client.HTTPConnection(
+                        "127.0.0.1", self.server_address[1], timeout=2
+                    )
                     client.putrequest("GET", "/health", skip_host=True)
                     for host in hosts:
                         client.putheader("Host", host)
                     client.endheaders()
-                    response = client.getresponse(); response.read(); client.close()
+                    response = client.getresponse()
+                    response.read()
+                    client.close()
                     assert response.status == 403
                 assert calls == []
                 for host in (f"127.0.0.1:{self.server_address[1]}", "localhost:18090"):
-                    client = http.client.HTTPConnection("127.0.0.1", self.server_address[1], timeout=2)
+                    client = http.client.HTTPConnection(
+                        "127.0.0.1", self.server_address[1], timeout=2
+                    )
                     client.request("GET", "/health", headers={"Host": host})
-                    response = client.getresponse(); response.read(); client.close()
+                    response = client.getresponse()
+                    response.read()
+                    client.close()
                     assert response.status == 200
-                body = (b'--neutral\r\nContent-Disposition: form-data; name="file"; filename="neutral.wav"\r\n'
-                        b'Content-Type: audio/wav\r\n\r\nneutral audio\r\n--neutral--\r\n')
-                client = http.client.HTTPConnection("127.0.0.1", self.server_address[1], timeout=2)
-                client.request("POST", "/v1/audio/transcriptions", body,
-                               {"Host": "localhost:18090", "Content-Type": "multipart/form-data; boundary=neutral"})
+                body = (
+                    b'--neutral\r\nContent-Disposition: form-data; name="file"; filename="neutral.wav"\r\n'
+                    b"Content-Type: audio/wav\r\n\r\nneutral audio\r\n--neutral--\r\n"
+                )
+                client = http.client.HTTPConnection(
+                    "127.0.0.1", self.server_address[1], timeout=2
+                )
+                client.request(
+                    "POST",
+                    "/v1/audio/transcriptions",
+                    body,
+                    {
+                        "Host": "localhost:18090",
+                        "Content-Type": "multipart/form-data; boundary=neutral",
+                    },
+                )
                 response = client.getresponse()
                 assert response.status == 200
                 assert json.loads(response.read())["text"] == "neutral audio"

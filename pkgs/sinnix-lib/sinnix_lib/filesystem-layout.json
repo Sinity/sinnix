@@ -28,17 +28,9 @@
     }
   },
   "optional": {
-    "/realm": [
-      ".Trash-1000",
-      ".btrfs",
-      ".hidden"
-    ],
-    "/outer-realm": [
-      ".Trash-1000"
-    ],
-    "/neo-outer-realm": [
-      ".Trash-1000"
-    ]
+    "/realm": [".Trash-1000", ".btrfs", ".hidden"],
+    "/outer-realm": [".Trash-1000"],
+    "/neo-outer-realm": [".Trash-1000"]
   },
   "activity_lanes": {
     "audio": "audio/recording",

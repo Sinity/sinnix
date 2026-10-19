@@ -137,7 +137,9 @@ def capabilities_command(argv: list[str]) -> int:
         )
         return 1
     index_status = view.get("index_status") or {}
-    print(f"Declaration index: {index_status.get('status', 'unavailable')}; {index_status.get('reason', '')}")
+    print(
+        f"Declaration index: {index_status.get('status', 'unavailable')}; {index_status.get('reason', '')}"
+    )
     for group in view["groups"]:
         print(f"\n{group['label']} ({len(group['rows'])}) — {group['note']}")
         for row in group["rows"]:

@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.files import FileError, HostFileService
+from sinnix_agent_gateway.permissions import Principal
 
 
 def service(tmp_path: Path, principal_name: str) -> HostFileService:
@@ -202,7 +202,9 @@ def test_cross_filesystem_unlink_failure_reports_both_preserved_objects(
 
 
 @pytest.mark.parametrize("fail_read", [False, True])
-def test_copy_preserves_a_destination_created_during_source_open(tmp_path, monkeypatch, fail_read):
+def test_copy_preserves_a_destination_created_during_source_open(
+    tmp_path, monkeypatch, fail_read
+):
     import os
 
     source = tmp_path / "source.txt"
@@ -227,7 +229,9 @@ def test_copy_preserves_a_destination_created_during_source_open(tmp_path, monke
     monkeypatch.setattr(Path, "open", race)
     expected = OSError if fail_read else FileError
     with pytest.raises(expected):
-        service(tmp_path, "operator").write("copy", str(source), destination=str(destination))
+        service(tmp_path, "operator").write(
+            "copy", str(source), destination=str(destination)
+        )
     assert destination.read_bytes() == b"concurrent work"
     assert destination.stat().st_ino == expected_inode
     assert source.read_bytes() == b"source evidence"

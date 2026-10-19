@@ -1,4 +1,5 @@
 """Scoring triggers share a bounded worker without losing arrivals."""
+
 import threading
 
 import pytest

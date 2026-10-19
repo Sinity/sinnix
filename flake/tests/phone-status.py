@@ -2,14 +2,14 @@
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 source = Path(sys.argv[1]).read_text()
 status = source.split("\napp-status)\n", 1)[1].split("\n  ;;\napp-install)", 1)[0]
-mock = r'''
+mock = r"""
 adb_any() {
   case "$*" in
     get-state) return 0 ;;
@@ -27,24 +27,37 @@ adb_any() {
 }
 ffprobe() { echo 300; }
 ffmpeg() { echo 'mean_volume: -20 dB' >&2; }
-'''
+"""
 
 with tempfile.TemporaryDirectory() as temporary:
     root = Path(temporary)
     (root / "lake/ambient").mkdir(parents=True)
     (root / "lake/ambient/ambient-20000101.m4a").touch()
-    (root / "status.json").write_text(json.dumps({
-        "updated_at": "2000-01-01T00:00:00Z", "recording": True,
-        "chunk_dir_is_shared": True, "package": "fixture", "app_version": 1,
-        "failures": 0,
-    }))
+    (root / "status.json").write_text(
+        json.dumps(
+            {
+                "updated_at": "2000-01-01T00:00:00Z",
+                "recording": True,
+                "chunk_dir_is_shared": True,
+                "package": "fixture",
+                "app_version": 1,
+                "failures": 0,
+            }
+        )
+    )
 
     def run():
         return subprocess.run(
-            ["bash", "-c", "set -euo pipefail\nAPP_ID=fixture\n"
-             'LAKE_ROOT="$FIXTURE/lake"\n' + mock + status],
+            [
+                "bash",
+                "-c",
+                "set -euo pipefail\nAPP_ID=fixture\n"
+                'LAKE_ROOT="$FIXTURE/lake"\n' + mock + status,
+            ],
             env={**os.environ, "FIXTURE": str(root), "TMPDIR": str(root)},
-            text=True, capture_output=True, timeout=5,
+            text=True,
+            capture_output=True,
+            timeout=5,
         )
 
     # The remote ls|head predecessor hides ls failure and claims a drained phone.
@@ -87,4 +100,6 @@ with tempfile.TemporaryDirectory() as temporary:
     assert "last chunk: ambient-old-name.m4a" in present.stdout, present.stdout
     assert not list(root.glob("sinnix-phone-status.*"))
 
-print("Phone status: missing/wrong-type refused, empty fallback and newest-mtime measurement passed")
+print(
+    "Phone status: missing/wrong-type refused, empty fallback and newest-mtime measurement passed"
+)

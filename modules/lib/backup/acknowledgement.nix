@@ -251,9 +251,7 @@ in
         # without UUID bindings, writable snapshots and ordinary directories
         # remain on disk; no fallback recursive deletion is safe here.
         ${snapshotCoverage} verify "$snap_dir" "$archive_name" "$snapshot_uuid" \
-          ${
-            pkgs.writeText "root-snapshot-coverage.json" (builtins.toJSON rootSnapshotExcludes)
-          } || return 1
+          ${pkgs.writeText "root-snapshot-coverage.json" (builtins.toJSON rootSnapshotExcludes)} || return 1
         [ "$(${snapshotCoverage} identity "$snap_dir")" = "$snapshot_uuid" ] || return 1
         btrfs subvolume delete "$snap_dir"
       }

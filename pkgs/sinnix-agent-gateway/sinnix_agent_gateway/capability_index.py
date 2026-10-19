@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .permissions import Permission, Principal
 from .config import GatewayConfig
+from .permissions import Permission, Principal
 
 
 class CapabilityIndexError(ValueError):

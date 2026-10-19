@@ -12,27 +12,27 @@ let
   # Agent/devshell library overrides can outlive a host upgrade. The native
   # control client must use its packaged C++ ABI, without changing the
   # compositor's or applications' library environment.
-  hyprlandWithNativeCli = lib.makeOverridable
-    (lib.setFunctionArgs
-      (args:
-        let
-          unwrapped = pkgs.hyprland.override args;
-        in
-        pkgs.symlinkJoin {
-          name = "${unwrapped.name}-native-cli";
-          paths = map (output: unwrapped.${output}) (unwrapped.meta.outputsToInstall or [ "out" ]);
-          nativeBuildInputs = [ pkgs.makeWrapper ];
-          inherit (unwrapped) version;
-          meta = unwrapped.meta // { outputsToInstall = [ "out" ]; };
-          passthru = unwrapped.passthru or { };
-          postBuild = ''
-            unlink "$out/bin/hyprctl"
-            makeWrapper ${unwrapped}/bin/hyprctl "$out/bin/hyprctl" \
-              --unset LD_LIBRARY_PATH
-          '';
-        })
-      (lib.functionArgs pkgs.hyprland.override))
-    { };
+  hyprlandWithNativeCli = lib.makeOverridable (lib.setFunctionArgs (
+    args:
+    let
+      unwrapped = pkgs.hyprland.override args;
+    in
+    pkgs.symlinkJoin {
+      name = "${unwrapped.name}-native-cli";
+      paths = map (output: unwrapped.${output}) (unwrapped.meta.outputsToInstall or [ "out" ]);
+      nativeBuildInputs = [ pkgs.makeWrapper ];
+      inherit (unwrapped) version;
+      meta = unwrapped.meta // {
+        outputsToInstall = [ "out" ];
+      };
+      passthru = unwrapped.passthru or { };
+      postBuild = ''
+        unlink "$out/bin/hyprctl"
+        makeWrapper ${unwrapped}/bin/hyprctl "$out/bin/hyprctl" \
+          --unset LD_LIBRARY_PATH
+      '';
+    }
+  ) (lib.functionArgs pkgs.hyprland.override)) { };
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
 
   # Helpers for home-manager config

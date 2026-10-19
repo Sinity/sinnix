@@ -39,7 +39,7 @@ assert_denied 'bd update sinnix-test --append-notes ok && bd update sinnix-test 
 # A project Python environment must not execute startup code in the guard.
 poison="$test_root/python-env"
 mkdir -p "$poison"
-cat > "$poison/sitecustomize.py" <<'PYTHON'
+cat >"$poison/sitecustomize.py" <<'PYTHON'
 import os
 with open(os.environ["SINNIX_HOOK_IMPORT_MARKER"], "w") as handle:
     handle.write("unexpected fixture startup")

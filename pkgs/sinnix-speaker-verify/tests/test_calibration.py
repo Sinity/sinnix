@@ -10,9 +10,9 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
-from types import SimpleNamespace
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -56,7 +56,9 @@ def test_disjoint_check_rejects_reused_audio(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("same_group", [False, True])
-def test_disjoint_check_rejects_hardlinked_audio(tmp_path: Path, same_group: bool) -> None:
+def test_disjoint_check_rejects_hardlinked_audio(
+    tmp_path: Path, same_group: bool
+) -> None:
     sample = tmp_path / "clip.wav"
     sample.touch()
     alias = tmp_path / "other-name.wav"
@@ -191,13 +193,21 @@ def test_score_refuses_an_unbound_report_before_loading_model(monkeypatch, tmp_p
     store.mkdir()
     (store / "operator.json").write_text(json.dumps({"centroid": [1.0, 0.0]}))
     report = tmp_path / "report.json"
-    report.write_text(json.dumps({"supports_attribution": True,
-                                "cohort_embeddings": [[0, 1], [-1, 0], [0, -1]]}))
+    report.write_text(
+        json.dumps(
+            {
+                "supports_attribution": True,
+                "cohort_embeddings": [[0, 1], [-1, 0], [0, -1]],
+            }
+        )
+    )
     monkeypatch.setattr(MODULE, "STORE_DIR", store)
     calls = []
     monkeypatch.setattr(MODULE, "_load_model", lambda: calls.append("load") or object())
     monkeypatch.setattr(MODULE, "_embed", lambda *args: np.array([0.8, 0.6]))
-    args = SimpleNamespace(name="operator", audio="neutral.wav", calibration=str(report))
+    args = SimpleNamespace(
+        name="operator", audio="neutral.wav", calibration=str(report)
+    )
     with pytest.raises(ValueError, match="calibration"):
         MODULE.cmd_score(args)
     assert calls == []
@@ -211,8 +221,14 @@ def test_calibrate_publishes_a_private_report(monkeypatch, tmp_path):
 def calibrated(monkeypatch, tmp_path):
     report, groups = _publish_synthetic_report(monkeypatch, tmp_path)
     monkeypatch.setattr(MODULE, "STORE_DIR", tmp_path / "store")
-    MODULE.cmd_enroll(SimpleNamespace(audio=list(map(str, reversed(groups["enrollment"]))), name="operator"))
-    return report, SimpleNamespace(name="operator", audio=str(groups["genuine"][0]), calibration=str(report))
+    MODULE.cmd_enroll(
+        SimpleNamespace(
+            audio=list(map(str, reversed(groups["enrollment"]))), name="operator"
+        )
+    )
+    return report, SimpleNamespace(
+        name="operator", audio=str(groups["genuine"][0]), calibration=str(report)
+    )
 
 
 def test_matching_report_scores_the_exact_enrollment(calibrated, capsys):
@@ -227,8 +243,25 @@ def test_matching_report_scores_the_exact_enrollment(calibrated, capsys):
     assert isinstance(result["attribution_score"], float)
 
 
-@pytest.mark.parametrize("change", ["report_model", "enrollment_model", "centroid", "version", "method", "trials", "metric", "summary", "counts", "cohort", "max_eer"])
-def test_mismatched_or_malformed_report_refuses_before_model_load(calibrated, monkeypatch, change):
+@pytest.mark.parametrize(
+    "change",
+    [
+        "report_model",
+        "enrollment_model",
+        "centroid",
+        "version",
+        "method",
+        "trials",
+        "metric",
+        "summary",
+        "counts",
+        "cohort",
+        "max_eer",
+    ],
+)
+def test_mismatched_or_malformed_report_refuses_before_model_load(
+    calibrated, monkeypatch, change
+):
     report, args = calibrated
     payload = json.loads(report.read_text())
     target = MODULE._enrollment_path("operator")
@@ -272,13 +305,22 @@ def test_support_flag_cannot_override_measured_trials(calibrated, capsys):
     payload = json.loads(report.read_text())
     genuine = impostor = [0.0, 0.1]
     stats = MODULE._eer(genuine, impostor)
-    payload.update(trial_scores={"genuine": genuine, "impostor": impostor},
-                   equal_error_rate=stats["eer"], threshold=stats["threshold"],
-                   false_accept_rate=stats["far"], false_reject_rate=stats["frr"],
-                   calibration_error_brier=MODULE._brier(genuine, impostor, stats["threshold"]),
-                   max_eer=0.05, supports_attribution=True)
+    payload.update(
+        trial_scores={"genuine": genuine, "impostor": impostor},
+        equal_error_rate=stats["eer"],
+        threshold=stats["threshold"],
+        false_accept_rate=stats["far"],
+        false_reject_rate=stats["frr"],
+        calibration_error_brier=MODULE._brier(genuine, impostor, stats["threshold"]),
+        max_eer=0.05,
+        supports_attribution=True,
+    )
     for label, values in (("genuine", genuine), ("impostor", impostor)):
-        payload[label] = {"min": min(values), "mean": float(np.mean(values)), "max": max(values)}
+        payload[label] = {
+            "min": min(values),
+            "mean": float(np.mean(values)),
+            "max": max(values),
+        }
     report.write_text(json.dumps(payload))
     capsys.readouterr()
     assert MODULE.cmd_score(args) == 0
@@ -292,14 +334,21 @@ def test_invalid_calibration_policy_refuses_before_model_load(monkeypatch, maxim
         MODULE.cmd_calibrate(SimpleNamespace(max_eer=maximum))
 
 
-def test_legacy_enrollment_still_scores_without_calibration(monkeypatch, tmp_path, capsys):
+def test_legacy_enrollment_still_scores_without_calibration(
+    monkeypatch, tmp_path, capsys
+):
     monkeypatch.setattr(MODULE, "STORE_DIR", tmp_path)
     target = tmp_path / "operator.json"
     original = b'{"centroid":[1.0,0.0]}'
     target.write_bytes(original)
     monkeypatch.setattr(MODULE, "_load_model", lambda: object())
     monkeypatch.setattr(MODULE, "_embed", lambda *args: np.array([0.8, 0.6]))
-    assert MODULE.cmd_score(SimpleNamespace(name="operator", audio="synthetic.wav", calibration=None)) == 0
+    assert (
+        MODULE.cmd_score(
+            SimpleNamespace(name="operator", audio="synthetic.wav", calibration=None)
+        )
+        == 0
+    )
     result = json.loads(capsys.readouterr().out)
     assert result["cosine_similarity"] == 0.8
     assert "attribution_score" not in result
@@ -323,13 +372,25 @@ def test_corpus_reader_refuses_unavailable_inputs(tmp_path, monkeypatch, unavail
     previous = b'{"previous":"verified report"}'
     report.write_bytes(previous)
     inode = report.stat().st_ino
-    monkeypatch.setattr(MODULE, "_load_model", lambda: pytest.fail("model loaded before corpus validation"))
+    monkeypatch.setattr(
+        MODULE,
+        "_load_model",
+        lambda: pytest.fail("model loaded before corpus validation"),
+    )
     try:
         with pytest.raises(expected):
             MODULE._audio_files(str(tmp_path))
         with pytest.raises(expected):
-            MODULE.cmd_calibrate(SimpleNamespace(max_eer=0.05, enrollment=str(tmp_path),
-                genuine="unused", impostor="unused", cohort="unused", output=str(report)))
+            MODULE.cmd_calibrate(
+                SimpleNamespace(
+                    max_eer=0.05,
+                    enrollment=str(tmp_path),
+                    genuine="unused",
+                    impostor="unused",
+                    cohort="unused",
+                    output=str(report),
+                )
+            )
         assert report.read_bytes() == previous and report.stat().st_ino == inode
     finally:
         hidden.chmod(0o700)

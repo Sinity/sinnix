@@ -207,6 +207,7 @@ def test_symlinked_cache_marker_is_not_a_declaration(tmp_path):
 
 def test_missing_nested_managed_home_fails(tmp_path):
     from sinnix_lib.layout import COLLECTION_PATHS
+
     prefix = tmp_path / "lake"
     build_lake(prefix)
     home = prefix / "realm" / next(iter(COLLECTION_PATHS.values()))
@@ -216,9 +217,9 @@ def test_missing_nested_managed_home_fails(tmp_path):
     assert f"INVALID managed directory: {home}" in result.stdout
 
 
-
 def test_wrong_root_type_is_not_skipped(tmp_path):
-    root = tmp_path / ROOTS[0]; root.parent.mkdir(parents=True, exist_ok=True)
+    root = tmp_path / ROOTS[0]
+    root.parent.mkdir(parents=True, exist_ok=True)
     root.write_text("wrong root type")
     result = run(tmp_path)
     assert result.returncode == 1
@@ -228,12 +229,16 @@ def test_wrong_root_type_is_not_skipped(tmp_path):
 
 def test_denied_root_is_not_absent_or_success(tmp_path, monkeypatch, capsys):
     import runpy
+
     module = runpy.run_path(str(SCRIPT))
     root = tmp_path / ROOTS[0]
     original = Path.lstat
+
     def denied(path, *args, **kwargs):
-        if path == root: raise PermissionError("synthetic denied root")
+        if path == root:
+            raise PermissionError("synthetic denied root")
         return original(path, *args, **kwargs)
+
     monkeypatch.setattr(Path, "lstat", denied)
     monkeypatch.setenv("LAKE_LINT_ROOT_PREFIX", str(tmp_path))
     assert module["main"]() == 1

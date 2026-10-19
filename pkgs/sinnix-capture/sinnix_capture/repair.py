@@ -1,12 +1,12 @@
 """Digest-guarded capture index repair, preserving every original line."""
 
-from contextlib import closing
 import hashlib
 import json
 import os
-from pathlib import Path
 import sqlite3
 import stat
+from contextlib import closing
+from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from sinnix_lib.layout import capture_lane_path
@@ -16,8 +16,15 @@ from .query import _valid_timestamp
 
 
 def _identity(info):
-    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
-            info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode))
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_uid,
+        info.st_gid,
+        stat.S_IMODE(info.st_mode),
+    )
 
 
 def _sync_directory(path):
@@ -43,14 +50,22 @@ def _digest_regular(path):
 
 def _verified_entry(directory, lane, evidence):
     """Project a reviewed original record, never metadata supplied on trust."""
-    if (not isinstance(evidence, dict) or type(evidence.get("seq")) is not int
-            or evidence["seq"] < 1 or not _valid_timestamp(evidence.get("ts"))):
+    if (
+        not isinstance(evidence, dict)
+        or type(evidence.get("seq")) is not int
+        or evidence["seq"] < 1
+        or not _valid_timestamp(evidence.get("ts"))
+    ):
         raise ValueError("invalid restoration metadata")
     filename = evidence.get("file")
     offset = evidence.get("offset")
-    if (not isinstance(filename, str) or Path(filename).name != filename
-            or not Path(filename).match(f"{lane}-[0-9]*.jsonl")
-            or type(offset) is not int or offset < 0):
+    if (
+        not isinstance(filename, str)
+        or Path(filename).name != filename
+        or not Path(filename).match(f"{lane}-[0-9]*.jsonl")
+        or type(offset) is not int
+        or offset < 0
+    ):
         raise ValueError("invalid restoration source location")
     path = directory / filename
     fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
@@ -63,13 +78,18 @@ def _verified_entry(directory, lane, evidence):
         with os.fdopen(fd, "rb", closefd=False) as stream:
             stream.seek(offset)
             line = stream.readline()
-        if (not line.endswith(b"\n")
-                or hashlib.sha256(line).hexdigest() != evidence.get("sha256")):
+        if not line.endswith(b"\n") or hashlib.sha256(line).hexdigest() != evidence.get(
+            "sha256"
+        ):
             raise ValueError("restoration source record changed")
         row = json.loads(line)
-        if (not isinstance(row, dict) or type(row.get("seq")) is not int
-                or row["seq"] < 1 or not _valid_timestamp(row.get("ts"))
-                or (row["seq"], row["ts"]) != (evidence.get("seq"), evidence.get("ts"))):
+        if (
+            not isinstance(row, dict)
+            or type(row.get("seq")) is not int
+            or row["seq"] < 1
+            or not _valid_timestamp(row.get("ts"))
+            or (row["seq"], row["ts"]) != (evidence.get("seq"), evidence.get("ts"))
+        ):
             raise ValueError("restoration source metadata differs from review")
         current = path.lstat()
         if (current.st_dev, current.st_ino) != (before.st_dev, before.st_ino):
@@ -79,7 +99,9 @@ def _verified_entry(directory, lane, evidence):
         os.close(fd)
 
 
-def repair_index(capture_root, lane, *, expected_sha256, expected_size, restore_entries=()):
+def repair_index(
+    capture_root, lane, *, expected_sha256, expected_size, restore_entries=()
+):
     """Repair reviewed metadata under the producer lock; never renumber/drop.
 
     This maintenance operation holds the lane's writer lock through publication.
@@ -88,8 +110,11 @@ def repair_index(capture_root, lane, *, expected_sha256, expected_size, restore_
     index covers every payload, or repair ambiguous duplicate sequence IDs.
     Restorations require exact record boundaries and full source-record hashes.
     """
-    if (not isinstance(expected_sha256, str) or len(expected_sha256) != 64
-            or any(c not in "0123456789abcdef" for c in expected_sha256)):
+    if (
+        not isinstance(expected_sha256, str)
+        or len(expected_sha256) != 64
+        or any(c not in "0123456789abcdef" for c in expected_sha256)
+    ):
         raise ValueError("expected SHA-256 must be a full lowercase digest")
     if type(expected_size) is not int or expected_size < 0:
         raise ValueError("expected index size must be a nonnegative integer")
@@ -110,7 +135,9 @@ def repair_index(capture_root, lane, *, expected_sha256, expected_size, restore_
                 db.execute("PRAGMA synchronous = OFF")
                 # Length + decimal digits order arbitrary positive integers
                 # exactly, without SQLite's signed-int64 conversion limit.
-                db.execute("CREATE TABLE rows (digits INTEGER, seq TEXT, line BLOB, PRIMARY KEY(digits,seq)) WITHOUT ROWID")
+                db.execute(
+                    "CREATE TABLE rows (digits INTEGER, seq TEXT, line BLOB, PRIMARY KEY(digits,seq)) WITHOUT ROWID"
+                )
                 digest = hashlib.sha256()
                 previous = 0
                 ordered = True
@@ -124,46 +151,74 @@ def repair_index(capture_root, lane, *, expected_sha256, expected_size, restore_
                             if not line.endswith(b"\n"):
                                 raise ValueError("index has an incomplete final record")
                             row = json.loads(line)
-                            if (not isinstance(row, dict) or type(row.get("seq")) is not int
-                                    or row["seq"] < 1 or not _valid_timestamp(row.get("ts"))):
-                                raise ValueError("index has malformed timestamp/sequence fields")
+                            if (
+                                not isinstance(row, dict)
+                                or type(row.get("seq")) is not int
+                                or row["seq"] < 1
+                                or not _valid_timestamp(row.get("ts"))
+                            ):
+                                raise ValueError(
+                                    "index has malformed timestamp/sequence fields"
+                                )
                             seq = row["seq"]
                             ordered = ordered and seq > previous
                             previous = seq
                             key = str(seq)
                             try:
-                                db.execute("INSERT INTO rows VALUES (?, ?, ?)", (len(key), key, line))
+                                db.execute(
+                                    "INSERT INTO rows VALUES (?, ?, ?)",
+                                    (len(key), key, line),
+                                )
                             except sqlite3.IntegrityError as exc:
-                                raise ValueError("duplicate sequence requires payload reconciliation") from exc
+                                raise ValueError(
+                                    "duplicate sequence requires payload reconciliation"
+                                ) from exc
                             digest.update(line)
                             count += 1
                     if _identity(os.fstat(fd)) != _identity(observed):
                         raise ValueError("index changed during review")
                 finally:
                     os.close(fd)
-                if digest.hexdigest() != expected_sha256 or _identity(index.lstat()) != _identity(observed):
+                if digest.hexdigest() != expected_sha256 or _identity(
+                    index.lstat()
+                ) != _identity(observed):
                     raise ValueError("index changed since review")
                 restored = 0
                 for evidence in restore_entries:
                     row = _verified_entry(directory, lane, evidence)
                     seq = row["seq"]
                     key = str(seq)
-                    line = (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode()
+                    line = (
+                        json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n"
+                    ).encode()
                     try:
-                        db.execute("INSERT INTO rows VALUES (?, ?, ?)", (len(key), key, line))
+                        db.execute(
+                            "INSERT INTO rows VALUES (?, ?, ?)", (len(key), key, line)
+                        )
                     except sqlite3.IntegrityError as exc:
-                        raise ValueError("restored sequence is already indexed; reconciliation required") from exc
+                        raise ValueError(
+                            "restored sequence is already indexed; reconciliation required"
+                        ) from exc
                     restored += 1
                 if ordered and not restored:
-                    return {"changed": False, "records": count, "sha256": expected_sha256}
+                    return {
+                        "changed": False,
+                        "records": count,
+                        "sha256": expected_sha256,
+                    }
                 pending = Path(scratch) / "index.jsonl"
                 new_digest = hashlib.sha256()
                 with pending.open("xb") as stream:
-                    for (line,) in db.execute("SELECT line FROM rows ORDER BY digits, seq"):
+                    for (line,) in db.execute(
+                        "SELECT line FROM rows ORDER BY digits, seq"
+                    ):
                         stream.write(line)
                         new_digest.update(line)
                     current = os.fstat(stream.fileno())
-                    if (current.st_uid, current.st_gid) != (observed.st_uid, observed.st_gid):
+                    if (current.st_uid, current.st_gid) != (
+                        observed.st_uid,
+                        observed.st_gid,
+                    ):
                         os.fchown(stream.fileno(), observed.st_uid, observed.st_gid)
                     os.fchmod(stream.fileno(), stat.S_IMODE(observed.st_mode))
                     stream.flush()
@@ -171,7 +226,9 @@ def repair_index(capture_root, lane, *, expected_sha256, expected_size, restore_
                 backups = directory / ".index-repairs"
                 backups.mkdir(mode=0o700, exist_ok=True)
                 if not stat.S_ISDIR(backups.lstat().st_mode):
-                    raise ValueError("index preimage entrance must be a physical directory")
+                    raise ValueError(
+                        "index preimage entrance must be a physical directory"
+                    )
                 backup = backups / f"{expected_sha256}.jsonl"
                 try:
                     os.link(index, backup, follow_symlinks=False)
@@ -186,6 +243,14 @@ def repair_index(capture_root, lane, *, expected_sha256, expected_size, restore_
                 os.replace(pending, index)
                 _sync_directory(directory)
                 if _digest_regular(index) != new_digest.hexdigest():
-                    raise ValueError("published index verification failed; preimage retained")
-                return {"changed": True, "records": count + restored, "restored_records": restored, "sha256": new_digest.hexdigest(),
-                        "previous_sha256": expected_sha256, "backup": str(backup)}
+                    raise ValueError(
+                        "published index verification failed; preimage retained"
+                    )
+                return {
+                    "changed": True,
+                    "records": count + restored,
+                    "restored_records": restored,
+                    "sha256": new_digest.hexdigest(),
+                    "previous_sha256": expected_sha256,
+                    "backup": str(backup),
+                }

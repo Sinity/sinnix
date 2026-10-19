@@ -8,12 +8,11 @@ import json
 import os
 import tracemalloc
 import uuid
-
-import pytest
 from email.message import Message
 from http import HTTPStatus
 from types import MethodType
 
+import pytest
 import sinnix_phone_dispatcher.execute as execute_mod
 import sinnix_phone_dispatcher.server as server_mod
 import sinnix_phone_dispatcher.uploads as uploads_mod
@@ -97,7 +96,8 @@ def test_oversized_event_batch_is_refused_before_reading(monkeypatch):
     handler, sent = _handler("/v1/events?day=20260101&offset=0", b"", str(size))
     handler.rfile = UnreadableBody()
     monkeypatch.setattr(
-        server_mod, "append_events",
+        server_mod,
+        "append_events",
         lambda *_args: (_ for _ in ()).throw(AssertionError("domain was called")),
     )
     handler.do_POST()
@@ -273,6 +273,7 @@ def test_camera_configured_home_over_unix_socket(monkeypatch, tmp_path):
     import runpy
     import socket
     import threading
+
     import sinnix_phone_dispatcher.state as state
 
     camera = tmp_path / "photo" / "DCIM"
@@ -295,8 +296,12 @@ def test_camera_configured_home_over_unix_socket(monkeypatch, tmp_path):
         connection.sock.connect(address)
         body = b"synthetic camera payload"
         digest = hashlib.sha256(body).hexdigest()
-        connection.request("POST", "/v1/chunk?lane=camera&name=Camera/fixture.jpg",
-                           body, {"X-Sinnix-Sha256": digest})
+        connection.request(
+            "POST",
+            "/v1/chunk?lane=camera&name=Camera/fixture.jpg",
+            body,
+            {"X-Sinnix-Sha256": digest},
+        )
         response = connection.getresponse()
         receipt = json.loads(response.read())
         assert response.status == HTTPStatus.OK
@@ -312,6 +317,7 @@ def test_camera_configured_home_over_unix_socket(monkeypatch, tmp_path):
 
 def test_camera_default_is_independent_of_telemetry_root(monkeypatch, tmp_path):
     import runpy
+
     import sinnix_phone_dispatcher.state as state
 
     monkeypatch.delenv("SINNIX_PHONE_CAMERA_DIR", raising=False)
@@ -321,15 +327,43 @@ def test_camera_default_is_independent_of_telemetry_root(monkeypatch, tmp_path):
     assert configured["download"] == tmp_path / "telemetry" / "download"
 
 
-@pytest.mark.parametrize("path", ["/v1/intent", "/v1/job-answer", "/v1/inbox/confirm?name=neutral", "/v1/chunk?name=neutral", "/v1/events?day=20260101&offset=0"])
-@pytest.mark.parametrize("header,value", [("Origin", "https://example.invalid"), ("Origin", "null"), ("Origin", ""), ("Sec-Fetch-Site", "same-origin"), ("Sec-Fetch-Mode", "navigate"), ("Sec-Fetch-Dest", "image"), ("Sec-Fetch-User", "?1")])
-def test_browser_requests_are_refused_before_body_or_owner(path, header, value, monkeypatch):
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/v1/intent",
+        "/v1/job-answer",
+        "/v1/inbox/confirm?name=neutral",
+        "/v1/chunk?name=neutral",
+        "/v1/events?day=20260101&offset=0",
+    ],
+)
+@pytest.mark.parametrize(
+    "header,value",
+    [
+        ("Origin", "https://example.invalid"),
+        ("Origin", "null"),
+        ("Origin", ""),
+        ("Sec-Fetch-Site", "same-origin"),
+        ("Sec-Fetch-Mode", "navigate"),
+        ("Sec-Fetch-Dest", "image"),
+        ("Sec-Fetch-User", "?1"),
+    ],
+)
+def test_browser_requests_are_refused_before_body_or_owner(
+    path, header, value, monkeypatch
+):
     handler, sent = _handler(path, b"", "100")
     handler.headers[header] = value
+
     class UnreadableBody:
-        def read(self, *_args): raise AssertionError("refused body was read")
+        def read(self, *_args):
+            raise AssertionError("refused body was read")
+
     handler.rfile = UnreadableBody()
-    def refused(*_args, **_kwargs): raise AssertionError("refused request reached owner")
+
+    def refused(*_args, **_kwargs):
+        raise AssertionError("refused request reached owner")
+
     for name in ("execute", "confirm_inbox", "store_upload", "append_events"):
         monkeypatch.setattr(server_mod, name, refused)
     handler.do_POST()
@@ -340,17 +374,26 @@ def test_browser_requests_are_refused_before_body_or_owner(path, header, value, 
 def test_browser_private_get_is_refused_before_owner(monkeypatch):
     handler, sent = _handler("/v1/glance", b"", None)
     handler.headers["Sec-Fetch-Site"] = "same-origin"
-    monkeypatch.setattr(server_mod, "build_glance", lambda: (_ for _ in ()).throw(AssertionError("private owner read")))
+    monkeypatch.setattr(
+        server_mod,
+        "build_glance",
+        lambda: (_ for _ in ()).throw(AssertionError("private owner read")),
+    )
     handler.do_GET()
     assert sent[0][0] == HTTPStatus.FORBIDDEN
 
 
-def test_http_browser_refusal_does_not_wait_for_body_and_native_client_works(monkeypatch):
+def test_http_browser_refusal_does_not_wait_for_body_and_native_client_works(
+    monkeypatch,
+):
     import http.client
     import threading
     from http.server import ThreadingHTTPServer
+
     received = []
-    monkeypatch.setattr(server_mod, "execute", lambda payload: received.append(payload) or {"ok": True})
+    monkeypatch.setattr(
+        server_mod, "execute", lambda payload: received.append(payload) or {"ok": True}
+    )
     server = ThreadingHTTPServer(("127.0.0.1", 0), server_mod.Handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -362,20 +405,31 @@ def test_http_browser_refusal_does_not_wait_for_body_and_native_client_works(mon
         client.endheaders()
         response = client.getresponse()
         assert response.status == 403
-        response.read(); client.close()
+        response.read()
+        client.close()
         assert received == []
         client = http.client.HTTPConnection(*server.server_address, timeout=2)
-        client.request("POST", "/v1/intent", body=b'{"kind":"ping"}', headers={"Content-Type": "application/json"})
+        client.request(
+            "POST",
+            "/v1/intent",
+            body=b'{"kind":"ping"}',
+            headers={"Content-Type": "application/json"},
+        )
         response = client.getresponse()
         assert response.status == 200
-        response.read(); client.close()
+        response.read()
+        client.close()
         assert received == [{"kind": "ping"}]
     finally:
-        server.shutdown(); server.server_close(); thread.join(timeout=2)
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 @pytest.mark.parametrize("path", ["/v1/intent", "/phone/v1/job-answer/", "/intent///"])
-@pytest.mark.parametrize("types", [[], ["text/plain"], ["application/json", "application/json"]])
+@pytest.mark.parametrize(
+    "types", [[], ["text/plain"], ["application/json", "application/json"]]
+)
 def test_action_media_type_refused_before_body_and_owner(path, types, monkeypatch):
     handler, sent = _handler(path, b"", "1000000")
     del handler.headers["Content-Type"]

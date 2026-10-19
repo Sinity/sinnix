@@ -91,7 +91,9 @@ def test_server_lifespan_survives_optional_publisher_failure(tmp_path: Path) -> 
             async with server.settings.lifespan(server):
                 while publisher.status()["state"] != "degraded":
                     await anyio.sleep(0.001)
-                response = await server.call_tool("gateway.catalog", {"query": "status"})
+                response = await server.call_tool(
+                    "gateway.catalog", {"query": "status"}
+                )
                 assert response.structured_content["result"]["outcome"] == "ok"
                 status = await server.call_tool("gateway.status", {})
                 health = status.structured_content["data"]["subscription_publishers"]

@@ -7,7 +7,6 @@ from datetime import datetime
 from typing import Any
 
 from .artifacts import ArtifactService
-from .permissions import Permission, Principal
 from .config import GatewayConfig
 from .owner_execution import (
     EnvironmentProfile,
@@ -15,6 +14,7 @@ from .owner_execution import (
     OwnerExecution,
     OwnerRoute,
 )
+from .permissions import Permission, Principal
 
 
 class ObserveService:

@@ -1,11 +1,12 @@
 """Failed rendering must preserve the previously verified document."""
+
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 SCRIPT = Path(sys.argv.pop(1))
 
@@ -26,9 +27,22 @@ class Publication(unittest.TestCase):
         self.output.chmod(0o600)
 
     def render(self):
-        return subprocess.run(["bash", str(SCRIPT), "--data", str(self.data),
-                               "--skills-root", str(self.skills), "--agents-root", str(self.agents),
-                               "--output", str(self.output)], capture_output=True, timeout=5)
+        return subprocess.run(
+            [
+                "bash",
+                str(SCRIPT),
+                "--data",
+                str(self.data),
+                "--skills-root",
+                str(self.skills),
+                "--agents-root",
+                str(self.agents),
+                "--output",
+                str(self.output),
+            ],
+            capture_output=True,
+            timeout=5,
+        )
 
     def preserved(self):
         self.assertEqual(self.output.read_bytes(), b"previous verified document\n")
@@ -40,13 +54,17 @@ class Publication(unittest.TestCase):
         self.preserved()
 
     def test_private_output_preserves_previous(self):
-        (self.skills / "example.md").write_text("---\nname: fixture\ndescription: /home/fixture/private\n---\n")
+        (self.skills / "example.md").write_text(
+            "---\nname: fixture\ndescription: /home/fixture/private\n---\n"
+        )
         self.assertNotEqual(self.render().returncode, 0)
         self.preserved()
 
     @unittest.skipIf(os.geteuid() == 0, "requires unprivileged traversal")
     def test_unavailable_inventory_preserves_previous(self):
-        (self.skills / "entry.md").write_text("---\nname: fixture\ndescription: fixture\n---\n")
+        (self.skills / "entry.md").write_text(
+            "---\nname: fixture\ndescription: fixture\n---\n"
+        )
         self.skills.chmod(0)
         try:
             self.assertNotEqual(self.render().returncode, 0)

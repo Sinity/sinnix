@@ -6,12 +6,14 @@ import sqlite3
 
 import pytest
 from sinnix_agent_gateway.audit import AuditService
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig
+from sinnix_agent_gateway.permissions import Principal
 
 
 def service(tmp_path):
-    return AuditService(GatewayConfig(state_dir=tmp_path, projects={}), Principal.for_name("operator"))
+    return AuditService(
+        GatewayConfig(state_dir=tmp_path, projects={}), Principal.for_name("operator")
+    )
 
 
 def test_audit_connections_close_without_garbage_collection(tmp_path):
@@ -36,8 +38,10 @@ def test_audit_connections_close_without_garbage_collection(tmp_path):
 @pytest.mark.parametrize("fail", [False, True])
 def test_connection_transaction_and_cleanup(tmp_path, fail):
     audit = service(tmp_path)
+
     class Interrupted(Exception):
         pass
+
     try:
         with audit._connect() as connection:
             connection.execute("begin immediate")
@@ -50,25 +54,32 @@ def test_connection_transaction_and_cleanup(tmp_path, fail):
     with pytest.raises(sqlite3.ProgrammingError, match="closed"):
         connection.execute("select 1")
     with audit._connect() as reopened:
-        exists = reopened.execute("select count(*) from sqlite_master where name='fixture_transaction'").fetchone()[0]
+        exists = reopened.execute(
+            "select count(*) from sqlite_master where name='fixture_transaction'"
+        ).fetchone()[0]
         assert exists == (0 if fail else 1)
         if not fail:
-            assert reopened.execute("select value from fixture_transaction").fetchone() == (1,)
+            assert reopened.execute(
+                "select value from fixture_transaction"
+            ).fetchone() == (1,)
 
 
 def test_connection_closes_when_pragma_setup_fails(tmp_path, monkeypatch):
     audit = service(tmp_path)
     connect = sqlite3.connect
     opened = []
+
     class BrokenSetup(sqlite3.Connection):
         def execute(self, sql, *args, **kwargs):
             if sql == "pragma journal_mode=wal":
                 raise sqlite3.OperationalError("synthetic setup failure")
             return super().execute(sql, *args, **kwargs)
+
     def broken_connect(*args, **kwargs):
         connection = connect(*args, **kwargs, factory=BrokenSetup)
         opened.append(connection)
         return connection
+
     monkeypatch.setattr(sqlite3, "connect", broken_connect)
     with pytest.raises(sqlite3.OperationalError, match="synthetic setup failure"):
         with audit._connect():

@@ -1,7 +1,7 @@
+import os
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import SimpleNamespace
-import os
 
 import pytest
 
@@ -22,14 +22,19 @@ def test_downloader_children_create_private_outputs(monkeypatch, tmp_path):
 
     def run(_command, **_kwargs):
         return real_run(
-            [downloader.sys.executable, "-c",
-             "from pathlib import Path; import sys; p=Path(sys.argv[1]); p.mkdir(); (p/'receipt').write_text('neutral')",
-             str(output)],
+            [
+                downloader.sys.executable,
+                "-c",
+                "from pathlib import Path; import sys; p=Path(sys.argv[1]); p.mkdir(); (p/'receipt').write_text('neutral')",
+                str(output),
+            ],
             check=False,
         )
 
     monkeypatch.setattr(downloader.subprocess, "run", run)
-    monkeypatch.setattr(downloader.sys, "argv", ["sinnix-ytdlp", "https://example.invalid/neutral"])
+    monkeypatch.setattr(
+        downloader.sys, "argv", ["sinnix-ytdlp", "https://example.invalid/neutral"]
+    )
     monkeypatch.setenv("SINNIX_CHROME_PROFILE", str(tmp_path / "no-profile"))
     assert downloader.main() == 0
     assert output.stat().st_mode & 0o777 == 0o700
@@ -44,10 +49,13 @@ def load_script():
     ).load_module()
 
 
-@pytest.mark.parametrize("alias", [
-    "https://catalog.example.test/watch/item?from=list#player",
-    "HTTPS://CATALOG.EXAMPLE.TEST:443/watch/item?from=list#player",
-])
+@pytest.mark.parametrize(
+    "alias",
+    [
+        "https://catalog.example.test/watch/item?from=list#player",
+        "HTTPS://CATALOG.EXAMPLE.TEST:443/watch/item?from=list#player",
+    ],
+)
 def test_canonical_page_alias_does_not_retry(monkeypatch, tmp_path, alias):
     downloader = load_script()
     page = "https://catalog.example.test/watch/item?from=list"
@@ -77,14 +85,19 @@ def test_canonical_page_alias_does_not_retry(monkeypatch, tmp_path, alias):
     assert calls == [["yt-dlp", page]]
 
 
-@pytest.mark.parametrize("media", [
-    "https://media.example.test/streams/item.m3u8",
-    "https://catalog.example.test/watch/item?download=123&token=neutral",
-    "https://catalog.example.test/watch/item",
-    "https://catalog.example.test/watch/item/?from=list",
-    "https://alternate:neutral@catalog.example.test/watch/item?from=list",
-])
-def test_distinct_media_url_retries_once_with_source_headers(monkeypatch, tmp_path, media):
+@pytest.mark.parametrize(
+    "media",
+    [
+        "https://media.example.test/streams/item.m3u8",
+        "https://catalog.example.test/watch/item?download=123&token=neutral",
+        "https://catalog.example.test/watch/item",
+        "https://catalog.example.test/watch/item/?from=list",
+        "https://alternate:neutral@catalog.example.test/watch/item?from=list",
+    ],
+)
+def test_distinct_media_url_retries_once_with_source_headers(
+    monkeypatch, tmp_path, media
+):
     downloader = load_script()
     page = "https://catalog.example.test/watch/item?from=list"
     calls = []

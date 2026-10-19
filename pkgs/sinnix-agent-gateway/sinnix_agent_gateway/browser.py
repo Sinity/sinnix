@@ -10,7 +10,6 @@ from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.lock import flock
 
 from .artifacts import ArtifactService
-from .permissions import Permission, Principal
 from .config import GatewayConfig
 from .owner_execution import (
     ExecutionProfile,
@@ -18,6 +17,7 @@ from .owner_execution import (
     OwnerExecution,
     OwnerRoute,
 )
+from .permissions import Permission, Principal
 
 
 class BrowserError(ValueError):

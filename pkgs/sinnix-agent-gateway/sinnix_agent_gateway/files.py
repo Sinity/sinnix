@@ -12,8 +12,8 @@ from typing import Any
 
 from sinnix_lib.atomic import atomic_publish
 
-from .permissions import Permission, Principal
 from .config import GatewayConfig
+from .permissions import Permission, Principal
 
 
 class FileError(ValueError):

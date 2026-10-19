@@ -59,9 +59,11 @@ def monitored_mount_paths() -> list[str]:
     if not isinstance(rows, list):
         return []
     paths = [row.get("path") for row in rows if isinstance(row, dict)]
-    return list(dict.fromkeys(
-        path for path in paths if isinstance(path, str) and path.startswith("/")
-    ))
+    return list(
+        dict.fromkeys(
+            path for path in paths if isinstance(path, str) and path.startswith("/")
+        )
+    )
 
 
 def polylogue_archive() -> dict[str, Any]:

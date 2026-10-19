@@ -5,39 +5,58 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
 from agentctl import landing, worktrunk
 from agentctl.worktrunk import Worktree
 
 
 def git(root, *args):
-    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=True).stdout.strip()
+    return subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+    ).stdout.strip()
 
 
 @pytest.fixture
 def checkout(config, project_root, tmp_path, monkeypatch):
     from agentctl.projects import load_project_adapter
+
     git(project_root, "init", "-q", "-b", "master")
     (project_root / "tracked.txt").write_text("committed")
     (project_root / ".gitignore").write_text("ignored*\n.agentctl/receipt*\n")
     git(project_root, "add", ".")
-    git(project_root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test", "commit", "-qm", "fixture")
+    git(
+        project_root,
+        "-c",
+        "user.name=Fixture",
+        "-c",
+        "user.email=fixture@example.test",
+        "commit",
+        "-qm",
+        "fixture",
+    )
     path = tmp_path / "checkout"
     git(project_root, "worktree", "add", "-qb", "candidate", str(path))
     tree = Worktree(branch="candidate", path=path)
-    monkeypatch.setattr(worktrunk, "worktrunk_list", lambda root: (Worktree(branch="master", path=project_root, main=True), tree))
+    monkeypatch.setattr(
+        worktrunk,
+        "worktrunk_list",
+        lambda root: (Worktree(branch="master", path=project_root, main=True), tree),
+    )
     monkeypatch.setattr(worktrunk, "worktrunk_find", lambda root, branch: tree)
     monkeypatch.setattr(landing, "_task_users", lambda path: [])
     monkeypatch.setattr(landing, "_process_users", lambda path: [])
+
     def remove(root, branch, **kwargs):
         git(root, "worktree", "remove", str(path))
+
     monkeypatch.setattr(worktrunk, "worktrunk_remove", remove)
     return config, load_project_adapter(project_root), path
 
 
 def drop(checkout):
     config, project, path = checkout
-    return landing._drop_branch(config, project, "candidate", base=git(project.root, "rev-parse", "HEAD"))
+    return landing._drop_branch(
+        config, project, "candidate", base=git(project.root, "rev-parse", "HEAD")
+    )
 
 
 @pytest.mark.parametrize("kind", ["ignored", "--assume-unchanged", "--skip-worktree"])
@@ -53,7 +72,11 @@ def test_cleanup_preserves_hidden_working_bytes(checkout, kind):
     before = target.read_bytes(), target.stat().st_ino, target.stat().st_mtime_ns
     reason = drop(checkout)
     assert reason and "kept" in reason
-    assert (target.read_bytes(), target.stat().st_ino, target.stat().st_mtime_ns) == before
+    assert (
+        target.read_bytes(),
+        target.stat().st_ino,
+        target.stat().st_mtime_ns,
+    ) == before
 
 
 def test_cleanup_removes_clean_checkout_after_retaining_owned_artifacts(checkout):
@@ -64,7 +87,9 @@ def test_cleanup_removes_clean_checkout_after_retaining_owned_artifacts(checkout
     assert not path.exists()
     retained = list((config.state_dir / "artifacts").rglob("receipt-private.txt.*"))
     assert len(retained) == 1 and retained[0].read_bytes() == b"retained fixture result"
-    assert git(project.root, "rev-parse", "candidate") == git(project.root, "rev-parse", "master")
+    assert git(project.root, "rev-parse", "candidate") == git(
+        project.root, "rev-parse", "master"
+    )
 
 
 def test_cleanup_refuses_reused_foreign_checkout_path(checkout, tmp_path, monkeypatch):
@@ -75,8 +100,10 @@ def test_cleanup_refuses_reused_foreign_checkout_path(checkout, tmp_path, monkey
     retained.write_bytes(b"foreign repository content")
     assert git(path, "status", "--porcelain") == ""
     assert git(path, "rev-parse", "HEAD") == git(project.root, "rev-parse", "candidate")
+
     def no_remove(*args, **kwargs):
         raise AssertionError("foreign checkout must refuse before removal")
+
     monkeypatch.setattr(worktrunk, "worktrunk_remove", no_remove)
     reason = drop(checkout)
     assert reason and "another Git repository" in reason
@@ -88,10 +115,12 @@ def test_cleanup_keeps_artifact_changed_after_preservation(checkout, monkeypatch
     receipt = path / ".agentctl/receipt-private.txt"
     receipt.write_bytes(b"first result")
     original = landing._preserve_artifacts
+
     def changed(*args, **kwargs):
         copied = original(*args, **kwargs)
         receipt.write_bytes(b"later unpublished result")
         return copied
+
     monkeypatch.setattr(landing, "_preserve_artifacts", changed)
     reason = drop(checkout)
     assert reason and "changed after preservation" in reason
@@ -110,18 +139,30 @@ def test_cleanup_keeps_unknown_ignored_directory(checkout):
 
 def test_cleanup_keeps_inaccessible_detached_checkout(checkout, monkeypatch):
     config, project, path = checkout
-    monkeypatch.setattr(worktrunk, "worktrunk_list", lambda root: (Worktree(branch=None, path=path),))
+    monkeypatch.setattr(
+        worktrunk, "worktrunk_list", lambda root: (Worktree(branch=None, path=path),)
+    )
     monkeypatch.setattr(worktrunk, "worktrunk_find", lambda root, branch: None)
     original = Path.stat
+
     def denied(candidate, *args, **kwargs):
         if candidate == path:
             raise PermissionError("synthetic checkout denial")
         return original(candidate, *args, **kwargs)
+
     monkeypatch.setattr(Path, "stat", denied)
+
     def no_remove(*args, **kwargs):
         raise AssertionError("unavailable checkout must not reach removal")
+
     monkeypatch.setattr(worktrunk, "worktrunk_remove", no_remove)
-    reason = landing._drop_branch(config, project, "candidate", base=git(project.root, "rev-parse", "HEAD"), recorded_path=path)
+    reason = landing._drop_branch(
+        config,
+        project,
+        "candidate",
+        base=git(project.root, "rev-parse", "HEAD"),
+        recorded_path=path,
+    )
     assert reason and "synthetic checkout denial" in reason
 
 
@@ -130,21 +171,62 @@ def unregistered_branch(checkout, monkeypatch):
     config, project, path = checkout
     head = git(project.root, "rev-parse", "candidate")
     git(project.root, "worktree", "remove", str(path))
-    monkeypatch.setattr(worktrunk, "worktrunk_list", lambda root: (Worktree(branch="master", path=project.root, main=True),))
-    monkeypatch.setattr(worktrunk, "worktrunk_find", lambda root, branch: Worktree(branch=branch, path=None))
+    monkeypatch.setattr(
+        worktrunk,
+        "worktrunk_list",
+        lambda root: (Worktree(branch="master", path=project.root, main=True),),
+    )
+    monkeypatch.setattr(
+        worktrunk,
+        "worktrunk_find",
+        lambda root, branch: Worktree(branch=branch, path=None),
+    )
     return config, project, path, head
 
 
-def test_absent_checkout_retirement_really_removes_branch_and_retains_head(unregistered_branch):
+def test_absent_checkout_retirement_really_removes_branch_and_retains_head(
+    unregistered_branch,
+):
     config, project, path, head = unregistered_branch
-    assert landing._drop_branch(config, project, "candidate", base=head, recorded_path=path, delete_branch=True) is None
-    missing = subprocess.run(["git", "-C", str(project.root), "show-ref", "--verify", "--quiet", "refs/heads/candidate"], capture_output=True)
+    assert (
+        landing._drop_branch(
+            config,
+            project,
+            "candidate",
+            base=head,
+            recorded_path=path,
+            delete_branch=True,
+        )
+        is None
+    )
+    missing = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(project.root),
+            "show-ref",
+            "--verify",
+            "--quiet",
+            "refs/heads/candidate",
+        ],
+        capture_output=True,
+    )
     assert missing.returncode == 1
-    assert head in git(project.root, "for-each-ref", "--format=%(objectname)", "refs/agentctl/recovery").splitlines()
+    assert (
+        head
+        in git(
+            project.root,
+            "for-each-ref",
+            "--format=%(objectname)",
+            "refs/agentctl/recovery",
+        ).splitlines()
+    )
 
 
 @pytest.mark.parametrize("kind", ["denied", "broken_link", "wrong_parent"])
-def test_unregistered_checkout_uncertainty_keeps_branch(unregistered_branch, tmp_path, kind):
+def test_unregistered_checkout_uncertainty_keeps_branch(
+    unregistered_branch, tmp_path, kind
+):
     config, project, path, head = unregistered_branch
     blocked = tmp_path / "blocked"
     payload = None
@@ -161,10 +243,24 @@ def test_unregistered_checkout_uncertainty_keeps_branch(unregistered_branch, tmp
         blocked.write_bytes(b"unexpected parent object")
         path = blocked / "residue"
     try:
-        reason = landing._drop_branch(config, project, "candidate", base=head, recorded_path=path, delete_branch=True)
-        assert reason and "kept" in reason, "unknown checkout presence authorized branch retirement"
+        reason = landing._drop_branch(
+            config,
+            project,
+            "candidate",
+            base=head,
+            recorded_path=path,
+            delete_branch=True,
+        )
+        assert reason and "kept" in reason, (
+            "unknown checkout presence authorized branch retirement"
+        )
         assert git(project.root, "rev-parse", "candidate") == head
-        assert not git(project.root, "for-each-ref", "--format=%(refname)", "refs/agentctl/recovery")
+        assert not git(
+            project.root,
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/agentctl/recovery",
+        )
     finally:
         if kind == "denied":
             blocked.chmod(0o700)
@@ -177,11 +273,15 @@ def test_unregistered_checkout_uncertainty_keeps_branch(unregistered_branch, tmp
 def test_post_removal_broken_link_is_retained_as_residue(checkout, monkeypatch):
     config, project, path = checkout
     head = git(project.root, "rev-parse", "candidate")
+
     def remove(root, branch, **kwargs):
         git(root, "worktree", "remove", str(path))
         path.symlink_to(path.parent / "absent")
+
     monkeypatch.setattr(worktrunk, "worktrunk_remove", remove)
-    reason = landing._drop_branch(config, project, "candidate", base=head, recorded_path=path, delete_branch=True)
+    reason = landing._drop_branch(
+        config, project, "candidate", base=head, recorded_path=path, delete_branch=True
+    )
     assert reason and "remains after removal" in reason
     assert path.is_symlink()
     assert git(project.root, "rev-parse", "candidate") == head

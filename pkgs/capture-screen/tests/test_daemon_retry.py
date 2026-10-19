@@ -173,11 +173,19 @@ def test_pending_trigger_is_consumed_before_socket_close(tmp_path, monkeypatch):
     monkeypatch.setattr(daemon.hypr, "connect_socket2", lambda *_: Socket())
     monkeypatch.setattr(daemon.hypr, "SocketEventPump", Pump)
     monkeypatch.setattr(daemon.hypr, "make_hyprctl_json_reader", lambda *_: None)
-    monkeypatch.setattr(daemon.hypr, "get_active_window", lambda *_: observations.append(True))
+    monkeypatch.setattr(
+        daemon.hypr, "get_active_window", lambda *_: observations.append(True)
+    )
     monkeypatch.setattr(daemon.hypr, "get_monitors", lambda *_: [])
-    args = daemon.build_arg_parser().parse_args([
-        "--capture-root", str(tmp_path), "--runtime-dir", str(tmp_path),
-        "--instance-signature", "fixture",
-    ])
+    args = daemon.build_arg_parser().parse_args(
+        [
+            "--capture-root",
+            str(tmp_path),
+            "--runtime-dir",
+            str(tmp_path),
+            "--instance-signature",
+            "fixture",
+        ]
+    )
     assert daemon.run(args) == 1
     assert observations == [True]

@@ -185,7 +185,9 @@ class PytestAdmissionTests(unittest.TestCase):
             json.dumps(
                 {
                     "argv": ["python", "-m", "pytest", "-n", "8", "tests"],
-                    "environment": {"POLYLOGUE_PYTEST_ADMISSION_DIR": str(root / "admission")},
+                    "environment": {
+                        "POLYLOGUE_PYTEST_ADMISSION_DIR": str(root / "admission")
+                    },
                     "working_directory": str(root),
                     "log_path": str(log),
                 }

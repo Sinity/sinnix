@@ -8,13 +8,13 @@ from pathlib import Path
 
 import pytest
 from sinnix_agent_gateway.audit import AuditService
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.events import (
     MAX_EVENT_PROJECTS,
     EventCursorError,
     NormalizedEventService,
 )
+from sinnix_agent_gateway.permissions import Principal
 
 
 class FakeProjects:

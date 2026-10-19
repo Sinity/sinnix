@@ -42,10 +42,12 @@ def test_declared_operation_limits_reach_its_queued_launch(
 ) -> None:
     descriptor = project_root / ".agentctl/project.toml"
     limits = ["MemoryMax=3G", "IOReadBandwidthMax=/realm 20M"]
-    descriptor.write_text(descriptor.read_text().replace(
-        'exec = ["fixture-verify"]',
-        'exec = ["fixture-verify"]\nunit_properties=' + json.dumps(limits),
-    ))
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            'exec = ["fixture-verify"]',
+            'exec = ["fixture-verify"]\nunit_properties=' + json.dumps(limits),
+        )
+    )
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("verify"))
     written = read_launch(config, fake_pueue.task(started["job_id"]))
@@ -57,7 +59,10 @@ def test_required_services_share_the_verifiers_single_launch(
 ) -> None:
     descriptor = project_root / ".agentctl/project.toml"
     descriptor.write_text(
-        descriptor.read_text().replace('exec = ["fixture-verify"]', 'exec = ["fixture-verify"]\nrequires=["database"]')
+        descriptor.read_text().replace(
+            'exec = ["fixture-verify"]',
+            'exec = ["fixture-verify"]\nrequires=["database"]',
+        )
         + '\n[operations.database]\ndescription="Fixture database"\nexec=["fixture-db"]\nready_probe=["fixture-ready"]\nready_timeout_seconds=12\n'
     )
     project = load_project_adapter(project_root)
@@ -67,7 +72,14 @@ def test_required_services_share_the_verifiers_single_launch(
     argv = written["argv"]
     assert argv[0] == "env"
     assert argv[2].endswith("/service_run.py")
-    assert json.loads(argv[3]) == [{"name": "database", "command": ["fixture-db"], "ready_probe": ["fixture-ready"], "ready_timeout_seconds": 12}]
+    assert json.loads(argv[3]) == [
+        {
+            "name": "database",
+            "command": ["fixture-db"],
+            "ready_probe": ["fixture-ready"],
+            "ready_timeout_seconds": 12,
+        }
+    ]
     assert argv[4:] == ["--", "fixture-verify"]
     assert written["exit_type"] == "main"
 
@@ -1636,8 +1648,11 @@ def test_a_wait_finds_the_job_the_queue_moved_before_the_wait_began(
 
 @pytest.mark.parametrize("move_again", [False, True])
 def test_wait_keeps_relocated_hint_without_repeating_reference_scans(
-    fake_pueue: FakePueue, config: Config, project_root: Path,
-    monkeypatch: pytest.MonkeyPatch, move_again: bool,
+    fake_pueue: FakePueue,
+    config: Config,
+    project_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    move_again: bool,
 ) -> None:
     project = load_project_adapter(project_root)
     first = launch.start_operation(config, project, project.operation("check"))
@@ -1675,7 +1690,9 @@ def test_wait_keeps_relocated_hint_without_repeating_reference_scans(
     assert set(scans) == {own["reference"] + ".json"}
     assert len(fake_pueue.waited) == 3
     for stranger in (first, second):
-        task = launch.find_task(fake_pueue.tasks(), stranger["job_id"], stranger["reference"])
+        task = launch.find_task(
+            fake_pueue.tasks(), stranger["job_id"], stranger["reference"]
+        )
         assert task is not None and task.status == "Queued"
 
 
@@ -2258,7 +2275,9 @@ def test_queued_environment_uses_current_host_roots_without_losing_explicit_over
     assert "NOT_INHERITED" not in env
 
 
-def test_wait_retained_cancelled_launch_does_not_follow_reused_id(fake_pueue, config, project_root):
+def test_wait_retained_cancelled_launch_does_not_follow_reused_id(
+    fake_pueue, config, project_root
+):
     project = load_project_adapter(project_root)
     own = launch.start_operation(config, project, project.operation("check"))
     fake_pueue.queue(own["job_id"])
@@ -2266,41 +2285,57 @@ def test_wait_retained_cancelled_launch_does_not_follow_reused_id(fake_pueue, co
     fake_pueue.next_id = own["job_id"]
     other = launch.start_operation(config, project, project.operation("check"))
     fake_pueue.succeed(other["job_id"])
-    observed = launch.wait(own["job_id"], timeout_seconds=5, reference=own["reference"], config=config)
+    observed = launch.wait(
+        own["job_id"], timeout_seconds=5, reference=own["reference"], config=config
+    )
     assert observed["phase"] == "cancelled" and observed["terminal"] is True
-    assert observed["reference"] == own["reference"] and observed["queue_present"] is False
+    assert (
+        observed["reference"] == own["reference"] and observed["queue_present"] is False
+    )
     assert observed["exit_code"] == CANCELLED_EXIT_CODE
     assert fake_pueue.waited == []
 
 
 @pytest.mark.parametrize("owner_error", [False, True])
-def test_wait_retained_cancellation_during_observation(fake_pueue, config, project_root, owner_error):
+def test_wait_retained_cancellation_during_observation(
+    fake_pueue, config, project_root, owner_error
+):
     project = load_project_adapter(project_root)
     own = launch.start_operation(config, project, project.operation("check"))
     fake_pueue.queue(own["job_id"])
+
     def cancel_then_reuse(fake):
         launch.cancel(config, own["job_id"], reference=own["reference"])
         fake.next_id = own["job_id"]
         launch.start_operation(config, project, project.operation("check"))
         if owner_error:
             raise PueueError("fixture removed during wait")
+
     fake_pueue.finish_when_waited(own["job_id"], cancel_then_reuse)
     # No explicit reference: a wait must retain the identity it first saw.
     observed = launch.wait(own["job_id"], timeout_seconds=5, config=config)
     assert observed["phase"] == "cancelled" and observed["terminal"] is True
-    assert observed["reference"] == own["reference"] and not observed.get("wait_timed_out")
+    assert observed["reference"] == own["reference"] and not observed.get(
+        "wait_timed_out"
+    )
     assert fake_pueue.waited == [own["job_id"]]
 
 
 @pytest.mark.parametrize("request_only", [False, True])
-def test_wait_retained_unverified_launch_is_not_terminal(fake_pueue, config, project_root, request_only):
+def test_wait_retained_unverified_launch_is_not_terminal(
+    fake_pueue, config, project_root, request_only
+):
     project = load_project_adapter(project_root)
     own = launch.start_operation(config, project, project.operation("check"))
     task = fake_pueue.task(own["job_id"])
     if request_only:
-        launch._write_disposition(config, task, {"outcome": "cancelled", "unresolved": True, "started": True})
+        launch._write_disposition(
+            config, task, {"outcome": "cancelled", "unresolved": True, "started": True}
+        )
     fake_pueue.remove([own["job_id"]])
     assert launch.get_job(own["job_id"], config, own["reference"])["terminal"] is False
     with pytest.raises(JobError, match="no verified terminal"):
-        launch.wait(own["job_id"], timeout_seconds=5, reference=own["reference"], config=config)
+        launch.wait(
+            own["job_id"], timeout_seconds=5, reference=own["reference"], config=config
+        )
     assert fake_pueue.waited == []

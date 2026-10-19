@@ -200,17 +200,17 @@ def test_keyed_shell_launch_reuses_exact_job_and_refuses_changed_request(
     config: Config, fake_pueue: FakePueue, project_root: Path
 ):
     project = load_project_adapter(project_root)
-    arguments = dict(
-        project=project,
-        operation="shell",
-        label="fixture:shell",
-        group="pytest",
-        argv=["echo", "fixture"],
-        working_directory=project_root,
-        timeout_seconds=30,
-        result_kind="exit",
-        environment={},
-    )
+    arguments = {
+        "project": project,
+        "operation": "shell",
+        "label": "fixture:shell",
+        "group": "pytest",
+        "argv": ["echo", "fixture"],
+        "working_directory": project_root,
+        "timeout_seconds": 30,
+        "result_kind": "exit",
+        "environment": {},
+    }
     first = launch.enqueue_request(
         config, owner_request_key="shell-key", request_digest="original", **arguments
     )
@@ -237,19 +237,19 @@ def test_keyed_shell_launch_recovers_lost_queue_ack_without_duplicate(
         raise pueue.PueueError("acknowledgement lost")
 
     monkeypatch.setattr(pueue, "add", uncertain)
-    arguments = dict(
-        owner_request_key="shell-accepted",
-        request_digest="original",
-        project=project,
-        operation="shell",
-        label="fixture:shell",
-        group="pytest",
-        argv=["echo", "fixture"],
-        working_directory=project_root,
-        timeout_seconds=30,
-        result_kind="exit",
-        environment={},
-    )
+    arguments = {
+        "owner_request_key": "shell-accepted",
+        "request_digest": "original",
+        "project": project,
+        "operation": "shell",
+        "label": "fixture:shell",
+        "group": "pytest",
+        "argv": ["echo", "fixture"],
+        "working_directory": project_root,
+        "timeout_seconds": 30,
+        "result_kind": "exit",
+        "environment": {},
+    }
     with pytest.raises(launch.EnqueueUncertain):
         launch.enqueue_request(config, **arguments)
     recovered = launch.enqueue_request(config, **arguments)
@@ -401,8 +401,9 @@ def test_legacy_queue_entry_without_input_keeps_conventional_artifact_reads(
     assert result["value"] == {"legacy": True}
 
 
-
-def test_guarded_cancel_allows_real_wrapper_to_finalize(config, fake_pueue, project_root, monkeypatch):
+def test_guarded_cancel_allows_real_wrapper_to_finalize(
+    config, fake_pueue, project_root, monkeypatch
+):
     import subprocess
     import threading
 
@@ -446,12 +447,20 @@ def test_guarded_cancel_allows_real_wrapper_to_finalize(config, fake_pueue, proj
     thread.start()
     try:
         assert running.wait(5), repr(failures)
-        result = launch.cancel(config, job["job_id"], reference=job["reference"], expected_attempt=1, settle_seconds=0.5)
+        result = launch.cancel(
+            config,
+            job["job_id"],
+            reference=job["reference"],
+            expected_attempt=1,
+            settle_seconds=0.5,
+        )
     finally:
         stopped.set()
         thread.join(2)
     assert not thread.is_alive() and not failures
-    assert not fake_pueue.killed, "guarded canceller forced a kill while holding the finalizer's lock"
+    assert not fake_pueue.killed, (
+        "guarded canceller forced a kill while holding the finalizer's lock"
+    )
     assert result["outcome"]["outcome"] == "cancelled"
     assert result["outcome"]["cancellation"]["attempt"] == 1
     assert not run.cancel_marker_for(document["log_path"]).exists()
@@ -459,9 +468,10 @@ def test_guarded_cancel_allows_real_wrapper_to_finalize(config, fake_pueue, proj
     assert events[-1]["phase"] == "finished" and events[-1]["outcome"] == "cancelled"
 
 
-
 @pytest.mark.parametrize("retry", ["allocated", "starting"])
-def test_guarded_cancel_never_escalates_onto_a_new_wrapper(config, fake_pueue, project_root, monkeypatch, retry):
+def test_guarded_cancel_never_escalates_onto_a_new_wrapper(
+    config, fake_pueue, project_root, monkeypatch, retry
+):
     import subprocess
     from dataclasses import replace
 
@@ -474,7 +484,13 @@ def test_guarded_cancel_never_escalates_onto_a_new_wrapper(config, fake_pueue, p
     path = run.outcome_path_for(first["log_path"])
     clock = [0.0]
     monkeypatch.setattr(launch.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(launch.subprocess, "run", lambda command, **_kw: subprocess.CompletedProcess(command, 0, stdout="", stderr=""))
+    monkeypatch.setattr(
+        launch.subprocess,
+        "run",
+        lambda command, **_kw: subprocess.CompletedProcess(
+            command, 0, stdout="", stderr=""
+        ),
+    )
     monkeypatch.setattr(launch, "_unit_state", lambda _unit: "stopped")
 
     def restart(_seconds):
@@ -482,17 +498,28 @@ def test_guarded_cancel_never_escalates_onto_a_new_wrapper(config, fake_pueue, p
         if retry == "allocated":
             artifacts.begin(document, input_path)
         else:
-            fake_pueue._tasks[task.task_id] = replace(task, started_at="2026-09-03T08:00:02+00:00")
+            fake_pueue._tasks[task.task_id] = replace(
+                task, started_at="2026-09-03T08:00:02+00:00"
+            )
         clock[0] = 1.0
 
     with pytest.raises(launch.JobError, match="attempt changed while waiting"):
-        launch.cancel(config, task.task_id, reference=job["reference"], expected_attempt=1, settle_seconds=0.5, sleep=restart)
+        launch.cancel(
+            config,
+            task.task_id,
+            reference=job["reference"],
+            expected_attempt=1,
+            settle_seconds=0.5,
+            sleep=restart,
+        )
     assert not fake_pueue.killed
     assert json.loads(path.read_text())["attempt"] == 1
     assert artifacts.cancellation(Path(document["log_path"]), 1)["attempt"] == 1
 
 
-def test_guarded_cancel_can_kill_only_the_same_unsettled_wrapper(config, fake_pueue, project_root, monkeypatch):
+def test_guarded_cancel_can_kill_only_the_same_unsettled_wrapper(
+    config, fake_pueue, project_root, monkeypatch
+):
     import subprocess
 
     from agentctl import artifacts
@@ -500,15 +527,28 @@ def test_guarded_cancel_can_kill_only_the_same_unsettled_wrapper(config, fake_pu
     job, document = execute(config, fake_pueue, project_root)
     task = fake_pueue.task(job["job_id"])
     artifacts.begin(document, str(launch.launch_input_path(task)))
-    monkeypatch.setattr(launch.subprocess, "run", lambda command, **_kw: subprocess.CompletedProcess(command, 0, stdout="", stderr=""))
+    monkeypatch.setattr(
+        launch.subprocess,
+        "run",
+        lambda command, **_kw: subprocess.CompletedProcess(
+            command, 0, stdout="", stderr=""
+        ),
+    )
     monkeypatch.setattr(launch, "_unit_state", lambda _unit: "stopped")
-    launch.cancel(config, task.task_id, reference=job["reference"], expected_attempt=1, settle_seconds=0)
+    launch.cancel(
+        config,
+        task.task_id,
+        reference=job["reference"],
+        expected_attempt=1,
+        settle_seconds=0,
+    )
     assert fake_pueue.killed == [task.task_id]
     assert artifacts.cancellation(Path(document["log_path"]), 1)["attempt"] == 1
 
 
-
-def test_guarded_cancel_keeps_a_published_attempt_while_wrapper_exits(config, fake_pueue, project_root, monkeypatch):
+def test_guarded_cancel_keeps_a_published_attempt_while_wrapper_exits(
+    config, fake_pueue, project_root, monkeypatch
+):
     import subprocess
 
     from agentctl import artifacts
@@ -519,10 +559,25 @@ def test_guarded_cancel_keeps_a_published_attempt_while_wrapper_exits(config, fa
     path = run.outcome_path_for(allocated["log_path"])
     previous = b'{"attempt":1,"outcome":"cancelled","exit_code":130}'
     path.write_bytes(previous)
-    monkeypatch.setattr(launch.subprocess, "run", lambda command, **_kw: subprocess.CompletedProcess(command, 0, stdout="", stderr=""))
+    monkeypatch.setattr(
+        launch.subprocess,
+        "run",
+        lambda command, **_kw: subprocess.CompletedProcess(
+            command, 0, stdout="", stderr=""
+        ),
+    )
     monkeypatch.setattr(launch, "_unit_state", lambda _unit: "stopped")
-    result = launch.cancel(config, task.task_id, reference=job["reference"], expected_attempt=1, settle_seconds=0)
+    result = launch.cancel(
+        config,
+        task.task_id,
+        reference=job["reference"],
+        expected_attempt=1,
+        settle_seconds=0,
+    )
     assert not fake_pueue.killed
     assert result["outcome"]["attempt"] == 1
     assert path.read_bytes() == previous
-    assert json.loads(run.cancel_marker_for(document["log_path"]).read_text())["attempt"] == 1
+    assert (
+        json.loads(run.cancel_marker_for(document["log_path"]).read_text())["attempt"]
+        == 1
+    )

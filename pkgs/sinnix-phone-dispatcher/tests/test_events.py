@@ -144,7 +144,10 @@ def test_cursor_rejects_a_malformed_day(isolated_state_dirs) -> None:
 def test_noncanonical_days_are_refused_without_creating_files(isolated_state_dirs):
     for day in ("20260818\n", "２０２６０８１８"):
         assert uploads_mod.events_cursor(day)[0] == HTTPStatus.BAD_REQUEST
-        assert uploads_mod.append_events(day, 0, b"fixture\n", None)[0] == HTTPStatus.BAD_REQUEST
+        assert (
+            uploads_mod.append_events(day, 0, b"fixture\n", None)[0]
+            == HTTPStatus.BAD_REQUEST
+        )
     assert not isolated_state_dirs["events_dir"].exists()
 
 
@@ -247,7 +250,9 @@ def test_a_pwrite_that_makes_no_progress_fails_visibly(
 
 
 @pytest.mark.parametrize("kind", ["fifo", "directory", "symlink", "dangling_symlink"])
-def test_nonregular_day_is_not_empty_or_acknowledged(isolated_state_dirs, monkeypatch, kind):
+def test_nonregular_day_is_not_empty_or_acknowledged(
+    isolated_state_dirs, monkeypatch, kind
+):
     target = _day_file(isolated_state_dirs)
     target.parent.mkdir(parents=True)
     other = target.parent / "retained.jsonl"
@@ -281,7 +286,9 @@ def test_nonregular_day_is_not_empty_or_acknowledged(isolated_state_dirs, monkey
         assert not other.exists()
 
 
-def test_replacement_during_append_is_not_acknowledged(isolated_state_dirs, monkeypatch):
+def test_replacement_during_append_is_not_acknowledged(
+    isolated_state_dirs, monkeypatch
+):
     target = _day_file(isolated_state_dirs)
     retired = target.with_suffix(".retained")
     real_write = os.pwrite
@@ -310,7 +317,11 @@ def test_missing_day_gap_does_not_create_an_empty_file(isolated_state_dirs):
 
 def test_short_preads_are_completed(isolated_state_dirs, monkeypatch):
     real_read = os.pread
-    monkeypatch.setattr(uploads_mod.os, "pread", lambda fd, size, offset: real_read(fd, min(size, 2), offset))
+    monkeypatch.setattr(
+        uploads_mod.os,
+        "pread",
+        lambda fd, size, offset: real_read(fd, min(size, 2), offset),
+    )
     body = b"new fixture\n"
     status, result = uploads_mod.append_events("20260818", 0, body, _sha(body))
     assert status == HTTPStatus.OK and result["cursor"] == len(body)
@@ -334,12 +345,16 @@ def test_readonly_capture_does_not_acknowledge_missing_suffix(isolated_state_dir
     target.write_bytes(b"retained fixture\n")
     target.chmod(0o440)
     body = b"new fixture\n"
-    status, result = uploads_mod.append_events("20260818", target.stat().st_size, body, _sha(body))
+    status, result = uploads_mod.append_events(
+        "20260818", target.stat().st_size, body, _sha(body)
+    )
     assert status == HTTPStatus.INTERNAL_SERVER_ERROR and result["ok"] is False
     assert target.read_bytes() == b"retained fixture\n"
 
 
-def test_append_and_exact_replay_sync_file_and_directory(isolated_state_dirs, monkeypatch):
+def test_append_and_exact_replay_sync_file_and_directory(
+    isolated_state_dirs, monkeypatch
+):
     real_sync = os.fsync
     synced = []
 
@@ -349,15 +364,22 @@ def test_append_and_exact_replay_sync_file_and_directory(isolated_state_dirs, mo
 
     monkeypatch.setattr(uploads_mod.os, "fsync", sync)
     body = b"retained fixture\n"
-    assert uploads_mod.append_events("20260818", 0, body, _sha(body))[0] == HTTPStatus.OK
+    assert (
+        uploads_mod.append_events("20260818", 0, body, _sha(body))[0] == HTTPStatus.OK
+    )
     assert synced[0] == "file" and synced[1:] and set(synced[1:]) == {"directory"}
     synced.clear()
-    assert uploads_mod.append_events("20260818", 0, body, _sha(body))[1]["duplicate"] is True
+    assert (
+        uploads_mod.append_events("20260818", 0, body, _sha(body))[1]["duplicate"]
+        is True
+    )
     assert synced[0] == "file" and synced[1:] and set(synced[1:]) == {"directory"}
 
 
 @pytest.mark.parametrize("fail_directory", [False, True])
-def test_failed_sync_is_not_acknowledged_on_replay(isolated_state_dirs, monkeypatch, fail_directory):
+def test_failed_sync_is_not_acknowledged_on_replay(
+    isolated_state_dirs, monkeypatch, fail_directory
+):
     body = b"retained fixture\n"
     real_sync = os.fsync
 
@@ -372,10 +394,15 @@ def test_failed_sync_is_not_acknowledged_on_replay(isolated_state_dirs, monkeypa
         assert status == HTTPStatus.INTERNAL_SERVER_ERROR and result["ok"] is False
         assert _day_file(isolated_state_dirs).read_bytes() == body
     monkeypatch.setattr(uploads_mod.os, "fsync", real_sync)
-    assert uploads_mod.append_events("20260818", 0, body, _sha(body))[1]["duplicate"] is True
+    assert (
+        uploads_mod.append_events("20260818", 0, body, _sha(body))[1]["duplicate"]
+        is True
+    )
 
 
-def test_changed_event_range_during_sync_is_not_acknowledged(isolated_state_dirs, monkeypatch):
+def test_changed_event_range_during_sync_is_not_acknowledged(
+    isolated_state_dirs, monkeypatch
+):
     target = _day_file(isolated_state_dirs)
     real_sync = os.fsync
     replacement = b"replacement fixture\n"
@@ -404,8 +431,13 @@ def test_append_syncs_new_directory_ancestors(isolated_state_dirs, monkeypatch):
 
     monkeypatch.setattr(uploads_mod.os, "fsync", sync)
     body = b"retained fixture\n"
-    assert uploads_mod.append_events("20260818", 0, body, _sha(body))[0] == HTTPStatus.OK
-    for path in [_day_file(isolated_state_dirs).parent, _day_file(isolated_state_dirs).parent.parent]:
+    assert (
+        uploads_mod.append_events("20260818", 0, body, _sha(body))[0] == HTTPStatus.OK
+    )
+    for path in [
+        _day_file(isolated_state_dirs).parent,
+        _day_file(isolated_state_dirs).parent.parent,
+    ]:
         info = path.stat()
         assert (info.st_dev, info.st_ino) in directories
 
@@ -452,7 +484,9 @@ def test_cursor_waits_for_pending_append_durability(isolated_state_dirs, monkeyp
 
 
 @pytest.mark.parametrize("error", [OSError, FileNotFoundError])
-def test_cursor_sync_failure_does_not_acknowledge_bytes(isolated_state_dirs, monkeypatch, error):
+def test_cursor_sync_failure_does_not_acknowledge_bytes(
+    isolated_state_dirs, monkeypatch, error
+):
     body = b'{"kind":"neutral"}\n'
     target = _day_file(isolated_state_dirs)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -468,11 +502,11 @@ def test_cursor_sync_failure_does_not_acknowledge_bytes(isolated_state_dirs, mon
     assert target.read_bytes() == body
 
 
-
 def test_new_event_bytes_do_not_restore_group_write_access(tmp_path, monkeypatch):
     import os
 
     from sinnix_phone_dispatcher import uploads
+
     monkeypatch.setattr(uploads, "EVENTS_DIR", tmp_path)
     target = tmp_path / "events-20200101.jsonl"
     target.write_bytes(b"first\n")
@@ -487,7 +521,9 @@ def test_new_event_bytes_do_not_restore_group_write_access(tmp_path, monkeypatch
     assert target.stat().st_mode & 0o777 == 0o600
 
 
-def test_partial_notification_survives_dispatcher_restart(isolated_state_dirs, monkeypatch):
+def test_partial_notification_survives_dispatcher_restart(
+    isolated_state_dirs, monkeypatch
+):
     import importlib
 
     from sinnix_phone_dispatcher import notifications
@@ -496,14 +532,21 @@ def test_partial_notification_survives_dispatcher_restart(isolated_state_dirs, m
     line = b'{"kind":"notification_posted","title":"fixture","text":"preserved"}\n'
     assert uploads_mod.append_events("20260101", 0, line[:30], None)[0] == HTTPStatus.OK
     importlib.reload(notifications)
-    monkeypatch.setattr(notifications, "notify_desktop", lambda *a, **kw: calls.append(a))
-    assert uploads_mod.append_events("20260101", 30, line[30:], None)[0] == HTTPStatus.OK
+    monkeypatch.setattr(
+        notifications, "notify_desktop", lambda *a, **kw: calls.append(a)
+    )
+    assert (
+        uploads_mod.append_events("20260101", 30, line[30:], None)[0] == HTTPStatus.OK
+    )
     assert calls == [("fixture", "preserved")]
 
 
-def test_notification_descriptor_failure_keeps_upload_acknowledged(isolated_state_dirs, monkeypatch):
+def test_notification_descriptor_failure_keeps_upload_acknowledged(
+    isolated_state_dirs, monkeypatch
+):
     def exhausted(fd):
         raise OSError("descriptor exhaustion")
+
     monkeypatch.setattr(uploads_mod.os, "dup", exhausted)
     line = b'{"kind":"mark"}\n'
     status, result = uploads_mod.append_events("20260101", 0, line, None)

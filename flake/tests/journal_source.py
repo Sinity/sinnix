@@ -2,12 +2,11 @@
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
-
+from pathlib import Path
 
 SCRIPT = Path(sys.argv.pop()).read_text()
 
@@ -39,15 +38,17 @@ class JournalSource(unittest.TestCase):
         for name in ("btrfs", "chown", "chmod", "install"):
             (self.bin / name).symlink_to(command)
         self.script = self.base / "script"
-        self.script.write_text(
-            SCRIPT.replace("/realm/state", str(self.parent))
-        )
+        self.script.write_text(SCRIPT.replace("/realm/state", str(self.parent)))
 
     def run_script(self, **extra):
         return subprocess.run(
             ["bash", "-e", str(self.script)],
-            env={**os.environ, "PATH": str(self.bin) + ":" + os.environ["PATH"],
-                 "CALLS": str(self.calls), **extra},
+            env={
+                **os.environ,
+                "PATH": str(self.bin) + ":" + os.environ["PATH"],
+                "CALLS": str(self.calls),
+                **extra,
+            },
             capture_output=True,
             text=True,
         )
@@ -60,11 +61,14 @@ class JournalSource(unittest.TestCase):
     def test_absent_source_created_once_with_journal_permissions(self):
         self.assertEqual(self.run_script().returncode, 0)
         self.assertTrue(self.root.is_dir())
-        self.assertEqual(self.recorded_calls(), [
-            ["btrfs", "subvolume", "create", str(self.root)],
-            ["chown", "root:systemd-journal", str(self.root)],
-            ["chmod", "2755", str(self.root)],
-        ])
+        self.assertEqual(
+            self.recorded_calls(),
+            [
+                ["btrfs", "subvolume", "create", str(self.root)],
+                ["chown", "root:systemd-journal", str(self.root)],
+                ["chmod", "2755", str(self.root)],
+            ],
+        )
         self.assertEqual(self.run_script().returncode, 0)
         self.assertEqual(len(self.recorded_calls()), 3)
 
@@ -80,7 +84,9 @@ class JournalSource(unittest.TestCase):
         payload.write_bytes(b"retained native journal fixture")
         before = self.root.stat(), payload.stat(), payload.read_bytes()
         self.assertEqual(self.run_script().returncode, 0)
-        self.assertEqual(before, (self.root.stat(), payload.stat(), payload.read_bytes()))
+        self.assertEqual(
+            before, (self.root.stat(), payload.stat(), payload.read_bytes())
+        )
         self.assertEqual(self.recorded_calls(), [])
 
     def test_wrong_source_types_refuse_without_mutation(self):
@@ -89,7 +95,9 @@ class JournalSource(unittest.TestCase):
                 if kind == "file":
                     self.root.write_bytes(b"retained")
                 else:
-                    self.root.symlink_to(self.parent if kind == "directory-link" else "absent")
+                    self.root.symlink_to(
+                        self.parent if kind == "directory-link" else "absent"
+                    )
                 before = self.root.lstat()
                 self.assertNotEqual(self.run_script().returncode, 0)
                 self.assertEqual(self.root.lstat(), before)
@@ -111,9 +119,12 @@ class JournalSource(unittest.TestCase):
     def test_creation_failure_does_not_change_permissions(self):
         self.assertNotEqual(self.run_script(FAIL_CREATE="1").returncode, 0)
         self.assertFalse(self.root.exists())
-        self.assertEqual(self.recorded_calls(), [
-            ["btrfs", "subvolume", "create", str(self.root)],
-        ])
+        self.assertEqual(
+            self.recorded_calls(),
+            [
+                ["btrfs", "subvolume", "create", str(self.root)],
+            ],
+        )
 
 
 if __name__ == "__main__":

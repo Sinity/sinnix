@@ -113,8 +113,8 @@ def _resolve_project(runtime: Runtime, locator: Any) -> str:
 
 
 async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
-    from ..permissions import Permission
     from ..contexts import source_revision
+    from ..permissions import Permission
     from .products import (
         CampaignInput,
         OrchestrationInput,
@@ -234,7 +234,9 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
                 "intent": inp.intent,
                 "roots": inp.roots,
                 "at": inp.at.owner_value() if inp.at else None,
-                "budget_bytes": min(56000, max(8192, runtime.config.max_result_bytes - 8192)),
+                "budget_bytes": min(
+                    56000, max(8192, runtime.config.max_result_bytes - 8192)
+                ),
                 **({"refresh_id": inp.refresh_id} if inp.refresh_id else {}),
             },
             deadline_at=inp.deadline_at,
@@ -307,18 +309,24 @@ _COMPONENT_DATA = TypeAdapter(Any)
 
 
 def _presentation_size(context: Mapping[str, Any]) -> int:
-    fields = {key: item for key, item in context.items() if key in ComposedContext.model_fields}
+    fields = {
+        key: item
+        for key, item in context.items()
+        if key in ComposedContext.model_fields
+    }
     model = ComposedContext.model_validate(fields)
     # Include typed defaults while keeping native owner data shared. Non-JSON
     # values still follow Pydantic's Any serialization, as in the full dump.
     serialized = model.model_dump(exclude={"components": {"__all__": {"data"}}})
-    for row, component in zip(serialized["components"], model.components):
+    for row, component in zip(serialized["components"], model.components, strict=True):
         data = component.data
         row["data"] = data if _native_json(data) else _COMPONENT_DATA.dump_python(data)
     return canonical_size(serialized, default=str)
 
 
-def _within_budget(context: Mapping[str, Any], *, reserve_bytes: int = 0) -> dict[str, Any]:
+def _within_budget(
+    context: Mapping[str, Any], *, reserve_bytes: int = 0
+) -> dict[str, Any]:
     """Use the owner's compact view when full data exceeds the payload bound.
 
     The immutable snapshot always retains the original. Unsupported or unusable
@@ -348,7 +356,9 @@ def _within_budget(context: Mapping[str, Any], *, reserve_bytes: int = 0) -> dic
             entry["data"] = {**product, "data": projection, "owner_metadata": None}
             entry["presentation"] = "compact"
             entry["full_product_pointer"] = f"/components/{index}/data/data"
-            entry["reason"] = "Owner-selected compact view; full observation is in snapshot_ref"
+            entry["reason"] = (
+                "Owner-selected compact view; full observation is in snapshot_ref"
+            )
         components.append(entry)
     bounded["components"] = components
     if size(bounded) <= budget:

@@ -16,9 +16,9 @@ from sinnix_agent_gateway.browser import (
     BrowserError,
     BrowserService,
 )
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.owner_execution import ExecutionResult
+from sinnix_agent_gateway.permissions import Principal
 
 
 def browser_service(tmp_path: Path, principal_name: str) -> tuple[BrowserService, Path]:

@@ -27,7 +27,11 @@ def machine_lane_path(root: Path | str, lane: str) -> Path:
 
 def inventory_structure(root: str) -> str:
     """Generated structure, not an inspection or preservation claim."""
-    rows = ["<!-- BEGIN GENERATED ROOT LAYOUT -->", "| Home | Purpose |", "| --- | --- |"]
+    rows = [
+        "<!-- BEGIN GENERATED ROOT LAYOUT -->",
+        "| Home | Purpose |",
+        "| --- | --- |",
+    ]
     rows.extend(f"| `{name}/` | {purpose} |" for name, purpose in ROOTS[root].items())
     rows.append("<!-- END GENERATED ROOT LAYOUT -->")
     return "\n".join(rows)

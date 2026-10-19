@@ -17,7 +17,6 @@ from ..action import (
     MutationControls,
     RequestControls,
 )
-from ..permissions import Permission
 from ..contracts import VerbFamily
 from ..locators import UNIT_REF_PREFIX, UnitLocator, UnitScope
 from ..machine_actions import MachineActionError
@@ -27,6 +26,7 @@ from ..owner_execution import (
     ExecutionResult,
     OwnerRoute,
 )
+from ..permissions import Permission
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 

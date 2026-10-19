@@ -77,7 +77,9 @@ def build_parser() -> argparse.ArgumentParser:
     repair.add_argument("--expected-sha256", required=True)
     repair.set_defaults(func=_repair_events)
 
-    event_status = sub.add_parser("event-status", help="read the bounded retained event tail")
+    event_status = sub.add_parser(
+        "event-status", help="read the bounded retained event tail"
+    )
     event_status.add_argument("--file", type=Path)
     event_status.set_defaults(func=_event_status)
 

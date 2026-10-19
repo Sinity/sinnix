@@ -74,7 +74,9 @@ def is_binary_mime(mime: str) -> bool:
 def _verified_blob(path: Path, digest: str) -> bool:
     """An absent blob can be published; an invalid retained object cannot."""
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        descriptor = os.open(
+            path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+        )
     except FileNotFoundError:
         return False
     try:
@@ -97,9 +99,13 @@ def store_blob(lane_dir: Path, content: bytes | BinaryIO, digest: str) -> Path:
     # `exclusive` uses a unique temporary and links it into place; concurrent
     # callbacks either publish these same bytes or observe the completed blob.
     if not _verified_blob(blob_path, digest):
-        published = atomic_publish(blob_path, content, fsync=True, mode=0o600, exclusive=True)
+        published = atomic_publish(
+            blob_path, content, fsync=True, mode=0o600, exclusive=True
+        )
         if not published and not _verified_blob(blob_path, digest):
-            raise FileNotFoundError(f"selection blob disappeared during publication: {blob_path}")
+            raise FileNotFoundError(
+                f"selection blob disappeared during publication: {blob_path}"
+            )
     return blob_path
 
 
@@ -244,7 +250,9 @@ def capture_selection(
             # and still matches. Reuse verified bytes or restore an absent blob
             # before suppressing the duplicate event.
             raw_ref = (
-                str(store_blob(lane_dir, content, digest)) if is_binary_mime(mime) else None
+                str(store_blob(lane_dir, content, digest))
+                if is_binary_mime(mime)
+                else None
             )
             if dedup_state is not None and _is_duplicate(dedup_state, key):
                 return 0

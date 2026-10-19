@@ -425,7 +425,9 @@ def test_worker_exports_queue_identity_to_the_child(
 
 @pytest.mark.parametrize("exit_type", ["main", "cgroup"])
 def test_a_declared_pool_runs_the_child_as_a_service_with_declared_exit_type(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue,
+    tmp_path: Path,
+    fake_systemd: FakeSystemd,
+    fake_pueue: FakePueue,
     exit_type: str,
 ) -> None:
     """The unit is recoverable from pueue; wrapper completion follows its cgroup."""
@@ -520,7 +522,11 @@ def test_unit_properties_bound_the_task_unit_itself(
     launch = write_launch(
         tmp_path,
         pool="agent",
-        unit_properties=["MemoryMax=10G", "CPUWeight=50", "IOReadBandwidthMax=/realm 20M"],
+        unit_properties=[
+            "MemoryMax=10G",
+            "CPUWeight=50",
+            "IOReadBandwidthMax=/realm 20M",
+        ],
     )
 
     assert main([str(launch)]) == 0
@@ -900,9 +906,7 @@ def test_property_failures_do_not_hold_the_cancellation_lock(
         assert client is not None
         properties = run_module._wait_for_unit("fixture.service", 30)
         outcome.append(
-            run_module._classify(
-                run_module._marker_targets(marker, 1), properties
-            )
+            run_module._classify(run_module._marker_targets(marker, 1), properties)
         )
 
     submitter = threading.Thread(target=run_and_observe)
@@ -1135,12 +1139,17 @@ def test_a_unit_whose_task_is_terminal_is_an_orphan_and_is_settled(
 
 @pytest.mark.parametrize("known_running", [False, True])
 def test_a_multi_slot_pool_is_not_guarded(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue, known_running: bool
+    tmp_path: Path,
+    fake_systemd: FakeSystemd,
+    fake_pueue: FakePueue,
+    known_running: bool,
 ) -> None:
     if known_running:
         task_id = fake_pueue.add(
-            group="agent", label="other:verify",
-            command=("agentctl-run", "/inputs/other.json"), working_directory=tmp_path,
+            group="agent",
+            label="other:verify",
+            command=("agentctl-run", "/inputs/other.json"),
+            working_directory=tmp_path,
         )
         other = unit_for("/inputs/other.json", "agent")
     else:
@@ -1517,16 +1526,42 @@ def test_worker_exports_observed_native_provenance(
     tmp_path, fake_systemd, fake_pueue, dirty, linked, subdirectory
 ):
     import hashlib
+
     subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=Fixture",
-                    "-c", "user.email=fixture@example.invalid", "commit",
-                    "--allow-empty", "-qm", "neutral"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "neutral",
+        ],
+        check=True,
+    )
     (tmp_path / ".git/info/exclude").write_text("*\n!neutral.txt\n")
     (tmp_path / "neutral.txt").write_text("committed fixture")
     subprocess.run(["git", "-C", str(tmp_path), "add", "neutral.txt"], check=True)
-    subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=Fixture",
-                    "-c", "user.email=fixture@example.invalid", "commit",
-                    "-qm", "track neutral fixture"], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-qm",
+            "track neutral fixture",
+        ],
+        check=True,
+    )
     head = subprocess.check_output(
         ["git", "-C", str(tmp_path), "rev-parse", "HEAD"], text=True
     ).strip()
@@ -1534,26 +1569,46 @@ def test_worker_exports_observed_native_provenance(
         (tmp_path / "neutral.txt").write_text("uncommitted fixture")
     assert run_module.git_observation(tmp_path)["dirty"] is dirty
     root = tmp_path / "other-root" if linked else tmp_path
-    fields = ["JOB_ID", "CORRELATION_ID", "PROJECT_ID", "OPERATION",
-              "CHECKOUT_ID", "CHECKOUT_HEAD"]
-    command = "import os,json;print(json.dumps({k:os.environ.get('AGENTCTL_'+k) for k in " + repr(fields) + "}))"
+    fields = [
+        "JOB_ID",
+        "CORRELATION_ID",
+        "PROJECT_ID",
+        "OPERATION",
+        "CHECKOUT_ID",
+        "CHECKOUT_HEAD",
+    ]
+    command = (
+        "import os,json;print(json.dumps({k:os.environ.get('AGENTCTL_'+k) for k in "
+        + repr(fields)
+        + "}))"
+    )
     cwd = tmp_path / "sub" if subdirectory else tmp_path
     cwd.mkdir(exist_ok=True)
     launch = write_launch(
-        tmp_path, pool="pytest", project_root=str(root), working_directory=str(cwd),
+        tmp_path,
+        pool="pytest",
+        project_root=str(root),
+        working_directory=str(cwd),
         argv=[sys.executable, "-c", command],
         tree_receipt={"head": "stale-cache-head"},
-        environment={"PATH": os.environ["PATH"], "AGENTCTL_CHECKOUT_HEAD": "parent-head",
-                     "AGENTCTL_CORRELATION_ID": "parent-request"},
+        environment={
+            "PATH": os.environ["PATH"],
+            "AGENTCTL_CHECKOUT_HEAD": "parent-head",
+            "AGENTCTL_CORRELATION_ID": "parent-request",
+        },
     )
     assert main([str(launch)]) == 0
     row = json.loads(log_of(tmp_path))
     assert row == {
-        "JOB_ID": "job-a", "CORRELATION_ID": "job-a",
-        "PROJECT_ID": "fixture", "OPERATION": "check",
+        "JOB_ID": "job-a",
+        "CORRELATION_ID": "job-a",
+        "PROJECT_ID": "fixture",
+        "OPERATION": "check",
         "CHECKOUT_HEAD": head,
-        "CHECKOUT_ID": "worktree-" + hashlib.sha256(str(tmp_path).encode()).hexdigest()[:16]
-            if linked else "default",
+        "CHECKOUT_ID": "worktree-"
+        + hashlib.sha256(str(tmp_path).encode()).hexdigest()[:16]
+        if linked
+        else "default",
     }
 
 
@@ -1562,9 +1617,14 @@ def test_worker_does_not_invent_missing_checkout_evidence(
 ):
     command = "import os,json;print(json.dumps({k:os.environ.get('AGENTCTL_'+k) for k in ['CHECKOUT_ID','CHECKOUT_HEAD']}))"
     launch = write_launch(
-        tmp_path, pool="pytest", argv=[sys.executable, "-c", command],
-        environment={"PATH": os.environ["PATH"], "AGENTCTL_CHECKOUT_ID": "parent",
-                     "AGENTCTL_CHECKOUT_HEAD": "parent"},
+        tmp_path,
+        pool="pytest",
+        argv=[sys.executable, "-c", command],
+        environment={
+            "PATH": os.environ["PATH"],
+            "AGENTCTL_CHECKOUT_ID": "parent",
+            "AGENTCTL_CHECKOUT_HEAD": "parent",
+        },
     )
     assert main([str(launch)]) == 0
     assert json.loads(log_of(tmp_path)) == {"CHECKOUT_ID": None, "CHECKOUT_HEAD": None}
@@ -1580,7 +1640,9 @@ def test_notify_admission_wait_does_not_spend_execution_observation_budget(
         clock[0] += delay
 
     def snapshot(_unit: str) -> dict[str, str]:
-        state = "activating" if clock[0] < 5 else "active" if clock[0] < 6 else "inactive"
+        state = (
+            "activating" if clock[0] < 5 else "active" if clock[0] < 6 else "inactive"
+        )
         return {
             "LoadState": "loaded",
             "ActiveState": state,
@@ -1647,19 +1709,26 @@ def test_missing_unit_cannot_prove_command_success() -> None:
     )
 
 
-def test_retained_exited_unit_is_a_terminal_observation(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_retained_exited_unit_is_a_terminal_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     properties = {
-        "LoadState": "loaded", "ActiveState": "active", "SubState": "exited",
-        "Result": "success", "ExecMainStatus": "0", "ExecMainCode": "exited",
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "exited",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "ExecMainCode": "exited",
     }
     monkeypatch.setattr(run_module, "_unit_snapshot", lambda _unit: properties)
 
     def unexpected_wait(_delay: float) -> None:
-        raise AssertionError("retained terminal state must be captured without polling again")
+        raise AssertionError(
+            "retained terminal state must be captured without polling again"
+        )
 
     monkeypatch.setattr(run_module.time, "sleep", unexpected_wait)
     assert run_module._wait_for_unit("fixture.service", 0) == properties
-
 
 
 def test_real_cancellation_after_startup_keeps_its_outcome_and_releases_unit(
@@ -1691,11 +1760,17 @@ def test_real_cancellation_after_startup_keeps_its_outcome_and_releases_unit(
 
 def test_running_unit_cannot_prove_command_success() -> None:
     properties = {
-        "LoadState": "loaded", "ActiveState": "active", "SubState": "running",
-        "Result": "success", "ExecMainStatus": "0", "ExecMainCode": "0",
+        "LoadState": "loaded",
+        "ActiveState": "active",
+        "SubState": "running",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "ExecMainCode": "0",
     }
-    assert run_module._classify(False, properties) == (run_module.Outcome.VANISHED, VANISHED_EXIT_CODE)
-
+    assert run_module._classify(False, properties) == (
+        run_module.Outcome.VANISHED,
+        VANISHED_EXIT_CODE,
+    )
 
 
 def test_real_retained_orphan_is_released_by_the_next_multi_slot_admission(
@@ -1706,16 +1781,23 @@ def test_real_retained_orphan_is_released_by_the_next_multi_slot_admission(
     fake_pueue.groups["fixture"] = 2
     first = write_launch(tmp_path, name="first.json", argv=["true"])
     task_id = fake_pueue.add(
-        group="fixture", label="fixture:check", command=("agentctl-run", str(first)),
+        group="fixture",
+        label="fixture:check",
+        command=("agentctl-run", str(first)),
         working_directory=tmp_path,
     )
     first_unit = unit_for(first, "fixture")
     next_launch = write_launch(
-        tmp_path, name="next.json", argv=["true"], job_id="job-next",
+        tmp_path,
+        name="next.json",
+        argv=["true"],
+        job_id="job-next",
         log_path=str(tmp_path / "next-job.log"),
     )
     next_task = fake_pueue.add(
-        group="fixture", label="fixture:check", command=("agentctl-run", str(next_launch)),
+        group="fixture",
+        label="fixture:check",
+        command=("agentctl-run", str(next_launch)),
         working_directory=tmp_path,
     )
     assert set(fake_pueue.running_tasks("fixture")) == {task_id, next_task}
@@ -1747,7 +1829,6 @@ def test_real_retained_orphan_is_released_by_the_next_multi_slot_admission(
             run_module._systemctl("reset-failed", unit)
 
 
-
 @pytest.mark.parametrize("parallel", [1, 2])
 def test_same_reference_restart_preserves_its_prior_unit_release(
     tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue, parallel: int
@@ -1755,7 +1836,9 @@ def test_same_reference_restart_preserves_its_prior_unit_release(
     fake_pueue.groups["pytest"] = parallel
     launch = write_launch(tmp_path, pool="pytest")
     task_id = fake_pueue.add(
-        group="pytest", label="fixture:check", command=("agentctl-run", str(launch)),
+        group="pytest",
+        label="fixture:check",
+        command=("agentctl-run", str(launch)),
         working_directory=tmp_path,
     )
     unit = unit_for(launch, "pytest")
@@ -1769,10 +1852,14 @@ def test_same_reference_restart_preserves_its_prior_unit_release(
     ]
 
 
-CONNECT_REFUSED = "Failed to connect to user scope bus via local transport: Connection refused\n"
+CONNECT_REFUSED = (
+    "Failed to connect to user scope bus via local transport: Connection refused\n"
+)
 
 
-def refusing_startup_client(fake: FakeSystemd, failures: int, *, exit_status: int = 0) -> Path:
+def refusing_startup_client(
+    fake: FakeSystemd, failures: int, *, exit_status: int = 0
+) -> Path:
     runner = fake.root / "bin/systemd-run"
     delegate = runner.with_name("systemd-run-delegate")
     runner.rename(delegate)
@@ -1795,13 +1882,22 @@ def refusing_startup_client(fake: FakeSystemd, failures: int, *, exit_status: in
 
 
 def test_startup_connection_refusal_recovers_without_duplicate_payload(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue,
+    tmp_path: Path,
+    fake_systemd: FakeSystemd,
+    fake_pueue: FakePueue,
 ) -> None:
     attempts = refusing_startup_client(fake_systemd, 2)
     payload = tmp_path / "payload-runs"
-    launch = write_launch(tmp_path, pool="pytest", argv=[
-        sys.executable, "-c", "import sys;open(sys.argv[1], 'a').write('run\\n')", str(payload),
-    ])
+    launch = write_launch(
+        tmp_path,
+        pool="pytest",
+        argv=[
+            sys.executable,
+            "-c",
+            "import sys;open(sys.argv[1], 'a').write('run\\n')",
+            str(payload),
+        ],
+    )
     assert main([str(launch)]) == 0
     assert attempts.read_text() == "3"
     assert payload.read_text() == "run\n"
@@ -1810,7 +1906,9 @@ def test_startup_connection_refusal_recovers_without_duplicate_payload(
 
 
 def test_startup_connection_outage_is_bounded_without_resubmission(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_systemd: FakeSystemd,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_systemd: FakeSystemd,
 ) -> None:
     attempts = refusing_startup_client(fake_systemd, 100)
     marker = cancel_marker_for(tmp_path / "job-a.log")
@@ -1818,11 +1916,16 @@ def test_startup_connection_outage_is_bounded_without_resubmission(
     clock = [0.0]
     monkeypatch.setattr(run_module, "BUS_CONNECT_RETRY_SECONDS", 1, raising=False)
     monkeypatch.setattr(run_module.time, "monotonic", lambda: clock[0])
-    monkeypatch.setattr(run_module.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay))
+    monkeypatch.setattr(
+        run_module.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay)
+    )
     monkeypatch.setattr(run_module, "_unit_snapshot", lambda _unit: None)
     with (tmp_path / "startup.log").open("wb") as log:
         client = run_module._start_service(
-            ["systemd-run", "--user", "--unit=fixture.service", "--", "true"], marker, 1, log,
+            ["systemd-run", "--user", "--unit=fixture.service", "--", "true"],
+            marker,
+            1,
+            log,
         )
     assert client is not None and client.returncode == 1
     assert clock[0] >= 1
@@ -1831,7 +1934,9 @@ def test_startup_connection_outage_is_bounded_without_resubmission(
 
 
 def test_startup_connection_wait_releases_cancellation_lock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_systemd: FakeSystemd,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_systemd: FakeSystemd,
 ) -> None:
     attempts = refusing_startup_client(fake_systemd, 100)
     marker = cancel_marker_for(tmp_path / "job-a.log")
@@ -1847,7 +1952,10 @@ def test_startup_connection_wait_releases_cancellation_lock(
     monkeypatch.setattr(run_module, "_unit_snapshot", lambda _unit: None)
     with (tmp_path / "startup.log").open("wb") as log:
         client = run_module._start_service(
-            ["systemd-run", "--user", "--unit=fixture.service", "--", "true"], marker, 1, log,
+            ["systemd-run", "--user", "--unit=fixture.service", "--", "true"],
+            marker,
+            1,
+            log,
         )
     assert client is None
     assert attempts.read_text() == "1"
@@ -1855,15 +1963,22 @@ def test_startup_connection_wait_releases_cancellation_lock(
 
 
 def test_real_lost_startup_ack_waits_without_resubmitting(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_pueue: FakePueue,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_pueue: FakePueue,
 ) -> None:
     user_manager()
     monkeypatch.setenv("PUEUE_GROUP", "fixture")
     payload = tmp_path / "payload-runs"
-    launch = write_launch(tmp_path, argv=[
-        sys.executable, "-c",
-        "import sys,time;time.sleep(.2);open(sys.argv[1], 'a').write('run\\n')", str(payload),
-    ])
+    launch = write_launch(
+        tmp_path,
+        argv=[
+            sys.executable,
+            "-c",
+            "import sys,time;time.sleep(.2);open(sys.argv[1], 'a').write('run\\n')",
+            str(payload),
+        ],
+    )
     original = run_module._start_service
     calls = []
 
@@ -1881,38 +1996,60 @@ def test_real_lost_startup_ack_waits_without_resubmitting(
 
 
 def test_startup_connection_does_not_resubmit_an_observed_loaded_unit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_systemd: FakeSystemd,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_systemd: FakeSystemd,
 ) -> None:
     attempts = refusing_startup_client(fake_systemd, 100)
     marker = cancel_marker_for(tmp_path / "job-a.log")
     (tmp_path / "job-a.attempts").mkdir()
     monkeypatch.setattr(run_module.time, "sleep", lambda _delay: None)
-    monkeypatch.setattr(run_module, "_unit_snapshot", lambda _unit: {"LoadState": "loaded", "ActiveState": "active"})
+    monkeypatch.setattr(
+        run_module,
+        "_unit_snapshot",
+        lambda _unit: {"LoadState": "loaded", "ActiveState": "active"},
+    )
     with (tmp_path / "startup.log").open("wb") as log:
         client = run_module._start_service(
-            ["systemd-run", "--user", "--unit=fixture.service", "--", "true"], marker, 1, log,
+            ["systemd-run", "--user", "--unit=fixture.service", "--", "true"],
+            marker,
+            1,
+            log,
         )
     assert client is not None and client.returncode == 1
     assert attempts.read_text() == "1"
 
 
-@pytest.mark.parametrize("diagnostic", [
-    "Failed to start transient service unit: Connection reset by peer\n",
-    CONNECT_REFUSED + "another diagnostic\n",
-    "Failed to connect to user scope bus via local transport: Operation not permitted\n",
-])
+@pytest.mark.parametrize(
+    "diagnostic",
+    [
+        "Failed to start transient service unit: Connection reset by peer\n",
+        CONNECT_REFUSED + "another diagnostic\n",
+        "Failed to connect to user scope bus via local transport: Operation not permitted\n",
+    ],
+)
 def test_startup_connection_does_not_retry_other_client_errors(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_systemd: FakeSystemd, diagnostic: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_systemd: FakeSystemd,
+    diagnostic: str,
 ) -> None:
     attempts = refusing_startup_client(fake_systemd, 1)
     runner = fake_systemd.root / "bin/systemd-run"
-    runner.write_text(runner.read_text().replace(repr(CONNECT_REFUSED), repr(diagnostic)))
+    runner.write_text(
+        runner.read_text().replace(repr(CONNECT_REFUSED), repr(diagnostic))
+    )
     marker = cancel_marker_for(tmp_path / "job-a.log")
     (tmp_path / "job-a.attempts").mkdir()
-    monkeypatch.setattr(run_module, "_unit_snapshot", lambda _unit: {"LoadState": "not-found"})
+    monkeypatch.setattr(
+        run_module, "_unit_snapshot", lambda _unit: {"LoadState": "not-found"}
+    )
     with (tmp_path / "startup.log").open("wb") as log:
         client = run_module._start_service(
-            ["systemd-run", "--user", "--unit=fixture.service", "--", "true"], marker, 1, log,
+            ["systemd-run", "--user", "--unit=fixture.service", "--", "true"],
+            marker,
+            1,
+            log,
         )
     assert client is not None and client.returncode == 1
     assert attempts.read_text() == "1"
@@ -1920,12 +2057,21 @@ def test_startup_connection_does_not_retry_other_client_errors(
 
 
 def test_startup_connection_payload_stderr_cannot_trigger_retry(
-    tmp_path: Path, fake_systemd: FakeSystemd, fake_pueue: FakePueue,
+    tmp_path: Path,
+    fake_systemd: FakeSystemd,
+    fake_pueue: FakePueue,
 ) -> None:
     attempts = refusing_startup_client(fake_systemd, 0, exit_status=1)
-    launch = write_launch(tmp_path, pool="pytest", argv=[
-        sys.executable, "-c", "import sys;sys.stderr.write(sys.argv[1]);sys.exit(1)", CONNECT_REFUSED,
-    ])
+    launch = write_launch(
+        tmp_path,
+        pool="pytest",
+        argv=[
+            sys.executable,
+            "-c",
+            "import sys;sys.stderr.write(sys.argv[1]);sys.exit(1)",
+            CONNECT_REFUSED,
+        ],
+    )
     assert main([str(launch)]) == 1
     assert attempts.read_text() == "1"
     assert outcome_of(tmp_path)["outcome"] == "failed"
@@ -1933,7 +2079,10 @@ def test_startup_connection_payload_stderr_cannot_trigger_retry(
 
 
 def test_lost_startup_ack_retains_already_observed_terminal_result(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_systemd: FakeSystemd, fake_pueue: FakePueue,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_systemd: FakeSystemd,
+    fake_pueue: FakePueue,
 ) -> None:
     launch = write_launch(tmp_path, pool="pytest")
     original = run_module._start_service
@@ -1952,78 +2101,102 @@ def test_lost_startup_ack_retains_already_observed_terminal_result(
     assert outcome_of(tmp_path)["outcome"] == "success"
 
 
-
 def test_startup_default_status_does_not_prove_execution():
-    properties = {"LoadState": "loaded", "ActiveState": "inactive", "Job": "",
-                  "Result": "success", "ExecMainStatus": "0", "ExecMainCode": "0"}
-    assert run_module._classify(False, properties) == (run_module.Outcome.VANISHED, VANISHED_EXIT_CODE)
+    properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Job": "",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "ExecMainCode": "0",
+    }
+    assert run_module._classify(False, properties) == (
+        run_module.Outcome.VANISHED,
+        VANISHED_EXIT_CODE,
+    )
 
 
 def test_pending_start_job_is_not_terminal():
-    properties = {"LoadState": "loaded", "ActiveState": "inactive", "Job": "17",
-                  "Result": "success", "ExecMainStatus": "0", "ExecMainCode": "0"}
+    properties = {
+        "LoadState": "loaded",
+        "ActiveState": "inactive",
+        "Job": "17",
+        "Result": "success",
+        "ExecMainStatus": "0",
+        "ExecMainCode": "0",
+    }
     assert not run_module._unit_is_terminal(properties)
 
 
-@pytest.mark.parametrize('kind', ['directory', 'symlink', 'file'])
-def test_a_preexisting_scratch_entrance_is_preserved_and_refused(tmp_path, monkeypatch, kind):
-    monkeypatch.setenv('AGENTCTL_TMPFS_SCRATCH_ROOT', str(tmp_path / 'tmpfs'))
-    root = tmp_path / 'tmpfs'
+@pytest.mark.parametrize("kind", ["directory", "symlink", "file"])
+def test_a_preexisting_scratch_entrance_is_preserved_and_refused(
+    tmp_path, monkeypatch, kind
+):
+    monkeypatch.setenv("AGENTCTL_TMPFS_SCRATCH_ROOT", str(tmp_path / "tmpfs"))
+    root = tmp_path / "tmpfs"
     root.mkdir()
-    scratch = root / 'job-a'
-    retained = tmp_path / 'retained'
+    scratch = root / "job-a"
+    retained = tmp_path / "retained"
     retained.mkdir()
-    evidence = retained / 'keep'
-    evidence.write_text('recoverable previous work')
-    if kind == 'directory':
+    evidence = retained / "keep"
+    evidence.write_text("recoverable previous work")
+    if kind == "directory":
         scratch.mkdir()
-        evidence = scratch / 'keep'
-        evidence.write_text('recoverable previous work')
-    elif kind == 'symlink':
+        evidence = scratch / "keep"
+        evidence.write_text("recoverable previous work")
+    elif kind == "symlink":
         scratch.symlink_to(retained, target_is_directory=True)
     else:
-        scratch.write_text('existing file')
+        scratch.write_text("existing file")
     before = scratch.lstat()
-    command_marker = tmp_path / 'command-ran'
+    command_marker = tmp_path / "command-ran"
     launch = write_launch(
         tmp_path,
-        argv=['sh', '-c', 'touch "$1"', 'fixture', str(command_marker)],
-        scratch={'kind': 'tmpfs', 'path': str(scratch)},
+        argv=["sh", "-c", 'touch "$1"', "fixture", str(command_marker)],
+        scratch={"kind": "tmpfs", "path": str(scratch)},
     )
     assert main([str(launch)]) == REFUSED_EXIT_CODE
     assert not command_marker.exists()
     after = scratch.lstat()
-    assert (after.st_dev, after.st_ino, after.st_mode) == (before.st_dev, before.st_ino, before.st_mode)
-    assert evidence.read_text() == 'recoverable previous work'
-    if kind == 'symlink':
+    assert (after.st_dev, after.st_ino, after.st_mode) == (
+        before.st_dev,
+        before.st_ino,
+        before.st_mode,
+    )
+    assert evidence.read_text() == "recoverable previous work"
+    if kind == "symlink":
         assert scratch.is_symlink() and scratch.readlink() == retained
-    if kind == 'file':
-        assert scratch.read_text() == 'existing file'
-    assert outcome_of(tmp_path)['outcome'] == 'refused'
+    if kind == "file":
+        assert scratch.read_text() == "existing file"
+    assert outcome_of(tmp_path)["outcome"] == "refused"
 
 
-@pytest.mark.parametrize('missing_command', [False, True])
-def test_scratch_cleanup_failure_is_reported_without_hiding_command_status(tmp_path, monkeypatch, missing_command):
+@pytest.mark.parametrize("missing_command", [False, True])
+def test_scratch_cleanup_failure_is_reported_without_hiding_command_status(
+    tmp_path, monkeypatch, missing_command
+):
     import errno
 
-    monkeypatch.setenv('AGENTCTL_TMPFS_SCRATCH_ROOT', str(tmp_path / 'tmpfs'))
-    scratch = tmp_path / 'tmpfs' / 'job-a'
+    monkeypatch.setenv("AGENTCTL_TMPFS_SCRATCH_ROOT", str(tmp_path / "tmpfs"))
+    scratch = tmp_path / "tmpfs" / "job-a"
 
     def denied(path):
         assert path == scratch
-        raise PermissionError(errno.EACCES, 'denied', 'private-child-name')
+        raise PermissionError(errno.EACCES, "denied", "private-child-name")
 
-    monkeypatch.setattr(run_module.shutil, 'rmtree', denied)
+    monkeypatch.setattr(run_module.shutil, "rmtree", denied)
     launch = write_launch(
         tmp_path,
-        argv=['agentctl-no-such-command'] if missing_command else ['sh', '-c', 'exit 7'],
-        scratch={'kind': 'tmpfs', 'path': str(scratch)},
+        argv=["agentctl-no-such-command"]
+        if missing_command
+        else ["sh", "-c", "exit 7"],
+        scratch={"kind": "tmpfs", "path": str(scratch)},
     )
     expected = REFUSED_EXIT_CODE if missing_command else 7
     assert main([str(launch)]) == expected
     outcome = outcome_of(tmp_path)
-    assert outcome['exit_code'] == expected
-    assert outcome['scratch']['cleanup_error'] == 'PermissionError (errno 13)'
-    assert outcome['scratch']['path'] == str(scratch)
+    assert outcome["exit_code"] == expected
+    assert outcome["scratch"]["cleanup_error"] == "PermissionError (errno 13)"
+    assert outcome["scratch"]["path"] == str(scratch)
     assert scratch.is_dir()
-    assert 'private-child-name' not in json.dumps(outcome)
+    assert "private-child-name" not in json.dumps(outcome)

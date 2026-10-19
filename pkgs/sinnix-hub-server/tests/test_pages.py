@@ -9,7 +9,6 @@ buttons the action API answers with 403.
 from __future__ import annotations
 
 from html import unescape
-
 from typing import Any
 
 from sinnix_hub_server import pages
@@ -119,7 +118,7 @@ def test_policy_controls_only_offer_declared_properties() -> None:
     assert '"CPUWeight", "5"' in unescape(controls)
     assert '"MemoryHigh", "8G"' in unescape(controls)
     assert "Slice" not in controls
-    assert 'act(\'reset_policy\',\'unit\',"x.service"' in unescape(controls)
+    assert "act('reset_policy','unit',\"x.service\"" in unescape(controls)
 
 
 def test_work_page_renders_queue_jobs_and_interrupts_live_jobs() -> None:
@@ -191,8 +190,8 @@ def test_work_page_renders_queue_jobs_and_interrupts_live_jobs() -> None:
     # Jobs are pueue tasks by label; only a live one can be interrupted.
     assert "sinnix:lane:sinnix-1" in html
     assert "sinex:cache_prebuild" in html and "exit 2" in unescape(html)
-    assert 'act(\'interrupt\',\'job_id\',"7"'  in unescape(html)
-    assert 'act(\'interrupt\',\'job_id\',"8"'  not in unescape(html)
+    assert "act('interrupt','job_id',\"7\"" in unescape(html)
+    assert "act('interrupt','job_id',\"8\"" not in unescape(html)
     assert "1" in html and "jobs queued or running" in html
 
 
@@ -206,17 +205,30 @@ def test_work_page_escapes_queue_count_fields_and_does_not_invent_pause_owner():
     from html.parser import HTMLParser
 
     marker = '<img src=x onerror="alert(1)">'
+
     class Elements(HTMLParser):
         def __init__(self):
             super().__init__()
             self.tags = []
+
         def handle_starttag(self, tag, attrs):
             self.tags.append(tag)
+
     for field in ("running", "parallel", "queued", "paused"):
-        detail = {"status": "Paused", "running": 1, "parallel": 4, "queued": 2, "paused": 1}
+        detail = {
+            "status": "Paused",
+            "running": 1,
+            "parallel": 4,
+            "queued": 2,
+            "paused": 1,
+        }
         detail[field] = marker
-        html = pages.render_work(MANIFEST, {"state": {"agentctl": {"groups": {"fixture": detail}}}},
-                                 INVENTORY, "fixture")
+        html = pages.render_work(
+            MANIFEST,
+            {"state": {"agentctl": {"groups": {"fixture": detail}}}},
+            INVENTORY,
+            "fixture",
+        )
         parser = Elements()
         parser.feed(html)
         assert "img" not in parser.tags
@@ -225,12 +237,32 @@ def test_work_page_escapes_queue_count_fields_and_does_not_invent_pause_owner():
 
 def test_jobs_prioritize_active_and_explain_both_display_and_owner_omissions():
     import datetime as dt
+
     from sinnix_hub_server.pages.queue import jobs_card
-    jobs = [{"job_id": i, "label": f"completed-{i}", "terminal": True,
-             "phase": "succeeded", "enqueued_at": "2026-10-18T06:00:00Z"} for i in range(20)]
-    jobs.append({"job_id": 100, "label": "old-running-job", "terminal": False,
-                 "phase": "running", "enqueued_at": "2026-10-17T06:00:00Z"})
-    html = jobs_card({"agentctl": {"jobs": jobs, "omitted": {"active": 3, "terminal": 99}}}, dt.datetime.now(dt.timezone.utc))
+
+    jobs = [
+        {
+            "job_id": i,
+            "label": f"completed-{i}",
+            "terminal": True,
+            "phase": "succeeded",
+            "enqueued_at": "2026-10-18T06:00:00Z",
+        }
+        for i in range(20)
+    ]
+    jobs.append(
+        {
+            "job_id": 100,
+            "label": "old-running-job",
+            "terminal": False,
+            "phase": "running",
+            "enqueued_at": "2026-10-17T06:00:00Z",
+        }
+    )
+    html = jobs_card(
+        {"agentctl": {"jobs": jobs, "omitted": {"active": 3, "terminal": 99}}},
+        dt.datetime.now(dt.timezone.utc),
+    )
     assert "old-running-job" in html
     assert html.index("old-running-job") < html.index("completed-0")
     assert "Showing 12 of 21 snapshot jobs" in html
@@ -239,7 +271,9 @@ def test_jobs_prioritize_active_and_explain_both_display_and_owner_omissions():
 
 def test_empty_snapshot_does_not_claim_no_owner_jobs_or_invent_coverage():
     import datetime as dt
+
     from sinnix_hub_server.pages.queue import jobs_card
+
     html = jobs_card({"agentctl": {"jobs": []}}, dt.datetime.now(dt.timezone.utc))
     assert "no jobs in this snapshot" in html
     assert "unknown active, unknown completed" in html

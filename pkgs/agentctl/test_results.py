@@ -572,8 +572,12 @@ def test_loading_malformed_v2_results_reports_errors_before_semantic_traversal(
 
 
 @pytest.mark.parametrize("kind", ["worker", "judge"])
-@pytest.mark.parametrize("raw", [b"\xff", b'{"summary":"\xe2\x82', b"\xff\xfe{\x00}\x00"])
-def test_invalid_text_encoding_is_a_result_refusal(tmp_path: Path, kind: str, raw: bytes) -> None:
+@pytest.mark.parametrize(
+    "raw", [b"\xff", b'{"summary":"\xe2\x82', b"\xff\xfe{\x00}\x00"]
+)
+def test_invalid_text_encoding_is_a_result_refusal(
+    tmp_path: Path, kind: str, raw: bytes
+) -> None:
     path = tmp_path / "result.json"
     path.write_bytes(raw)
     before = path.stat()
@@ -583,7 +587,9 @@ def test_invalid_text_encoding_is_a_result_refusal(tmp_path: Path, kind: str, ra
     assert path.read_bytes() == raw
     after = path.stat()
     assert (before.st_ino, before.st_mtime_ns, before.st_mode) == (
-        after.st_ino, after.st_mtime_ns, after.st_mode
+        after.st_ino,
+        after.st_mtime_ns,
+        after.st_mode,
     )
 
 
@@ -605,12 +611,16 @@ def test_decoder_integer_refusal_is_a_result_error(tmp_path: Path, kind: str) ->
     assert path.read_text() == raw
     after = path.stat()
     assert (before.st_ino, before.st_mtime_ns, before.st_mode) == (
-        after.st_ino, after.st_mtime_ns, after.st_mode
+        after.st_ino,
+        after.st_mtime_ns,
+        after.st_mode,
     )
 
 
 @pytest.mark.parametrize("kind", ["worker", "judge"])
-def test_decoded_nested_nonobject_retains_schema_refusal(tmp_path: Path, kind: str) -> None:
+def test_decoded_nested_nonobject_retains_schema_refusal(
+    tmp_path: Path, kind: str
+) -> None:
     raw = "[" * 20000 + "0" + "]" * 20000
     path = tmp_path / "nested.json"
     path.write_text(raw)

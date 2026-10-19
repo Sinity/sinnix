@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import Field, model_validator
 
 from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
-from ..permissions import Permission
 from ..capability_index import CapabilityIndexError
 from ..contexts import ContextSnapshotStore
 from ..contracts import VerbFamily
+from ..permissions import Permission
 from ..results import ProtocolError, ResultError
 from ..schemas import GatewayModel
 

@@ -26,7 +26,6 @@ from ..action import (
     MutationControls,
     RequestControls,
 )
-from ..permissions import Permission
 from ..contracts import VerbFamily
 from ..locators import (
     CheckoutLocator,
@@ -37,6 +36,7 @@ from ..locators import (
     job_ref,
     project_ref,
 )
+from ..permissions import Permission
 from ..redaction import redact
 from ..results import ProtocolError
 from ..schemas import GatewayModel

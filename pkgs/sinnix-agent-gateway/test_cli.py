@@ -12,7 +12,6 @@ import tempfile
 import time
 from http.client import HTTPConnection
 from pathlib import Path
-from types import SimpleNamespace
 
 import anyio
 import pytest
@@ -448,6 +447,7 @@ def test_stdio_mcp_client_consumes_complete_binary_artifact(tmp_path: Path) -> N
 
 def test_input_sources_require_one_complete_json_object(tmp_path: Path) -> None:
     import io
+
     with pytest.raises(CliInputError, match="valid JSON"):
         load_json_input(inline="not-json")
     with pytest.raises(CliInputError, match="JSON object"):
@@ -457,20 +457,29 @@ def test_input_sources_require_one_complete_json_object(tmp_path: Path) -> None:
     with pytest.raises(CliInputError, match="unavailable"):
         load_json_input(input_file=tmp_path / "missing.json")
     with pytest.raises(CliInputError, match="valid JSON"):
-        load_json_input(use_stdin=True, stdin=io.BytesIO(b'{} trailing'))
+        load_json_input(use_stdin=True, stdin=io.BytesIO(b"{} trailing"))
 
 
 @pytest.mark.parametrize("source", ["inline", "file", "stdin"])
 @pytest.mark.parametrize("characters", [50_000, 90_000])
-def test_complete_unicode_cli_request_survives_former_byte_cliffs(tmp_path, source, characters):
+def test_complete_unicode_cli_request_survives_former_byte_cliffs(
+    tmp_path, source, characters
+):
     import io
+
     from test_actions_projects import fixture
+
     config, project, _ = fixture(tmp_path)
     content = "界" * characters
-    head = subprocess.check_output(["git", "-C", str(project), "rev-parse", "HEAD"], text=True).strip()
-    payload = {"target": {"project": "fixture"},
-               "change": {"operation": "write", "path": "unicode.txt", "content": content},
-               "expected_head": head, "idempotency_key": "unicode-request"}
+    head = subprocess.check_output(
+        ["git", "-C", str(project), "rev-parse", "HEAD"], text=True
+    ).strip()
+    payload = {
+        "target": {"project": "fixture"},
+        "change": {"operation": "write", "path": "unicode.txt", "content": content},
+        "expected_head": head,
+        "idempotency_key": "unicode-request",
+    }
     raw = json.dumps(payload, ensure_ascii=False).encode()
     assert len(json.dumps(payload).encode()) > 262_144
     if characters == 50_000:

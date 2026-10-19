@@ -14,7 +14,6 @@ from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from sinnix_agent_gateway import actions as action_set
 from sinnix_agent_gateway.app import Runtime, create_server
-from sinnix_agent_gateway.permissions import PolicyError
 from sinnix_agent_gateway.cli import (
     build_manifest,
     semantic_canary,
@@ -22,6 +21,7 @@ from sinnix_agent_gateway.cli import (
 )
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.owner_execution import ExecutionResult, OwnerExecution
+from sinnix_agent_gateway.permissions import PolicyError
 from sinnix_agent_gateway.projects import ProjectError
 from sinnix_agent_gateway.server import _bounded_resource_json
 

@@ -19,10 +19,10 @@ from ..action import (
     Example,
     RequestControls,
 )
-from ..permissions import Permission, PolicyError
 from ..captures import CaptureLane
 from ..catalog import search_rows
 from ..contracts import VerbFamily
+from ..permissions import Permission, PolicyError
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 from .products import OwnerProduct, owner_product

@@ -1032,8 +1032,12 @@ def _run_seconds(job: Mapping[str, Any], first_seen: float) -> float:
 
 
 def _await_verification(
-    profile: str, job_id: int, reference: Any, timeout_seconds: float,
-    *, config: Config | None = None,
+    profile: str,
+    job_id: int,
+    reference: Any,
+    timeout_seconds: float,
+    *,
+    config: Config | None = None,
 ) -> dict[str, Any]:
     """Wait for a verification job to reach a terminal state.
 
@@ -1049,7 +1053,9 @@ def _await_verification(
     first_seen: float | None = None
     wait_for = limit if limit is not None else VERIFY_EXIT_GRACE_SECONDS
     while True:
-        waited = launch.wait(job_id, timeout_seconds=wait_for, reference=reference, config=config)
+        waited = launch.wait(
+            job_id, timeout_seconds=wait_for, reference=reference, config=config
+        )
         # `launch.wait` can return the last non-terminal view at the instant
         # its deadline passes; pueue's current record decides.
         try:
@@ -1235,7 +1241,11 @@ def _verify(
     if not isinstance(job_id, int):
         raise JobError(f"verification {profile} returned no task id")
     waited = _await_verification(
-        profile, job_id, started.get("reference"), operation.timeout_seconds, config=config
+        profile,
+        job_id,
+        started.get("reference"),
+        operation.timeout_seconds,
+        config=config,
     )
     if waited.get("phase") != "succeeded":
         raise BatchRefusal(
@@ -2288,7 +2298,10 @@ def _cleanup_obstacle(
 ) -> str | None:
     """Git status alone cannot prove that checkout-only bytes are retained."""
     common = ("rev-parse", "--path-format=absolute", "--git-common-dir")
-    if Path(_git(path, *common)).resolve() != Path(_git(project.root, *common)).resolve():
+    if (
+        Path(_git(path, *common)).resolve()
+        != Path(_git(project.root, *common)).resolve()
+    ):
         return "worktree kept; checkout belongs to another Git repository"
     for record in _git(path, "ls-files", "-v", "-z").split("\0"):
         if not record:
@@ -2313,7 +2326,15 @@ def _cleanup_obstacle(
             if parent == path:
                 break
             parent = parent.parent
-    ignored = _git(path, "ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z")
+    ignored = _git(
+        path,
+        "ls-files",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "--directory",
+        "-z",
+    )
     pending = [path / name for name in ignored.split("\0") if name]
     while pending:
         candidate = pending.pop()
@@ -2759,14 +2780,16 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
                     None,
                 )
             try:
-                recorded_present = (
-                    recorded_path is not None and _path_entry_exists(recorded_path)
+                recorded_present = recorded_path is not None and _path_entry_exists(
+                    recorded_path
                 )
             except OSError as error:
-                kept.append({
-                    "branch": branch,
-                    "reason": f"worktree kept; cannot inspect recorded checkout: {error}",
-                })
+                kept.append(
+                    {
+                        "branch": branch,
+                        "reason": f"worktree kept; cannot inspect recorded checkout: {error}",
+                    }
+                )
                 continue
             checkout_absent = (
                 registered is None or registered.path is None

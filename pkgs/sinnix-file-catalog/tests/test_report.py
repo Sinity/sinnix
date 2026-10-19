@@ -350,9 +350,24 @@ console.log('cached-search, type-filter, reset and hash navigation passed');
 
 def test_known_unavailable_current_addresses_are_text_not_active_links(tmp_path):
     path = str(tmp_path / "retained historical address")
-    for status in ("unavailable", "missing", "offline_mount", "denied", "inaccessible", "wrong_type"):
-        asset = dict(id="fixture", kind="file", current_path=path, title="Fixture",
-            description="Retained historical evidence", inspections=[], relations=[], location_status=status)
+    for status in (
+        "unavailable",
+        "missing",
+        "offline_mount",
+        "denied",
+        "inaccessible",
+        "wrong_type",
+    ):
+        asset = {
+            "id": "fixture",
+            "kind": "file",
+            "current_path": path,
+            "title": "Fixture",
+            "description": "Retained historical evidence",
+            "inspections": [],
+            "relations": [],
+            "location_status": status,
+        }
         page = MODULE["render_asset"](asset, {"fixture": asset})
         assert "Location unavailable." in page
         assert MODULE["esc"](path) in page
@@ -362,18 +377,38 @@ def test_known_unavailable_current_addresses_are_text_not_active_links(tmp_path)
 def test_available_and_unobserved_current_addresses_keep_their_links(tmp_path):
     path = str(tmp_path / "fixture")
     for status in (None, "available"):
-        asset = dict(id="fixture", kind="file", current_path=path, title="Fixture",
-            description="Evidence", inspections=[], relations=[], location_status=status)
+        asset = {
+            "id": "fixture",
+            "kind": "file",
+            "current_path": path,
+            "title": "Fixture",
+            "description": "Evidence",
+            "inspections": [],
+            "relations": [],
+            "location_status": status,
+        }
         page = MODULE["render_asset"](asset, {"fixture": asset})
         assert MODULE["path_link"](path) in page
 
 
 def test_location_review_and_diagnosis_are_preserved_and_escaped(tmp_path):
-    asset = dict(id="fixture", kind="file", current_path=str(tmp_path / "missing"),
-        title="Fixture", description="Historical evidence", inspections=[], relations=[],
-        location_status="missing", current_location=dict(observed_at="2026-01-01T00:00:00Z",
-        content_continuity="unverified", reason="No such file", review_reason="<img src=x onerror=alert(1)>",
-        basis="retained <input>"))
+    asset = {
+        "id": "fixture",
+        "kind": "file",
+        "current_path": str(tmp_path / "missing"),
+        "title": "Fixture",
+        "description": "Historical evidence",
+        "inspections": [],
+        "relations": [],
+        "location_status": "missing",
+        "current_location": {
+            "observed_at": "2026-01-01T00:00:00Z",
+            "content_continuity": "unverified",
+            "reason": "No such file",
+            "review_reason": "<img src=x onerror=alert(1)>",
+            "basis": "retained <input>",
+        },
+    }
     page = MODULE["render_asset"](asset, {"fixture": asset})
     assert "Location diagnosis: No such file" in page
     assert "&lt;img" in page and "retained &lt;input&gt;" in page
@@ -382,29 +417,49 @@ def test_location_review_and_diagnosis_are_preserved_and_escaped(tmp_path):
 
 def test_evidence_projection_resolves_history_without_changing_annotations():
     import copy
+
     asset = {"enrichment": {"extraction": {"path": "/old/catalog/evidence/sample.txt"}}}
-    catalog = {"assets": [
-        {"id": "broad", "kind": "collection", "current_path": "/history", "previous_paths": ["/old"]},
-        {"id": "evidence", "kind": "collection", "current_path": "/current/catalog", "previous_paths": ["/old/catalog"]},
-    ]}
+    catalog = {
+        "assets": [
+            {
+                "id": "broad",
+                "kind": "collection",
+                "current_path": "/history",
+                "previous_paths": ["/old"],
+            },
+            {
+                "id": "evidence",
+                "kind": "collection",
+                "current_path": "/current/catalog",
+                "previous_paths": ["/old/catalog"],
+            },
+        ]
+    }
     before = copy.deepcopy((asset, catalog))
     page = MODULE["render_enrichment"](asset, catalog)
     assert 'href="file:///current/catalog/evidence/sample.txt"' in page
     assert 'href="file:///old/' not in page
-    assert '/old/catalog/evidence/sample.txt</code>' in page
+    assert "/old/catalog/evidence/sample.txt</code>" in page
     assert (asset, catalog) == before
 
 
 def test_ambiguous_or_unavailable_evidence_has_no_active_link():
     asset = {"enrichment": {"extraction": {"path": "/old/evidence.txt"}}}
-    owner = {"id": "first", "kind": "collection", "current_path": "/first", "previous_paths": ["/old"]}
+    owner = {
+        "id": "first",
+        "kind": "collection",
+        "current_path": "/first",
+        "previous_paths": ["/old"],
+    }
     second = {**owner, "id": "second", "current_path": "/second"}
     page = MODULE["render_enrichment"](asset, {"assets": [owner, second]})
     assert "ambiguous historical address" in page
-    assert 'href=' not in page
-    page = MODULE["render_enrichment"](asset, {"assets": [{**owner, "location_status": "denied"}]})
+    assert "href=" not in page
+    page = MODULE["render_enrichment"](
+        asset, {"assets": [{**owner, "location_status": "denied"}]}
+    )
     assert "explicitly unavailable" in page
-    assert 'href=' not in page
+    assert "href=" not in page
 
 
 @pytest.mark.parametrize("source", ["catalog", "template"])
@@ -412,7 +467,9 @@ def test_nonregular_input_keeps_previous_report(tmp_path, source):
     import os
 
     catalog = tmp_path / "catalog.json"
-    catalog.write_text(json.dumps({"schema_version": 1, "updated_at": "2026-01-01", "assets": []}))
+    catalog.write_text(
+        json.dumps({"schema_version": 1, "updated_at": "2026-01-01", "assets": []})
+    )
     template = tmp_path / "template.html"
     template.write_text(TEMPLATE)
     output = tmp_path / "report.html"
@@ -421,11 +478,24 @@ def test_nonregular_input_keeps_previous_report(tmp_path, source):
     blocked.unlink()
     os.mkfifo(blocked)
     result = subprocess.run(
-        [str(Path(__file__).parents[3] / "scripts/sinnix-file-catalog-report"),
-         "--catalog", str(catalog), "--template", str(template), "--output", str(output)],
-        text=True, capture_output=True, timeout=2,
+        [
+            str(Path(__file__).parents[3] / "scripts/sinnix-file-catalog-report"),
+            "--catalog",
+            str(catalog),
+            "--template",
+            str(template),
+            "--output",
+            str(output),
+        ],
+        text=True,
+        capture_output=True,
+        timeout=2,
     )
     assert result.returncode == 2
     assert "regular file" in result.stderr
     assert output.read_bytes() == b"verified previous report"
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["catalog.json", "report.html", "template.html"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "catalog.json",
+        "report.html",
+        "template.html",
+    ]

@@ -7,9 +7,9 @@ import time
 from pathlib import Path
 
 import pytest
-from sinnix_agent_gateway.permissions import Permission, PolicyError, Principal
 from sinnix_agent_gateway.captures import CaptureService
 from sinnix_agent_gateway.config import GatewayConfig
+from sinnix_agent_gateway.permissions import Permission, PolicyError, Principal
 from sinnix_lib.layout import ACTIVITY_LANES, capture_lane_path
 
 
@@ -327,9 +327,7 @@ def test_capture_read_without_a_lane_access_entry_is_a_config_error() -> None:
     from sinnix_agent_gateway import permissions as caps
 
     original = dict(caps.PRINCIPAL_LANE_ACCESS)
-    caps.ROLE_PERMISSIONS["fixture-principal"] = frozenset(
-        {Permission.CAPTURE_READ}
-    )
+    caps.ROLE_PERMISSIONS["fixture-principal"] = frozenset({Permission.CAPTURE_READ})
     try:
         with pytest.raises(PolicyError, match="no PRINCIPAL_LANE_ACCESS entry"):
             Principal.for_name("fixture-principal")
@@ -342,6 +340,7 @@ def test_capture_read_without_a_lane_access_entry_is_a_config_error() -> None:
 @pytest.mark.parametrize("payload", ["{", "[]", "{}", '{"captures":null}'])
 def test_unusable_inventory_is_not_measured_as_zero_lanes(tmp_path, payload):
     from sinnix_agent_gateway.captures import CaptureInventoryUnavailableError
+
     gateway_config, _ = config(tmp_path)
     gateway_config.runtime_inventory.write_text(payload)
     service = CaptureService(gateway_config, Principal.for_name("operator"))
@@ -351,13 +350,16 @@ def test_unusable_inventory_is_not_measured_as_zero_lanes(tmp_path, payload):
 
 def test_missing_and_denied_inventory_are_not_empty(tmp_path, monkeypatch):
     from sinnix_agent_gateway.captures import CaptureInventoryUnavailableError
+
     gateway_config, _ = config(tmp_path)
     gateway_config.runtime_inventory.unlink()
     service = CaptureService(gateway_config, Principal.for_name("operator"))
     with pytest.raises(CaptureInventoryUnavailableError, match="unavailable"):
         service.lanes_visible()
+
     def denied(*args, **kwargs):
         raise PermissionError("synthetic denied inventory")
+
     monkeypatch.setattr(Path, "read_text", denied)
     with pytest.raises(CaptureInventoryUnavailableError, match="denied inventory"):
         service.lanes_visible()
@@ -370,47 +372,74 @@ def test_accessible_empty_inventory_is_valid(tmp_path):
     assert service.lanes_visible() == {"lanes": [], "total_declared_lanes": 0}
 
 
-
 def scoped_config(tmp_path, selectors):
     from dataclasses import replace
+
     cfg, paths = config(tmp_path)
     inventory = json.loads(cfg.runtime_inventory.read_text())
-    inventory["capture_scopes"] = {"schema": "sinnix-capture-scope-v1", "subjects": {
-        "activity": ["clipboard", "mpris"], "machine": ["router"], "health": []}}
+    inventory["capture_scopes"] = {
+        "schema": "sinnix-capture-scope-v1",
+        "subjects": {
+            "activity": ["clipboard", "mpris"],
+            "machine": ["router"],
+            "health": [],
+        },
+    }
     cfg.runtime_inventory.write_text(json.dumps(inventory))
     return replace(cfg, capture_scope=frozenset(selectors)), paths
 
 
 def test_subject_and_lane_union_has_independent_principal_upper_bound(tmp_path):
     from dataclasses import replace
+
     cfg, _ = scoped_config(tmp_path, ["subject:activity", "lane:router"])
     service = CaptureService(cfg, Principal.for_name("operator"))
-    assert {row["name"] for row in service.lanes_visible()["lanes"]} == {"clipboard", "mpris", "router"}
-    restricted = replace(Principal.for_name("operator"), allowed_lanes=frozenset({"clipboard"}))
+    assert {row["name"] for row in service.lanes_visible()["lanes"]} == {
+        "clipboard",
+        "mpris",
+        "router",
+    }
+    restricted = replace(
+        Principal.for_name("operator"), allowed_lanes=frozenset({"clipboard"})
+    )
     service = CaptureService(cfg, restricted)
     assert [row["name"] for row in service.lanes_visible()["lanes"]] == ["clipboard"]
-    with pytest.raises(PolicyError): service.query(["router"])
-    with pytest.raises(PolicyError): service.lane("mpris")
+    with pytest.raises(PolicyError):
+        service.query(["router"])
+    with pytest.raises(PolicyError):
+        service.lane("mpris")
 
 
 def test_scoped_capture_reads_and_freshness_never_admit_omitted_lanes(tmp_path):
     from dataclasses import replace
+
     cfg, _ = scoped_config(tmp_path, ["lane:clipboard"])
     collector = tmp_path / "collector"
-    collector.write_text(f"#!{sys.executable}\nimport json,sys\nlanes=[sys.argv[i+1] for i,v in enumerate(sys.argv) if v=='--lane']\nprint(json.dumps({{'records':[{{'lane':lane}} for lane in lanes]}}))\n")
+    collector.write_text(
+        f"#!{sys.executable}\nimport json,sys\nlanes=[sys.argv[i+1] for i,v in enumerate(sys.argv) if v=='--lane']\nprint(json.dumps({{'records':[{{'lane':lane}} for lane in lanes]}}))\n"
+    )
     collector.chmod(0o700)
-    service = CaptureService(replace(cfg, capture_command=str(collector)), Principal.for_name("operator"))
+    service = CaptureService(
+        replace(cfg, capture_command=str(collector)), Principal.for_name("operator")
+    )
     assert [row["name"] for row in service.lanes_visible()["lanes"]] == ["clipboard"]
     assert service.query()["records"] == [{"lane": "clipboard"}]
-    for operation in [service.query, lambda lanes: service.lane(lanes[0]), lambda lanes: service.freshness(lanes[0])]:
-        with pytest.raises(PolicyError): operation(["router"])
+    for operation in [
+        service.query,
+        lambda lanes: service.lane(lanes[0]),
+        lambda lanes: service.freshness(lanes[0]),
+    ]:
+        with pytest.raises(PolicyError):
+            operation(["router"])
 
 
 @pytest.mark.parametrize("selector", ["subject:unknown", "lane:future", "activity"])
 def test_unknown_or_unqualified_capture_selectors_fail_visibly(tmp_path, selector):
     from sinnix_agent_gateway.captures import CaptureScopeError
+
     cfg, _ = scoped_config(tmp_path, [selector])
-    with pytest.raises(CaptureScopeError): CaptureService(cfg, Principal.for_name("operator")).lanes_visible()
+    with pytest.raises(CaptureScopeError):
+        CaptureService(cfg, Principal.for_name("operator")).lanes_visible()
 
 
 def test_known_empty_subject_is_not_unknown_or_unavailable(tmp_path):
@@ -420,50 +449,85 @@ def test_known_empty_subject_is_not_unknown_or_unavailable(tmp_path):
     assert service.query() == {"records": [], "lanes_queried": [], "truncated": False}
 
 
-@pytest.mark.parametrize("schema,members", [("unsupported", ["clipboard"]), ("sinnix-capture-scope-v1", ["absent"])])
+@pytest.mark.parametrize(
+    "schema,members",
+    [("unsupported", ["clipboard"]), ("sinnix-capture-scope-v1", ["absent"])],
+)
 def test_invalid_subject_authority_is_not_guessed(tmp_path, schema, members):
     from sinnix_agent_gateway.captures import CaptureScopeError
+
     cfg, _ = scoped_config(tmp_path, ["subject:activity"])
     inventory = json.loads(cfg.runtime_inventory.read_text())
     inventory["capture_scopes"] = {"schema": schema, "subjects": {"activity": members}}
     cfg.runtime_inventory.write_text(json.dumps(inventory))
-    with pytest.raises(CaptureScopeError): CaptureService(cfg, Principal.for_name("operator")).lanes_visible()
+    with pytest.raises(CaptureScopeError):
+        CaptureService(cfg, Principal.for_name("operator")).lanes_visible()
 
 
 def test_config_rejects_retired_ambiguous_selector_syntax(tmp_path):
     path = tmp_path / "config.json"
     path.write_text(json.dumps({"endpoint": {"scope": {"captures": ["activity"]}}}))
-    with pytest.raises(ValueError, match="capture-scope-v1"): GatewayConfig.load(path)
-    path.write_text(json.dumps({"endpoint": {"scope": {"captures": ["subject:activity", "lane:clipboard"]}}}))
-    assert GatewayConfig.load(path).capture_scope == frozenset({"subject:activity", "lane:clipboard"})
+    with pytest.raises(ValueError, match="capture-scope-v1"):
+        GatewayConfig.load(path)
+    path.write_text(
+        json.dumps(
+            {
+                "endpoint": {
+                    "scope": {"captures": ["subject:activity", "lane:clipboard"]}
+                }
+            }
+        )
+    )
+    assert GatewayConfig.load(path).capture_scope == frozenset(
+        {"subject:activity", "lane:clipboard"}
+    )
 
 
-
-def test_scope_and_principal_limits_apply_before_filesystem_probes(tmp_path, monkeypatch):
+def test_scope_and_principal_limits_apply_before_filesystem_probes(
+    tmp_path, monkeypatch
+):
     from dataclasses import replace
+
     cfg, paths = scoped_config(tmp_path, ["subject:activity"])
-    principal = replace(Principal.for_name("operator"), allowed_lanes=frozenset({"clipboard"}))
+    principal = replace(
+        Principal.for_name("operator"), allowed_lanes=frozenset({"clipboard"})
+    )
     original = Path.is_file
     observed = []
+
     def probe(path):
         observed.append(path)
-        assert path == paths["clipboard"] / "clipboard-index.jsonl", "excluded capture path was probed"
+        assert path == paths["clipboard"] / "clipboard-index.jsonl", (
+            "excluded capture path was probed"
+        )
         return original(path)
+
     monkeypatch.setattr(Path, "is_file", probe)
-    assert [row["name"] for row in CaptureService(cfg, principal).lanes_visible()["lanes"]] == ["clipboard"]
+    assert [
+        row["name"] for row in CaptureService(cfg, principal).lanes_visible()["lanes"]
+    ] == ["clipboard"]
     assert observed == [paths["clipboard"] / "clipboard-index.jsonl"]
 
 
 @pytest.mark.parametrize("identity", ACTIVITY_LANES)
-def test_managed_lane_contract_round_trips_shared_layout(tmp_path: Path, identity: str) -> None:
+def test_managed_lane_contract_round_trips_shared_layout(
+    tmp_path: Path, identity: str
+) -> None:
     root = tmp_path / "custom-capture-root"
     path = capture_lane_path(root, identity)
     path.mkdir(parents=True)
     index = path / f"{identity}-index.jsonl"
     index.write_text('{"ts":1,"seq":1}\n')
     inventory = tmp_path / "inventory.json"
-    inventory.write_text(json.dumps({"captures": [{"name": "display-name", "path": str(path)}]}))
-    service = CaptureService(GatewayConfig(state_dir=tmp_path / "state", projects={}, runtime_inventory=inventory), Principal.for_name("operator"))
+    inventory.write_text(
+        json.dumps({"captures": [{"name": "display-name", "path": str(path)}]})
+    )
+    service = CaptureService(
+        GatewayConfig(
+            state_dir=tmp_path / "state", projects={}, runtime_inventory=inventory
+        ),
+        Principal.for_name("operator"),
+    )
     lane = service.lane("display-name")
     assert lane["native_lane"] == identity
     assert lane["capture_root"] == str(root)
@@ -475,17 +539,34 @@ def test_retired_flat_managed_lane_is_not_admitted_as_empty(tmp_path: Path) -> N
     lane.mkdir(parents=True)
     (lane / "mpris-index.jsonl").write_text('{"ts":1,"seq":1}\n')
     inventory = tmp_path / "inventory.json"
-    inventory.write_text(json.dumps({"captures": [{"name": "mpris", "path": str(lane)}]}))
-    service = CaptureService(GatewayConfig(state_dir=tmp_path / "state", projects={}, runtime_inventory=inventory), Principal.for_name("operator"))
+    inventory.write_text(
+        json.dumps({"captures": [{"name": "mpris", "path": str(lane)}]})
+    )
+    service = CaptureService(
+        GatewayConfig(
+            state_dir=tmp_path / "state", projects={}, runtime_inventory=inventory
+        ),
+        Principal.for_name("operator"),
+    )
     result = service.query(["mpris"])
     assert result["available"] is False
     assert result["failure_class"] == "native_contract_unavailable"
 
 
-def test_capture_query_reads_actual_native_cli_at_canonical_homes(tmp_path: Path) -> None:
+def test_capture_query_reads_actual_native_cli_at_canonical_homes(
+    tmp_path: Path,
+) -> None:
     gateway_config, _ = config(tmp_path)
     command = os.environ.get("SINNIX_CAPTURE_TEST_EXECUTABLE", "sinnix-capture")
-    service = CaptureService(GatewayConfig(state_dir=gateway_config.state_dir, projects={}, runtime_inventory=gateway_config.runtime_inventory, capture_command=command), Principal.for_name("operator"))
+    service = CaptureService(
+        GatewayConfig(
+            state_dir=gateway_config.state_dir,
+            projects={},
+            runtime_inventory=gateway_config.runtime_inventory,
+            capture_command=command,
+        ),
+        Principal.for_name("operator"),
+    )
     result = service.query(["mpris", "clipboard"])
     assert "available" not in result, result
     records = {record["lane"]: record for record in result["records"]}

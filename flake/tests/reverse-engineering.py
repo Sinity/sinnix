@@ -4,9 +4,9 @@ import gzip
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
+from pathlib import Path
 
 
 def rea(*args):
@@ -21,7 +21,9 @@ def rea(*args):
     return json.loads(result.stdout)
 
 
-with tempfile.TemporaryDirectory(prefix="reverse-engineering-", dir=os.environ["TMPDIR"]) as temp:
+with tempfile.TemporaryDirectory(
+    prefix="reverse-engineering-", dir=os.environ["TMPDIR"]
+) as temp:
     root = Path(temp)
     doctor = rea("doctor", "--provider", "ghidra")
     assert doctor["healthy"], doctor
@@ -48,4 +50,6 @@ with tempfile.TemporaryDirectory(prefix="reverse-engineering-", dir=os.environ["
     rendered = json.dumps(code)
     assert "fixture_transform" in rendered and "13" in rendered, code
     assert hashlib.sha256(binary.read_bytes()).hexdigest() == original
-    print("PASS: Ghidra readiness, gzip inspection/extraction parity, native decompilation, unchanged sources")
+    print(
+        "PASS: Ghidra readiness, gzip inspection/extraction parity, native decompilation, unchanged sources"
+    )

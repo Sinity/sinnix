@@ -28,10 +28,9 @@ from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from sinnix_lib.layout import capture_lane_path
-
 from sinnix_lib import ledger
 from sinnix_lib.atomic import atomic_publish
+from sinnix_lib.layout import capture_lane_path
 from sinnix_lib.lock import flock
 
 from .envelope import build_envelope
@@ -169,7 +168,8 @@ class CaptureWriter:
         # Path.glob can suppress directory access errors. Recovery must not
         # interpret an unreadable retained archive as an empty one.
         return sorted(
-            path for path in self.lane_dir.iterdir()
+            path
+            for path in self.lane_dir.iterdir()
             if path.match(f"{self.lane}-[0-9]*.jsonl")
         )
 
@@ -252,17 +252,24 @@ class CaptureWriter:
                 db.execute("PRAGMA cache_size = -1024")
                 # This private spool is regenerable, never a recovery authority.
                 db.execute("PRAGMA synchronous = OFF")
-                db.execute("CREATE TABLE pending (seq INTEGER PRIMARY KEY, entry TEXT NOT NULL)")
+                db.execute(
+                    "CREATE TABLE pending (seq INTEGER PRIMARY KEY, entry TEXT NOT NULL)"
+                )
                 for path in self._daily_paths():
                     for record in self._payload_records(path):
                         seq = record["seq"]
                         if last < seq <= counter:
                             entry = {"ts": record["ts"], "seq": seq, "file": path.name}
-                            db.execute("INSERT INTO pending VALUES (?, ?)", (seq, json.dumps(entry)))
+                            db.execute(
+                                "INSERT INTO pending VALUES (?, ?)",
+                                (seq, json.dumps(entry)),
+                            )
                 # Finish reading and validating inputs before modifying the
                 # index. Duplicate sequences refuse ambiguous recovery.
                 for (entry,) in db.execute("SELECT entry FROM pending ORDER BY seq"):
-                    ledger.append_jsonl(self._index_path, json.loads(entry), fsync=True, mode=0o600)
+                    ledger.append_jsonl(
+                        self._index_path, json.loads(entry), fsync=True, mode=0o600
+                    )
 
     def _record_path(self, ts: float) -> Path:
         day = time.strftime("%Y%m%d", time.gmtime(ts))

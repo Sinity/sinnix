@@ -169,6 +169,7 @@ def test_missing_timezone_is_explicit_invalid_definition(tmp_path):
 
 def test_oversize_input_refused(tmp_path, monkeypatch):
     from sinnix_lib import judgments
+
     fs = load()
     monkeypatch.setattr(judgments, "JUDGMENT_LIMIT_BYTES", 10)
     p = tmp_path / "large"
@@ -546,14 +547,20 @@ def test_ambiguous_role_makes_definition_audit_nonzero(tmp_path, capsys):
 
 def test_report_does_not_rescan_entire_ledger_per_target(tmp_path, monkeypatch, capsys):
     fs = load()
-    ls = ledger(fs, tmp_path, [decision("/a")] + [
-        decision(f"/a/child-{i}", field="role", value="source") for i in range(200)
-    ])
+    ls = ledger(
+        fs,
+        tmp_path,
+        [decision("/a")]
+        + [decision(f"/a/child-{i}", field="role", value="source") for i in range(200)],
+    )
+
     class Counted(list):
         iterations = 0
+
         def __iter__(self):
             self.iterations += 1
             return super().__iter__()
+
     ls["valid"] = Counted(ls["valid"])
     monkeypatch.setattr(fs, "read_judgments", lambda path: ls)
     assert fs.cmd_judgments(SimpleNamespace(index_dir=tmp_path, action="report")) == 0
@@ -565,9 +572,12 @@ def test_report_does_not_rescan_entire_ledger_per_target(tmp_path, monkeypatch, 
 def test_report_retains_long_inherited_value_once(tmp_path, capsys):
     fs = load()
     value = "retained-long-value " + "x" * 65536
-    ledger(fs, tmp_path, [decision("/a", value=value)] + [
-        decision(f"/a/child-{i}", field="role", value="source") for i in range(200)
-    ])
+    ledger(
+        fs,
+        tmp_path,
+        [decision("/a", value=value)]
+        + [decision(f"/a/child-{i}", field="role", value="source") for i in range(200)],
+    )
     assert fs.cmd_judgments(SimpleNamespace(index_dir=tmp_path, action="report")) == 0
     text = capsys.readouterr().out
     assert text.count(value) == 1
@@ -577,49 +587,81 @@ def test_report_retains_long_inherited_value_once(tmp_path, capsys):
 
 def test_bulk_facets_agree_with_direct_resolution(tmp_path):
     fs = load()
-    ls = ledger(fs, tmp_path, [
-        decision("/", field="maintenance_owner", value="root owner"),
-        decision("/a", value="operator topic", method="operator"),
-        decision("/a", value="newer rule", ts="2026-03-01T00:00:00Z"),
-        decision("/a/b", value=None, observation="unknown"),
-        decision("/a/b", field="preservation", value="first"),
-        decision("/a/b", field="preservation", value="second"),
-        decision("/a", field="role", value="source", detail="original A"),
-        decision("/a", field="role", value="source", detail="original B"),
-        decision("/a", field="nonfacet", value="not projected"),
-        {**decision(field="topic", value="digest-only"), "target": "sha256:" + "a" * 64},
-    ])
+    ls = ledger(
+        fs,
+        tmp_path,
+        [
+            decision("/", field="maintenance_owner", value="root owner"),
+            decision("/a", value="operator topic", method="operator"),
+            decision("/a", value="newer rule", ts="2026-03-01T00:00:00Z"),
+            decision("/a/b", value=None, observation="unknown"),
+            decision("/a/b", field="preservation", value="first"),
+            decision("/a/b", field="preservation", value="second"),
+            decision("/a", field="role", value="source", detail="original A"),
+            decision("/a", field="role", value="source", detail="original B"),
+            decision("/a", field="nonfacet", value="not projected"),
+            {
+                **decision(field="topic", value="digest-only"),
+                "target": "sha256:" + "a" * 64,
+            },
+        ],
+    )
     paths = ["/", "/a", "/a-sibling", "/a/b", "/a/b/c", "/a/c", "/ab", "/absent"]
-    expected = {path: {field: result for field, result in fs.resolve_judgments(ls, path).items()
-                       if field in fs.JUDGMENT_FACETS} for path in paths}
+    expected = {
+        path: {
+            field: result
+            for field, result in fs.resolve_judgments(ls, path).items()
+            if field in fs.JUDGMENT_FACETS
+        }
+        for path in paths
+    }
     assert fs.resolve_judgments_many(ls, paths) == expected
     roles = fs.resolve_judgments_many(ls, paths, fields=("role",))
-    assert roles == {path: {k: v for k, v in values.items() if k == "role"}
-                     for path, values in expected.items()}
+    assert roles == {
+        path: {k: v for k, v in values.items() if k == "role"}
+        for path, values in expected.items()
+    }
 
 
 def test_current_only_report_cannot_hide_access_failure(tmp_path, monkeypatch, capsys):
     fs = load()
     ledger(fs, tmp_path, [decision("/a")])
     original = Path.stat
+
     def denied(path, *args, **kwargs):
         if path == Path("/a"):
             raise PermissionError("synthetic current-path denial")
         return original(path, *args, **kwargs)
+
     monkeypatch.setattr(Path, "stat", denied)
     with pytest.raises(PermissionError, match="synthetic current-path denial"):
-        fs.cmd_judgments(SimpleNamespace(index_dir=tmp_path, action="report", current_only=True))
+        fs.cmd_judgments(
+            SimpleNamespace(index_dir=tmp_path, action="report", current_only=True)
+        )
     assert capsys.readouterr().out == ""
 
 
 def test_report_shares_structured_values_and_long_role_detail(tmp_path, capsys):
     fs = load()
     text = "retained detail " + "x" * 65536
-    ledger(fs, tmp_path, [
-        decision("/a", value={"nested": text}),
-        decision("/a", field="role", value="source", detail=text),
-    ] + [decision(f"/a/child-{i}", field="preservation", value="retain") for i in range(200)])
-    assert fs.cmd_judgments(SimpleNamespace(index_dir=tmp_path, action="report", group_by="role")) == 0
+    ledger(
+        fs,
+        tmp_path,
+        [
+            decision("/a", value={"nested": text}),
+            decision("/a", field="role", value="source", detail=text),
+        ]
+        + [
+            decision(f"/a/child-{i}", field="preservation", value="retain")
+            for i in range(200)
+        ],
+    )
+    assert (
+        fs.cmd_judgments(
+            SimpleNamespace(index_dir=tmp_path, action="report", group_by="role")
+        )
+        == 0
+    )
     report = capsys.readouterr().out
     assert report.count(text) == 2
     assert len(report.encode()) < 170000

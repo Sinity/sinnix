@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
 from sinnix_hub_server import capabilities, pages
 from sinnix_hub_server.cli import capabilities_command
 
@@ -142,7 +141,10 @@ def test_cli_prints_every_group_and_filters_by_kind(tmp_path, capsys) -> None:
     out = capsys.readouterr().out
     assert "Declaration index: selected" in out
     assert "airvpn-seed" in out and "future-kind" in out
-    assert capabilities_command(["--index", str(index), "--kind", "service", "--json"]) == 0
+    assert (
+        capabilities_command(["--index", str(index), "--kind", "service", "--json"])
+        == 0
+    )
     view = json.loads(capsys.readouterr().out)
     assert {row["kind"] for row in view["rows"]} == {"service"}
 
@@ -161,7 +163,9 @@ def test_the_wrapper_execs_the_reducer_view(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("PATH", str(tmp_path) + os.pathsep + os.environ["PATH"])
     monkeypatch.setenv(
         "PYTHONPATH",
-        os.pathsep.join([str(Path(capabilities.__file__).resolve().parents[1]), *sys.path]),
+        os.pathsep.join(
+            [str(Path(capabilities.__file__).resolve().parents[1]), *sys.path]
+        ),
     )
     result = subprocess.run(
         [

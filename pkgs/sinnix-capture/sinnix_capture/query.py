@@ -50,10 +50,15 @@ def discover_lanes(capture_root: Path | str) -> list[str]:
     # Known physical homes may be nested; do not expose medium containers as lanes.
     containers = {relative.split("/")[0] for relative in ACTIVITY_LANES.values()}
     known = {
-        lane for lane in ACTIVITY_LANES
+        lane
+        for lane in ACTIVITY_LANES
         if _directory_present(capture_lane_path(root, lane), declared=True)
     }
-    custom = {p.name for p in root.iterdir() if _directory_present(p) and p.name not in containers}
+    custom = {
+        p.name
+        for p in root.iterdir()
+        if _directory_present(p) and p.name not in containers
+    }
     return sorted(known | custom)
 
 
@@ -124,13 +129,23 @@ def lane_delta(capture_root: Path | str, lane: str, since_ts: float = 0.0) -> di
                     break
                 entry = json.loads(line)
                 if not isinstance(entry, dict) or not {"ts", "seq"} <= entry.keys():
-                    raise ValueError(f"capture index record lacks timestamp/sequence: {index_path}")
+                    raise ValueError(
+                        f"capture index record lacks timestamp/sequence: {index_path}"
+                    )
                 ts = entry["ts"]
                 seq = entry["seq"]
                 if not _valid_timestamp(ts):
-                    raise ValueError(f"capture index timestamp must be finite and numeric: {index_path}")
-                if type(seq) is not int or seq < 1 or (prev_seq is not None and seq <= prev_seq):
-                    raise ValueError(f"capture index sequences must be positive and strictly increasing: {index_path}")
+                    raise ValueError(
+                        f"capture index timestamp must be finite and numeric: {index_path}"
+                    )
+                if (
+                    type(seq) is not int
+                    or seq < 1
+                    or (prev_seq is not None and seq <= prev_seq)
+                ):
+                    raise ValueError(
+                        f"capture index sequences must be positive and strictly increasing: {index_path}"
+                    )
                 if newest_ts is None or ts > newest_ts:
                     newest_ts = ts
                 if ts >= since_ts:
@@ -140,7 +155,9 @@ def lane_delta(capture_root: Path | str, lane: str, since_ts: float = 0.0) -> di
                 prev_seq = seq
 
     if newest_ts is None and _has_retained_payload(index_path.parent, lane):
-        raise ValueError(f"capture index has no complete records for retained payloads: {index_path}")
+        raise ValueError(
+            f"capture index has no complete records for retained payloads: {index_path}"
+        )
 
     return {
         "lane": lane,

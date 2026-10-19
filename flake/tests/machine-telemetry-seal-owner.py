@@ -2,11 +2,10 @@
 
 import fcntl
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
-
+from pathlib import Path
 
 with tempfile.TemporaryDirectory(prefix="telemetry-seal-") as scratch:
     root = Path(scratch)
@@ -20,7 +19,9 @@ with tempfile.TemporaryDirectory(prefix="telemetry-seal-") as scratch:
     bindir = root / "bin"
     bindir.mkdir()
     fake = bindir / "owner-fixture"
-    fake.write_text(f"#!{sys.executable}\n" + r'''
+    fake.write_text(
+        f"#!{sys.executable}\n"
+        + r"""
 import os,sys
 from pathlib import Path
 root=Path(os.environ['OWNER_FIXTURE_ROOT'])
@@ -40,7 +41,8 @@ elif name=='machine-telemetry-segments':
     else:
         assert (root/'collector-state').read_text()=='active'
 else:raise AssertionError(name)
-''')
+"""
+    )
     fake.chmod(0o755)
     for name in ("systemctl", "chown", "machine-telemetry-segments"):
         (bindir / name).symlink_to(fake)
@@ -48,12 +50,20 @@ else:raise AssertionError(name)
     script.write_text(body)
     state = root / "collector-state"
     state.write_text("active")
-    environment = {**os.environ, "PATH": str(bindir) + os.pathsep + os.environ["PATH"],
-                   "OWNER_FIXTURE_ROOT": str(root)}
+    environment = {
+        **os.environ,
+        "PATH": str(bindir) + os.pathsep + os.environ["PATH"],
+        "OWNER_FIXTURE_ROOT": str(root),
+    }
 
     def run(**extra):
-        return subprocess.run(["bash", str(script)], env={**environment, **extra},
-                              capture_output=True, text=True, timeout=10)
+        return subprocess.run(
+            ["bash", str(script)],
+            env={**environment, **extra},
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
 
     with maintenance.open("a") as held:
         fcntl.flock(held.fileno(), fcntl.LOCK_EX)
@@ -72,4 +82,6 @@ else:raise AssertionError(name)
     assert state.read_text() == "active"
     assert (root / "calls").read_text().split() == ["seal", "archive", "verify"]
     assert maintenance.read_bytes() == b"existing owner evidence must not be truncated"
-    print("rendered seal unit: lock serialization, writer restoration and once-only checks after sealing")
+    print(
+        "rendered seal unit: lock serialization, writer restoration and once-only checks after sealing"
+    )

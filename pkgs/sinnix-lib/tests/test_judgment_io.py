@@ -1,19 +1,18 @@
 """Authored ledger inputs are files, never unbounded streams."""
+
 import hashlib
 import os
-from pathlib import Path
 import subprocess
 import sys
 
 import pytest
-
 from sinnix_lib.judgments import read_judgments
 
 
 def test_fifo_ledger_is_refused_without_waiting_for_a_writer(tmp_path):
     path = tmp_path / "judgments.jsonl"
     os.mkfifo(path)
-    code = '''
+    code = """
 from pathlib import Path
 from sinnix_lib.judgments import read_judgments
 import sys
@@ -23,8 +22,13 @@ except ValueError as exc:
     assert "regular file" in str(exc)
 else:
     raise AssertionError("FIFO ledger accepted")
-'''
-    result = subprocess.run([sys.executable, "-c", code, str(path)], capture_output=True, text=True, timeout=3)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(path)],
+        capture_output=True,
+        text=True,
+        timeout=3,
+    )
     assert result.returncode == 0, result.stderr
     assert path.is_fifo()
 

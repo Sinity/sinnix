@@ -3,8 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import math
-from datetime import datetime, timezone
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .query import query as query_lanes
@@ -19,7 +19,9 @@ def _cmd_write(args: argparse.Namespace) -> int:
                 raise ValueError("non-finite timestamp")
             datetime.fromtimestamp(args.ts, timezone.utc)
         except (ValueError, OverflowError, OSError):
-            print("--ts must be a finite, representable Unix timestamp", file=sys.stderr)
+            print(
+                "--ts must be a finite, representable Unix timestamp", file=sys.stderr
+            )
             return 2
     writer = CaptureWriter(args.capture_root, args.lane)
 
@@ -99,7 +101,12 @@ def main(argv: list[str] | None = None) -> int:
     write_p.add_argument("--capture-root", required=True, type=Path)
     write_p.add_argument("--lane", required=True)
     write_p.add_argument("--payload", help="JSON payload; reads stdin if omitted")
-    write_p.add_argument("--ts", type=float, default=None, help="Observed Unix timestamp for a queued single record")
+    write_p.add_argument(
+        "--ts",
+        type=float,
+        default=None,
+        help="Observed Unix timestamp for a queued single record",
+    )
     write_p.add_argument(
         "--raw-ref",
         default=None,

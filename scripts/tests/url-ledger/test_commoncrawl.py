@@ -410,14 +410,22 @@ class ClusterResponse(io.BytesIO):
         self.headers = {} if length is None else {"Content-Length": length}
 
 
-@pytest.mark.parametrize("payload,length", [(b"", "0"), (b"index", "bad"), (b"index", "10")])
-def test_failed_cluster_download_removes_only_owned_staging(tmp_path, monkeypatch, payload, length):
+@pytest.mark.parametrize(
+    "payload,length", [(b"", "0"), (b"index", "bad"), (b"index", "10")]
+)
+def test_failed_cluster_download_removes_only_owned_staging(
+    tmp_path, monkeypatch, payload, length
+):
     provider = ledger.CommonCrawlProvider(cache_dir=tmp_path)
     unrelated = tmp_path / "unrelated"
     unrelated.write_bytes(b"preserve")
     legacy = tmp_path / "CC-TEST-cluster.idx.tmp"
     legacy.symlink_to(unrelated)
-    monkeypatch.setattr(ledger.urllib.request, "urlopen", lambda *_a, **_kw: ClusterResponse(payload, length))
+    monkeypatch.setattr(
+        ledger.urllib.request,
+        "urlopen",
+        lambda *_a, **_kw: ClusterResponse(payload, length),
+    )
     with pytest.raises(ledger.ProviderUnavailable):
         provider._cluster_index("CC-TEST")
     assert unrelated.read_bytes() == b"preserve"
@@ -426,7 +434,9 @@ def test_failed_cluster_download_removes_only_owned_staging(tmp_path, monkeypatc
     assert not list(tmp_path.glob(".CC-TEST-cluster.idx.*.tmp"))
 
 
-def test_interrupted_download_cannot_corrupt_another_published_cluster(tmp_path, monkeypatch):
+def test_interrupted_download_cannot_corrupt_another_published_cluster(
+    tmp_path, monkeypatch
+):
     first = ledger.CommonCrawlProvider(cache_dir=tmp_path)
     second = ledger.CommonCrawlProvider(cache_dir=tmp_path)
     retained = b"second complete index\n"
@@ -459,17 +469,20 @@ def test_interrupted_download_cannot_corrupt_another_published_cluster(tmp_path,
     assert not list(tmp_path.glob(".CC-TEST-cluster.idx.*.tmp"))
 
 
-@pytest.mark.parametrize(("value", "expected"), [
-    ("2026-01-01T00:00:00Z", 1767225600.0),
-    ("2026-01-01T00:00:00.125Z", 1767225600.125),
-    ("2026-01-01T02:00:00+02:00", 1767225600.0),
-    ("2026-01-01T02:00:00.125+02:00", 1767225600.125),
-    ("2025-12-31T19:00:00-05:00", 1767225600.0),
-    ("2026-01-01T00:00:00", 1767225600.0),
-    ("20260101000000", 1767225600.0),
-    ("Thu, 01 Jan 2026 00:00:00 GMT", 1767225600.0),
-    ("2026-02-30T00:00:00Z", None),
-])
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("2026-01-01T00:00:00Z", 1767225600.0),
+        ("2026-01-01T00:00:00.125Z", 1767225600.125),
+        ("2026-01-01T02:00:00+02:00", 1767225600.0),
+        ("2026-01-01T02:00:00.125+02:00", 1767225600.125),
+        ("2025-12-31T19:00:00-05:00", 1767225600.0),
+        ("2026-01-01T00:00:00", 1767225600.0),
+        ("20260101000000", 1767225600.0),
+        ("Thu, 01 Jan 2026 00:00:00 GMT", 1767225600.0),
+        ("2026-02-30T00:00:00Z", None),
+    ],
+)
 def test_timestamp_offsets_and_fractional_seconds(value, expected):
     assert ledger._iso_to_epoch(value) == expected
 
@@ -480,14 +493,31 @@ def test_local_coverage_matches_the_same_instant_across_offsets(tmp_path):
     url = "https://example.invalid/timezone"
     visits = ["2026-01-01T02:00:00+02:00", "2025-12-31T19:00:00.125-05:00"]
     snapshots = ["2026-01-01T00:00:00Z", "2026-01-01T00:00:00.125Z"]
-    (state / "urls.jsonl").write_text(json.dumps({"url": url, "visits": visits, "visit_count": 2}) + "\n")
-    (state / "resolution.jsonl").write_text(json.dumps({"url": url, "provider": "wayback", "status": "ok", "snapshots": snapshots}) + "\n")
+    (state / "urls.jsonl").write_text(
+        json.dumps({"url": url, "visits": visits, "visit_count": 2}) + "\n"
+    )
+    (state / "resolution.jsonl").write_text(
+        json.dumps(
+            {"url": url, "provider": "wayback", "status": "ok", "snapshots": snapshots}
+        )
+        + "\n"
+    )
     derived = tmp_path / "derived"
-    args = argparse.Namespace(state_root=str(state), derived_root=str(derived), window_days=0, duckdb_bin=shutil.which("duckdb"))
+    args = argparse.Namespace(
+        state_root=str(state),
+        derived_root=str(derived),
+        window_days=0,
+        duckdb_bin=shutil.which("duckdb"),
+    )
     assert args.duckdb_bin is not None
     assert ledger.cmd_build(args) == 0
-    row = json.loads((ledger.published_generation(derived) / "coverage.jsonl").read_text())
+    row = json.loads(
+        (ledger.published_generation(derived) / "coverage.jsonl").read_text()
+    )
     assert row["visit_timestamps"] == visits
     assert row["wayback_snapshots"] == snapshots
     assert row["visits_with_snapshot_within_window"] == 2
-    assert [r["gap_seconds"] for r in row["nearest_snapshot_to_each_visit"]] == [0.0, 0.0]
+    assert [r["gap_seconds"] for r in row["nearest_snapshot_to_each_visit"]] == [
+        0.0,
+        0.0,
+    ]

@@ -196,7 +196,9 @@ def main():
     declaration = "    expected_version: int | MISSING = Field("
     if declaration not in generated:
         raise ValueError("owner request models lost their declared version guards")
-    generated = generated.replace(declaration, "    expected_version: VersionToken | MISSING = Field(")
+    generated = generated.replace(
+        declaration, "    expected_version: VersionToken | MISSING = Field("
+    )
     generated = generated.replace(
         "from pydantic.experimental.missing_sentinel import MISSING\n",
         "from pydantic.experimental.missing_sentinel import MISSING\n\nfrom .revisions import VersionToken\n",

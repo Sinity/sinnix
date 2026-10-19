@@ -161,7 +161,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Only index segments modified within this many hours (timer's own lookback window)",
     )
     index_parser.add_argument("--ffmpeg-bin", default="ffmpeg")
-    index_parser.add_argument("--catalog", type=Path, help="Explicit identity catalog for retained historical raw references")
+    index_parser.add_argument(
+        "--catalog",
+        type=Path,
+        help="Explicit identity catalog for retained historical raw references",
+    )
     index_parser.set_defaults(func=_cmd_index)
 
     pause_parser = subparsers.add_parser(

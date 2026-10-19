@@ -4,7 +4,6 @@ from pathlib import Path
 from threading import Barrier
 
 import pytest
-
 from sinnix_hub_server import server
 
 
@@ -20,13 +19,17 @@ def test_initialize_or_recover_token(tmp_path, initial):
     assert path.stat().st_mode & 0o777 == 0o600
 
 
-def test_usable_token_survives_restart_without_parent_write_access(tmp_path, monkeypatch):
+def test_usable_token_survives_restart_without_parent_write_access(
+    tmp_path, monkeypatch
+):
     path = tmp_path / "runtime" / "token"
     path.parent.mkdir()
     path.write_text("fixture-token\n")
     inode = path.stat().st_ino
     path.parent.chmod(0o500)
-    monkeypatch.setattr(server.secrets, "token_urlsafe", lambda _: pytest.fail("rotated usable token"))
+    monkeypatch.setattr(
+        server.secrets, "token_urlsafe", lambda _: pytest.fail("rotated usable token")
+    )
     try:
         assert server.ensure_token(path) == "fixture-token"
         assert path.read_bytes() == b"fixture-token\n"
@@ -42,7 +45,9 @@ def test_concurrent_starters_share_one_token(tmp_path, monkeypatch, initial):
     if initial is not None:
         path.write_bytes(initial)
     sequence = count()
-    monkeypatch.setattr(server.secrets, "token_urlsafe", lambda _: f"fixture-{next(sequence)}")
+    monkeypatch.setattr(
+        server.secrets, "token_urlsafe", lambda _: f"fixture-{next(sequence)}"
+    )
     barrier = Barrier(8)
 
     def start(_):
@@ -66,7 +71,11 @@ def test_token_read_error_is_not_missing_state(tmp_path, monkeypatch):
         return real_read(candidate, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", read)
-    monkeypatch.setattr(server, "atomic_publish", lambda *args, **kwargs: pytest.fail("published after read failure"))
+    monkeypatch.setattr(
+        server,
+        "atomic_publish",
+        lambda *args, **kwargs: pytest.fail("published after read failure"),
+    )
     with pytest.raises(PermissionError, match="synthetic denied"):
         server.ensure_token(path)
     assert path.read_bytes() == b"\n"

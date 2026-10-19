@@ -21,8 +21,8 @@ import uuid
 from contextlib import redirect_stdout
 from datetime import datetime
 from pathlib import Path
-from unittest.mock import patch
 from types import SimpleNamespace
+from unittest.mock import patch
 
 PARSER = argparse.ArgumentParser()
 PARSER.add_argument("--verifier", required=True)
@@ -47,7 +47,9 @@ class BorgHostIdentityFixture(unittest.TestCase):
             def run(extra=None):
                 return subprocess.run(
                     ["bash", "-eu", "-c", prefix + '\nprintf "%s" "$BORG_HOST_ID"'],
-                    env=env | (extra or {}), capture_output=True, text=True,
+                    env=env | (extra or {}),
+                    capture_output=True,
+                    text=True,
                 )
 
             identity.write_text("0123456789abcdef0123456789abcdef\n")
@@ -85,36 +87,64 @@ class SnapshotInventoryFixture(unittest.TestCase):
             root.touch()
             with self.assertRaises(NotADirectoryError):
                 COVERAGE.snapshot_names(root, "realm.*")
-        with patch.object(COVERAGE.os, "scandir", side_effect=PermissionError(errno.EACCES, "denied")):
+        with patch.object(
+            COVERAGE.os, "scandir", side_effect=PermissionError(errno.EACCES, "denied")
+        ):
             with self.assertRaises(PermissionError):
                 COVERAGE.snapshot_names("/synthetic/snapshots", "realm.*")
 
     def test_entry_lookup_error_is_not_omitted(self):
         entry = SimpleNamespace(name="realm.20261016T020000+0200")
+
         def unavailable(**kwargs):
             raise OSError(errno.EIO, "entry lookup failed")
+
         entry.stat = unavailable
         from contextlib import nullcontext
-        with patch.object(COVERAGE.os, "scandir", return_value=nullcontext(iter([entry]))):
+
+        with patch.object(
+            COVERAGE.os, "scandir", return_value=nullcontext(iter([entry]))
+        ):
             with self.assertRaises(OSError):
                 COVERAGE.snapshot_names("/synthetic/snapshots", "realm.*")
 
 
 class FilesystemIdentityFixture(unittest.TestCase):
     def test_exact_filesystem_uuid_is_required(self):
-        mount = json.dumps({"filesystems": [{"target": "/synthetic", "fstype": "btrfs"}]})
-        with patch.object(COVERAGE, "run", side_effect=[mount, f"Label: 'fixture'  uuid: {FS_UUID}\n"]) as probe:
-            self.assertEqual(COVERAGE.filesystem_identity("/synthetic/nested/snapshot"), FS_UUID)
-            self.assertEqual(probe.call_args_list[0].args,
-                             ("findmnt", "--json", "--output", "TARGET,FSTYPE", "--target", "/synthetic/nested/snapshot"))
-            self.assertEqual(probe.call_args_list[1].args,
-                             ("btrfs", "filesystem", "show", "--raw", "/synthetic"))
+        mount = json.dumps(
+            {"filesystems": [{"target": "/synthetic", "fstype": "btrfs"}]}
+        )
+        with patch.object(
+            COVERAGE, "run", side_effect=[mount, f"Label: 'fixture'  uuid: {FS_UUID}\n"]
+        ) as probe:
+            self.assertEqual(
+                COVERAGE.filesystem_identity("/synthetic/nested/snapshot"), FS_UUID
+            )
+            self.assertEqual(
+                probe.call_args_list[0].args,
+                (
+                    "findmnt",
+                    "--json",
+                    "--output",
+                    "TARGET,FSTYPE",
+                    "--target",
+                    "/synthetic/nested/snapshot",
+                ),
+            )
+            self.assertEqual(
+                probe.call_args_list[1].args,
+                ("btrfs", "filesystem", "show", "--raw", "/synthetic"),
+            )
         for output in ("", f"UUID: {FS_UUID}\n", f"Label: none uuid: {FS_UUID}\n" * 2):
             with patch.object(COVERAGE, "run", side_effect=[mount, output]):
-                with self.assertRaisesRegex(ValueError, "identify one Btrfs filesystem"):
+                with self.assertRaisesRegex(
+                    ValueError, "identify one Btrfs filesystem"
+                ):
                     COVERAGE.filesystem_identity("/synthetic/nested/snapshot")
         for mounts in ([], [{"target": "/synthetic", "fstype": "ext4"}]):
-            with patch.object(COVERAGE, "run", return_value=json.dumps({"filesystems": mounts})):
+            with patch.object(
+                COVERAGE, "run", return_value=json.dumps({"filesystems": mounts})
+            ):
                 with self.assertRaisesRegex(ValueError, "identify one Btrfs mount"):
                     COVERAGE.filesystem_identity("/synthetic/nested/snapshot")
 
@@ -145,15 +175,22 @@ class CoverageMemoryFixture(unittest.TestCase):
                 directory = "/" not in self.relative
                 return SimpleNamespace(
                     st_mode=(0o40700 if directory else 0o100600),
-                    st_uid=1000, st_gid=1000, st_mtime_ns=0, st_size=0,
-                    st_ino=2**63 + 123, st_dev=2**63 + 456, st_rdev=0,
+                    st_uid=1000,
+                    st_gid=1000,
+                    st_mtime_ns=0,
+                    st_size=0,
+                    st_ino=2**63 + 123,
+                    st_dev=2**63 + 456,
+                    st_rdev=0,
                 )
 
             def iterdir(self):
                 if self.relative == ".":
                     return (VirtualPath(f"dir-{i:03d}") for i in range(directory_count))
-                return (VirtualPath(f"{self.relative}/file-{i:03d}-" + "x" * 100)
-                        for i in range(files_per_directory))
+                return (
+                    VirtualPath(f"{self.relative}/file-{i:03d}-" + "x" * 100)
+                    for i in range(files_per_directory)
+                )
 
             def open(self, mode):
                 return io.BytesIO(b"")
@@ -169,15 +206,33 @@ class CoverageMemoryFixture(unittest.TestCase):
             for path in paths():
                 st = path.lstat()
                 if metadata:
-                    yield dict(path=path.relative, mode=st.st_mode, uid=st.st_uid,
-                               gid=st.st_gid, mtime=st.st_mtime_ns, size=0)
+                    yield {
+                        "path": path.relative,
+                        "mode": st.st_mode,
+                        "uid": st.st_uid,
+                        "gid": st.st_gid,
+                        "mtime": st.st_mtime_ns,
+                        "size": 0,
+                    }
                 elif "/" in path.relative:
-                    yield dict(path=path.relative, healthy=True, size=0, sha256=empty_hash)
+                    yield {
+                        "path": path.relative,
+                        "healthy": True,
+                        "size": 0,
+                        "sha256": empty_hash,
+                    }
 
-        with patch.object(COVERAGE, "Path", new=lambda path:
-                          VirtualPath() if path == "synthetic-source" else real_path(path)), \
-             patch.object(COVERAGE, "command_items", new=items), \
-             patch.object(COVERAGE.os, "listxattr", new=lambda path, **kw: []):
+        with (
+            patch.object(
+                COVERAGE,
+                "Path",
+                new=lambda path: (
+                    VirtualPath() if path == "synthetic-source" else real_path(path)
+                ),
+            ),
+            patch.object(COVERAGE, "command_items", new=items),
+            patch.object(COVERAGE.os, "listxattr", new=lambda path, **kw: []),
+        ):
             tracemalloc.start()
             try:
                 result = COVERAGE.verify("synthetic-source", "synthetic-archive", [])
@@ -213,7 +268,9 @@ class CoverageFixture(unittest.TestCase):
         (self.source / "same-name").write_text("old version")
         (self.source / "old-only").write_text("unique historical bytes")
         self.snapshot_uuid = str(uuid.uuid4())
-        filesystem_probe = patch.object(COVERAGE, "filesystem_identity", return_value=FS_UUID)
+        filesystem_probe = patch.object(
+            COVERAGE, "filesystem_identity", return_value=FS_UUID
+        )
         filesystem_probe.start()
         self.addCleanup(filesystem_probe.stop)
 
@@ -265,28 +322,52 @@ class CoverageFixture(unittest.TestCase):
             f"archive={archive}\nsnapshot={new}\nfilesystem_uuid={FS_UUID}\n"
             f"generation=20\nsubvolume_id=102\ncoverage={json.dumps(proof)}\n"
         )
-        details = {old: (str(uuid.uuid4()), 10, 101), new: (self.snapshot_uuid, 20, 102)}
-        with patch.object(COVERAGE, "snapshot_details", side_effect=lambda path: details[path.name]):
+        details = {
+            old: (str(uuid.uuid4()), 10, 101),
+            new: (self.snapshot_uuid, 20, 102),
+        }
+        with patch.object(
+            COVERAGE, "snapshot_details", side_effect=lambda path: details[path.name]
+        ):
             self.assertEqual(
-                COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3"),
+                COVERAGE.verified_prune_plan(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                ),
                 [],
             )
             policy = self.root / "adoption-policy.json"
             policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": []}))
-            proof.update(proof_mode="full", policy_sha256=COVERAGE.policy_identity(policy, True))
+            proof.update(
+                proof_mode="full", policy_sha256=COVERAGE.policy_identity(policy, True)
+            )
             fields = COVERAGE.read_marker_fields(marker)
             fields["coverage"] = json.dumps(proof)
-            marker.write_text("".join(f"{key}={value}\n" for key, value in fields.items()))
+            marker.write_text(
+                "".join(f"{key}={value}\n" for key, value in fields.items())
+            )
             argv = [
-                "coverage", "acknowledged", "--policy", str(policy), "--",
-                str(queue), "realm.*", str(marker), "realm", "-coverage-v3",
+                "coverage",
+                "acknowledged",
+                "--policy",
+                str(policy),
+                "--",
+                str(queue),
+                "realm.*",
+                str(marker),
+                "realm",
+                "-coverage-v3",
             ]
             output = io.StringIO()
             with patch.object(COVERAGE.sys, "argv", argv), redirect_stdout(output):
                 COVERAGE.main()
             self.assertEqual(output.getvalue().strip(), new)
-            policy.write_text(json.dumps({"noncanonical": ["changed-policy"], "borg_excludes": []}))
-            with patch.object(COVERAGE.sys, "argv", argv), self.assertRaisesRegex(ValueError, "active policy"):
+            policy.write_text(
+                json.dumps({"noncanonical": ["changed-policy"], "borg_excludes": []})
+            )
+            with (
+                patch.object(COVERAGE.sys, "argv", argv),
+                self.assertRaisesRegex(ValueError, "active policy"),
+            ):
                 COVERAGE.main()
 
     def test_each_released_snapshot_has_its_own_archive_and_receipt(self):
@@ -315,38 +396,82 @@ class CoverageFixture(unittest.TestCase):
             "archive": archive,
         }
         marker = self.root / "latest"
+
         def receipt(name, native, coverage):
             return (
                 f"archive={coverage['archive']}\nsnapshot={name}\nfilesystem_uuid={FS_UUID}\n"
                 f"generation={native[1]}\nsubvolume_id={native[2]}\ncoverage={json.dumps(coverage)}\n"
             )
+
         details = {old: (old_uuid, 10, 101), new: (self.snapshot_uuid, 20, 102)}
         marker.write_text(receipt(new, details[new], proof))
         acknowledgements = COVERAGE.acknowledgement_directory(marker)
         acknowledgements.mkdir()
-        with patch.object(COVERAGE, "snapshot_details", side_effect=lambda path: details[path.name]):
-            self.assertEqual(COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3"), [new, old])
-            self.assertEqual(COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3"), [])
+        with patch.object(
+            COVERAGE, "snapshot_details", side_effect=lambda path: details[path.name]
+        ):
+            self.assertEqual(
+                COVERAGE.queued_snapshots(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                ),
+                [new, old],
+            )
+            self.assertEqual(
+                COVERAGE.verified_prune_plan(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                ),
+                [],
+            )
             (acknowledgements / old).write_text(receipt(old, details[old], old_proof))
-            self.assertEqual(COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3"), [new])
-            self.assertEqual(COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3"), [(old, *details[old])])
+            self.assertEqual(
+                COVERAGE.queued_snapshots(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                ),
+                [new],
+            )
+            self.assertEqual(
+                COVERAGE.verified_prune_plan(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                ),
+                [(old, *details[old])],
+            )
             (acknowledgements / new).write_bytes(marker.read_bytes())
-            self.assertEqual(COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3"), [])
+            self.assertEqual(
+                COVERAGE.queued_snapshots(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                ),
+                [],
+            )
             self.assertFalse(COVERAGE.should_advance_marker(queue, marker, old))
             rolled_back = "realm.20260401T233000+0000"
             (queue / rolled_back).mkdir()
             details[rolled_back] = (str(uuid.uuid4()), 30, 103)
-            self.assertEqual(COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3"), [rolled_back])
+            self.assertEqual(
+                COVERAGE.queued_snapshots(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                ),
+                [rolled_back],
+            )
             self.assertTrue(COVERAGE.should_advance_marker(queue, marker, rolled_back))
-            (acknowledgements / old).write_text(receipt(old, details[old], old_proof).replace(old_proof["archive_id"], "a" * 64))
+            (acknowledgements / old).write_text(
+                receipt(old, details[old], old_proof).replace(
+                    old_proof["archive_id"], "a" * 64
+                )
+            )
             with self.assertRaisesRegex(ValueError, "archive identity changed"):
-                COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3")
+                COVERAGE.verified_prune_plan(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                )
             with self.assertRaisesRegex(ValueError, "archive identity changed"):
-                COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3")
+                COVERAGE.queued_snapshots(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                )
             (acknowledgements / old).write_text(receipt(old, details[old], old_proof))
             details[old] = (str(uuid.uuid4()), 10, 101)
             with self.assertRaisesRegex(ValueError, "snapshot identity changed"):
-                COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3")
+                COVERAGE.verified_prune_plan(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                )
 
     def test_archive_admission_window_is_bounded(self):
         self.assertTrue(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 6, 5)))
@@ -368,11 +493,22 @@ class CoverageFixture(unittest.TestCase):
         )
         # Lower generations can belong to a replacement filesystem. Neither
         # the old marker nor an existing Borg archive orders its snapshots.
-        with patch.object(COVERAGE, "snapshot_details", return_value=(str(uuid.uuid4()), 10, 101)), \
-             patch.object(COVERAGE, "archive_identity", return_value="a" * 64):
+        with (
+            patch.object(
+                COVERAGE, "snapshot_details", return_value=(str(uuid.uuid4()), 10, 101)
+            ),
+            patch.object(COVERAGE, "archive_identity", return_value="a" * 64),
+        ):
             with self.assertRaisesRegex(ValueError, "snapshot is unavailable"):
-                COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3")
-            self.assertEqual(COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3"), [current])
+                COVERAGE.verified_prune_plan(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                )
+            self.assertEqual(
+                COVERAGE.queued_snapshots(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                ),
+                [current],
+            )
 
     def test_cutoff_on_another_filesystem_never_authorizes_pruning(self):
         queue = self.root / "replacement-filesystem"
@@ -386,15 +522,45 @@ class CoverageFixture(unittest.TestCase):
             "generation=20\nsubvolume_id=102\n"
             f"coverage={json.dumps({'snapshot_uuid': self.snapshot_uuid, 'archive': archive, 'archive_id': 'a' * 64})}\n"
         )
-        with patch.object(COVERAGE, "snapshot_details", return_value=(self.snapshot_uuid, 20, 102)):
-            self.assertEqual(COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3"), [current])
+        with patch.object(
+            COVERAGE, "snapshot_details", return_value=(self.snapshot_uuid, 20, 102)
+        ):
+            self.assertEqual(
+                COVERAGE.queued_snapshots(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                ),
+                [current],
+            )
             with self.assertRaisesRegex(ValueError, "filesystem identity changed"):
-                COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3")
+                COVERAGE.verified_prune_plan(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                )
         # An older marker is history, not authority over current generations.
-        marker.write_text(marker.read_text().replace(next(line for line in marker.read_text().splitlines(True) if line.startswith("filesystem_uuid=")), ""))
-        self.assertEqual(COVERAGE.verified_prune_plan(queue, "realm.*", marker, "realm", "-coverage-v3"), [])
-        with patch.object(COVERAGE, "snapshot_details", return_value=(self.snapshot_uuid, 20, 102)):
-            self.assertEqual(COVERAGE.queued_snapshots(queue, "realm.*", marker, "realm", "-coverage-v3"), [current])
+        marker.write_text(
+            marker.read_text().replace(
+                next(
+                    line
+                    for line in marker.read_text().splitlines(True)
+                    if line.startswith("filesystem_uuid=")
+                ),
+                "",
+            )
+        )
+        self.assertEqual(
+            COVERAGE.verified_prune_plan(
+                queue, "realm.*", marker, "realm", "-coverage-v3"
+            ),
+            [],
+        )
+        with patch.object(
+            COVERAGE, "snapshot_details", return_value=(self.snapshot_uuid, 20, 102)
+        ):
+            self.assertEqual(
+                COVERAGE.queued_snapshots(
+                    queue, "realm.*", marker, "realm", "-coverage-v3"
+                ),
+                [current],
+            )
 
     def test_inventory_failure_cleans_private_scratch(self):
         real_temp = tempfile.TemporaryDirectory
@@ -406,9 +572,14 @@ class CoverageFixture(unittest.TestCase):
             self.assertEqual(Path(temp.name).stat().st_mode & 0o777, 0o700)
             return temp
 
-        with patch.object(COVERAGE.tempfile, "TemporaryDirectory", new=scratch), \
-             patch.object(COVERAGE.CoverageInventory, "add",
-                          side_effect=sqlite3.OperationalError("database or disk is full")):
+        with (
+            patch.object(COVERAGE.tempfile, "TemporaryDirectory", new=scratch),
+            patch.object(
+                COVERAGE.CoverageInventory,
+                "add",
+                side_effect=sqlite3.OperationalError("database or disk is full"),
+            ),
+        ):
             with self.assertRaisesRegex(sqlite3.OperationalError, "disk is full"):
                 COVERAGE.verify(self.source, "unused", [])
         self.assertEqual(len(created), 1)
@@ -454,7 +625,12 @@ class CoverageFixture(unittest.TestCase):
         started = time.monotonic()
         try:
             with self.assertRaisesRegex(ValueError, "exceeded.*budget"):
-                list(COVERAGE.command_items([sys.executable, "-c", "import time; time.sleep(10)"], lambda stream: iter(stream)))
+                list(
+                    COVERAGE.command_items(
+                        [sys.executable, "-c", "import time; time.sleep(10)"],
+                        lambda stream: iter(stream),
+                    )
+                )
             self.assertLess(time.monotonic() - started, 2)
         finally:
             COVERAGE._COMMAND_TIMEOUT.reset(token)
@@ -466,10 +642,21 @@ class CoverageFixture(unittest.TestCase):
             (self.source / (f"record-{i:04d}-" + "x" * 100)).write_bytes(b"neutral")
         self.archive()
         commands = [
-            (["borg", "debug", "dump-archive", "::snapshot", "/dev/stdout"],
-             lambda stream: COVERAGE.JsonStream(stream).items()),
-            (["borg", "list", "--json-lines", "--format", "{path}{sha256}{health}{size}", "::snapshot"],
-             lambda stream: (json.loads(line) for line in stream)),
+            (
+                ["borg", "debug", "dump-archive", "::snapshot", "/dev/stdout"],
+                lambda stream: COVERAGE.JsonStream(stream).items(),
+            ),
+            (
+                [
+                    "borg",
+                    "list",
+                    "--json-lines",
+                    "--format",
+                    "{path}{sha256}{health}{size}",
+                    "::snapshot",
+                ],
+                lambda stream: (json.loads(line) for line in stream),
+            ),
         ]
         for i, (command, parser) in enumerate(commands):
             with self.subTest(command=command[1]):
@@ -483,30 +670,62 @@ class CoverageFixture(unittest.TestCase):
     def test_metadata_coverage_does_not_hash_payloads_or_claim_content_equality(self):
         self.archive()
         original = COVERAGE.command_items
+
         def metadata_only(command, parser):
             self.assertNotIn("{path}{sha256}{health}{size}", command)
             yield from original(command, parser)
-        with patch.object(COVERAGE, "command_items", new=metadata_only), \
-             patch.object(COVERAGE.hashlib, "file_digest", side_effect=AssertionError("payload read")):
-            result = COVERAGE.verify(self.source, "snapshot", [], content_mode="metadata")
+
+        with (
+            patch.object(COVERAGE, "command_items", new=metadata_only),
+            patch.object(
+                COVERAGE.hashlib,
+                "file_digest",
+                side_effect=AssertionError("payload read"),
+            ),
+        ):
+            result = COVERAGE.verify(
+                self.source, "snapshot", [], content_mode="metadata"
+            )
         self.assertEqual(result["content_verification"], "not_performed")
         self.assertEqual(result["source_hashed_bytes"], 0)
         self.assertNotIn("content_sha256", result)
 
     def test_sample_has_exact_byte_file_bounds_and_continuation(self):
         self.archive()
-        first = COVERAGE.verify(self.source, "snapshot", [], content_mode="sampled", sample_bytes=24, sample_files=1)
+        first = COVERAGE.verify(
+            self.source,
+            "snapshot",
+            [],
+            content_mode="sampled",
+            sample_bytes=24,
+            sample_files=1,
+        )
         self.assertEqual(first["sampled_files"], 1)
         self.assertEqual(first["source_hashed_bytes"], len("unique historical bytes"))
         self.assertEqual(first["sample_next_after"], "old-only")
         self.assertEqual(first["sample_objects"][0]["path"], "old-only")
-        second = COVERAGE.verify(self.source, "snapshot", [], content_mode="sampled", sample_bytes=24, sample_files=1, sample_after=first["sample_next_after"])
+        second = COVERAGE.verify(
+            self.source,
+            "snapshot",
+            [],
+            content_mode="sampled",
+            sample_bytes=24,
+            sample_files=1,
+            sample_after=first["sample_next_after"],
+        )
         self.assertEqual(second["sample_next_after"], "same-name")
         self.assertEqual(second["sample_start_after"], "old-only")
         self.assertEqual(second["source_hashed_bytes"], len("old version"))
         self.assertEqual(second["content_coverage"], "partial")
         self.assertNotIn("content_sha256", second)
-        no_fit = COVERAGE.verify(self.source, "snapshot", [], content_mode="sampled", sample_bytes=1, sample_files=1)
+        no_fit = COVERAGE.verify(
+            self.source,
+            "snapshot",
+            [],
+            content_mode="sampled",
+            sample_bytes=1,
+            sample_files=1,
+        )
         self.assertEqual(no_fit["source_hashed_bytes"], 0)
         self.assertEqual(no_fit["sampled_files"], 0)
 
@@ -520,12 +739,23 @@ class CoverageFixture(unittest.TestCase):
                     with path.open("wb") as stream:
                         stream.truncate(1073741825)
                     inventory.add(name, path.stat())
-                with patch.object(COVERAGE, "command_items", side_effect=AssertionError("no selected content")):
-                    result = COVERAGE.verify_content_sample(root, "unused", inventory,
-                        byte_budget=1073741824, file_budget=128)
+                with patch.object(
+                    COVERAGE,
+                    "command_items",
+                    side_effect=AssertionError("no selected content"),
+                ):
+                    result = COVERAGE.verify_content_sample(
+                        root,
+                        "unused",
+                        inventory,
+                        byte_budget=1073741824,
+                        file_budget=128,
+                    )
                 self.assertEqual(result["sampled_files"], 0)
                 self.assertEqual(result["content_verification"], "not_performed")
-                self.assertEqual(result["sample_excluded_population"]["over_byte_budget_files"], 2)
+                self.assertEqual(
+                    result["sample_excluded_population"]["over_byte_budget_files"], 2
+                )
                 self.assertIn("other_retained_archives", result["sample_excludes"])
                 self.assertNotIn("content_sha256", result)
             finally:
@@ -543,14 +773,31 @@ class CoverageFixture(unittest.TestCase):
                 path = root / "z-small"
                 path.write_bytes(b"ok")
                 inventory.add(path.name, path.stat())
+
                 def items(command, parser):
-                    yield {"path":path.name, "size":2, "healthy":True,
-                           "sha256":COVERAGE.hashlib.sha256(b"ok").hexdigest()}
+                    yield {
+                        "path": path.name,
+                        "size": 2,
+                        "healthy": True,
+                        "sha256": COVERAGE.hashlib.sha256(b"ok").hexdigest(),
+                    }
+
                 with patch.object(COVERAGE, "command_items", new=items):
-                    first = COVERAGE.verify_content_sample(root, "unused", inventory, byte_budget=2, file_budget=1)
-                    wrapped = COVERAGE.verify_content_sample(root, "unused", inventory, byte_budget=2, file_budget=1, after="z-small")
+                    first = COVERAGE.verify_content_sample(
+                        root, "unused", inventory, byte_budget=2, file_budget=1
+                    )
+                    wrapped = COVERAGE.verify_content_sample(
+                        root,
+                        "unused",
+                        inventory,
+                        byte_budget=2,
+                        file_budget=1,
+                        after="z-small",
+                    )
                 self.assertEqual(first["sampled_files"], 1)
-                self.assertEqual(first["sample_excluded_population"]["over_byte_budget_files"], 8)
+                self.assertEqual(
+                    first["sample_excluded_population"]["over_byte_budget_files"], 8
+                )
                 self.assertTrue(wrapped["sample_cursor_wrapped"])
                 self.assertEqual(wrapped["sampled_files"], 1)
             finally:
@@ -561,7 +808,15 @@ class CoverageFixture(unittest.TestCase):
             (self.source / name).write_text("neutral")
         self.archive()
         for after, expected in (("a1", "a[1]"), ("a[1]", "b\n[1]ą")):
-            result = COVERAGE.verify(self.source, "snapshot", [], content_mode="sampled", sample_bytes=100, sample_files=1, sample_after=after)
+            result = COVERAGE.verify(
+                self.source,
+                "snapshot",
+                [],
+                content_mode="sampled",
+                sample_bytes=100,
+                sample_files=1,
+                sample_after=after,
+            )
             self.assertEqual(result["sampled_files"], 1)
             self.assertEqual(result["sample_next_after"], expected)
             self.assertEqual(result["sample_objects"][0]["path"], expected)
@@ -745,7 +1000,13 @@ class CoverageFixture(unittest.TestCase):
                 COVERAGE.archive_identity("snapshot", self.snapshot_uuid), "b" * 64
             )
             command.assert_called_once_with(
-                "borg", "list", "--json", "--format", "{comment}", "--glob-archives", "snapshot"
+                "borg",
+                "list",
+                "--json",
+                "--format",
+                "{comment}",
+                "--glob-archives",
+                "snapshot",
             )
             with self.assertRaisesRegex(ValueError, "UUID"):
                 COVERAGE.archive_identity("absent", self.snapshot_uuid)
@@ -820,22 +1081,45 @@ class CoverageFixture(unittest.TestCase):
         )
         self.assertEqual(ordinary, ["user.fixture"])
         text = "user::rwx\nuser:neutral:r--:1000\ngroup::r-x\nmask::r-x\nother::---"
-        expected = {(1, None): 7, (2, 1000): 4, (4, None): 5, (16, None): 5, (32, None): 0}
+        expected = {
+            (1, None): 7,
+            (2, 1000): 4,
+            (4, None): 5,
+            (16, None): 5,
+            (32, None): 0,
+        }
         raw = COVERAGE.struct.pack("<I", 2) + b"".join(
-            COVERAGE.struct.pack("<HHI", tag, perm, identity if identity is not None else 0xFFFFFFFF)
+            COVERAGE.struct.pack(
+                "<HHI", tag, perm, identity if identity is not None else 0xFFFFFFFF
+            )
             for (tag, identity), perm in expected.items()
         )
         self.assertEqual(COVERAGE.source_acl_entries(raw), expected)
         self.assertEqual(COVERAGE.archived_acl_entries(text), expected)
-        self.assertEqual(COVERAGE.archived_acl_entries(text.replace("neutral", "renamed")), expected)
-        encoded = "\x7f" + text.replace("neutral", "invalid-\udcff").encode("utf-8", "surrogateescape").hex()
+        self.assertEqual(
+            COVERAGE.archived_acl_entries(text.replace("neutral", "renamed")), expected
+        )
+        encoded = (
+            "\x7f"
+            + text.replace("neutral", "invalid-\udcff")
+            .encode("utf-8", "surrogateescape")
+            .hex()
+        )
         self.assertEqual(COVERAGE.archived_acl_entries(encoded), expected)
 
     def test_changed_acl_principal_or_permission_cannot_satisfy_coverage(self):
         self.archive()
         path = self.source / "same-name"
-        source_entries = [(1, 6, 0xFFFFFFFF), (2, 4, 1000), (4, 4, 0xFFFFFFFF), (16, 4, 0xFFFFFFFF), (32, 4, 0xFFFFFFFF)]
-        raw = COVERAGE.struct.pack("<I", 2) + b"".join(COVERAGE.struct.pack("<HHI", *entry) for entry in source_entries)
+        source_entries = [
+            (1, 6, 0xFFFFFFFF),
+            (2, 4, 1000),
+            (4, 4, 0xFFFFFFFF),
+            (16, 4, 0xFFFFFFFF),
+            (32, 4, 0xFFFFFFFF),
+        ]
+        raw = COVERAGE.struct.pack("<I", 2) + b"".join(
+            COVERAGE.struct.pack("<HHI", *entry) for entry in source_entries
+        )
         archived = {"uid": 1000, "permission": "r--"}
         original_items = COVERAGE.command_items
         original_list = os.listxattr
@@ -844,16 +1128,32 @@ class CoverageFixture(unittest.TestCase):
         def items(command, parser):
             for item in original_items(command, parser):
                 if "debug" in command and COVERAGE.archive_path(item) == "same-name":
-                    item = {**item, "acl_access": f"user::rw-\nuser:neutral:{archived['permission']}:{archived['uid']}\ngroup::r--\nmask::r--\nother::r--"}
+                    item = {
+                        **item,
+                        "acl_access": f"user::rw-\nuser:neutral:{archived['permission']}:{archived['uid']}\ngroup::r--\nmask::r--\nother::r--",
+                    }
                 yield item
 
         def names(candidate, **kw):
-            return ["system.posix_acl_access"] if Path(candidate) == path else original_list(candidate, **kw)
+            return (
+                ["system.posix_acl_access"]
+                if Path(candidate) == path
+                else original_list(candidate, **kw)
+            )
 
         def value(candidate, name, **kw):
-            return raw if Path(candidate) == path and os.fsencode(name) == b"system.posix_acl_access" else original_get(candidate, name, **kw)
+            return (
+                raw
+                if Path(candidate) == path
+                and os.fsencode(name) == b"system.posix_acl_access"
+                else original_get(candidate, name, **kw)
+            )
 
-        with patch.object(COVERAGE, "command_items", items), patch.object(os, "listxattr", names), patch.object(os, "getxattr", value):
+        with (
+            patch.object(COVERAGE, "command_items", items),
+            patch.object(os, "listxattr", names),
+            patch.object(os, "getxattr", value),
+        ):
             COVERAGE.verify(self.source, "snapshot", [])
             archived["uid"] = 1001
             with self.assertRaisesRegex(ValueError, "ACL mismatch"):
@@ -867,36 +1167,71 @@ class CoverageFixture(unittest.TestCase):
         # restricted by an r-- mask. Preserve the stored permission, not its
         # effective masked value; formatting whitespace carries no semantics.
         text = "user::rw-\nuser:1001:rwx\t:1001\ngroup::r--\nmask::r--\nother::r--"
-        expected = {(1, None): 6, (2, 1001): 7, (4, None): 4, (16, None): 4, (32, None): 4}
+        expected = {
+            (1, None): 6,
+            (2, 1001): 7,
+            (4, None): 4,
+            (16, None): 4,
+            (32, None): 4,
+        }
         self.assertEqual(COVERAGE.archived_acl_entries(text), expected)
         self.assertNotEqual(
             COVERAGE.archived_acl_entries(text.replace("rwx\t", "r--\t")), expected
         )
 
     def test_default_only_acl_uses_mode_for_borg_access_entries(self):
-        entries = [(1, 7, 0xFFFFFFFF), (2, 4, 1000), (4, 5, 0xFFFFFFFF), (16, 5, 0xFFFFFFFF), (32, 5, 0xFFFFFFFF)]
-        raw = COVERAGE.struct.pack("<I", 2) + b"".join(COVERAGE.struct.pack("<HHI", *entry) for entry in entries)
-        item = {"acl_access": "user::rwx\ngroup::r-x\nother::r-x", "acl_default": "user::rwx\nuser:neutral:r--:1000\ngroup::r-x\nmask::r-x\nother::r-x"}
+        entries = [
+            (1, 7, 0xFFFFFFFF),
+            (2, 4, 1000),
+            (4, 5, 0xFFFFFFFF),
+            (16, 5, 0xFFFFFFFF),
+            (32, 5, 0xFFFFFFFF),
+        ]
+        raw = COVERAGE.struct.pack("<I", 2) + b"".join(
+            COVERAGE.struct.pack("<HHI", *entry) for entry in entries
+        )
+        item = {
+            "acl_access": "user::rwx\ngroup::r-x\nother::r-x",
+            "acl_default": "user::rwx\nuser:neutral:r--:1000\ngroup::r-x\nmask::r-x\nother::r-x",
+        }
         with patch.object(os, "getxattr", return_value=raw):
-            COVERAGE.verify_acl_metadata(self.source, 0o755, {b"system.posix_acl_default"}, item)
+            COVERAGE.verify_acl_metadata(
+                self.source, 0o755, {b"system.posix_acl_default"}, item
+            )
             with self.assertRaisesRegex(ValueError, "ACL mismatch"):
-                COVERAGE.verify_acl_metadata(self.source, 0o755, {b"system.posix_acl_default"}, {**item, "acl_default": ""})
+                COVERAGE.verify_acl_metadata(
+                    self.source,
+                    0o755,
+                    {b"system.posix_acl_default"},
+                    {**item, "acl_default": ""},
+                )
 
     def test_metadata_contract_changes_the_policy_proof_identity(self):
         policy = self.root / "policy.json"
         declaration = {"noncanonical": [], "borg_excludes": []}
         policy.write_text(json.dumps(declaration))
-        legacy = COVERAGE.hashlib.sha256(json.dumps(declaration, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        legacy = COVERAGE.hashlib.sha256(
+            json.dumps(declaration, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
         self.assertNotEqual(COVERAGE.policy_identity(policy), legacy)
         with patch.object(COVERAGE, "METADATA_CONTRACT", "older-weaker-contract"):
             older = COVERAGE.policy_identity(policy)
         self.assertNotEqual(COVERAGE.policy_identity(policy), older)
 
     def test_malformed_acl_refuses_instead_of_waiving_metadata(self):
-        for raw in [b"", COVERAGE.struct.pack("<I", 3), COVERAGE.struct.pack("<IHHI", 2, 2, 4, 0xFFFFFFFF)]:
+        for raw in [
+            b"",
+            COVERAGE.struct.pack("<I", 3),
+            COVERAGE.struct.pack("<IHHI", 2, 2, 4, 0xFFFFFFFF),
+        ]:
             with self.subTest(raw=raw), self.assertRaises(ValueError):
                 COVERAGE.source_acl_entries(raw)
-        for text in ["user:unknown:rwx", "user::rwx\nuser::rwx", "user::rwx\ngroup::r-x\nother::r-X", "user::rwx\nuser:neutral:r--:1000\ngroup::r-x\nother::---"]:
+        for text in [
+            "user:unknown:rwx",
+            "user::rwx\nuser::rwx",
+            "user::rwx\ngroup::r-x\nother::r-X",
+            "user::rwx\nuser:neutral:r--:1000\ngroup::r-x\nother::---",
+        ]:
             with self.subTest(text=text), self.assertRaises(ValueError):
                 COVERAGE.archived_acl_entries(text)
 
@@ -1176,7 +1511,9 @@ class CoverageFixture(unittest.TestCase):
 
 class ProducerReceiptFixture(unittest.TestCase):
     def setUp(self):
-        filesystem_probe = patch.object(COVERAGE, "filesystem_identity", return_value=FS_UUID)
+        filesystem_probe = patch.object(
+            COVERAGE, "filesystem_identity", return_value=FS_UUID
+        )
         filesystem_probe.start()
         self.addCleanup(filesystem_probe.stop)
 
@@ -1232,23 +1569,37 @@ class ProducerReceiptFixture(unittest.TestCase):
                 self.assertEqual(proof["filesystem_uuid"], FS_UUID)
                 self.assertEqual(proof["created_epoch"], receipt["created_epoch"])
                 for name, expected in (
-                    ("original", 123), ("compressed", 80), ("deduplicated", 17)
+                    ("original", 123),
+                    ("compressed", 80),
+                    ("deduplicated", 17),
                 ):
                     self.assertEqual(receipt["create_" + name + "_bytes"], expected)
                     self.assertEqual(proof["create_" + name + "_bytes"], expected)
                 legacy = {
-                    key: value for key, value in receipt.items()
-                    if key not in ("create_compressed_bytes", "create_deduplicated_bytes", "created_epoch")
+                    key: value
+                    for key, value in receipt.items()
+                    if key
+                    not in (
+                        "create_compressed_bytes",
+                        "create_deduplicated_bytes",
+                        "created_epoch",
+                    )
                 }
                 receipt_path.write_text(json.dumps(legacy))
-                legacy_proof = COVERAGE.verify_created(source, archive, uuid_value, policy, receipt_path)
+                legacy_proof = COVERAGE.verify_created(
+                    source, archive, uuid_value, policy, receipt_path
+                )
                 self.assertNotIn("create_deduplicated_bytes", legacy_proof)
                 self.assertNotIn("create_compressed_bytes", legacy_proof)
                 self.assertNotIn("created_epoch", legacy_proof)
                 for invalid in (-1, True, "17", 1.5, None):
-                    receipt_path.write_text(json.dumps(receipt | {"created_epoch": invalid}))
+                    receipt_path.write_text(
+                        json.dumps(receipt | {"created_epoch": invalid})
+                    )
                     with self.assertRaisesRegex(ValueError, "timestamp"):
-                        COVERAGE.verify_created(source, archive, uuid_value, policy, receipt_path)
+                        COVERAGE.verify_created(
+                            source, archive, uuid_value, policy, receipt_path
+                        )
                 for name in ("original", "compressed", "deduplicated"):
                     for invalid in (-1, True, "17", 1.5, None):
                         bad = json.loads(json.dumps(stats))
@@ -1256,20 +1607,36 @@ class ProducerReceiptFixture(unittest.TestCase):
                         with self.subTest(name=name, invalid=invalid):
                             with self.assertRaisesRegex(ValueError, "byte count"):
                                 COVERAGE.record_create(source, archive, policy, bad)
-                            receipt_path.write_text(json.dumps(receipt | {"create_" + name + "_bytes": invalid}))
+                            receipt_path.write_text(
+                                json.dumps(
+                                    receipt | {"create_" + name + "_bytes": invalid}
+                                )
+                            )
                             with self.assertRaisesRegex(ValueError, "byte count"):
-                                COVERAGE.verify_created(source, archive, uuid_value, policy, receipt_path)
+                                COVERAGE.verify_created(
+                                    source, archive, uuid_value, policy, receipt_path
+                                )
                 for altered in (
                     receipt | {"filesystem_uuid": str(uuid.uuid4())},
-                    {key: value for key, value in receipt.items() if key != "filesystem_uuid"},
+                    {
+                        key: value
+                        for key, value in receipt.items()
+                        if key != "filesystem_uuid"
+                    },
                 ):
                     receipt_path.write_text(json.dumps(altered))
                     with self.assertRaisesRegex(ValueError, "receipt does not bind"):
-                        COVERAGE.verify_created(source, archive, uuid_value, policy, receipt_path)
+                        COVERAGE.verify_created(
+                            source, archive, uuid_value, policy, receipt_path
+                        )
                 receipt_path.write_text(json.dumps(receipt))
-                with patch.object(COVERAGE, "filesystem_identity", return_value=str(uuid.uuid4())):
+                with patch.object(
+                    COVERAGE, "filesystem_identity", return_value=str(uuid.uuid4())
+                ):
                     with self.assertRaisesRegex(ValueError, "receipt does not bind"):
-                        COVERAGE.verify_created(source, archive, uuid_value, policy, receipt_path)
+                        COVERAGE.verify_created(
+                            source, archive, uuid_value, policy, receipt_path
+                        )
                 bad_stats = json.loads(json.dumps(stats))
                 bad_stats["archive"]["command_line"].extend(
                     [
@@ -1308,8 +1675,10 @@ class ProducerReceiptFixture(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "has not completed"):
                 COVERAGE.audit_status(receipt, policy, 691200)
             marker = root / "latest"
-            self.assertEqual(COVERAGE.audit_readiness(marker, policy),
-                             {"ready": False, "reason": "awaiting-acknowledged-archive"})
+            self.assertEqual(
+                COVERAGE.audit_readiness(marker, policy),
+                {"ready": False, "reason": "awaiting-acknowledged-archive"},
+            )
             uuid_value = str(uuid.uuid4())
             archive_id = "a" * 64
             proof = {
@@ -1324,9 +1693,13 @@ class ProducerReceiptFixture(unittest.TestCase):
                 f"coverage={json.dumps(proof)}\n"
             )
             self.assertTrue(COVERAGE.audit_readiness(marker, policy)["ready"])
-            policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": ["new-boundary"]}))
-            self.assertEqual(COVERAGE.audit_readiness(marker, policy),
-                             {"ready": False, "reason": "awaiting-current-policy-archive"})
+            policy.write_text(
+                json.dumps({"noncanonical": [], "borg_excludes": ["new-boundary"]})
+            )
+            self.assertEqual(
+                COVERAGE.audit_readiness(marker, policy),
+                {"ready": False, "reason": "awaiting-current-policy-archive"},
+            )
             self.assertFalse(receipt.exists())
             policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": []}))
             with (
@@ -1349,19 +1722,35 @@ class ProducerReceiptFixture(unittest.TestCase):
             self.assertEqual(audit["audit_mode"], "independent_full")
             self.assertEqual(audit["source_hashed_bytes"], 123)
             self.assertLessEqual(COVERAGE.audit_status(receipt, policy, 691200), 1)
-            sampled = dict(audit, audit_mode="independent_metadata_sampled",
-                content_coverage="partial", content_verification="bounded_sample",
-                sampled_files=1, sample_byte_budget=128, sample_file_budget=1,
-                sample_content_sha256=COVERAGE.hashlib.sha256(json.dumps(["neutral", "c" * 64], ensure_ascii=True).encode()).hexdigest(),
-                sample_objects=[{"path": "neutral", "sha256": "c" * 64, "size": 123}])
+            sampled = dict(
+                audit,
+                audit_mode="independent_metadata_sampled",
+                content_coverage="partial",
+                content_verification="bounded_sample",
+                sampled_files=1,
+                sample_byte_budget=128,
+                sample_file_budget=1,
+                sample_content_sha256=COVERAGE.hashlib.sha256(
+                    json.dumps(["neutral", "c" * 64], ensure_ascii=True).encode()
+                ).hexdigest(),
+                sample_objects=[{"path": "neutral", "sha256": "c" * 64, "size": 123}],
+            )
             sampled.pop("content_sha256")
             receipt.write_text(json.dumps(sampled))
             with self.assertRaisesRegex(ValueError, "overdue"):
                 COVERAGE.audit_status(receipt, policy, 691200)
-            self.assertLessEqual(COVERAGE.audit_status(receipt, policy, 691200, mode="sampled"), 1)
-            zero = dict(sampled, sampled_files=0, source_hashed_bytes=0,
-                        archive_content_verified_bytes=0, content_verification="not_performed",
-                        sample_objects=[], sample_content_sha256=COVERAGE.hashlib.sha256().hexdigest())
+            self.assertLessEqual(
+                COVERAGE.audit_status(receipt, policy, 691200, mode="sampled"), 1
+            )
+            zero = dict(
+                sampled,
+                sampled_files=0,
+                source_hashed_bytes=0,
+                archive_content_verified_bytes=0,
+                content_verification="not_performed",
+                sample_objects=[],
+                sample_content_sha256=COVERAGE.hashlib.sha256().hexdigest(),
+            )
             receipt.write_text(json.dumps(zero))
             with self.assertRaisesRegex(ValueError, "invalid bounded"):
                 COVERAGE.audit_status(receipt, policy, 691200, mode="sampled")
@@ -1505,7 +1894,15 @@ elif command=='btrfs':
         shutil.rmtree(args[2])
     else: sys.exit(64)
 """.replace("PYTHON", sys.executable).replace("REAL_BORG", repr(shutil.which("borg")))
-            for name in ("findmnt", "mountpoint", "mount", "umount", "btrfs", "borg", "systemctl"):
+            for name in (
+                "findmnt",
+                "mountpoint",
+                "mount",
+                "umount",
+                "btrfs",
+                "borg",
+                "systemctl",
+            ):
                 (root / "mock-bin" / name).write_text(mock)
                 (root / "mock-bin" / name).chmod(0o755)
             (root / "mock-bin/dolt").write_text(
@@ -1766,9 +2163,7 @@ else: sys.exit(1)
             )
             # Existing acknowledgements are validated before archive creation,
             # so the failed identity read leaves no new archive to collide with.
-            self.assertEqual(
-                resumed_fields["archive"], "realm-" + interrupted.name
-            )
+            self.assertEqual(resumed_fields["archive"], "realm-" + interrupted.name)
             # A receipt can survive a crash before the acknowledgement. Reuse
             # that exact archive on restart instead of creating another one.
             acknowledged = COVERAGE.read_marker_fields(latest_marker)
@@ -1837,7 +2232,9 @@ else: sys.exit(1)
                 ).splitlines()
                 member = next(path for path in entries if path.endswith(source))
                 if repo == "borg-polylogue-state-v1":
-                    self.assertFalse(any("/.salvage-internals-20261008" in path for path in entries))
+                    self.assertFalse(
+                        any("/.salvage-internals-20261008" in path for path in entries)
+                    )
                 contents = subprocess.check_output(
                     [
                         "borg",
@@ -2286,9 +2683,13 @@ else: sys.exit(1)
             marker_before = marker_path.read_bytes()
             snapshots_before = sorted((root / "realm-snapshots").iterdir())
             refused = run("missing", ok=False)
-            self.assertIn("verified acknowledgement snapshot is unavailable", refused.stderr)
+            self.assertIn(
+                "verified acknowledgement snapshot is unavailable", refused.stderr
+            )
             self.assertEqual(marker_path.read_bytes(), marker_before)
-            self.assertEqual(sorted((root / "realm-snapshots").iterdir()), snapshots_before)
+            self.assertEqual(
+                sorted((root / "realm-snapshots").iterdir()), snapshots_before
+            )
             for directory in (
                 "live-holder/snapshots",
                 "live-holder/repo",

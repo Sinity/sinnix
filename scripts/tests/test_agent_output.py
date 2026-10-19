@@ -1,12 +1,12 @@
 """Native backend stdout is a result protocol, including on a cold bootstrap."""
 
-import json
 import io
+import json
 import os
 import shutil
 import subprocess
-import tempfile
 import tarfile
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -41,10 +41,22 @@ class NativeOutputTest(unittest.TestCase):
             ),
         }
         self.result = self.root / "result.json"
-        package = {"name": "fixture-package", "version": "1.0.0", "bin": {"fixture": "fixture"}}
-        lock = {"name": package["name"], "version": package["version"], "lockfileVersion": 3, "packages": {"": package}}
+        package = {
+            "name": "fixture-package",
+            "version": "1.0.0",
+            "bin": {"fixture": "fixture"},
+        }
+        lock = {
+            "name": package["name"],
+            "version": package["version"],
+            "lockfileVersion": 3,
+            "packages": {"": package},
+        }
         with tarfile.open(self.root / "locked-package.tgz", "w:gz") as archive:
-            for name, payload in {"package.json": json.dumps(package), "npm-shrinkwrap.json": json.dumps(lock)}.items():
+            for name, payload in {
+                "package.json": json.dumps(package),
+                "npm-shrinkwrap.json": json.dumps(lock),
+            }.items():
                 data = payload.encode()
                 member = tarfile.TarInfo("package/" + name)
                 member.size = len(data)
@@ -497,8 +509,13 @@ class NativeOutputTest(unittest.TestCase):
         source = self.root / "locked-package.tgz"
         outcome = subprocess.run(
             [
-                "bash", str(BOOTSTRAP), "fixture-agent", "fixture-package",
-                "fixture", str(self.bin), str(source),
+                "bash",
+                str(BOOTSTRAP),
+                "fixture-agent",
+                "fixture-package",
+                "fixture",
+                str(self.bin),
+                str(source),
             ],
             env={**self.env, "HOME": str(self.root)},
             capture_output=True,
@@ -508,9 +525,15 @@ class NativeOutputTest(unittest.TestCase):
         args = (self.root / "npm-args").read_text().splitlines()
         self.assertEqual(args[:2], ["ci", "--prefix"])
         self.assertEqual(args[3:], ["--global=false", "--omit=dev"])
-        installed = self.root / ".local/state/fixture-agent/npm/lib/node_modules/fixture-package"
+        installed = (
+            self.root
+            / ".local/state/fixture-agent/npm/lib/node_modules/fixture-package"
+        )
         with tarfile.open(source) as archive:
-            self.assertEqual((installed / "npm-shrinkwrap.json").read_bytes(), archive.extractfile("package/npm-shrinkwrap.json").read())
+            self.assertEqual(
+                (installed / "npm-shrinkwrap.json").read_bytes(),
+                archive.extractfile("package/npm-shrinkwrap.json").read(),
+            )
 
     def test_missing_tarball_does_not_retire_recoverable_package(self):
         state = self.root / ".local/state/fixture-agent"
@@ -519,15 +542,24 @@ class NativeOutputTest(unittest.TestCase):
         (retired / "recoverable.txt").write_bytes(b"retained fixture bytes")
         self.executable("npm", 'touch "$HOME/npm-called"\n')
         outcome = subprocess.run(
-            ["bash", str(BOOTSTRAP), "fixture-agent", "fixture-package",
-             "fixture", str(self.bin), str(self.root / "absent.tgz")],
+            [
+                "bash",
+                str(BOOTSTRAP),
+                "fixture-agent",
+                "fixture-package",
+                "fixture",
+                str(self.bin),
+                str(self.root / "absent.tgz"),
+            ],
             env={**self.env, "HOME": str(self.root)},
-            capture_output=True, timeout=10,
+            capture_output=True,
+            timeout=10,
         )
         self.assertNotEqual(outcome.returncode, 0)
         self.assertIn(b"locked recovery tarball is unavailable", outcome.stderr)
-        self.assertEqual((retired / "recoverable.txt").read_bytes(),
-                         b"retained fixture bytes")
+        self.assertEqual(
+            (retired / "recoverable.txt").read_bytes(), b"retained fixture bytes"
+        )
         self.assertFalse((self.root / "npm-called").exists())
         self.assertFalse((state / "npm-recovery").exists())
 

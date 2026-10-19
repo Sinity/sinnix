@@ -47,8 +47,8 @@ grep -Fq 'dirty_paths: []' "$global_record"
 mkdir -p "$test_root/bin" "$test_root/barrier" "$test_root/concurrent" "$test_root/collision"
 real_mv=$(command -v mv)
 real_date=$(command -v date)
-printf '#!%s\n' "$BASH" > "$test_root/bin/mv"
-cat >> "$test_root/bin/mv" <<'WRAPPER'
+printf '#!%s\n' "$BASH" >"$test_root/bin/mv"
+cat >>"$test_root/bin/mv" <<'WRAPPER'
 set -euo pipefail
 if [ "$HANDOFF_TEST_MODE" = collision ]; then
   printf 'retained preexisting record\n' > "${@: -1}"
@@ -63,8 +63,8 @@ else
 fi
 exec "$REAL_MV" "$@"
 WRAPPER
-printf '#!%s\n' "$BASH" > "$test_root/bin/date"
-cat >> "$test_root/bin/date" <<'WRAPPER'
+printf '#!%s\n' "$BASH" >"$test_root/bin/date"
+cat >>"$test_root/bin/date" <<'WRAPPER'
 if [ "${2:-}" = +%Y%m%dT%H%M%SZ ]; then
   echo 20260101T000000Z
 else
@@ -73,13 +73,13 @@ fi
 WRAPPER
 chmod +x "$test_root/bin/mv" "$test_root/bin/date"
 for session in one two; do
-  jq -nc --arg session "$session" '{session_id:$session,cwd:"/nowhere",trigger:"auto"}' > "$test_root/$session.json"
+  jq -nc --arg session "$session" '{session_id:$session,cwd:"/nowhere",trigger:"auto"}' >"$test_root/$session.json"
 done
 for session in one two; do
   env PATH="$test_root/bin:$PATH" REAL_MV="$real_mv" REAL_DATE="$real_date" \
     HANDOFF_TEST_MODE=concurrent HANDOFF_BARRIER="$test_root/barrier" \
     CLAUDE_SCRATCH_ROOT="$test_root/concurrent" \
-    "$writer" < "$test_root/$session.json" > "$test_root/$session.out" &
+    "$writer" <"$test_root/$session.json" >"$test_root/$session.out" &
   if [ "$session" = one ]; then first_pid=$!; else second_pid=$!; fi
 done
 wait "$first_pid"
@@ -98,7 +98,7 @@ test "$(stat -c '%a' "$two_record")" = 600
 # Even a competing final name introduced after staging cannot be overwritten.
 if env PATH="$test_root/bin:$PATH" REAL_MV="$real_mv" REAL_DATE="$real_date" \
   HANDOFF_TEST_MODE=collision CLAUDE_SCRATCH_ROOT="$test_root/collision" \
-  "$writer" < "$test_root/one.json" > "$test_root/collision.out" 2> "$test_root/collision.err"; then
+  "$writer" <"$test_root/one.json" >"$test_root/collision.out" 2>"$test_root/collision.err"; then
   echo "handoff replaced a competing record" >&2
   exit 1
 fi
@@ -115,15 +115,15 @@ test "${#staged[@]}" -eq 0
 original='old "file".txt'
 renamed=$'new\tname.txt'
 untracked=$'line\n雪\\name.txt'
-printf 'neutral fixture\n' > "$test_root/repo/$original"
+printf 'neutral fixture\n' >"$test_root/repo/$original"
 git -C "$test_root/repo" add -- "$original"
 git -C "$test_root/repo" -c user.name=Fixture -c user.email=fixture@example.invalid \
   -c commit.gpgsign=false commit -qm 'neutral fixture'
 git -C "$test_root/repo" mv -- "$original" "$renamed"
-printf 'neutral untracked fixture\n' > "$test_root/repo/$untracked"
+printf 'neutral untracked fixture\n' >"$test_root/repo/$untracked"
 path_record="$(payload claude | "$writer")"
 paths="$(grep '^dirty_paths: ' "$path_record")"
 paths="${paths#dirty_paths: }"
 jq -e --arg original "$original" --arg renamed "$renamed" --arg untracked "$untracked" \
   'index($original) != null and index($renamed) != null and index($untracked) != null' \
-  <<< "$paths" >/dev/null
+  <<<"$paths" >/dev/null

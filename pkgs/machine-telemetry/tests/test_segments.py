@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from contextlib import closing
 import importlib.util
 import json
-from pathlib import Path
 import sqlite3
 import sys
+from contextlib import closing
+from pathlib import Path
 
 import pytest
 
@@ -61,7 +61,9 @@ def test_sealing_continues_row_ids_and_lists_both_files(database: Path) -> None:
             "INSERT INTO metric_sample(observed_at, host, schema_version, interval_s)"
             " VALUES ('2026-10-25T00:00:00Z', 'host', 1, 10)"
         )
-        assert connection.execute("SELECT max(id) FROM metric_sample").fetchone() == (2,)
+        assert connection.execute("SELECT max(id) FROM metric_sample").fetchone() == (
+            2,
+        )
     assert json.loads(segments.manifest_path(database).read_text()) == manifest
 
 
@@ -85,7 +87,9 @@ def test_an_interrupted_seal_finishes_on_rerun(database: Path, monkeypatch) -> N
     monkeypatch.setattr(segments.os, "rename", crash_on_second)
     with pytest.raises(OSError):
         seal(database, "20261025T000000Z")
-    assert json.loads(segments.manifest_path(database).read_text())["state"] == "sealing"
+    assert (
+        json.loads(segments.manifest_path(database).read_text())["state"] == "sealing"
+    )
     monkeypatch.setattr(segments.os, "rename", real_rename)
     manifest = seal(database, "ignored")
     assert manifest["state"] == "ready"
@@ -94,7 +98,9 @@ def test_an_interrupted_seal_finishes_on_rerun(database: Path, monkeypatch) -> N
 
 
 def test_the_collector_refuses_to_start_mid_seal(database: Path, monkeypatch) -> None:
-    monkeypatch.setattr(segments.os, "rename", lambda *_: (_ for _ in ()).throw(OSError("stop")))
+    monkeypatch.setattr(
+        segments.os, "rename", lambda *_: (_ for _ in ()).throw(OSError("stop"))
+    )
     with pytest.raises(OSError):
         seal(database, "20261025T000000Z")
     with pytest.raises(RuntimeError, match="incomplete"):
@@ -102,7 +108,9 @@ def test_the_collector_refuses_to_start_mid_seal(database: Path, monkeypatch) ->
             pass
 
 
-def test_verify_and_archive_run_once_per_sealed_file(database: Path, tmp_path: Path) -> None:
+def test_verify_and_archive_run_once_per_sealed_file(
+    database: Path, tmp_path: Path
+) -> None:
     seal(database, "20261025T000000Z")
     calls: list[list[str]] = []
 
@@ -112,14 +120,20 @@ def test_verify_and_archive_run_once_per_sealed_file(database: Path, tmp_path: P
             Path(argv[-1]).write_bytes(b"zstd")
 
     records, output = tmp_path / "verified", tmp_path / "archives"
-    assert segments.verify(database, records, run) == ["telemetry.20261025T000000Z.sqlite"]
+    assert segments.verify(database, records, run) == [
+        "telemetry.20261025T000000Z.sqlite"
+    ]
     assert segments.verify(database, records, run) == []
-    assert segments.archive(database, output, run) == ["telemetry.20261025T000000Z.sqlite"]
+    assert segments.archive(database, output, run) == [
+        "telemetry.20261025T000000Z.sqlite"
+    ]
     assert segments.archive(database, output, run) == []
     assert len(calls) == 2
 
 
-def test_archive_adopts_the_first_cutovers_legacy_artifact(database: Path, tmp_path: Path) -> None:
+def test_archive_adopts_the_first_cutovers_legacy_artifact(
+    database: Path, tmp_path: Path
+) -> None:
     manifest = seal(database, "20261025T000000Z")
     entry = manifest["sealed"][0]
     output = tmp_path / "archives"
@@ -133,7 +147,10 @@ def test_archive_adopts_the_first_cutovers_legacy_artifact(database: Path, tmp_p
             }
         )
     )
-    assert segments.archive(database, output, lambda argv: pytest.fail("recompressed")) == []
+    assert (
+        segments.archive(database, output, lambda argv: pytest.fail("recompressed"))
+        == []
+    )
 
 
 def test_a_changed_sealed_file_is_refused(database: Path, tmp_path: Path) -> None:

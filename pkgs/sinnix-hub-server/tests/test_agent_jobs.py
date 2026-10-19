@@ -34,6 +34,7 @@ def test_native_timeout_reaps_descendant_before_closing_output(tmp_path):
         client._call([sys.executable, str(script)])
     pid = int(pidfile.read_text())
     state = Path(f"/proc/{pid}/stat")
+
     def stopped():
         try:
             return state.read_text().split(") ", 1)[1].startswith("Z ")
@@ -51,16 +52,20 @@ def test_native_timeout_reaps_descendant_before_closing_output(tmp_path):
         if not stopped():
             import os
             import signal
+
             os.kill(pid, signal.SIGKILL)
 
 
 def test_native_protocol_limit_stops_oversized_response():
     client = AgentCtlClient()
     with pytest.raises(AgentCtlError, match="protocol bound"):
-        client._call([
-            sys.executable, "-c",
-            f"import sys;sys.stdout.write('x'*{MAX_RESPONSE_BYTES + 1})",
-        ])
+        client._call(
+            [
+                sys.executable,
+                "-c",
+                f"import sys;sys.stdout.write('x'*{MAX_RESPONSE_BYTES + 1})",
+            ]
+        )
 
 
 def test_snapshot_reads_one_bounded_owner_projection() -> None:

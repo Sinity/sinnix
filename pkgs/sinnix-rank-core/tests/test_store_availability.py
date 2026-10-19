@@ -6,12 +6,15 @@ import subprocess
 import sys
 
 import pytest
-
 from rank_core.store import Store, read_log
 
 
 def read(kind, directory):
-    return read_log(directory / "comparisons.jsonl") if kind == "comparisons" else Store(directory).load_items()
+    return (
+        read_log(directory / "comparisons.jsonl")
+        if kind == "comparisons"
+        else Store(directory).load_items()
+    )
 
 
 def filename(kind):
@@ -57,7 +60,9 @@ raise SystemExit(1)
     result = subprocess.run(
         [sys.executable, "-c", program, str(tmp_path), kind],
         env={"PATH": "/nonexistent", "PYTHONPATH": os.pathsep.join(sys.path)},
-        capture_output=True, text=True, timeout=2,
+        capture_output=True,
+        text=True,
+        timeout=2,
     )
     assert result.returncode == 0, result.stderr
 
@@ -66,15 +71,20 @@ raise SystemExit(1)
 def test_json_unicode_line_separator_is_content(tmp_path, kind):
     text = "neutral\u2028value"
     record = {"id": "a", "label": text, "context": text}
-    (tmp_path / filename(kind)).write_text(json.dumps(record, ensure_ascii=False) + "\n")
+    (tmp_path / filename(kind)).write_text(
+        json.dumps(record, ensure_ascii=False) + "\n"
+    )
     result = read(kind, tmp_path)
-    assert (result.live[0]["context"] if kind == "comparisons" else result["a"].label) == text
+    assert (
+        result.live[0]["context"] if kind == "comparisons" else result["a"].label
+    ) == text
 
 
 @pytest.mark.parametrize("kind", ["comparisons", "items"])
 def test_missing_empty_and_regular_symlink_remain_supported(tmp_path, kind):
     def empty(result):
         return not result.live if kind == "comparisons" else not result
+
     assert empty(read(kind, tmp_path))
     target = tmp_path / "native.jsonl"
     target.write_text("")

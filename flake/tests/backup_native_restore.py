@@ -39,11 +39,21 @@ def selected_target(payload, version):
     size = payload[version + "_bytes"]
     relative = payload["relative_path"]
     path = PurePosixPath(relative)
-    if not relative or path.is_absolute() or ".." in path.parts or str(path) != relative:
+    if (
+        not relative
+        or path.is_absolute()
+        or ".." in path.parts
+        or str(path) != relative
+    ):
         raise ValueError("restore target must be one canonical archive-relative path")
-    if not re.fullmatch(r"realm-realm\.\d{8}T\d{6}[+-]\d{4}(?:-(?:coverage|producer)-v[1-9][0-9]*)?", archive):
+    if not re.fullmatch(
+        r"realm-realm\.\d{8}T\d{6}[+-]\d{4}(?:-(?:coverage|producer)-v[1-9][0-9]*)?",
+        archive,
+    ):
         raise ValueError("restore target is not a named Realm snapshot archive")
-    if not all(re.fullmatch(r"[0-9a-f]{64}", value) for value in (archive_id, expected_hash)):
+    if not all(
+        re.fullmatch(r"[0-9a-f]{64}", value) for value in (archive_id, expected_hash)
+    ):
         raise ValueError("restore requires complete archive and content identities")
     if not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", snapshot_uuid):
         raise ValueError("restore requires the snapshot UUID")
@@ -54,21 +64,41 @@ def selected_target(payload, version):
 
 def installed_owner():
     unit = "borgbackup-job-realm.service"
-    start = subprocess.check_output(["systemctl", "show", unit, "-p", "ExecStart", "--value"], text=True)
+    start = subprocess.check_output(
+        ["systemctl", "show", unit, "-p", "ExecStart", "--value"], text=True
+    )
     script = Path(re.search(r"path=(\S+) ;", start)[1]).read_text()
     shell = shlex.split(script.splitlines()[0][2:])[0]
     values = {}
     for name in ("BORG_REPO", "BORG_PASSCOMMAND", "BORG_CACHE_DIR"):
-        words = shlex.split(re.search(r"^\s*export " + name + r"=(.*)$", script, re.M)[1])
+        words = shlex.split(
+            re.search(r"^\s*export " + name + r"=(.*)$", script, re.M)[1]
+        )
         if len(words) != 1:
             raise ValueError("archive owner has a nonliteral environment binding")
         values[name] = words[0]
-    declared = subprocess.check_output(["systemctl", "show", unit, "-p", "Environment", "--value"], text=True)
+    declared = subprocess.check_output(
+        ["systemctl", "show", unit, "-p", "Environment", "--value"], text=True
+    )
     for item in shlex.split(declared):
         name, separator, value = item.partition("=")
-        if separator and name in {"PATH", "HOME", "BORG_BASE_DIR", "BORG_CONFIG_DIR", "BORG_SECURITY_DIR", "BORG_KEYS_DIR", "BORG_RELOCATED_REPO_ACCESS_IS_OK", "BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK"}:
+        if separator and name in {
+            "PATH",
+            "HOME",
+            "BORG_BASE_DIR",
+            "BORG_CONFIG_DIR",
+            "BORG_SECURITY_DIR",
+            "BORG_KEYS_DIR",
+            "BORG_RELOCATED_REPO_ACCESS_IS_OK",
+            "BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK",
+        }:
             values[name] = value
-    user = subprocess.check_output(["systemctl", "show", unit, "-p", "User", "--value"], text=True).strip() or "root"
+    user = (
+        subprocess.check_output(
+            ["systemctl", "show", unit, "-p", "User", "--value"], text=True
+        ).strip()
+        or "root"
+    )
     values.setdefault("HOME", pwd.getpwnam(user).pw_dir)
     if "PATH" not in values:
         raise ValueError("installed archive owner has no declared PATH")
@@ -83,12 +113,33 @@ def installed_owner():
 def owner_read(shell, values, argv, seconds, output_limit):
     pipeline = 'cap="$1"; shift; "$@" | head -c "$cap"'
     command = [
-        "sudo", "-n", "timeout", "--kill-after=5s", str(seconds) + "s",
-        "flock", "-E", "75", "-n", "/run/lock/sinnix-borg.lock", "env",
+        "sudo",
+        "-n",
+        "timeout",
+        "--kill-after=5s",
+        str(seconds) + "s",
+        "flock",
+        "-E",
+        "75",
+        "-n",
+        "/run/lock/sinnix-borg.lock",
+        "env",
         *[key + "=" + value for key, value in values.items()],
-        shell, "-o", "pipefail", "-c", pipeline, "restore-proof", str(output_limit), *argv,
+        shell,
+        "-o",
+        "pipefail",
+        "-c",
+        pipeline,
+        "restore-proof",
+        str(output_limit),
+        *argv,
     ]
-    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
     output = bytearray()
     diagnostic = b""
     with selectors.DefaultSelector() as selector:
@@ -105,29 +156,57 @@ def owner_read(shell, values, argv, seconds, output_limit):
                     diagnostic = (diagnostic + block)[-8192:]
     status = process.wait()
     if status:
-        raise RuntimeError(f"archive read exited {status}: {diagnostic.decode(errors='replace')}")
+        raise RuntimeError(
+            f"archive read exited {status}: {diagnostic.decode(errors='replace')}"
+        )
     if len(output) >= output_limit:
         raise ValueError("archive read exceeded its retained output bound")
     return bytes(output)
 
 
 def verify_target(payload, version, read):
-    archive, archive_id, snapshot_uuid, expected_hash, size, relative = selected_target(payload, version)
-    header_command = ["borg", "list", "--json", "--format", "{comment}", "--glob-archives", glob_escape(archive)]
+    archive, archive_id, snapshot_uuid, expected_hash, size, relative = selected_target(
+        payload, version
+    )
+    header_command = [
+        "borg",
+        "list",
+        "--json",
+        "--format",
+        "{comment}",
+        "--glob-archives",
+        glob_escape(archive),
+    ]
 
     def check_identity():
         headers = json.loads(read(header_command, 30, 1024 * 1024))["archives"]
-        matches = [item for item in headers if item.get("archive", item.get("name")) == archive]
-        if len(matches) != 1 or matches[0].get("id") != archive_id or matches[0].get("comment") != "sinnix-snapshot-v1:" + snapshot_uuid:
+        matches = [
+            item for item in headers if item.get("archive", item.get("name")) == archive
+        ]
+        if (
+            len(matches) != 1
+            or matches[0].get("id") != archive_id
+            or matches[0].get("comment") != "sinnix-snapshot-v1:" + snapshot_uuid
+        ):
             raise ValueError("archive identity changed since the source receipt")
 
     check_identity()
-    restored = read(["borg", "extract", "--stdout", "--", "::" + archive, relative], 300, size + 1)
+    restored = read(
+        ["borg", "extract", "--stdout", "--", "::" + archive, relative], 300, size + 1
+    )
     digest = hashlib.sha256(restored).hexdigest()
     if len(restored) != size or digest != expected_hash:
         raise ValueError("restored file differs from the complete source digest")
     check_identity()
-    return {"outcome": "ok", "archive": archive, "archive_id": archive_id, "snapshot_uuid": snapshot_uuid, "relative_path": relative, "bytes": size, "sha256": digest}
+    return {
+        "outcome": "ok",
+        "archive": archive,
+        "archive_id": archive_id,
+        "snapshot_uuid": snapshot_uuid,
+        "relative_path": relative,
+        "bytes": size,
+        "sha256": digest,
+    }
 
 
 def main():
@@ -138,11 +217,26 @@ def main():
     started = time.monotonic()
     try:
         payload = load_target(args.target)
-        selected_target(payload, args.version)  # Validate before reading privileged owner state.
+        selected_target(
+            payload, args.version
+        )  # Validate before reading privileged owner state.
         shell, values = installed_owner()
-        proof = verify_target(payload, args.version, lambda argv, seconds, limit: owner_read(shell, values, argv, seconds, limit))
+        proof = verify_target(
+            payload,
+            args.version,
+            lambda argv, seconds, limit: owner_read(
+                shell, values, argv, seconds, limit
+            ),
+        )
         status = 0
-    except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.SubprocessError) as error:
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        TypeError,
+        RuntimeError,
+        subprocess.SubprocessError,
+    ) as error:
         proof = {"outcome": "error", "diagnostic": str(error)}
         status = 1
     proof["elapsed_seconds"] = time.monotonic() - started

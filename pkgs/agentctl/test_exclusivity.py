@@ -276,7 +276,9 @@ def test_retry_respects_active_exclusive_partner(
     assert fake_pueue.task(task.task_id).status == "Queued"
 
 
-def test_admission_and_release_do_not_load_terminal_history(fake_pueue, config, project_root, monkeypatch):
+def test_admission_and_release_do_not_load_terminal_history(
+    fake_pueue, config, project_root, monkeypatch
+):
     config = heavy_policy(config)
     project = load_project_adapter(project_root)
     worker = agent_task(config, project)

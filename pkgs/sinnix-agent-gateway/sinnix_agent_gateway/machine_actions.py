@@ -6,8 +6,8 @@ import socket
 from typing import Any, Callable
 from urllib.parse import quote
 
-from .permissions import Permission, Principal
 from .config import GatewayConfig
+from .permissions import Permission, Principal
 
 
 class MachineActionError(ValueError):

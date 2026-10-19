@@ -5,7 +5,6 @@ import json
 import tracemalloc
 
 import pytest
-
 from sinnix_agent_gateway import payloads
 
 
@@ -28,7 +27,9 @@ def test_failed_json_encoding_cannot_publish_partial_payload(tmp_path):
     root = tmp_path / "payloads"
     previous = payloads.retain_json(root, {"kept": True})
     with pytest.raises(TypeError):
-        payloads.retain_json(root, ["x" * 64] * 10000 + [object()], link=tmp_path / "partial")
+        payloads.retain_json(
+            root, ["x" * 64] * 10000 + [object()], link=tmp_path / "partial"
+        )
     assert list(root.iterdir()) == [previous]
     assert not (tmp_path / "partial").exists()
     assert json.loads(previous.read_bytes()) == {"kept": True}
@@ -36,8 +37,10 @@ def test_failed_json_encoding_cannot_publish_partial_payload(tmp_path):
 
 def test_failed_atomic_publication_cleans_staging(tmp_path, monkeypatch):
     root = tmp_path / "payloads"
+
     def fail(*args, **kwargs):
         raise OSError("synthetic publication failure")
+
     monkeypatch.setattr(payloads, "atomic_publish_at", fail)
     with pytest.raises(OSError, match="synthetic"):
         payloads.retain_json(root, {"rows": ["x"] * 1000})

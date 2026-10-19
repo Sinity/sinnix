@@ -105,20 +105,33 @@ def find_mount_for_path(path: Path) -> dict[str, Any]:
 
 def chrome_path_row(path: Path, include_size: bool = True) -> dict[str, Any]:
     row: dict[str, Any] = {
-        "path": str(path), "exists": None, "is_symlink": None, "realpath": None,
+        "path": str(path),
+        "exists": None,
+        "is_symlink": None,
+        "realpath": None,
     }
     try:
         info = path.lstat()
         row["is_symlink"] = stat.S_ISLNK(info.st_mode)
         if row["is_symlink"]:
             info = path.stat()
-        row.update(exists=True, is_directory=stat.S_ISDIR(info.st_mode), status="available")
+        row.update(
+            exists=True, is_directory=stat.S_ISDIR(info.st_mode), status="available"
+        )
         row["realpath"] = str(path.resolve(strict=False))
     except FileNotFoundError as exc:
-        row.update(exists=False, status="dangling-link" if row["is_symlink"] else "missing", error=str(exc))
+        row.update(
+            exists=False,
+            status="dangling-link" if row["is_symlink"] else "missing",
+            error=str(exc),
+        )
         return row
     except OSError as exc:
-        row.update(exists=None, status="denied" if isinstance(exc, PermissionError) else "inaccessible", error=str(exc))
+        row.update(
+            exists=None,
+            status="denied" if isinstance(exc, PermissionError) else "inaccessible",
+            error=str(exc),
+        )
         return row
     row["mount"] = find_mount_for_path(path)
     if include_size:
@@ -127,15 +140,28 @@ def chrome_path_row(path: Path, include_size: bool = True) -> dict[str, Any]:
 
 
 def group_process_counters(processes: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    metrics = ("rss_kb", "rchar", "wchar", "read_bytes", "write_bytes", "cancelled_write_bytes")
+    metrics = (
+        "rss_kb",
+        "rchar",
+        "wchar",
+        "read_bytes",
+        "write_bytes",
+        "cancelled_write_bytes",
+    )
     groups: dict[str, dict[str, Any]] = {}
     for proc in processes:
         cgroup = proc.get("cgroup") or "(unknown)"
-        row = groups.setdefault(cgroup, {
-            "cgroup": cgroup, "processes": 0,
-            "counter_coverage": {key: {"measured": 0, "missing": 0, "measured_sum": 0}
-                                 for key in metrics},
-        })
+        row = groups.setdefault(
+            cgroup,
+            {
+                "cgroup": cgroup,
+                "processes": 0,
+                "counter_coverage": {
+                    key: {"measured": 0, "missing": 0, "measured_sum": 0}
+                    for key in metrics
+                },
+            },
+        )
         row["processes"] += 1
         values = {**(proc.get("io") or {}), "rss_kb": proc.get("rss_kb")}
         for key in metrics:
@@ -149,9 +175,14 @@ def group_process_counters(processes: list[dict[str, Any]]) -> list[dict[str, An
     for row in groups.values():
         for key, coverage in row["counter_coverage"].items():
             row[key] = None if coverage["missing"] else coverage["measured_sum"]
-    return sorted(groups.values(), key=lambda row: (
-        row["counter_coverage"]["write_bytes"]["measured_sum"]
-        + row["counter_coverage"]["read_bytes"]["measured_sum"]), reverse=True)
+    return sorted(
+        groups.values(),
+        key=lambda row: (
+            row["counter_coverage"]["write_bytes"]["measured_sum"]
+            + row["counter_coverage"]["read_bytes"]["measured_sum"]
+        ),
+        reverse=True,
+    )
 
 
 def collect_chrome_io(
@@ -176,7 +207,9 @@ def collect_chrome_io(
         cache_rows = []
         if profile_row["status"] == "available":
             if not profile_row["is_directory"]:
-                profile_row.update(status="wrong-type", error="Chrome profile is not a directory")
+                profile_row.update(
+                    status="wrong-type", error="Chrome profile is not a directory"
+                )
             else:
                 for rel in CHROME_CACHE_RELATIVE_PATHS:
                     cache_row = chrome_path_row(profile / rel)
@@ -226,8 +259,13 @@ def collect_chrome_io(
     result["below_process_peaks"] = result["below_process_peaks"][:limit]
     result["available"] = bool(
         any(row["status"] == "available" for row in result["profiles"])
-        or result["processes"] or result["below_process_peaks"]
+        or result["processes"]
+        or result["below_process_peaks"]
     )
     if not result["available"]:
-        result["gaps"] = ["chrome_io.profile_unavailable" if result["profiles"] else "chrome_io.no_profile_or_process_seen"]
+        result["gaps"] = [
+            "chrome_io.profile_unavailable"
+            if result["profiles"]
+            else "chrome_io.no_profile_or_process_seen"
+        ]
     return result

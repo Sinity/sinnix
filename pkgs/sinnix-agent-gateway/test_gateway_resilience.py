@@ -7,9 +7,9 @@ import sys
 import anyio
 import pytest
 from sinnix_agent_gateway.audit import AuditService
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.cli import build_manifest, verify_approval
 from sinnix_agent_gateway.config import GatewayConfig
+from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.results import RequestContext, ResultService
 
 
@@ -252,7 +252,10 @@ def test_interrupted_shell_launch_recovers_exact_job_or_stays_indeterminate(
         if evidence == "missing":
             return None
         if evidence == "malformed":
-            return {"launch_reference": "request-retained", "state": {"phase": "running"}}
+            return {
+                "launch_reference": "request-retained",
+                "state": {"phase": "running"},
+            }
         return {
             "job_id": "71",
             "launch_reference": "request-retained",
@@ -284,12 +287,16 @@ def test_interrupted_shell_launch_recovers_exact_job_or_stays_indeterminate(
         assert anyio.run(invoke, request) == response
         assert len(seen) == 1
         audited = call(
-            runtime, "audit.operation", {"action": "shell.run", "key": "shell-key"},
+            runtime,
+            "audit.operation",
+            {"action": "shell.run", "key": "shell-key"},
             BY_NAME,
         )
         assert audited["data"]["state"] == "confirmed"
         assert audited["data"]["response"] == response
-        assert anyio.run(invoke, {**request, "request_id": "new-correlation"}) == response
+        assert (
+            anyio.run(invoke, {**request, "request_id": "new-correlation"}) == response
+        )
     for changed in (
         {"argv": ["git", "log"]},
         {"checkout": {"project": "other"}},

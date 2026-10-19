@@ -94,14 +94,20 @@ class Handler(BaseHTTPRequestHandler):
         if any(
             self.headers.get_all(name)
             for name in (
-                "Origin", "Sec-Fetch-Site", "Sec-Fetch-Mode",
-                "Sec-Fetch-Dest", "Sec-Fetch-User",
+                "Origin",
+                "Sec-Fetch-Site",
+                "Sec-Fetch-Mode",
+                "Sec-Fetch-Dest",
+                "Sec-Fetch-User",
             )
         ):
             self.close_connection = True
             self._send(
                 HTTPStatus.FORBIDDEN,
-                {"ok": False, "detail": "browser requests are not admitted on the native phone API"},
+                {
+                    "ok": False,
+                    "detail": "browser requests are not admitted on the native phone API",
+                },
             )
             return False
         return True
@@ -181,7 +187,10 @@ class Handler(BaseHTTPRequestHandler):
                 self.close_connection = True
                 self._send(
                     HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
-                    {"ok": False, "detail": "one application/json Content-Type is required"},
+                    {
+                        "ok": False,
+                        "detail": "one application/json Content-Type is required",
+                    },
                 )
                 return
 

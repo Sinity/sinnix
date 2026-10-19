@@ -162,7 +162,9 @@ def test_uploaded_bytes_match_identity_after_source_changes(
     audio.write_bytes(original)
     output = tmp_path / "output"
     monkeypatch.setenv("ELEVENLABS_API_KEY", "synthetic-key")
-    monkeypatch.setattr(sys, "argv", ["review", "--output-dir", str(output), str(audio)])
+    monkeypatch.setattr(
+        sys, "argv", ["review", "--output-dir", str(output), str(audio)]
+    )
     write_json = subject.write_json
 
     def change_after_identity(path, value):
@@ -180,11 +182,18 @@ def test_uploaded_bytes_match_identity_after_source_changes(
 
     def fake_api(request, timeout):
         message = BytesParser(policy=default).parsebytes(
-            b"Content-Type: " + request.get_header("Content-type").encode()
-            + b"\r\nMIME-Version: 1.0\r\n\r\n" + request.data
+            b"Content-Type: "
+            + request.get_header("Content-type").encode()
+            + b"\r\nMIME-Version: 1.0\r\n\r\n"
+            + request.data
         )
-        uploads.append(next(part.get_payload(decode=True) for part in message.iter_parts()
-                            if part.get_param("name", header="content-disposition") == "file"))
+        uploads.append(
+            next(
+                part.get_payload(decode=True)
+                for part in message.iter_parts()
+                if part.get_param("name", header="content-disposition") == "file"
+            )
+        )
         return io.BytesIO(b'{"text":"synthetic transcript","words":[]}')
 
     monkeypatch.setattr(subject.urllib.request, "urlopen", fake_api)

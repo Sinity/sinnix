@@ -672,7 +672,8 @@ def test_backpressure_tick_reports_the_decision(
 
     calls = []
     monkeypatch.setattr(
-        launch, "release_holds",
+        launch,
+        "release_holds",
         lambda config: calls.append(config) or {"released": [7], "waiting": []},
     )
     assert cli.main(["backpressure", "tick"]) == 0
@@ -1016,8 +1017,10 @@ def test_batch_queue_replaces_a_lost_landing_once_the_results_are_in(
 
 
 def test_wait_reports_elapsed_age_after_blocking(
-    fake_pueue: FakePueue, cli_config: Config,
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    fake_pueue: FakePueue,
+    cli_config: Config,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     clock = datetime(2026, 1, 1, 12, tzinfo=UTC)
 
@@ -1032,8 +1035,13 @@ def test_wait_reports_elapsed_age_after_blocking(
         nonlocal clock
         started = clock.isoformat()
         clock += timedelta(minutes=10)
-        return {"job_id": 1, "label": "fixture:check", "phase": "running",
-                "started_at": started, "wait_timed_out": True}
+        return {
+            "job_id": 1,
+            "label": "fixture:check",
+            "phase": "running",
+            "started_at": started,
+            "wait_timed_out": True,
+        }
 
     monkeypatch.setattr(cli.launch, "wait", wait)
     assert cli.main(["job", "wait", "1"]) == cli.EXIT_JOB_NOT_SUCCEEDED
@@ -1043,11 +1051,15 @@ def test_wait_reports_elapsed_age_after_blocking(
 
 @pytest.mark.parametrize("verb", ["start", "fire"])
 def test_job_launch_wait_timeout_is_not_success(
-    verb: str, fake_pueue: FakePueue, cli_config: Config,
+    verb: str,
+    fake_pueue: FakePueue,
+    cli_config: Config,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    assert cli.main(["job", verb, "fixture", "check", "--wait",
-                     "--timeout-seconds", "1"]) == cli.EXIT_JOB_NOT_SUCCEEDED
+    assert (
+        cli.main(["job", verb, "fixture", "check", "--wait", "--timeout-seconds", "1"])
+        == cli.EXIT_JOB_NOT_SUCCEEDED
+    )
     observed = json.loads(capsys.readouterr().out)
     assert observed["wait_timed_out"] is True
     assert observed["phase"] == "running"
@@ -1056,7 +1068,9 @@ def test_job_launch_wait_timeout_is_not_success(
 
 @pytest.mark.parametrize("verb", ["start", "fire"])
 def test_job_launch_wait_success_is_success(
-    verb: str, fake_pueue: FakePueue, cli_config: Config,
+    verb: str,
+    fake_pueue: FakePueue,
+    cli_config: Config,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     fake_pueue.finish_when_waited(1, lambda fake: fake.succeed(1))
@@ -1182,16 +1196,33 @@ def test_batch_task_refuses_superseded_attempt_before_owner_read(
     assert "current attempt" in capsys.readouterr().err
 
 
-def test_wait_archived_cancellation_retains_job_failure_exit(fake_pueue, cli_config, capsys):
+def test_wait_archived_cancellation_retains_job_failure_exit(
+    fake_pueue, cli_config, capsys
+):
     assert cli.main(["job", "start", "fixture", "check"]) == 0
     own = json.loads(capsys.readouterr().out)
     fake_pueue.queue(own["job_id"])
-    assert cli.main(["job", "cancel", str(own["job_id"]), "--reference", own["reference"]]) == 0
+    assert (
+        cli.main(["job", "cancel", str(own["job_id"]), "--reference", own["reference"]])
+        == 0
+    )
     capsys.readouterr()
     fake_pueue.next_id = own["job_id"]
     assert cli.main(["job", "start", "fixture", "check"]) == 0
     capsys.readouterr()
-    assert cli.main(["--json", "job", "wait", str(own["job_id"]), "--reference", own["reference"]]) == cli.EXIT_JOB_NOT_SUCCEEDED
+    assert (
+        cli.main(
+            [
+                "--json",
+                "job",
+                "wait",
+                str(own["job_id"]),
+                "--reference",
+                own["reference"],
+            ]
+        )
+        == cli.EXIT_JOB_NOT_SUCCEEDED
+    )
     output = capsys.readouterr()
     observed = json.loads(output.out)
     assert observed["phase"] == "cancelled" and observed["terminal"] is True

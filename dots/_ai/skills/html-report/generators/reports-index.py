@@ -102,7 +102,9 @@ def explicitly_superseded(text: str) -> bool:
     )
 
 
-def render_navigation(reports_dir: Path, out: Path, manifest: Path | None = None, served: bool = False) -> tuple[str, list[dict]]:
+def render_navigation(
+    reports_dir: Path, out: Path, manifest: Path | None = None, served: bool = False
+) -> tuple[str, list[dict]]:
     """Read optional links-only configuration; native resources remain authoritative.
 
     navigation.json may be a symlink to an independently maintained private
@@ -122,7 +124,9 @@ def render_navigation(reports_dir: Path, out: Path, manifest: Path | None = None
     if served:
         for entry in reports_dir.rglob("*"):
             if entry.is_file() and not entry.name.startswith("."):
-                published.setdefault(str(entry.resolve()), quote(os.path.relpath(entry, out.parent)))
+                published.setdefault(
+                    str(entry.resolve()), quote(os.path.relpath(entry, out.parent))
+                )
     sections, groups = [], []
     total = 0
     esc = html_mod.escape
@@ -173,8 +177,11 @@ def render_navigation(reports_dir: Path, out: Path, manifest: Path | None = None
                 href, cls = target.as_uri(), "local-link"
             if served:
                 href = published.get(str(target.resolve()))
-                link = (f'<a href="{esc(href, quote=True)}">{esc(item["title"])}</a> '
-                        if href else f'<span>{esc(item["title"])} (local file; use Copy path)</span> ')
+                link = (
+                    f'<a href="{esc(href, quote=True)}">{esc(item["title"])}</a> '
+                    if href
+                    else f"<span>{esc(item['title'])} (local file; use Copy path)</span> "
+                )
             else:
                 link = f'<a class="{cls}" href="{esc(href, quote=True)}">{esc(item["title"])}</a> '
             items.append({**item, "status": status})
@@ -251,7 +258,13 @@ def report_meta(p: Path) -> dict:
     }
 
 
-def build(reports_dir: Path, out: Path, navigation_out: Path | None = None, navigation: Path | None = None, served: bool = False) -> int:
+def build(
+    reports_dir: Path,
+    out: Path,
+    navigation_out: Path | None = None,
+    navigation: Path | None = None,
+    served: bool = False,
+) -> int:
     nav_html, nav_groups = render_navigation(reports_dir, out, navigation, served)
     files = sorted(
         [
@@ -374,17 +387,27 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("reports_dir", type=Path)
     ap.add_argument("--out", type=Path, default=None)
-    ap.add_argument("--navigation", type=Path, help="Explicit private navigation source, independent of the served site")
+    ap.add_argument(
+        "--navigation",
+        type=Path,
+        help="Explicit private navigation source, independent of the served site",
+    )
     ap.add_argument(
         "--navigation-markdown",
         type=Path,
         default=None,
         help="Also publish a Markdown projection of navigation.json",
     )
-    ap.add_argument("--served", action="store_true", help="Link only published files; label private and local entrances")
+    ap.add_argument(
+        "--served",
+        action="store_true",
+        help="Link only published files; label private and local entrances",
+    )
     args = ap.parse_args()
     out = args.out or (args.reports_dir / "index.html")
-    return build(args.reports_dir, out, args.navigation_markdown, args.navigation, args.served)
+    return build(
+        args.reports_dir, out, args.navigation_markdown, args.navigation, args.served
+    )
 
 
 if __name__ == "__main__":

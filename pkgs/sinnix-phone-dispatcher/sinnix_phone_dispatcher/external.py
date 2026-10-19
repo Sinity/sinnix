@@ -62,7 +62,9 @@ def _score_loop() -> None:
         try:
             _score_worker()
         except Exception as exc:  # noqa: BLE001 - advisory; retain future triggers
-            print(f"phone-dispatcher: score: scoring pass failed: {exc}", file=sys.stderr)
+            print(
+                f"phone-dispatcher: score: scoring pass failed: {exc}", file=sys.stderr
+            )
 
 
 def trigger_score() -> None:
@@ -79,7 +81,9 @@ def trigger_score() -> None:
             return
         _score_running = True
         try:
-            threading.Thread(target=_score_loop, daemon=True, name="phone-score").start()
+            threading.Thread(
+                target=_score_loop, daemon=True, name="phone-score"
+            ).start()
         except BaseException:
             _score_running = False
             raise
