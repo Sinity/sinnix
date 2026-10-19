@@ -4,8 +4,8 @@
 # runtimeInputs: bash @sinnix-hub-server
 set -euo pipefail
 
-# Thin front door: `sinnix orient` (this wrapper, discovered like every other
+# Thin wrapper: `sinnix status` (this wrapper, discovered like every other
 # scripts/ entry) execs straight into the real implementation, which lives in
-# the hub-server package (pkgs/sinnix-hub-server/sinnix_hub_server/orient.py)
-# next to the hub server state it reads. See `sinnix-hub-server orient --help`.
-exec sinnix-hub-server orient "$@"
+# the hub-server package (pkgs/sinnix-hub-server/sinnix_hub_server/status.py)
+# next to the hub server state it reads. See `sinnix-hub-server status --help`.
+exec sinnix-hub-server status "$@"

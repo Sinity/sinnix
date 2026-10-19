@@ -46,7 +46,7 @@ def test_prompt_rejects_noncanonical_or_unknown_inputs() -> None:
         principal="operator", catalog=lambda _principal: {"actions": []}
     )
     try:
-        generator.generate("orient-project", {"ref": "/tmp/project"})
+        generator.generate("project-overview", {"ref": "/tmp/project"})
     except ValueError as exc:
         assert "canonical" in str(exc)
     else:
@@ -58,10 +58,10 @@ def test_prompt_registry_visibility_intent_kind_and_bounds_are_enforced() -> Non
         principal="operator", catalog=lambda _principal: {"actions": []}
     )
     with pytest.raises(ValueError, match="resource kind"):
-        generator.generate("orient-project", {"ref": "sinnix://jobs/job-1"})
+        generator.generate("project-overview", {"ref": "sinnix://jobs/job-1"})
     with pytest.raises(ValueError, match="resource kind"):
         generator.generate(
-            "orient-project", {"ref": "sinnix://browser/agent-workspace"}
+            "project-overview", {"ref": "sinnix://browser/agent-workspace"}
         )
     with pytest.raises(ValueError, match="not recognized"):
         generator.generate(
@@ -70,5 +70,5 @@ def test_prompt_registry_visibility_intent_kind_and_bounds_are_enforced() -> Non
         )
     with pytest.raises(ValueError, match="input bound"):
         generator.generate(
-            "orient-project", {"ref": "sinnix://projects/" + "x" * 2_100}
+            "project-overview", {"ref": "sinnix://projects/" + "x" * 2_100}
         )

@@ -21,7 +21,7 @@ Preserved exactly, because they are contracts other things read:
   * the ledger schema `sinnix-health-transition-v1` and its `k=v;k=v` evidence
     strings, at /run/sinnix/health-transitions.jsonl. The schema is open over
     the `status` value and every reader treats it that way (`/v1/health/lanes`
-    hands the state file back verbatim; orient lists anything that is not
+    hands the state file back verbatim; `sinnix status` lists anything that is not
     "healthy"), so a new status is an additive change under the same name. The
     `capture_stale` statuses are `healthy`, `stale`, and -- added 2026-08-18 --
     `unproduced`, which means the lane's path holds no file at all: it has

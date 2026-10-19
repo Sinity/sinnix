@@ -1,4 +1,4 @@
-"""`sinnix-hub-server orient` -- one-call system orientation for agents.
+"""`sinnix-hub-server status` -- one-call system status for agents.
 
 Thin, read-only composition over sources that are already authoritative
 elsewhere: the reducer's own /v1/snapshot (which embeds the runtime
@@ -23,7 +23,7 @@ from typing import Any, Callable
 
 from sinnix_lib.ledger import utc_ts
 
-SCHEMA = "sinnix-orient-v1"
+SCHEMA = "sinnix-status-v1"
 
 SOCKET_TIMEOUT = 3.0
 BD_TIMEOUT = 8.0
@@ -35,7 +35,7 @@ def default_static_inventory_path() -> Path:
     """Honors SINNIX_RUNTIME_INVENTORY_FILE, the same override
     sinnix-observe's runtime_inventory.inventory_path() reads -- so hermetic
     tests and fixture hosts that already point that env var elsewhere also
-    redirect orient's acknowledged-outages read."""
+    redirect this acknowledged-outages read."""
     return Path(
         os.environ.get(
             "SINNIX_RUNTIME_INVENTORY_FILE", "/etc/sinnix/runtime-inventory.json"
@@ -45,7 +45,7 @@ def default_static_inventory_path() -> Path:
 
 class UnixConnection(http.client.HTTPConnection):
     """HTTP over the reducer's Unix socket -- same shape as cli.py's, kept
-    local so orient has no import-time dependency on the CLI module."""
+    local so this module has no import-time dependency on the CLI module."""
 
     def __init__(self, path: str, timeout: float = SOCKET_TIMEOUT) -> None:
         super().__init__("localhost", timeout=timeout)
@@ -292,7 +292,7 @@ def _truncate(text: Any, width: int = TITLE_MAX) -> str:
 def render_human(data: dict[str, Any]) -> str:
     lines: list[str] = []
     system = data.get("system") or {}
-    lines.append(f"sinnix orient — {data.get('generated_at', '?')}")
+    lines.append(f"sinnix status — {data.get('generated_at', '?')}")
     lines.append("")
     lines.append(str(system.get("summary", "system status unknown")))
     for unit in system.get("failed_units") or []:
@@ -384,7 +384,7 @@ def default_socket_path() -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="sinnix-hub-server orient")
+    parser = argparse.ArgumentParser(prog="sinnix-hub-server status")
     parser.add_argument(
         "--json", action="store_true", help="Emit the composed document as JSON."
     )

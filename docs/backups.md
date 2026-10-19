@@ -62,7 +62,7 @@ Borg stores mostly new data; the `/realm` snapshots archive them.
   notification, repeated daily while it stays failed.
 - **Do not trust `systemctl --failed` alone.** Every NixOS switch resets the
   failed state of all units. Use the hub's health view
-  (`sinnix-hub-server orient`) or the journal.
+  (`sinnix status`) or the journal.
 - **Journal.** Drains log `backup_phase=create` and `backup_phase=verify`
   lines: `journalctl -u borgbackup-job-realm -u borgbackup-job-persist`.
 - **Markers.** Per-repository state, including the latest archived snapshot

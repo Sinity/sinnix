@@ -175,7 +175,7 @@ def test_published_prompt_accepts_its_declared_target(tmp_path: Path) -> None:
 
     async def get():
         return await server.get_prompt(
-            "orient-project", {"ref": "sinnix://projects/fixture"}
+            "project-overview", {"ref": "sinnix://projects/fixture"}
         )
 
     prompt = anyio.run(get)

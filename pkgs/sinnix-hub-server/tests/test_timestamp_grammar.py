@@ -1,6 +1,6 @@
 """One UTC grammar across the records this package writes and joins.
 
-The health ledger, the reducer snapshot, the action receipts and orient are
+The health ledger, the snapshot, the action receipts and the status report are
 read together -- a lane's transition is matched against the snapshot revision
 that observed it, and a receipt against the snapshot it was admitted from.
 While the health ledger stamped seconds and everything else stamped
@@ -20,7 +20,8 @@ from pathlib import Path
 from typing import Any
 
 from sinnix_hub_server import actions as actions_module
-from sinnix_hub_server import health, orient
+from sinnix_hub_server import health
+from sinnix_hub_server import status as hub_status
 from sinnix_hub_server import reducer as reducer_module
 from sinnix_hub_server.actions import ActionService
 from sinnix_hub_server.reducer import Reducer
@@ -122,8 +123,8 @@ def test_every_record_this_package_joins_carries_one_utc_grammar(
     assert off_grammar == {}
 
 
-def test_orient_stamps_the_same_grammar(tmp_path: Path) -> None:
-    generated = orient.compose(
+def test_status_stamps_the_same_grammar(tmp_path: Path) -> None:
+    generated = hub_status.compose(
         socket_path=tmp_path / "absent.sock",
         static_inventory_path=tmp_path / "absent.json",
         fetch=lambda _socket, _route: None,

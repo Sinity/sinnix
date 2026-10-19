@@ -21,14 +21,14 @@ class PromptSpec:
 
 PROMPT_SPECS = (
     PromptSpec(
-        "orient-project", "project.orientation", "Orient on one project before acting."
+        "project-overview", "project.orientation", "Get an overview of one project before acting."
     ),
     PromptSpec(
         "triage-beads", "project.triage", "Triage bounded Beads work for one project."
     ),
     PromptSpec("review-job", "job.review", "Review one queued job and its evidence."),
     PromptSpec(
-        "incident-orient", "incident", "Orient on current runtime incident evidence."
+        "incident-overview", "incident", "Review current runtime incident evidence."
     ),
 )
 

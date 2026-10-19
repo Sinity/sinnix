@@ -1,4 +1,4 @@
-"""`sinnix-hub-server orient`: composition, degrade paths, and the folded
+"""`sinnix-hub-server status`: composition, degrade paths, and the folded
 acknowledged-outages hook contract."""
 
 from __future__ import annotations
@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sinnix_hub_server import orient
+from sinnix_hub_server import status as hub_status
 
 SNAPSHOT_HEALTHY: dict[str, Any] = {
     "schema": "sinnix-ops-v1",
@@ -96,7 +96,7 @@ def failing_runner(*_args: Any, **_kwargs: Any):
 
 
 def test_failed_and_attention_units_filters_active_states() -> None:
-    units = orient.failed_and_attention_units(SNAPSHOT_HEALTHY["state"])
+    units = hub_status.failed_and_attention_units(SNAPSHOT_HEALTHY["state"])
     states = {u["unit"]: u["active_state"] for u in units}
     assert states == {
         "sinnix-capture-kitty-scrollback.service": "failed",
@@ -105,22 +105,22 @@ def test_failed_and_attention_units_filters_active_states() -> None:
 
 
 def test_system_verdict_reports_attention_when_units_or_sources_are_bad() -> None:
-    units = orient.failed_and_attention_units(SNAPSHOT_HEALTHY["state"])
-    degraded = orient.degraded_sources(SNAPSHOT_HEALTHY["sources"])
-    status, summary = orient.system_verdict(units, degraded)
+    units = hub_status.failed_and_attention_units(SNAPSHOT_HEALTHY["state"])
+    degraded = hub_status.degraded_sources(SNAPSHOT_HEALTHY["sources"])
+    status, summary = hub_status.system_verdict(units, degraded)
     assert status == "attention"
     assert "1 unit failed" in summary
     assert "ambient-intelligence" in summary
 
 
 def test_system_verdict_healthy_when_nothing_is_wrong() -> None:
-    status, summary = orient.system_verdict([], [])
+    status, summary = hub_status.system_verdict([], [])
     assert (status, summary) == ("healthy", "The system is healthy.")
 
 
 def test_acknowledged_outages_extracts_only_down_true() -> None:
     inventory = SNAPSHOT_HEALTHY["state"]["runtime_inventory"]
-    rows = orient.acknowledged_outages(inventory)
+    rows = hub_status.acknowledged_outages(inventory)
     assert rows == [
         {
             "surface": "sinex",
@@ -133,12 +133,12 @@ def test_acknowledged_outages_extracts_only_down_true() -> None:
 
 
 def test_acknowledged_outages_absent_inventory_is_empty() -> None:
-    assert orient.acknowledged_outages(None) == []
-    assert orient.acknowledged_outages({"surfaces": "not-a-dict"}) == []
+    assert hub_status.acknowledged_outages(None) == []
+    assert hub_status.acknowledged_outages({"surfaces": "not-a-dict"}) == []
 
 
 def test_capture_freshness_counts_and_lists_non_healthy() -> None:
-    freshness = orient.capture_freshness(LANES_MIXED)
+    freshness = hub_status.capture_freshness(LANES_MIXED)
     assert freshness["available"] is True
     assert freshness["total"] == 3
     assert freshness["healthy"] == 1
@@ -152,8 +152,8 @@ def test_capture_freshness_counts_and_lists_non_healthy() -> None:
 
 
 def test_capture_freshness_unavailable_when_lanes_missing() -> None:
-    assert orient.capture_freshness(None) == {"available": False}
-    assert orient.capture_freshness({"keys": "not-a-dict"}) == {"available": False}
+    assert hub_status.capture_freshness(None) == {"available": False}
+    assert hub_status.capture_freshness({"keys": "not-a-dict"}) == {"available": False}
 
 
 # --------------------------------------------------------------------------
@@ -165,7 +165,7 @@ def test_bd_ready_head_parses_and_truncates() -> None:
     items = [
         {"id": f"sinnix-{i}", "title": f"item {i}", "priority": 3} for i in range(8)
     ]
-    result = orient.bd_ready_head(runner=make_runner(json.dumps(items)))
+    result = hub_status.bd_ready_head(runner=make_runner(json.dumps(items)))
     assert result["available"] is True
     assert result["total"] == 8
     assert len(result["ready"]) == 5
@@ -173,18 +173,18 @@ def test_bd_ready_head_parses_and_truncates() -> None:
 
 
 def test_bd_ready_head_absent_on_nonzero_exit() -> None:
-    result = orient.bd_ready_head(
+    result = hub_status.bd_ready_head(
         runner=make_runner("Error: no beads database found", 1)
     )
     assert result == {"available": False}
 
 
 def test_bd_ready_head_absent_on_missing_binary() -> None:
-    assert orient.bd_ready_head(runner=failing_runner) == {"available": False}
+    assert hub_status.bd_ready_head(runner=failing_runner) == {"available": False}
 
 
 def test_bd_ready_head_absent_on_malformed_json() -> None:
-    assert orient.bd_ready_head(runner=make_runner("not json")) == {"available": False}
+    assert hub_status.bd_ready_head(runner=make_runner("not json")) == {"available": False}
 
 
 # --------------------------------------------------------------------------
@@ -198,7 +198,7 @@ def test_compose_healthy_reducer_and_beads() -> None:
             route
         ]
 
-    data = orient.compose(
+    data = hub_status.compose(
         socket_path=Path("/nonexistent/ops.sock"),
         fetch=fetch,
         bd_head=lambda: {
@@ -207,7 +207,7 @@ def test_compose_healthy_reducer_and_beads() -> None:
             "ready": [{"id": "x", "title": "y", "priority": 1}],
         },
     )
-    assert data["schema"] == orient.SCHEMA
+    assert data["schema"] == hub_status.SCHEMA
     assert data["system"]["status"] == "attention"
     assert data["acknowledged_outages"][0]["surface"] == "sinex"
     assert data["capture_freshness"]["healthy"] == 1
@@ -225,7 +225,7 @@ def test_compose_degraded_reducer_falls_back_to_static_inventory(
     def fetch(_socket: Path, _route: str) -> dict[str, Any] | None:
         return None  # the reducer is unreachable
 
-    data = orient.compose(
+    data = hub_status.compose(
         socket_path=Path("/nonexistent/ops.sock"),
         static_inventory_path=static_inventory,
         fetch=fetch,
@@ -244,14 +244,14 @@ def test_compose_no_beads_workspace() -> None:
             route
         ]
 
-    data = orient.compose(
+    data = hub_status.compose(
         socket_path=Path("/nonexistent/ops.sock"),
         fetch=fetch,
         bd_head=lambda: {"available": False},
     )
     assert data["beads"] == {"available": False}
     # Human rendering must not mention the beads section at all.
-    text = orient.render_human(data)
+    text = hub_status.render_human(data)
     assert "Beads ready" not in text
 
 
@@ -273,7 +273,7 @@ def test_render_human_healthy_system_has_no_attention_rows() -> None:
         },
         "beads": {"available": False},
     }
-    text = orient.render_human(data)
+    text = hub_status.render_human(data)
     assert "The system is healthy." in text
     assert "FAILED" not in text
     assert "Acknowledged outages" not in text
@@ -281,7 +281,7 @@ def test_render_human_healthy_system_has_no_attention_rows() -> None:
 
 
 def test_render_human_includes_every_populated_section() -> None:
-    data = orient.compose(
+    data = hub_status.compose(
         socket_path=Path("/nonexistent/ops.sock"),
         fetch=lambda _s, route: {
             "/v1/snapshot": SNAPSHOT_HEALTHY,
@@ -293,7 +293,7 @@ def test_render_human_includes_every_populated_section() -> None:
             "ready": [{"id": "a", "title": "t", "priority": 1}],
         },
     )
-    text = orient.render_human(data)
+    text = hub_status.render_human(data)
     assert "FAILED      sinnix-capture-kitty-scrollback.service (user)" in text
     assert "ACTIVATING  sinnix-midflight.service (system)" in text
     assert "SOURCE DOWN ambient-intelligence" in text
@@ -313,7 +313,7 @@ def test_render_acknowledged_only_matches_hook_contract() -> None:
             "ref": "sinnix-abcd",
         }
     ]
-    text = orient.render_acknowledged_only(acked)
+    text = hub_status.render_acknowledged_only(acked)
     assert text.startswith(
         "## Acknowledged outages (known-down, do not re-report as incidents)\n\n"
     )
@@ -325,7 +325,7 @@ def test_render_acknowledged_only_matches_hook_contract() -> None:
 
 
 def test_render_acknowledged_only_empty_when_nothing_acknowledged() -> None:
-    assert orient.render_acknowledged_only([]) == ""
+    assert hub_status.render_acknowledged_only([]) == ""
 
 
 def test_acknowledged_only_report_prefers_static_file(tmp_path: Path) -> None:
@@ -339,7 +339,7 @@ def test_acknowledged_only_report_prefers_static_file(tmp_path: Path) -> None:
         calls.append(route)
         return None
 
-    text = orient.acknowledged_only_report(
+    text = hub_status.acknowledged_only_report(
         socket_path=Path("/nonexistent/ops.sock"),
         static_inventory_path=static_inventory,
         fetch=fetch,
@@ -355,7 +355,7 @@ def test_acknowledged_only_report_falls_back_to_socket(tmp_path: Path) -> None:
         assert route == "/v1/snapshot"
         return SNAPSHOT_HEALTHY
 
-    text = orient.acknowledged_only_report(
+    text = hub_status.acknowledged_only_report(
         socket_path=Path("/nonexistent/ops.sock"),
         static_inventory_path=missing,
         fetch=fetch,
@@ -367,13 +367,13 @@ def test_default_static_inventory_path_honors_env_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("SINNIX_RUNTIME_INVENTORY_FILE", "/tmp/fixture-inventory.json")
-    assert orient.default_static_inventory_path() == Path("/tmp/fixture-inventory.json")
+    assert hub_status.default_static_inventory_path() == Path("/tmp/fixture-inventory.json")
 
 
 def test_default_static_inventory_path_falls_back_to_etc(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("SINNIX_RUNTIME_INVENTORY_FILE", raising=False)
-    assert orient.default_static_inventory_path() == Path(
+    assert hub_status.default_static_inventory_path() == Path(
         "/etc/sinnix/runtime-inventory.json"
     )
