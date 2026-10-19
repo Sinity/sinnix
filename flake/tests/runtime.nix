@@ -566,11 +566,7 @@ in
               # LiteLLM routes to several independently activated backends.
               # Requiring Ollama here starts its GPU occupant for every
               # gateway request and evicts direct GPU backends such as Glimmer.
-              assertion =
-                !(lib.elem "ollama-proxy.service" (config.systemd.services.litellm.requires or [ ]))
-                && !(lib.elem "ollama-proxy" (
-                  config.sinnix.runtime.inventory.surfaces.litellm.activation.dependsOn or [ ]
-                ));
+              assertion = !(lib.elem "ollama-proxy.service" (config.systemd.services.litellm.requires or [ ]));
               message = "LiteLLM must not unconditionally start the Ollama GPU backend; model backends activate independently";
             }
           ];

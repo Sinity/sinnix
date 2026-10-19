@@ -1,49 +1,17 @@
 # System Introspection: config dump generation
 #
 # Generates at build time:
-# - /etc/sinnix/config.json   — Serialized config.sinnix attrset (for any consumer)
+# - /etc/sinnix/config.json   — the expected live state sinnix-config-drift
+#   compares against, and the configuration revision
 {
   lib,
   config,
   ...
 }:
 let
-  cfg = config.sinnix;
-  inherit (cfg.paths) machineRoot;
-
-  # ── Collect enabled features ────────────────────────────────────────
-  collectEnabled =
-    domain: features:
-    lib.concatLists (
-      lib.mapAttrsToList (
-        name: value:
-        if builtins.isAttrs value && value ? enable && value.enable then [ "${domain}.${name}" ] else [ ]
-      ) features
-    );
-
-  enabledFeatures = lib.concatLists (lib.mapAttrsToList collectEnabled (cfg.features or { }));
-
-  enabledServices = lib.filter (
-    name:
-    let
-      svc = cfg.services.${name} or { };
-    in
-    builtins.isAttrs svc && svc ? enable && svc.enable
-  ) (builtins.attrNames (cfg.services or { }));
-
-  # ── Config dump (selective serialization for safety) ────────────────
+  # ── Config dump: only what sinnix-config-drift reads ────────────────
   configDump = {
     sinnix = {
-      inherit (cfg)
-        user
-        machine
-        paths
-        projects
-        ;
-      secrets = {
-        inherit (cfg.secrets) enable;
-        paths = cfg.secrets.paths or { };
-      };
       drift = {
         sysctls = config.boot.kernel.sysctl;
         slices = config.sinnix.runtime.inventory.slices;
@@ -88,26 +56,7 @@ let
       };
     };
     meta = {
-      hostname = config.networking.hostName;
       configurationRevision = config.system.configurationRevision;
-      stateVersion = config.system.stateVersion;
-      inherit enabledFeatures enabledServices;
-      captures.directories = {
-        asciinema = "${config.sinnix.paths.capturePaths.asciinema}";
-        screenshot = "${config.sinnix.paths.capturePaths.screenshot}";
-        audio = "${config.sinnix.paths.capturePaths.audio}";
-        keylog = "${config.sinnix.paths.capturePaths.keylog}";
-        syslog = "${machineRoot}/syslog";
-        machine = machineRoot;
-        activitywatch = "${config.sinnix.paths.capturePaths.activitywatch}";
-        shell = "${config.sinnix.paths.capturePaths.shell}";
-        webhistory = "${config.sinnix.paths.capturePaths.webhistory}";
-        kitty-scrollback = "${config.sinnix.paths.capturePaths.kitty-scrollback}";
-      };
-      firewallPorts = {
-        tcp = config.networking.firewall.allowedTCPPorts;
-        udp = config.networking.firewall.allowedUDPPorts;
-      };
     };
   };
 

@@ -34,7 +34,6 @@ mkServiceModule {
       # loads models lazily per request. 30s is ample for the daemon itself.
       readinessTimeout = 30;
       exclusiveResource = "gpu-inference";
-      dependsOn = [ "ollama-proxy" ];
       # Model pulls are exactly the long-running-consumer case the
       # activation contract exists for.
       consumers = [

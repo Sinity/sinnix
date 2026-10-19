@@ -496,11 +496,9 @@ mkServiceModule {
           };
           machine-telemetry-seal-timer = {
             unit = "machine-telemetry-seal.timer";
-            kind = "timer";
           };
           machine-telemetry-sqlite-backup-timer = {
             unit = "machine-telemetry-sqlite-backup.timer";
-            kind = "timer";
           };
         };
 

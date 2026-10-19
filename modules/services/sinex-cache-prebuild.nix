@@ -52,7 +52,6 @@ mkServiceModule {
   surface = {
     unit = "sinex-cache-prebuild.timer";
     manager = "user";
-    kind = "timer";
     observe = {
       enable = true;
       restartable = false;

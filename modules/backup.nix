@@ -1086,7 +1086,6 @@ in
             };
             btrbk-timer = {
               unit = "btrbk.timer";
-              kind = "timer";
               observe = {
                 enable = true;
                 restartable = false;
@@ -1166,7 +1165,6 @@ in
             };
             polylogue-sqlite-backup-timer = {
               unit = "polylogue-sqlite-backup.timer";
-              kind = "timer";
             };
             borgbackup-job-polylogue-state = {
               unit = "borgbackup-job-polylogue-state.service";

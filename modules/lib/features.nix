@@ -95,7 +95,6 @@ let
       docs ? null,
       # CLI, development, and system features are part of every host. Desktop
       # features follow the machine role unless a host declares an exception.
-      defaultOn ? true,
       defaultOnDesktop ? builtins.head path == "desktop",
       configFn,
     }:
@@ -106,7 +105,7 @@ let
       ]
       ++ path;
       generatedOptions = mkSubFeatureOptions subFeatures;
-      enableDefault = config: if defaultOnDesktop then config.sinnix.machine.isDesktop else defaultOn;
+      enableDefault = config: !defaultOnDesktop || config.sinnix.machine.isDesktop;
       inherit
         description
         extraOptions
@@ -240,81 +239,6 @@ let
     sinnix: hmConfig: rel:
     hmConfig.lib.file.mkOutOfStoreSymlink (sinnix.paths.dotsRoot + rel);
 
-  # PAM login limits factory
-  # Usage: mkPAMLimits { domain = "@audio"; rtprio = 95; memlock = "unlimited"; }
-  mkPAMLimits =
-    {
-      domain,
-      rtprio ? null,
-      memlock ? null,
-      nice ? null,
-    }:
-    lib.concatLists [
-      (lib.optional (rtprio != null) {
-        inherit domain;
-        type = "-";
-        item = "rtprio";
-        value = toString rtprio;
-      })
-      (lib.optional (memlock != null) {
-        inherit domain;
-        type = "-";
-        item = "memlock";
-        value = memlock;
-      })
-      (lib.optional (nice != null) {
-        inherit domain;
-        type = "-";
-        item = "nice";
-        value = toString nice;
-      })
-    ];
-
-  # Standard shell env-var name for a secret (matches modules/secrets.nix's
-  # own agenix-export derivation): upper-SNAKE_CASE, dots and dashes both
-  # collapse to underscores.
-  secretEnvName = secretName: lib.toUpper (lib.replaceStrings [ "-" "." ] [ "_" "_" ] secretName);
-
-  # Standard secret-resolution shell fragment: prefer an already-exported env
-  # var, else read the agenix runtime path if readable, else fail loudly.
-  # Leaves the resolved value exported in `varName` (defaults to the secret's
-  # derived env-var name).
-  #
-  # Usage: mkSecretLookup { secretName = "deepseek-api-key"; varName = "OPENAI_API_KEY"; caller = "hermes-deepseek"; }
-  mkSecretLookup =
-    {
-      # Bare secret name as it appears under secret/<name>.age and
-      # /run/agenix/<name> (see modules/secrets.nix auto-discovery).
-      secretName,
-      # Wrapper/script name used in the error message, e.g. "hermes-deepseek".
-      caller,
-      # Shell variable the resolved value ends up exported in.
-      varName ? secretEnvName secretName,
-      # Runtime path override; defaults to the standard agenix path.
-      agenixPath ? "/run/agenix/${secretName}",
-    }:
-    let
-      envName = secretEnvName secretName;
-      path = lib.escapeShellArg agenixPath;
-    in
-    ''
-      if [ -n "''${${envName}:-}" ]; then
-        ${
-          # When the caller wants the secret in its own derived env var, the
-          # value is already exactly where it belongs -- emitting
-          # `FOO="$FOO"` here is a self-assignment shellcheck rejects
-          # (SC2269), which fails any writeShellApplication caller.
-          if varName == envName then ":" else ''${varName}="''${${envName}}"''
-        }
-      elif [ -r ${path} ]; then
-        ${varName}="$(<${path})"
-      else
-        echo "${caller}: no ${secretName} available (set ${envName} or ensure ${agenixPath} is readable)" >&2
-        exit 1
-      fi
-      export ${varName}
-    '';
-
   # ============================================================================
   # Auto-Discovery Helpers
   # ============================================================================
@@ -355,8 +279,6 @@ in
     mkServiceModule
     mkAiService
     mkDotsFileFor
-    mkPAMLimits
-    mkSecretLookup
     ;
   inherit mkAutoImports;
 }

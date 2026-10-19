@@ -47,7 +47,6 @@ mkAiService {
     idleTimeout = "300s";
     # Cold start loads that 650 MB encoder in ~2s.
     readinessTimeout = 60;
-    dependsOn = [ "stt-proxy" ];
   };
   configFn =
     {

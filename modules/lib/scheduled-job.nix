@@ -25,27 +25,8 @@
 #                           calendar step, so it must divide its minute,
 #                           hour or day evenly),
 #                           onBootSec, onStartupSec, persistent,
-#                           randomizedDelaySec, accuracySec, description,
-#                           enable ? true }
-#                         omit for a service with no timer at all. `enable`
-#                         is for the different case of a STATICALLY known
-#                         timer spec whose activation is gated by a runtime
-#                         option of the SAME module (e.g. a job's own
-#                         `job = { cfg, ... }: { timer = { ...; enable =
-#                         cfg.timer.enable; }; }` function form): omitting
-#                         the `timer` key outright based on forcing that
-#                         same-module cfg value to decide the KEY'S
-#                         PRESENCE creates a genuine self-referential
-#                         blackhole in the module system (the generic
-#                         config-merge pass must visit this module's own
-#                         `.config` shape to resolve the very cfg option
-#                         being forced).
-#                         `enable` keeps the `timer` key statically present
-#                         (safe: no forcing needed for shape) and instead
-#                         wraps the rendered timer unit's VALUE in
-#                         `lib.mkIf`, the same deferred-marker mechanism
-#                         that already makes `cfg.enable` -> `mkIf cfg.enable`
-#                         safe everywhere else in this factory.
+#                           randomizedDelaySec, accuracySec, description }
+#                         omit for a service with no timer at all.
 #   manager ? "system"    "system" | "user"
 #   user                  system-manager User= (evidence lives in a user's
 #                         own stores)
@@ -59,7 +40,7 @@
 #                         restartIfChanged, ...)
 { lib }:
 let
-  systemdLib = import ./systemd-hardening.nix { inherit lib; };
+  systemdLib = import ./systemd.nix { inherit lib; };
 in
 {
   config,
@@ -174,11 +155,7 @@ let
     services.${unitName} = serviceBody;
   }
   // lib.optionalAttrs (j ? timer) {
-    # mkIf, not a plain value: this is the ONLY point where `timer.enable`
-    # (see the doc comment above) gets forced, and mkIf is a marker the
-    # module system's generic config-merge pass defers to leaf-read time
-    # rather than needing during shape/key-presence resolution.
-    timers.${unitName} = lib.mkIf (j.timer.enable or true) timerBody;
+    timers.${unitName} = timerBody;
   };
 in
 if manager == "user" then { systemd.user = units; } else { systemd = units; }

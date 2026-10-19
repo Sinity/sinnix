@@ -151,7 +151,6 @@ mkFeatureModule {
         sinnix.runtime.surfaces.wallpaper-timeofday = {
           unit = "sinnix-wallpaper-timeofday.timer";
           manager = "user";
-          kind = "timer";
           observe = {
             enable = true;
             restartable = false;

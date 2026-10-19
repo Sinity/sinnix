@@ -67,9 +67,6 @@ let
       key: (builtins.length (builtins.filter (candidate: candidate == key) surfaceUnitKeys)) > 1
     ) surfaceUnitKeys
   );
-  kindUnitMismatches = builtins.filter (
-    surface: !(lib.hasSuffix ".${surface.kind}" surface.unit)
-  ) surfaceRows;
   unreferencedAcknowledgements = lib.mapAttrsToList (name: _: name) (
     lib.filterAttrs (
       _: surface:
@@ -287,15 +284,9 @@ in
                 "slice"
                 "scope"
               ];
-              default = "service";
-              description = ''
-                Runtime surface kind. Every value here is a real systemd unit
-                type, and the assertion below enforces that `unit` ends in it.
-                There is deliberately no "capture" member: a lane whose writer
-                is not a unit belongs in sinnix.runtime.captures, not here with
-                a synthetic unit name that makes the `unit` field mean two
-                different things depending on this one.
-              '';
+              readOnly = true;
+              default = lib.last (lib.splitString "." config.unit);
+              description = "systemd unit type, taken from the suffix of `unit`.";
             };
             resourceClass = lib.mkOption {
               type = lib.types.enum resourceClassNames;
@@ -502,11 +493,6 @@ in
                 default = null;
                 description = "Resource admission key shared by mutually exclusive surfaces.";
               };
-              dependsOn = lib.mkOption {
-                type = lib.types.listOf lib.types.str;
-                default = [ ];
-                description = "Runtime surface names required by this activation path.";
-              };
               # Long-running consumers of a socket-proxied surface MUST speak to
               # the publicEndpoint: traffic against the private backend port is
               # invisible to the proxy's idle timer, so mid-work the proxy
@@ -701,14 +687,6 @@ in
             message =
               "sinnix.runtime.surfaces must not declare duplicate manager/unit pairs: "
               + lib.concatStringsSep ", " duplicateSurfaceUnitKeys;
-          }
-          {
-            assertion = kindUnitMismatches == [ ];
-            message =
-              "sinnix.runtime.surfaces unit suffixes must match their kind: "
-              + lib.concatMapStringsSep ", " (
-                surface: "${surface.name}:${surface.kind}:${surface.unit}"
-              ) kindUnitMismatches;
           }
           {
             assertion = unreferencedAcknowledgements == [ ];

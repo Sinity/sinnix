@@ -25,12 +25,4 @@ rec {
     });
   };
 
-  # Add build inputs to an existing package
-  # Example: mkBuildInputsOverlay "xdg-desktop-portal-hyprland" (pkgs: [ pkgs.libcap ])
-  mkBuildInputsOverlay = name: buildInputsFn: _final: prev: {
-    ${name} = prev.${name}.overrideAttrs (old: {
-      buildInputs = (old.buildInputs or [ ]) ++ buildInputsFn prev;
-    });
-  };
-
 }

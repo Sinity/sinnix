@@ -32,7 +32,6 @@ mkAiService {
     idleTimeout = "10min";
     # Python startup and migrations; measured cold starts are well under this.
     readinessTimeout = 180;
-    dependsOn = [ "open-webui-proxy" ];
   };
   stateDirectories = [ "/var/lib/open-webui" ];
   requiresCuda = false;

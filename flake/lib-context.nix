@@ -3,7 +3,7 @@ let
   inherit (inputs.nixpkgs) lib;
 
   featureLib = import ../modules/lib/features.nix { inherit lib; };
-  systemdLib = import ../modules/lib/systemd-hardening.nix { inherit lib; };
+  systemdLib = import ../modules/lib/systemd.nix { inherit lib; };
   overlayLib = import ../modules/lib/overlay-helpers.nix { inherit lib; };
   # mkCaptureLane builds ON mkServiceModule (callers do
   # `mkServiceModule (mkCaptureLane { ... }) args`) rather than wrapping it,
@@ -46,7 +46,7 @@ let
   extendedLib = lib.extend (
     _final: _prev: {
       sinnix = {
-        inherit (featureLib) mkPAMLimits mkSecretLookup mkAutoImports;
+        inherit (featureLib) mkAutoImports;
         mkScheduledJob = scheduledJobLib;
         systemd = systemdLib;
         inherit (systemdLib) mkRuntimeServiceConfig;

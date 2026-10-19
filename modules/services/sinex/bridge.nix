@@ -538,7 +538,6 @@ in
         sinnix.runtime.surfaces = {
           sinex-runtime = {
             unit = "sinex-runtime.target";
-            kind = "target";
             resourceClass = "capture";
             observe = {
               enable = runtimeAutoStart;
@@ -547,7 +546,6 @@ in
           };
           sinex-runtime-timer = {
             unit = "sinex-runtime.timer";
-            kind = "timer";
           };
           sinexd = {
             unit = "sinexd.service";
@@ -593,7 +591,6 @@ in
           };
           sinex-postgres-dump-timer = {
             unit = "sinex-postgres-dump.timer";
-            kind = "timer";
           };
         }
         // lib.optionalAttrs activationProfile.document {

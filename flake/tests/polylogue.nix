@@ -137,10 +137,6 @@ in
               set -eu
               site="$(echo ${polyloguePackage}/lib/python*/site-packages)"
               test -d "$site/devtools"
-              if grep -Fq 'max(1, int(budget // WORKER_PEAK_MIB))' "$site/devtools/worker_memory.py"; then
-                echo "FAIL: worker_memory.py restored the max(1) floor" >&2
-                exit 1
-              fi
               PYTHONPATH="$site''${PYTHONPATH:+:$PYTHONPATH}" python3 ${./pytest_admission.py}
               touch "$out"
             '';

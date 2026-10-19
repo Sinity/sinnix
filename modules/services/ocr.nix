@@ -31,7 +31,6 @@ mkServiceModule {
       idleTimeout = "300s";
       readinessTimeout = 60;
       exclusiveResource = "gpu-inference";
-      dependsOn = [ "ocr-proxy" ];
     };
     observe = {
       enable = true;

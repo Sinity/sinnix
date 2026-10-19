@@ -26,7 +26,6 @@ mkAiService {
     idleTimeout = "300s";
     readinessTimeout = 60;
     exclusiveResource = "gpu-inference";
-    dependsOn = [ "tts-proxy" ];
   };
   extraOptions = {
     autoStart = args.lib.mkOption {

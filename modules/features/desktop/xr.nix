@@ -154,7 +154,6 @@ mkFeatureModule {
         sinnix.runtime.surfaces.quest-media-prune = {
           unit = "sinnix-quest-media-prune.timer";
           manager = "user";
-          kind = "timer";
           observe = {
             enable = true;
             restartable = false;

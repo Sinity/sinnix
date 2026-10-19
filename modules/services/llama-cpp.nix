@@ -67,7 +67,6 @@ mkServiceModule {
           backendEndpoint = backendSocket name;
           inherit (profile) idleTimeout readinessTimeout;
           exclusiveResource = if profile.requiresCuda then "gpu-inference" else null;
-          dependsOn = [ "${name}-proxy" ];
         };
         observe = {
           enable = true;

@@ -37,7 +37,6 @@ mkAiService {
     # Unmeasured; kept at the baseline default.
     idleTimeout = "30s";
     readinessTimeout = 30;
-    dependsOn = [ "kokoro-proxy" ];
   };
   extraOptions = {
     autoStart = args.lib.mkOption {

@@ -43,7 +43,6 @@ mkServiceModule {
       idleTimeout = "900s";
       readinessTimeout = 180;
       exclusiveResource = "gpu-inference";
-      dependsOn = [ "comfyui-proxy" ];
     };
     observe = {
       enable = true;

@@ -32,7 +32,6 @@ mkServiceModule {
       idleTimeout = "900s";
       readinessTimeout = 180;
       exclusiveResource = "gpu-inference";
-      dependsOn = [ "musicgen-proxy" ];
     };
     observe = {
       enable = true;

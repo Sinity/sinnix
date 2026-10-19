@@ -32,7 +32,7 @@ let
     let
       normalized = {
         manager = "system";
-        kind = "service";
+        kind = lib.last (lib.splitString "." surface.unit);
         resourceClass = "ordinary";
         observe = {
           enable = false;
@@ -51,7 +51,6 @@ let
           backendEndpoint = null;
           idleTimeout = null;
           exclusiveResource = null;
-          dependsOn = [ ];
         };
         workload = {
           class = "unclassified";

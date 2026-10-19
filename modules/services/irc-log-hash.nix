@@ -34,7 +34,6 @@ mkServiceModule {
     {
       unit = "sinnix-irc-log-hash.timer";
       manager = "user";
-      kind = "timer";
       observe = {
         enable = true;
         restartable = false;
