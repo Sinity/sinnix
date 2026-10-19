@@ -68,9 +68,7 @@ def test_idle_owner_revision_changes_publish_the_changed_component() -> None:
 
 
 def test_server_lifespan_survives_optional_publisher_failure(tmp_path: Path) -> None:
-    server = create_server(
-        GatewayConfig(state_dir=tmp_path / "state", projects={}), "operator"
-    )
+    server = create_server(GatewayConfig(state_dir=tmp_path / "state", projects={}))
     publisher = server._sinnix_revision_publisher
     publisher._should_poll = lambda: True
     original_run = publisher.run

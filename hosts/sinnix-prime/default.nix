@@ -36,27 +36,7 @@
   sinnix.services = {
     agent-gateway = {
       enable = true;
-      endpoints = {
-        operator = {
-          # The private ChatGPT tunnel uses the single operator gateway identity.
-          enable = true;
-          label = "Private ChatGPT operator";
-          principal = "operator";
-          tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
-          runtimeKeyFile = "/run/agenix/openai-tunnel-runtime-key";
-          healthPort = 3088;
-          scope = {
-            captures = [
-              "subject:activity"
-              "subject:ai"
-              "subject:comms"
-              "subject:health"
-              "subject:machine"
-              "subject:self"
-            ];
-          };
-        };
-      };
+      tunnelId = "tunnel_6a2eb972c3bc8191be437670f455ebd9";
     };
     # Clodex remains inactive until its one-time device-code OAuth has created
     # ~/.clodex/providers.json. See docs/clodex.md.

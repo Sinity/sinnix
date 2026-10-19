@@ -18,7 +18,6 @@ from sinnix_lib.atomic import atomic_publish
 
 from .. import files as host_files
 from ..action import (
-    OPERATOR_ONLY,
     Action,
     ActionResult,
     Example,
@@ -26,7 +25,7 @@ from ..action import (
     RequestControls,
 )
 from ..content import Artifact, attach, is_text, sha256_of, sniff_media_type
-from ..contracts import VerbFamily
+from ..contracts import PRINCIPAL, VerbFamily
 from ..files import FileError
 from ..locators import FileLocator, encode_file_ref
 from ..owner_execution import (
@@ -35,7 +34,6 @@ from ..owner_execution import (
     OwnerExecution,
     OwnerRoute,
 )
-from ..permissions import Permission
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 from ..text_paging import decode_utf8_page
@@ -87,7 +85,7 @@ def _authorized(runtime: Runtime, locator: FileLocator, *, existing: bool) -> Pa
 
 def _secret_descendant_globs(runtime: Runtime, roots: list[Path]) -> list[str]:
     """Return ripgrep exclusions for configured roots where possible."""
-    if runtime.principal.name == "operator":
+    if PRINCIPAL == "operator":
         return []
     globs: list[str] = []
     for root in roots:
@@ -143,7 +141,6 @@ class StatInput(RequestControls):
 
 
 def _stat(runtime: Runtime, inp: StatInput) -> FileStat:
-    runtime.principal.require(Permission.FILE_READ)
     raw_path, _ = inp.target.resolve()
     candidate = Path(raw_path)
     if inp.follow_symlinks:
@@ -261,7 +258,6 @@ def _entry(runtime: Runtime, child: Path) -> FileEntry | None:
 
 
 def _list(runtime: Runtime, inp: ListInput) -> DirectoryListing:
-    runtime.principal.require(Permission.FILE_READ)
     target = _authorized(runtime, inp.target, existing=True)
     if not target.is_dir():
         raise ProtocolError("invalid_request", "path is not a directory")
@@ -346,7 +342,6 @@ class FileContent(GatewayModel):
 
 
 def _read(runtime: Runtime, inp: ReadInput) -> ActionResult:
-    runtime.principal.require(Permission.FILE_READ)
     target = _authorized(runtime, inp.target, existing=True)
     if not target.is_file():
         raise ProtocolError("invalid_request", "path is not a regular file")
@@ -471,7 +466,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=StatInput,
         Output=FileStat,
         handler=_stat,
-        principals=OPERATOR_ONLY,
         resource_kinds=("host_file",),
         affordances=("files.read", "files.list", "files.change"),
         aliases=("file info", "metadata", "size", "permissions"),
@@ -487,7 +481,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ListInput,
         Output=DirectoryListing,
         handler=_list,
-        principals=OPERATOR_ONLY,
         resource_kinds=("host_file",),
         affordances=("files.stat", "files.read", "files.search"),
         aliases=("ls", "directory", "folder", "browse"),
@@ -503,7 +496,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ReadInput,
         Output=FileContent,
         handler=_read,
-        principals=OPERATOR_ONLY,
         resource_kinds=("host_file",),
         affordances=("files.patch", "files.change", "files.stat"),
         aliases=("cat", "open", "view", "image", "picture", "screenshot file"),
@@ -664,7 +656,6 @@ def _raise_search_failure(argv: list[str], result: ExecutionResult) -> None:
 
 
 def _search(runtime: Runtime, inp: SearchInput) -> SearchResult:
-    runtime.principal.require(Permission.FILE_READ)
     roots = [_authorized(runtime, root, existing=True) for root in inp.roots]
     root_refs = [encode_file_ref(str(root)) for root in roots]
     warnings: list[str] = []
@@ -1229,7 +1220,6 @@ def _git_apply_patch(
 
 
 def _patch(runtime: Runtime, inp: PatchInput) -> PatchResult:
-    runtime.principal.require(Permission.FILE_WRITE)
     target = _authorized(runtime, inp.target, existing=True)
     if not target.is_file():
         raise ProtocolError("invalid_request", "path is not a regular file")
@@ -1380,7 +1370,6 @@ class ChangeResult(GatewayModel):
 
 
 def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
-    runtime.principal.require(Permission.FILE_WRITE)
     path, ref = inp.target.resolve()
     expected = inp.expected_sha256
     if inp.preconditions:
@@ -1464,7 +1453,6 @@ ACTIONS = ACTIONS + (
         Input=SearchInput,
         Output=SearchResult,
         handler=_search,
-        principals=OPERATOR_ONLY,
         resource_kinds=("host_file",),
         affordances=("files.read", "files.stat", "files.list"),
         aliases=("find", "grep", "locate", "rg", "fd", "search files", "recent files"),
@@ -1499,7 +1487,6 @@ ACTIONS = ACTIONS + (
         Input=PatchInput,
         Output=PatchResult,
         handler=_patch,
-        principals=OPERATOR_ONLY,
         resource_kinds=("host_file",),
         affordances=("files.read", "files.stat"),
         aliases=("edit", "apply diff", "modify text", "sed"),
@@ -1541,7 +1528,6 @@ ACTIONS = ACTIONS + (
         Input=ChangeInput,
         Output=ChangeResult,
         handler=_change,
-        principals=OPERATOR_ONLY,
         resource_kinds=("host_file",),
         affordances=("files.stat", "files.read", "files.list"),
         aliases=("write", "save", "rename", "delete", "mkdir", "touch"),

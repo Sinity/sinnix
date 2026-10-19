@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import Field
 
 from ..action import (
-    OPERATOR_ONLY,
     Action,
     Example,
     MutationControls,
@@ -677,12 +676,10 @@ def _open(runtime: Runtime, inp: OpenInput) -> OpenResult:
 
 _READ = {
     "owner": "terminals",
-    "principals": OPERATOR_ONLY,
     "resource_kinds": ("terminal",),
 }
 _WRITE = {
     "owner": "terminals",
-    "principals": OPERATOR_ONLY,
     "resource_kinds": ("terminal",),
 }
 _TARGET = {"target": {"title_contains": "Codex"}}

@@ -12,7 +12,6 @@ import anyio
 from pydantic import Field, ValidationError
 
 from ..action import (
-    OPERATOR_ONLY,
     Action,
     ActionResult,
     Example,
@@ -28,7 +27,6 @@ from ..mcp_broker import (
     McpBrokerTimeoutError,
     McpEnvironmentError,
 )
-from ..permissions import Permission
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 
@@ -113,7 +111,6 @@ def _server_row(
 
 
 async def _servers(runtime: Runtime, inp: ServersInput) -> Servers:
-    runtime.principal.require(Permission.MCP_READ)
     configured = runtime.config.mcp_broker_servers
     unknown = sorted(set(inp.servers) - set(configured))
     if unknown:
@@ -310,10 +307,6 @@ async def _invoke_self(
             "self-broker routing supports direct read actions only; invoke changes by their action name",
             details={"tool": tool},
         )
-    if runtime.principal_name not in action.principals:
-        raise ProtocolError(
-            "policy_denied", "principal cannot invoke the requested gateway action"
-        )
     try:
         request_input = action.Input.model_validate(dict(arguments))
     except ValidationError as exc:
@@ -450,7 +443,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ServersInput,
         Output=Servers,
         handler=_servers,
-        principals=OPERATOR_ONLY,
         resource_kinds=("mcp_tool",),
         affordances=("mcp.tools", "mcp.call", "artifacts.read"),
         aliases=(
@@ -473,7 +465,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ToolsInput,
         Output=Tools,
         handler=_tools,
-        principals=OPERATOR_ONLY,
         resource_kinds=("mcp_tool",),
         affordances=("mcp.call", "mcp.change", "mcp.servers"),
         aliases=("list mcp tools", "upstream tools", "tool schema"),
@@ -492,7 +483,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=CallInput,
         Output=CallResult,
         handler=_call,
-        principals=OPERATOR_ONLY,
         resource_kinds=("mcp_tool",),
         affordances=("mcp.tools", "artifacts.read"),
         aliases=("call mcp tool", "query upstream", "polylogue search"),
@@ -515,7 +505,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ChangeInput,
         Output=CallResult,
         handler=_change,
-        principals=OPERATOR_ONLY,
         resource_kinds=("mcp_tool",),
         affordances=("mcp.tools", "artifacts.read", "audit.receipt"),
         aliases=("write mcp tool", "mutate upstream", "refresh"),

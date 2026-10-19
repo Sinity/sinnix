@@ -12,6 +12,7 @@ from typing import Any, Callable, Mapping
 
 from .audit import AuditService
 from .beads import BeadsService
+from .contracts import PRINCIPAL
 from .projects import ProjectService
 from .results import derive_cursor_key
 
@@ -47,12 +48,11 @@ def _digest(value: Any) -> str:
 class OpaqueEventCursor:
     """A scope-bound cursor. It carries positions, never normalized event rows."""
 
-    def __init__(self, *, principal: str, cursor_key: bytes) -> None:
-        self.principal = principal
-        self._key = derive_cursor_key(cursor_key, "events", principal)
+    def __init__(self, *, cursor_key: bytes) -> None:
+        self._key = derive_cursor_key(cursor_key, "events", PRINCIPAL)
 
     def _scope(self, projects: list[str]) -> str:
-        return _digest({"principal": self.principal, "projects": sorted(projects)})
+        return _digest({"principal": PRINCIPAL, "projects": sorted(projects)})
 
     @staticmethod
     def _initial_state() -> dict[str, Any]:
@@ -176,7 +176,6 @@ class NormalizedEventService:
     def __init__(
         self,
         *,
-        principal: str,
         cursor_key: bytes,
         projects: ProjectService,
         beads: BeadsService,
@@ -185,7 +184,6 @@ class NormalizedEventService:
         jobs: Callable[[int, str | None], Mapping[str, Any]] | None = None,
         max_response_bytes: int = MAX_RESPONSE_BYTES,
     ) -> None:
-        self.principal = principal
         self.projects = projects
         self.beads = beads
         self.audit = audit
@@ -194,7 +192,7 @@ class NormalizedEventService:
         if not 16_384 <= max_response_bytes <= MAX_RESPONSE_BYTES:
             raise ValueError("event response bound is outside the supported range")
         self.max_response_bytes = max_response_bytes
-        self.cursor = OpaqueEventCursor(principal=principal, cursor_key=cursor_key)
+        self.cursor = OpaqueEventCursor(cursor_key=cursor_key)
 
     def _event(
         self,
@@ -209,7 +207,7 @@ class NormalizedEventService:
     ) -> dict[str, Any]:
         row: dict[str, Any] = {
             "schema": "sinnix.gateway-event.v1",
-            "principal": self.principal,
+            "principal": PRINCIPAL,
             "event_id": event_id,
             "kind": kind,
             "source": source,
@@ -238,7 +236,7 @@ class NormalizedEventService:
     ) -> bool:
         payload = {
             "schema": "sinnix.gateway-events.v1",
-            "principal": self.principal,
+            "principal": PRINCIPAL,
             "events": events,
             "sources": sources,
             "limit": limit,
@@ -641,7 +639,7 @@ class NormalizedEventService:
         next_cursor = self.cursor.encode(next_state, selected)
         response = {
             "schema": "sinnix.gateway-events.v1",
-            "principal": self.principal,
+            "principal": PRINCIPAL,
             "events": events,
             "sources": sources,
             "next_cursor": next_cursor,

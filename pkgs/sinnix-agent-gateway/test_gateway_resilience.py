@@ -9,7 +9,6 @@ import pytest
 from sinnix_agent_gateway.audit import AuditService
 from sinnix_agent_gateway.cli import build_manifest, verify_approval
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.results import RequestContext, ResultService
 
 
@@ -18,9 +17,8 @@ def test_full_observations_survive_restart_and_share_only_payload_bytes(tmp_path
     config = GatewayConfig(
         projects={}, state_dir=tmp_path / "state", max_result_bytes=8192
     )
-    principal = Principal.for_name("operator")
-    audit = AuditService(config, principal)
-    service = ResultService(config, principal)
+    audit = AuditService(config)
+    service = ResultService(config)
     payload = {"text": "x" * size}
     responses = []
     for index in range(2):
@@ -36,7 +34,7 @@ def test_full_observations_survive_restart_and_share_only_payload_bytes(tmp_path
                 meta={"coverage": {"observation": index}},
             )
         )
-    restarted = ResultService(config, principal)
+    restarted = ResultService(config)
     observations = [restarted.read(row["result"]["result_id"]) for row in responses]
     assert [row["data"] for row in observations] == [payload, payload]
     assert [row["meta"]["coverage"] for row in observations] == [
@@ -63,9 +61,8 @@ def test_crashed_pending_call_is_indeterminate_without_reexecution(
 import os, sys
 from pathlib import Path
 from sinnix_agent_gateway.audit import AuditService
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.config import GatewayConfig
-service = AuditService(GatewayConfig(projects={}, state_dir=Path(sys.argv[1])), Principal.for_name('operator'))
+service = AuditService(GatewayConfig(projects={}, state_dir=Path(sys.argv[1])))
 assert service.claim_idempotency('fixture.change', 'key', 'a'*64)[0] == 'new'
 if sys.argv[3] == 'True':
     Path(sys.argv[2]).write_text('accepted once')
@@ -75,9 +72,7 @@ os._exit(37)
         [sys.executable, "-c", code, str(state), str(effect), str(after_effect)]
     )
     assert crashed.returncode == 37
-    service = AuditService(
-        GatewayConfig(projects={}, state_dir=state), Principal.for_name("operator")
-    )
+    service = AuditService(GatewayConfig(projects={}, state_dir=state))
     assert service.claim_idempotency("fixture.change", "key", "a" * 64) == (
         "indeterminate",
         None,
@@ -96,8 +91,8 @@ os._exit(37)
 
 def test_pending_contention_and_confirmed_response_replay(tmp_path):
     config = GatewayConfig(projects={}, state_dir=tmp_path)
-    first = AuditService(config, Principal.for_name("operator"))
-    second = AuditService(config, Principal.for_name("operator"))
+    first = AuditService(config)
+    second = AuditService(config)
     assert first.claim_idempotency("fixture.change", "key", "a" * 64)[0] == "new"
     assert second.claim_idempotency("fixture.change", "key", "a" * 64)[0] == "pending"
     response = {"receipt": {"receipt_id": "receipt"}, "data": {"accepted": True}}
@@ -119,24 +114,17 @@ def test_pending_contention_and_confirmed_response_replay(tmp_path):
     )
 
 
-def test_package_manifest_checks_code_and_principal_separately_from_connector(tmp_path):
+def test_package_manifest_checks_code_separately_from_connector(tmp_path):
     path = tmp_path / "manifest.json"
     config = GatewayConfig(
         projects={}, state_dir=tmp_path / "state", package_manifest_path=path
     )
-    manifest = anyio.run(build_manifest, config, "operator")
-    path.write_text(json.dumps({"principal": "operator", "manifest": manifest}))
-    assert (
-        verify_approval(config, "operator")["tool_manifest_hash"] == manifest["sha256"]
-    )
-    path.write_text(json.dumps({"principal": "unknown", "manifest": manifest}))
-    with pytest.raises(ValueError, match="principal"):
-        verify_approval(config, "operator")
-    path.write_text(
-        json.dumps({"principal": "operator", "manifest": {"sha256": "a" * 64}})
-    )
+    manifest = anyio.run(build_manifest, config)
+    path.write_text(json.dumps({"manifest": manifest}))
+    assert verify_approval(config)["tool_manifest_hash"] == manifest["sha256"]
+    path.write_text(json.dumps({"manifest": {"sha256": "a" * 64}}))
     with pytest.raises(ValueError, match="drift"):
-        verify_approval(config, "operator")
+        verify_approval(config)
 
 
 @pytest.mark.parametrize("size", [200, 20000])
@@ -150,14 +138,13 @@ def test_owner_product_availability_is_independent_of_presentation_budget(
     from sinnix_agent_gateway.mcp_broker import McpBrokerService
 
     config = GatewayConfig(projects={}, state_dir=tmp_path, max_result_bytes=8192)
-    principal = Principal.for_name("operator")
     data = {"evidence": "x" * size, "coverage": {"complete": False}}
 
     class Broker(McpBrokerService):
         async def owner_result(self, *args, **kwargs):
             return {"structuredContent": data, "isError": False}
 
-    broker = Broker(config, principal, ArtifactService(config, principal))
+    broker = Broker(config, ArtifactService(config))
 
     async def invoke():
         presentation = await broker.call("polylogue", "get", {}, write=False)
@@ -182,7 +169,7 @@ def test_interrupted_launch_reconciles_owner_identity_without_running_again(
     from sinnix_agent_gateway.runtime import Runtime
 
     config = GatewayConfig(projects={}, state_dir=tmp_path)
-    runtime = Runtime.create(config, "operator")
+    runtime = Runtime.create(config)
     request = {"idempotency_key": "launch-key"}
     context = runtime._request_context(request)
     runtime.audit.claim_idempotency(
@@ -234,7 +221,7 @@ def test_interrupted_shell_launch_recovers_exact_job_or_stays_indeterminate(
     from sinnix_agent_gateway.runtime import Runtime
     from test_actions_machine import call
 
-    runtime = Runtime.create(GatewayConfig(projects={}, state_dir=tmp_path), "operator")
+    runtime = Runtime.create(GatewayConfig(projects={}, state_dir=tmp_path))
     request = {
         "checkout": {"project": "fixture"},
         "argv": ["git", "status"],
@@ -313,7 +300,7 @@ def test_unreconciled_interruption_returns_indeterminate_and_no_effect(tmp_path)
     from sinnix_agent_gateway.actions import BY_NAME
     from sinnix_agent_gateway.runtime import Runtime
 
-    runtime = Runtime.create(GatewayConfig(projects={}, state_dir=tmp_path), "operator")
+    runtime = Runtime.create(GatewayConfig(projects={}, state_dir=tmp_path))
     request = {"idempotency_key": "change-key"}
     context = runtime._request_context(request)
     runtime.audit.claim_idempotency(
@@ -344,7 +331,7 @@ def test_machine_recovery_requires_exact_confirmed_owner_request(
     from sinnix_agent_gateway.actions import BY_NAME
     from sinnix_agent_gateway.runtime import Runtime
 
-    runtime = Runtime.create(GatewayConfig(projects={}, state_dir=tmp_path), "operator")
+    runtime = Runtime.create(GatewayConfig(projects={}, state_dir=tmp_path))
     expected = {
         "kind": "unit",
         "unit": "fixture.service",
@@ -413,7 +400,7 @@ def test_error_after_mutation_exposes_uncertainty_and_never_repeats(tmp_path):
     from sinnix_agent_gateway.actions import BY_NAME
     from sinnix_agent_gateway.runtime import Runtime
 
-    runtime = Runtime.create(GatewayConfig(projects={}, state_dir=tmp_path), "operator")
+    runtime = Runtime.create(GatewayConfig(projects={}, state_dir=tmp_path))
     effects = []
 
     async def interrupted():
@@ -442,7 +429,7 @@ def test_stopped_process_reconciles_without_resolving_a_live_process(tmp_path):
     from sinnix_agent_gateway.actions import BY_NAME
     from sinnix_agent_gateway.runtime import Runtime
 
-    runtime = Runtime.create(GatewayConfig(projects={}, state_dir=tmp_path), "operator")
+    runtime = Runtime.create(GatewayConfig(projects={}, state_dir=tmp_path))
     expected = {"kind": "process", "pid": 424242, "start_ticks": 7}
     request = {
         "target": {"pid": 424242},

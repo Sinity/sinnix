@@ -23,7 +23,6 @@ from sinnix_lib.lock import flock
 
 from .config import GatewayConfig, ProjectConfig
 from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
-from .permissions import Permission, Principal
 
 
 class ProjectError(ValueError):
@@ -302,14 +301,10 @@ def _atomic_publish_symlink(parent: int, target_name: str, target: str) -> None:
 
 
 class ProjectService:
-    def __init__(self, config: GatewayConfig, principal: Principal):
+    def __init__(self, config: GatewayConfig):
         self.config = config
-        self.principal = principal
 
     def _project(self, project_id: str, *, write: bool = False) -> ProjectConfig:
-        self.principal.require(
-            Permission.PROJECT_WRITE if write else Permission.PROJECT_READ
-        )
         try:
             project = self.config.projects[project_id]
         except KeyError as exc:
@@ -339,8 +334,6 @@ class ProjectService:
         return resolved
 
     def list(self) -> dict[str, Any]:
-        self.principal.require(Permission.PROJECT_READ)
-        can_write = Permission.PROJECT_WRITE in self.principal.permissions
         rows = []
         for project in self.config.projects.values():
             candidates: list[dict[str, Any]] = []
@@ -378,7 +371,7 @@ class ProjectService:
                         None,
                     ),
                     "checkouts": candidates,
-                    "writable": can_write,
+                    "writable": True,
                 }
             )
         return {"projects": sorted(rows, key=lambda row: row["project_id"])}
@@ -1173,7 +1166,7 @@ class ProjectService:
                 separators=(",", ":"),
             ).encode()
         ).hexdigest()
-        results = ResultService(self.config, self.principal)
+        results = ResultService(self.config)
         if cursor is not None:
             return results.continue_snapshot(
                 cursor, query_sha256=key, page_size=page_size

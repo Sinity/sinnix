@@ -43,12 +43,9 @@ PROMPT_KINDS = {
 
 
 class PromptGenerator:
-    """Generate principal-visible guidance from canonical registry references."""
+    """Generate guidance from canonical registry references."""
 
-    def __init__(
-        self, *, principal: str, catalog: Callable[[str], Mapping[str, Any]]
-    ) -> None:
-        self.principal = principal
+    def __init__(self, *, catalog: Callable[[], Mapping[str, Any]]) -> None:
         self.catalog = catalog
         self._specs = {spec.name: spec for spec in PROMPT_SPECS}
 
@@ -77,8 +74,6 @@ class PromptGenerator:
             raise ValueError(
                 "prompt ref is not a canonical registry reference"
             ) from exc
-        if self.principal not in resource.principals:
-            raise ValueError("prompt ref is not visible to this principal")
         if str(resource.ref_template.format(values)) != reference:
             raise ValueError("prompt ref is not canonical")
         return resource, values
@@ -107,7 +102,7 @@ class PromptGenerator:
             raise ValueError(
                 f"prompt {spec.name} does not accept resource kind {resource.kind!r}"
             )
-        catalog = self.catalog(self.principal)
+        catalog = self.catalog()
         actions = [
             {
                 "name": row.get("name"),
@@ -122,7 +117,6 @@ class PromptGenerator:
             "schema": "sinnix.gateway-prompt.v1",
             "prompt": name,
             "intent": spec.intent,
-            "principal": self.principal,
             "target_ref": ref,
             "context_ref": ref,
             "action_catalog_revision": catalog.get("revision"),
@@ -130,7 +124,7 @@ class PromptGenerator:
             "instructions": [
                 f"Compose the {spec.intent} context for {ref} and use only evidence-bearing canonical refs from it.",
                 "Treat unavailable components as explicit evidence gaps.",
-                "Select actions from this principal-filtered catalog. This prompt does not grant mutation authority or invoke an action.",
+                "Select actions from this catalog. This prompt does not grant mutation authority or invoke an action.",
                 "When evidence changes, re-read the owner resource and compare its source revision before proceeding.",
             ],
         }

@@ -15,7 +15,6 @@ def config(tmp_path: Path) -> GatewayConfig:
     return GatewayConfig(
         state_dir=tmp_path / "state",
         projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
-        approved_manifest_hash="approved-fixture-hash",
     )
 
 
@@ -69,7 +68,7 @@ def apply(server, plan_data: dict, key: str = "apply-1") -> dict:
 def test_plan_applies_explicit_move_after_planned_mkdir_and_replays(
     tmp_path: Path,
 ) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     source = tmp_path / "source.txt"
     destination_parent = tmp_path / "archive"
     destination = destination_parent / "source.txt"
@@ -91,7 +90,7 @@ def test_plan_applies_explicit_move_after_planned_mkdir_and_replays(
 
 
 def test_changeset_refuses_changed_source_before_any_mutation(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     source, destination = tmp_path / "source.txt", tmp_path / "destination.txt"
     source.write_text("before")
     planned = plan(server, source, destination)
@@ -105,7 +104,7 @@ def test_changeset_refuses_changed_source_before_any_mutation(tmp_path: Path) ->
 
 
 def test_plan_reports_collision_without_mutating(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     source, destination = tmp_path / "source.txt", tmp_path / "destination.txt"
     source.write_text("source")
     destination.write_text("destination")
@@ -122,7 +121,7 @@ def test_plan_reports_collision_without_mutating(tmp_path: Path) -> None:
 def test_changeset_reports_partial_failure_with_compensation_hint(
     tmp_path: Path, monkeypatch
 ) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     runtime = server._sinnix_revision_publisher.runtime
     source_one, source_two = tmp_path / "one.txt", tmp_path / "two.txt"
     destination_one, destination_two = (
@@ -175,7 +174,7 @@ def test_changeset_reports_partial_failure_with_compensation_hint(
 def test_directory_move_is_same_filesystem_rename_with_tree_identity(
     tmp_path: Path,
 ) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     source, destination = tmp_path / "source-dir", tmp_path / "destination-dir"
     (source / "nested").mkdir(parents=True)
     (source / "nested" / "note.txt").write_text("note")
@@ -194,7 +193,7 @@ def test_directory_move_is_same_filesystem_rename_with_tree_identity(
 
 
 def test_references_uses_bounded_existing_text_search(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     root = tmp_path / "refs"
     root.mkdir()
     note = root / "note.txt"
@@ -215,7 +214,7 @@ def test_references_uses_bounded_existing_text_search(tmp_path: Path) -> None:
 def test_plan_refuses_source_parent_that_cannot_remove(tmp_path, monkeypatch):
     from sinnix_agent_gateway import files
 
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     source = tmp_path / "source"
     source.write_text("payload")
     destination = tmp_path / "destination"
@@ -239,7 +238,7 @@ def test_plan_refuses_cross_parent_directory_without_directory_write_access(
 ):
     from sinnix_agent_gateway import files
 
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     source = tmp_path / "source"
     source.mkdir()
     (source / "note").write_text("payload")
@@ -263,7 +262,7 @@ def test_plan_refuses_cross_parent_directory_without_directory_write_access(
 def test_changed_source_access_refused_before_planned_mkdir(tmp_path, monkeypatch):
     from sinnix_agent_gateway import files
 
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     source = tmp_path / "source"
     source.write_text("payload")
     parent = tmp_path / "new-parent"
@@ -286,7 +285,7 @@ def test_changed_source_access_refused_before_planned_mkdir(tmp_path, monkeypatc
 def test_oserror_from_move_owner_keeps_structured_partial_receipt(
     tmp_path, monkeypatch
 ):
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     runtime = server._sinnix_revision_publisher.runtime
     source = tmp_path / "source"
     source.write_text("payload")

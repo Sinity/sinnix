@@ -68,8 +68,6 @@ class GatewayConfig:
     observe_command: str = "sinnix-observe"
     max_result_bytes: int = 262_144
     package_manifest_path: Path | None = None
-    approved_manifest_hash: str | None = None
-    approved_manifest_principal: str = "operator"
     connector_snapshot_path: Path | None = None
     systemd_run_command: str = "systemd-run"
     systemctl_command: str = "systemctl"
@@ -82,7 +80,6 @@ class GatewayConfig:
     beads_command: str = "bd"
     mcp_broker_servers: dict[str, dict[str, Any]] = field(default_factory=dict)
     capture_command: str = "sinnix-capture"
-    capture_scope: frozenset[str] = frozenset()
 
     @classmethod
     def load(cls, path: Path | None) -> "GatewayConfig":
@@ -96,17 +93,6 @@ class GatewayConfig:
         scope = endpoint.get("scope", {})
         if not isinstance(scope, Mapping):
             raise ValueError("endpoint.scope must be an object")
-        capture_scope_values = scope.get("captures", [])
-        if not isinstance(capture_scope_values, list) or any(
-            not isinstance(value, str)
-            or value.partition(":")[0] not in {"lane", "subject"}
-            or not value.partition(":")[2]
-            for value in capture_scope_values
-        ):
-            raise ValueError(
-                "endpoint.scope.captures requires capture-scope-v1 subject:<id> or lane:<id> selectors"
-            )
-        capture_scope = frozenset(capture_scope_values)
         project_scope_values = scope.get("projects", [])
         if not isinstance(project_scope_values, list) or any(
             not isinstance(value, str) or not value for value in project_scope_values
@@ -278,7 +264,6 @@ class GatewayConfig:
         return cls(
             state_dir=state_dir,
             projects=projects,
-            capture_scope=capture_scope,
             runtime_inventory=Path(
                 raw.get("runtimeInventory", "/etc/sinnix/runtime-inventory.json")
             ),
@@ -296,10 +281,6 @@ class GatewayConfig:
             package_manifest_path=Path(raw["packageManifestPath"])
             if raw.get("packageManifestPath")
             else None,
-            approved_manifest_hash=raw.get("approvedManifestHash"),
-            approved_manifest_principal=raw.get(
-                "approvedManifestPrincipal", "operator"
-            ),
             connector_snapshot_path=Path(raw["connectorSnapshotPath"])
             if "connectorSnapshotPath" in raw
             else None,

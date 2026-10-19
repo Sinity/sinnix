@@ -15,9 +15,9 @@ from typing import TYPE_CHECKING, Any, Literal
 import anyio
 from pydantic import Field
 
-from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
+from ..action import Action, Example, RequestControls
 from ..contexts import source_revision
-from ..contracts import VerbFamily
+from ..contracts import PRINCIPAL, VerbFamily
 from ..locators import (
     BeadLocator,
     FileLocator,
@@ -25,7 +25,6 @@ from ..locators import (
     ProjectLocator,
     project_ref,
 )
-from ..permissions import Permission
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 from .jobs import JobView, _job_view
@@ -191,7 +190,6 @@ def _probe(
     runtime: Runtime, condition: FileExists | TerminalOutput
 ) -> tuple[bool, dict[str, Any], str]:
     if isinstance(condition, FileExists):
-        runtime.principal.require(Permission.FILE_READ)
         path, _ = condition.target.resolve()
         present = Path(path).exists()
         return (
@@ -360,7 +358,6 @@ class EventPage(GatewayModel):
 
 
 def _events(runtime: Runtime, inp: EventsInput) -> EventPage:
-    runtime.principal.require(Permission.AUDIT_READ)
     project_ids = (
         sorted({locator.resolve(runtime) for locator in inp.projects})
         if inp.projects
@@ -369,7 +366,7 @@ def _events(runtime: Runtime, inp: EventsInput) -> EventPage:
     page = runtime.v2_events(inp.limit, inp.cursor, project_ids)
     return EventPage(
         event_schema=page.get("schema"),
-        principal=str(page.get("principal") or runtime.principal.name),
+        principal=str(page.get("principal") or PRINCIPAL),
         events=[dict(row) for row in page.get("events") or []],
         sources=dict(page.get("sources") or {}),
         next_cursor=str(page["next_cursor"]),
@@ -391,7 +388,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=WaitInput,
         Output=WaitResult,
         handler=_wait_for,
-        principals=ALL_PRINCIPALS,
         resource_kinds=(
             "job",
             "bead",
@@ -452,11 +448,10 @@ ACTIONS: tuple[Action, ...] = (
         Input=EventsInput,
         Output=EventPage,
         handler=_events,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("receipt", "project", "job"),
         affordances=("wait.for", "jobs.get", "events.tail"),
         aliases=("what happened", "recent activity", "audit log", "changes since"),
-        documentation="Pass next_cursor back to continue; a cursor from another principal or project scope fails stale_cursor.",
+        documentation="Pass next_cursor back to continue; a cursor from another project scope fails stale_cursor.",
         examples=(
             Example(title="Latest events", input={"limit": 50}),
             Example(

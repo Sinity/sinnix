@@ -20,16 +20,12 @@ from mcp.types import ContentBlock, ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from .contracts import (
-    KNOWN_PRINCIPALS,
     KNOWN_TYPED_FAILURES,
     EffectMode,
     VerbFamily,
 )
 from .revisions import token_input_schema
 from .schemas import GatewayModel, V2ToolEnvelope
-
-ALL_PRINCIPALS = KNOWN_PRINCIPALS
-OPERATOR_ONLY = frozenset({"operator"})
 
 READ_FAMILIES = frozenset(
     {
@@ -138,7 +134,6 @@ class Action:
     Input: type[RequestControls]
     Output: type[BaseModel]
     handler: Handler = field(compare=False)
-    principals: frozenset[str] = ALL_PRINCIPALS
     resource_kinds: tuple[str, ...] = ()
     affordances: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
@@ -159,8 +154,6 @@ class Action:
             raise ValueError("action name must be a dotted canonical name")
         if not self.owner or not self.summary:
             raise ValueError(f"action {self.name!r} requires an owner and summary")
-        if not self.principals or not self.principals <= KNOWN_PRINCIPALS:
-            raise ValueError(f"action {self.name!r} names unknown principals")
         if not issubclass(self.Input, RequestControls):
             raise ValueError(f"action {self.name!r} Input must extend RequestControls")
         mutating = issubclass(self.Input, MutationControls)
@@ -236,7 +229,6 @@ class Action:
             "family": self.family.value,
             "owner": self.owner,
             "effect": self.effect.value,
-            "principals": sorted(self.principals),
             "resource_kinds": list(self.resource_kinds),
             "affordances": list(self.affordances),
             "aliases": list(self.aliases),

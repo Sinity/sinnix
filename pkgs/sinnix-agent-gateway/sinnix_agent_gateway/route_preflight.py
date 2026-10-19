@@ -5,7 +5,6 @@ from typing import Any, Callable
 
 from .captures import (
     CaptureInventoryUnavailableError,
-    CaptureScopeError,
     queryable_capture_lanes,
 )
 from .config import GatewayConfig
@@ -88,16 +87,12 @@ class GatewayRoutePreflight:
 
     def _capture_probe(self) -> dict[str, Any]:
         try:
-            lanes = queryable_capture_lanes(
-                self.config.runtime_inventory, self.config.capture_scope
-            )
-        except (CaptureInventoryUnavailableError, CaptureScopeError) as error:
+            lanes = queryable_capture_lanes(self.config.runtime_inventory)
+        except CaptureInventoryUnavailableError as error:
             return {
                 "route": "capture.query",
                 "status": "unavailable",
-                "failure_class": "capture_scope_invalid"
-                if isinstance(error, CaptureScopeError)
-                else "capture_inventory_unavailable",
+                "failure_class": "capture_inventory_unavailable",
                 "detail": str(error),
             }
         if not lanes:

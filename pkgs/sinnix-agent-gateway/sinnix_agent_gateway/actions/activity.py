@@ -12,8 +12,6 @@ from pydantic import Field
 
 from .. import generated_polylogue_inputs as session_owner
 from ..action import (
-    ALL_PRINCIPALS,
-    OPERATOR_ONLY,
     Action,
     ActionResult,
     Example,
@@ -22,7 +20,6 @@ from ..action import (
 from ..captures import CaptureLane
 from ..catalog import search_rows
 from ..contracts import VerbFamily
-from ..permissions import Permission, PolicyError
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 from .products import OwnerProduct, owner_product
@@ -33,8 +30,6 @@ if TYPE_CHECKING:
 
 def _owner_error(exc: ValueError) -> ProtocolError:
     message = str(exc)
-    if isinstance(exc, PolicyError):
-        return ProtocolError("policy_denied", message)
     if "cursor" in message and ("stale" in message or "malformed" in message):
         return ProtocolError("stale_cursor", message)
     if "source changed" in message:
@@ -301,13 +296,12 @@ def _lane_files(lane: CaptureLane, since: float, until: float) -> list[Path]:
 
 
 def _activity(runtime: Runtime, inp: ActivityInput) -> Activity:
-    runtime.principal.require(Permission.CAPTURE_READ)
     until = inp.until if inp.until is not None else time.time()
     since = inp.since if inp.since is not None else until - 3_600
     if since > until:
         raise ProtocolError("invalid_request", "since must not be after until")
     available = runtime.captures._available_lanes()
-    visible = runtime.principal.filter_lanes(None, sorted(available))
+    visible = sorted(available)
     wanted_kinds = set(inp.kinds)
     lanes = [
         name
@@ -441,7 +435,6 @@ class SessionsResult(GatewayModel):
 
 
 async def _sessions(runtime: Runtime, inp: SessionsInput) -> ActionResult:
-    runtime.principal.require(Permission.SESSION_READ)
     product = await owner_product(
         runtime,
         "polylogue",
@@ -472,7 +465,6 @@ class TimelineInput(RequestControls, session_owner.SessionTimeline):
 
 
 async def _timeline(runtime: Runtime, inp: TimelineInput) -> ActionResult:
-    runtime.principal.require(Permission.SESSION_READ)
     product = await owner_product(
         runtime,
         "polylogue",
@@ -588,7 +580,6 @@ def _session_action(name: str, model: type, summary: str) -> Action:
         Input=Input,
         Output=SessionsResult,
         handler=_timeline,
-        principals=OPERATOR_ONLY,
         resource_kinds=(),
         affordances=("sessions.read", "sessions.search", "timeline.query"),
         examples=(_SESSION_EXAMPLES[name],),
@@ -605,7 +596,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=CapturesInput,
         Output=CapturesResult,
         handler=_captures,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("capture_lane",),
         affordances=("activity.query", "captures.query"),
         aliases=("capture lanes", "lane health", "records since", "sidecar index"),
@@ -627,11 +617,10 @@ ACTIONS: tuple[Action, ...] = (
         name="activity.query",
         family=VerbFamily.QUERY,
         owner="captures",
-        summary="Normalised activity events (clipboard, notifications, media, windows...) from the capture lanes this principal may read, newest first.",
+        summary="Normalised activity events (clipboard, notifications, media, windows...) from the capture lanes, newest first.",
         Input=ActivityInput,
         Output=Activity,
         handler=_activity,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("capture_lane",),
         affordances=("captures.query", "sessions.query", "timeline.query"),
         aliases=(
@@ -657,7 +646,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=SessionsInput,
         Output=SessionsResult,
         handler=_sessions,
-        principals=OPERATOR_ONLY,
         resource_kinds=(),
         affordances=("sessions.read", "sessions.search", "timeline.query"),
         examples=(
@@ -675,7 +663,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=MemoryInput,
         Output=SessionsResult,
         handler=_memory,
-        principals=OPERATOR_ONLY,
         resource_kinds=(),
         affordances=("memory.raw.search", "sessions.raw.read"),
         examples=(

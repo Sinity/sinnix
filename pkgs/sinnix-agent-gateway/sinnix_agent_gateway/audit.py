@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .config import GatewayConfig
-from .permissions import Permission, Principal
+from .contracts import PRINCIPAL
 from .redaction import redact_structure
 
 GENESIS_HASH = "0" * 64
@@ -24,9 +24,8 @@ def _canonical(value: Any) -> bytes:
 
 
 class AuditService:
-    def __init__(self, config: GatewayConfig, principal: Principal):
+    def __init__(self, config: GatewayConfig):
         self.config = config
-        self.principal = principal
         config.initialize_state()
         self.path = config.state_dir / "audit" / "events.sqlite3"
         self._claims: dict[tuple[str, str], int] = {}
@@ -106,7 +105,7 @@ class AuditService:
                 "occurred_at": occurred_at,
                 # The hash-chain field name remains stable so existing audit
                 # entries verify. Its values are principal names.
-                "profile": self.principal.name,
+                "profile": PRINCIPAL,
                 "operation": operation,
                 "outcome": outcome,
                 "payload": clean_payload,
@@ -120,7 +119,7 @@ class AuditService:
                 (
                     event_id,
                     occurred_at,
-                    self.principal.name,
+                    PRINCIPAL,
                     operation,
                     outcome,
                     json.dumps(clean_payload, sort_keys=True),
@@ -153,7 +152,7 @@ class AuditService:
                 connection.execute("begin immediate")
                 row = connection.execute(
                     "select request_sha256,state,response_json from idempotency where principal = ? and action = ? and idempotency_key = ?",
-                    (self.principal.name, action, idempotency_key),
+                    (PRINCIPAL, action, idempotency_key),
                 ).fetchone()
                 if row is None:
                     if descriptor is None:
@@ -162,7 +161,7 @@ class AuditService:
                     connection.execute(
                         "insert into idempotency(principal,action,idempotency_key,request_sha256,state,response_json,receipt_id,created_at,updated_at) values (?, ?, ?, ?, 'pending', null, null, ?, ?)",
                         (
-                            self.principal.name,
+                            PRINCIPAL,
                             action,
                             idempotency_key,
                             request_sha256,
@@ -184,7 +183,7 @@ class AuditService:
                     if state == "indeterminate":
                         connection.execute(
                             "update idempotency set state = 'indeterminate', updated_at = ? where principal = ? and action = ? and idempotency_key = ?",
-                            (now, self.principal.name, action, idempotency_key),
+                            (now, PRINCIPAL, action, idempotency_key),
                         )
                     connection.execute("commit")
                     return state, None
@@ -219,7 +218,7 @@ class AuditService:
                     json.dumps(response, sort_keys=True, separators=(",", ":")),
                     receipt_id,
                     time.time(),
-                    self.principal.name,
+                    PRINCIPAL,
                     action,
                     idempotency_key,
                     request_sha256,
@@ -228,7 +227,7 @@ class AuditService:
             if updated != 1:
                 row = connection.execute(
                     "select response_json from idempotency where principal = ? and action = ? and idempotency_key = ? and request_sha256 = ? and state = 'confirmed'",
-                    (self.principal.name, action, idempotency_key, request_sha256),
+                    (PRINCIPAL, action, idempotency_key, request_sha256),
                 ).fetchone()
                 if row is None or row[0] is None:
                     connection.execute("rollback")
@@ -243,7 +242,7 @@ class AuditService:
         with self._connect() as connection:
             connection.execute(
                 "update idempotency set state = 'indeterminate', updated_at = ? where principal = ? and action = ? and idempotency_key = ? and state = 'pending'",
-                (time.time(), self.principal.name, action, idempotency_key),
+                (time.time(), PRINCIPAL, action, idempotency_key),
             )
         self.release_idempotency(action, idempotency_key)
 
@@ -254,7 +253,7 @@ class AuditService:
 
     def _lock_path(self, action: str, idempotency_key: str) -> Path:
         lock_name = hashlib.sha256(
-            _canonical([self.principal.name, action, idempotency_key])
+            _canonical([PRINCIPAL, action, idempotency_key])
         ).hexdigest()
         return self.path.parent / f"{lock_name}.lock"
 
@@ -284,11 +283,10 @@ class AuditService:
         rejected before admission can also be unknown. Reading never changes
         the row.
         """
-        self.principal.require(Permission.AUDIT_READ)
         with self._connect() as connection:
             row = connection.execute(
                 "select request_sha256,state,response_json,receipt_id,created_at,updated_at from idempotency where principal = ? and action = ? and idempotency_key = ?",
-                (self.principal.name, action, idempotency_key),
+                (PRINCIPAL, action, idempotency_key),
             ).fetchone()
         if row is None:
             return {"state": "unknown"}
@@ -312,7 +310,6 @@ class AuditService:
 
     def receipt(self, receipt_id: str) -> dict[str, Any]:
         """Return one principal-scoped audit event as a canonical receipt."""
-        self.principal.require(Permission.AUDIT_READ)
         try:
             receipt_id = str(uuid.UUID(receipt_id))
         except ValueError as exc:
@@ -324,7 +321,7 @@ class AuditService:
             ).fetchone()
         if row is None:
             raise ValueError("unknown receipt")
-        if row[3] != self.principal.name:
+        if row[3] != PRINCIPAL:
             raise ValueError("receipt is unavailable to this principal")
         return {
             "schema": "sinnix.gateway-audit-receipt.v1",
@@ -340,12 +337,11 @@ class AuditService:
         }
 
     def tail(self, limit: int = 100) -> dict[str, Any]:
-        self.principal.require(Permission.AUDIT_READ)
         limit = max(1, min(limit, 1000))
         with self._connect() as connection:
             rows = connection.execute(
                 "select sequence,event_id,occurred_at,profile,operation,outcome,payload_json,previous_hash,entry_hash from events where profile = ? order by sequence desc limit ?",
-                (self.principal.name, limit),
+                (PRINCIPAL, limit),
             ).fetchall()
         events = [
             {
@@ -365,14 +361,13 @@ class AuditService:
 
     def events_since(self, sequence: int, limit: int = 100) -> list[dict[str, Any]]:
         """Read existing audit rows after an opaque sequence position."""
-        self.principal.require(Permission.AUDIT_READ)
         if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
             raise ValueError("audit sequence must be non-negative")
         limit = max(1, min(limit, 1_000))
         with self._connect() as connection:
             rows = connection.execute(
                 "select sequence,event_id,occurred_at,profile,operation,outcome,payload_json,previous_hash,entry_hash from events where profile = ? and sequence > ? order by sequence asc limit ?",
-                (self.principal.name, sequence, limit),
+                (PRINCIPAL, sequence, limit),
             ).fetchall()
         return [
             {
@@ -390,7 +385,6 @@ class AuditService:
         ]
 
     def verify(self) -> dict[str, Any]:
-        self.principal.require(Permission.AUDIT_READ)
         previous_hash = GENESIS_HASH
         checked = 0
         with self._connect() as connection:

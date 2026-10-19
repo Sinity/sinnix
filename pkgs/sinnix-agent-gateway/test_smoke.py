@@ -13,7 +13,7 @@ import pytest
 from mcp import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from sinnix_agent_gateway import actions as action_set
-from sinnix_agent_gateway.app import Runtime, create_server
+from sinnix_agent_gateway.app import Runtime
 from sinnix_agent_gateway.cli import (
     build_manifest,
     semantic_canary,
@@ -21,7 +21,6 @@ from sinnix_agent_gateway.cli import (
 )
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.owner_execution import ExecutionResult, OwnerExecution
-from sinnix_agent_gateway.permissions import PolicyError
 from sinnix_agent_gateway.projects import ProjectError
 from sinnix_agent_gateway.server import _bounded_resource_json
 
@@ -29,6 +28,8 @@ from sinnix_agent_gateway.server import _bounded_resource_json
 def config(tmp_path: Path) -> GatewayConfig:
     project = tmp_path / "project"
     project.mkdir()
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"manifest": {"sha256": "approved-fixture-hash"}}))
     return GatewayConfig(
         state_dir=tmp_path / "state",
         projects={
@@ -37,7 +38,7 @@ def config(tmp_path: Path) -> GatewayConfig:
                 path=project,
             )
         },
-        approved_manifest_hash="approved-fixture-hash",
+        package_manifest_path=manifest,
     )
 
 
@@ -45,7 +46,7 @@ def test_gateway_resource_bounds_fall_back_to_an_attested_artifact(
     tmp_path: Path,
 ) -> None:
     runtime = Runtime.create(
-        dataclasses.replace(config(tmp_path), max_result_bytes=2_048), "operator"
+        dataclasses.replace(config(tmp_path), max_result_bytes=2_048)
     )
 
     encoded = _bounded_resource_json(runtime, {"payload": "x" * 4_000}, "fixture")
@@ -62,7 +63,7 @@ def test_operator_project_writes_are_available(
 ) -> None:
     cfg = config(tmp_path)
     subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
-    runtime = Runtime.create(cfg, "operator")
+    runtime = Runtime.create(cfg)
     target = cfg.projects["fixture"].path / "operator.txt"
 
     result = runtime.projects.write("fixture", target.name, "operator authority")
@@ -77,7 +78,7 @@ def test_project_read_applies_late_line_range_before_byte_bound(tmp_path: Path) 
     subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
     target = cfg.projects["fixture"].path / "large.txt"
     target.write_text("".join(f"line-{line:04d} padding\n" for line in range(1, 301)))
-    runtime = Runtime.create(cfg, "operator")
+    runtime = Runtime.create(cfg)
     result = runtime.projects.read("fixture", "large.txt", 250, 251, 128)
     assert "line-0250" in result["content"]
     assert "line-0251" in result["content"]
@@ -85,7 +86,7 @@ def test_project_read_applies_late_line_range_before_byte_bound(tmp_path: Path) 
 
 def test_project_subprocess_output_reaches_result_storage(tmp_path: Path) -> None:
     cfg = dataclasses.replace(config(tmp_path), max_result_bytes=4096)
-    runtime = Runtime.create(cfg, "operator")
+    runtime = Runtime.create(cfg)
     output = runtime.projects._run_spooled(
         [sys.executable, "-c", "import sys; sys.stdout.write('x' * 10000000)"],
         cfg.projects["fixture"].path,
@@ -94,7 +95,7 @@ def test_project_subprocess_output_reaches_result_storage(tmp_path: Path) -> Non
 
 
 def test_project_subprocess_failure_surfaces_bounded_stderr(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
+    runtime = Runtime.create(config(tmp_path))
 
     with pytest.raises(ProjectError, match="project diagnostic"):
         runtime.projects._run_spooled(
@@ -112,7 +113,7 @@ def test_project_apply_patch_streams_patch_to_git(tmp_path: Path) -> None:
     subprocess.run(["git", "init", "--quiet", cfg.projects["fixture"].path], check=True)
     target = cfg.projects["fixture"].path / "tracked.txt"
     target.write_text("before\n")
-    runtime = Runtime.create(cfg, "operator")
+    runtime = Runtime.create(cfg)
 
     result = runtime.projects.apply_patch(
         "fixture",
@@ -162,7 +163,7 @@ def test_project_diff_rejects_option_injection_before_external_driver(
     subprocess.run(["git", "commit", "-qm", "fixture"], cwd=project, check=True)
     (project / "tracked.txt").write_text("after\n")
 
-    runtime = Runtime.create(cfg, "operator")
+    runtime = Runtime.create(cfg)
     with pytest.raises(ProjectError, match="invalid git ref"):
         runtime.projects.diff("fixture", "--ext-diff")
     assert not marker.exists()
@@ -177,7 +178,7 @@ def test_project_tree_and_read_reject_symlink_escape(tmp_path: Path) -> None:
     outside = tmp_path / "outside.txt"
     outside.write_text("private")
     (cfg.projects["fixture"].path / "escape.txt").symlink_to(outside)
-    runtime = Runtime.create(cfg, "operator")
+    runtime = Runtime.create(cfg)
     with pytest.raises(ProjectError):
         runtime.projects.read("fixture", "escape.txt")
     assert runtime.projects.tree("fixture")["entries"] == []
@@ -199,7 +200,7 @@ def test_remote_project_tools_hide_local_only_agent_state(tmp_path: Path) -> Non
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("gateway-private-marker")
 
-    runtime = Runtime.create(cfg, "operator")
+    runtime = Runtime.create(cfg)
     for path in private_files:
         with pytest.raises(ProjectError):
             runtime.projects.read("fixture", str(path.relative_to(project)))
@@ -214,7 +215,7 @@ def test_remote_project_tools_hide_local_only_agent_state(tmp_path: Path) -> Non
 
 
 def test_audit_chain_survives_concurrent_writers(tmp_path: Path) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
+    runtime = Runtime.create(config(tmp_path))
     with concurrent.futures.ThreadPoolExecutor(max_workers=32) as executor:
         list(
             executor.map(
@@ -235,7 +236,7 @@ def test_audit_chain_survives_concurrent_writers(tmp_path: Path) -> None:
 
 def test_v2_events_are_receipted(tmp_path: Path) -> None:
     cfg = config(tmp_path)
-    operator = Runtime.create(cfg, "operator")
+    operator = Runtime.create(cfg)
     operator.audit.append("operator_event", "ok")
 
     async def invoke():
@@ -260,21 +261,16 @@ def test_v2_events_are_receipted(tmp_path: Path) -> None:
 
 def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> None:
     cfg = config(tmp_path)
-    runtime = Runtime.create(cfg, "operator")
+    runtime = Runtime.create(cfg)
     status = runtime.observe.gateway_status(
-        "operator",
-        "capability-hash",
         "approved-fixture-hash",
         "catalog-hash",
         "v2-test",
     )
-    assert status["principal_contract_hash"] == "capability-hash"
     assert status["current_model_visibility"] == "unknown"
     assert status["transport"] == "stdio"
     assert (
         runtime.observe.gateway_status(
-            "operator",
-            "capability-hash",
             "approved-fixture-hash",
             "catalog-hash",
             "v2-test",
@@ -286,10 +282,7 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
     assert status["action_catalog_hash"] == "catalog-hash"
     assert status["catalog"] == {
         "revision": "v2-test",
-        "live_action_catalog": {
-            "principal": "operator",
-            "sha256": "catalog-hash",
-        },
+        "live_action_catalog": {"sha256": "catalog-hash"},
         "chatgpt_observed": None,
         "comparisons": {
             "live_to_chatgpt_observed": "unobserved",
@@ -314,15 +307,12 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         )
     )
     status = runtime.observe.gateway_status(
-        "operator",
-        "capability-hash",
         "approved-fixture-hash",
         "catalog-hash",
         "v2-test",
     )
     assert set(status["manifests"]["comparisons"].values()) == {"match"}
     recorded = status["catalog"]["chatgpt_observed"]
-    assert recorded["principal"] == "operator"
     assert recorded["sha256"] == "catalog-hash"
     assert recorded["observed_at"] == 1788828936.1
     assert recorded["source"] == "last_recorded_client_snapshot"
@@ -345,8 +335,6 @@ def test_gateway_status_reports_distinct_manifest_provenance(tmp_path: Path) -> 
         )
     )
     status = runtime.observe.gateway_status(
-        "operator",
-        "capability-hash",
         "approved-fixture-hash",
         "catalog-hash",
         "v2-test",
@@ -366,18 +354,15 @@ def test_gateway_status_keeps_local_evidence_when_connector_snapshot_is_not_an_o
     cfg = config(tmp_path)
     cfg.state_dir.mkdir(parents=True, exist_ok=True)
     (cfg.state_dir / "connector-snapshot.json").write_text(json.dumps(malformed))
-    runtime = Runtime.create(cfg, "operator")
+    runtime = Runtime.create(cfg)
 
     status = runtime.observe.gateway_status(
-        "operator",
-        "capability-hash",
         "live-manifest-hash",
         "catalog-hash",
         "v2-test",
     )
 
     assert status["status"] == "ready"
-    assert status["principal"] == "operator"
     assert status["manifests"]["live_server"]["sha256"] == "live-manifest-hash"
     assert (
         status["manifests"]["comparisons"]["live_to_chatgpt_observed"] == "unobserved"
@@ -394,7 +379,7 @@ def test_gateway_status_reports_broker_route_evidence(
             "polylogue": {"brokered": True},
         },
     )
-    runtime = Runtime.create(cfg, "operator")
+    runtime = Runtime.create(cfg)
     monkeypatch.setattr(
         runtime.route_preflight,
         "run",
@@ -423,7 +408,6 @@ def test_gateway_status_reports_broker_route_evidence(
     monkeypatch.setattr(runtime.mcp_broker, "catalog", catalog)
     status = anyio.run(
         runtime.gateway_status,
-        "capability-hash",
         "approved-fixture-hash",
         "catalog-hash",
         "v2-test",
@@ -451,12 +435,10 @@ def test_gateway_status_reports_broker_route_evidence(
 
 def test_gateway_status_keeps_unapproved_manifest_unobserved(tmp_path: Path) -> None:
     runtime = Runtime.create(
-        dataclasses.replace(config(tmp_path), approved_manifest_hash=None), "operator"
+        dataclasses.replace(config(tmp_path), package_manifest_path=None)
     )
 
     status = runtime.observe.gateway_status(
-        "operator",
-        "capability-hash",
         "control-live-hash",
         "catalog-hash",
         "v2-test",
@@ -474,7 +456,7 @@ def test_gateway_status_keeps_unapproved_manifest_unobserved(tmp_path: Path) -> 
 
 def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:
     cfg = config(tmp_path)
-    runtime = Runtime.create(cfg, "operator")
+    runtime = Runtime.create(cfg)
     directory = cfg.state_dir / "diagnostics" / "fixture"
     directory.mkdir(parents=True)
     source = directory / "fixture.log"
@@ -498,38 +480,26 @@ def test_state_is_private_and_artifact_ids_are_opaque(tmp_path: Path) -> None:
     assert "source" not in chunk
 
 
-def test_unknown_principal_is_rejected_before_server_creation(tmp_path: Path) -> None:
-    with pytest.raises(PolicyError):
-        create_server(config(tmp_path), "agent-control")
-
-
-def test_approval_check_requires_the_current_paired_contract(tmp_path: Path) -> None:
+def test_approval_check_requires_the_current_package_manifest(tmp_path: Path) -> None:
     cfg = config(tmp_path)
-    approved = dataclasses.replace(
-        cfg,
-        approved_manifest_hash=anyio.run(build_manifest, cfg, "operator")["sha256"],
-    )
+    live = anyio.run(build_manifest, cfg)["sha256"]
+    cfg.package_manifest_path.write_text(json.dumps({"manifest": {"sha256": live}}))
 
-    assert verify_approval(approved, "operator") == {
-        "principal": "operator",
-        "tool_manifest_hash": approved.approved_manifest_hash,
-        "action_catalog_hash": action_set.catalog_hash("operator"),
+    assert verify_approval(cfg) == {
+        "tool_manifest_hash": live,
+        "action_catalog_hash": action_set.catalog_hash(),
     }
 
+    cfg.package_manifest_path.write_text(json.dumps({"manifest": {"sha256": "stale"}}))
     with pytest.raises(ValueError, match="tool manifest drift"):
-        verify_approval(
-            dataclasses.replace(approved, approved_manifest_hash="stale"), "operator"
-        )
-    with pytest.raises(ValueError, match="principal"):
-        verify_approval(approved, "retired")
+        verify_approval(cfg)
 
 
 def test_semantic_canary_exercises_catalog_and_project_list_envelopes(
     tmp_path: Path,
 ) -> None:
-    result = anyio.run(semantic_canary, config(tmp_path), "operator")
+    result = anyio.run(semantic_canary, config(tmp_path))
 
-    assert result["principal"] == "operator"
     assert result["catalog_actions"] >= 4
     assert result["projects"] == 1
 
@@ -792,7 +762,7 @@ print(json.dumps(report))
         observe_command=str(collector),
         max_result_bytes=1_024,
     )
-    runtime = Runtime.create(cfg, "operator")
+    runtime = Runtime.create(cfg)
 
     overview = runtime.observe.machine_query("overview")
     units = runtime.observe.machine_query("units", cursor=20, limit=3)
@@ -814,7 +784,7 @@ def test_machine_section_overflow_is_retained_as_an_attested_artifact(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     runtime = Runtime.create(
-        dataclasses.replace(config(tmp_path), max_result_bytes=1_024), "operator"
+        dataclasses.replace(config(tmp_path), max_result_bytes=1_024)
     )
     report = {
         "schema": "sinnix.observe.v1",
@@ -841,7 +811,7 @@ def test_machine_section_overflow_is_retained_as_an_attested_artifact(
 def test_machine_query_requests_owner_selected_section(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
+    runtime = Runtime.create(config(tmp_path))
     calls = []
     report = {
         "schema": "sinnix.observe.v1",
@@ -898,8 +868,7 @@ def test_machine_query_preserves_optional_user_bus_in_real_collector(
     )
     collector.chmod(0o700)
     runtime = Runtime.create(
-        dataclasses.replace(config(tmp_path), observe_command=str(collector)),
-        "operator",
+        dataclasses.replace(config(tmp_path), observe_command=str(collector))
     )
     environment = {
         "HOME": str(tmp_path),
@@ -935,7 +904,6 @@ def test_machine_query_reduces_page_to_response_bound(
             projects={},
             max_result_bytes=262_144,
         ),
-        "operator",
     )
     rows = [
         {"unit": f"fixture-{index}.service", "detail": "x" * 1_450}
@@ -983,9 +951,9 @@ def test_machine_query_reduces_page_to_response_bound(
 
 def test_operator_manifest_contains_typed_actions(tmp_path: Path) -> None:
     cfg = config(tmp_path)
-    operator = anyio.run(build_manifest, cfg, "operator")
+    operator = anyio.run(build_manifest, cfg)
     operator_names = {row["name"] for row in operator["tools"]}
-    assert operator_names == {a.name for a in action_set.visible("operator")}
+    assert operator_names == {a.name for a in action_set.ALL_ACTIONS}
     assert "files.change" in operator_names
     for row in operator["tools"]:
         action = action_set.BY_NAME[row["name"]]
@@ -1027,7 +995,7 @@ def test_stdio_transport_negotiates_typed_tools(tmp_path: Path) -> None:
         executable = os.environ.get("SINNIX_GATEWAY_TEST_EXECUTABLE")
         command = executable or sys.executable
         args = [] if executable else ["-m", "sinnix_agent_gateway.cli"]
-        args.extend(["--config", str(config_path), "--principal", "operator", "serve"])
+        args.extend(["--config", str(config_path), "serve"])
         child_env = dict(os.environ)
         if not executable:
             source_root = str(Path(__file__).resolve().parent)
@@ -1053,7 +1021,6 @@ def test_stdio_transport_negotiates_typed_tools(tmp_path: Path) -> None:
                 status = await session.call_tool("gateway.status", {})
                 assert status.structured_content is not None
                 assert status.structured_content["result"]["outcome"] == "ok"
-                assert status.structured_content["data"]["principal"] == "operator"
                 projects = await session.call_tool("projects.list", {})
                 assert (
                     projects.structured_content["data"]["projects"][0]["project_id"]

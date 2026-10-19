@@ -16,7 +16,6 @@ from sinnix_agent_gateway.app import Runtime
 from sinnix_agent_gateway.audit import AuditService
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
 from sinnix_agent_gateway.contracts import VerbFamily
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.results import (
     ERROR_CODES,
     ProtocolError,
@@ -48,7 +47,7 @@ class _ChangeIn(MutationControls):
     pass
 
 
-def _fixture_action(name: str, family: VerbFamily, principals: set[str]) -> Action:
+def _fixture_action(name: str, family: VerbFamily) -> Action:
     return Action(
         name=name,
         family=family,
@@ -57,7 +56,6 @@ def _fixture_action(name: str, family: VerbFamily, principals: set[str]) -> Acti
         Input=_ChangeIn if family is VerbFamily.CHANGE else _ReadIn,
         Output=_Out,
         handler=lambda runtime, inp: {},
-        principals=frozenset(principals),
     )
 
 
@@ -71,9 +69,8 @@ def config(tmp_path, *, max_result_bytes: int = 262_144):
 
 def test_large_metadata_has_retrievable_continuation(tmp_path) -> None:
     cfg = config(tmp_path)
-    principal = Principal.for_name("operator")
-    results = ResultService(cfg, principal)
-    receipt = AuditService(cfg, principal).append("fixture.query", "ok", {})
+    results = ResultService(cfg)
+    receipt = AuditService(cfg).append("fixture.query", "ok", {})
     meta = {"coverage": {"items": ["source" * 100] * 1000}}
     result = results.record(
         action="fixture.query",
@@ -94,9 +91,9 @@ def test_large_metadata_has_retrievable_continuation(tmp_path) -> None:
 
 def test_result_snapshot_preserves_owner_page_and_receipt(tmp_path) -> None:
     cfg = config(tmp_path)
-    audit = AuditService(cfg, Principal.for_name("operator"))
+    audit = AuditService(cfg)
     receipt = audit.append("gateway.catalog", "ok", {"count": 2})
-    results = ResultService(cfg, Principal.for_name("operator"))
+    results = ResultService(cfg)
 
     snapshot = results.record(
         action="gateway.catalog",
@@ -126,7 +123,7 @@ def test_result_snapshot_preserves_owner_page_and_receipt(tmp_path) -> None:
 
 
 def test_runtime_v2_envelopes_success_and_public_error(tmp_path) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
+    runtime = Runtime.create(config(tmp_path))
     action = ACTIONS["gateway.catalog"]
 
     success = _execute(
@@ -178,7 +175,7 @@ def test_runtime_v2_envelopes_success_and_public_error(tmp_path) -> None:
 def test_runtime_v2_replaces_an_oversized_owner_payload_with_an_artifact(
     tmp_path,
 ) -> None:
-    runtime = Runtime.create(config(tmp_path, max_result_bytes=1_024), "operator")
+    runtime = Runtime.create(config(tmp_path, max_result_bytes=1_024))
     action = ACTIONS["gateway.catalog"]
 
     response = _execute(
@@ -193,7 +190,7 @@ def test_runtime_v2_replaces_an_oversized_owner_payload_with_an_artifact(
 
 
 def test_large_snapshot_row_survives_paging_and_artifact_transport(tmp_path) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
+    runtime = Runtime.create(config(tmp_path))
     results = runtime.results
     query_sha = hashlib.sha256(b"large-snapshot-row").hexdigest()
     row = {"id": "large", "body": "x" * 300_000}
@@ -254,8 +251,8 @@ def test_accepted_failure_classes_are_exactly_the_rendered_envelope_enum() -> No
 
 
 def test_runtime_v2_keeps_each_expected_failure_in_a_typed_envelope(tmp_path) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
-    action = _fixture_action("fixture.typed-failure", VerbFamily.QUERY, {"operator"})
+    runtime = Runtime.create(config(tmp_path))
+    action = _fixture_action("fixture.typed-failure", VerbFamily.QUERY)
 
     for code in ERROR_CODES:
         response = _execute(
@@ -279,8 +276,8 @@ def test_runtime_v2_keeps_each_expected_failure_in_a_typed_envelope(tmp_path) ->
 def test_mutation_idempotency_replays_receipt_without_second_owner_write(
     tmp_path,
 ) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
-    action = _fixture_action("fixture.change", VerbFamily.CHANGE, {"operator"})
+    runtime = Runtime.create(config(tmp_path))
+    action = _fixture_action("fixture.change", VerbFamily.CHANGE)
     writes = []
 
     def write() -> dict[str, object]:
@@ -302,7 +299,7 @@ def test_mutation_idempotency_replays_receipt_without_second_owner_write(
 def test_declared_deadline_and_idempotency_failures_persist_bounded_envelopes(
     tmp_path,
 ) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
+    runtime = Runtime.create(config(tmp_path))
     action = ACTIONS["batches.start"]
     request = {
         "project": {"project": "fixture"},
@@ -349,10 +346,8 @@ def test_declared_deadline_and_idempotency_failures_persist_bounded_envelopes(
 def test_concurrent_matching_idempotency_returns_conflict_then_replays(
     tmp_path,
 ) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
-    action = _fixture_action(
-        "fixture.concurrent-change", VerbFamily.CHANGE, {"operator"}
-    )
+    runtime = Runtime.create(config(tmp_path))
+    action = _fixture_action("fixture.concurrent-change", VerbFamily.CHANGE)
     started, release = threading.Event(), threading.Event()
     writes: list[str] = []
 
@@ -380,8 +375,8 @@ def test_concurrent_matching_idempotency_returns_conflict_then_replays(
 
 
 def test_partial_completion_is_explicitly_non_atomic(tmp_path) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
-    action = _fixture_action("fixture.change", VerbFamily.CHANGE, {"operator"})
+    runtime = Runtime.create(config(tmp_path))
+    action = _fixture_action("fixture.change", VerbFamily.CHANGE)
 
     response = _execute(
         runtime,
@@ -399,7 +394,7 @@ def test_partial_completion_is_explicitly_non_atomic(tmp_path) -> None:
 
 
 def test_v2_rejects_ignored_preconditions(tmp_path) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
+    runtime = Runtime.create(config(tmp_path))
 
     response = _execute(
         runtime,
@@ -431,8 +426,7 @@ def _project_runtime(tmp_path: Path) -> Runtime:
         GatewayConfig(
             state_dir=tmp_path / "state",
             projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
-        ),
-        "operator",
+        )
     )
 
 
@@ -455,7 +449,7 @@ def _checkout_preconditions(runtime: Runtime) -> dict[str, str]:
 def test_v2_operate_maps_canonical_targets_and_validates_owner_receipts(
     tmp_path, reference, target
 ) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
+    runtime = Runtime.create(config(tmp_path))
     calls: list[dict[str, object]] = []
 
     def execute(
@@ -514,7 +508,7 @@ def test_v2_operate_maps_canonical_targets_and_validates_owner_receipts(
 
 
 def test_v2_operate_rejects_mismatched_owner_receipt(tmp_path) -> None:
-    runtime = Runtime.create(config(tmp_path), "operator")
+    runtime = Runtime.create(config(tmp_path))
 
     runtime.machine_actions.execute = lambda *_args: {
         "schema": "sinnix-hub-action-v1",
@@ -552,7 +546,7 @@ def test_v2_operate_rejects_mismatched_owner_receipt(tmp_path) -> None:
 def test_snapshot_continuation_can_resize_pages_without_changing_position(
     tmp_path,
 ) -> None:
-    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    results = ResultService(config(tmp_path))
     query_sha = hashlib.sha256(b"resized-snapshot").hexdigest()
     writer = results.start_snapshot(
         query_sha256=query_sha, source_revision="revision-one", page_size=1
@@ -584,7 +578,7 @@ def test_snapshot_continuation_can_resize_pages_without_changing_position(
 def test_snapshot_pages_seek_to_index_without_rereading_prefix(
     tmp_path, monkeypatch
 ) -> None:
-    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    results = ResultService(config(tmp_path))
     query_sha = hashlib.sha256(b"indexed-snapshot-pages").hexdigest()
     writer = results.start_snapshot(
         query_sha256=query_sha, source_revision="revision-one", page_size=17
@@ -654,7 +648,7 @@ def test_snapshot_pages_seek_to_index_without_rereading_prefix(
 
 
 def test_snapshot_page_refuses_corrupt_offset_index(tmp_path) -> None:
-    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    results = ResultService(config(tmp_path))
     query_sha = hashlib.sha256(b"corrupt-index").hexdigest()
     writer = results.start_snapshot(
         query_sha256=query_sha, source_revision="revision-one", page_size=2
@@ -682,7 +676,7 @@ def test_snapshot_page_refuses_corrupt_offset_index(tmp_path) -> None:
 
 
 def test_snapshot_first_page_matches_serialized_rows_after_nested_mutation(tmp_path):
-    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    results = ResultService(config(tmp_path))
     writer = results.start_snapshot(
         query_sha256="query", source_revision="source", page_size=1
     )
@@ -712,7 +706,7 @@ def test_snapshot_failure_finalizes_resources_and_preserves_commit(
 
     import sinnix_agent_gateway.results as module
 
-    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    results = ResultService(config(tmp_path))
     writer = results.start_snapshot(
         query_sha256="query", source_revision="source", page_size=1
     )
@@ -769,7 +763,7 @@ def test_snapshot_failure_finalizes_resources_and_preserves_commit(
 
 @pytest.mark.parametrize("attribute", ["handle", "offsets_handle"])
 def test_close_failure_still_closes_both_snapshot_resources(tmp_path, attribute):
-    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    results = ResultService(config(tmp_path))
     writer = results.start_snapshot(
         query_sha256="query", source_revision="source", page_size=1
     )
@@ -793,7 +787,7 @@ def test_close_failure_still_closes_both_snapshot_resources(tmp_path, attribute)
 def test_second_resource_open_failure_does_not_leak_first_resource_or_stage(
     tmp_path, monkeypatch
 ):
-    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    results = ResultService(config(tmp_path))
     original = Path.open
     opened = []
 
@@ -834,9 +828,7 @@ def test_frame_size_matches_canonical_json(payload):
 def test_oversized_frame_count_avoids_full_serialized_copy(tmp_path):
     import tracemalloc
 
-    results = ResultService(
-        config(tmp_path, max_result_bytes=4096), Principal.for_name("operator")
-    )
+    results = ResultService(config(tmp_path, max_result_bytes=4096))
     payload = {"rows": ["x" * 64] * 100000}
     tracemalloc.start()
     try:
@@ -851,9 +843,7 @@ def test_oversized_frame_count_avoids_full_serialized_copy(tmp_path):
 
 
 def test_oversized_prefix_does_not_hide_invalid_json_tail(tmp_path):
-    results = ResultService(
-        config(tmp_path, max_result_bytes=4096), Principal.for_name("operator")
-    )
+    results = ResultService(config(tmp_path, max_result_bytes=4096))
     with pytest.raises(ResultError) as refusal:
         results.require_payload_bound(["x" * 64] * 10000 + [object()])
     assert refusal.value.failure_class == "owner_failed"
@@ -911,7 +901,7 @@ def test_digest_keeps_circular_and_ignored_field_validation():
 def test_snapshot_streams_large_row_without_retaining_first_page_bytes(tmp_path):
     import tracemalloc
 
-    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    results = ResultService(config(tmp_path))
     writer = results.start_snapshot(
         query_sha256="query", source_revision="source", page_size=1
     )
@@ -929,7 +919,7 @@ def test_snapshot_streams_large_row_without_retaining_first_page_bytes(tmp_path)
 
 
 def test_invalid_row_tail_rolls_back_before_next_append(tmp_path):
-    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    results = ResultService(config(tmp_path))
     writer = results.start_snapshot(
         query_sha256="query", source_revision="source", page_size=3
     )
@@ -943,7 +933,7 @@ def test_invalid_row_tail_rolls_back_before_next_append(tmp_path):
 
 
 def test_snapshot_row_write_failure_aborts_private_staging(tmp_path):
-    results = ResultService(config(tmp_path), Principal.for_name("operator"))
+    results = ResultService(config(tmp_path))
     writer = results.start_snapshot(
         query_sha256="query", source_revision="source", page_size=1
     )

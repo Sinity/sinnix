@@ -9,7 +9,6 @@ from sinnix_agent_gateway.capability_index import (
     CapabilityIndexService,
 )
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_agent_gateway.permissions import PolicyError, Principal
 
 
 def index_path(tmp_path: Path, rows: list[dict[str, object]]) -> Path:
@@ -30,7 +29,6 @@ def index_path(tmp_path: Path, rows: list[dict[str, object]]) -> Path:
 def service(
     tmp_path: Path,
     rows: list[dict[str, object]],
-    principal_name: str = "operator",
     max_result_bytes: int = 262_144,
 ) -> CapabilityIndexService:
     return CapabilityIndexService(
@@ -40,7 +38,6 @@ def service(
             capability_index=index_path(tmp_path, rows),
             max_result_bytes=max_result_bytes,
         ),
-        Principal.for_name(principal_name),
     )
 
 
@@ -198,36 +195,12 @@ def test_missing_index_is_an_honest_unavailable_result(tmp_path: Path) -> None:
             projects={},
             capability_index=tmp_path / "missing.json",
         ),
-        Principal.for_name("operator"),
     )
 
     assert capability_index.search() == {
         "available": False,
         "reason": "capability index is unavailable",
     }
-
-
-def test_operator_can_search_but_unknown_principal_cannot(tmp_path: Path) -> None:
-    operator = service(
-        tmp_path,
-        [{"kind": "script", "name": "status", "description": "Show status"}],
-        principal_name="operator",
-    )
-    denied = CapabilityIndexService(
-        GatewayConfig(
-            state_dir=tmp_path / "state",
-            projects={},
-            capability_index=index_path(
-                tmp_path,
-                [{"kind": "script", "name": "status", "description": "Show status"}],
-            ),
-        ),
-        Principal("restricted", frozenset(), None),
-    )
-
-    assert operator.search()["available"] is True
-    with pytest.raises(PolicyError, match="capability.read"):
-        denied.search()
 
 
 def test_invalid_index_request_is_rejected(tmp_path: Path) -> None:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from functools import lru_cache
+from functools import cache
 from typing import Any
 
 from ..action import Action, validate_actions
@@ -60,36 +60,30 @@ ALL_ACTIONS: tuple[Action, ...] = validate_actions(
 BY_NAME: dict[str, Action] = {action.name: action for action in ALL_ACTIONS}
 
 
-def visible(principal: str) -> tuple[Action, ...]:
-    return tuple(action for action in ALL_ACTIONS if principal in action.principals)
+@cache
+def catalog_hash() -> str:
+    """Digest of every catalog row field.
 
-
-@lru_cache(maxsize=32)
-def catalog_hash(principal: str) -> str:
-    """Digest of every principal-visible catalog row field.
-
-    The generated contract promises that examples, affordances and principal
-    sets participate in this digest alongside names and schemas.
-    The action set is fixed for this process; cache each principal digest
-    after the server startup warm-up. Hashing the complete catalog row keeps
-    that promise true when another documented action field is added later.
+    The generated contract promises that examples and affordances participate
+    in this digest alongside names and schemas. The action set is fixed for
+    this process; the digest is computed once, at the server startup warm-up.
+    Hashing the complete catalog row keeps that promise true when another
+    documented action field is added later.
     """
-    rows = [action.catalog_row() for action in visible(principal)]
+    rows = [action.catalog_row() for action in ALL_ACTIONS]
     rows.sort(key=lambda row: row["name"])
     encoded = json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
 
 
-def resource_rows(principal: str) -> list[dict[str, Any]]:
-    """Resource kinds with the visible actions that read or change them."""
+def resource_rows() -> list[dict[str, Any]]:
+    """Resource kinds with the actions that read or change them."""
     by_kind: dict[str, list[str]] = {}
-    for action in visible(principal):
+    for action in ALL_ACTIONS:
         for kind in action.resource_kinds:
             by_kind.setdefault(kind, []).append(action.name)
     rows = []
     for resource in REGISTRY.resources:
-        if principal not in resource.principals:
-            continue
         rows.append(
             {
                 "kind": resource.kind,

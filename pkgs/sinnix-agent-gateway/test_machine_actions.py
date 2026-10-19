@@ -9,7 +9,6 @@ from sinnix_agent_gateway.machine_actions import (
     MachineActionError,
     MachineActionService,
 )
-from sinnix_agent_gateway.permissions import Principal
 
 
 class FakeResponse:
@@ -38,7 +37,7 @@ class FakeConnection:
 
 
 def service(
-    tmp_path: Path, principal_name: str, response: FakeResponse
+    tmp_path: Path, response: FakeResponse
 ) -> tuple[MachineActionService, FakeConnection]:
     connection = FakeConnection(response)
     config = GatewayConfig(
@@ -49,7 +48,6 @@ def service(
     return (
         MachineActionService(
             config,
-            Principal.for_name(principal_name),
             connection_factory=lambda _path: connection,
         ),
         connection,
@@ -62,7 +60,7 @@ def test_machine_action_forwards_exact_owner_request(tmp_path: Path) -> None:
         "receipt_id": "owner-receipt",
         "status": "accepted",
     }
-    actions, connection = service(tmp_path, "operator", FakeResponse(201, receipt))
+    actions, connection = service(tmp_path, FakeResponse(201, receipt))
 
     result = actions.execute(
         "restart",
@@ -104,7 +102,6 @@ def test_machine_action_snapshot_exposes_bounded_authority_revision(
 ) -> None:
     actions, connection = service(
         tmp_path,
-        "operator",
         FakeResponse(
             200,
             {
@@ -135,7 +132,6 @@ def test_machine_action_snapshot_exposes_bounded_authority_revision(
 def test_machine_action_snapshot_rejects_malformed_revision(tmp_path: Path) -> None:
     actions, _ = service(
         tmp_path,
-        "operator",
         FakeResponse(
             200,
             {"schema": "sinnix-hub-v1", "sequence": True, "observed_at": "now"},
@@ -149,7 +145,6 @@ def test_machine_action_snapshot_rejects_malformed_revision(tmp_path: Path) -> N
 def test_machine_action_returns_owner_rejection(tmp_path: Path) -> None:
     actions, _ = service(
         tmp_path,
-        "operator",
         FakeResponse(409, {"error": "expected_target is stale"}),
     )
 
@@ -181,7 +176,7 @@ def test_prepare_reads_target_without_mutation_authority(tmp_path: Path) -> None
         },
         "observed_at": "2026-09-13T00:00:00Z",
     }
-    actions, connection = service(tmp_path, "operator", FakeResponse(200, payload))
+    actions, connection = service(tmp_path, FakeResponse(200, payload))
     assert actions.prepare("restart", {"unit": "fixture.service"}) == payload
     assert connection.request_args[:2] == ("POST", "/v1/actions/prepare")
     assert json.loads(connection.request_args[2]) == {
@@ -194,7 +189,6 @@ def test_prepare_reads_target_without_mutation_authority(tmp_path: Path) -> None
 def test_prepare_rejects_mismatched_target(tmp_path: Path) -> None:
     actions, _ = service(
         tmp_path,
-        "operator",
         FakeResponse(
             200,
             {
@@ -210,19 +204,15 @@ def test_prepare_rejects_mismatched_target(tmp_path: Path) -> None:
 
 
 def test_lookup_distinguishes_missing_from_owner_failure(tmp_path: Path) -> None:
-    actions, connection = service(
-        tmp_path, "operator", FakeResponse(404, {"error": "not_found"})
-    )
+    actions, connection = service(tmp_path, FakeResponse(404, {"error": "not_found"}))
     assert actions.lookup("request / #") is None
     assert connection.request_args[:2] == ("GET", "/v1/actions/request%20%2F%20%23")
-    actions, _ = service(
-        tmp_path, "operator", FakeResponse(503, {"error": "unavailable"})
-    )
+    actions, _ = service(tmp_path, FakeResponse(503, {"error": "unavailable"}))
     with pytest.raises(MachineActionError, match="unavailable"):
         actions.lookup("request")
 
 
 def test_lookup_returns_retained_receipt(tmp_path: Path) -> None:
     receipt = {"idempotency_key": "one", "status": "accepted"}
-    actions, _ = service(tmp_path, "operator", FakeResponse(200, receipt))
+    actions, _ = service(tmp_path, FakeResponse(200, receipt))
     assert actions.lookup("one") == receipt

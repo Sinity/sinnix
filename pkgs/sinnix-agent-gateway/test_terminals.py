@@ -9,7 +9,6 @@ import pytest
 from sinnix_agent_gateway.artifacts import ArtifactService
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.owner_execution import OwnerExecution
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.terminals import (
     TerminalDiagnosticError,
     TerminalError,
@@ -17,9 +16,7 @@ from sinnix_agent_gateway.terminals import (
 )
 
 
-def terminal_service(
-    tmp_path: Path, principal_name: str
-) -> tuple[TerminalService, Path]:
+def terminal_service(tmp_path: Path) -> tuple[TerminalService, Path]:
     captured = tmp_path / "terminal-commands.jsonl"
     runner = tmp_path / "kitty-control"
     runner.write_text(
@@ -43,10 +40,7 @@ def terminal_service(
             "XDG_RUNTIME_DIR": str(tmp_path / "runtime"),
         }
     )
-    principal = Principal.for_name(principal_name)
-    return TerminalService(
-        config, principal, ArtifactService(config, principal), execution
-    ), captured
+    return TerminalService(config, ArtifactService(config), execution), captured
 
 
 def commands(path: Path) -> list[list[str]]:
@@ -54,7 +48,7 @@ def commands(path: Path) -> list[list[str]]:
 
 
 def test_operator_sends_exact_terminal_text_vector(tmp_path: Path) -> None:
-    terminals, captured = terminal_service(tmp_path, "operator")
+    terminals, captured = terminal_service(tmp_path)
 
     terminals.action(
         "send",
@@ -67,7 +61,7 @@ def test_operator_sends_exact_terminal_text_vector(tmp_path: Path) -> None:
 
 
 def test_terminal_requires_runtime_directory_before_launch(tmp_path: Path) -> None:
-    terminals, _ = terminal_service(tmp_path, "operator")
+    terminals, _ = terminal_service(tmp_path)
     terminals.execution = OwnerExecution({})
 
     with pytest.raises(TerminalError, match="environment_unavailable:XDG_RUNTIME_DIR"):
@@ -75,7 +69,7 @@ def test_terminal_requires_runtime_directory_before_launch(tmp_path: Path) -> No
 
 
 def test_terminal_failure_writes_redacted_diagnostic_artifact(tmp_path: Path) -> None:
-    terminals, _ = terminal_service(tmp_path, "operator")
+    terminals, _ = terminal_service(tmp_path)
     runner = Path(terminals.config.kitty_control_command)
     runner.write_text("#!/bin/sh\nprintf 'token=fixture-secret\\n' >&2\nexit 23\n")
     runner.chmod(0o700)

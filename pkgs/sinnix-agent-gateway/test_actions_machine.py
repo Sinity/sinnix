@@ -163,7 +163,7 @@ class FakeConnection:
         pass
 
 
-def make_runtime(tmp_path: Path, principal: str = "operator") -> Runtime:
+def make_runtime(tmp_path: Path) -> Runtime:
     transitions = tmp_path / "transitions.jsonl"
     transitions.write_text(
         '{"unit":"beta.service","to":"failed"}\n{"unit":"alpha.service","to":"active"}\n'
@@ -177,7 +177,7 @@ def make_runtime(tmp_path: Path, principal: str = "operator") -> Runtime:
         runtime_transitions=transitions,
         hub_socket_path=tmp_path / "hub.sock",
     )
-    runtime = Runtime.create(cfg, principal)
+    runtime = Runtime.create(cfg)
     receipt = {
         "schema": "sinnix-hub-action-v1",
         "receipt_id": "owner-receipt",
@@ -288,7 +288,7 @@ def test_query_sections_and_actions_revision(tmp_path: Path) -> None:
 
 
 def test_snapshot_composes_sections_with_availability(tmp_path: Path) -> None:
-    runtime = make_runtime(tmp_path, "operator")
+    runtime = make_runtime(tmp_path)
     data = call(runtime, "machine.snapshot", {})["data"]
     assert data["load"]["available"] and "1m" in data["load"]["data"]
     assert data["memory"]["data"]["bytes"]["MemTotal"] > 0
@@ -387,7 +387,7 @@ def test_operate_and_units_operate_go_through_hub(tmp_path: Path) -> None:
 
 
 def test_operator_can_prepare_exact_target_precondition(tmp_path: Path) -> None:
-    runtime = make_runtime(tmp_path, "operator")
+    runtime = make_runtime(tmp_path)
     result = call(
         runtime,
         "machine.prepare",

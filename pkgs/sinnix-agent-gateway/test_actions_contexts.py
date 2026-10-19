@@ -29,7 +29,7 @@ def test_compose_input_binds_target_to_intent():
 def test_project_context_preserves_owner_components_and_observes_each_time(
     tmp_path, monkeypatch, intent
 ):
-    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch, with_git=True)
+    server, runtime, _ = make_server(tmp_path, monkeypatch, with_git=True)
     product = {
         "components": [
             {"name": "tasks", "status": "unavailable", "reason": "owner offline"}
@@ -59,7 +59,7 @@ def test_project_context_preserves_owner_components_and_observes_each_time(
 def test_job_review_preserves_native_receipt_and_incident_uses_observe(
     tmp_path, monkeypatch
 ):
-    server, runtime, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, runtime, fake = make_server(tmp_path, monkeypatch)
     receipt = {
         **DONE,
         "artifacts": {"stdout": "/private/fixture-output"},
@@ -93,7 +93,7 @@ def test_job_review_preserves_native_receipt_and_incident_uses_observe(
 def test_job_review_follows_launch_identity_across_reorders(
     tmp_path, monkeypatch, target
 ):
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, _, fake = make_server(tmp_path, monkeypatch)
     reference = "fixture-worker-original"
 
     def observe(args):
@@ -120,7 +120,7 @@ def test_job_review_follows_launch_identity_across_reorders(
 
 
 def test_job_review_rejects_another_launch(tmp_path, monkeypatch):
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.result"] = {
         **DONE,
         "launch_reference": "replacement",
@@ -150,7 +150,7 @@ def test_oversized_orientation_uses_owner_projection_and_retains_exact_snapshot(
         "GatewayConfig",
         partial(GatewayConfig, max_result_bytes=16384),
     )
-    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch, with_git=True)
+    server, runtime, _ = make_server(tmp_path, monkeypatch, with_git=True)
     projection = {
         "product": "project_context_compact",
         "outcome": "partial",
@@ -199,12 +199,10 @@ def test_oversized_orientation_uses_owner_projection_and_retains_exact_snapshot(
     from sinnix_agent_gateway.actions import audit
     from test_actions_jobs import OWNED
 
-    monkeypatch.setattr(
-        server_module, "visible_actions", lambda principal: (*OWNED, *audit.ACTIONS)
-    )
+    monkeypatch.setattr(server_module, "ALL_ACTIONS", (*OWNED, *audit.ACTIONS))
     from sinnix_agent_gateway.app import create_server
 
-    server = create_server(runtime.config, "operator")
+    server = create_server(runtime.config)
     page = call(server, "results.get", {"ref": value["snapshot_ref"]})
     assert page["result"]["outcome"] == "ok", page
 
@@ -223,7 +221,7 @@ def test_oversized_orientation_uses_owner_projection_and_retains_exact_snapshot(
 def test_unusable_oversized_orientation_is_explicitly_unavailable(
     tmp_path, monkeypatch, presentation
 ):
-    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch, with_git=True)
+    server, runtime, _ = make_server(tmp_path, monkeypatch, with_git=True)
     product = {"components": [{"data": "界" * 200000}], "presentation": presentation}
     runtime.mcp_broker = Broker({"ok": True, "data": product})
     response = call(
@@ -253,7 +251,7 @@ def test_projects_context_uses_the_same_compact_component_contract(
     from sinnix_agent_gateway.app import create_server
     from test_actions_jobs import OWNED
 
-    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch, with_git=True)
+    _, runtime, _ = make_server(tmp_path, monkeypatch, with_git=True)
     projection = {
         "product": "project_context_compact",
         "outcome": "partial",
@@ -281,10 +279,8 @@ def test_projects_context_uses_the_same_compact_component_contract(
             },
         }
     )
-    monkeypatch.setattr(
-        server_module, "visible_actions", lambda principal: (*OWNED, *projects.ACTIONS)
-    )
-    server = create_server(runtime.config, "operator")
+    monkeypatch.setattr(server_module, "ALL_ACTIONS", (*OWNED, *projects.ACTIONS))
+    server = create_server(runtime.config)
     response = call(server, "projects.context", {"target": {"project": "fixture"}})
     assert response["result"]["outcome"] == "ok", response
     value = response["data"]
@@ -313,7 +309,7 @@ def test_project_wrapper_metadata_cannot_hide_orientation_in_an_artifact(
         "GatewayConfig",
         partial(GatewayConfig, max_result_bytes=16384),
     )
-    _, runtime, _ = make_server(tmp_path, "operator", monkeypatch, with_git=True)
+    _, runtime, _ = make_server(tmp_path, monkeypatch, with_git=True)
     projection = {
         "product": "project_context_compact",
         "outcome": "ok",
@@ -321,10 +317,8 @@ def test_project_wrapper_metadata_cannot_hide_orientation_in_an_artifact(
     }
     product = {"outcome": "ok", "evidence": "", "presentation": projection}
     runtime.mcp_broker = Broker({"ok": True, "data": product})
-    monkeypatch.setattr(
-        server_module, "visible_actions", lambda principal: (*OWNED, *projects.ACTIONS)
-    )
-    server = create_server(runtime.config, "operator")
+    monkeypatch.setattr(server_module, "ALL_ACTIONS", (*OWNED, *projects.ACTIONS))
+    server = create_server(runtime.config)
     arguments = {"intent": "project.orientation", "project": {"project": "fixture"}}
     initial = call(server, "context.compose", arguments)
     assert initial["result"]["outcome"] == "ok", initial
@@ -357,7 +351,7 @@ def test_oversized_context_metadata_spills_complete_original_without_refusal(
         "GatewayConfig",
         partial(GatewayConfig, max_result_bytes=16384),
     )
-    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch, with_git=True)
+    server, runtime, _ = make_server(tmp_path, monkeypatch, with_git=True)
     reason = "complete metadata 界" * 2000
     observation = {
         "available": available,

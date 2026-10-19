@@ -14,7 +14,6 @@ from .owner_execution import (
     OwnerExecution,
     OwnerRoute,
 )
-from .permissions import Permission, Principal
 
 
 class DesktopError(ValueError):
@@ -40,12 +39,10 @@ class DesktopService:
     def __init__(
         self,
         config: GatewayConfig,
-        principal: Principal,
         artifacts: ArtifactService,
         execution: OwnerExecution | None = None,
     ):
         self.config = config
-        self.principal = principal
         self.artifacts = artifacts
         self.execution = execution or OwnerExecution()
 
@@ -92,7 +89,6 @@ class DesktopService:
         target: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Capture the focused output, one output, or a region into attested state."""
-        self.principal.require(Permission.DESKTOP_READ)
         if not isinstance(fix_hdr, bool):
             raise DesktopError("fix_hdr must be boolean")
         capture_dir = self.config.state_dir / "captures" / uuid.uuid4().hex
@@ -178,13 +174,9 @@ class DesktopService:
         self, owner: str, arguments: list[str], *, mutating: bool, timeout: float = 15
     ) -> Any:
         """Run one declared wrapper verb for a typed action; returns decoded output."""
-        self.principal.require(
-            Permission.DESKTOP_ACTION if mutating else Permission.DESKTOP_READ
-        )
         return self._run(owner, arguments, timeout=timeout)["result"]
 
     def read(self, operation: str) -> dict[str, Any]:
-        self.principal.require(Permission.DESKTOP_READ)
         try:
             owner, *arguments = self._READ_OPERATIONS[operation]
         except KeyError as exc:
@@ -195,7 +187,6 @@ class DesktopService:
         return {"operation": operation, **self._run(owner, arguments)}
 
     def action(self, operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        self.principal.require(Permission.DESKTOP_ACTION)
         if not isinstance(arguments, dict):
             raise DesktopError("arguments must be an object")
         if operation == "focus_window":

@@ -10,15 +10,10 @@ from sinnix_lib.layout import ACTIVITY_LANES, capture_lane_path
 
 from .config import GatewayConfig
 from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
-from .permissions import Permission, PolicyError, Principal
 
 
 class CaptureInventoryUnavailableError(RuntimeError):
     """The capture authority could not be read or interpreted."""
-
-
-class CaptureScopeError(PolicyError):
-    """Configured selectors cannot be resolved through the runtime authority."""
 
 
 @dataclass(frozen=True)
@@ -42,11 +37,7 @@ class CaptureLane:
         return None
 
 
-def queryable_capture_lanes(
-    runtime_inventory: Path,
-    selectors: frozenset[str] = frozenset(),
-    allowed_lanes: frozenset[str] | None = None,
-) -> dict[str, CaptureLane]:
+def queryable_capture_lanes(runtime_inventory: Path) -> dict[str, CaptureLane]:
     """Derive capture query contracts from every declared runtime lane.
 
     The inventory is the capture authority.  Every valid declared path is
@@ -82,13 +73,8 @@ def queryable_capture_lanes(
         if not lane_path.is_absolute():
             continue
         declarations[name] = lane_path
-    selected = _selected_capture_names(inventory, set(declarations), selectors)
-    if allowed_lanes is not None:
-        selected.intersection_update(allowed_lanes)
     lanes: dict[str, CaptureLane] = {}
     for name, lane_path in declarations.items():
-        if name not in selected:
-            continue
         native_lane = lane_path.name
         root = lane_path.parent
         for identity, relative in ACTIVITY_LANES.items():
@@ -118,73 +104,20 @@ def queryable_capture_lanes(
     return lanes
 
 
-def _selected_capture_names(
-    inventory: dict, names: set[str], selectors: frozenset[str]
-) -> set[str]:
-    if not selectors:
-        return names
-    scope = inventory.get("capture_scopes")
-    subjects = None
-    if any(selector.startswith("subject:") for selector in selectors):
-        if (
-            not isinstance(scope, dict)
-            or scope.get("schema") != "sinnix-capture-scope-v1"
-            or not isinstance(scope.get("subjects"), dict)
-        ):
-            raise CaptureScopeError(
-                "subject selectors require the versioned runtime capture subject registry"
-            )
-        subjects = scope["subjects"]
-    selected = set()
-    for selector in sorted(selectors):
-        kind, separator, name = selector.partition(":")
-        if not separator or not name:
-            raise CaptureScopeError(f"invalid capture-scope-v1 selector: {selector}")
-        if kind == "lane":
-            if name not in names:
-                raise CaptureScopeError(
-                    f"unknown runtime capture lane selector: {selector}"
-                )
-            selected.add(name)
-        elif kind == "subject":
-            if name not in subjects:
-                raise CaptureScopeError(
-                    f"unknown runtime capture subject selector: {selector}"
-                )
-            members = subjects[name]
-            if not isinstance(members, list) or any(
-                not isinstance(member, str) or member not in names for member in members
-            ):
-                raise CaptureScopeError(
-                    f"invalid runtime capture subject membership: {name}"
-                )
-            selected.update(members)
-        else:
-            raise CaptureScopeError(f"unknown capture selector kind: {kind}")
-    return selected
-
-
 class CaptureService:
     """Query declared native capture lanes without owning a lane registry."""
 
-    def __init__(self, config: GatewayConfig, principal: Principal):
+    def __init__(self, config: GatewayConfig):
         self.config = config
-        self.principal = principal
         self.execution = OwnerExecution()
 
     def _available_lanes(self) -> dict[str, CaptureLane]:
-        return queryable_capture_lanes(
-            self.config.runtime_inventory,
-            self.config.capture_scope,
-            self.principal.allowed_lanes,
-        )
+        return queryable_capture_lanes(self.config.runtime_inventory)
 
     def lanes_visible(self) -> dict[str, Any]:
-        """List runtime-declared native lane contracts visible to this principal."""
-        self.principal.require(Permission.CAPTURE_READ)
+        """List the runtime-declared native lane contracts."""
         lanes = self._available_lanes()
         available = sorted(lanes)
-        visible = self.principal.filter_lanes(None, available)
         return {
             "lanes": [
                 {
@@ -201,19 +134,16 @@ class CaptureService:
                         else {}
                     ),
                 }
-                for name in visible
+                for name in available
             ],
             "total_declared_lanes": len(available),
         }
 
     def lane(self, name: str) -> dict[str, Any]:
         """Return one canonical lane's inventory-derived native contract."""
-        self.principal.require_lane(name)
         try:
             lane = self._available_lanes()[name]
         except KeyError as exc:
-            if self.config.capture_scope:
-                raise PolicyError("capture lane is outside endpoint scope") from exc
             raise ValueError(
                 "capture lane is not declared by runtime inventory"
             ) from exc
@@ -231,12 +161,9 @@ class CaptureService:
 
     def freshness(self, name: str) -> dict[str, Any]:
         """Return freshness from the lane's actual capture progress record."""
-        self.principal.require_lane(name)
         try:
             lane = self._available_lanes()[name]
         except KeyError as exc:
-            if self.config.capture_scope:
-                raise PolicyError("capture lane is outside endpoint scope") from exc
             raise ValueError(
                 "capture lane is not declared by runtime inventory"
             ) from exc
@@ -270,7 +197,15 @@ class CaptureService:
         self, lanes: list[str] | None = None, since: float = 0.0, limit: int = 100
     ) -> dict[str, Any]:
         available = self._available_lanes()
-        effective_lanes = self.principal.filter_lanes(lanes, sorted(available))
+        if lanes is None:
+            effective_lanes = sorted(available)
+        else:
+            unknown = [lane for lane in lanes if lane not in available]
+            if unknown:
+                raise ValueError(
+                    f"capture lane(s) {unknown} are not declared by runtime inventory"
+                )
+            effective_lanes = lanes
         if not effective_lanes:
             return {"records": [], "lanes_queried": [], "truncated": False}
 

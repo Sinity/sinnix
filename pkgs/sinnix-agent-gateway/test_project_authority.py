@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 from sinnix_agent_gateway import projects as projects_module
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.projects import ProjectError, ProjectService
 
 
@@ -32,7 +31,7 @@ def project_service(tmp_path: Path) -> tuple[ProjectService, Path, Path]:
         state_dir=tmp_path / "state",
         projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
     )
-    return ProjectService(config, Principal.for_name("operator")), project, linked
+    return ProjectService(config), project, linked
 
 
 def test_project_checkouts_are_git_derived_and_explicit(tmp_path: Path) -> None:
@@ -68,7 +67,7 @@ def test_read_only_project_views_do_not_run_repository_fsmonitor(
     assert marker.exists(), "fixture must demonstrate native fsmonitor invocation"
     marker.unlink()
 
-    observer = ProjectService(projects.config, Principal.for_name("operator"))
+    observer = ProjectService(projects.config)
     assert observer.summary("fixture")["branch"]["head"] == "master"
     assert observer.checkouts("fixture")["checkouts"]
     assert not marker.exists()
@@ -95,7 +94,7 @@ def test_project_mutation_uses_configured_default_with_linked_checkout(
     tmp_path: Path,
 ) -> None:
     projects, _project, linked = project_service(tmp_path)
-    operator = ProjectService(projects.config, Principal.for_name("operator"))
+    operator = ProjectService(projects.config)
     linked_checkout = operator.checkouts("fixture")["checkouts"][1]["checkout_id"]
 
     operator.write("fixture", "operator.txt", "default")
@@ -111,7 +110,7 @@ def test_project_mutation_publishes_through_pinned_parent_when_replaced_by_symli
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
 ) -> None:
     _observer, project, _linked = project_service(tmp_path)
-    operator = ProjectService(_observer.config, Principal.for_name("operator"))
+    operator = ProjectService(_observer.config)
     safe_parent = project / "safe"
     safe_parent.mkdir()
     target = safe_parent / "tracked.txt"
@@ -161,7 +160,7 @@ def test_project_write_cleans_collision_safe_temporary_after_publication_failure
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _observer, project, _linked = project_service(tmp_path)
-    operator = ProjectService(_observer.config, Principal.for_name("operator"))
+    operator = ProjectService(_observer.config)
 
     def fail_replace(*_args: object, **_kwargs: object) -> None:
         raise OSError("injected publication failure")
@@ -178,7 +177,7 @@ def test_project_write_syncs_file_and_parent_directory_before_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _observer, project, _linked = project_service(tmp_path)
-    operator = ProjectService(_observer.config, Principal.for_name("operator"))
+    operator = ProjectService(_observer.config)
     original_fsync = projects_module.os.fsync
     synced_kinds: list[str] = []
 
@@ -199,7 +198,7 @@ def test_gateway_temporary_artifacts_are_excluded_from_project_apis(
     tmp_path: Path,
 ) -> None:
     _observer, project, _linked = project_service(tmp_path)
-    observer = ProjectService(_observer.config, Principal.for_name("operator"))
+    observer = ProjectService(_observer.config)
     temporary = project / ".tracked.gateway-tmp-fixture"
     temporary.write_text("private temporary\n")
 
@@ -217,7 +216,7 @@ def test_project_patch_rename_removes_source_without_ingesting_ignored_files(
     dirty: bool,
 ) -> None:
     _observer, project, _linked = project_service(tmp_path)
-    operator = ProjectService(_observer.config, Principal.for_name("operator"))
+    operator = ProjectService(_observer.config)
     source = project / "old.txt"
     source.write_text("tracked\n")
     git(project, "add", "old.txt")
@@ -256,7 +255,7 @@ def test_failed_rename_destination_keeps_the_dirty_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     observer, project, _linked = project_service(tmp_path)
-    operator = ProjectService(observer.config, Principal.for_name("operator"))
+    operator = ProjectService(observer.config)
     source = project / "a.txt"
     source.write_text("committed\n")
     git(project, "add", "a.txt")

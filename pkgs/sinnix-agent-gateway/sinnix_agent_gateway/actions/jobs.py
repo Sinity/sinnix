@@ -19,14 +19,12 @@ from pydantic import Field
 
 from .. import shell_lanes
 from ..action import (
-    ALL_PRINCIPALS,
-    OPERATOR_ONLY,
     Action,
     Example,
     MutationControls,
     RequestControls,
 )
-from ..contracts import VerbFamily
+from ..contracts import PRINCIPAL, VerbFamily
 from ..locators import (
     CheckoutLocator,
     JobLocator,
@@ -36,7 +34,6 @@ from ..locators import (
     job_ref,
     project_ref,
 )
-from ..permissions import Permission
 from ..redaction import redact
 from ..results import ProtocolError
 from ..schemas import GatewayModel
@@ -400,7 +397,6 @@ class JobPage(GatewayModel):
 
 
 def _list(runtime: Runtime, inp: ListInput) -> JobPage:
-    runtime.principal.require(Permission.JOB_READ)
     arguments: dict[str, Any] = {"limit": inp.limit}
     if inp.cursor is not None:
         arguments["cursor"] = inp.cursor
@@ -508,7 +504,6 @@ def _log(
 
 
 def _get(runtime: Runtime, inp: GetInput) -> JobDetail:
-    runtime.principal.require(Permission.JOB_READ)
     job_id, _, reference = inp.target.resolve()
     selectors = {}
     if inp.attempt is not None:
@@ -553,7 +548,6 @@ class LogsInput(RequestControls):
 
 
 def _logs(runtime: Runtime, inp: LogsInput) -> JobLog:
-    runtime.principal.require(Permission.JOB_READ)
     job_id, _, reference = inp.target.resolve()
     return _log(runtime, job_id, inp.offset, inp.max_bytes, reference, inp.attempt)
 
@@ -594,7 +588,6 @@ class JobWait(GatewayModel):
 
 async def _wait(runtime: Runtime, inp: JobWaitInput) -> JobWait:
     """Block on pueue in a worker thread; a cancelled MCP request abandons it."""
-    runtime.principal.require(Permission.JOB_READ)
     job_id, _, reference = inp.target.resolve()
     raw = await anyio.to_thread.run_sync(
         lambda: _job(
@@ -659,7 +652,6 @@ class QueuePage(GatewayModel):
 
 
 def _queues(runtime: Runtime, inp: QueuesInput) -> QueuePage:
-    runtime.principal.require(Permission.JOB_READ)
     arguments: dict[str, Any] = {}
     if inp.groups is not None:
         if any(not group or len(group) > 128 for group in inp.groups):
@@ -717,7 +709,6 @@ class CancelResult(GatewayModel):
 
 
 def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
-    runtime.principal.require(Permission.JOB_CANCEL)
     job_id, ref, reference = inp.target.resolve()
     expected = inp.expected_phase
     if inp.preconditions:
@@ -742,7 +733,7 @@ def _cancel(runtime: Runtime, inp: CancelInput) -> CancelResult:
         "job.cancel",
         job_id,
         reference,
-        actor=f"gateway:{runtime.principal.name}",
+        actor=f"gateway:{PRINCIPAL}",
         reason=inp.reason,
     )
     if not isinstance(raw.get("cancel_requested"), bool):
@@ -788,7 +779,6 @@ class RetryInput(MutationControls):
 
 
 def _retry(runtime: Runtime, inp: RetryInput) -> JobView:
-    runtime.principal.require(Permission.JOB_START)
     job_id, _, reference = inp.target.resolve()
     return _job_view(_job(runtime, "job.retry", job_id, reference))
 
@@ -809,7 +799,6 @@ class CleanResult(GatewayModel):
 
 
 def _clean(runtime: Runtime, inp: CleanInput) -> CleanResult:
-    runtime.principal.require(Permission.JOB_CANCEL)
     job_id, _, reference = inp.target.resolve()
     raw = _job(runtime, "job.clean", job_id, reference)
     # The id the owner cleaned, which a reorder may have moved the job to.
@@ -995,7 +984,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ListInput,
         Output=JobPage,
         handler=_list,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("job",),
         affordances=("jobs.get", "jobs.logs", "jobs.wait", "jobs.cancel"),
         aliases=("queue", "pueue status", "running jobs", "tasks"),
@@ -1014,7 +1002,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=GetInput,
         Output=JobDetail,
         handler=_get,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("job",),
         affordances=("jobs.logs", "jobs.wait", "jobs.cancel", "jobs.retry"),
         aliases=("job status", "job result", "job output", "phase"),
@@ -1034,7 +1021,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=LogsInput,
         Output=JobLog,
         handler=_logs,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("job",),
         affordances=("jobs.get", "jobs.wait"),
         aliases=("job log", "tail", "output", "stdout"),
@@ -1056,7 +1042,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=JobWaitInput,
         Output=JobWait,
         handler=_wait,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("job",),
         affordances=("jobs.get", "jobs.logs", "jobs.queues", "jobs.cancel"),
         aliases=("wait for job", "block", "until done", "continue"),
@@ -1097,7 +1082,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=QueuesInput,
         Output=QueuePage,
         handler=_queues,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("job",),
         affordances=("jobs.get", "jobs.wait", "jobs.cancel"),
         aliases=("lanes", "occupancy", "queue length", "what is running", "backlog"),
@@ -1118,12 +1102,11 @@ ACTIONS: tuple[Action, ...] = (
         Input=CancelInput,
         Output=CancelResult,
         handler=_cancel,
-        principals=OPERATOR_ONLY,
         resource_kinds=("job",),
         affordances=("jobs.get", "jobs.logs", "jobs.retry"),
         aliases=("kill", "stop job", "abort"),
         supports_precondition=True,
-        documentation="Pass expected_phase to refuse when the job already moved on. The owner retains reason with the gateway principal label before stopping the job. Request metadata is separate from completion; survivors is null when the owner did not report a process inspection.",
+        documentation="Pass expected_phase to refuse when the job already moved on. The owner retains reason with the gateway caller label before stopping the job. Request metadata is separate from completion; survivors is null when the owner did not report a process inspection.",
         examples=(
             Example(
                 title="Cancel a running job",
@@ -1143,7 +1126,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=RetryInput,
         Output=JobView,
         handler=_retry,
-        principals=OPERATOR_ONLY,
         resource_kinds=("job",),
         affordances=("jobs.wait", "jobs.get"),
         aliases=("restart", "rerun", "requeue"),
@@ -1162,7 +1144,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=CleanInput,
         Output=CleanResult,
         handler=_clean,
-        principals=OPERATOR_ONLY,
         resource_kinds=("job",),
         affordances=("jobs.list",),
         aliases=("remove job", "forget", "delete job", "prune"),
@@ -1182,7 +1163,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=OperationRunInput,
         Output=JobView,
         handler=_run_operation,
-        principals=OPERATOR_ONLY,
         resource_kinds=("project", "checkout", "job"),
         affordances=("jobs.wait", "jobs.logs", "jobs.get", "jobs.cancel"),
         aliases=("agentctl job start", "run check", "run lint", "verify", "build"),
@@ -1214,7 +1194,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ShellRunInput,
         Output=ShellRunResult,
         handler=_run_shell,
-        principals=OPERATOR_ONLY,
         resource_kinds=("project", "checkout", "job"),
         affordances=("jobs.wait", "jobs.logs", "jobs.queues", "jobs.cancel"),
         aliases=("exec", "command", "bash", "run command"),

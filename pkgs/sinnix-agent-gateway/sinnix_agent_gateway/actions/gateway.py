@@ -10,10 +10,9 @@ from typing import TYPE_CHECKING, Any, Literal
 import anyio
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..action import ALL_PRINCIPALS, Action, Example, MutationControls, RequestControls
+from ..action import Action, Example, MutationControls, RequestControls
 from ..catalog import search_rows
-from ..contracts import VerbFamily
-from ..permissions import Permission
+from ..contracts import PRINCIPAL, VerbFamily
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 
@@ -39,7 +38,6 @@ class GatewayStatus(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    principal: str
     route_preflight: dict[str, Any]
 
 
@@ -52,11 +50,8 @@ async def _status(runtime: Runtime, inp: StatusInput) -> GatewayStatus:
 
     manifest = await runtime.tool_manifest()
     # Hashing the catalog serializes every schema; off the event loop.
-    catalog_hash = await anyio.to_thread.run_sync(
-        action_set.catalog_hash, runtime.principal_name
-    )
+    catalog_hash = await anyio.to_thread.run_sync(action_set.catalog_hash)
     status = await runtime.gateway_status(
-        runtime.principal_contract_hash(),
         manifest["sha256"],
         catalog_hash,
         action_set.REVISION,
@@ -97,7 +92,6 @@ class CatalogAction(GatewayModel):
     aliases: list[str]
     affordances: list[str]
     resource_kinds: list[str]
-    principals: list[str]
     effect: str
     example: dict[str, Any] | None = None
     input_schema: dict[str, Any] | None = None
@@ -151,8 +145,8 @@ async def _describe(runtime: Runtime, inp: DescribeInput) -> Description:
     from .. import actions as action_set
 
     action = action_set.BY_NAME.get(inp.action)
-    if action is None or runtime.principal_name not in action.principals:
-        raise ProtocolError("not_found", "action is not visible to this principal")
+    if action is None:
+        raise ProtocolError("not_found", "action is not declared")
     row = action.catalog_row()
     digest = hashlib.sha256(
         json.dumps(row, sort_keys=True, separators=(",", ":")).encode()
@@ -190,7 +184,7 @@ def _action_matches(
     from .. import actions as action_set
 
     rows = []
-    for action in action_set.visible(runtime.principal_name):
+    for action in action_set.ALL_ACTIONS:
         if inp.family and action.family.value != inp.family:
             continue
         if inp.domain and action.domain != inp.domain:
@@ -208,7 +202,6 @@ def _action_matches(
                 "aliases": list(action.aliases),
                 "affordances": list(action.affordances),
                 "resource_kinds": list(action.resource_kinds),
-                "principals": sorted(action.principals),
                 "effect": action.effect.value,
                 "example": action.examples[0].input if action.examples else None,
                 "input_schema": action.input_schema() if inp.include_schemas else None,
@@ -226,9 +219,9 @@ def _action_matches(
         "resource_kinds",
     )
     selected = search_rows(rows, inp.query, fields)
-    resources = action_set.resource_rows(runtime.principal_name)
+    resources = action_set.resource_rows()
     resources = search_rows(resources, inp.query, ("kind", "owner", "actions"))
-    return selected, resources, action_set.catalog_hash(runtime.principal_name)
+    return selected, resources, action_set.catalog_hash()
 
 
 async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
@@ -242,11 +235,7 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
     incomplete: dict[str, str] = {}
     mcp_catalog_truncated = False
     catalog_artifact: dict[str, Any] | None = None
-    if (
-        inp.include_mcp_tools
-        and (inp.query or "").strip()
-        and Permission.MCP_READ in runtime.principal.permissions
-    ):
+    if inp.include_mcp_tools and (inp.query or "").strip():
         try:
             broker = await runtime.mcp_broker.catalog(bounded=False)
         except Exception as exc:  # broker failures are catalog gaps, not errors
@@ -307,7 +296,7 @@ async def _catalog(runtime: Runtime, inp: CatalogInput) -> Catalog:
                 kind="catalog-matches",
                 owner_id="gateway",
                 source="gateway.catalog",
-                target={"principal": runtime.principal_name, "query": inp.query},
+                target={"principal": PRINCIPAL, "query": inp.query},
             )
         )
     return Catalog(
@@ -339,7 +328,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=DescribeInput,
         Output=Description,
         handler=_describe,
-        principals=ALL_PRINCIPALS,
         examples=(Example(title="Describe", input={"action": "files.read"}),),
     ),
     Action(
@@ -350,7 +338,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ReadInput,
         Output=Dispatched,
         handler=_dispatch_only,
-        principals=ALL_PRINCIPALS,
         documentation="Pass the exact action name and its ordinary input in arguments. The response is the selected action's native envelope and content blocks.",
         examples=(
             Example(title="Read", input={"action": "projects.list", "arguments": {}}),
@@ -364,7 +351,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=EffectInput,
         Output=Dispatched,
         handler=_dispatch_only,
-        principals=ALL_PRINCIPALS,
         documentation="Pass controls at the top level and ordinary action input in arguments. The response is the selected action's native envelope and receipt. Change and operate effects are admitted.",
         examples=(
             Example(
@@ -385,7 +371,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=EffectInput,
         Output=Dispatched,
         handler=_dispatch_only,
-        principals=ALL_PRINCIPALS,
         documentation="Pass controls at the top level and ordinary action input in arguments. The response is the selected action's native envelope and receipt.",
         examples=(
             Example(
@@ -402,11 +387,10 @@ ACTIONS: tuple[Action, ...] = (
         name="gateway.status",
         family=VerbFamily.STATUS,
         owner="gateway",
-        summary="Report the principal, contract hashes, tool count and per-route availability.",
+        summary="Report the contract hashes, tool count and per-route availability.",
         Input=StatusInput,
         Output=GatewayStatus,
         handler=_status,
-        principals=ALL_PRINCIPALS,
         affordances=("gateway.catalog",),
         aliases=("health", "ready", "capabilities", "what can you do"),
         examples=(Example(title="Status", input={}),),
@@ -419,7 +403,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=CatalogInput,
         Output=Catalog,
         handler=_catalog,
-        principals=ALL_PRINCIPALS,
         affordances=("gateway.status",),
         aliases=("search tools", "discover", "help", "list actions", "which tool"),
         documentation="limit bounds inline rows per category. matched_counts and returned_counts distinguish observed matches from this response. matches_artifact retains every filtered match when cropped; artifacts.read retrieves its immutable bytes. Every action is also an MCP tool with its full schema in tools/list; the catalog adds aliases, affordances, resource kinds and the brokered MCP tool inventory (lynchpin, sinex, polylogue).",

@@ -15,7 +15,7 @@ def fixture(tmp_path):
 
 def server_fixture(tmp_path):
     config, log = fixture(tmp_path)
-    return create_server(config, "operator"), log
+    return create_server(config), log
 
 
 def test_native_update_preserves_explicit_null_metadata_and_row_version(tmp_path):
@@ -216,10 +216,9 @@ def test_an_abandoned_claim_reads_as_indeterminate_and_a_live_one_as_pending(
 ):
     """Fails if a claim whose caller died reads as still pending, or vice versa."""
     from sinnix_agent_gateway.audit import AuditService
-    from sinnix_agent_gateway.permissions import Principal
 
     config, _ = fixture(tmp_path)
-    audit = AuditService(config, Principal.for_name("operator"))
+    audit = AuditService(config)
     assert audit.claim_idempotency("beads.create", "live", "sha")[0] == "new"
     assert audit.operation("beads.create", "live")["state"] == "pending"
 

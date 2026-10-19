@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+from .contracts import PRINCIPAL
 from .payloads import canonical_chunks
 
 
@@ -32,8 +33,8 @@ def source_revision(value: Any) -> str:
 class ContextSnapshotStore:
     """Read historical context snapshots without rewriting or evicting them."""
 
-    def __init__(self, state_dir: Path, principal: str) -> None:
-        self.root = state_dir / "contexts" / principal
+    def __init__(self, state_dir: Path) -> None:
+        self.root = state_dir / "contexts" / PRINCIPAL
 
     @staticmethod
     def _snapshot_id(snapshot: Mapping[str, Any]) -> str:

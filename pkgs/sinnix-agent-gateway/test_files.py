@@ -5,20 +5,18 @@ from pathlib import Path
 import pytest
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.files import FileError, HostFileService
-from sinnix_agent_gateway.permissions import Principal
 
 
-def service(tmp_path: Path, principal_name: str) -> HostFileService:
+def service(tmp_path: Path) -> HostFileService:
     return HostFileService(
         GatewayConfig(state_dir=tmp_path / "state", projects={}),
-        Principal.for_name(principal_name),
     )
 
 
 def test_operator_write_uses_compare_and_swap_and_receipts(tmp_path: Path) -> None:
     target = tmp_path / "fixture.txt"
     target.write_text("before")
-    operator = service(tmp_path, "operator")
+    operator = service(tmp_path)
     before = operator.stat(str(target))["sha256"]
 
     replaced = operator.write(
@@ -46,7 +44,7 @@ def test_operator_create_publishes_exclusively_and_preserves_replace(
     tmp_path: Path,
 ) -> None:
     target = tmp_path / "new.txt"
-    operator = service(tmp_path, "operator")
+    operator = service(tmp_path)
 
     created = operator.write("create", str(target), content="new")
 
@@ -69,7 +67,7 @@ def test_operator_copies_and_moves_regular_files_without_replacing_destination(
     copy = tmp_path / "copy.txt"
     moved = tmp_path / "moved.txt"
     source.write_text("gateway fixture")
-    operator = service(tmp_path, "operator")
+    operator = service(tmp_path)
     source_hash = operator.stat(str(source))["sha256"]
 
     copied = operator.write(
@@ -96,7 +94,7 @@ def test_operator_rejects_symlink_mutation(tmp_path: Path) -> None:
     link.symlink_to(target)
 
     with pytest.raises(FileError, match="symlinks"):
-        service(tmp_path, "operator").write("replace", str(link), content="after")
+        service(tmp_path).write("replace", str(link), content="after")
 
     assert target.read_text() == "before"
 
@@ -117,9 +115,7 @@ def test_same_filesystem_move_has_no_hardlink_unlink_intermediate(
         )
 
     monkeypatch.setattr(files.os, "link", forbidden)
-    service(tmp_path, "operator").write(
-        "move", str(source), destination=str(destination)
-    )
+    service(tmp_path).write("move", str(source), destination=str(destination))
     assert not source.exists() and destination.read_text() == "payload"
     assert destination.stat().st_ino == inode and destination.stat().st_nlink == 1
 
@@ -141,9 +137,7 @@ def test_nonwritable_source_parent_refused_before_destination_creation(
         ),
     )
     with pytest.raises(FileError, match="source parent"):
-        service(tmp_path, "operator").write(
-            "move", str(source), destination=str(destination)
-        )
+        service(tmp_path).write("move", str(source), destination=str(destination))
     assert source.read_text() == "payload" and not destination.exists()
 
 
@@ -161,9 +155,7 @@ def test_atomic_move_failure_does_not_leave_a_destination(tmp_path, monkeypatch)
 
     monkeypatch.setattr(files, "rename_noreplace", refused)
     with pytest.raises(FileError, match="atomic move failed"):
-        service(tmp_path, "operator").write(
-            "move", str(source), destination=str(destination)
-        )
+        service(tmp_path).write("move", str(source), destination=str(destination))
     assert source.read_text() == "payload" and not destination.exists()
 
 
@@ -195,9 +187,7 @@ def test_cross_filesystem_unlink_failure_reports_both_preserved_objects(
 
     monkeypatch.setattr(Path, "unlink", block_source)
     with pytest.raises(FileError, match="both paths retained"):
-        service(tmp_path, "operator").write(
-            "move", str(source), destination=str(destination)
-        )
+        service(tmp_path).write("move", str(source), destination=str(destination))
     assert source.read_text() == destination.read_text() == "payload"
 
 
@@ -229,9 +219,7 @@ def test_copy_preserves_a_destination_created_during_source_open(
     monkeypatch.setattr(Path, "open", race)
     expected = OSError if fail_read else FileError
     with pytest.raises(expected):
-        service(tmp_path, "operator").write(
-            "copy", str(source), destination=str(destination)
-        )
+        service(tmp_path).write("copy", str(source), destination=str(destination))
     assert destination.read_bytes() == b"concurrent work"
     assert destination.stat().st_ino == expected_inode
     assert source.read_bytes() == b"source evidence"

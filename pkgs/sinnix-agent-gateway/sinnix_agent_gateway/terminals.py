@@ -11,7 +11,6 @@ from .owner_execution import (
     OwnerExecution,
     OwnerRoute,
 )
-from .permissions import Permission, Principal
 
 
 class TerminalError(ValueError):
@@ -35,12 +34,10 @@ class TerminalService:
     def __init__(
         self,
         config: GatewayConfig,
-        principal: Principal,
         artifacts: ArtifactService,
         execution: OwnerExecution | None = None,
     ):
         self.config = config
-        self.principal = principal
         self.artifacts = artifacts
         self.execution = execution or OwnerExecution()
 
@@ -48,9 +45,6 @@ class TerminalService:
         self, arguments: list[str], *, mutating: bool, timeout: float = 30
     ) -> Any:
         """Run one declared wrapper verb for a typed action; returns decoded output."""
-        self.principal.require(
-            Permission.TERMINAL_ACTION if mutating else Permission.TERMINAL_READ
-        )
         return self._run(arguments, timeout=timeout)["result"]
 
     def _run(self, arguments: list[str], *, timeout: float = 30) -> dict[str, Any]:
@@ -78,7 +72,6 @@ class TerminalService:
     def read(
         self, operation: str, arguments: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        self.principal.require(Permission.TERMINAL_READ)
         if arguments is None:
             arguments = {}
         if not isinstance(arguments, dict):
@@ -113,7 +106,6 @@ class TerminalService:
         )
 
     def action(self, operation: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        self.principal.require(Permission.TERMINAL_ACTION)
         if not isinstance(arguments, dict):
             raise TerminalError("arguments must be an object")
         if operation == "focus":

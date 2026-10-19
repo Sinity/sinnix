@@ -98,9 +98,7 @@ LISTING = [
 ]
 
 
-def fake_terminals(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, principal: str = "operator"
-):
+def fake_terminals(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     captured = tmp_path / "commands.jsonl"
     runner = tmp_path / "kitty-control"
     runner.write_text(
@@ -147,9 +145,8 @@ def fake_terminals(
         state_dir=tmp_path / "state",
         projects={},
         kitty_control_command=str(runner),
-        approved_manifest_hash="approved-fixture-hash",
     )
-    server = create_server(config, principal)
+    server = create_server(config)
     register(server, terminal_actions.ACTIONS)
     return server, captured
 

@@ -38,15 +38,15 @@ def server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
         state_dir=tmp_path / "state",
         projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
     )
-    runtime = Runtime.create(config, "operator")
+    runtime = Runtime.create(config)
     runtime.jobs = FakeJobs(default={**JOB, "timed_out": False})  # type: ignore[assignment]
-    monkeypatch.setattr(Runtime, "create", classmethod(lambda _c, _g, _p: runtime))
+    monkeypatch.setattr(Runtime, "create", classmethod(lambda _c, _g: runtime))
     monkeypatch.setattr(
         server_module,
-        "visible_actions",
-        lambda name: tuple(a for a in OWNED if name in a.principals),
+        "ALL_ACTIONS",
+        OWNED,
     )
-    return create_server(config, "operator")
+    return create_server(config)
 
 
 def refusal(server: Any, name: str, arguments: dict[str, Any]) -> dict[str, Any]:

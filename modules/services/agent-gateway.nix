@@ -66,141 +66,72 @@ let
 in
 mkServiceModule {
   name = "agent-gateway";
-  description = "operator MCP gateway over attested agent-job endpoints";
+  description = "operator MCP gateway";
   extraOptions = {
     stateDir = lib.mkOption {
       type = lib.types.str;
-      default = "/home/${userName}/.local/state/sinnix/agent-gateway";
-      description = "Private persisted gateway audit and non-job artifact state.";
+      # The path predates single-endpoint configuration; it holds the audit
+      # database, results and artifacts.
+      default = "/home/${userName}/.local/state/sinnix/agent-gateway/operator";
+      description = "Private persisted gateway audit, result and artifact state.";
     };
     maxResultBytes = lib.mkOption {
       type = lib.types.int;
       default = 262144;
       description = "Client response byte budget. Larger successful payloads use artifacts; chunked read operations also use this budget. This is not a Beads owner-output limit.";
     };
-    endpoints = lib.mkOption {
-      type = lib.types.attrsOf (
-        lib.types.submodule (
-          { name, ... }:
-          {
-            options = {
-              enable = lib.mkEnableOption "this OpenAI Secure MCP endpoint";
-              principal = lib.mkOption {
-                type = lib.types.enum [
-                  "operator"
-                ];
-                default = "operator";
-                description = "Gateway principal selected explicitly for this endpoint.";
-              };
-              label = lib.mkOption {
-                type = lib.types.nullOr lib.types.str;
-                default = null;
-                description = "Optional human-readable endpoint label.";
-              };
-              autoStart = lib.mkOption {
-                type = lib.types.bool;
-                default = true;
-                description = "Start this supervised endpoint at user login.";
-              };
-              stateDir = lib.mkOption {
-                type = lib.types.str;
-                default = "/home/${userName}/.local/state/sinnix/agent-gateway/${name}";
-                description = "Private persisted state for this endpoint.";
-              };
-              scope = {
-                projects = lib.mkOption {
-                  type = lib.types.listOf lib.types.str;
-                  default = [ ];
-                  description = "Canonical project IDs visible to this endpoint.";
-                };
-                captures = lib.mkOption {
-                  type = lib.types.listOf lib.types.str;
-                  default = [ ];
-                  description = "Capture-scope-v1 selectors: subject:<id> or lane:<exact runtime ID>. Empty means all principal-authorized lanes.";
-                };
-              };
-              tunnelId = lib.mkOption {
-                type = lib.types.str;
-                default = "";
-                description = "Non-secret OpenAI tunnel identifier for this endpoint.";
-              };
-              runtimeKeyFile = lib.mkOption {
-                type = lib.types.str;
-                default = "/run/agenix/openai-tunnel-runtime-key-${name}";
-                description = "Agenix runtime key dedicated to this endpoint.";
-              };
-              healthPort = lib.mkOption {
-                type = lib.types.port;
-                default = 3088;
-                description = "Loopback health, readiness, metrics, and UI port.";
-              };
-            };
-          }
-        )
-      );
-      default = { };
-      description = "Independently supervised principal-scoped gateway endpoints.";
+    autoStart = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Start the tunnel and its MCP server at user login.";
+    };
+    projects = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = "Canonical project IDs the gateway serves; empty means every configured project.";
+    };
+    tunnelId = lib.mkOption {
+      type = lib.types.str;
+      description = "Non-secret OpenAI tunnel identifier.";
+    };
+    runtimeKeyFile = lib.mkOption {
+      type = lib.types.str;
+      default = "/run/agenix/openai-tunnel-runtime-key";
+      description = "Agenix runtime key of the OpenAI tunnel.";
+    };
+    healthPort = lib.mkOption {
+      type = lib.types.port;
+      default = 3088;
+      description = "Loopback health, readiness, metrics, and UI port of the tunnel client.";
     };
   };
   configFn =
     { cfg, ... }:
     let
-      enabledEndpoints = lib.filterAttrs (_: endpoint: endpoint.enable) cfg.endpoints;
-      mkGatewayConfig =
-        {
-          stateDir,
-          endpoint,
-          projects,
-          approvals ? { },
-        }:
-        {
-          inherit stateDir endpoint projects;
-          privateProjectCatalogFile = config.sinnix.projects.privateCatalogFile;
-          inherit (cfg) maxResultBytes;
-          inherit mcpBrokerServers;
-        }
-        // approvals;
-      endpointConfigs = lib.mapAttrs (
-        name: endpoint:
-        jsonFormat.generate "sinnix-agent-gateway-${name}.json" (mkGatewayConfig {
-          stateDir = endpoint.stateDir;
-          endpoint = {
-            inherit name;
-            label = endpoint.label;
-            principal = endpoint.principal;
-            scope = endpoint.scope;
-          };
-          projects = config.sinnix.projects.entries;
-          approvals = {
-            packageManifestPath = "${scriptPkgs.sinnix-agent-gateway}/share/sinnix-agent-gateway/manifests/${endpoint.principal}.json";
-            approvedManifestPrincipal = endpoint.principal;
-          };
-        })
-      ) enabledEndpoints;
-      endpointArtifacts = lib.mapAttrs (
-        name: endpoint:
-        let
-          configFile = endpointConfigs.${name};
-        in
-        {
-          manifestCheck = pkgs.writeShellScriptBin "sinnix-agent-gateway-${name}-schema" ''
-            set -euo pipefail
-            exec ${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg endpoint.principal} manifest
-          '';
-          approvalGate = pkgs.writeShellScript "sinnix-agent-gateway-${name}-approval-gate" ''
-            set -euo pipefail
-            exec ${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg endpoint.principal} approval-check
-          '';
-          semanticCanary = pkgs.writeShellScript "sinnix-agent-gateway-${name}-semantic-canary" ''
-            set -euo pipefail
-            exec ${gatewayBin} --config ${configFile} --principal ${lib.escapeShellArg endpoint.principal} canary
-          '';
-          stateScaffold = pkgs.writeShellScript "sinnix-agent-gateway-${name}-state-scaffold" ''
-            set -euo pipefail
-            exec ${pkgs.coreutils}/bin/install -d -m 0700 ${lib.escapeShellArg endpoint.stateDir}
-          '';
-        }
-      ) enabledEndpoints;
+      configFile = jsonFormat.generate "sinnix-agent-gateway.json" {
+        inherit (cfg) stateDir maxResultBytes;
+        endpoint.scope.projects = cfg.projects;
+        projects = config.sinnix.projects.entries;
+        privateProjectCatalogFile = config.sinnix.projects.privateCatalogFile;
+        inherit mcpBrokerServers;
+        packageManifestPath = "${scriptPkgs.sinnix-agent-gateway}/share/sinnix-agent-gateway/manifest.json";
+      };
+      manifestCheck = pkgs.writeShellScriptBin "sinnix-agent-gateway-schema" ''
+        set -euo pipefail
+        exec ${gatewayBin} --config ${configFile} manifest
+      '';
+      approvalGate = pkgs.writeShellScript "sinnix-agent-gateway-approval-gate" ''
+        set -euo pipefail
+        exec ${gatewayBin} --config ${configFile} approval-check
+      '';
+      semanticCanary = pkgs.writeShellScript "sinnix-agent-gateway-semantic-canary" ''
+        set -euo pipefail
+        exec ${gatewayBin} --config ${configFile} canary
+      '';
+      stateScaffold = pkgs.writeShellScript "sinnix-agent-gateway-state-scaffold" ''
+        set -euo pipefail
+        exec ${pkgs.coreutils}/bin/install -d -m 0700 ${lib.escapeShellArg cfg.stateDir}
+      '';
       gatewayPath =
         lib.makeBinPath [
           pkgs.systemd
@@ -215,61 +146,16 @@ mkServiceModule {
         + ":/run/current-system/sw/bin:/etc/profiles/per-user/${userName}/bin"
         + ":/home/${userName}/.local/bin";
       giTypelibPath = "${pkgs.at-spi2-core}/lib/girepository-1.0:${pkgs.gobject-introspection}/lib/girepository-1.0";
-      endpointValues = lib.mapAttrsToList (_: endpoint: endpoint) enabledEndpoints;
-      duplicateValues =
-        field:
-        let
-          values = map (endpoint: toString endpoint.${field}) endpointValues;
-        in
-        lib.filter (value: builtins.length (builtins.filter (candidate: candidate == value) values) > 1) (
-          lib.unique values
-        );
     in
     {
-
-      assertions = [
-        {
-          assertion = duplicateValues "tunnelId" == [ ];
-          message = "agent-gateway endpoints must use distinct tunnel IDs";
-        }
-        {
-          assertion = duplicateValues "runtimeKeyFile" == [ ];
-          message = "agent-gateway endpoints must use distinct runtime credentials";
-        }
-        {
-          assertion = duplicateValues "healthPort" == [ ];
-          message = "agent-gateway endpoints must use distinct health ports";
-        }
-      ]
-      ++ lib.concatLists (
-        lib.mapAttrsToList (name: endpoint: [
-          {
-            assertion = endpoint.tunnelId != "";
-            message = "sinnix.services.agent-gateway.endpoints.${name}.tunnelId must be set when the endpoint is enabled";
-          }
-        ]) enabledEndpoints
-      );
 
       environment.systemPackages = [
         scriptPkgs.sinnix-agent-gateway
         tunnelClient
-      ]
-      ++ lib.concatLists (
-        lib.mapAttrsToList (name: _: [
-          endpointArtifacts.${name}.manifestCheck
-        ]) enabledEndpoints
-      );
+        manifestCheck
+      ];
 
-      environment.etc =
-        lib.optionalAttrs (builtins.hasAttr "operator" endpointConfigs) {
-          "sinnix/agent-gateway.json".source = endpointConfigs.operator;
-        }
-        // lib.mapAttrs' (
-          name: _:
-          lib.nameValuePair "sinnix/agent-gateway-${name}.json" {
-            source = endpointConfigs.${name};
-          }
-        ) enabledEndpoints;
+      environment.etc."sinnix/agent-gateway.json".source = configFile;
 
       sinnix.persistence.home.directories = [
         {
@@ -278,152 +164,142 @@ mkServiceModule {
         }
       ];
 
-      sinnix.runtime.units =
-        (lib.mapAttrs' (
-          name: endpoint:
-          lib.nameValuePair "agent-gateway-${name}" {
-            unit = "sinnix-agent-gateway-${name}.service";
-            manager = "user";
-            resourceClass = "ordinary";
-            notifyOnFailure = true;
-            operatorRestart = true;
-            workload = {
-              class = "protected";
-              rationale = "Outbound ${endpoint.principal} control path for endpoint ${name}; independently bounded and restartable.";
-              processMatchers = [ "tunnel-client" ];
-            };
-            activation = {
-              mode = "direct";
-              publicEndpoint = "127.0.0.1:${toString endpoint.healthPort}";
-            };
-          }
-        ) enabledEndpoints)
-        // (lib.mapAttrs' (
-          name: endpoint:
-          lib.nameValuePair "agent-gateway-${name}-mcp" {
-            unit = "sinnix-agent-gateway-${name}-mcp.service";
-            manager = "user";
-            resourceClass = "ordinary";
-            notifyOnFailure = true;
-            operatorRestart = true;
-            workload = {
-              class = "protected";
-              rationale = "Loopback MCP server for the ${name} operator tunnel.";
-              processMatchers = [ "sinnix-agent-gateway" ];
-            };
-            # The server runs a remote agent's tools in process: git and
-            # content reads over checkouts, owner subprocesses, and the
-            # brokered MCP children. That is agent tool work, so it shares
-            # agenttool.slice's budget instead of running unbounded in
-            # app.slice, and MemoryHigh throttles this unit first. Page cache
-            # from checkout reads is what reclaim takes: one night of
-            # all-worktree content hashing charged 9.4G here.
-            # MemoryMax is the safety boundary for remote-driven work: memory
-            # that reclaim cannot take past MemoryHigh is a runaway call, and
-            # the kernel ends it here instead of in the operator's session.
-            # TimeoutStopSec covers the server's own 8 s drain deadline.
-            resources = {
-              Slice = "agenttool.slice";
-              MemoryHigh = "4G";
-              MemoryMax = "6G";
-              TimeoutStopSec = "10s";
-            };
-            activation = {
-              mode = "direct";
-            };
-          }
-        ) enabledEndpoints);
+      sinnix.runtime.units = {
+        agent-gateway = {
+          unit = "sinnix-agent-gateway.service";
+          manager = "user";
+          resourceClass = "ordinary";
+          notifyOnFailure = true;
+          operatorRestart = true;
+          workload = {
+            class = "protected";
+            rationale = "Outbound operator control path; independently bounded and restartable.";
+            processMatchers = [ "tunnel-client" ];
+          };
+          activation = {
+            mode = "direct";
+            publicEndpoint = "127.0.0.1:${toString cfg.healthPort}";
+          };
+        };
+        agent-gateway-mcp = {
+          unit = "sinnix-agent-gateway-mcp.service";
+          manager = "user";
+          resourceClass = "ordinary";
+          notifyOnFailure = true;
+          operatorRestart = true;
+          workload = {
+            class = "protected";
+            rationale = "Loopback MCP server for the operator tunnel.";
+            processMatchers = [ "sinnix-agent-gateway" ];
+          };
+          # The server runs a remote agent's tools in process: git and
+          # content reads over checkouts, owner subprocesses, and the
+          # brokered MCP children. That is agent tool work, so it shares
+          # agenttool.slice's budget instead of running unbounded in
+          # app.slice, and MemoryHigh throttles this unit first. Page cache
+          # from checkout reads is what reclaim takes: one night of
+          # all-worktree content hashing charged 9.4G here.
+          # MemoryMax is the safety boundary for remote-driven work: memory
+          # that reclaim cannot take past MemoryHigh is a runaway call, and
+          # the kernel ends it here instead of in the operator's session.
+          # TimeoutStopSec covers the server's own 8 s drain deadline.
+          resources = {
+            Slice = "agenttool.slice";
+            MemoryHigh = "4G";
+            MemoryMax = "6G";
+            TimeoutStopSec = "10s";
+          };
+          activation = {
+            mode = "direct";
+          };
+        };
+      };
 
       home-manager.users.${userName} = {
-        systemd.user.services =
-          (lib.mapAttrs' (
-            name: endpoint:
-            lib.nameValuePair "sinnix-agent-gateway-${name}" {
-              Unit = {
-                Description = "OpenAI Secure MCP endpoint ${name} for Sinnix ${endpoint.principal} gateway";
-                After = [
-                  "network-online.target"
-                  "sinnix-agent-gateway-${name}-mcp.service"
-                ];
-                Wants = [
-                  "network-online.target"
-                  "sinnix-agent-gateway-${name}-mcp.service"
-                ];
-                ConditionPathExists = endpoint.runtimeKeyFile;
-                StartLimitIntervalSec = 300;
-                StartLimitBurst = 8;
-              };
-              Service = {
+        systemd.user.services = {
+          sinnix-agent-gateway = {
+            Unit = {
+              Description = "OpenAI Secure MCP tunnel for the Sinnix gateway";
+              After = [
+                "network-online.target"
+                "sinnix-agent-gateway-mcp.service"
+              ];
+              Wants = [
+                "network-online.target"
+                "sinnix-agent-gateway-mcp.service"
+              ];
+              ConditionPathExists = cfg.runtimeKeyFile;
+              StartLimitIntervalSec = 300;
+              StartLimitBurst = 8;
+            };
+            Service = {
+              Type = "simple";
+              # The client dispatches at most this many commands to the
+              # server at once (default 10); the rest queue inside it while
+              # the control plane's per-command response deadline runs. A
+              # ChatGPT fleet of 16 tabs exceeds 10.
+              ExecStart = ''
+                ${tunnelClient}/bin/tunnel-client run \
+                  --control-plane.tunnel-id ${lib.escapeShellArg cfg.tunnelId} \
+                  --control-plane.api-key file:%d/runtime-key \
+                  --mcp.server-url ${lib.escapeShellArg "url=http://localhost:8000/mcp,channel=main,unix-socket=%t/sinnix-agent-gateway/mcp.sock"} \
+                  --mcp.startup-wait-timeout 30s \
+                  --mcp.max-concurrent-requests 32 \
+                  --health.listen-addr 127.0.0.1:${toString cfg.healthPort} \
+                  --log.format json \
+                  --log.level warn
+              '';
+              LoadCredential = "runtime-key:${cfg.runtimeKeyFile}";
+              Restart = "always";
+              RestartSec = "5s";
+              UMask = "0077";
+              # warn: at info the client logs its whole dependency graph on
+              # every start plus a line per dispatched call.
+              # No gateway PATH or typelib path. The client does start
+              # `codex app-server` (from the user manager's PATH) to serve
+              # Codex over the tunnel; the codex wrapper scopes it under
+              # agent.slice. Every input of this unit must be the tunnel's own, since
+              # Home Manager restarts a unit whose file changed and a
+              # tunnel restart drops every in-flight call. A restart of the
+              # server alone does not: the client reconnects to its socket.
+            };
+            Install.WantedBy = lib.optionals cfg.autoStart [ "default.target" ];
+          };
+          sinnix-agent-gateway-mcp = {
+            Unit = {
+              Description = "Loopback MCP server for the Sinnix gateway";
+              StartLimitIntervalSec = 300;
+              StartLimitBurst = 8;
+            };
+            Service =
+              lib.sinnix.mkRuntimeServiceConfig {
+                runtimeInventory = config.sinnix.runtime.inventory;
+                unit = "sinnix-agent-gateway-mcp.service";
+                manager = "user";
+              }
+              // {
                 Type = "simple";
-                # The client dispatches at most this many commands to the
-                # server at once (default 10); the rest queue inside it while
-                # the control plane's per-command response deadline runs. A
-                # ChatGPT fleet of 16 tabs exceeds 10.
+                RuntimeDirectory = "sinnix-agent-gateway";
+                RuntimeDirectoryMode = "0700";
+                ExecStartPre = [
+                  stateScaffold
+                  approvalGate
+                  semanticCanary
+                ];
                 ExecStart = ''
-                  ${tunnelClient}/bin/tunnel-client run \
-                    --control-plane.tunnel-id ${lib.escapeShellArg endpoint.tunnelId} \
-                    --control-plane.api-key file:%d/runtime-key \
-                    --mcp.server-url ${lib.escapeShellArg "url=http://localhost:8000/mcp,channel=main,unix-socket=%t/sinnix-agent-gateway-${name}/mcp.sock"} \
-                    --mcp.startup-wait-timeout 30s \
-                    --mcp.max-concurrent-requests 32 \
-                    --health.listen-addr 127.0.0.1:${toString endpoint.healthPort} \
-                    --log.format json \
-                    --log.level warn
+                  ${gatewayBin} --config ${configFile} serve-http --socket %t/sinnix-agent-gateway/mcp.sock
                 '';
-                LoadCredential = "runtime-key:${endpoint.runtimeKeyFile}";
                 Restart = "always";
                 RestartSec = "5s";
                 UMask = "0077";
-                # warn: at info the client logs its whole dependency graph on
-                # every start plus a line per dispatched call.
-                # No gateway PATH or typelib path. The client does start
-                # `codex app-server` (from the user manager's PATH) to serve
-                # Codex over the tunnel; the codex wrapper scopes it under
-                # agent.slice. Every input of this unit must be the tunnel's own, since
-                # Home Manager restarts a unit whose file changed and a
-                # tunnel restart drops every in-flight call. A restart of the
-                # server alone does not: the client reconnects to its socket.
+                Environment = [
+                  "PATH=${gatewayPath}"
+                  "GI_TYPELIB_PATH=${giTypelibPath}"
+                ];
               };
-              Install.WantedBy = lib.optionals endpoint.autoStart [ "default.target" ];
-            }
-          ) enabledEndpoints)
-          // (lib.mapAttrs' (
-            name: endpoint:
-            lib.nameValuePair "sinnix-agent-gateway-${name}-mcp" {
-              Unit = {
-                Description = "Loopback MCP server for Sinnix gateway ${name}";
-                StartLimitIntervalSec = 300;
-                StartLimitBurst = 8;
-              };
-              Service =
-                lib.sinnix.mkRuntimeServiceConfig {
-                  runtimeInventory = config.sinnix.runtime.inventory;
-                  unit = "sinnix-agent-gateway-${name}-mcp.service";
-                  manager = "user";
-                }
-                // {
-                  Type = "simple";
-                  RuntimeDirectory = "sinnix-agent-gateway-${name}";
-                  RuntimeDirectoryMode = "0700";
-                  ExecStartPre = [
-                    endpointArtifacts.${name}.stateScaffold
-                    endpointArtifacts.${name}.approvalGate
-                    endpointArtifacts.${name}.semanticCanary
-                  ];
-                  ExecStart = ''
-                    ${gatewayBin} --config ${endpointConfigs.${name}} --principal ${lib.escapeShellArg endpoint.principal} serve-http --socket %t/sinnix-agent-gateway-${name}/mcp.sock
-                  '';
-                  Restart = "always";
-                  RestartSec = "5s";
-                  UMask = "0077";
-                  Environment = [
-                    "PATH=${gatewayPath}"
-                    "GI_TYPELIB_PATH=${giTypelibPath}"
-                  ];
-                };
-              Install.WantedBy = lib.optionals endpoint.autoStart [ "default.target" ];
-            }
-          ) enabledEndpoints);
+            Install.WantedBy = lib.optionals cfg.autoStart [ "default.target" ];
+          };
+        };
       };
     };
 } args

@@ -47,11 +47,6 @@ in
                 ];
               };
             };
-            sinnix.runtime.captureSubjects.fixture = [
-              "fixture-system-capture"
-              "fixture-user-capture"
-              "fixture-standalone-capture"
-            ];
             sinnix.runtime.captures = [
               {
                 name = "fixture-standalone-capture";
@@ -136,17 +131,6 @@ in
                   }
                 && (capture "fixture-standalone-capture").producer == null;
               message = "flattened captures must preserve declared manager/unit ownership and leave standalone producers unknown";
-            }
-            {
-              assertion =
-                config.sinnix.runtime.inventory.capture_scopes.schema == "sinnix-capture-scope-v1"
-                &&
-                  config.sinnix.runtime.inventory.capture_scopes.subjects.fixture == [
-                    "fixture-system-capture"
-                    "fixture-user-capture"
-                    "fixture-standalone-capture"
-                  ];
-              message = "capture subjects must project exact enabled IDs from the explicit versioned registry";
             }
             {
               # Both fixture surfaces override a key their class also sets

@@ -352,7 +352,6 @@ class LocalJobs:
         return self._call(self._queues, arguments)
 
     def shell_start(self, **arguments: Any) -> dict[str, Any]:
-        arguments.pop("principal", None)
         arguments.pop("result", None)
         return self._call(self._shell_start, arguments)
 

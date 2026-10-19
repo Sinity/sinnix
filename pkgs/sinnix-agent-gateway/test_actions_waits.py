@@ -12,7 +12,7 @@ from test_actions_jobs import DONE, RUNNING, call, make_server
 def test_wait_for_job_terminal_uses_the_queue_wait(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.wait"] = DONE
     done = call(
         server,
@@ -52,7 +52,7 @@ def test_wait_for_job_terminal_carries_the_launch_reference_to_the_queue(
     Anti-vacuity: without it the queue wait is handed the task id the ref
     encodes, and answers about whatever a reorder moved there.
     """
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, _, fake = make_server(tmp_path, monkeypatch)
     reference = "fixture-worker-abcd1234"
     fake.responses["job.wait"] = {**DONE, "job_id": "44", "launch_reference": reference}
 
@@ -82,7 +82,7 @@ def test_wait_for_job_terminal_carries_the_launch_reference_to_the_queue(
 def test_wait_for_file_exists_polls_until_the_deadline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, _ = make_server(tmp_path, "operator", monkeypatch)
+    server, _, _ = make_server(tmp_path, monkeypatch)
     target = tmp_path / "out.txt"
     missing = call(
         server,
@@ -126,7 +126,7 @@ def test_wait_for_file_exists_polls_until_the_deadline(
 def test_wait_for_file_hash_and_receipt_use_the_runtime_resolver(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, _ = make_server(tmp_path, "operator", monkeypatch)
+    server, _, _ = make_server(tmp_path, monkeypatch)
     target = tmp_path / "hashed.txt"
     target.write_text("hello\n")
     digest = "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03"
@@ -168,7 +168,7 @@ def test_wait_condition_union_rejects_mixed_fields() -> None:
 def test_events_tail_pages_with_a_scope_bound_cursor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch, with_git=True)
+    server, _, fake = make_server(tmp_path, monkeypatch, with_git=True)
     fake.responses["job.list"] = {
         "jobs": [RUNNING],
         "total": 1,
@@ -210,7 +210,7 @@ def test_wait_for_terminal_output_matches_captured_text_only(
     The terminal owner answers {"operation": "capture", "result": <text>}; the
     pattern must be searched in the text alone.
     """
-    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
+    server, runtime, _ = make_server(tmp_path, monkeypatch)
     screens = {"text": ""}
 
     class Terminals:

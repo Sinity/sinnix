@@ -20,14 +20,13 @@ from test_actions_machine import call
 BY_NAME = {action.name: action for action in artifacts.ACTIONS}
 
 
-def runtime(tmp_path: Path, principal: str = "operator") -> Runtime:
+def runtime(tmp_path: Path) -> Runtime:
     return Runtime.create(
         GatewayConfig(
             state_dir=tmp_path / "state",
             projects={},
             hub_socket_path=tmp_path / "hub.sock",
         ),
-        principal,
     )
 
 
@@ -284,7 +283,6 @@ def test_oversized_reads_stay_on_original_artifact_with_lossless_pages(
         GatewayConfig(
             state_dir=tmp_path / "state", projects={}, max_result_bytes=bound
         ),
-        "operator",
     )
     original = ('🙂"\\\n\t' * 30000).encode()
     artifact_id = register(rt, "large.txt", original, "note")

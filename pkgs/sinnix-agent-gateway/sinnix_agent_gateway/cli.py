@@ -19,7 +19,6 @@ from .cli_support import (
     invoke_mcp,
 )
 from .config import GatewayConfig
-from .permissions import ROLE_PERMISSIONS
 from .runtime import manifest_measurement
 
 LOCAL_CONFIG_PATH = Path("/etc/sinnix/agent-gateway.json")
@@ -34,46 +33,31 @@ def _default_config_path() -> Path | None:
     return LOCAL_CONFIG_PATH if LOCAL_CONFIG_PATH.is_file() else None
 
 
-async def build_manifest(config: GatewayConfig, principal_name: str) -> dict[str, Any]:
-    manifest = canonical_manifest(
-        await create_server(config, principal_name).list_tools()
-    )
+async def build_manifest(config: GatewayConfig) -> dict[str, Any]:
+    manifest = canonical_manifest(await create_server(config).list_tools())
     return {**manifest, "measurement": manifest_measurement(manifest)}
 
 
-def verify_approval(config: GatewayConfig, principal_name: str) -> dict[str, object]:
-    """Check deployed code against its package-generated principal manifest."""
-    if config.approved_manifest_principal != principal_name:
-        raise ValueError(
-            "approval principal does not match the selected gateway principal"
-        )
-    expected = config.approved_manifest_hash
+def verify_approval(config: GatewayConfig) -> dict[str, object]:
+    """Check deployed code against its package-generated tool manifest."""
+    expected = None
     if config.package_manifest_path is not None:
         artifact = json.loads(config.package_manifest_path.read_text())
-        if artifact.get("principal") != principal_name:
-            raise ValueError(
-                "package manifest principal does not match selected principal"
-            )
         expected = artifact.get("manifest", {}).get("sha256")
     if not isinstance(expected, str) or not expected:
         raise ValueError("a package tool manifest is required")
-    live = anyio.run(build_manifest, config, principal_name)["sha256"]
+    live = anyio.run(build_manifest, config)["sha256"]
     if live != expected:
         raise ValueError(f"tool manifest drift: expected {expected}, got {live}")
     return {
-        "principal": principal_name,
         "tool_manifest_hash": live,
-        "action_catalog_hash": action_set.catalog_hash(principal_name),
+        "action_catalog_hash": action_set.catalog_hash(),
     }
 
 
-async def semantic_canary(
-    config: GatewayConfig, principal_name: str
-) -> dict[str, object]:
+async def semantic_canary(config: GatewayConfig) -> dict[str, object]:
     """Exercise the typed envelopes a cold session starts from."""
-    catalog = await invoke_mcp(
-        config, principal_name, "gateway.catalog", {"limit": 500}
-    )
+    catalog = await invoke_mcp(config, "gateway.catalog", {"limit": 500})
     data = catalog.get("data") if isinstance(catalog, dict) else None
     if catalog.get("result", {}).get("outcome") != "ok" or not isinstance(data, dict):
         raise ValueError("semantic canary catalog did not return its typed envelope")
@@ -82,7 +66,7 @@ async def semantic_canary(
     missing = sorted(required - names)
     if missing:
         raise ValueError(f"semantic canary catalog omits actions: {', '.join(missing)}")
-    projects = await invoke_mcp(config, principal_name, "projects.list", {})
+    projects = await invoke_mcp(config, "projects.list", {})
     rows = projects.get("data", {}).get("projects") if projects.get("data") else None
     if projects.get("result", {}).get("outcome") != "ok" or not isinstance(rows, list):
         raise ValueError(
@@ -91,7 +75,6 @@ async def semantic_canary(
     if data.get("truncated"):
         raise ValueError("semantic canary catalog was truncated")
     return {
-        "principal": principal_name,
         "catalog_actions": len(names),
         "projects": len(rows),
     }
@@ -103,9 +86,6 @@ def parser() -> argparse.ArgumentParser:
         description="Invoke one typed gateway action or serve the MCP transport.",
     )
     result.add_argument("--config", type=Path, default=_default_config_path())
-    result.add_argument(
-        "--principal", choices=sorted(ROLE_PERMISSIONS), default="operator"
-    )
     subcommands = result.add_subparsers(dest="command")
     for name in (
         "serve",
@@ -158,9 +138,8 @@ def main() -> None:
     arguments = parser().parse_args()
     config = GatewayConfig.load(arguments.config)
     command = arguments.command or "serve"
-    principal = arguments.principal
     if command == "serve":
-        create_server(config, principal).run("stdio")
+        create_server(config).run("stdio")
     elif command == "serve-http":
         from .serving import serve_unix
 
@@ -174,7 +153,7 @@ def main() -> None:
         ):
             raise SystemExit("socket directory must be owned by this user and private")
         app = create_server(
-            config, principal, transport="streamable_http_unix"
+            config, transport="streamable_http_unix"
         ).streamable_http_app(json_response=True, host="localhost")
         original_umask = os.umask(0o077)
         try:
@@ -182,26 +161,25 @@ def main() -> None:
         finally:
             os.umask(original_umask)
     elif command == "manifest":
-        print(json.dumps(anyio.run(build_manifest, config, principal), indent=2))
+        print(json.dumps(anyio.run(build_manifest, config), indent=2))
     elif command == "catalog-hash":
         print(
             json.dumps(
                 {
-                    "principal": principal,
                     "revision": action_set.REVISION,
-                    "sha256": action_set.catalog_hash(principal),
+                    "sha256": action_set.catalog_hash(),
                 },
                 indent=2,
             )
         )
     elif command == "approval-check":
         try:
-            print(json.dumps(verify_approval(config, principal), indent=2))
+            print(json.dumps(verify_approval(config), indent=2))
         except ValueError as error:
             raise SystemExit(str(error)) from error
     elif command == "canary":
         try:
-            print(json.dumps(anyio.run(semantic_canary, config, principal)))
+            print(json.dumps(anyio.run(semantic_canary, config)))
         except ValueError as error:
             raise SystemExit(str(error)) from error
     elif command == "info":
@@ -209,10 +187,9 @@ def main() -> None:
             json.dumps(
                 {
                     "version": VERSION,
-                    "principal": principal,
                     "transport": "stdio",
                     "state": str(config.state_dir),
-                    "actions": len(action_set.visible(principal)),
+                    "actions": len(action_set.ALL_ACTIONS),
                 },
                 indent=2,
             )
@@ -220,7 +197,6 @@ def main() -> None:
     elif command == "catalog":
         try:
             payload = catalog_display(
-                principal=principal,
                 action_name=arguments.action,
                 schema=arguments.schema,
                 example=arguments.example,
@@ -242,7 +218,7 @@ def main() -> None:
                 idempotency_key=arguments.idempotency_key,
                 deadline_at=arguments.deadline_at,
             )
-            response = invoke(config, principal, arguments.action, payload)
+            response = invoke(config, arguments.action, payload)
         except (CliInputError, ValueError, RuntimeError) as error:
             raise SystemExit(str(error)) from error
         print(json.dumps(response, indent=2, sort_keys=True))

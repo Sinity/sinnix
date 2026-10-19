@@ -12,8 +12,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import Field
 
 from ..action import (
-    ALL_PRINCIPALS,
-    OPERATOR_ONLY,
     Action,
     Example,
     MutationControls,
@@ -28,7 +26,6 @@ from ..locators import (
     proc_snapshot,
     process_ref,
 )
-from ..permissions import Permission
 from ..redaction import redact, redact_env
 from ..results import ProtocolError
 from ..schemas import GatewayModel
@@ -152,7 +149,6 @@ class ProcessListing(GatewayModel):
 
 
 def _list(runtime: Runtime, inp: ListInput) -> ProcessListing:
-    runtime.principal.require(Permission.MACHINE_READ)
     boot = _boot_time()
     unit = inp.unit.resolve()[0] if inp.unit else None
     rows = proc_snapshot()
@@ -323,7 +319,6 @@ def _environ(pid: int, limit: int) -> tuple[dict[str, str], bool]:
 
 
 def _get(runtime: Runtime, inp: GetInput) -> ProcessDetail:
-    runtime.principal.require(Permission.MACHINE_READ)
     raw, ref = inp.target.resolve()
     pid = raw["pid"]
     boot = _boot_time()
@@ -407,7 +402,6 @@ class ProcessTree(GatewayModel):
 
 
 def _tree(runtime: Runtime, inp: TreeInput) -> ProcessTree:
-    runtime.principal.require(Permission.MACHINE_READ)
     boot = _boot_time()
     rows = {row["pid"]: row for row in proc_snapshot()}
     by_parent: dict[int, list[dict[str, Any]]] = {}
@@ -483,7 +477,6 @@ class SignalResult(GatewayModel):
 
 
 def _signal(runtime: Runtime, inp: SignalInput) -> SignalResult:
-    runtime.principal.require(Permission.MACHINE_ACTION)
     raw, ref = inp.target.resolve()
     if isinstance(inp.request, HubStop):
         receipt: OperateResult = _operate_via_hub(
@@ -552,7 +545,6 @@ class WaitResult(GatewayModel):
 
 
 def _wait(runtime: Runtime, inp: WaitInput) -> WaitResult:
-    runtime.principal.require(Permission.MACHINE_READ)
     raw, ref = inp.target.resolve()
     started = time.monotonic()
     deadline = started + inp.timeout_seconds
@@ -596,7 +588,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ListInput,
         Output=ProcessListing,
         handler=_list,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("process",),
         affordances=(
             "processes.get",
@@ -620,7 +611,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=GetInput,
         Output=ProcessDetail,
         handler=_get,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("process",),
         affordances=(
             "processes.tree",
@@ -645,7 +635,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=TreeInput,
         Output=ProcessTree,
         handler=_tree,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("process",),
         affordances=("processes.get", "processes.signal"),
         aliases=("pstree", "children", "descendants"),
@@ -664,7 +653,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=SignalInput,
         Output=SignalResult,
         handler=_signal,
-        principals=OPERATOR_ONLY,
         resource_kinds=("process",),
         affordances=("processes.wait", "processes.get", "audit.receipt"),
         aliases=("kill", "pkill", "terminate", "sigterm", "sigkill"),
@@ -707,7 +695,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=WaitInput,
         Output=WaitResult,
         handler=_wait,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("process",),
         affordances=("processes.get", "processes.signal", "processes.list"),
         aliases=("wait for exit", "await process", "has it finished"),

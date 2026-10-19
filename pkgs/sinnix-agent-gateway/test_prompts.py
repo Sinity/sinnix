@@ -6,8 +6,8 @@ import pytest
 from sinnix_agent_gateway.prompts import PROMPT_SPECS, PromptGenerator
 
 
-def test_generated_prompts_use_canonical_refs_and_principal_filtered_catalog() -> None:
-    def catalog(principal):
+def test_generated_prompts_use_canonical_refs_and_the_catalog() -> None:
+    def catalog():
         return {
             "revision": "catalog-rev",
             "actions": [
@@ -26,7 +26,7 @@ def test_generated_prompts_use_canonical_refs_and_principal_filtered_catalog() -
             ],
         }  # noqa: E731
 
-    generator = PromptGenerator(principal="operator", catalog=catalog)
+    generator = PromptGenerator(catalog=catalog)
 
     assert {row["name"] for row in generator.list()} == {
         spec.name for spec in PROMPT_SPECS
@@ -40,9 +40,7 @@ def test_generated_prompts_use_canonical_refs_and_principal_filtered_catalog() -
 
 
 def test_prompt_rejects_noncanonical_or_unknown_inputs() -> None:
-    generator = PromptGenerator(
-        principal="operator", catalog=lambda _principal: {"actions": []}
-    )
+    generator = PromptGenerator(catalog=lambda: {"actions": []})
     try:
         generator.generate("project-overview", {"ref": "/tmp/project"})
     except ValueError as exc:
@@ -52,9 +50,7 @@ def test_prompt_rejects_noncanonical_or_unknown_inputs() -> None:
 
 
 def test_prompt_registry_visibility_intent_kind_and_bounds_are_enforced() -> None:
-    generator = PromptGenerator(
-        principal="operator", catalog=lambda _principal: {"actions": []}
-    )
+    generator = PromptGenerator(catalog=lambda: {"actions": []})
     with pytest.raises(ValueError, match="resource kind"):
         generator.generate("project-overview", {"ref": "sinnix://jobs/job-1"})
     with pytest.raises(ValueError, match="resource kind"):

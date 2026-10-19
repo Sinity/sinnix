@@ -10,8 +10,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import Field
 
 from ..action import (
-    ALL_PRINCIPALS,
-    OPERATOR_ONLY,
     Action,
     Example,
     MutationControls,
@@ -26,7 +24,6 @@ from ..owner_execution import (
     ExecutionResult,
     OwnerRoute,
 )
-from ..permissions import Permission
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 
@@ -330,7 +327,6 @@ def _incidents(runtime: Runtime, limit: int) -> SnapshotSection:
 
 
 def _snapshot(runtime: Runtime, inp: SnapshotInput) -> MachineSnapshot:
-    runtime.principal.require(Permission.MACHINE_READ)
     pressure = _observe_section(runtime, "pressure", "live_pressure")
     units = _observe_section(runtime, "units")
     if units.available and isinstance(units.data, list):
@@ -435,7 +431,6 @@ def _scope_flag(scope: UnitScope) -> list[str]:
 
 
 def _units_list(runtime: Runtime, inp: UnitsListInput) -> UnitsListing:
-    runtime.principal.require(Permission.MACHINE_READ)
     argv = [
         runtime.config.systemctl_command,
         *_scope_flag(inp.scope),
@@ -570,7 +565,6 @@ def _unit_show(
 
 
 def _units_get(runtime: Runtime, inp: UnitGetInput) -> UnitDetail:
-    runtime.principal.require(Permission.MACHINE_READ)
     unit, scope, ref = inp.target.resolve()
     wanted = tuple(
         dict.fromkeys(
@@ -663,7 +657,6 @@ class UnitLogs(GatewayModel):
 
 
 def _units_logs(runtime: Runtime, inp: UnitLogsInput) -> UnitLogs:
-    runtime.principal.require(Permission.MACHINE_READ)
     unit, scope, ref = inp.target.resolve()
     argv = [
         runtime.config.journalctl_command,
@@ -883,7 +876,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=SnapshotInput,
         Output=MachineSnapshot,
         handler=_snapshot,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("machine_unit",),
         affordances=(
             "machine.query",
@@ -903,7 +895,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=QueryInput,
         Output=MachineSection,
         handler=_query,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("machine_unit", "process"),
         affordances=(
             "machine.operate",
@@ -928,7 +919,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=UnitsListInput,
         Output=UnitsListing,
         handler=_units_list,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("machine_unit",),
         affordances=(
             "machine.units.get",
@@ -950,7 +940,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=UnitGetInput,
         Output=UnitDetail,
         handler=_units_get,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("machine_unit",),
         affordances=("machine.units.logs", "machine.units.operate", "processes.get"),
         aliases=("systemctl status", "unit status", "service status", "is it running"),
@@ -969,7 +958,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=UnitLogsInput,
         Output=UnitLogs,
         handler=_units_logs,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("machine_unit",),
         affordances=("machine.units.get", "machine.units.operate"),
         aliases=("journalctl", "logs", "journal", "why did it fail"),
@@ -988,7 +976,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=PrepareInput,
         Output=PreparedAction,
         handler=_prepare,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("job", "machine_unit", "process"),
         affordances=("machine.operate",),
         examples=(
@@ -1009,7 +996,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=OperateInput,
         Output=OperateResult,
         handler=_operate,
-        principals=OPERATOR_ONLY,
         resource_kinds=("job", "machine_unit", "process"),
         affordances=("machine.query", "machine.units.get", "audit.receipt"),
         aliases=(
@@ -1073,7 +1059,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=UnitOperateInput,
         Output=OperateResult,
         handler=_units_operate,
-        principals=OPERATOR_ONLY,
         resource_kinds=("machine_unit",),
         affordances=("machine.units.get", "machine.units.logs", "audit.receipt"),
         aliases=("systemctl restart", "systemctl start", "systemctl stop", "bounce"),

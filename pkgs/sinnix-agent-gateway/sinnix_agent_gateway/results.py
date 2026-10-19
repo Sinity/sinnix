@@ -18,8 +18,8 @@ from sinnix_lib.atomic import atomic_publish
 
 from .artifacts import ArtifactService
 from .config import GatewayConfig
+from .contracts import PRINCIPAL
 from .payloads import canonical_chunks, canonical_size, retain_json
-from .permissions import Permission, Principal
 from .schemas import ERROR_CODES, V2ToolEnvelope
 
 
@@ -276,7 +276,7 @@ class ResultSnapshotWriter:
             metadata = {
                 "schema": "sinnix.gateway-result-snapshot.v1",
                 "snapshot_id": self.snapshot_id,
-                "principal": self.service.principal.name,
+                "principal": PRINCIPAL,
                 "query_sha256": self.query_sha256,
                 "source_revision": self.source_revision,
                 "row_count": self.row_count,
@@ -314,12 +314,10 @@ class ResultService:
     def __init__(
         self,
         config: GatewayConfig,
-        principal: Principal,
         artifacts: ArtifactService | None = None,
     ):
         self.config = config
-        self.principal = principal
-        self.artifacts = artifacts or ArtifactService(config, principal)
+        self.artifacts = artifacts or ArtifactService(config)
         config.initialize_state()
         self.root = config.state_dir / "results"
         self.payloads_root = config.state_dir / "payloads"
@@ -471,7 +469,7 @@ class ResultService:
         if (
             metadata.get("schema") != "sinnix.gateway-result-snapshot.v1"
             or metadata.get("snapshot_id") != snapshot_id
-            or metadata.get("principal") != self.principal.name
+            or metadata.get("principal") != PRINCIPAL
             or not isinstance(metadata.get("query_sha256"), str)
             or not isinstance(metadata.get("source_revision"), str)
             or not isinstance(metadata.get("row_count"), int)
@@ -597,7 +595,7 @@ class ResultService:
         offset = payload.get("offset")
         cursor_page_size = payload.get("page_size")
         if (
-            payload.get("principal") != self.principal.name
+            payload.get("principal") != PRINCIPAL
             or payload.get("query_sha256") != query_sha256
             or not isinstance(snapshot_id, str)
             or not isinstance(offset, int)
@@ -627,7 +625,7 @@ class ResultService:
             self._cursor(
                 {
                     "snapshot_id": snapshot_id,
-                    "principal": self.principal.name,
+                    "principal": PRINCIPAL,
                     "query_sha256": query_sha256,
                     "source_revision": metadata["source_revision"],
                     "offset": page["next_offset"],
@@ -709,7 +707,7 @@ class ResultService:
                 "result_id": result_id,
                 "ref": self._result_ref(result_id),
                 "action": action,
-                "principal": self.principal.name,
+                "principal": PRINCIPAL,
                 "owner": owner,
                 "route": route,
                 "outcome": outcome,
@@ -792,7 +790,7 @@ class ResultService:
         initial_cursor = self._cursor(
             {
                 "snapshot_id": metadata["snapshot_id"],
-                "principal": self.principal.name,
+                "principal": PRINCIPAL,
                 "query_sha256": metadata["query_sha256"],
                 "source_revision": metadata["source_revision"],
                 "offset": writer.page_size,
@@ -834,7 +832,6 @@ class ResultService:
         return {**metadata, "ref": self._result_ref(result_id), "rows": rows}
 
     def read(self, result_id: str) -> dict[str, Any]:
-        self.principal.require(Permission.AUDIT_READ)
         result_id = self._normalized_id(result_id)
         path = self._path(result_id)
         try:
@@ -851,7 +848,7 @@ class ResultService:
                 or len(digest) != 64
                 or any(c not in "0123456789abcdef" for c in digest)
                 or not isinstance(stored, dict)
-                or stored.get("result", {}).get("principal") != self.principal.name
+                or stored.get("result", {}).get("principal") != PRINCIPAL
             ):
                 raise ResultError("malformed or unavailable result snapshot")
             try:
@@ -871,7 +868,7 @@ class ResultService:
             or envelope.get("schema") != self.schema
             or result.get("result_id") != result_id
             or result.get("ref") != self._result_ref(result_id)
-            or result.get("principal") != self.principal.name
+            or result.get("principal") != PRINCIPAL
             or result.get("sha256") != self._digest(envelope)
         ):
             raise ResultError("malformed or unavailable result snapshot")

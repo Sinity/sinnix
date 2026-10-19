@@ -167,22 +167,20 @@ python3Packages.buildPythonApplication {
   ];
 
   postInstall = ''
-    mkdir -p "$out/share/sinnix-agent-gateway/manifests"
-    PYTHONPATH="$out/${python3Packages.python.sitePackages}:$PYTHONPATH" python - "$out/share/sinnix-agent-gateway/manifests" <<'PY'
+    mkdir -p "$out/share/sinnix-agent-gateway"
+    PYTHONPATH="$out/${python3Packages.python.sitePackages}:$PYTHONPATH" python - "$out/share/sinnix-agent-gateway/manifest.json" <<'PY'
     import json
     import sys
     import tempfile
     from pathlib import Path
     import anyio
-    from sinnix_agent_gateway.permissions import ROLE_PERMISSIONS
     from sinnix_agent_gateway.cli import build_manifest
     from sinnix_agent_gateway.config import GatewayConfig
 
     with tempfile.TemporaryDirectory() as state:
         config = GatewayConfig(projects={}, state_dir=Path(state))
-        for principal in ROLE_PERMISSIONS:
-            artifact = {"principal": principal, "manifest": anyio.run(build_manifest, config, principal)}
-            (Path(sys.argv[1]) / f"{principal}.json").write_text(json.dumps(artifact, sort_keys=True))
+        artifact = {"manifest": anyio.run(build_manifest, config)}
+        Path(sys.argv[1]).write_text(json.dumps(artifact, sort_keys=True))
     PY
   '';
 

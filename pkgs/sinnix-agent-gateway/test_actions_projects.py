@@ -40,8 +40,8 @@ ACTIONS = validate_actions(
 def serve_actions(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         server_module,
-        "visible_actions",
-        lambda principal: tuple(a for a in ACTIONS if principal in a.principals),
+        "ALL_ACTIONS",
+        ACTIONS,
     )
 
 
@@ -53,7 +53,7 @@ def git(path: Path, *arguments: str) -> str:
 
 def test_search_large_lines_and_requested_count(tmp_path: Path) -> None:
     config, project, _ = fixture(tmp_path)
-    server = create_server(config, "operator")
+    server = create_server(config)
     rt = server._sinnix_revision_publisher.runtime
     long_line = "needle " + "x" * 1_100_000
     (project / "large.txt").write_text(long_line + "\n" + "needle\n" * 1100)
@@ -68,7 +68,7 @@ def test_search_large_lines_and_requested_count(tmp_path: Path) -> None:
 
 def test_tree_exact_limit_and_large_requested_read(tmp_path: Path) -> None:
     config, project, _ = fixture(tmp_path)
-    server = create_server(config, "operator")
+    server = create_server(config)
     rt = server._sinnix_revision_publisher.runtime
     assert rt.projects.tree("fixture", max_entries=3)["truncated"] is False
     content = "large " + "x" * 300_000
@@ -82,7 +82,7 @@ def test_tree_pages_continue_past_default_limit(tmp_path: Path) -> None:
     config, project, _ = fixture(tmp_path)
     for index in range(6):
         (project / f"file-{index}.txt").write_text(str(index))
-    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    runtime = create_server(config)._sinnix_revision_publisher.runtime
     complete = runtime.projects.tree("fixture", max_entries=100)
     seen = []
     cursor = None
@@ -99,7 +99,7 @@ def test_read_many_observes_checkout_once_per_batch(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config, _, _ = fixture(tmp_path)
-    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    runtime = create_server(config)._sinnix_revision_publisher.runtime
     observed = []
     original = projects_module._content_revision
 
@@ -126,7 +126,7 @@ def test_project_reads_reuse_verified_hashes_and_invalidate_changed_files(
     tmp_path: Path,
 ) -> None:
     config, project, _ = fixture(tmp_path)
-    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    runtime = create_server(config)._sinnix_revision_publisher.runtime
     projects_module._cached_file_sha256.cache_clear()
     first = runtime.projects.read("fixture", "README.md")
     cold_misses = projects_module._cached_file_sha256.cache_info().misses
@@ -156,7 +156,7 @@ def test_export_covers_source_and_continues_explicit_pages(tmp_path: Path) -> No
     executable.chmod(0o755)
     (project / "run-link").symlink_to("run.sh")
     (project / "MANIFEST.json").write_text("source manifest\n")
-    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    runtime = create_server(config)._sinnix_revision_publisher.runtime
 
     whole = runtime.projects.export("fixture")
     assert whole["manifest"]["truncated"] is False
@@ -229,14 +229,13 @@ def fixture(tmp_path: Path) -> tuple[GatewayConfig, Path, Path]:
     config = GatewayConfig(
         state_dir=tmp_path / "state",
         projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
-        approved_manifest_hash="approved-fixture-hash",
     )
     return config, project, linked
 
 
 def test_actions_publish_honest_schemas(tmp_path: Path) -> None:
     config, _, _ = fixture(tmp_path)
-    server = create_server(config, "operator")
+    server = create_server(config)
     runtime = server._sinnix_revision_publisher.runtime
     for action in projects.ACTIONS:
         tool = build_tool(action, runtime)
@@ -265,7 +264,7 @@ def test_locators_require_exactly_one_selector() -> None:
 
 def test_list_get_and_locators_resolve_projects_and_checkouts(tmp_path: Path) -> None:
     config, project, linked = fixture(tmp_path)
-    server = create_server(config, "operator")
+    server = create_server(config)
 
     listing = ok(server, "projects.list", {})
     listed = listing["projects"][0]
@@ -382,7 +381,7 @@ def test_bare_repository_lists_store_and_explicit_default_checkout(
     config, store, primary, secondary = _bare_fixture(
         tmp_path, default_checkout=tmp_path / "primary"
     )
-    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    runtime = create_server(config)._sinnix_revision_publisher.runtime
 
     listed = runtime.projects.list()["projects"][0]
     assert listed["repository_kind"] == "bare"
@@ -419,7 +418,7 @@ def test_bare_repository_lists_store_and_explicit_default_checkout(
         == "bare repository fixture\n"
     )
     public_view = ok(
-        create_server(config, "operator"),
+        create_server(config),
         "projects.get",
         {
             "target": {"project": "fixture", "checkout": "default"},
@@ -437,7 +436,7 @@ def test_bare_repository_without_default_requires_explicit_checkout(
     config, _store, _primary, _secondary = _bare_fixture(
         tmp_path, default_checkout=None
     )
-    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    runtime = create_server(config)._sinnix_revision_publisher.runtime
     listed = runtime.projects.list()["projects"][0]
     assert listed["repository_kind"] == "bare"
     assert listed["default_checkout_id"] is None
@@ -451,7 +450,7 @@ def test_bare_repository_without_default_requires_explicit_checkout(
         )["content"]
         == "bare repository fixture\n"
     )
-    server = create_server(config, "operator")
+    server = create_server(config)
     assert (
         error(
             server,
@@ -471,7 +470,7 @@ def test_bare_checkout_discovery_omits_missing_and_prunable_records(
     stale = tmp_path / "stale"
     git(store, "worktree", "add", "--quiet", "--detach", str(stale), "main")
     shutil.rmtree(stale)
-    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    runtime = create_server(config)._sinnix_revision_publisher.runtime
     service = runtime.projects
     original = service._run_spooled
     missing = tmp_path / "missing"
@@ -516,7 +515,7 @@ def test_public_project_list_obeys_scope_after_private_catalog_merge(
             }
         )
     )
-    server = create_server(GatewayConfig.load(config_path), "operator")
+    server = create_server(GatewayConfig.load(config_path))
 
     listing = ok(server, "projects.list", {})
 
@@ -543,7 +542,7 @@ def test_public_project_list_keeps_empty_scope_broad(tmp_path: Path) -> None:
             }
         )
     )
-    server = create_server(GatewayConfig.load(config_path), "operator")
+    server = create_server(GatewayConfig.load(config_path))
 
     listing = ok(server, "projects.list", {})
 
@@ -555,7 +554,7 @@ def test_public_project_list_keeps_empty_scope_broad(tmp_path: Path) -> None:
 
 def test_tree_read_diff_and_search_keep_authority_checks(tmp_path: Path) -> None:
     config, project, linked = fixture(tmp_path)
-    server = create_server(config, "operator")
+    server = create_server(config)
     target = {"target": {"project": "fixture"}}
 
     tree = ok(server, "projects.tree", {**target, "max_entries": 10})
@@ -641,7 +640,7 @@ def test_read_rechecks_resolved_symlink_targets_and_reports_emitted_bytes(
     (project / "alias.txt").symlink_to("secrets/fixture.txt")
     (project / "aliasdir").symlink_to("secrets", target_is_directory=True)
     (project / "tiny.txt").write_text("abcde\n")
-    server = create_server(config, "operator")
+    server = create_server(config)
     target = {"target": {"project": "fixture"}}
 
     assert (
@@ -665,7 +664,7 @@ def test_diff_omits_policy_excluded_paths(tmp_path: Path) -> None:
     config, project, _ = fixture(tmp_path)
     (project / ".env").write_text("SYNTHETIC_PRIVATE=hidden\n")
     (project / "README.md").write_text("visible change\n")
-    server = create_server(config, "operator")
+    server = create_server(config)
 
     result = ok(server, "projects.diff", {"target": {"project": "fixture"}})
     assert "visible change" in result["diff"]
@@ -726,7 +725,7 @@ def test_write_preserves_existing_mode_and_uses_readable_default(
     tmp_path: Path,
 ) -> None:
     config, project, _ = fixture(tmp_path)
-    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    runtime = create_server(config)._sinnix_revision_publisher.runtime
     script = project / "script.sh"
     script.write_text("#!/bin/sh\n")
     script.chmod(0o755)
@@ -745,9 +744,8 @@ def test_diff_spools_complete_output_before_result_artifact(tmp_path: Path) -> N
         state_dir=config.state_dir,
         projects=config.projects,
         max_result_bytes=1_024,
-        approved_manifest_hash=config.approved_manifest_hash,
     )
-    server = create_server(config, "operator")
+    server = create_server(config)
     (project / "README.md").write_text("changed " + "x" * 5_000 + "\n")
 
     response = call(server, "projects.diff", {"target": {"project": "fixture"}})
@@ -773,7 +771,7 @@ def test_change_requires_matching_preconditions_and_echoes_new_state(
     tmp_path: Path,
 ) -> None:
     config, project, _ = fixture(tmp_path)
-    server = create_server(config, "operator")
+    server = create_server(config)
     before = ok(server, "projects.get", {"target": {"project": "fixture"}})["checkout"]
     target = {"target": {"project": "fixture"}}
 
@@ -910,7 +908,7 @@ def test_change_requires_matching_preconditions_and_echoes_new_state(
 
 def test_context_composes_orientation_and_triage(tmp_path: Path) -> None:
     config, project, _ = fixture(tmp_path)
-    server = create_server(config, "operator")
+    server = create_server(config)
     (project / "README.md").write_text("dirty\n")
 
     orientation = ok(server, "projects.context", {"target": {"project": "fixture"}})
@@ -948,7 +946,7 @@ def test_context_composes_orientation_and_triage(tmp_path: Path) -> None:
 
 def test_search_pages_retain_observation_after_checkout_edit(tmp_path: Path) -> None:
     config, project, _ = fixture(tmp_path)
-    rt = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    rt = create_server(config)._sinnix_revision_publisher.runtime
     source = project / "search.txt"
     source.write_text("needle original\n" * 7)
     request = projects.SearchInput(
@@ -985,7 +983,7 @@ def test_requested_search_count_does_not_buffer_all_matches(
     from types import SimpleNamespace
 
     config, _, _ = fixture(tmp_path)
-    rt = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    rt = create_server(config)._sinnix_revision_publisher.runtime
 
     def stream(self, argv, profile, collect, **kwargs):
         for index in range(12_001):
@@ -1031,7 +1029,7 @@ def test_search_checkout_race_does_not_publish_partial_snapshot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config, project, _ = fixture(tmp_path)
-    rt = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    rt = create_server(config)._sinnix_revision_publisher.runtime
     source = project / "search.txt"
     source.write_text("needle original\n")
     search = rt.projects.search
@@ -1057,7 +1055,7 @@ def test_large_project_change_consumes_verified_artifact_and_replays(
     tmp_path, operation
 ):
     config, project, _ = fixture(tmp_path)
-    server = create_server(config, "operator")
+    server = create_server(config)
     runtime = server._sinnix_revision_publisher.runtime
     expected = ("large multibyte λ input\n" * 140_000).encode()
     if operation == "write":
@@ -1103,7 +1101,7 @@ def test_large_project_change_consumes_verified_artifact_and_replays(
 @pytest.mark.parametrize("warm_cache", [False, True])
 def test_tampered_project_input_artifact_refuses_without_mutation(tmp_path, warm_cache):
     config, project, _ = fixture(tmp_path)
-    server = create_server(config, "operator")
+    server = create_server(config)
     runtime = server._sinnix_revision_publisher.runtime
     directory = config.state_dir / "captures" / "input-fixture"
     directory.mkdir(parents=True)
@@ -1180,7 +1178,7 @@ def test_project_read_bounds_giant_lines_before_slicing(
 
     config, project, _ = fixture(tmp_path)
     (project / "giant.txt").write_text("雪" * 800_000 + "\nselected\n")
-    runtime = create_server(config, "operator")._sinnix_revision_publisher.runtime
+    runtime = create_server(config)._sinnix_revision_publisher.runtime
     text_wrapper = projects_module.io.TextIOWrapper
     calls = []
 

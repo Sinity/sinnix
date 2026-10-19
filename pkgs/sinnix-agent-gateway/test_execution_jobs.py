@@ -19,16 +19,16 @@ FakeJobs = DirectJobs
 
 
 def runtime_with_jobs(
-    tmp_path: Path, principal_name: str, *, max_result_bytes: int = 1_048_576
+    tmp_path: Path, *, max_result_bytes: int = 1_048_576
 ) -> tuple[Runtime, FakeJobs]:
-    project = tmp_path / f"project-{principal_name}"
+    project = tmp_path / "project"
     project.mkdir()
     config = GatewayConfig(
         state_dir=tmp_path / "state",
         projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
         max_result_bytes=max_result_bytes,
     )
-    runtime = Runtime.create(config, principal_name)
+    runtime = Runtime.create(config)
     jobs = FakeJobs(default={"job_id": "job-fixture"})
     runtime.jobs = jobs  # type: ignore[assignment]
     return runtime, jobs
@@ -48,7 +48,7 @@ def test_v2_get_reads_a_canonical_ref_through_the_action_that_owns_the_kind(
     The server registers a template per readable kind; a kind whose reader is
     missing answered every read with an AttributeError instead of data.
     """
-    runtime, jobs = runtime_with_jobs(tmp_path, "operator")
+    runtime, jobs = runtime_with_jobs(tmp_path)
     jobs.responses["job.get"] = {
         "job_id": "7",
         "label": "fixture:check",

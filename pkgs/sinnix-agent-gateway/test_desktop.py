@@ -9,10 +9,9 @@ from sinnix_agent_gateway.artifacts import ArtifactError, ArtifactService
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.desktop import DesktopDiagnosticError, DesktopService
 from sinnix_agent_gateway.owner_execution import OwnerExecution
-from sinnix_agent_gateway.permissions import Principal
 
 
-def desktop_service(tmp_path: Path, principal_name: str) -> tuple[DesktopService, Path]:
+def desktop_service(tmp_path: Path) -> tuple[DesktopService, Path]:
     captured = tmp_path / "desktop-commands.jsonl"
     runner = tmp_path / "desktop-control"
     runner.write_text(
@@ -37,7 +36,6 @@ def desktop_service(tmp_path: Path, principal_name: str) -> tuple[DesktopService
         hypr_control_command=str(runner),
         screenshot_control_command=str(runner),
     )
-    principal = Principal.for_name(principal_name)
     execution = OwnerExecution(
         {
             "HOME": str(tmp_path),
@@ -48,9 +46,7 @@ def desktop_service(tmp_path: Path, principal_name: str) -> tuple[DesktopService
             "HYPRLAND_INSTANCE_SIGNATURE": "fixture",
         }
     )
-    return DesktopService(
-        config, principal, ArtifactService(config, principal), execution
-    ), captured
+    return DesktopService(config, ArtifactService(config), execution), captured
 
 
 def commands(path: Path) -> list[list[str]]:
@@ -58,7 +54,7 @@ def commands(path: Path) -> list[list[str]]:
 
 
 def test_operator_focus_uses_wrapper_and_verifies_active_window(tmp_path: Path) -> None:
-    desktop, captured = desktop_service(tmp_path, "operator")
+    desktop, captured = desktop_service(tmp_path)
 
     result = desktop.action("focus_window", {"window": "address:0xfixture"})
 
@@ -71,7 +67,7 @@ def test_operator_focus_uses_wrapper_and_verifies_active_window(tmp_path: Path) 
 
 
 def test_operator_dispatch_uses_exact_argument_vector(tmp_path: Path) -> None:
-    desktop, captured = desktop_service(tmp_path, "operator")
+    desktop, captured = desktop_service(tmp_path)
 
     desktop.action(
         "dispatch",
@@ -82,7 +78,7 @@ def test_operator_dispatch_uses_exact_argument_vector(tmp_path: Path) -> None:
 
 
 def test_desktop_requires_wayland_environment_before_launch(tmp_path: Path) -> None:
-    desktop, _ = desktop_service(tmp_path, "operator")
+    desktop, _ = desktop_service(tmp_path)
     desktop.execution = OwnerExecution({})
 
     with pytest.raises(DesktopDiagnosticError) as caught:
@@ -96,7 +92,7 @@ def test_desktop_requires_wayland_environment_before_launch(tmp_path: Path) -> N
 
 
 def test_artifact_rejects_unreceipted_capture_source(tmp_path: Path) -> None:
-    desktop, _ = desktop_service(tmp_path, "operator")
+    desktop, _ = desktop_service(tmp_path)
     source = desktop.config.state_dir / "captures" / "unreceipted.png"
     source.write_bytes(b"fixture")
 
@@ -109,7 +105,7 @@ def test_artifact_rejects_unreceipted_capture_source(tmp_path: Path) -> None:
 
 
 def test_desktop_capture_registers_raw_and_corrected_artifacts(tmp_path: Path) -> None:
-    desktop, captured = desktop_service(tmp_path, "operator")
+    desktop, captured = desktop_service(tmp_path)
 
     result = desktop.capture_output()
     artifacts = [

@@ -5,13 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from dataclasses import replace
 from pathlib import Path
 
 import anyio
 from conftest import error, ok
 from sinnix_agent_gateway.app import create_server
-from sinnix_agent_gateway.permissions import Permission
 from test_actions_beads import commands, fixture
 from test_contexts import historical_context
 
@@ -26,13 +24,13 @@ def read_resource(server, reference: str) -> dict:
 
 def test_beads_public_snapshot_and_frozen_paging_after_restart(tmp_path: Path) -> None:
     config, log = fixture(tmp_path)
-    server = create_server(config, "operator")
+    server = create_server(config)
     query = {"projects": ["fixture"], "view": "open", "limit": 1}
     first = ok(server, "beads.query", query)
     reference = first["page"]["snapshot_ref"]
     cursor = first["page"]["next_cursor"]
     (tmp_path / "owner-state.json").write_text(json.dumps({"writes": 10, "created": 0}))
-    restarted = create_server(config, "operator")
+    restarted = create_server(config)
     reads = len(commands(log))
     second = ok(restarted, "beads.query", {**query, "cursor": cursor})
     assert [row["id"] for row in second["items"]] == ["fixture-2"]
@@ -48,7 +46,7 @@ def test_beads_public_snapshot_and_frozen_paging_after_restart(tmp_path: Path) -
         error(restarted, "beads.query", {**query, "view": "all", "cursor": cursor})
         == "stale_cursor"
     )
-    other = create_server(config, "operator")
+    other = create_server(config)
     assert (
         ok(other, "beads.query", {**query, "cursor": cursor})["items"]
         == second["items"]
@@ -60,14 +58,14 @@ def test_context_public_retrieval_after_restart_retains_provenance(
     tmp_path: Path,
 ) -> None:
     config, _ = fixture(tmp_path)
-    server = create_server(config, "operator")
+    server = create_server(config)
     context = ok(
         server,
         "context.compose",
         {"intent": "project.orientation", "project": {"project": "fixture"}},
     )
     reference = context["snapshot_ref"]
-    restarted = create_server(config, "operator")
+    restarted = create_server(config)
     stored = ok(restarted, "results.get", {"ref": reference})["envelope"]
     retained = stored["rows"][0]
     assert retained["intent"] == context["intent"]
@@ -83,9 +81,7 @@ def test_context_public_retrieval_after_restart_retains_provenance(
         assert row["snapshot_ref"] == reference
     assert read_resource(restarted, reference) == stored
     assert (
-        ok(create_server(config, "operator"), "results.get", {"ref": reference})[
-            "envelope"
-        ]
+        ok(create_server(config), "results.get", {"ref": reference})["envelope"]
         == stored
     )
 
@@ -106,13 +102,11 @@ def test_historical_context_refs_remain_publicly_readable_without_rewrite(
     contents = json.dumps(snapshot).encode()
     path.write_bytes(contents)
     before = path.stat().st_mtime_ns
-    server = create_server(config, "operator")
+    server = create_server(config)
     assert ok(server, "results.get", {"ref": reference})["envelope"] == snapshot
     assert read_resource(server, reference)["data"]["envelope"] == snapshot
     assert (
-        ok(create_server(config, "operator"), "results.get", {"ref": reference})[
-            "envelope"
-        ]
+        ok(create_server(config), "results.get", {"ref": reference})["envelope"]
         == snapshot
     )
     assert path.read_bytes() == contents and path.stat().st_mtime_ns == before
@@ -153,7 +147,7 @@ def test_legacy_beads_cursor_imports_frozen_rows_without_modifying_source(
         }
     )
     path.write_text(contents)
-    server = create_server(config, "operator")
+    server = create_server(config)
     page = ok(
         server,
         "beads.query",
@@ -171,7 +165,7 @@ def test_legacy_beads_cursor_imports_frozen_rows_without_modifying_source(
 
 def test_published_prompt_accepts_its_declared_target(tmp_path: Path) -> None:
     config, _ = fixture(tmp_path)
-    server = create_server(config, "operator")
+    server = create_server(config)
 
     async def get():
         return await server.get_prompt(
@@ -182,24 +176,3 @@ def test_published_prompt_accepts_its_declared_target(tmp_path: Path) -> None:
     assert (
         json.loads(prompt.messages[0].content.text)["intent"] == "project.orientation"
     )
-
-
-def test_historical_context_read_requires_audit_capability(tmp_path: Path) -> None:
-    config, _ = fixture(tmp_path)
-    snapshot = historical_context()
-    reference = snapshot["snapshot_ref"]
-    path = (
-        config.state_dir
-        / "contexts"
-        / "operator"
-        / f"{reference.rsplit('/', 1)[1]}.json"
-    )
-    path.parent.mkdir(parents=True)
-    path.write_text(json.dumps(snapshot))
-    server = create_server(config, "operator")
-    runtime = server._sinnix_revision_publisher.runtime
-    runtime.principal = replace(
-        runtime.principal,
-        permissions=runtime.principal.permissions - {Permission.AUDIT_READ},
-    )
-    assert error(server, "results.get", {"ref": reference}) == "policy_denied"

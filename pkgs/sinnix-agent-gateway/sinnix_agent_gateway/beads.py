@@ -14,8 +14,8 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .config import GatewayConfig, ProjectConfig, TaskAuthorityConfig
+from .contracts import PRINCIPAL
 from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
-from .permissions import Permission, Principal
 from .results import ProtocolError, ResultError, ResultService
 
 
@@ -65,11 +65,10 @@ class BeadsService:
     def __init__(
         self,
         config: GatewayConfig,
-        principal: Principal,
         results: ResultService | None = None,
     ):
-        self.config, self.principal = config, principal
-        self.results = results or ResultService(config, principal)
+        self.config = config
+        self.results = results or ResultService(config)
         self.execution = OwnerExecution(base_environment={})
 
     @staticmethod
@@ -113,7 +112,6 @@ class BeadsService:
         return f"{cls.project_ref(project_id)}/beads/{bead_id}"
 
     def _project(self, project_id: str, write: bool) -> ProjectConfig:
-        self.principal.require(Permission.TASK_WRITE if write else Permission.TASK_READ)
         try:
             project = self.config.projects[self._string(project_id, "project_id", 128)]
         except KeyError as exc:
@@ -163,7 +161,7 @@ class BeadsService:
                 "HOME": str(Path.home()),
                 "LANG": os.environ.get("LANG", "C.UTF-8"),
                 "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
-                "BEADS_ACTOR": f"sinnix-gateway:{self.principal.name}",
+                "BEADS_ACTOR": f"sinnix-gateway:{PRINCIPAL}",
             },
         )
         # Owner output size is not a client-envelope limit or a transaction
@@ -492,7 +490,7 @@ class BeadsService:
                         cursor = self.results._cursor(
                             {
                                 "snapshot_id": writer.snapshot_id,
-                                "principal": self.principal.name,
+                                "principal": PRINCIPAL,
                                 "query_sha256": key,
                                 "offset": legacy_offset,
                                 "page_size": limit,
@@ -540,7 +538,7 @@ class BeadsService:
             self._project(project_id, False)
         page_limit = self._limit(limit, maximum=None)
         request = {
-            "principal": self.principal.name,
+            "principal": PRINCIPAL,
             "projects": sorted(projects),
             "view": view,
             "filters": filters or {},

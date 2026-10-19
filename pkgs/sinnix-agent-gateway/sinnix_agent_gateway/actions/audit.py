@@ -6,11 +6,10 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field, model_validator
 
-from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
+from ..action import Action, Example, RequestControls
 from ..capability_index import CapabilityIndexError
 from ..contexts import ContextSnapshotStore
 from ..contracts import VerbFamily
-from ..permissions import Permission
 from ..results import ProtocolError, ResultError
 from ..schemas import GatewayModel
 
@@ -145,13 +144,10 @@ class ResultSnapshot(GatewayModel):
 
 
 def _result(runtime: Runtime, inp: ResultInput) -> ResultSnapshot:
-    runtime.principal.require(Permission.AUDIT_READ)
     result_id = inp.result_id or (inp.ref or "").rsplit("/", 1)[1]
     try:
         if inp.ref and inp.ref.startswith("sinnix://contexts/"):
-            envelope = ContextSnapshotStore(
-                runtime.config.state_dir, runtime.principal_name
-            ).get(result_id)
+            envelope = ContextSnapshotStore(runtime.config.state_dir).get(result_id)
         else:
             envelope = runtime.results.read(result_id)
     except (ResultError, KeyError) as exc:
@@ -236,7 +232,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=VerifyInput,
         Output=Verification,
         handler=_verify,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("receipt",),
         affordances=("audit.receipt", "events.tail"),
         aliases=("audit chain", "integrity", "tamper check"),
@@ -246,11 +241,10 @@ ACTIONS: tuple[Action, ...] = (
         name="audit.receipt",
         family=VerbFamily.GET,
         owner="audit",
-        summary="Read one principal-scoped audit receipt by ref or id.",
+        summary="Read one audit receipt by ref or id.",
         Input=ReceiptInput,
         Output=Receipt,
         handler=_receipt,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("receipt",),
         affordances=("audit.verify", "events.tail"),
         aliases=("receipt", "what happened in that call"),
@@ -278,7 +272,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=OperationInput,
         Output=Operation,
         handler=_operation,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("receipt",),
         affordances=("audit.receipt",),
         aliases=("lost response", "did my write commit", "operation status"),
@@ -300,7 +293,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ResultInput,
         Output=ResultSnapshot,
         handler=_result,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("result", "context_snapshot"),
         affordances=("audit.receipt",),
         aliases=("result snapshot", "replay response"),
@@ -314,7 +306,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=CapabilitiesInput,
         Output=Capabilities,
         handler=_capabilities,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("capability",),
         affordances=("capabilities.query",),
         aliases=(

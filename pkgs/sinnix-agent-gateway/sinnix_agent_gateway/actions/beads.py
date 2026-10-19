@@ -7,8 +7,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import Field, create_model, model_validator
 
 from ..action import (
-    ALL_PRINCIPALS,
-    OPERATOR_ONLY,
     Action,
     Example,
     MutationControls,
@@ -598,7 +596,6 @@ def _native_actions() -> tuple[Action, ...]:
                 Input=Input,
                 Output=NativeResult,
                 handler=handler,
-                principals=OPERATOR_ONLY if write else ALL_PRINCIPALS,
                 resource_kinds=_KINDS,
                 affordances=("beads.get", "beads.query"),
                 examples=(
@@ -747,7 +744,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ClosureInput,
         Output=ClosureOutput,
         handler=_closure,
-        principals=ALL_PRINCIPALS,
         resource_kinds=_KINDS,
         affordances=("beads.get", "beads.query", "campaign.progress"),
         aliases=("dependency closure", "campaign closure"),
@@ -772,7 +768,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=QueryInput,
         Output=BeadQuery,
         handler=_query,
-        principals=ALL_PRINCIPALS,
         resource_kinds=_KINDS,
         affordances=("beads.get", "beads.update", "projects.context"),
         aliases=(
@@ -824,7 +819,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=GetInput,
         Output=Bead,
         handler=_get,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("bead",),
         affordances=("beads.update", "beads.query"),
         aliases=("show task", "bd show", "issue details", "task notes"),
@@ -856,7 +850,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=OperateInput,
         Output=OperateResult,
         handler=_operate,
-        principals=OPERATOR_ONLY,
         resource_kinds=("project", "task_authority"),
         affordances=("beads.query", "projects.get"),
         aliases=("bd sync", "bd export", "backup beads", "restore beads"),
@@ -890,7 +883,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ReadInput,
         Output=NativeResult,
         handler=_read,
-        principals=ALL_PRINCIPALS,
         resource_kinds=_KINDS,
         affordances=("beads.get", "beads.query"),
         examples=(

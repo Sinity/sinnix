@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal, Mapping
 import anyio
 from pydantic import Field, TypeAdapter, model_validator
 
-from ..action import ALL_PRINCIPALS, Action, Example, RequestControls
+from ..action import Action, Example, RequestControls
 from ..contracts import VerbFamily
 from ..locators import JobLocator, ProjectLocator, project_ref
 from ..payloads import canonical_size
@@ -114,7 +114,6 @@ def _resolve_project(runtime: Runtime, locator: Any) -> str:
 
 async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
     from ..contexts import source_revision
-    from ..permissions import Permission
     from .products import (
         CampaignInput,
         OrchestrationInput,
@@ -125,7 +124,6 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
     )
 
     if inp.job is not None:
-        runtime.principal.require(Permission.JOB_READ)
         job_id, ref, launch_reference = inp.job.resolve()
         identity = {"job_id": job_id, "max_bytes": 64000}
         if launch_reference is not None:
@@ -209,7 +207,6 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
             },
         )
     elif inp.intent == "incident":
-        runtime.principal.require(Permission.MACHINE_READ)
         value = await anyio.to_thread.run_sync(
             runtime.observe.machine_query, "overview"
         )
@@ -223,7 +220,6 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
             source_ref="sinnix://machine/overview",
         )
     else:
-        runtime.principal.require(Permission.TASK_READ)
         product = await owner_product(
             runtime,
             "lynchpin",
@@ -394,7 +390,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ComposeInput,
         Output=ComposedContext,
         handler=_compose,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("project", "checkout", "job", "context_snapshot"),
         affordances=(
             "jobs.list",

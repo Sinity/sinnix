@@ -7,7 +7,9 @@ from typing import Any, Callable, Mapping
 from .refs import RefTemplate
 from .schemas import ERROR_CODES
 
-KNOWN_PRINCIPALS = frozenset({"operator"})
+# The gateway has one caller. Persisted rows, result envelopes and cursor keys
+# still carry its name, so stored data and live cursors stay valid.
+PRINCIPAL = "operator"
 
 JsonSchema = Mapping[str, Any]
 AvailabilityProbe = Callable[[], Mapping[str, Any]]
@@ -46,7 +48,6 @@ class ResourceSpec:
     readable_projections: tuple[str, ...] = ()
     supports_query: bool = False
     availability_probe: AvailabilityProbe | None = field(default=None, compare=False)
-    principals: frozenset[str] = KNOWN_PRINCIPALS
 
     def __post_init__(self) -> None:
         if not self.kind:
@@ -58,10 +59,3 @@ class ResourceSpec:
             )
         if not self.owner:
             raise ValueError(f"resource {self.kind!r} requires an owner")
-        if not self.principals:
-            raise ValueError(f"resource {self.kind!r} requires at least one principal")
-        unknown_principals = self.principals - KNOWN_PRINCIPALS
-        if unknown_principals:
-            raise ValueError(
-                f"resource {self.kind!r} names unknown principals: {sorted(unknown_principals)}"
-            )

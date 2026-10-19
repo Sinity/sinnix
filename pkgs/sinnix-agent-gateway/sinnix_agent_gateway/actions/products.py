@@ -8,12 +8,11 @@ from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
 import anyio
 from pydantic import Field, model_validator
 
-from ..action import OPERATOR_ONLY, Action, Example, RequestControls
+from ..action import Action, Example, RequestControls
 from ..contracts import VerbFamily
 from ..generated_lynchpin_inputs import CampaignInput as OwnerCampaignInput
 from ..locators import ProjectLocator
 from ..mcp_broker import McpBrokerError
-from ..permissions import Permission, PolicyError
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 
@@ -116,8 +115,6 @@ async def owner_product(
             write=False,
             deadline_at=deadline_at,
         )
-    except PolicyError:
-        raise
     except McpBrokerError as exc:
         return OwnerProduct(
             owner=owner,
@@ -234,7 +231,6 @@ class OrchestrationResult(GatewayModel):
 async def _orchestration(
     runtime: Runtime, inp: OrchestrationInput
 ) -> OrchestrationResult:
-    runtime.principal.require(Permission.SESSION_READ)
     sessions = []
     for reference in dict.fromkeys(inp.session_refs):
         if not reference.startswith("session:") or len(reference) > 8192:
@@ -298,7 +294,6 @@ async def _campaign(runtime: Runtime, inp: CampaignInput) -> CampaignResult:
     from .contexts import _resolve_project
 
     project = await anyio.to_thread.run_sync(_resolve_project, runtime, inp.project)
-    runtime.principal.require(Permission.TASK_READ)
     product = await owner_product(
         runtime,
         "lynchpin",
@@ -329,7 +324,6 @@ ACTIONS = (
         Input=CampaignInput,
         Output=CampaignResult,
         handler=_campaign,
-        principals=OPERATOR_ONLY,
         resource_kinds=("project", "bead"),
         affordances=("beads.query", "beads.get", "context.compose"),
         documentation="Task closure, verified delivery and acceptance remain separate. Missing evidence is unknown; bounded closure cannot establish an exact denominator. Historical task state is read at its resolved owner revision.",
@@ -348,7 +342,6 @@ ACTIONS = (
         Input=OrchestrationInput,
         Output=OrchestrationResult,
         handler=_orchestration,
-        principals=OPERATOR_ONLY,
         resource_kinds=(),
         affordances=("sessions.query", "context.compose"),
         documentation="Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.",

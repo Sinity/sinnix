@@ -21,7 +21,7 @@ BY_NAME = {action.name: action for action in mcp_tools.ACTIONS}
 def test_offline_owner_keeps_stale_contract_in_typed_catalogs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    rt = runtime(tmp_path, "operator", monkeypatch)
+    rt = runtime(tmp_path, monkeypatch)
     call(rt, "mcp.tools", {}, BY_NAME)
 
     async def failed(*_args: object) -> dict:
@@ -71,7 +71,6 @@ class WriteSession(FakeSession):
 
 def runtime(
     tmp_path: Path,
-    principal: str,
     monkeypatch: pytest.MonkeyPatch,
     session=WriteSession,
     max_result_bytes: int = 262_144,
@@ -106,7 +105,7 @@ def runtime(
             },
         },
     )
-    return Runtime.create(cfg, principal)
+    return Runtime.create(cfg)
 
 
 def test_locator_forms() -> None:
@@ -127,7 +126,7 @@ def test_locator_forms() -> None:
 def test_servers_tools_call_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    rt = runtime(tmp_path, "operator", monkeypatch)
+    rt = runtime(tmp_path, monkeypatch)
     servers = {
         row["name"]: row
         for row in call(rt, "mcp.servers", {}, BY_NAME)["data"]["servers"]
@@ -214,9 +213,7 @@ def test_tools_filters_complete_server_catalog_before_page_limit(
             ]
             return SimpleNamespace(tools=tools, next_cursor=None)
 
-    rt = runtime(
-        tmp_path, "operator", monkeypatch, LargeCatalogSession, max_result_bytes=4_096
-    )
+    rt = runtime(tmp_path, monkeypatch, LargeCatalogSession, max_result_bytes=4_096)
 
     result = call(
         rt,
@@ -235,7 +232,7 @@ def test_tools_reports_incomplete_upstream_coverage_for_no_match(
 ) -> None:
     from test_mcp_broker import RepeatingCursorSession
 
-    rt = runtime(tmp_path, "operator", monkeypatch, RepeatingCursorSession)
+    rt = runtime(tmp_path, monkeypatch, RepeatingCursorSession)
     result = call(
         rt,
         "mcp.tools",
@@ -251,7 +248,7 @@ def test_tools_reports_incomplete_upstream_coverage_for_no_match(
 def test_broker_timeout_is_diagnosable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    rt = runtime(tmp_path, "operator", monkeypatch)
+    rt = runtime(tmp_path, monkeypatch)
 
     class Hanging(FakeSession):
         async def initialize(self) -> None:
@@ -272,7 +269,7 @@ def test_broker_timeout_is_diagnosable(
 def test_self_broker_routes_direct_read_with_content_blocks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    rt = runtime(tmp_path, "operator", monkeypatch)
+    rt = runtime(tmp_path, monkeypatch)
     image = tmp_path / "fixture.png"
     image.write_bytes(
         b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"

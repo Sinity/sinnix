@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import ConfigDict, Field
 
 from ..action import (
-    OPERATOR_ONLY,
     Action,
     ActionResult,
     Example,
@@ -442,9 +441,6 @@ def _walk(
 
 
 def _tree(runtime: Runtime, inp: TreeInput) -> AccessibleTree:
-    from ..permissions import Permission
-
-    runtime.principal.require(Permission.DESKTOP_READ)
     locator = inp.window or WindowLocator(active=True)
     client, ref = _owner_call(lambda: locator.resolve(runtime))
     pid = client.get("pid")
@@ -805,7 +801,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=SnapshotInput,
         Output=DesktopSnapshot,
         handler=_snapshot,
-        principals=OPERATOR_ONLY,
         resource_kinds=("desktop",),
         affordances=("desktop.screenshot", "desktop.operate", "desktop.tree"),
         aliases=(
@@ -826,7 +821,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ScreenshotInput,
         Output=Screenshot,
         handler=_screenshot,
-        principals=OPERATOR_ONLY,
         resource_kinds=("desktop", "artifact"),
         affordances=("desktop.snapshot", "desktop.operate", "artifacts.read"),
         aliases=(
@@ -855,7 +849,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=TreeInput,
         Output=AccessibleTree,
         handler=_tree,
-        principals=OPERATOR_ONLY,
         resource_kinds=("desktop",),
         affordances=("desktop.operate", "desktop.screenshot"),
         aliases=("accessibility tree", "a11y", "widgets", "ui elements"),
@@ -873,7 +866,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=OperateInput,
         Output=OperateResult,
         handler=_operate,
-        principals=OPERATOR_ONLY,
         resource_kinds=("desktop",),
         affordances=("desktop.snapshot", "desktop.screenshot", "desktop.tree"),
         aliases=(

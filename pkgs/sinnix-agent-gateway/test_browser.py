@@ -18,10 +18,9 @@ from sinnix_agent_gateway.browser import (
 )
 from sinnix_agent_gateway.config import GatewayConfig
 from sinnix_agent_gateway.owner_execution import ExecutionResult
-from sinnix_agent_gateway.permissions import Principal
 
 
-def browser_service(tmp_path: Path, principal_name: str) -> tuple[BrowserService, Path]:
+def browser_service(tmp_path: Path) -> tuple[BrowserService, Path]:
     captured = tmp_path / "browser-commands.jsonl"
     runner = tmp_path / "chrome-control"
     runner.write_text(
@@ -43,10 +42,7 @@ def browser_service(tmp_path: Path, principal_name: str) -> tuple[BrowserService
         projects={},
         chrome_control_command=str(runner),
     )
-    principal = Principal.for_name(principal_name)
-    return BrowserService(
-        config, principal, ArtifactService(config, principal)
-    ), captured
+    return BrowserService(config, ArtifactService(config)), captured
 
 
 def commands(path: Path) -> list[list[str]]:
@@ -62,7 +58,7 @@ def run_concurrent_registry_updates(
     barrier = Barrier(2)
     lock_paths: list[Path] = []
     original_flock = browser_module.flock
-    browser, _ = browser_service(state_dir.parent, "operator")
+    browser, _ = browser_service(state_dir.parent)
 
     @contextmanager
     def synchronized_flock(path):
@@ -100,7 +96,7 @@ def test_concurrent_register_and_forget_preserve_unrelated_update(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     state_dir = tmp_path / "state"
-    browser, _ = browser_service(tmp_path, "operator")
+    browser, _ = browser_service(tmp_path)
     browser.register_target({"id": "existing"})
     browser = run_concurrent_registry_updates(
         monkeypatch,
@@ -113,7 +109,7 @@ def test_concurrent_register_and_forget_preserve_unrelated_update(
 
 
 def test_operator_actions_require_gateway_created_agent_target(tmp_path: Path) -> None:
-    browser, captured = browser_service(tmp_path, "operator")
+    browser, captured = browser_service(tmp_path)
 
     target = browser.action("agent_window", {"url": "https://example.test"})
     result = browser.action(
@@ -133,7 +129,7 @@ def test_operator_actions_require_gateway_created_agent_target(tmp_path: Path) -
 def test_direct_browser_target_reads_require_registered_agent_window(
     tmp_path: Path, operation: str
 ) -> None:
-    browser, captured = browser_service(tmp_path, "operator")
+    browser, captured = browser_service(tmp_path)
 
     with pytest.raises(BrowserError, match="gateway-created agent window"):
         browser.read(operation, "operator-page")
@@ -144,7 +140,7 @@ def test_direct_browser_target_reads_require_registered_agent_window(
 def test_browser_owner_failure_is_attested_as_a_diagnostic(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    browser, _ = browser_service(tmp_path, "operator")
+    browser, _ = browser_service(tmp_path)
     monkeypatch.setattr(
         browser.execution,
         "run",
@@ -169,7 +165,7 @@ def test_browser_owner_failure_is_attested_as_a_diagnostic(
 def test_agent_window_rejects_visible_target_after_wrapper_warning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    browser, _ = browser_service(tmp_path, "operator")
+    browser, _ = browser_service(tmp_path)
     commands: list[list[str]] = []
 
     def run(arguments: list[str]) -> dict[str, object]:
@@ -185,7 +181,7 @@ def test_agent_window_rejects_visible_target_after_wrapper_warning(
 
 
 def test_operator_cannot_act_on_existing_browser_page(tmp_path: Path) -> None:
-    browser, _ = browser_service(tmp_path, "operator")
+    browser, _ = browser_service(tmp_path)
 
     with pytest.raises(BrowserError, match="gateway-created agent window"):
         browser.action(
@@ -197,7 +193,7 @@ def test_operator_cannot_act_on_existing_browser_page(tmp_path: Path) -> None:
 def test_browser_capture_registers_only_owned_target_as_artifact(
     tmp_path: Path,
 ) -> None:
-    browser, captured = browser_service(tmp_path, "operator")
+    browser, captured = browser_service(tmp_path)
 
     browser.action("agent_window", {})
     result = browser.capture("agent-target", full_page=True)
@@ -228,7 +224,7 @@ def test_browser_capture_registers_only_owned_target_as_artifact(
 def test_browser_capture_rejects_existing_operator_target_before_invocation(
     tmp_path: Path,
 ) -> None:
-    browser, captured = browser_service(tmp_path, "operator")
+    browser, captured = browser_service(tmp_path)
 
     with pytest.raises(BrowserError, match="gateway-created agent window"):
         browser.capture("operator-page")

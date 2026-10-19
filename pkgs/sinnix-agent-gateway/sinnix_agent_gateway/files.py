@@ -13,7 +13,6 @@ from typing import Any
 from sinnix_lib.atomic import atomic_publish
 
 from .config import GatewayConfig
-from .permissions import Permission, Principal
 
 
 class FileError(ValueError):
@@ -107,9 +106,8 @@ def _copy_exclusive(source: Path, destination: Path) -> None:
 
 
 class HostFileService:
-    def __init__(self, config: GatewayConfig, principal: Principal):
+    def __init__(self, config: GatewayConfig):
         self.config = config
-        self.principal = principal
 
     def _resolve(self, path: str, *, existing: bool) -> Path:
         candidate = Path(path).expanduser()
@@ -124,10 +122,6 @@ class HostFileService:
                 resolved.parent.resolve(strict=True)
             except FileNotFoundError as exc:
                 raise FileError("parent directory does not exist") from exc
-        if self.principal.name != "operator" and any(
-            resolved == root or root in resolved.parents for root in _SECRET_ROOTS
-        ):
-            raise FileError("path is unavailable to this principal")
         return resolved
 
     def _destination(self, path: str) -> Path:
@@ -141,7 +135,6 @@ class HostFileService:
         return self._resolve(path, existing=False)
 
     def stat(self, path: str) -> dict[str, Any]:
-        self.principal.require(Permission.FILE_READ)
         target = self._resolve(path, existing=True)
         details = target.stat()
         return {
@@ -168,7 +161,6 @@ class HostFileService:
         destination: str | None = None,
         expected_sha256: str | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Permission.FILE_WRITE)
         candidate = Path(path).expanduser()
         if not candidate.is_absolute():
             candidate = Path.home() / candidate

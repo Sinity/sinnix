@@ -10,12 +10,11 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
 
-from ..action import ALL_PRINCIPALS, Action, ActionResult, Example, RequestControls
+from ..action import Action, ActionResult, Example, RequestControls
 from ..artifacts import ArtifactError
 from ..content import IMAGE_TYPES, Artifact, attach, is_text
 from ..contracts import VerbFamily
 from ..locators import ARTIFACT_REF_PREFIX, ArtifactLocator
-from ..permissions import Permission
 from ..results import ProtocolError, ResultError
 from ..schemas import GatewayModel
 from ..text_paging import decode_utf8_page
@@ -70,7 +69,6 @@ def _row(raw: dict[str, Any]) -> ArtifactRow:
 
 
 def _list(runtime: Runtime, inp: ListInput) -> ActionResult:
-    runtime.principal.require(Permission.ARTIFACT_READ)
     query = {
         "action": "artifacts.list",
         "kind": inp.kind,
@@ -127,7 +125,6 @@ class Metadata(ArtifactRow):
 def _metadata(
     runtime: Runtime, locator: ArtifactLocator
 ) -> tuple[dict[str, Any], Path, str]:
-    runtime.principal.require(Permission.ARTIFACT_READ)
     artifact_id, ref = locator.resolve()
     try:
         raw = runtime.artifacts._metadata(artifact_id)
@@ -270,11 +267,10 @@ ACTIONS: tuple[Action, ...] = (
         name="artifacts.list",
         family=VerbFamily.CATALOG,
         owner="artifacts",
-        summary="List principal-visible artifacts with kind, owner, size and canonical ref.",
+        summary="List artifacts with kind, owner, size and canonical ref.",
         Input=ListInput,
         Output=Listing,
         handler=_list,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("artifact",),
         affordances=("artifacts.get", "artifacts.read"),
         aliases=("captures", "diagnostics", "stored responses", "large results"),
@@ -293,7 +289,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=GetInput,
         Output=Metadata,
         handler=_get,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("artifact",),
         affordances=("artifacts.read", "artifacts.list"),
         aliases=("artifact info", "artifact metadata"),
@@ -316,7 +311,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ReadInput,
         Output=Content,
         handler=_read,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("artifact",),
         affordances=("artifacts.get", "artifacts.list"),
         aliases=(

@@ -65,7 +65,7 @@ FakeJobs = DirectJobs
 
 
 def make_server(
-    tmp_path: Path, principal: str, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> tuple[Any, FakeJobs]:
     project = tmp_path / "project"
     project.mkdir(exist_ok=True)
@@ -73,16 +73,16 @@ def make_server(
         state_dir=tmp_path / "state",
         projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
     )
-    runtime = Runtime.create(config, principal)
+    runtime = Runtime.create(config)
     fake = FakeJobs(default=RUN)
     runtime.jobs = fake  # type: ignore[assignment]
-    monkeypatch.setattr(Runtime, "create", classmethod(lambda _c, _g, _p: runtime))
+    monkeypatch.setattr(Runtime, "create", classmethod(lambda _c, _g: runtime))
     monkeypatch.setattr(
         server_module,
-        "visible_actions",
-        lambda name: tuple(a for a in OWNED if name in a.principals),
+        "ALL_ACTIONS",
+        OWNED,
     )
-    return create_server(config, principal), fake
+    return create_server(config), fake
 
 
 def test_run_locator_accepts_a_ref_a_full_id_or_a_suffix() -> None:
@@ -99,7 +99,7 @@ def test_status_names_every_worker_bead_and_the_pueue_ids_jobs_actions_take(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Breaks if a supervisor has to parse a task label to learn a run's beads."""
-    server, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, fake = make_server(tmp_path, monkeypatch)
 
     data = ok(server, "batches.status", {"target": {"run_id": "a2c81926"}})
 
@@ -131,7 +131,7 @@ def test_status_names_every_worker_bead_and_the_pueue_ids_jobs_actions_take(
 def test_list_pages_runs_and_forwards_the_project_filter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, fake = make_server(tmp_path, monkeypatch)
     fake.responses["batch.list"] = {"runs": [RUN], "total": 3, "truncated": True}
 
     page = ok(server, "batches.list", {"project": {"project": "fixture"}, "limit": 1})
@@ -147,7 +147,7 @@ def test_list_pages_runs_and_forwards_the_project_filter(
 def test_start_sends_the_beads_and_the_worker_grouping(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, fake = make_server(tmp_path, monkeypatch)
     fake.responses["batch.start"] = {**RUN, "existing": False, "resumed": True}
 
     started = ok(
@@ -198,7 +198,7 @@ def test_land_and_resume_return_the_queued_task_rather_than_running_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Breaks if a caller has to hold an MCP request open for a whole landing."""
-    server, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, fake = make_server(tmp_path, monkeypatch)
     fake.responses["batch.land"] = {**RUN, "landing_job_id": "77"}
     fake.responses["batch.resume"] = {**RUN, "resumed_job_id": "78"}
 
@@ -233,7 +233,7 @@ def test_land_and_resume_return_the_queued_task_rather_than_running_it(
 def test_a_landed_run_offers_no_further_transition(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, fake = make_server(tmp_path, monkeypatch)
     fake.responses["batch.status"] = {
         **RUN,
         "stage": "landed",

@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
 
-from ..action import OPERATOR_ONLY, Action, Example, MutationControls, RequestControls
-from ..contracts import VerbFamily
+from ..action import Action, Example, MutationControls, RequestControls
+from ..contracts import PRINCIPAL, VerbFamily
 from ..files import move_source_refusal
 from ..locators import FileLocator, encode_file_ref
 from ..organization import (
@@ -17,7 +17,6 @@ from ..organization import (
     file_identity,
     identity_matches,
 )
-from ..permissions import Permission
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 from .files import SearchInput, _search
@@ -340,7 +339,6 @@ def _plan_mkdir(runtime: Runtime, index: int, locator: FileLocator) -> PlannedMk
 
 
 def _plan(runtime: Runtime, inp: PlanInput) -> PlanResult:
-    runtime.principal.require(Permission.FILE_READ)
     mkdirs = [
         _plan_mkdir(runtime, index, target) for index, target in enumerate(inp.mkdirs)
     ]
@@ -352,7 +350,7 @@ def _plan(runtime: Runtime, inp: PlanInput) -> PlanResult:
     _refuse_nested_or_cyclic_moves(moves)
     plan: dict[str, Any] = {
         "schema": OrganizationService.plan_schema,
-        "principal": runtime.principal.name,
+        "principal": PRINCIPAL,
         "moves": [entry.model_dump() for entry in moves],
         "mkdirs": [entry.model_dump() for entry in mkdirs],
     }
@@ -475,13 +473,12 @@ def _require_preconditions(runtime: Runtime, plan: dict[str, Any]) -> None:
 
 
 def _changeset(runtime: Runtime, inp: ChangesetInput) -> ChangesetResult:
-    runtime.principal.require(Permission.FILE_WRITE)
     service = OrganizationService(runtime.files, runtime.artifacts)
     try:
         plan = service.load_plan(inp.plan_ref)
     except OrganizationError as exc:
         raise ProtocolError("not_found", str(exc)) from exc
-    if plan.get("principal") != runtime.principal.name:
+    if plan.get("principal") != PRINCIPAL:
         raise ProtocolError("policy_denied", "plan belongs to another principal")
     if plan.get("plan_digest") != inp.plan_digest:
         raise ProtocolError(
@@ -556,7 +553,7 @@ def _changeset(runtime: Runtime, inp: ChangesetInput) -> ChangesetResult:
                 break
     receipt = {
         "schema": "sinnix.gateway-files-changeset-receipt.v1",
-        "principal": runtime.principal.name,
+        "principal": PRINCIPAL,
         "plan_ref": inp.plan_ref,
         "plan_digest": inp.plan_digest,
         "atomic": False,
@@ -583,7 +580,6 @@ def _changeset(runtime: Runtime, inp: ChangesetInput) -> ChangesetResult:
 
 
 def _references(runtime: Runtime, inp: ReferencesInput) -> ReferencesResult:
-    runtime.principal.require(Permission.FILE_READ)
     hits: list[ReferenceHit] = []
     truncated = False
     warnings: list[str] = []
@@ -632,7 +628,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=PlanInput,
         Output=PlanResult,
         handler=_plan,
-        principals=OPERATOR_ONLY,
         resource_kinds=("host_file",),
         affordances=("files.changeset", "files.references"),
         aliases=("move plan", "relocation preview"),
@@ -659,7 +654,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ChangesetInput,
         Output=ChangesetResult,
         handler=_changeset,
-        principals=OPERATOR_ONLY,
         resource_kinds=("host_file",),
         affordances=("files.stat", "files.references"),
         aliases=("apply move plan", "relocation changeset"),
@@ -684,7 +678,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ReferencesInput,
         Output=ReferencesResult,
         handler=_references,
-        principals=OPERATOR_ONLY,
         resource_kinds=("host_file",),
         affordances=("files.read", "files.plan"),
         aliases=("find old paths", "path references"),

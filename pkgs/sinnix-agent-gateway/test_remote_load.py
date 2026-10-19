@@ -32,7 +32,6 @@ from mcp.shared.inbound import (
 from sinnix_agent_gateway import calllog, serving, tooling
 from sinnix_agent_gateway import projects as projects_module
 from sinnix_agent_gateway.config import GatewayConfig, ProjectConfig
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.projects import ProjectService
 from test_actions_jobs import DONE, make_server
 
@@ -108,7 +107,6 @@ def test_one_checkout_read_hashes_only_that_checkout(
             state_dir=tmp_path / "state",
             projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
         ),
-        Principal.for_name("operator"),
     )
     hashed: list[Path] = []
     real = projects_module._content_revision
@@ -146,7 +144,6 @@ def test_checkout_listing_skips_a_worktree_removed_during_the_read(
             state_dir=tmp_path / "state",
             projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
         ),
-        Principal.for_name("operator"),
     )
     listed = ProjectService._checkout_candidates
 
@@ -170,7 +167,7 @@ def test_a_blocking_shell_start_does_not_stall_concurrent_calls(
     While the job owner is blocked, a concurrent jobs.list must still answer.
     With the owner on the loop, nothing else runs until it returns.
     """
-    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
+    server, runtime, _ = make_server(tmp_path, monkeypatch)
     jobs = GatedJobs()
     release = threading.Event()
     jobs.gates["job.shell.start"] = release
@@ -212,7 +209,7 @@ def test_a_remote_read_answers_with_a_typed_deadline_inside_its_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Fails if a slow remote read runs past the budget instead of answering."""
-    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
+    server, runtime, _ = make_server(tmp_path, monkeypatch)
     runtime.transport = tooling.REMOTE_TRANSPORT
     monkeypatch.setattr(tooling, "REMOTE_READ_BUDGET_SECONDS", 0.5)
     jobs = GatedJobs()
@@ -240,7 +237,7 @@ def test_a_remote_wait_is_capped_below_the_tunnel_deadline(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Fails if a 300 s remote wait reaches the owner uncapped."""
-    server, runtime, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, runtime, fake = make_server(tmp_path, monkeypatch)
     runtime.transport = tooling.REMOTE_TRANSPORT
     fake.responses["job.wait"] = {**DONE, "timed_out": True}
 
@@ -277,7 +274,7 @@ def test_each_remote_call_leaves_one_redacted_journal_line(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Fails if a remote call is unlogged or its log carries a secret value."""
-    server, runtime, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, runtime, fake = make_server(tmp_path, monkeypatch)
     runtime.transport = tooling.REMOTE_TRANSPORT
     fake.responses["job.shell.start"] = {**DONE, "job_id": "52"}
     secret = "sk-" + "a1b2c3d4" * 4
@@ -674,7 +671,7 @@ def test_a_remote_shell_still_running_is_logged_as_running(
     A lane full of long jobs showed up in the journal as a column of `ok`
     calls about 30 s long; the running state is what a reader needs.
     """
-    server, runtime, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, runtime, fake = make_server(tmp_path, monkeypatch)
     runtime.transport = tooling.REMOTE_TRANSPORT
     running = {
         **DONE,
@@ -733,9 +730,7 @@ def test_a_catalog_call_does_not_stall_the_event_loop(
     """
     from sinnix_agent_gateway.app import create_server
 
-    server = create_server(
-        GatewayConfig(state_dir=tmp_path / "state", projects={}), "operator"
-    )
+    server = create_server(GatewayConfig(state_dir=tmp_path / "state", projects={}))
     stalls: list[dict[str, Any]] = []
 
     async def scenario() -> None:

@@ -6,13 +6,11 @@ from pathlib import Path
 import pytest
 from sinnix_agent_gateway.artifacts import ArtifactService
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_agent_gateway.permissions import Principal
 
 
 def service(tmp_path):
     owner = ArtifactService(
         GatewayConfig(state_dir=tmp_path / "state", projects={}),
-        Principal.for_name("operator"),
     )
     directory = owner.config.state_dir / "captures" / "fixture"
     directory.mkdir()

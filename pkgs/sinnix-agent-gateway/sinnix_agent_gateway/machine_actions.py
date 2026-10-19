@@ -7,7 +7,6 @@ from typing import Any, Callable
 from urllib.parse import quote
 
 from .config import GatewayConfig
-from .permissions import Permission, Principal
 
 
 class MachineActionError(ValueError):
@@ -29,13 +28,11 @@ class MachineActionService:
     def __init__(
         self,
         config: GatewayConfig,
-        principal: Principal,
         connection_factory: Callable[
             [str], http.client.HTTPConnection
         ] = UnixConnection,
     ) -> None:
         self.config = config
-        self.principal = principal
         self.connection_factory = connection_factory
 
     def _request(
@@ -80,7 +77,6 @@ class MachineActionService:
 
     def snapshot(self) -> dict[str, Any]:
         """Read current hub observation status."""
-        self.principal.require(Permission.MACHINE_READ)
         payload = self._request("GET", "/v1/revision")
         if (
             payload.get("schema") != "sinnix-hub-v1"
@@ -107,7 +103,6 @@ class MachineActionService:
         target: dict[str, Any],
         parameters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Permission.MACHINE_READ)
         request = {"action": action, "target": target, "parameters": parameters or {}}
         payload = self._request(
             "POST",
@@ -126,7 +121,6 @@ class MachineActionService:
 
     def lookup(self, idempotency_key: str) -> dict[str, Any] | None:
         """Read the retained owner outcome without submitting an action again."""
-        self.principal.require(Permission.MACHINE_ACTION)
         return (
             self._request(
                 "GET", "/v1/actions/" + quote(idempotency_key, safe=""), missing_ok=True
@@ -143,7 +137,6 @@ class MachineActionService:
         operator_reason: str,
         parameters: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Permission.MACHINE_ACTION)
         request = {
             "action": action,
             "target": target,

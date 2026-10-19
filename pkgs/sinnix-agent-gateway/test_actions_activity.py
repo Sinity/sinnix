@@ -34,9 +34,7 @@ def write_lane(path: Path, lane: str, records: list[dict]) -> None:
             )
 
 
-def runtime(
-    tmp_path: Path, principal: str = "operator"
-) -> tuple[Runtime, dict[str, Path]]:
+def runtime(tmp_path: Path) -> tuple[Runtime, dict[str, Path]]:
     inventory, lanes = make_inventory(tmp_path)
     inventory_data = json.loads(inventory.read_text())
     plain = tmp_path / "plain.jsonl"
@@ -50,7 +48,7 @@ def runtime(
         hub_socket_path=tmp_path / "hub.sock",
         capture_command="sinnix-capture-absent",
     )
-    rt = Runtime.create(cfg, principal)
+    rt = Runtime.create(cfg)
     return rt, lanes
 
 

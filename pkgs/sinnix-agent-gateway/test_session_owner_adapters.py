@@ -11,10 +11,10 @@ from test_actions_jobs import make_server as job_server
 from test_actions_products import Broker
 
 
-def make_server(tmp_path, principal, monkeypatch):
-    _, runtime, fake = job_server(tmp_path, principal, monkeypatch)
-    monkeypatch.setattr(server_module, "visible_actions", lambda _: activity.ACTIONS)
-    return create_server(runtime.config, principal), runtime, fake
+def make_server(tmp_path, monkeypatch):
+    _, runtime, fake = job_server(tmp_path, monkeypatch)
+    monkeypatch.setattr(server_module, "ALL_ACTIONS", activity.ACTIONS)
+    return create_server(runtime.config), runtime, fake
 
 
 @pytest.mark.parametrize(
@@ -68,7 +68,7 @@ def make_server(tmp_path, principal, monkeypatch):
 def test_native_operation_envelope_survives_transport(
     tmp_path, monkeypatch, action, payload, operation
 ):
-    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
+    server, runtime, _ = make_server(tmp_path, monkeypatch)
     data = {
         "items": [{"reference": "codex:fixture.jsonl", "indexed_session_id": None}],
         "continuation": "owner-next",
@@ -105,7 +105,7 @@ def test_native_operation_envelope_survives_transport(
 def test_native_input_constraints_reject_before_owner(
     tmp_path, monkeypatch, action, payload
 ):
-    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
+    server, runtime, _ = make_server(tmp_path, monkeypatch)
     runtime.mcp_broker = Broker()
     result = call(server, action, payload)
     assert result["result"]["outcome"] == "error"
@@ -113,7 +113,7 @@ def test_native_input_constraints_reject_before_owner(
 
 
 def test_archive_unavailable_is_retained_without_local_fallback(tmp_path, monkeypatch):
-    server, runtime, _ = make_server(tmp_path, "operator", monkeypatch)
+    server, runtime, _ = make_server(tmp_path, monkeypatch)
     runtime.mcp_broker = Broker(failure=True)
     result = call(
         server, "sessions.raw.search", {"origin": "codex-session", "query": "needle"}

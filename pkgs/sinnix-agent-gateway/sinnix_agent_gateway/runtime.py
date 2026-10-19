@@ -21,7 +21,7 @@ from .capability_index import CapabilityIndexService
 from .captures import CaptureService
 from .config import GatewayConfig
 from .contexts import source_revision
-from .contracts import EffectMode
+from .contracts import PRINCIPAL, EffectMode
 from .desktop import DesktopService
 from .events import EventCursorError, NormalizedEventService
 from .execution import JobOwnerError, LocalJobs
@@ -31,7 +31,6 @@ from .machine_actions import MachineActionService
 from .mcp_broker import McpBrokerService
 from .observe import ObserveService
 from .owner_execution import OwnerDiagnosticError
-from .permissions import Permission, PolicyError, Principal
 from .projects import ProjectService
 from .redaction import public_error
 from .registry import REGISTRY, RegistryError
@@ -140,8 +139,6 @@ def manifest_measurement(manifest: Mapping[str, Any]) -> dict[str, Any]:
 
 @dataclass
 class Runtime:
-    principal_name: str
-    principal: Principal
     config: GatewayConfig
     projects: ProjectService
     artifacts: ArtifactService
@@ -165,39 +162,32 @@ class Runtime:
     tool_manifest: Callable[[], Awaitable[dict[str, Any]]] | None = None
     publisher_status: Callable[[], dict[str, Any]] | None = None
 
-    def principal_contract_hash(self) -> str:
-        return _principal_contract(self.principal_name)
-
     @classmethod
-    def create(cls, config: GatewayConfig, principal_name: str) -> "Runtime":
-        principal = Principal.for_name(principal_name)
-        artifacts = ArtifactService(config, principal)
-        projects = ProjectService(config, principal)
-        results = ResultService(config, principal, artifacts)
-        beads = BeadsService(config, principal, results)
+    def create(cls, config: GatewayConfig) -> "Runtime":
+        artifacts = ArtifactService(config)
+        projects = ProjectService(config)
+        results = ResultService(config, artifacts)
+        beads = BeadsService(config, results)
         runtime = cls(
-            principal_name=principal_name,
-            principal=principal,
             config=config,
             projects=projects,
             artifacts=artifacts,
-            audit=AuditService(config, principal),
+            audit=AuditService(config),
             results=results,
             jobs=LocalJobs(),
-            observe=ObserveService(config, principal, artifacts),
-            machine_actions=MachineActionService(config, principal),
-            desktop=DesktopService(config, principal, artifacts),
-            terminals=TerminalService(config, principal, artifacts),
-            browser=BrowserService(config, principal, artifacts),
+            observe=ObserveService(config, artifacts),
+            machine_actions=MachineActionService(config),
+            desktop=DesktopService(config, artifacts),
+            terminals=TerminalService(config, artifacts),
+            browser=BrowserService(config, artifacts),
             beads=beads,
-            capability_index=CapabilityIndexService(config, principal),
-            captures=CaptureService(config, principal),
-            files=HostFileService(config, principal),
-            mcp_broker=McpBrokerService(config, principal, artifacts),
+            capability_index=CapabilityIndexService(config),
+            captures=CaptureService(config),
+            files=HostFileService(config),
+            mcp_broker=McpBrokerService(config, artifacts),
             route_preflight=GatewayRoutePreflight(config),
         )
         runtime.normalized_events = NormalizedEventService(
-            principal=principal_name,
             cursor_key=runtime.results.cursor_key,
             projects=runtime.projects,
             beads=runtime.beads,
@@ -233,7 +223,6 @@ class Runtime:
 
     async def gateway_status(
         self,
-        principal_contract_hash: str,
         manifest_hash: str,
         action_catalog_hash: str,
         catalog_revision: str,
@@ -243,8 +232,6 @@ class Runtime:
         status = await anyio.to_thread.run_sync(
             functools.partial(
                 self.observe.gateway_status,
-                self.principal_name,
-                principal_contract_hash,
                 manifest_hash,
                 action_catalog_hash,
                 catalog_revision,
@@ -252,30 +239,29 @@ class Runtime:
             )
         )
         preflight = await anyio.to_thread.run_sync(self.route_preflight.run)
-        if Permission.MCP_READ in self.principal.permissions:
-            broker_catalog = await self.mcp_broker.catalog()
-            broker_routes = []
-            for server in broker_catalog["servers"]:
-                if not server.get("brokered"):
-                    continue
-                available = server.get("availability") == "available"
-                route = {
-                    "route": f"mcp.{server['name']}",
-                    "status": "pass" if available else "unavailable",
-                    "tool_count": server.get("tool_count"),
-                    "read_only_tool_count": server.get("read_only_tool_count"),
-                }
-                if not available:
-                    route["failure_class"] = server.get(
-                        "failure_class", "upstream_unavailable"
-                    )
-                broker_routes.append(route)
-            preflight["routes"].extend(broker_routes)
-            preflight["status"] = (
-                "ready"
-                if all(route["status"] == "pass" for route in preflight["routes"])
-                else "degraded"
-            )
+        broker_catalog = await self.mcp_broker.catalog()
+        broker_routes = []
+        for server in broker_catalog["servers"]:
+            if not server.get("brokered"):
+                continue
+            available = server.get("availability") == "available"
+            route = {
+                "route": f"mcp.{server['name']}",
+                "status": "pass" if available else "unavailable",
+                "tool_count": server.get("tool_count"),
+                "read_only_tool_count": server.get("read_only_tool_count"),
+            }
+            if not available:
+                route["failure_class"] = server.get(
+                    "failure_class", "upstream_unavailable"
+                )
+            broker_routes.append(route)
+        preflight["routes"].extend(broker_routes)
+        preflight["status"] = (
+            "ready"
+            if all(route["status"] == "pass" for route in preflight["routes"])
+            else "degraded"
+        )
         status["route_preflight"] = preflight
         if self.publisher_status is not None:
             status["subscription_publishers"] = self.publisher_status()
@@ -351,8 +337,6 @@ class Runtime:
         self,
         operation: str,
         arguments: Mapping[str, Any],
-        *,
-        principal: str | None = None,
     ) -> dict[str, Any]:
         handlers = {
             operation_name: getattr(self.jobs, method_name, None)
@@ -433,16 +417,8 @@ class Runtime:
                 f"{resource.kind} resources have no single-ref reader; "
                 "call one of the actions the catalog lists for the kind",
             )
-        if self.principal_name not in resource.principals:
-            raise PolicyError(
-                f"principal {self.principal_name} cannot read {resource.kind} resources"
-            )
         name, arguments = reader
         action = ACTIONS_BY_NAME[name]
-        if self.principal_name not in action.principals:
-            raise PolicyError(
-                f"principal {self.principal_name} cannot read {resource.kind} resources"
-            )
         request = action.Input.model_validate(arguments(canonical_ref, values))
         data = (
             await action.handler(self, request)
@@ -505,9 +481,6 @@ class Runtime:
         idempotency_key: str | None = None,
         request_digest: str | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Permission.SHELL_RUN)
-        if self.principal.name != "operator":
-            raise PolicyError("operator shell jobs require the operator principal")
         if not isinstance(project_id, str) or not 1 <= len(project_id) <= 128:
             raise ProtocolError("invalid_request", "project_id is malformed")
         if not isinstance(checkout_id, str) or not 1 <= len(checkout_id) <= 128:
@@ -544,11 +517,7 @@ class Runtime:
         if idempotency_key is not None:
             arguments["idempotency_key"] = idempotency_key
             arguments["request_digest"] = request_digest
-        result = self._job(
-            "job.shell.start",
-            arguments,
-            principal="operator",
-        )
+        result = self._job("job.shell.start", arguments)
         job_id = result.get("job_id")
         if not isinstance(job_id, str) or not job_id:
             raise ProtocolError(
@@ -568,7 +537,6 @@ class Runtime:
         parameters: Mapping[str, Any] | None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Permission.JOB_START)
         if not isinstance(project_id, str) or not 1 <= len(project_id) <= 128:
             raise ProtocolError("invalid_request", "project_id is malformed")
         if not isinstance(operation, str) or not 1 <= len(operation) <= 128:
@@ -616,7 +584,6 @@ class Runtime:
         return values
 
     def _recent_jobs(self, limit: int, cursor: str | None = None) -> dict[str, Any]:
-        self.principal.require(Permission.JOB_READ)
         arguments: dict[str, Any] = {"limit": limit}
         if cursor:
             arguments["cursor"] = cursor
@@ -847,7 +814,6 @@ class Runtime:
                 raise ProtocolError(
                     "invalid_request", "job_terminal requires a canonical job reference"
                 )
-            self.principal.require(Permission.JOB_READ)
             if cancelled is not None and cancelled():
                 return {
                     "schema": "sinnix.gateway-wait.v1",
@@ -1130,8 +1096,8 @@ class Runtime:
         payload = {
             "schema": "sinnix.gateway-receipt.v2",
             "action": action.name,
-            "principal": self.principal.name,
-            "actor": context.actor or self.principal.name,
+            "principal": PRINCIPAL,
+            "actor": context.actor or PRINCIPAL,
             "reason": context.reason,
             "request_id": context.request_id,
             "correlation_id": context.request_id,
@@ -1314,13 +1280,6 @@ class Runtime:
                 "details": {},
                 "diagnostic_refs": [],
             }
-        elif isinstance(exc, PolicyError):
-            error = {
-                "code": "policy_denied",
-                "message": public_error(exc),
-                "details": {},
-                "diagnostic_refs": [],
-            }
         elif isinstance(exc, ValueError):
             error = {
                 "code": "invalid_request",
@@ -1350,8 +1309,7 @@ class Runtime:
                 "diagnostic_refs": [],
             }
         if effect_started and not (
-            isinstance(exc, PolicyError)
-            or (isinstance(exc, ProtocolError) and error["code"] in PRE_EFFECT_FAILURES)
+            isinstance(exc, ProtocolError) and error["code"] in PRE_EFFECT_FAILURES
         ):
             error["details"] = {
                 **error["details"],
@@ -1374,7 +1332,7 @@ class Runtime:
             "gateway-"
             + hashlib.sha256(
                 json.dumps(
-                    [self.principal.name, action, idempotency_key],
+                    [PRINCIPAL, action, idempotency_key],
                     separators=(",", ":"),
                 ).encode()
             ).hexdigest()
@@ -1595,10 +1553,6 @@ class Runtime:
         try:
             try:
                 context = self._request_context(request)
-                if self.principal_name not in action.principals:
-                    raise PolicyError(
-                        f"principal {self.principal_name!r} cannot invoke action {action.name!r}"
-                    )
                 if validation_failure is not None:
                     raise validation_failure
                 if context.preconditions and not action.supports_precondition:
@@ -1650,16 +1604,3 @@ class Runtime:
         finally:
             if reserved and context.idempotency_key is not None:
                 self.audit.release_idempotency(action.name, context.idempotency_key)
-
-
-def _principal_contract(principal_name: str) -> str:
-    principal = Principal.for_name(principal_name)
-    payload = {
-        "principal": principal_name,
-        "capabilities": sorted(
-            permission.value for permission in principal.permissions
-        ),
-    }
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()

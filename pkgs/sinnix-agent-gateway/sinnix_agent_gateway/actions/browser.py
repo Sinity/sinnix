@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import Field, model_validator
 
 from ..action import (
-    OPERATOR_ONLY,
     Action,
     ActionResult,
     Example,
@@ -724,7 +723,7 @@ def _operate(runtime: Runtime, inp: BrowserOperateInput) -> ActionResult:
     )
 
 
-_READ = {"owner": "browser", "principals": OPERATOR_ONLY}
+_READ = {"owner": "browser"}
 _TARGET = {"target": {"url_contains": "example.test"}}
 
 ACTIONS: tuple[Action, ...] = (
@@ -781,7 +780,6 @@ ACTIONS: tuple[Action, ...] = (
         name="browser.operate",
         family=VerbFamily.OPERATE,
         owner="browser",
-        principals=OPERATOR_ONLY,
         summary="Open a gateway page on the hidden agent workspace, or navigate, click, fill, submit, scroll, press keys, wait, download, upload, or evaluate JavaScript in one gateway-owned page.",
         Input=BrowserOperateInput,
         Output=BrowserOperateResult,

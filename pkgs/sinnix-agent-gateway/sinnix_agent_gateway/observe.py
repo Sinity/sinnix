@@ -14,7 +14,6 @@ from .owner_execution import (
     OwnerExecution,
     OwnerRoute,
 )
-from .permissions import Permission, Principal
 
 
 class ObserveService:
@@ -47,12 +46,10 @@ class ObserveService:
     def __init__(
         self,
         config: GatewayConfig,
-        principal: Principal,
         artifacts: ArtifactService | None = None,
     ):
         self.config = config
-        self.principal = principal
-        self.artifacts = artifacts or ArtifactService(config, principal)
+        self.artifacts = artifacts or ArtifactService(config)
         self.execution = OwnerExecution()
 
     def _connector_snapshot(self) -> dict[str, Any] | None:
@@ -207,7 +204,6 @@ class ObserveService:
     def machine_query(
         self, operation: str, cursor: int = 0, limit: int = 100
     ) -> dict[str, Any]:
-        self.principal.require(Permission.MACHINE_READ)
         if cursor < 0:
             raise ValueError("cursor must be non-negative")
         if limit < 1 or limit > 500:
@@ -316,40 +312,23 @@ class ObserveService:
 
     def gateway_status(
         self,
-        principal_name: str,
-        capability_contract_hash: str,
         live_manifest_hash: str,
         action_catalog_hash: str,
         catalog_revision: str,
         transport: str = "stdio",
     ) -> dict[str, Any]:
-        self.principal.require(Permission.MACHINE_READ)
         inventory_available = self.config.runtime_inventory.is_file()
-        approved_hash = (
-            self.config.approved_manifest_hash
-            if self.config.approved_manifest_principal == principal_name
-            else None
-        )
+        approved_hash = None
         if self.config.package_manifest_path is not None:
             try:
                 artifact = json.loads(self.config.package_manifest_path.read_text())
-                approved_hash = (
-                    artifact.get("manifest", {}).get("sha256")
-                    if artifact.get("principal") == principal_name
-                    else None
-                )
+                approved_hash = artifact.get("manifest", {}).get("sha256")
             except (OSError, ValueError):
                 approved_hash = None
         snapshot = self._connector_snapshot()
-        observed_hash = (
-            snapshot["manifest_sha256"]
-            if snapshot is not None and snapshot["principal"] == principal_name
-            else None
-        )
+        observed_hash = snapshot["manifest_sha256"] if snapshot is not None else None
         observed_catalog_hash = (
-            snapshot["action_catalog_sha256"]
-            if snapshot is not None and snapshot["principal"] == principal_name
-            else None
+            snapshot["action_catalog_sha256"] if snapshot is not None else None
         )
         snapshot_metadata = {
             "source": "last_recorded_client_snapshot",
@@ -358,21 +337,15 @@ class ObserveService:
         }
         return {
             "status": "ready",
-            "principal": principal_name,
             "current_model_visibility": "unknown",
-            "principal_contract_hash": capability_contract_hash,
             "tool_manifest_hash": live_manifest_hash,
             "action_catalog_hash": action_catalog_hash,
             "catalog": {
                 "revision": catalog_revision,
-                "live_action_catalog": {
-                    "principal": principal_name,
-                    "sha256": action_catalog_hash,
-                },
+                "live_action_catalog": {"sha256": action_catalog_hash},
                 "chatgpt_observed": (
                     {
                         **snapshot_metadata,
-                        "principal": principal_name,
                         "sha256": observed_catalog_hash,
                         **(
                             {"observed_at": snapshot.get("observed_at")}
@@ -391,22 +364,13 @@ class ObserveService:
                 },
             },
             "manifests": {
-                "live_server": {
-                    "principal": principal_name,
-                    "sha256": live_manifest_hash,
-                },
+                "live_server": {"sha256": live_manifest_hash},
                 "package_generated": (
-                    {
-                        "principal": self.config.approved_manifest_principal,
-                        "sha256": approved_hash,
-                    }
-                    if approved_hash is not None
-                    else None
+                    {"sha256": approved_hash} if approved_hash is not None else None
                 ),
                 "chatgpt_observed": (
                     {
                         **snapshot_metadata,
-                        "principal": principal_name,
                         "sha256": observed_hash,
                         **(
                             {"observed_at": snapshot.get("observed_at")}

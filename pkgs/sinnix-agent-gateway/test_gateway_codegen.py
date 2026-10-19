@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from sinnix_agent_gateway import actions as action_set
+from sinnix_agent_gateway.action import Action
 from sinnix_agent_gateway.gateway_codegen import (
     SKILL_PATH,
     check_artifacts,
@@ -40,43 +41,36 @@ def test_corrupting_an_action_name_or_field_fails_generation_check(
     assert check_artifacts(tmp_path)
 
 
-def test_catalog_hash_includes_examples_affordances_and_principals(
+def test_catalog_hash_includes_examples_and_affordances(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    original = action_set.visible
     action = action_set.BY_NAME["gateway.status"]
-
-    def changed(principal: str):
-        rows = list(original(principal))
-        rows[rows.index(action)] = replace(
-            action,
-            affordances=("gateway.catalog", "gateway.status"),
-            principals=frozenset({"operator"}),
-            examples=(),
-        )
-        return tuple(rows)
+    rows = list(action_set.ALL_ACTIONS)
+    rows[rows.index(action)] = replace(
+        action, affordances=("gateway.catalog", "gateway.status"), examples=()
+    )
 
     action_set.catalog_hash.cache_clear()
-    baseline = action_set.catalog_hash("operator")
-    monkeypatch.setattr(action_set, "visible", changed)
+    baseline = action_set.catalog_hash()
+    monkeypatch.setattr(action_set, "ALL_ACTIONS", tuple(rows))
     # A changed action set belongs to a new process, with an empty cache.
     action_set.catalog_hash.cache_clear()
     try:
-        assert action_set.catalog_hash("operator") != baseline
+        assert action_set.catalog_hash() != baseline
     finally:
         action_set.catalog_hash.cache_clear()
 
 
 def test_catalog_digest_reuses_startup_result(monkeypatch: pytest.MonkeyPatch) -> None:
     action_set.catalog_hash.cache_clear()
-    expected = action_set.catalog_hash("operator")
+    expected = action_set.catalog_hash()
 
-    def unexpected(_principal: str):
+    def unexpected(_self):
         raise AssertionError("warm catalog requests must not rebuild catalog rows")
 
-    monkeypatch.setattr(action_set, "visible", unexpected)
+    monkeypatch.setattr(Action, "catalog_row", unexpected)
     try:
-        assert action_set.catalog_hash("operator") == expected
-        assert action_set.catalog_hash("operator") == expected
+        assert action_set.catalog_hash() == expected
+        assert action_set.catalog_hash() == expected
     finally:
         action_set.catalog_hash.cache_clear()

@@ -6,7 +6,6 @@ from pathlib import Path
 
 from sinnix_agent_gateway.audit import AuditService
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_agent_gateway.permissions import Principal
 from sinnix_agent_gateway.redaction import env_name_is_secret, redact, redact_env
 
 
@@ -54,7 +53,6 @@ def test_audit_records_structured_diagnostics_and_redacts_values(
     """
     audit = AuditService(
         GatewayConfig(state_dir=tmp_path / "state", projects={}),
-        Principal.for_name("operator"),
     )
     receipt = audit.append(
         "fixture.call",

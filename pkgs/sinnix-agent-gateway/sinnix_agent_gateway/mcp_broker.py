@@ -34,7 +34,6 @@ from .owner_execution import (
     OwnerRoute,
 )
 from .payloads import canonical_size
-from .permissions import Permission, Principal
 
 
 class McpBrokerError(ValueError):
@@ -121,12 +120,10 @@ class McpBrokerService:
     def __init__(
         self,
         config: GatewayConfig,
-        principal: Principal,
         artifacts: ArtifactService,
         execution: OwnerExecution | None = None,
     ):
         self.config = config
-        self.principal = principal
         self.artifacts = artifacts
         self.execution = execution
         self._task_group: Any | None = None
@@ -304,7 +301,6 @@ class McpBrokerService:
         self, *, server_names: set[str] | None = None, bounded: bool = True
     ) -> dict[str, Any]:
         """Return admitted upstream tool contracts from bounded handshakes."""
-        self.principal.require(Permission.MCP_READ)
         rows = sorted(
             (name, row)
             for name, row in self.config.mcp_broker_servers.items()
@@ -1002,7 +998,6 @@ class McpBrokerService:
         write: bool,
         deadline_at: float | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Permission.MCP_WRITE if write else Permission.MCP_READ)
         server_name = self._string(server_name, "server", 128)
         tool_name = self._string(tool_name, "tool", 256)
         if not isinstance(arguments, dict):

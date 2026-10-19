@@ -251,8 +251,8 @@ async def _dispatch_core(
         except ValidationError as exc:
             raise _validation_error(exc, core) from exc
         leaf = BY_NAME.get(request.action)
-        if leaf is None or runtime.principal_name not in leaf.principals:
-            raise ProtocolError("not_found", "action is not visible to this principal")
+        if leaf is None:
+            raise ProtocolError("not_found", "action is not declared")
         if leaf.name in {"gateway.read", "gateway.change", "gateway.run"}:
             raise ProtocolError("invalid_request", "recursive core dispatch is refused")
         admitted = (

@@ -27,7 +27,6 @@ def git(path: Path, *args: str) -> None:
 
 def make_server(
     tmp_path: Path,
-    principal: str,
     monkeypatch: pytest.MonkeyPatch,
     *,
     with_git: bool = False,
@@ -52,16 +51,16 @@ def make_server(
         state_dir=tmp_path / "state",
         projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
     )
-    runtime = Runtime.create(config, principal)
+    runtime = Runtime.create(config)
     fake = FakeJobs()
     runtime.jobs = fake  # type: ignore[assignment]
-    monkeypatch.setattr(Runtime, "create", classmethod(lambda _cls, _c, _p: runtime))
+    monkeypatch.setattr(Runtime, "create", classmethod(lambda _cls, _c: runtime))
     monkeypatch.setattr(
         server_module,
-        "visible_actions",
-        lambda name: tuple(action for action in OWNED if name in action.principals),
+        "ALL_ACTIONS",
+        OWNED,
     )
-    return create_server(config, principal), runtime, fake
+    return create_server(config), runtime, fake
 
 
 RUN_ID = "fixture-20260906-012123-a2c81926"
@@ -106,7 +105,7 @@ def test_job_locator_accepts_ref_or_id_and_carries_the_launch_reference() -> Non
 def test_list_pages_with_refs_and_forwards_the_project_filter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.list"] = {
         "jobs": [
             RUNNING,
@@ -150,7 +149,7 @@ def test_list_pages_with_refs_and_forwards_the_project_filter(
 def test_get_returns_summary_log_range_and_result(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.get"] = DONE
     fake.responses["job.logs"] = lambda args: {
         "job_id": "41",
@@ -222,7 +221,7 @@ def test_get_returns_summary_log_range_and_result(
 def test_wait_reports_terminal_running_or_queued_from_the_queue(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.wait"] = {
         **RUNNING,
         "timed_out": True,
@@ -266,7 +265,7 @@ def test_a_wait_carrying_a_launch_reference_follows_its_job_to_another_id(
     its own answer, and one that never sent the reference would be told about
     whatever task the switch moved to that id.
     """
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.wait"] = MOVED
 
     waited = call(
@@ -292,7 +291,7 @@ def test_an_answer_about_another_job_is_refused_whichever_identity_was_sent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Identity is proven against what the call addressed, and always proven."""
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, _, fake = make_server(tmp_path, monkeypatch)
 
     fake.responses["job.wait"] = MOVED
     by_id = call(server, "jobs.wait", {"target": {"job_id": 41}})
@@ -310,7 +309,7 @@ def test_an_answer_about_another_job_is_refused_whichever_identity_was_sent(
 def test_a_job_view_returns_the_reference_a_later_call_addresses_it_by(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.start"] = {**RUNNING, "launch_reference": "fixture-check-abcd"}
 
     started = call(
@@ -329,7 +328,7 @@ def test_a_job_view_returns_the_reference_a_later_call_addresses_it_by(
 def test_clean_and_cancel_address_the_job_the_reference_names(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, _, fake = make_server(tmp_path, monkeypatch)
     reference = "fixture-worker-abcd1234"
     fake.responses["job.get"] = MOVED
     fake.responses["job.cancel"] = {
@@ -371,7 +370,7 @@ def test_clean_and_cancel_address_the_job_the_reference_names(
 def test_cancel_checks_the_phase_and_surfaces_reap_survivors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.get"] = RUNNING
     fake.responses["job.cancel"] = {
         **RUNNING,
@@ -453,9 +452,7 @@ def test_cancel_checks_the_phase_and_surfaces_reap_survivors(
 def test_operations_run_targets_the_root_or_a_linked_worktree(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, runtime, fake = make_server(
-        tmp_path, "operator", monkeypatch, with_git=True
-    )
+    server, runtime, fake = make_server(tmp_path, monkeypatch, with_git=True)
     fake.responses["job.start"] = {
         **DONE,
         "job_id": "50",
@@ -523,7 +520,7 @@ def test_operations_run_targets_the_root_or_a_linked_worktree(
 def test_shell_run_is_operator_only_and_keeps_cwd_inside_the_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, runtime, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, runtime, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.shell.start"] = {
         **DONE,
         "job_id": "51",
@@ -630,7 +627,7 @@ def test_shell_run_starts_agent_clis_in_the_long_lane_and_reads_in_the_quick_one
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Red if an agent launch lands in the lane quick reads use."""
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.shell.start"] = lambda arguments: {
         **DONE,
         "job_id": "70",
@@ -670,7 +667,7 @@ def test_a_shell_still_queued_answers_with_its_place_and_what_holds_the_lane(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Red if a continuation looks like a timeout or hides the lane occupancy."""
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.shell.start"] = QUEUED_SHELL
     fake.responses["job.wait"] = {**QUEUED_SHELL, "timed_out": True}
     fake.responses["job.logs"] = {
@@ -756,7 +753,7 @@ def test_a_shell_still_queued_answers_with_its_place_and_what_holds_the_lane(
 def test_queues_report_each_groups_occupancy(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server, _, fake = make_server(tmp_path, "operator", monkeypatch)
+    server, _, fake = make_server(tmp_path, monkeypatch)
     fake.responses["job.queues"] = {"queues": [QUEUE]}
     page = call(server, "jobs.queues", {"groups": ["shell-long"]})
     assert page["result"]["outcome"] == "ok", page

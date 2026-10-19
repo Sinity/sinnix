@@ -93,15 +93,11 @@ SNAPSHOT = {
 
 def register(server, actions) -> None:
     runtime = server._sinnix_revision_publisher.runtime
-    principal = runtime.principal.name
     for action in actions:
-        if principal in action.principals:
-            server._tool_manager._tools[action.name] = build_tool(action, runtime)
+        server._tool_manager._tools[action.name] = build_tool(action, runtime)
 
 
-def fake_desktop(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, principal: str = "operator"
-):
+def fake_desktop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     captured = tmp_path / "commands.jsonl"
     runner = tmp_path / "desktop-control"
     png = base64.b64encode(tiny_png()).decode()
@@ -146,9 +142,8 @@ def fake_desktop(
         projects={},
         hypr_control_command=str(runner),
         screenshot_control_command=str(runner),
-        approved_manifest_hash="approved-fixture-hash",
     )
-    server = create_server(config, principal)
+    server = create_server(config)
     register(server, desktop_actions.ACTIONS)
     return server, captured
 

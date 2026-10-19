@@ -28,7 +28,6 @@ from sinnix_agent_gateway.owner_execution import (
     ExecutionResult,
     OwnerExecution,
 )
-from sinnix_agent_gateway.permissions import Principal
 
 
 class FakeTransport:
@@ -135,7 +134,7 @@ class RepeatingCursorSession(FakeSession):
 def test_concurrent_catalog_refresh_shares_one_owner_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     calls = 0
 
     async def probe(*_args: object) -> dict[str, Any]:
@@ -159,7 +158,7 @@ def test_concurrent_catalog_refresh_shares_one_owner_probe(
 def test_optional_broker_environment_defaults_to_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     del broker.config.mcp_broker_servers["fixture"]["env"]
     monkeypatch.setattr(
         "sinnix_agent_gateway.mcp_broker.stdio_client",
@@ -175,7 +174,7 @@ def test_optional_broker_environment_defaults_to_empty(
 def test_optional_broker_arguments_default_to_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     del broker.config.mcp_broker_servers["fixture"]["args"]
     monkeypatch.setattr(
         "sinnix_agent_gateway.mcp_broker.stdio_client",
@@ -191,8 +190,8 @@ def test_optional_broker_arguments_default_to_empty(
 def test_concurrent_broker_instances_share_discovery_in_the_same_state_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    first = broker_service(tmp_path, "operator")
-    second = broker_service(tmp_path, "operator")
+    first = broker_service(tmp_path)
+    second = broker_service(tmp_path)
     calls = 0
 
     async def probe(*_args: object) -> dict[str, Any]:
@@ -220,7 +219,7 @@ from pathlib import Path
 import anyio
 from test_mcp_broker import broker_service
 root = Path(sys.argv[1])
-broker = broker_service(root, "operator")
+broker = broker_service(root)
 async def probe(*args):
     with (root / "probes").open("a") as output:
         output.write("probe\\n")
@@ -261,7 +260,7 @@ anyio.run(run)
 def test_discovery_wait_timeout_preserves_schema_and_private_permissions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     monkeypatch.setattr(
         "sinnix_agent_gateway.mcp_broker.stdio_client",
         lambda _params, **_kwargs: FakeTransport(),
@@ -290,7 +289,7 @@ def test_discovery_wait_timeout_preserves_schema_and_private_permissions(
 def test_catalog_failure_retains_complete_contract_across_broker_instances(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     monkeypatch.setattr(
         "sinnix_agent_gateway.mcp_broker.stdio_client",
         lambda _params, **_kwargs: FakeTransport(),
@@ -298,7 +297,7 @@ def test_catalog_failure_retains_complete_contract_across_broker_instances(
     monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", FakeSession)
     good = anyio.run(broker.catalog)
     contracts = next(s for s in good["servers"] if s["name"] == "fixture")["tools"]
-    reopened = broker_service(tmp_path, "operator")
+    reopened = broker_service(tmp_path)
 
     async def failed(*_args: object) -> dict[str, Any]:
         return {"availability": "unavailable", "reason": "fixture temporarily offline"}
@@ -315,7 +314,7 @@ def test_catalog_failure_retains_complete_contract_across_broker_instances(
 def test_partial_discovery_cannot_replace_complete_schema_and_config_invalidates_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     monkeypatch.setattr(
         "sinnix_agent_gateway.mcp_broker.stdio_client",
         lambda _params, **_kwargs: FakeTransport(),
@@ -347,7 +346,7 @@ def test_partial_discovery_cannot_replace_complete_schema_and_config_invalidates
 def test_cancelled_catalog_reader_does_not_cancel_shared_probe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     calls = 0
 
     async def run() -> None:
@@ -380,7 +379,7 @@ def test_cancelled_catalog_reader_does_not_cancel_shared_probe(
 def test_retained_read_schema_cannot_authorize_changed_live_tool(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     monkeypatch.setattr(
         "sinnix_agent_gateway.mcp_broker.stdio_client",
         lambda _params, **_kwargs: FakeTransport(),
@@ -406,7 +405,7 @@ def test_retained_read_schema_cannot_authorize_changed_live_tool(
 def test_catalog_and_invocation_traverse_every_tool_page(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     TwoPageSession.calls.clear()
     monkeypatch.setattr(
         "sinnix_agent_gateway.mcp_broker.stdio_client",
@@ -433,7 +432,7 @@ def test_catalog_and_invocation_traverse_every_tool_page(
 def test_repeated_tool_cursor_reports_partial_coverage(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     RepeatingCursorSession.calls.clear()
     monkeypatch.setattr(
         "sinnix_agent_gateway.mcp_broker.stdio_client",
@@ -456,9 +455,7 @@ def test_repeated_tool_cursor_reports_partial_coverage(
         anyio.run(lambda: broker.call("fixture", "missing", {}, write=False))
 
 
-def broker_service(
-    tmp_path: Path, principal_name: str, max_bytes: int = 262_144
-) -> McpBrokerService:
+def broker_service(tmp_path: Path, max_bytes: int = 262_144) -> McpBrokerService:
     config = GatewayConfig(
         state_dir=tmp_path / "state",
         projects={},
@@ -482,8 +479,7 @@ def broker_service(
             },
         },
     )
-    principal = Principal.for_name(principal_name)
-    return McpBrokerService(config, principal, ArtifactService(config, principal))
+    return McpBrokerService(config, ArtifactService(config))
 
 
 class LargeSchemaSession(FakeSession):
@@ -509,7 +505,7 @@ class LargeSchemaSession(FakeSession):
 def test_catalog_artifactizes_an_oversized_tool_schema(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator", max_bytes=4_096)
+    broker = broker_service(tmp_path, max_bytes=4_096)
     monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
     monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
     monkeypatch.setattr(
@@ -537,7 +533,7 @@ def test_catalog_artifactizes_an_oversized_tool_schema(
 def test_catalog_probes_admitted_servers_and_keeps_exclusions_static(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     monkeypatch.setattr(
         "sinnix_agent_gateway.mcp_broker.stdio_client",
         lambda _params, **_kwargs: FakeTransport(),
@@ -594,7 +590,7 @@ def write_stdio_fixture(tmp_path: Path, source: str) -> Path:
 
 
 def test_catalog_probes_real_stdio_mcp_fixture(tmp_path: Path) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     fixture = write_stdio_fixture(
         tmp_path,
         """import json
@@ -657,7 +653,7 @@ for line in sys.stdin:
 def test_real_stdio_catalog_tail_is_discoverable_and_session_stays_warm(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator", max_bytes=4_096)
+    broker = broker_service(tmp_path, max_bytes=4_096)
     monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
     monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
     fixture = write_stdio_fixture(
@@ -726,7 +722,7 @@ for line in sys.stdin:
 
 
 def test_catalog_attests_real_stdio_probe_failure(tmp_path: Path) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     fixture = write_stdio_fixture(
         tmp_path,
         """import sys
@@ -750,7 +746,7 @@ sys.exit(17)
 def test_broker_enforces_live_read_only_tool_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     captured = []
 
     def stdio(parameters: object, **_kwargs: object) -> FakeTransport:
@@ -776,7 +772,7 @@ def test_broker_enforces_live_read_only_tool_metadata(
 def test_gateway_lifespan_reuses_healthy_upstream_session(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     launches = 0
     closes = 0
 
@@ -816,7 +812,7 @@ def test_gateway_lifespan_reuses_healthy_upstream_session(
 def test_failed_persistent_write_is_not_resent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     calls = 0
     launches = 0
 
@@ -860,7 +856,7 @@ def test_failed_persistent_write_is_not_resent(
 def test_read_only_subroute_requires_exact_tool_and_explicit_selector(
     tmp_path, monkeypatch, annotation
 ):
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     broker.config.mcp_broker_servers["fixture"]["readOnlyRoutes"] = [
         {"tool": "lookup", "arguments": {"projection": "sessions"}}
     ]
@@ -908,7 +904,7 @@ def test_read_only_subroute_requires_exact_tool_and_explicit_selector(
 
 
 def test_read_only_tools_admit_unannotated_tools(tmp_path, monkeypatch) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     broker.config.mcp_broker_servers["fixture"]["readOnlyTools"] = ["lookup"]
     calls = []
 
@@ -948,7 +944,7 @@ def test_read_only_tools_admit_unannotated_tools(tmp_path, monkeypatch) -> None:
 
 @pytest.mark.parametrize("tools", [True, [""], [1], ["x" * 129]])
 def test_read_only_tools_rejects_malformed_configuration(tmp_path, tools) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     broker.config.mcp_broker_servers["fixture"]["readOnlyTools"] = tools
     with pytest.raises(McpBrokerError, match="configuration is malformed"):
         broker._server("fixture")
@@ -966,7 +962,7 @@ def test_read_only_tools_rejects_malformed_configuration(tmp_path, tools) -> Non
 def test_read_only_subroute_rejects_unbounded_or_malformed_configuration(
     tmp_path, routes
 ):
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     broker.config.mcp_broker_servers["fixture"]["readOnlyRoutes"] = routes
     with pytest.raises(McpBrokerError, match="configuration is malformed"):
         broker._server("fixture")
@@ -975,7 +971,7 @@ def test_read_only_subroute_rejects_unbounded_or_malformed_configuration(
 def test_broker_attests_upstream_stderr_on_transport_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
 
     def stdio(_parameters: object, *, errlog: TextIO) -> FailingTransport:
         return FailingTransport(errlog)
@@ -996,7 +992,7 @@ def test_broker_attests_upstream_stderr_on_transport_failure(
 def test_broker_artifactizes_large_upstream_response(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator", max_bytes=10)
+    broker = broker_service(tmp_path, max_bytes=10)
     monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")
     monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
     monkeypatch.setattr(
@@ -1020,7 +1016,7 @@ def test_broker_artifactizes_large_upstream_response(
 
 
 def test_broker_rejects_excluded_server_before_launch(tmp_path: Path) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
 
     with pytest.raises(McpBrokerError, match="browser isolation"):
         anyio.run(lambda: broker.call("blocked", "lookup", {}, write=False))
@@ -1035,7 +1031,7 @@ class HangingCallSession(FakeSession):
 def test_broker_uses_declared_timeout_and_classifies_upstream_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     broker.config.mcp_broker_servers["fixture"]["callTimeoutSeconds"] = 1
     monkeypatch.setattr(
         "sinnix_agent_gateway.mcp_broker.stdio_client",
@@ -1052,7 +1048,7 @@ def test_broker_uses_declared_timeout_and_classifies_upstream_timeout(
 
 
 def test_broker_enforces_caller_deadline_before_launch(tmp_path: Path) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
 
     with pytest.raises(McpBrokerDeadlineError, match="deadline elapsed"):
         anyio.run(
@@ -1113,7 +1109,7 @@ def test_probe_distinguishes_capped_discovery_from_call_route_timeout(
     probe_budget,
     failure_class,
 ) -> None:
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     broker.config.mcp_broker_servers["fixture"]["callTimeoutSeconds"] = call_budget
     budgets = []
     wait_for = asyncio.wait_for
@@ -1150,7 +1146,7 @@ def test_probe_distinguishes_capped_discovery_from_call_route_timeout(
 
 
 def test_persistent_calls_overlap(tmp_path, monkeypatch):
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     started = []
     both = asyncio.Event()
 
@@ -1187,7 +1183,7 @@ def test_persistent_calls_overlap(tmp_path, monkeypatch):
 
 
 def test_persistent_cancelled_queued_call_is_skipped(tmp_path, monkeypatch):
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     started = []
     full = asyncio.Event()
     release = asyncio.Event()
@@ -1238,7 +1234,7 @@ def test_persistent_cancelled_queued_call_is_skipped(tmp_path, monkeypatch):
 
 
 def test_persistent_failure_answers_all_pending_callers(tmp_path, monkeypatch):
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     two = asyncio.Event()
     count = 0
 
@@ -1289,7 +1285,7 @@ def test_persistent_failure_answers_all_pending_callers(tmp_path, monkeypatch):
 
 
 def test_persistent_initialization_failure_is_typed(tmp_path, monkeypatch):
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
 
     class FailedInitialization(FakeSession):
         async def initialize(self):
@@ -1314,7 +1310,7 @@ def test_persistent_initialization_failure_is_typed(tmp_path, monkeypatch):
 
 
 def test_discard_failed_proxy_preserves_replacement(tmp_path):
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     old, replacement = object(), object()
     broker._sessions["fixture"] = replacement
     anyio.run(lambda: broker._discard_session("fixture", expected=old))
@@ -1351,7 +1347,7 @@ async def main():
     await asyncio.gather(*tasks)
 asyncio.run(main())
 """)
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     broker.config.mcp_broker_servers["fixture"].update(
         command=sys.executable, args=[str(script)], env={}
     )
@@ -1376,7 +1372,7 @@ asyncio.run(main())
 def test_persistent_cancel_releases_active_call_without_cancelling_its_peer(
     tmp_path, monkeypatch
 ):
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     holding = asyncio.Event()
     timed_out = asyncio.Event()
     release = asyncio.Event()
@@ -1475,7 +1471,7 @@ async def main():
     await asyncio.gather(*tasks.values(),return_exceptions=True)
 asyncio.run(main())
 """)
-    broker = broker_service(tmp_path, "operator")
+    broker = broker_service(tmp_path)
     broker.config.mcp_broker_servers["fixture"].update(
         command=sys.executable, args=[str(script), str(events)], env={}
     )

@@ -7,13 +7,10 @@ import sqlite3
 import pytest
 from sinnix_agent_gateway.audit import AuditService
 from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_agent_gateway.permissions import Principal
 
 
 def service(tmp_path):
-    return AuditService(
-        GatewayConfig(state_dir=tmp_path, projects={}), Principal.for_name("operator")
-    )
+    return AuditService(GatewayConfig(state_dir=tmp_path, projects={}))
 
 
 def test_audit_connections_close_without_garbage_collection(tmp_path):

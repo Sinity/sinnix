@@ -40,10 +40,10 @@ def test_context_snapshot_survives_store_recreation_and_rejects_tampering(
     path = tmp_path / "contexts" / "operator" / f"{snapshot_id}.json"
     path.parent.mkdir(parents=True)
     path.write_text(json.dumps(snapshot, separators=(",", ":")))
-    assert ContextSnapshotStore(tmp_path, "operator").get(snapshot_id) == snapshot
+    assert ContextSnapshotStore(tmp_path).get(snapshot_id) == snapshot
     path.write_text(path.read_text().replace('"head":"a"', '"head":"b"'))
     with pytest.raises(KeyError):
-        ContextSnapshotStore(tmp_path, "operator").get(snapshot_id)
+        ContextSnapshotStore(tmp_path).get(snapshot_id)
 
 
 @pytest.mark.parametrize(

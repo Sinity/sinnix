@@ -14,8 +14,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from pydantic import Field
 
 from ..action import (
-    ALL_PRINCIPALS,
-    OPERATOR_ONLY,
     Action,
     Example,
     MutationControls,
@@ -31,7 +29,6 @@ from ..locators import (
     project_ref,
     run_ref,
 )
-from ..permissions import Permission
 from ..results import ProtocolError
 from ..schemas import GatewayModel
 from .jobs import JobState
@@ -276,7 +273,6 @@ class RunPage(GatewayModel):
 
 
 def _list(runtime: Runtime, inp: ListInput) -> RunPage:
-    runtime.principal.require(Permission.JOB_READ)
     arguments: dict[str, Any] = {"limit": inp.limit}
     if inp.project is not None:
         arguments["project_id"] = inp.project.resolve(runtime)
@@ -300,7 +296,6 @@ class StatusInput(RequestControls):
 
 
 def _status(runtime: Runtime, inp: StatusInput) -> RunView:
-    runtime.principal.require(Permission.JOB_READ)
     return _run_view(_owner(runtime, "batch.status", inp.target.resolve()))
 
 
@@ -339,7 +334,6 @@ class RunStarted(RunView):
 
 
 def _start(runtime: Runtime, inp: StartInput) -> RunStarted:
-    runtime.principal.require(Permission.JOB_START)
     arguments: dict[str, Any] = {
         "project_id": inp.project.resolve(runtime),
         "beads": inp.beads,
@@ -370,7 +364,6 @@ class LandQueued(RunView):
 
 
 def _land(runtime: Runtime, inp: LandInput) -> LandQueued:
-    runtime.principal.require(Permission.JOB_START)
     result = _owner(runtime, "batch.land", inp.target.resolve())
     queued = _job_id(result.get("landing_job_id"))
     if queued is None:
@@ -400,7 +393,6 @@ class ResumeQueued(RunView):
 
 
 def _resume(runtime: Runtime, inp: ResumeInput) -> ResumeQueued:
-    runtime.principal.require(Permission.JOB_START)
     result = _owner(
         runtime,
         "batch.resume",
@@ -437,7 +429,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ListInput,
         Output=RunPage,
         handler=_list,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("project", "run", "job"),
         affordances=("batches.status", "jobs.logs", "jobs.wait"),
         aliases=("runs", "agentctl batch list", "which batches", "active runs"),
@@ -456,7 +447,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=StatusInput,
         Output=RunView,
         handler=_status,
-        principals=ALL_PRINCIPALS,
         resource_kinds=("run", "bead", "job"),
         affordances=("jobs.logs", "jobs.wait", "batches.land", "batches.resume"),
         aliases=(
@@ -479,7 +469,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=StartInput,
         Output=RunStarted,
         handler=_start,
-        principals=OPERATOR_ONLY,
         resource_kinds=("project", "bead", "run", "job"),
         affordances=("batches.status", "jobs.wait", "jobs.logs", "jobs.cancel"),
         aliases=("dispatch", "agentctl batch start", "work on bead", "start agents"),
@@ -515,7 +504,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=LandInput,
         Output=LandQueued,
         handler=_land,
-        principals=OPERATOR_ONLY,
         resource_kinds=("run", "job"),
         affordances=("jobs.wait", "jobs.logs", "batches.status"),
         aliases=("land", "agentctl batch land", "publish the batch", "merge the run"),
@@ -535,7 +523,6 @@ ACTIONS: tuple[Action, ...] = (
         Input=ResumeInput,
         Output=ResumeQueued,
         handler=_resume,
-        principals=OPERATOR_ONLY,
         resource_kinds=("run", "job"),
         affordances=("jobs.wait", "jobs.logs", "batches.status"),
         aliases=("resume worker", "agentctl batch resume", "retry the agent"),

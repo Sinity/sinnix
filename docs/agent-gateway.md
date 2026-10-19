@@ -8,9 +8,9 @@ a client sees in `tools/list` is the one the handler validates.
 ```text
 ChatGPT operator connector
     -> OpenAI Secure MCP Tunnel
-    -> tunnel-client          (sinnix-agent-gateway-operator.service)
+    -> tunnel-client          (sinnix-agent-gateway.service)
     -> Streamable HTTP on a private Unix socket
-                              (sinnix-agent-gateway-operator-mcp.service)
+                              (sinnix-agent-gateway-mcp.service)
     -> typed actions over projects, jobs, artifacts, audit and observation
 ```
 
@@ -21,8 +21,9 @@ job controller. Local agents use the agentctl CLI directly.
 
 ## Authority
 
-The gateway is single-user. Its one endpoint serves the operator's ChatGPT with
-the operator's full power: reads, writes and jobs, with no read-only mode.
+The gateway is single-user. It serves the operator's ChatGPT with the
+operator's full power: reads, writes and jobs, with no read-only mode or
+per-caller permissions.
 Remote shells and jobs run in the operator's environment, including API keys
 and tokens. Those values stay on the host: agentctl keeps them out of launch
 inputs and masks them in logs, the gateway redacts them from audit rows and call
@@ -35,7 +36,7 @@ escapes.
 ## Actions
 
 Each action lives in `sinnix_agent_gateway/actions/` as an `Action`: input and
-output models, a handler, a verb family, principals, aliases, follow-up actions
+output models, a handler, a verb family, aliases, follow-up actions
 and examples. List them with `gateway.catalog`, or print the full reference with
 every schema and example:
 
@@ -81,7 +82,7 @@ client budget (`maxResultBytes`) returns an artifact ref instead of truncating;
 MCP tools by plain words. `gateway.describe` returns one action's schemas and
 policy. `gateway.read`, `gateway.change` and `gateway.run` invoke an exact
 action by name when a client has not loaded its typed tool. `gateway.status`
-reports the principal, the live and package-generated manifest hashes, the last
+reports the live and package-generated manifest hashes, the last
 recorded connector hash, and per-route availability.
 
 **Components.** Composite answers (`context.compose`, `projects.context`)
@@ -92,9 +93,9 @@ the worst part's status.
 ## CLI
 
 ```bash
-sinnix-agent-gateway --principal operator call files.read \
+sinnix-agent-gateway call files.read \
   --input '{"target":{"path":"/etc/os-release"}}'
-sinnix-agent-gateway --principal operator call files.read \
+sinnix-agent-gateway call files.read \
   --set target='{"path":"/etc/os-release"}'
 sinnix-agent-gateway catalog files.patch --schema
 sinnix-agent-gateway manifest
@@ -108,7 +109,7 @@ object; for large file bodies, write an artifact and pass it as a `source`.
 ## Projects
 
 Projects come from `sinnix.projects.entries` and the private runtime catalog,
-then the endpoint's `scope.projects` filter applies. A configured path names a
+then `sinnix.services.agent-gateway.projects`, when set, narrows them. A configured path names a
 Git repository; a discovered checkout must share its common directory. For a
 bare repository, set `defaultCheckout` to give project-level reads a default;
 otherwise reads name a checkout id from `projects.list`.
@@ -209,28 +210,19 @@ unlink, and never an overwrite. Cross-filesystem moves copy, verify, then remove
 the source. If removal fails, both paths remain and the receipt says so. A batch
 returns a partial receipt; there is no batch rollback.
 
-## Capture scopes
-
-`endpoint.scope.captures` takes `subject:<id>` and `lane:<capture id>`
-selectors. Subjects come from `sinnix.runtime.captureSubjects`. The current
-subjects are activity, ai, comms, health, self and machine, and every enabled
-capture lane belongs to exactly one. Selectors union, and the principal's lane
-permissions bound the result. Unknown selectors fail.
-
 ## Configuration and deployment
 
 ```nix
-sinnix.services.agent-gateway.enable = true;
-sinnix.services.agent-gateway.endpoints.operator = {
+sinnix.services.agent-gateway = {
   enable = true;
-  principal = "operator";
   tunnelId = "tunnel_...";
-  runtimeKeyFile = "/run/agenix/openai-tunnel-runtime-key";
+  # runtimeKeyFile defaults to /run/agenix/openai-tunnel-runtime-key.
 };
 ```
 
-**Units.** Each endpoint gets a tunnel unit, an MCP unit, a state directory and
-a tunnel health port (3088 on prime). The tunnel client also starts a
+**Units.** The gateway runs a tunnel unit and an MCP unit, keeps its state in
+`~/.local/state/sinnix/agent-gateway/operator`, and serves tunnel health on port
+3088. The tunnel client also starts a
 `codex app-server`, so ChatGPT can reach the local Codex.
 
 - **MCP unit:** runs in `agenttool.slice` with `MemoryHigh=4G` and

@@ -93,7 +93,7 @@ def build_request(
     return payload
 
 
-def select_action(action_name: str, principal: str) -> Action:
+def select_action(action_name: str) -> Action:
     action = action_set.BY_NAME.get(action_name)
     if action is None:
         candidates = sorted(
@@ -101,11 +101,6 @@ def select_action(action_name: str, principal: str) -> Action:
         )
         hint = f"; did you mean {', '.join(candidates[:5])}" if candidates else ""
         raise CliInputError(f"unknown action {action_name!r}{hint}")
-    if principal not in action.principals:
-        raise CliInputError(
-            f"principal {principal!r} cannot invoke {action_name}; allowed: "
-            + ", ".join(sorted(action.principals))
-        )
     return action
 
 
@@ -147,23 +142,22 @@ def _structured_response(response: Any) -> dict[str, Any]:
 
 
 async def invoke_mcp(
-    config: GatewayConfig, principal: str, action_name: str, payload: Mapping[str, Any]
+    config: GatewayConfig, action_name: str, payload: Mapping[str, Any]
 ) -> dict[str, Any]:
-    action = select_action(action_name, principal)
+    action = select_action(action_name)
     validate_request(action, payload)
-    server = create_server(config, principal)
+    server = create_server(config)
     return _structured_response(await server.call_tool(action.name, dict(payload)))
 
 
 def invoke(
-    config: GatewayConfig, principal: str, action_name: str, payload: Mapping[str, Any]
+    config: GatewayConfig, action_name: str, payload: Mapping[str, Any]
 ) -> dict[str, Any]:
-    return anyio.run(invoke_mcp, config, principal, action_name, payload)
+    return anyio.run(invoke_mcp, config, action_name, payload)
 
 
 def catalog_display(
     *,
-    principal: str,
     action_name: str | None = None,
     schema: bool = False,
     example: bool = False,
@@ -171,7 +165,7 @@ def catalog_display(
 ) -> dict[str, Any]:
     revision = action_set.REVISION
     if action_name is not None:
-        action = select_action(action_name, principal)
+        action = select_action(action_name)
         if schema:
             return {
                 "revision": revision,
@@ -198,7 +192,7 @@ def catalog_display(
                 "family": action.family.value,
                 "summary": action.summary,
             }
-            for action in action_set.visible(principal)
+            for action in action_set.ALL_ACTIONS
             if action.name.casefold().startswith(prefix)
         ],
     }

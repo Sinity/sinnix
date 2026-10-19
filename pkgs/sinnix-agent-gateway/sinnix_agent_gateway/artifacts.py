@@ -13,9 +13,9 @@ from typing import Any
 from sinnix_lib.atomic import atomic_publish
 
 from .config import GatewayConfig
+from .contracts import PRINCIPAL
 from .owner_execution import ExecutionResult
 from .payloads import retain_json
-from .permissions import Permission, Principal
 from .redaction import redact
 
 
@@ -60,9 +60,8 @@ _VERIFIED: dict[tuple[str, int, int, int, int, int], str] = {}
 
 
 class ArtifactService:
-    def __init__(self, config: GatewayConfig, principal: Principal):
+    def __init__(self, config: GatewayConfig):
         self.config = config
-        self.principal = principal
         config.initialize_state()
         self.root = config.state_dir / "artifacts"
 
@@ -204,7 +203,7 @@ class ArtifactService:
             "artifact_id": artifact_id,
             "kind": kind,
             "owner_id": owner_id,
-            "principal": self.principal.name,
+            "principal": PRINCIPAL,
             "source": str(source),
             "bytes": size,
             "sha256": digest,
@@ -261,11 +260,6 @@ class ArtifactService:
             metadata = json.loads(path.read_text())
         except (FileNotFoundError, json.JSONDecodeError) as exc:
             raise ArtifactError("unknown or malformed artifact") from exc
-        if (
-            self.principal.name != "operator"
-            and metadata.get("principal") != self.principal.name
-        ):
-            raise ArtifactError("artifact is unavailable to this principal")
         source = Path(metadata["source"]).resolve(strict=True)
         if not source.is_file() or not self._source_is_attested(source):
             raise ArtifactError("artifact source is no longer valid")
@@ -324,7 +318,6 @@ class ArtifactService:
         kind: str | None = None,
         owner_id: str | None = None,
     ) -> dict[str, Any]:
-        self.principal.require(Permission.ARTIFACT_READ)
         rows = []
         paths = sorted(
             self.root.glob("*/metadata.json"),
@@ -337,17 +330,8 @@ class ArtifactService:
             try:
                 row = json.loads(path.read_text())
             except json.JSONDecodeError:
-                if (
-                    self.principal.name == "operator"
-                    and kind is None
-                    and owner_id is None
-                ):
+                if kind is None and owner_id is None:
                     rows.append({"artifact_id": path.parent.name, "malformed": True})
-                continue
-            if (
-                self.principal.name != "operator"
-                and row.get("principal") != self.principal.name
-            ):
                 continue
             if kind is not None and row.get("kind") != kind:
                 continue
@@ -360,7 +344,6 @@ class ArtifactService:
     def read(
         self, artifact_id: str, offset: int = 0, max_bytes: int = 64_000
     ) -> dict[str, Any]:
-        self.principal.require(Permission.ARTIFACT_READ)
         if offset < 0:
             raise ArtifactError("offset must be non-negative")
         max_bytes = max(1, min(max_bytes, self.config.max_result_bytes))

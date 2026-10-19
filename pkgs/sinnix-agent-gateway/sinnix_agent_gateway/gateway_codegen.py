@@ -17,7 +17,6 @@ from . import actions as action_set
 from .contracts import VerbFamily
 
 SKILL_PATH = Path("dots/_ai/skills/agent-gateway/SKILL.md")
-PRINCIPAL = "operator"
 
 
 def _json(value: Any) -> str:
@@ -28,9 +27,9 @@ def catalog_payload() -> dict[str, Any]:
     return {
         "schema": "sinnix.gateway-generated-catalog.v2",
         "revision": action_set.REVISION,
-        "action_catalog_hash": action_set.catalog_hash(PRINCIPAL),
-        "resources": action_set.resource_rows(PRINCIPAL),
-        "actions": [action.catalog_row() for action in action_set.visible(PRINCIPAL)],
+        "action_catalog_hash": action_set.catalog_hash(),
+        "resources": action_set.resource_rows(),
+        "actions": [action.catalog_row() for action in action_set.ALL_ACTIONS],
     }
 
 
@@ -49,13 +48,12 @@ def _table(header: list[str], rows: list[list[str]]) -> list[str]:
 
 def _action_table(rows: list[dict[str, Any]]) -> list[str]:
     return _table(
-        ["Action", "Family", "Owner", "Principals", "Summary"],
+        ["Action", "Family", "Owner", "Summary"],
         [
             [
                 f"`{row['name']}`",
                 f"`{row['family']}`",
                 f"`{row['owner']}`",
-                f"`{', '.join(row['principals'])}`",
                 row["documentation"],
             ]
             for row in rows
@@ -88,8 +86,8 @@ def render_reference() -> str:
         "",
         "Generated from `sinnix_agent_gateway.actions`. Every action is one MCP tool "
         "whose `tools/list` input schema is the one below; the catalog hash changes "
-        "when any principal-visible action catalog row changes, including its "
-        "schema, principal set, example or affordance.",
+        "when any action catalog row changes, including its schema, example or "
+        "affordance.",
         "",
         f"Revision: `{catalog['revision']}`. Catalog SHA-256: `{catalog['action_catalog_hash']}`.",
         "",
@@ -116,7 +114,6 @@ def render_reference() -> str:
                 row["documentation"],
                 "",
                 f"Family: `{row['family']}`. Owner: `{row['owner']}`. "
-                f"Principals: `{', '.join(row['principals'])}`. "
                 f"Typed failures: `{', '.join(row['typed_failures'])}`.",
                 "",
             ]
@@ -198,7 +195,7 @@ Every gateway action is one MCP tool named after the action; its input schema in
 ## Invocation
 
 - MCP: call the tool by action name with the fields of its input schema.
-- CLI: `sinnix-agent-gateway call <action> --input '{{...}}'` or `--set key=value` (values parse as JSON); `--principal` selects authority. `sinnix-agent-gateway catalog <action> --schema` prints the live schemas, `--example` the examples, `catalog --complete <prefix>` lists names.
+- CLI: `sinnix-agent-gateway call <action> --input '{{...}}'` or `--set key=value` (values parse as JSON); `sinnix-agent-gateway catalog <action> --schema` prints the live schemas, `--example` the examples, `catalog --complete <prefix>` lists names.
 - Discovery: `gateway.catalog` with a plain-words `query` finds actions, resources and brokered MCP tools; `gateway.status` reports contract hashes and route availability.
 
 Effectful actions (families change, operate, run) require `idempotency_key`. Confirmed responses replay unchanged. Pending calls refuse concurrent execution; interrupted calls become indeterminate and never retry their effects automatically. `operations.run` and `shell.run` reconcile through durable agentctl launch identities; hub-backed machine actions and process stop reconcile only exact confirmed owner receipts. Other interrupted mutations remain indeterminate. Preconditions are owner-specific checks, best effort unless the owner explicitly guarantees atomic comparison and mutation.

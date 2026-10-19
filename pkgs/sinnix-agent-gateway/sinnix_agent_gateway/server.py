@@ -20,8 +20,9 @@ from mcp.types import (
 
 from . import actions as action_set
 from . import calllog
-from .actions import visible as visible_actions
+from .actions import ALL_ACTIONS
 from .config import GatewayConfig
+from .contracts import PRINCIPAL
 from .prompts import PROMPT_SPECS, PromptGenerator
 from .registry import REGISTRY
 from .results import ProtocolError, derive_cursor_key
@@ -64,15 +65,13 @@ def _bounded_resource_json(runtime: Runtime, payload: Any, kind: str) -> str:
     return encoded_envelope.decode()
 
 
-def create_server(
-    config: GatewayConfig, principal_name: str, transport: str = "stdio"
-) -> MCPServer:
-    runtime = Runtime.create(config, principal_name)
+def create_server(config: GatewayConfig, transport: str = "stdio") -> MCPServer:
+    runtime = Runtime.create(config)
     runtime.transport = transport
     # Build every action schema now, before serving: the first catalog,
     # status or manifest call would otherwise build them on the event loop
     # and stall every concurrent call for about a second.
-    action_set.catalog_hash(principal_name)
+    action_set.catalog_hash()
     subscription_bus = DemandAwareSubscriptionBus(InMemorySubscriptionBus())
     revision_publisher = OwnerRevisionPublisher(runtime, subscription_bus)
     event_publisher = EventSpoolPublisher(config.event_spool, subscription_bus)
@@ -94,13 +93,11 @@ def create_server(
 
     mcp = MCPServer(
         name="sinnix-agent-gateway",
-        tools=[
-            build_tool(action, runtime) for action in visible_actions(principal_name)
-        ],
+        tools=[build_tool(action, runtime) for action in ALL_ACTIONS],
         title="Sinnix Agent Gateway",
-        description="Principal-scoped project, machine, and job control plane.",
+        description="Project, machine, and job control plane.",
         instructions=(
-            f"Active principal: {principal_name}. Start with catalog, then use canonical refs. "
+            "Start with catalog, then use canonical refs. "
             "All outputs are bounded; unavailable evidence is reported explicitly."
         ),
         version="0.3.0",
@@ -118,27 +115,27 @@ def create_server(
     @mcp.resource("sinnix://gateway/instructions")
     def gateway_instructions() -> str:
         return (
-            f"Principal {principal_name}. Projects are allowlisted. Paths are project-relative. "
+            "Projects are allowlisted. Paths are project-relative. "
             "Job IDs and artifact IDs are the only accepted control identities."
         )
 
     def _catalog_rows() -> dict[str, Any]:
         rows = []
-        for action in visible_actions(principal_name):
+        for action in ALL_ACTIONS:
             row = action.catalog_row()
             row.pop("input_schema")
             row.pop("output_schema")
             rows.append(row)
         return {
             "revision": action_set.REVISION,
-            "catalog_sha256": action_set.catalog_hash(principal_name),
+            "catalog_sha256": action_set.catalog_hash(),
             "actions": rows,
-            "resources": action_set.resource_rows(principal_name),
+            "resources": action_set.resource_rows(),
         }
 
     @mcp.resource("sinnix://gateway/v2/catalog")
     def gateway_v2_catalog() -> str:
-        """Return the principal-visible action and resource catalog."""
+        """Return the action and resource catalog."""
         return _bounded_resource_json(runtime, _catalog_rows(), "catalog")
 
     @mcp.resource(EVENTS_RESOURCE_URI)
@@ -148,10 +145,10 @@ def create_server(
 
     @mcp.resource("sinnix://gateway/v2/actions/{action_name}")
     def gateway_v2_action_schema(action_name: str) -> str:
-        """Return the full contract, schemas and examples of one visible action."""
+        """Return the full contract, schemas and examples of one action."""
         action = action_set.BY_NAME.get(action_name)
-        if action is None or principal_name not in action.principals:
-            raise ProtocolError("not_found", "action is not visible to this principal")
+        if action is None:
+            raise ProtocolError("not_found", "action is not declared")
         return _bounded_resource_json(
             runtime,
             {"revision": action_set.REVISION, "action": action.catalog_row()},
@@ -162,15 +159,11 @@ def create_server(
     def gateway_v2_resource_contract(resource_kind: str) -> str:
         """Return one canonical resource kind with the actions that use it."""
         row = next(
-            (
-                row
-                for row in action_set.resource_rows(principal_name)
-                if row["kind"] == resource_kind
-            ),
+            (row for row in action_set.resource_rows() if row["kind"] == resource_kind),
             None,
         )
         if row is None:
-            raise ProtocolError("not_found", "resource kind is not visible")
+            raise ProtocolError("not_found", "resource kind is not declared")
         return _bounded_resource_json(
             runtime,
             {"revision": action_set.REVISION, "resource": row},
@@ -179,29 +172,27 @@ def create_server(
 
     @mcp.resource("sinnix://results/{result_id}")
     def gateway_v2_result(result_id: str) -> str:
-        """Return one immutable V2 result snapshot for the active principal."""
+        """Return one immutable result snapshot."""
         return _bounded_resource_json(
             runtime, runtime.results.read(result_id), "result"
         )
 
     @mcp.resource("sinnix://receipts/{receipt_id}")
     def gateway_v2_receipt(receipt_id: str) -> str:
-        """Return one principal-scoped audit receipt behind its canonical ref."""
+        """Return one audit receipt behind its canonical ref."""
         return _bounded_resource_json(
             runtime, runtime.audit.receipt(receipt_id), "receipt"
         )
 
     def register_canonical_templates() -> None:
-        """Publish the principal-visible templates that have a reader.
+        """Publish the templates that have a reader.
 
         `result` and `receipt` are registered above; every other kind is read
         through the action `RESOURCE_READERS` names, so a kind without one is
         not published rather than published and refused.
         """
         for resource in REGISTRY.resources:
-            if principal_name not in resource.principals or (
-                resource.kind not in RESOURCE_READERS and resource.kind != "mcp_tool"
-            ):
+            if resource.kind not in RESOURCE_READERS and resource.kind != "mcp_tool":
                 continue
             variables = resource.ref_template.variables
 
@@ -248,14 +239,13 @@ def create_server(
     register_canonical_templates()
 
     template_cursor_key = derive_cursor_key(
-        runtime.results.cursor_key, "resource-templates", principal_name
+        runtime.results.cursor_key, "resource-templates", PRINCIPAL
     )
 
     def template_cursor(offset: int) -> str:
         body = json.dumps(
             {
                 "revision": action_set.REVISION,
-                "principal": principal_name,
                 "offset": offset,
             },
             sort_keys=True,
@@ -287,10 +277,7 @@ def create_server(
             body = json.loads(
                 base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode()
             )
-            if (
-                body.get("revision") != action_set.REVISION
-                or body.get("principal") != principal_name
-            ):
+            if body.get("revision") != action_set.REVISION:
                 raise ValueError
             offset = body.get("offset")
             if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
@@ -342,10 +329,7 @@ def create_server(
         "resources/templates/list", PaginatedRequestParams, list_resource_templates
     )
 
-    prompt_generator = PromptGenerator(
-        principal=principal_name,
-        catalog=lambda principal: _catalog_rows(),
-    )
+    prompt_generator = PromptGenerator(catalog=_catalog_rows)
     for prompt_spec in PROMPT_SPECS:
 
         def make_prompt(name: str):

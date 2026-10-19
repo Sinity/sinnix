@@ -35,7 +35,6 @@ def config(tmp_path: Path) -> GatewayConfig:
     return GatewayConfig(
         state_dir=tmp_path / "state",
         projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
-        approved_manifest_hash="approved-fixture-hash",
     )
 
 
@@ -74,7 +73,7 @@ def tiny_png() -> bytes:
 def test_core_dispatch_uses_leaf_execution_and_refuses_wrong_routes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     runtime = server._sinnix_revision_publisher.runtime
     calls: list[tuple[str, str | None]] = []
 
@@ -222,7 +221,7 @@ def test_core_dispatch_uses_leaf_execution_and_refuses_wrong_routes(
 
 
 def test_every_action_publishes_its_model_schema(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     runtime = server._sinnix_revision_publisher.runtime
     for action in ALL_ACTIONS:
         tool = build_tool(action, runtime)
@@ -246,7 +245,7 @@ def test_every_action_publishes_its_model_schema(tmp_path: Path) -> None:
 
 
 def test_tools_list_carries_typed_actions_next_to_verbs(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
 
     async def names():
         return {tool.name: tool for tool in await server.list_tools()}
@@ -316,7 +315,7 @@ def test_file_locator_round_trips_paths_and_refs() -> None:
 
 
 def test_files_actions_accept_paths_and_return_child_refs(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     root = tmp_path / "tree"
     root.mkdir()
     (root / "b.txt").write_text("beta\nline two\nline three\n")
@@ -387,7 +386,7 @@ def test_files_actions_accept_paths_and_return_child_refs(tmp_path: Path) -> Non
 
 
 def test_image_read_returns_an_image_block(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     image = tmp_path / "pixel.png"
     image.write_bytes(tiny_png())
     result = call(server, "files.read", {"target": {"path": str(image)}})
@@ -406,7 +405,7 @@ def test_image_read_returns_an_image_block(tmp_path: Path) -> None:
 
 
 def test_text_file_pages_preserve_utf8_at_byte_boundaries(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     target = tmp_path / "unicode.txt"
     original = "AB🙂ż日終"
     target.write_text(original, encoding="utf-8")
@@ -439,7 +438,7 @@ def test_text_file_pages_preserve_utf8_at_byte_boundaries(tmp_path: Path) -> Non
 def test_line_read_bounds_skipping_a_giant_physical_line(
     tmp_path: Path, monkeypatch
 ) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     target = tmp_path / "giant-lines.txt"
     target.write_bytes(b"x" * (2 * 1024 * 1024) + b"\nselected\n")
 
@@ -499,7 +498,7 @@ def test_line_read_bounds_skipping_a_giant_physical_line(
 
 
 def test_binary_read_never_attaches_bytes_to_the_chat(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     pdf = tmp_path / "page.pdf"
     pdf.write_bytes(b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n")
 
@@ -519,7 +518,7 @@ def test_binary_read_never_attaches_bytes_to_the_chat(tmp_path: Path) -> None:
 
 
 def test_unknown_input_field_is_typed_before_file_mutation(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     target = tmp_path / "protected.txt"
     target.write_text("before\n")
 
@@ -551,7 +550,7 @@ def test_mcp_adapter_distinguishes_omitted_fields_from_explicit_null(
     tmp_path: Path,
     via_core: bool,
 ) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     target = tmp_path / "sample.txt"
     target.write_text("sample\n")
     request = {"target": {"path": str(target)}}
@@ -582,7 +581,7 @@ def test_mcp_adapter_distinguishes_omitted_fields_from_explicit_null(
 def test_core_rejects_explicit_null_arguments_without_claiming_key(
     tmp_path: Path,
 ) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     invalid = structured(
         call(
             server,
@@ -619,7 +618,7 @@ def test_core_rejects_explicit_null_arguments_without_claiming_key(
 def test_validation_failure_keeps_only_valid_request_controls(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     runtime = server._sinnix_revision_publisher.runtime
     target = tmp_path / "protected.txt"
     target.write_text("before\n")
@@ -690,7 +689,7 @@ def test_validation_failure_keeps_only_valid_request_controls(
 
 
 def test_files_search_paths_and_content(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     root = tmp_path / "corpus"
     (root / "deep").mkdir(parents=True)
     (root / "one.png").write_bytes(tiny_png())
@@ -752,7 +751,7 @@ def test_files_search_paths_and_content(tmp_path: Path) -> None:
 def test_files_search_streams_long_matches_to_the_overflow_artifact(
     tmp_path: Path,
 ) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     runtime = server._sinnix_revision_publisher.runtime
     root = tmp_path / "large-corpus"
     root.mkdir()
@@ -784,7 +783,7 @@ def test_files_search_streams_long_matches_to_the_overflow_artifact(
 def test_files_search_timeout_reports_the_complete_streamed_prefix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     runtime = server._sinnix_revision_publisher.runtime
     root = tmp_path / "timed-corpus"
     root.mkdir()
@@ -825,7 +824,7 @@ def test_files_search_timeout_reports_the_complete_streamed_prefix(
 def test_files_search_decodes_ripgrep_byte_records_without_silently_dropping_them(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     runtime = server._sinnix_revision_publisher.runtime
     root = tmp_path / "byte-corpus"
     root.mkdir()
@@ -862,7 +861,7 @@ def test_files_search_decodes_ripgrep_byte_records_without_silently_dropping_the
 
 
 def test_files_image_and_pdf_afford_document_inspection(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     image = tmp_path / "page.png"
     image.write_bytes(tiny_png())
     pdf = tmp_path / "page.pdf"
@@ -880,7 +879,7 @@ def test_files_image_and_pdf_afford_document_inspection(tmp_path: Path) -> None:
 
 
 def test_files_stat_reports_hash_coverage(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     target = tmp_path / "hash.txt"
     target.write_text("hash me\n")
 
@@ -907,7 +906,7 @@ def test_files_stat_reports_hash_coverage(tmp_path: Path) -> None:
 
 
 def test_files_patch_modes_and_preconditions(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     target = tmp_path / "notes.md"
     target.write_text("one\ntwo\nthree\nfour\n")
     before = structured(call(server, "files.stat", {"target": {"path": str(target)}}))[
@@ -1033,7 +1032,7 @@ def test_files_patch_modes_and_preconditions(tmp_path: Path) -> None:
 
 
 def test_files_change_operations(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     root = tmp_path / "box"
 
     made = structured(
@@ -1135,7 +1134,7 @@ def test_files_change_operations(tmp_path: Path) -> None:
 
 
 def test_files_change_create_preserves_writer_after_preflight(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     runtime = server._sinnix_revision_publisher.runtime
     target = tmp_path / "concurrent.txt"
     write = runtime.files.write
@@ -1164,10 +1163,9 @@ def test_files_change_create_preserves_writer_after_preflight(tmp_path: Path) ->
 
 
 def test_gateway_status_and_catalog_are_typed(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     status = structured(call(server, "gateway.status", {}))
     assert status["result"]["outcome"] == "ok", status
-    assert status["data"]["principal"] == "operator"
     assert status["data"]["tool_count"] > 10
     assert status["data"]["route_preflight"]["status"] in {"ready", "degraded"}
 
@@ -1195,8 +1193,7 @@ def test_catalog_without_search_terms_does_not_probe_upstreams(
     tmp_path: Path, monkeypatch, arguments: dict
 ) -> None:
     server = create_server(
-        replace(config(tmp_path), mcp_broker_servers={"first": {}, "second": {}}),
-        "operator",
+        replace(config(tmp_path), mcp_broker_servers={"first": {}, "second": {}})
     )
     broker = server._sinnix_revision_publisher.runtime.mcp_broker
     probes = []
@@ -1223,8 +1220,7 @@ def test_catalog_search_probes_brokers_and_preserves_filtering_and_effects(
     tmp_path: Path, monkeypatch
 ) -> None:
     server = create_server(
-        replace(config(tmp_path), mcp_broker_servers={"fixture": {}, "offline": {}}),
-        "operator",
+        replace(config(tmp_path), mcp_broker_servers={"fixture": {}, "offline": {}})
     )
     broker = server._sinnix_revision_publisher.runtime.mcp_broker
     probes = []
@@ -1277,8 +1273,7 @@ def test_catalog_search_finds_tool_beyond_broker_inline_crop(
             config(tmp_path),
             max_result_bytes=4_096,
             mcp_broker_servers={"fixture": {}},
-        ),
-        "operator",
+        )
     )
     broker = server._sinnix_revision_publisher.runtime.mcp_broker
 
@@ -1323,8 +1318,7 @@ def test_catalog_search_reports_incomplete_upstream_without_matches(
     tmp_path: Path, monkeypatch
 ) -> None:
     server = create_server(
-        replace(config(tmp_path), mcp_broker_servers={"fixture": {}}),
-        "operator",
+        replace(config(tmp_path), mcp_broker_servers={"fixture": {}})
     )
     broker = server._sinnix_revision_publisher.runtime.mcp_broker
 
@@ -1358,7 +1352,7 @@ def test_files_search_keeps_a_bounded_page_of_one_huge_file_and_spills_the_rest(
     rest, the last match included, is in the overflow artifact. Real rg also
     emits begin/end/summary events, which must not produce warnings.
     """
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     runtime = server._sinnix_revision_publisher.runtime
     root = tmp_path / "huge-corpus"
     root.mkdir()
@@ -1390,7 +1384,7 @@ def test_files_search_spills_lines_across_files_after_inline_budget(
     tmp_path: Path,
 ) -> None:
     cfg = replace(config(tmp_path), max_result_bytes=1_024)
-    runtime = create_server(cfg, "operator")._sinnix_revision_publisher.runtime
+    runtime = create_server(cfg)._sinnix_revision_publisher.runtime
     root = tmp_path / "many-matches"
     root.mkdir()
     for number in range(12):
@@ -1417,7 +1411,7 @@ def test_files_search_reports_malformed_records_but_not_valid_summaries(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Fails if a summary event warns, or a match without a path passes silently."""
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     runtime = server._sinnix_revision_publisher.runtime
     root = tmp_path / "records"
     root.mkdir()
@@ -1449,7 +1443,7 @@ def test_files_search_reports_malformed_records_but_not_valid_summaries(
 
 
 def test_files_search_no_match_is_an_empty_result(tmp_path: Path) -> None:
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     runtime = server._sinnix_revision_publisher.runtime
     root = tmp_path / "empty-corpus"
     root.mkdir()
@@ -1464,7 +1458,7 @@ def test_files_search_no_match_is_an_empty_result(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("budget", [4, 7, 64])
 def test_line_excerpt_continues_at_exact_byte_offset(tmp_path, budget):
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     target = tmp_path / "continuation.txt"
     prefix = "ignored界\n".encode()
     suffix = ("界" * 20 + "\nlast\n").encode()
@@ -1502,7 +1496,7 @@ def test_line_excerpt_continues_at_exact_byte_offset(tmp_path, budget):
 
 
 def test_line_excerpt_refuses_nonprogressing_utf8_budget(tmp_path):
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     target = tmp_path / "utf8.txt"
     target.write_text("skip\n界界\n")
     result = call(
@@ -1521,7 +1515,7 @@ def test_line_excerpt_refuses_nonprogressing_utf8_budget(tmp_path):
 def test_catalog_retains_complete_filtered_matches(tmp_path, monkeypatch):
     from sinnix_agent_gateway.actions import gateway
 
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     runtime = server._sinnix_revision_publisher.runtime
     rows = [
         {
@@ -1534,7 +1528,6 @@ def test_catalog_retains_complete_filtered_matches(tmp_path, monkeypatch):
             "aliases": [],
             "affordances": [],
             "resource_kinds": [],
-            "principals": ["operator"],
             "effect": "read",
         }
         for i in range(120)
@@ -1571,7 +1564,7 @@ def test_catalog_retains_complete_filtered_matches(tmp_path, monkeypatch):
 def test_catalog_combined_count_does_not_imply_cropping(tmp_path, monkeypatch):
     from sinnix_agent_gateway.actions import gateway
 
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     runtime = server._sinnix_revision_publisher.runtime
     resource = {
         "kind": "fixture",
@@ -1635,7 +1628,7 @@ def test_large_file_read_budgets_use_bounded_lossless_pages(tmp_path, budget, la
 
 @pytest.mark.parametrize("offset", [1000000, 10**100])
 def test_file_read_beyond_observed_eof_returns_an_empty_page(tmp_path, offset):
-    server = create_server(config(tmp_path), "operator")
+    server = create_server(config(tmp_path))
     target = tmp_path / "small.txt"
     target.write_text("fixture")
     runtime = server._sinnix_revision_publisher.runtime
@@ -1652,7 +1645,7 @@ def test_files_search_stops_at_resource_bound_with_explicit_partial_result(
     tmp_path, monkeypatch, bound
 ):
     cfg = replace(config(tmp_path), max_result_bytes=1_024)
-    runtime = create_server(cfg, "operator")._sinnix_revision_publisher.runtime
+    runtime = create_server(cfg)._sinnix_revision_publisher.runtime
     root = tmp_path / "bounded-corpus"
     root.mkdir()
     if bound == "record":
@@ -1689,9 +1682,7 @@ def test_files_search_stops_at_resource_bound_with_explicit_partial_result(
 
 
 def test_files_search_overflow_preserves_non_utf8_filename(tmp_path, monkeypatch):
-    runtime = create_server(
-        config(tmp_path), "operator"
-    )._sinnix_revision_publisher.runtime
+    runtime = create_server(config(tmp_path))._sinnix_revision_publisher.runtime
     root = tmp_path / "raw-name-corpus"
     root.mkdir()
     raw_path = os.fsencode(root) + b"/raw-\xff.txt"

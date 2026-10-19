@@ -142,7 +142,7 @@ def test_private_http_transport_serves_operator_tools(
             )
             assert status == 200
             names = {tool["name"] for tool in json.loads(body)["result"]["tools"]}
-            assert names == {action.name for action in action_set.visible("operator")}
+            assert names == {action.name for action in action_set.ALL_ACTIONS}
             status, _, body = request(
                 {
                     "jsonrpc": "2.0",
@@ -187,24 +187,18 @@ def test_call_replays_through_the_named_tool_after_local_validation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr(
-        cli_support, "create_server", lambda _config, _principal: FakeServer(calls)
-    )
+    monkeypatch.setattr(cli_support, "create_server", lambda _config: FakeServer(calls))
     payload = {"target": {"path": "/etc/os-release"}}
     response = anyio.run(
-        cli_support.invoke_mcp, _config(tmp_path), "operator", "files.read", payload
+        cli_support.invoke_mcp, _config(tmp_path), "files.read", payload
     )
     assert response["schema"] == "sinnix.gateway-result.v3"
     assert calls == [("files.read", payload)]
 
     with pytest.raises(CliInputError, match="target"):
-        anyio.run(
-            cli_support.invoke_mcp, _config(tmp_path), "operator", "files.read", {}
-        )
+        anyio.run(cli_support.invoke_mcp, _config(tmp_path), "files.read", {})
     with pytest.raises(CliInputError, match="did you mean"):
-        anyio.run(
-            cli_support.invoke_mcp, _config(tmp_path), "operator", "files.rea", {}
-        )
+        anyio.run(cli_support.invoke_mcp, _config(tmp_path), "files.rea", {})
 
 
 def test_cli_projection_preserves_binary_content_blocks() -> None:
@@ -306,8 +300,6 @@ def test_cli_subprocess_preserves_failure_envelope_and_status(tmp_path: Path) ->
         executable,
         "--config",
         str(config),
-        "--principal",
-        "operator",
         "call",
         "files.stat",
         "--input",
@@ -338,8 +330,6 @@ def test_cli_subprocess_keeps_binary_bytes_out_of_the_chat(tmp_path: Path) -> No
         os.environ["SINNIX_GATEWAY_TEST_EXECUTABLE"],
         "--config",
         str(config),
-        "--principal",
-        "operator",
         "call",
         "files.read",
         "--input",
@@ -359,7 +349,7 @@ def test_cli_subprocess_keeps_binary_bytes_out_of_the_chat(tmp_path: Path) -> No
 
 def test_stdio_mcp_client_consumes_complete_binary_artifact(tmp_path: Path) -> None:
     config = _config(tmp_path)
-    runtime = Runtime.create(config, "operator")
+    runtime = Runtime.create(config)
     capture = config.state_dir / "captures" / "client-witness"
     capture.mkdir(parents=True)
     source = capture / "archive.zip"
@@ -495,7 +485,7 @@ def test_complete_unicode_cli_request_survives_former_byte_cliffs(
         arguments = {"use_stdin": True, "stdin": io.BytesIO(raw)}
     request = build_request(**arguments)
     assert request == payload
-    response = cli_support.invoke(config, "operator", "projects.change", request)
+    response = cli_support.invoke(config, "projects.change", request)
     assert response["result"]["outcome"] == "ok", response
     assert (project / "unicode.txt").read_bytes() == content.encode()
 
@@ -520,13 +510,9 @@ def test_set_flags_merge_json_values_without_conflicts() -> None:
 
 
 def test_catalog_display_exposes_schema_example_and_completion() -> None:
-    schema = cli_support.catalog_display(
-        principal="operator", action_name="files.patch", schema=True
-    )
-    example = cli_support.catalog_display(
-        principal="operator", action_name="files.patch", example=True
-    )
-    completion = cli_support.catalog_display(principal="operator", complete="files.")
+    schema = cli_support.catalog_display(action_name="files.patch", schema=True)
+    example = cli_support.catalog_display(action_name="files.patch", example=True)
+    completion = cli_support.catalog_display(complete="files.")
     assert schema["input_schema"]["type"] == "object"
     assert "data" in schema["output_schema"]["properties"]
     assert example["examples"]
@@ -542,17 +528,13 @@ def test_generated_examples_replay_and_validate(
 ) -> None:
     examples = [
         (action.name, example.input)
-        for action in action_set.visible("operator")
+        for action in action_set.ALL_ACTIONS
         for example in action.examples
     ]
     calls: list[tuple[str, dict[str, object]]] = []
-    monkeypatch.setattr(
-        cli_support, "create_server", lambda _config, _principal: FakeServer(calls)
-    )
+    monkeypatch.setattr(cli_support, "create_server", lambda _config: FakeServer(calls))
     assert examples
     for name, payload in examples:
-        anyio.run(cli_support.invoke_mcp, _config(tmp_path), "operator", name, payload)
+        anyio.run(cli_support.invoke_mcp, _config(tmp_path), name, payload)
     assert [name for name, _ in calls] == [name for name, _ in examples]
-    assert {name for name, _ in examples} == {
-        a.name for a in action_set.visible("operator")
-    }
+    assert {name for name, _ in examples} == {a.name for a in action_set.ALL_ACTIONS}

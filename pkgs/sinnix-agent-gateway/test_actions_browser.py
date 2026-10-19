@@ -93,9 +93,7 @@ SNAPSHOT = {
 }
 
 
-def fake_browser(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, principal: str = "operator"
-):
+def fake_browser(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     captured = tmp_path / "commands.jsonl"
     runner = tmp_path / "chrome-control"
     png = base64.b64encode(tiny_png()).decode()
@@ -142,9 +140,8 @@ def fake_browser(
         state_dir=tmp_path / "state",
         projects={},
         chrome_control_command=str(runner),
-        approved_manifest_hash="approved-fixture-hash",
     )
-    server = create_server(config, principal)
+    server = create_server(config)
     register(server, browser_actions.ACTIONS)
     return server, captured
 

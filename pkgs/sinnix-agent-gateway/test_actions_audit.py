@@ -34,15 +34,14 @@ ROWS = [
 ]
 
 
-def runtime(tmp_path: Path, principal: str = "operator") -> Runtime:
+def runtime(tmp_path: Path) -> Runtime:
     return Runtime.create(
         GatewayConfig(
             state_dir=tmp_path / "state",
             projects={},
             hub_socket_path=tmp_path / "hub.sock",
             capability_index=index_path(tmp_path, ROWS),
-        ),
-        principal,
+        )
     )
 
 
@@ -75,7 +74,7 @@ def test_results_get(tmp_path: Path) -> None:
 
 
 def test_capabilities_search_and_describe(tmp_path: Path) -> None:
-    rt = runtime(tmp_path, "operator")
+    rt = runtime(tmp_path)
     found = call(
         rt,
         "capabilities.query",

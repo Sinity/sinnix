@@ -17,9 +17,7 @@ def test_files_search_reports_regex_errors_and_applies_content_filters(
     (root / "recent.txt").write_text("needle\n")
     (root / "many.txt").write_text("needle\nneedle\nneedle\n")
     (root / "directory").mkdir()
-    server = create_server(
-        GatewayConfig(state_dir=tmp_path / "state", projects={}), "operator"
-    )
+    server = create_server(GatewayConfig(state_dir=tmp_path / "state", projects={}))
 
     filtered = ok(
         server,
@@ -68,7 +66,7 @@ def test_project_search_and_diff_expose_owner_output_bounds(tmp_path: Path) -> N
         max_result_bytes=1_024,
         projects={"fixture": ProjectConfig(project_id="fixture", path=project)},
     )
-    server = create_server(config, "operator")
+    server = create_server(config)
 
     search = ok(
         server,
@@ -89,9 +87,7 @@ def test_files_patch_uses_git_apply_semantics_without_cross_file_writes(
     target.write_bytes(b"one\ntwo")
     other = tmp_path / "other.txt"
     other.write_text("unchanged\n")
-    server = create_server(
-        GatewayConfig(state_dir=tmp_path / "state", projects={}), "operator"
-    )
+    server = create_server(GatewayConfig(state_dir=tmp_path / "state", projects={}))
     patch = "--- a/target.txt\n+++ b/target.txt\n@@ -1,2 +1,2 @@\n-one\n+ONE\n two\n\\ No newline at end of file\n"
     before = hashlib.sha256(target.read_bytes()).hexdigest()
     dry_run = ok(

@@ -13,10 +13,9 @@ from sinnix_agent_gateway.config import (
     ProjectConfig,
     TaskAuthorityConfig,
 )
-from sinnix_agent_gateway.permissions import Principal
 
 
-def beads_service(tmp_path: Path, principal: str = "operator"):
+def beads_service(tmp_path: Path):
     tmp_path.mkdir(parents=True, exist_ok=True)
     project = tmp_path / "project"
     project.mkdir()
@@ -86,7 +85,7 @@ print(json.dumps(value))
         },
         beads_command=str(runner),
     )
-    return BeadsService(config, Principal.for_name(principal)), log
+    return BeadsService(config), log
 
 
 def commands(log: Path):
@@ -94,7 +93,7 @@ def commands(log: Path):
 
 
 def test_task_reads_and_mutations_do_not_require_source_checkout(tmp_path):
-    beads, log = beads_service(tmp_path, "operator")
+    beads, log = beads_service(tmp_path)
     project = beads.config.projects["fixture"]
     project.path.rmdir()
     assert beads.query(project_ids=["fixture"], view="all")["items"]
@@ -118,7 +117,7 @@ def test_task_reads_and_mutations_do_not_require_source_checkout(tmp_path):
 
 
 def test_query_preserves_native_request_and_continues_frozen_observation(tmp_path):
-    beads, log = beads_service(tmp_path, "operator")
+    beads, log = beads_service(tmp_path)
     arguments = {
         "project_ids": ["fixture"],
         "filters": {"status": "open"},
@@ -149,7 +148,7 @@ def test_query_preserves_native_request_and_continues_frozen_observation(tmp_pat
 
 
 def test_get_and_closure_pin_exact_native_revision_and_keep_native_evidence(tmp_path):
-    beads, log = beads_service(tmp_path, "operator")
+    beads, log = beads_service(tmp_path)
     value = beads.get("fixture", "fixture-1", as_of="historic", includes=["history"])
     assert value["task_revision"] == "historic"
     value = beads.campaign_closure(
@@ -195,7 +194,7 @@ def test_native_mutation_preserves_body_and_owner_preconditions(tmp_path):
 def test_date_order_preserves_instants_and_nanoseconds(tmp_path, field, old, new):
     from sinnix_agent_gateway.actions.beads import Order
 
-    beads, _ = beads_service(tmp_path, "operator")
+    beads, _ = beads_service(tmp_path)
     state = tmp_path / "owner-state.json"
     value = json.loads(state.read_text())
     value["items"][0][field + "_at"] = old
@@ -219,7 +218,7 @@ def test_date_order_preserves_instants_and_nanoseconds(tmp_path, field, old, new
 
 @pytest.mark.parametrize("invalid", [123, "not-a-date", "2026-10-16T00:00:00"])
 def test_invalid_owner_date_is_explicit_partial_coverage(tmp_path, invalid):
-    beads, _ = beads_service(tmp_path, "operator")
+    beads, _ = beads_service(tmp_path)
     state = tmp_path / "owner-state.json"
     value = json.loads(state.read_text())
     value["items"][0]["created_at"] = invalid
@@ -240,7 +239,7 @@ def test_date_order_is_named_newest_or_oldest_first(tmp_path):
     from pydantic import ValidationError
     from sinnix_agent_gateway.actions.beads import Order
 
-    beads, _ = beads_service(tmp_path, "operator")
+    beads, _ = beads_service(tmp_path)
     state = tmp_path / "owner-state.json"
     value = json.loads(state.read_text())
     value["items"][0]["created_at"] = "2026-07-01T00:00:00Z"
