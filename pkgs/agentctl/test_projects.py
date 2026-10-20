@@ -632,3 +632,23 @@ def test_host_environment_is_loaded_without_requiring_a_caller_value(
         json.dumps({"inherited_environment": {"FIXTURE_ROOT": "/current"}})
     )
     assert load_config(location).inherited_environment == {"FIXTURE_ROOT": "/current"}
+
+
+@pytest.mark.parametrize("admission", ["open", "closed", "unknown"])
+def test_batch_admission_policy(project_root: Path, admission: str) -> None:
+    path = project_root / ".agentctl/project.toml"
+    path.write_text(
+        path.read_text().replace(
+            "[packets]\n", f'[packets]\nadmission = "{admission}"\n'
+        )
+    )
+    if admission == "unknown":
+        with pytest.raises(
+            ProjectConfigError, match="packets.admission must be open or closed"
+        ):
+            load_project_adapter(project_root)
+    else:
+        project = load_project_adapter(project_root)
+        assert project.packets.admission == admission
+        assert project.catalog_row()["batch_admission"] == admission
+        assert project.operation("verify").name == "verify"

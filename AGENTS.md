@@ -100,6 +100,9 @@ nix run .#sinnix-agent-environment-doc -- --output docs/agent-environment.md
 Sinnix publishes to `master` directly: verify, commit on `master` (or
 fast-forward a short-lived branch), and push. No PRs; hosted CI does not gate
 this repository. Worktrees remain the isolation for in-flight work.
+New Sinnix batches are closed. Use native changes and declared operations;
+historical batch reads and recovery controls remain available. Other projects
+retain their own admission policies.
 
 - Short checks run from the devshell. Heavy checks run as declared operations:
   `agentctl job start sinnix lint`, `agentctl job start sinnix check`

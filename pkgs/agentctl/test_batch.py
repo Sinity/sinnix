@@ -4849,3 +4849,22 @@ def test_unusable_integer_input_does_not_discard_other_page_bindings(
     indexed = {row["task_id"]: row for row in rows}
     assert "binding" not in indexed[first]
     assert indexed[second]["binding"]["beads"] == ["fx-solo"]
+
+
+def test_closed_batch_admission_refuses_before_reading_or_claiming_members(
+    config: Config, project_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    descriptor = project_root / ".agentctl/project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            "[packets]\n", '[packets]\nadmission = "closed"\n'
+        )
+    )
+    project = load_project_adapter(project_root)
+
+    def unexpected_members(*args, **kwargs):
+        raise AssertionError("closed project attempted to read batch members")
+
+    monkeypatch.setattr(start, "_member_sets", unexpected_members)
+    with pytest.raises(BatchRefusal, match="batch admission is closed"):
+        start.start(config, project, ["fixture-task"])

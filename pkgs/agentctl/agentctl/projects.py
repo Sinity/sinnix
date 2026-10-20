@@ -96,6 +96,7 @@ _MEMORY_SIZE = re.compile(r"[1-9][0-9]*[KMGT]?\Z")
 # `[packets.review]` names the reviewer's and integrator's agent.
 _PACKETS_FIELDS = frozenset(
     {
+        "admission",
         "template",
         "atlas_dir",
         "branch_prefix",
@@ -238,6 +239,7 @@ class WorkspacePolicy:
 class PacketsPolicy:
     """The descriptor's `[packets]`; None or empty means the compiler's default."""
 
+    admission: str = "open"
     template: Path | None = None
     atlas_dir: Path | None = None
     branch_prefix: str | None = None
@@ -334,6 +336,7 @@ class ProjectAdapter:
             "root": str(self.root),
             "descriptor": str(self.descriptor),
             "digest": self.digest,
+            "batch_admission": self.packets.admission,
             "environment": self.environment.catalog_row(),
             "workspace": self.workspace.catalog_row() if self.workspace else None,
             "operations": [operation.catalog_row() for operation in self.operations],
@@ -494,7 +497,12 @@ def _packets(raw: Mapping[str, Any], root: Path, descriptor: Path) -> PacketsPol
             f"{descriptor} [packets.defaults] may set only "
             + ", ".join(_PACKETS_DEFAULTS)
         )
-    fields: dict[str, Any] = {}
+    admission = packets.get("admission", "open")
+    if admission not in ("open", "closed"):
+        raise ProjectConfigError(
+            f"{descriptor} packets.admission must be open or closed"
+        )
+    fields: dict[str, Any] = {"admission": admission}
     for name in ("template", "atlas_dir"):
         if name in packets:
             value = packets[name]

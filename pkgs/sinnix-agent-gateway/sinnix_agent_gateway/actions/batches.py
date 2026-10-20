@@ -44,6 +44,7 @@ _TERMINAL_STAGES = {"landed", "abandoned"}
 # agentctl's refusal codes as a typed failure plus the action that follows.
 # A code absent here keeps the owner's own class.
 _REFUSALS: dict[str, tuple[str, str]] = {
+    "admission_closed": ("conflict", "operations.run"),
     "unknown_run": ("not_found", "batches.list"),
     "ambiguous_run": ("conflict", "batches.list"),
     "worker_missing": ("not_found", "batches.status"),

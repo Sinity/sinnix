@@ -432,7 +432,16 @@ Unknown operation fields are ignored with a warning.
 - `retain_artifacts`: globs copied into run state before a checkout is
   released.
 
-`[packets]` declares `template`, `atlas_dir`, `branch_prefix`,
+`[packets] admission = "closed"` refuses new batches before task reads, claims,
+worktree creation or queue submission. The default is `"open"`; existing run
+reads and recovery controls keep their original contracts. Sinnix closes new
+admission and uses native changes with declared operations. Other projects
+retain the shared engine until their callers and accepted work move. During a
+supported rollback, retain the closed descriptor and compatible admission check;
+older binaries are recovery-only and must not be activated as new-batch launchers.
+This supported-route policy does not revoke arbitrary same-user native authority.
+
+`[packets]` also declares `template`, `atlas_dir`, `branch_prefix`,
 `[packets.model_policy.<name>]`, `[packets.defaults]` and `[packets.review]`.
 An unknown table takes the project out of service; an unknown field in a
 known table is ignored with a warning.

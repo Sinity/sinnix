@@ -29,6 +29,7 @@ REVIEW_PROFILE = "review"
 # Every code a BatchRefusal may carry, with its meaning. `docs/agentctl.md`
 # renders this table; a refusal outside it is a programming error.
 REFUSALS: dict[str, str] = {
+    "admission_closed": "the project accepts native changes instead of new batches",
     "abandoned": "the run was abandoned; nothing runs again",
     "already_accepted": "the run has an acceptance record; nothing runs again",
     "ambiguous_run": "the suffix names more than one run",

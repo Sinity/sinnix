@@ -760,6 +760,12 @@ def start(
     A run already prepared for the same member set is returned unchanged; one
     left half-prepared is completed. Nothing launches twice.
     """
+    if project.packets.admission == "closed":
+        raise BatchRefusal(
+            "admission_closed",
+            f"{project.project_id} batch admission is closed; use native changes and declared operations. "
+            "Existing runs remain available through batch status and recovery controls.",
+        )
     if harness not in HARNESSES:
         raise BatchRefusal("harness", f"harness must be one of {HARNESSES}")
     if len(set(mcp_servers)) != len(mcp_servers) or any(
