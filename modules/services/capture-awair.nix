@@ -10,7 +10,6 @@
 # (`ssh sinnix-gw cat /tmp/dhcp.leases`) instead.
 {
   mkServiceModule,
-  mkCaptureLane,
   pkgs,
   lib,
   config,
@@ -18,7 +17,6 @@
   ...
 }@args:
 let
-  username = config.sinnix.user.name;
   inherit (config.sinnix.paths) healthRoot;
   laneDir = "${healthRoot}/environment";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
@@ -58,30 +56,38 @@ let
     '';
   };
 in
-mkServiceModule (mkCaptureLane {
+mkServiceModule {
   name = "capture-awair";
   description = "Awair Element air-quality capture (local API, no cloud)";
-  inherit username laneDir;
-  mode = "poll";
-  captureName = "environment";
-  cadenceSeconds = 60;
-  # Unlike media or clipboard lanes, silence here is never legitimate: the
-  # room always has air. A gap means the device is unplugged, off the
-  # network, or the lane is broken -- all worth surfacing.
-  staleAfterSeconds = 900;
-  execStart = lib.concatStringsSep " " [
-    "${poller}/bin/capture-awair-poll"
-    cfg.host
-    "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
-    healthRoot
-  ];
-  timer = {
-    intervalSec = cfg.intervalSec;
-    onBootSec = "2min";
-    accuracySec = "10s";
+  configFn = _: {
+    sinnix.capture.producers.capture-awair = {
+      directories = [ laneDir ];
+      outputs = [
+        {
+          name = "environment";
+          path = laneDir;
+          cadenceSeconds = cfg.intervalSec;
+          # Unlike media or clipboard lanes, silence here is never legitimate: the
+          # room always has air. A gap means the device is unplugged, off the
+          # network, or the lane is broken -- all worth surfacing.
+          staleAfterSeconds = 900;
+        }
+      ];
+      execStart = lib.concatStringsSep " " [
+        "${poller}/bin/capture-awair-poll"
+        cfg.host
+        "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
+        healthRoot
+      ];
+      poll.timer = {
+        intervalSec = cfg.intervalSec;
+        onBootSec = "2min";
+        accuracySec = "10s";
+      };
+      description = "Poll the Awair Element local API into the capture lake";
+      poll.timer.description = "Periodic trigger for the Awair air-quality capture";
+    };
   };
-  unitDescription = "Poll the Awair Element local API into the capture lake";
-  timerDescription = "Periodic trigger for the Awair air-quality capture";
   extraOptions = {
     host = lib.mkOption {
       type = lib.types.str;
@@ -101,4 +107,4 @@ mkServiceModule (mkCaptureLane {
       '';
     };
   };
-}) args
+} args

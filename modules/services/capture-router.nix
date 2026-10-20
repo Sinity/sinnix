@@ -24,7 +24,6 @@
 # nlbwmon once-per-closed-month backfill.
 {
   mkServiceModule,
-  mkCaptureLane,
   pkgs,
   lib,
   config,
@@ -32,7 +31,6 @@
   ...
 }@args:
 let
-  username = config.sinnix.user.name;
   lakeRoot = config.sinnix.paths.machineRoot;
   routerRoot = "${lakeRoot}/router";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
@@ -57,7 +55,7 @@ let
     text = builtins.readFile ../../pkgs/sinnix-capture-router/poll.sh;
   };
 in
-mkServiceModule (mkCaptureLane {
+mkServiceModule {
   name = "capture-router";
   description = "Pull sinnix-gw's syslog, nlbwmon, DHCP leases, and wifi associations into the capture lake";
   extraOptions = {
@@ -86,60 +84,62 @@ mkServiceModule (mkCaptureLane {
       '';
     };
   };
-  mode = "poll";
-  inherit username;
-  laneDir = routerRoot;
-  captures = [
-    {
-      name = "router-leases";
-      path = "${routerRoot}/leases";
-      cadenceSeconds = 1800;
-      # Leases are a volatile snapshot (lost on router reboot); a gap
-      # here means the lane broke or the router is unreachable, not that
-      # nothing happened, since some lease always exists once any device
-      # has ever joined.
-      staleAfterSeconds = 7200;
-    }
-    {
-      name = "router-associations";
-      path = "${routerRoot}/associations";
-      cadenceSeconds = 1800;
-      # An empty association list is completely normal (nobody home /
-      # everyone off wifi) -- but the poll itself still always produces a
-      # record, empty or not, so staleness here still correctly means
-      # "the poll stopped happening".
-      staleAfterSeconds = 7200;
-    }
-    {
-      name = "router-nlbw";
-      path = "${routerRoot}/nlbw";
-      cadenceSeconds = 1800;
-      staleAfterSeconds = 7200;
-    }
-    {
-      name = "router-syslog";
-      path = "${routerRoot}/syslog";
-      cadenceSeconds = 1800;
-      # No staleAfterSeconds: genuinely silent intervals are normal on a
-      # quiet home LAN, and poll.sh deliberately writes no envelope at
-      # all for an empty syslog delta (unlike the other three sub-lanes),
-      # so cadence-based staleness would false-positive on ordinary quiet
-      # nights rather than signal a broken lane.
-    }
-  ];
-  execStart = lib.concatStringsSep " " [
-    "${poller}/bin/capture-router-poll"
-    cfg.host
-    "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
-    routerRoot
-    "${remotePollScript}"
-    "${remotePeriodsScript}"
-  ];
-  timer = {
-    intervalSec = cfg.intervalSec;
-    onBootSec = "5min";
-    accuracySec = "30s";
+  configFn = _: {
+    sinnix.capture.producers.capture-router = {
+      directories = [ routerRoot ];
+      outputs = [
+        {
+          name = "router-leases";
+          path = "${routerRoot}/leases";
+          cadenceSeconds = cfg.intervalSec;
+          # Leases are a volatile snapshot (lost on router reboot); a gap
+          # here means the lane broke or the router is unreachable, not that
+          # nothing happened, since some lease always exists once any device
+          # has ever joined.
+          staleAfterSeconds = 7200;
+        }
+        {
+          name = "router-associations";
+          path = "${routerRoot}/associations";
+          cadenceSeconds = cfg.intervalSec;
+          # An empty association list is completely normal (nobody home /
+          # everyone off wifi) -- but the poll itself still always produces a
+          # record, empty or not, so staleness here still correctly means
+          # "the poll stopped happening".
+          staleAfterSeconds = 7200;
+        }
+        {
+          name = "router-nlbw";
+          path = "${routerRoot}/nlbw";
+          cadenceSeconds = cfg.intervalSec;
+          staleAfterSeconds = 7200;
+        }
+        {
+          name = "router-syslog";
+          path = "${routerRoot}/syslog";
+          cadenceSeconds = cfg.intervalSec;
+          # No staleAfterSeconds: genuinely silent intervals are normal on a
+          # quiet home LAN, and poll.sh deliberately writes no envelope at
+          # all for an empty syslog delta (unlike the other three sub-lanes),
+          # so cadence-based staleness would false-positive on ordinary quiet
+          # nights rather than signal a broken lane.
+        }
+      ];
+      execStart = lib.concatStringsSep " " [
+        "${poller}/bin/capture-router-poll"
+        cfg.host
+        "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
+        routerRoot
+        "${remotePollScript}"
+        "${remotePeriodsScript}"
+      ];
+      poll.timer = {
+        intervalSec = cfg.intervalSec;
+        onBootSec = "5min";
+        accuracySec = "30s";
+      };
+      description = "Pull sinnix-gw telemetry (syslog, nlbwmon, leases, associations) into the capture lake";
+      poll.timer.description = "Periodic trigger for the router telemetry capture";
+    };
   };
-  unitDescription = "Pull sinnix-gw telemetry (syslog, nlbwmon, leases, associations) into the capture lake";
-  timerDescription = "Periodic trigger for the router telemetry capture";
-}) args
+} args

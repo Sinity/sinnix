@@ -11,7 +11,6 @@
 # position, why writes shell out to the sinnix-capture CLI).
 {
   mkServiceModule,
-  mkCaptureLane,
   lib,
   pkgs,
   config,
@@ -19,7 +18,6 @@
   ...
 }@args:
 let
-  username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   lakeRoot = config.sinnix.paths.activityRoot;
   mprisDir = "${config.sinnix.paths.capturePaths.mpris}";
@@ -36,7 +34,7 @@ let
     + builtins.readFile ../../pkgs/sinnix-capture-mpris/monitor.py;
   };
 in
-mkServiceModule (mkCaptureLane {
+mkServiceModule {
   name = "capture-mpris";
   defaultOnDesktop = true;
   description = "MPRIS media-player track/status capture with playback heartbeat";
@@ -51,14 +49,22 @@ mkServiceModule (mkCaptureLane {
       '';
     };
   };
-  inherit username;
-  laneDir = mprisDir;
-  mode = "stream";
-  captureName = "mpris";
-  eventDriven = true;
-  # Media listening is optional and intermittent: a fully quiet week is a
-  # legitimate "nothing was played" outcome, not a broken daemon.
-  staleAfterSeconds = 604800;
-  execStart = "${monitor}/bin/capture-mpris-monitor --capture-root ${lakeRoot} --lane mpris --playerctl-bin ${pkgs.playerctl}/bin/playerctl --sinnix-capture-bin ${scriptPkgs.sinnix-capture}/bin/sinnix-capture --heartbeat-interval ${toString cfg.heartbeatIntervalSec}";
-  unitDescription = "MPRIS media-player track/status capture with playback heartbeat";
-}) args
+  configFn = _: {
+    sinnix.capture.producers.capture-mpris = {
+      directories = [ mprisDir ];
+      outputs = [
+        {
+          path = mprisDir;
+          name = "mpris";
+          eventDriven = true;
+          # Media listening is optional and intermittent: a fully quiet week is a
+          # legitimate "nothing was played" outcome, not a broken daemon.
+          staleAfterSeconds = 604800;
+        }
+      ];
+      execStart = "${monitor}/bin/capture-mpris-monitor --capture-root ${lakeRoot} --lane mpris --playerctl-bin ${pkgs.playerctl}/bin/playerctl --sinnix-capture-bin ${scriptPkgs.sinnix-capture}/bin/sinnix-capture --heartbeat-interval ${toString cfg.heartbeatIntervalSec}";
+      description = "MPRIS media-player track/status capture with playback heartbeat";
+      stream = { };
+    };
+  };
+} args

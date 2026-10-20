@@ -5,11 +5,6 @@ let
   featureLib = import ../modules/lib/features.nix { inherit lib; };
   systemdLib = import ../modules/lib/systemd.nix { inherit lib; };
   overlayLib = import ../modules/lib/overlay-helpers.nix { inherit lib; };
-  # mkCaptureLane builds ON mkServiceModule (callers do
-  # `mkServiceModule (mkCaptureLane { ... }) args`) rather than wrapping it,
-  # so it needs no reference to mkServiceModule itself -- just lib, like
-  # featureLib/systemdLib/overlayLib.
-  captureLaneLib = import ../modules/lib/capture-lane.nix { inherit lib; };
   # The one renderer for scheduled-oneshot jobs; mkServiceModule's `job`
   # argument is sugar over it, and multi-job or non-factory modules call it
   # directly as lib.sinnix.mkScheduledJob.
@@ -92,9 +87,7 @@ let
   mkSharedSpecialArgs = specialInputs: {
     inputs = specialInputs;
     inherit (featureLib) mkFeatureModule mkServiceModule mkAiService;
-    # capture-lane.nix exports the factory function directly (not wrapped in
-    # an attrset), so this is a plain binding, not an inherit-from-set.
-    mkCaptureLane = captureLaneLib;
+
     helpers = {
       inherit (featureLib) mkDotsFileFor;
       # pkgs.sinnixScriptRegistry is attached once per host by mkBaseModules'

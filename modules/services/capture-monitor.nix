@@ -10,7 +10,6 @@
 # the interval generous; this is not a lane to tighten for freshness.
 {
   mkServiceModule,
-  mkCaptureLane,
   pkgs,
   lib,
   config,
@@ -18,7 +17,6 @@
   ...
 }@args:
 let
-  username = config.sinnix.user.name;
   lakeRoot = config.sinnix.paths.machineRoot;
   laneDir = "${lakeRoot}/monitor";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
@@ -80,32 +78,9 @@ let
     '';
   };
 in
-mkServiceModule (mkCaptureLane {
+mkServiceModule {
   name = "capture-monitor";
   description = "AORUS FO48U DDC/CI sensor capture: power state, brightness/contrast drift, input source";
-  inherit username laneDir;
-  mode = "poll";
-  captureName = "monitor";
-  cadenceSeconds = cfg.intervalSec;
-  # A gap here means the panel is off, unplugged, or DDC broke -- all worth
-  # surfacing, but on a slower clock than a live sensor: normal sleep/wake
-  # or an input switch can legitimately silence a poll or two.
-  staleAfterSeconds = 3600;
-  execStart = lib.concatStringsSep " " [
-    "${poller}/bin/capture-monitor-poll"
-    "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
-    lakeRoot
-  ];
-  # /dev/i2c-* is group-owned (i2c) and the service inherits the operator's
-  # supplementary groups via systemd --user, so no DeviceAllow is needed as
-  # long as PrivateDevices stays unset.
-  timer = {
-    intervalSec = cfg.intervalSec;
-    onBootSec = "3min";
-    accuracySec = "30s";
-  };
-  unitDescription = "Poll the AORUS FO48U over DDC/CI into the capture lake";
-  timerDescription = "Periodic trigger for the monitor DDC/CI capture";
   extraOptions = {
     intervalSec = lib.mkOption {
       type = lib.types.ints.positive;
@@ -117,4 +92,35 @@ mkServiceModule (mkCaptureLane {
       '';
     };
   };
-}) args
+  configFn = _: {
+    sinnix.capture.producers.capture-monitor = {
+      directories = [ laneDir ];
+      outputs = [
+        {
+          path = laneDir;
+          name = "monitor";
+          cadenceSeconds = cfg.intervalSec;
+          # A gap here means the panel is off, unplugged, or DDC broke -- all worth
+          # surfacing, but on a slower clock than a live sensor: normal sleep/wake
+          # or an input switch can legitimately silence a poll or two.
+          staleAfterSeconds = 3600;
+        }
+      ];
+      execStart = lib.concatStringsSep " " [
+        "${poller}/bin/capture-monitor-poll"
+        "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
+        lakeRoot
+      ];
+      # /dev/i2c-* is group-owned (i2c) and the service inherits the operator's
+      # supplementary groups via systemd --user, so no DeviceAllow is needed as
+      # long as PrivateDevices stays unset.
+      poll.timer = {
+        intervalSec = cfg.intervalSec;
+        onBootSec = "3min";
+        accuracySec = "30s";
+      };
+      description = "Poll the AORUS FO48U over DDC/CI into the capture lake";
+      poll.timer.description = "Periodic trigger for the monitor DDC/CI capture";
+    };
+  };
+} args

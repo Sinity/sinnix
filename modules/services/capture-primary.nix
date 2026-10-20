@@ -23,7 +23,6 @@
 # selection; two separate selections a few seconds apart still both land.
 {
   mkServiceModule,
-  mkCaptureLane,
   lib,
   pkgs,
   config,
@@ -31,7 +30,6 @@
   ...
 }@args:
 let
-  username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   captureCli = scriptPkgs.sinnix-capture;
 
@@ -70,7 +68,7 @@ let
   };
   cfg = config.sinnix.services.capture-primary;
 in
-mkServiceModule (mkCaptureLane {
+mkServiceModule {
   name = "capture-primary";
   defaultOnDesktop = true;
   description = "Continuous Wayland PRIMARY-selection capture lane (wl-paste --primary --watch -> sinnix-capture)";
@@ -86,25 +84,33 @@ mkServiceModule (mkCaptureLane {
       '';
     };
   };
-  inherit username laneDir;
-  mode = "stream";
-  captureName = "primary";
-  eventDriven = true;
-  # PRIMARY activity depends entirely on whether the operator is doing
-  # text-heavy reading/selecting -- genuinely intermittent, so a week-long
-  # budget, same as the clipboard and mpris lanes.
-  staleAfterSeconds = 604800;
-  tmpfilesRules = [
-    "d ${laneDir} 0700 ${username} users -"
-    "d ${blobDir} 0700 ${username} users -"
-    "d ${stateDir} 0700 ${username} users -"
-  ];
-  execStart = "${pkgs.wl-clipboard}/bin/wl-paste --primary --watch ${primaryWatch}/bin/sinnix-capture-primary-watch";
-  environment = [
-    "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.activityRoot}"
-    "SINNIX_CAPTURE_PRIMARY_STATE_DIR=${stateDir}"
-    "SINNIX_CAPTURE_PRIMARY_DEBOUNCE_MS=${toString cfg.debounceMs}"
-  ];
-  umask = "0077";
-  unitDescription = "Wayland PRIMARY-selection capture lane";
-}) args
+  configFn = _: {
+    sinnix.capture.producers.capture-primary = {
+      directories = [
+        laneDir
+        blobDir
+        stateDir
+      ];
+      outputs = [
+        {
+          path = laneDir;
+          name = "primary";
+          eventDriven = true;
+          # PRIMARY activity depends entirely on whether the operator is doing
+          # text-heavy reading/selecting -- genuinely intermittent, so a week-long
+          # budget, same as the clipboard and mpris lanes.
+          staleAfterSeconds = 604800;
+        }
+      ];
+      execStart = "${pkgs.wl-clipboard}/bin/wl-paste --primary --watch ${primaryWatch}/bin/sinnix-capture-primary-watch";
+      environment = [
+        "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.activityRoot}"
+        "SINNIX_CAPTURE_PRIMARY_STATE_DIR=${stateDir}"
+        "SINNIX_CAPTURE_PRIMARY_DEBOUNCE_MS=${toString cfg.debounceMs}"
+      ];
+
+      description = "Wayland PRIMARY-selection capture lane";
+      stream = { };
+    };
+  };
+} args

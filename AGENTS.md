@@ -41,8 +41,8 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
 ## Modules
 
 - Use the factories: `mkFeatureModule` for default-on features,
-  `mkServiceModule` for default-off services, `mkCaptureLane` for capture
-  lanes, and `lib.sinnix.mkScheduledJob` for every scheduled oneshot (its
+  `mkServiceModule` for default-off services, typed `sinnix.capture.producers`
+  for unit-owned capture, and `lib.sinnix.mkScheduledJob` for scheduled oneshots (its
   registration provides failure notification and resource placement; never
   hand-wire a second timer or notifier). Bypassing a factory needs a
   structural reason. Plain helpers imported by a module stay out of

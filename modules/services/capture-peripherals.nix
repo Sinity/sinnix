@@ -4,7 +4,6 @@
 # Disconnected devices and inactive transports legitimately produce no records.
 {
   mkServiceModule,
-  mkCaptureLane,
   pkgs,
   lib,
   config,
@@ -12,7 +11,6 @@
   ...
 }@args:
 let
-  username = config.sinnix.user.name;
   peripheralsRoot = config.sinnix.paths.machinePaths.peripheral;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   cfg = config.sinnix.services.capture-peripherals;
@@ -36,53 +34,9 @@ let
     text = builtins.readFile ../../pkgs/sinnix-capture-peripherals/poll.sh;
   };
 in
-mkServiceModule (mkCaptureLane {
+mkServiceModule {
   name = "capture-peripherals";
   description = "Poll Logitech HID++ and paired Bluetooth audio device telemetry into the capture lake";
-  mode = "poll";
-  inherit username;
-  laneDir = peripheralsRoot;
-  captures = [
-    {
-      name = "peripherals-logitech";
-      path = "${peripheralsRoot}/logitech";
-      cadenceSeconds = cfg.intervalSec;
-      # A receiver with nothing paired, or an empty result if solaar sees
-      # no receiver at all, is a legitimate desk state -- staleness here
-      # only means the poll itself stopped happening.
-      staleAfterSeconds = cfg.intervalSec * 4;
-    }
-    {
-      name = "peripherals-bt-battery";
-      path = "${peripheralsRoot}/bt-battery";
-      cadenceSeconds = cfg.intervalSec;
-      # No staleAfterSeconds: an empty battery[] array is the normal state
-      # whenever every paired audio device is out of range or powered off
-      # (closed earbuds case, speaker unplugged), which is common and not
-      # a lane failure -- unlike capture-awair's always-on room sensor.
-    }
-    {
-      name = "peripherals-bt-audio";
-      path = "${peripheralsRoot}/bt-audio";
-      cadenceSeconds = cfg.intervalSec;
-      # Same reasoning: no transport is active whenever nothing is
-      # currently streaming audio to a Bluetooth sink.
-    }
-  ];
-  execStart = lib.concatStringsSep " " [
-    "${poller}/bin/capture-peripherals-poll"
-    "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
-    peripheralsRoot
-    "${parseBluez}"
-    "${parseSolaar}"
-  ];
-  timer = {
-    intervalSec = cfg.intervalSec;
-    onBootSec = "3min";
-    accuracySec = "15s";
-  };
-  unitDescription = "Poll Logitech + Bluetooth audio device telemetry into the capture lake";
-  timerDescription = "Periodic trigger for the peripherals capture";
   extraOptions = {
     intervalSec = lib.mkOption {
       type = lib.types.ints.positive;
@@ -94,4 +48,50 @@ mkServiceModule (mkCaptureLane {
       '';
     };
   };
-}) args
+  configFn = _: {
+    sinnix.capture.producers.capture-peripherals = {
+      directories = [ peripheralsRoot ];
+      outputs = [
+        {
+          name = "peripherals-logitech";
+          path = "${peripheralsRoot}/logitech";
+          cadenceSeconds = cfg.intervalSec;
+          # A receiver with nothing paired, or an empty result if solaar sees
+          # no receiver at all, is a legitimate desk state -- staleness here
+          # only means the poll itself stopped happening.
+          staleAfterSeconds = cfg.intervalSec * 4;
+        }
+        {
+          name = "peripherals-bt-battery";
+          path = "${peripheralsRoot}/bt-battery";
+          cadenceSeconds = cfg.intervalSec;
+          # No staleAfterSeconds: an empty battery[] array is the normal state
+          # whenever every paired audio device is out of range or powered off
+          # (closed earbuds case, speaker unplugged), which is common and not
+          # a lane failure -- unlike capture-awair's always-on room sensor.
+        }
+        {
+          name = "peripherals-bt-audio";
+          path = "${peripheralsRoot}/bt-audio";
+          cadenceSeconds = cfg.intervalSec;
+          # Same reasoning: no transport is active whenever nothing is
+          # currently streaming audio to a Bluetooth sink.
+        }
+      ];
+      execStart = lib.concatStringsSep " " [
+        "${poller}/bin/capture-peripherals-poll"
+        "${scriptPkgs.sinnix-capture}/bin/sinnix-capture"
+        peripheralsRoot
+        "${parseBluez}"
+        "${parseSolaar}"
+      ];
+      poll.timer = {
+        intervalSec = cfg.intervalSec;
+        onBootSec = "3min";
+        accuracySec = "15s";
+      };
+      description = "Poll Logitech + Bluetooth audio device telemetry into the capture lake";
+      poll.timer.description = "Periodic trigger for the peripherals capture";
+    };
+  };
+} args

@@ -18,7 +18,6 @@
 # sensitivity is handled at consumption time. Do not add redaction here.
 {
   mkServiceModule,
-  mkCaptureLane,
   lib,
   pkgs,
   config,
@@ -26,7 +25,6 @@
   ...
 }@args:
 let
-  username = config.sinnix.user.name;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   captureCli = scriptPkgs.sinnix-capture;
 
@@ -62,27 +60,35 @@ let
     '';
   };
 in
-mkServiceModule (mkCaptureLane {
+mkServiceModule {
   name = "capture-clipboard";
   defaultOnDesktop = true;
   description = "Continuous Wayland clipboard capture lane (wl-paste --watch -> sinnix-capture)";
-  inherit username laneDir;
-  mode = "stream";
-  captureName = "clipboard";
-  eventDriven = true;
-  # Genuinely bursty/idle-tolerant: an operator can go a full week without
-  # copying anything new (travel, laptop-only stretches).
-  staleAfterSeconds = 604800;
-  tmpfilesRules = [
-    "d ${laneDir} 0700 ${username} users -"
-    "d ${blobDir} 0700 ${username} users -"
-    "d ${stateDir} 0700 ${username} users -"
-  ];
-  execStart = "${pkgs.wl-clipboard}/bin/wl-paste --watch ${clipboardWatch}/bin/sinnix-capture-clipboard-watch";
-  environment = [
-    "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.activityRoot}"
-    "SINNIX_CAPTURE_CLIPBOARD_STATE_DIR=${stateDir}"
-  ];
-  umask = "0077";
-  unitDescription = "Wayland clipboard capture lane";
-}) args
+  configFn = _: {
+    sinnix.capture.producers.capture-clipboard = {
+      directories = [
+        laneDir
+        blobDir
+        stateDir
+      ];
+      outputs = [
+        {
+          path = laneDir;
+          name = "clipboard";
+          eventDriven = true;
+          # Genuinely bursty/idle-tolerant: an operator can go a full week without
+          # copying anything new (travel, laptop-only stretches).
+          staleAfterSeconds = 604800;
+        }
+      ];
+      execStart = "${pkgs.wl-clipboard}/bin/wl-paste --watch ${clipboardWatch}/bin/sinnix-capture-clipboard-watch";
+      environment = [
+        "SINNIX_CAPTURE_ROOT=${config.sinnix.paths.activityRoot}"
+        "SINNIX_CAPTURE_CLIPBOARD_STATE_DIR=${stateDir}"
+      ];
+
+      description = "Wayland clipboard capture lane";
+      stream = { };
+    };
+  };
+} args

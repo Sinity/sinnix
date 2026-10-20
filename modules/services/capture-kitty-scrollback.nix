@@ -5,7 +5,6 @@
 # kitty-scrollback lane a real owning unit the health sweep can track.
 {
   mkServiceModule,
-  mkCaptureLane,
   lib,
   pkgs,
   config,
@@ -20,7 +19,7 @@ let
   progressPath = "${progressDir}/kitty-scrollback";
   cfg = config.sinnix.services.capture-kitty-scrollback;
 in
-mkServiceModule (mkCaptureLane {
+mkServiceModule {
   name = "capture-kitty-scrollback";
   defaultOnDesktop = true;
   description = "Periodic full-ANSI kitty terminal scrollback capture";
@@ -31,32 +30,43 @@ mkServiceModule (mkCaptureLane {
       description = "Minutes between scrollback capture runs.";
     };
   };
-  inherit username;
-  laneDir = scrollbackDir;
-  mode = "poll";
-  captureName = "kitty-scrollback";
-  eventDriven = true;
-  # No kitty windows open for a full day is itself a real signal (host
-  # idle/away), not just a quiet capture lane.
-  staleAfterSeconds = 86400;
-  producerProgressPath = progressPath;
-  # Not restartable: this is a oneshot triggered by the timer, not a
-  # long-running daemon a restart could bring back.
-  restartable = false;
-  execStart = "${scriptPkgs.kitty-scrollback-capture}/bin/kitty-scrollback-capture";
-  environment = [
-    "KITTY_SCROLLBACK_DIR=${scrollbackDir}"
-    "KITTY_SCROLLBACK_PROGRESS_MARKER=${progressPath}"
-  ];
-  extraConfig = _: {
-    systemd.tmpfiles.rules = [ "d ${progressDir} 0700 ${username} users -" ];
-  };
-  pollAfter = [ "graphical-session.target" ];
-  timer = {
-    intervalSec = cfg.intervalMinutes * 60;
-    onStartupSec = "2min";
-    persistent = true;
-  };
-  unitDescription = "Full-ANSI kitty terminal scrollback capture";
-  timerDescription = "Periodic trigger for kitty scrollback capture";
-}) args
+  configFn =
+    _:
+    lib.mkMerge [
+      {
+        sinnix.capture.producers.capture-kitty-scrollback = {
+          directories = [ scrollbackDir ];
+          outputs = [
+            {
+              path = scrollbackDir;
+              name = "kitty-scrollback";
+              eventDriven = true;
+              # No kitty windows open for a full day is itself a real signal (host
+              # idle/away), not just a quiet capture lane.
+              staleAfterSeconds = 86400;
+              producerProgressPath = progressPath;
+              # Not restartable: this is a oneshot triggered by the timer, not a
+              # long-running daemon a restart could bring back.
+            }
+          ];
+          operatorRestart = false;
+          execStart = "${scriptPkgs.kitty-scrollback-capture}/bin/kitty-scrollback-capture";
+          environment = [
+            "KITTY_SCROLLBACK_DIR=${scrollbackDir}"
+            "KITTY_SCROLLBACK_PROGRESS_MARKER=${progressPath}"
+          ];
+          poll.after = [ "graphical-session.target" ];
+          poll.timer = {
+            intervalSec = cfg.intervalMinutes * 60;
+            onStartupSec = "2min";
+            persistent = true;
+          };
+          description = "Full-ANSI kitty terminal scrollback capture";
+          poll.timer.description = "Periodic trigger for kitty scrollback capture";
+        };
+      }
+      {
+        systemd.tmpfiles.rules = [ "d ${progressDir} 0700 ${username} users -" ];
+      }
+    ];
+} args
