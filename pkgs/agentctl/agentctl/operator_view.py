@@ -15,11 +15,11 @@ from datetime import UTC, datetime
 from typing import Any, Mapping, Sequence
 
 from . import github, job_queries, pueue
+from .batch_history import Run, list_runs, load, short_run_id
 from .config import Config
 from .github import GithubError
 from .job_queries import job_view
 from .limits import SHORT_ID
-from .manifest import Run, list_runs, load, short_run_id
 from .projects import ProjectAdapter
 from .prompts import PromptError, SubprocessBdReader
 from .pueue import PueueError, Task

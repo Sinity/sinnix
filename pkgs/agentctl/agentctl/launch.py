@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence, TextIO
 
-from . import artifacts, gitcmd, job_queries, manifest, pools, pueue
+from . import artifacts, batch_history, gitcmd, job_queries, pools, pueue
 from .config import Config
 from .launch_input import scratch_path, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
@@ -384,7 +384,7 @@ def _admission_hold(config: Config, group: str, *, label: str) -> dict[str, Any]
         "pool": group,
         "excluded_by": list(partners),
         "waiting_for": list(blocking),
-        "held_at": manifest.now(),
+        "held_at": datetime.now(UTC).isoformat(),
     }
 
 
@@ -1218,7 +1218,7 @@ def clean(config: Config, task_id: int, job_id: str | None = None) -> dict[str, 
 
 def _live_run_jobs(config: Config, tasks: Mapping[int, Task]) -> set[int]:
     """Jobs a live batch still needs, including attempts predating stable job ids."""
-    runs = [run for run in manifest.list_runs(config, strict=True) if run.live]
+    runs = [run for run in batch_history.list_runs(config, strict=True) if run.live]
     run_ids = {run.run_id for run in runs}
     worktrees: set[str] = set()
     retained: set[int] = set()

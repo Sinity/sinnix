@@ -48,6 +48,7 @@ from . import (
     pressure,
     results,
 )
+from .batch_history import HistoryError, HistoryRefusal, list_runs, load, resolve_run_id
 from .config import Config, ConfigError, load_config, resolve_project
 from .github import GithubError
 from .job_queries import JobError
@@ -55,9 +56,6 @@ from .manifest import (
     HARNESSES,
     BatchError,
     BatchRefusal,
-    list_runs,
-    load,
-    resolve_run_id,
 )
 from .operator_view import DEFAULT_JOB_ROWS, Output, local_clock, table
 from .projects import (
@@ -83,6 +81,7 @@ FOLLOW_POLL_SECONDS = 1.0
 MAX_EVENT_LINE_BYTES = 1024 * 1024
 
 _REFUSALS = (
+    HistoryRefusal,
     BatchRefusal,
     ConfigError,
     JobError,
@@ -90,7 +89,7 @@ _REFUSALS = (
     ProjectConfigError,
     ProjectEnvironmentError,
 )
-_SUBSTRATE_ERRORS = (BatchError, GithubError, PueueError, WorktrunkError)
+_SUBSTRATE_ERRORS = (BatchError, HistoryError, GithubError, PueueError, WorktrunkError)
 
 PROJECT_HELP = "project id or checkout path (default: the checkout enclosing the working directory)"
 
