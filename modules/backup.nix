@@ -45,10 +45,6 @@ let
   # unattended whenever ingestion resumes.
   polylogueStateRoot = config.sinnix.services.polylogue.dataDir;
   polylogueBackupRoot = "${realmRoot}/state/db-dumps/polylogue";
-  # A writable aside copy of Polylogue state from before the 2026-09 reindex.
-  # As a nested subvolume no realm snapshot reaches it; the Polylogue Borg
-  # job archives it.
-  polylogueAsideRoot = "${realmRoot}/state/polylogue-aside-20260926T182000Z";
   # The daemon's live SQLite databases at the top level of the state root.
   # index.db is deliberately NOT in this list: the symlink points into
   # .index-generations/ at a 40.5 GB derived rebuild-generation product --
@@ -1290,7 +1286,6 @@ in
           username
           polylogueStateRoot
           polylogueBackupRoot
-          polylogueAsideRoot
           polylogueDbNames
           polylogueDbExcludes
           borgDrainStateRoot

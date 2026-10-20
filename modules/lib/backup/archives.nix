@@ -8,7 +8,6 @@
   username,
   polylogueStateRoot,
   polylogueBackupRoot,
-  polylogueAsideRoot,
   polylogueDbNames,
   polylogueDbExcludes,
   borgDrainStateRoot,
@@ -208,13 +207,6 @@
       stage_root=${lib.escapeShellArg "${realmRoot}/state/cache/polylogue-backup-hooks"}
       install -d -m 0700 -o root -g root "$stage_root"
       install -d -m 0700 -o root -g root "$stage_root/cuts"
-      # The aside subvolume holds a pre-reindex copy of Polylogue state that
-      # no snapshot reaches: realm snapshots stop at nested subvolumes. It is
-      # archived here, beside the live state its blobs deduplicate against.
-      aside_sources=()
-      if [ -d ${lib.escapeShellArg polylogueAsideRoot} ]; then
-        aside_sources+=(${lib.escapeShellArg polylogueAsideRoot})
-      fi
       echo "polylogue state backup phase: creating archive"
       with_borg_lock ${pkgs.python3}/bin/python3 ${./cut-polylogue-hooks.py} \
         ${lib.escapeShellArg polylogueStateRoot} "$stage_root/cuts" -- borg create \
@@ -225,8 +217,7 @@
         } \
         --exclude ${lib.escapeShellArg "${polylogueStateRoot}/hooks/**"} \
         "::$archive_name" \
-        ${lib.escapeShellArg polylogueStateRoot} \
-        "''${aside_sources[@]}"
+        ${lib.escapeShellArg polylogueStateRoot}
       echo "polylogue state backup complete: $archive_name"
 
       install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
