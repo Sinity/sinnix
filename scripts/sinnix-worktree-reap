@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Remove inactive integrated worktrees, retaining unknown directories
+# runtimeInputs: coreutils git worktrunk
+# docs: docs/worktree-cleanup.md
+"""Daily worktree maintenance. Git owns registration; Worktrunk owns integration.
+
+Git worktree remove removes the directory as well as its registry entry.
+Missing .git is therefore no evidence that an arbitrary directory is disposable.
+"""
+
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import time
+
+
+def run(*args):
+    result = subprocess.run(args, text=True, capture_output=True, check=True,
+                            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+    if result.stderr:
+        print(result.stderr, file=sys.stderr, end="")
+    return result.stdout
+
+
+def registry(repo):
+    entries = []
+    for block in run("git", "-C", str(repo), "worktree", "list", "--porcelain", "-z").split("\0\0"):
+        fields = dict(field.partition(" ")[::2] for field in block.split("\0") if field)
+        if "worktree" in fields:
+            entries.append(fields)
+    return entries
+
+
+def process_start(pid, proc=Path("/proc")):
+    """None means gone. Permission or malformed-stat errors remain errors.
+
+    comm is parenthesized and may contain spaces and closing parentheses;
+    field 22 is index 19 of the fields following its final closing paren.
+    """
+    try:
+        stat = (proc / str(pid) / "stat").read_text()
+    except FileNotFoundError:
+        if (proc / str(pid)).exists():
+            raise RuntimeError(f"cannot establish lock owner state: PID {pid}")
+        return None
+    closing = stat.rfind(")")
+    if closing < 0:
+        raise RuntimeError(f"malformed stat for PID {pid}")
+    tail = stat[closing + 1:].split()
+    if len(tail) < 20 or not tail[19].isdigit():
+        raise RuntimeError(f"malformed stat for PID {pid}")
+    return tail[19]
+
+
+def process_cwd(process):
+    if process.parent != Path("/proc") or not process.name.isdigit():
+        raise ValueError(f"not a numeric /proc PID: {process}")
+    try:
+        return Path(os.readlink(process / "cwd"))
+    except PermissionError:
+        # Non-dumpable same-user services hide cwd. Use the host's existing
+        # sudo policy for this read only; never infer that permission means no
+        # user. A failed privileged read is still unknown unless PID vanished.
+        try:
+            value = run("/run/wrappers/bin/sudo", "-n", "readlink", "-z", "--", str(process / "cwd"))
+        except (OSError, subprocess.CalledProcessError) as error:
+            if not process.exists():
+                raise FileNotFoundError(str(process)) from error
+            raise RuntimeError(f"cannot inspect {process}/cwd") from error
+        if not value.endswith("\0"):
+            raise RuntimeError(f"invalid readlink response for {process}/cwd")
+        return Path(value[:-1])
+
+
+def in_use(tree, proc=Path("/proc")):
+    # Refresh immediately before each removal. Unknown process use fails
+    # closed. Other users are outside this user job's session boundary.
+    tree = tree.resolve()
+    for process in proc.iterdir():
+        if not process.name.isdigit():
+            continue
+        try:
+            if process.stat().st_uid != os.getuid():
+                continue
+            cwd = process_cwd(process)
+        except FileNotFoundError:
+            continue
+        except PermissionError as error:
+            raise RuntimeError(f"cannot inspect {process}/cwd") from error
+        if cwd == tree or tree in cwd.parents:
+            return True
+    return False
+
+
+def release_stale_locks(repo):
+    for entry in registry(repo):
+        reason = entry.get("locked", "")
+        if not reason.startswith("claude agent "):
+            continue
+        match = re.search(r"\(pid ([0-9]+) start ([0-9]+)\)", reason)
+        if not match:
+            continue
+        pid, start = match.groups()
+        now = process_start(pid)
+        if now is None or now != start:
+            # Read registry again: never unlock a replacement lock.
+            current = next((e for e in registry(repo) if e["worktree"] == entry["worktree"]), None)
+            if current == entry:
+                print(f"release stale Claude lock: {entry['worktree']}", flush=True)
+                run("git", "-C", str(repo), "worktree", "unlock", entry["worktree"])
+
+
+def candidates(repo, min_age):
+    return json.loads(run("wt", "-C", str(repo), "step", "prune", "--dry-run",
+                          "--min-age", min_age, "--format", "json"))
+
+
+def reap_repo(repo, min_age="1d"):
+    release_stale_locks(repo)
+    for candidate in candidates(repo, min_age):
+        # Branch-only and absent registry entries need no filesystem cleanup.
+        if candidate.get("kind") != "worktree" or not candidate.get("path"):
+            continue
+        tree = Path(candidate["path"])
+        before = next((e for e in registry(repo) if e["worktree"] == str(tree)), None)
+        if not before or tree == repo or "locked" in before or not tree.is_dir():
+            continue
+        # Worktrunk/Git remove can discard ignored files even without --force.
+        dirty = run("git", "-C", str(tree), "status", "--porcelain", "-z",
+                    "--untracked-files=all", "--ignored")
+        if dirty:
+            print(f"retain (dirty or ignored files): {tree}")
+            continue
+        # Revalidate integration after status, then process use and topology at
+        # the removal boundary. No --force, --reap or project hooks are allowed.
+        if candidate not in candidates(repo, min_age):
+            print(f"retain (integration changed): {tree}")
+            continue
+        if in_use(tree):
+            print(f"retain (in use): {tree}")
+            continue
+        current = next((e for e in registry(repo) if e["worktree"] == str(tree)), None)
+        if current != before:
+            print(f"retain (registry changed): {tree}")
+            continue
+        if run("git", "-C", str(tree), "status", "--porcelain", "-z",
+               "--untracked-files=all", "--ignored"):
+            print(f"retain (files changed during checks): {tree}")
+            continue
+        print(f"remove integrated worktree: {tree}", flush=True)
+        run("wt", "-C", str(repo), "remove", str(tree), "--foreground",
+            "--no-hooks", "--yes", "--format", "json")
+        if tree.exists():
+            raise RuntimeError(f"worktree remains after removal: {tree}")
+    for entry in registry(repo):
+        tree = Path(entry["worktree"])
+        if tree == repo or not tree.is_dir():
+            continue
+        # Advisory only: checkout activity may live deeper than the top level.
+        if tree.stat().st_mtime < time.time() - 14 * 86400:
+            print(f"retained checkout older than 14 days: {tree}")
+
+
+def main():
+    failed = False
+    for repo in sorted(Path("/realm/project").glob("*/repo")):
+        if not (repo / ".git").exists():
+            continue
+        try:
+            reap_repo(repo)
+        except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
+            print(f"worktree maintenance failed for {repo}: {error}", file=sys.stderr)
+            if isinstance(error, subprocess.CalledProcessError):
+                print(error.stderr or error.stdout, file=sys.stderr)
+            failed = True
+    # Unknown directories need a separate ownership decision. Do not chmod,
+    # delete or adopt them, regardless of age, name, or apparent process use.
+    for tree in sorted(Path("/realm/worktree").iterdir()):
+        if tree.is_dir() and not (tree / ".git").exists():
+            print(f"retain (unknown directory without .git): {tree}")
+    return int(failed)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
