@@ -1787,7 +1787,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     """Build a fresh scan and publish one coherent generation."""
     from .maintenance import admission
 
-    decision = admission()
+    decision = admission(Path("/realm"))
     if not decision["admitted"]:
         print(json.dumps(decision), file=sys.stderr)
         return 1

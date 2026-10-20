@@ -48,7 +48,7 @@ mkServiceModule {
       # without the ledger materialized on top of it.
       execStart = "${scriptPkgs.sinnix-fs}/bin/sinnix-fs scan --out-dir ${lib.escapeShellArg indexDir}";
       serviceConfig = {
-        ExecCondition = "${scriptPkgs.sinnix-fs}/bin/sinnix-fs maintain admission";
+        ExecCondition = "${scriptPkgs.sinnix-fs}/bin/sinnix-fs maintain admission --volume ${config.sinnix.paths.realmRoot}";
         TimeoutStartSec = cfg.maxSecondsPerRun;
         # DuckDB also allocates outside its buffer manager. A soft boundary
         # caused prolonged reclaim/refault loops even below the hard bound.

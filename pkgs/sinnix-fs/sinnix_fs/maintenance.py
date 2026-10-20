@@ -54,17 +54,20 @@ def identity(path: Path) -> dict:
     return {"device": info.st_dev, "inode": info.st_ino, "owner": info.st_uid}
 
 
-def volume_capacity() -> list[dict]:
+def volume_capacity(volume: Path | None = None) -> list[dict]:
     """Observe only mounted payloads, pinning the observed mount before probing."""
+    policies = [row for row in VOLUMES if volume is None or row[0] == volume]
+    if volume is not None and not policies:
+        raise ValueError("unknown managed volume")
     try:
         mounted = read_payload_mounts()
     except (OSError, ValueError) as error:
         return [
             {"path": str(path), "status": "unavailable", "reason": str(error)}
-            for path, _, _ in VOLUMES
+            for path, _, _ in policies
         ]
     volumes = []
-    for path, target, floor in VOLUMES:
+    for path, target, floor in policies:
         if path not in mounted:
             volumes.append({"path": str(path), "status": "not_mounted"})
             continue
@@ -96,13 +99,16 @@ def volume_capacity() -> list[dict]:
     return volumes
 
 
-def admission() -> dict:
-    volumes = volume_capacity()
+def admission(volume: Path | None = None) -> dict:
+    volumes = volume_capacity(volume)
     blocked = [
         row["path"]
         for row in volumes
         if row.get("status") == "unavailable"
-        or (row["path"] == str(VOLUMES[0][0]) and row.get("status") != "observed")
+        or (
+            (volume is not None or row["path"] == str(VOLUMES[0][0]))
+            and row.get("status") != "observed"
+        )
         or row.get("discretionary_work") == "defer"
     ]
     return {
@@ -281,7 +287,8 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="sinnix fs maintain", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("plan")
-    commands.add_parser("admission")
+    admit = commands.add_parser("admission")
+    admit.add_argument("--volume", type=Path, choices=[row[0] for row in VOLUMES])
     inspect = commands.add_parser("account")
     inspect.add_argument("roots", type=Path, nargs="+")
     execute = commands.add_parser("apply")
@@ -292,7 +299,7 @@ def main(argv=None) -> int:
         if args.command == "account":
             result = account(args.roots)
         elif args.command == "admission":
-            result = admission()
+            result = admission(args.volume)
             print(json.dumps(result, indent=2))
             return 0 if result["admitted"] else 1
         elif args.command == "plan":

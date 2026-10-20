@@ -220,7 +220,7 @@ mkServiceModule {
                 execStart = "${scriptPkgs.agentctl}/bin/agentctl job start --if-idle lynchpin ${job.operation} --wait";
                 user = "sinity";
                 serviceConfig = {
-                  ExecCondition = "${scriptPkgs.sinnix-fs}/bin/sinnix-fs maintain admission";
+                  ExecCondition = "${scriptPkgs.sinnix-fs}/bin/sinnix-fs maintain admission --volume ${config.sinnix.paths.realmRoot}";
                   Group = "users";
                   TimeoutStartSec = job.timeoutStartSec;
                   Environment = lib.mapAttrsToList (name: value: "${name}=${value}") chiselEnvironment;

@@ -189,7 +189,7 @@ def test_deferred_scan_creates_no_generation_or_ledger(tmp_path, monkeypatch, ca
 
     root = tmp_path / "index"
     monkeypatch.setattr(
-        m, "admission", lambda: {"admitted": False, "blocked": ["/realm"]}
+        m, "admission", lambda volume: {"admitted": False, "blocked": ["/realm"]}
     )
     monkeypatch.setattr(
         inventory,
@@ -199,3 +199,26 @@ def test_deferred_scan_creates_no_generation_or_ledger(tmp_path, monkeypatch, ca
     assert inventory.main(["scan", "--out-dir", str(root)]) == 1
     assert not root.exists()
     assert json.loads(capsys.readouterr().err)["blocked"] == ["/realm"]
+
+
+def test_unrelated_full_disk_does_not_block_selected_output_volume(monkeypatch):
+    calls = []
+
+    def observations(volume=None):
+        calls.append(volume)
+        assert volume == Path("/realm")
+        return [{"path": "/realm", "status": "observed", "discretionary_work": "admit"}]
+
+    monkeypatch.setattr(m, "volume_capacity", observations)
+    assert m.admission(Path("/realm"))["admitted"]
+    assert calls == [Path("/realm")]
+
+
+def test_explicit_offline_destination_defers_without_probing(monkeypatch):
+    monkeypatch.setattr(m, "read_payload_mounts", lambda: {})
+    monkeypatch.setattr(
+        m.os, "open", lambda *a, **k: pytest.fail("must not activate automount")
+    )
+    decision = m.admission(Path("/outer-realm"))
+    assert not decision["admitted"] and decision["blocked"] == ["/outer-realm"]
+    assert len(decision["volumes"]) == 1

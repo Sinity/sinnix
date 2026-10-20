@@ -116,10 +116,13 @@ It reports mounted-volume availability and the 15% Realm / 10% outer-volume
 targets. `sinnix fs maintain admission` admits discretionary work at or above
 10% / 5%, and exits 1 below either floor or when a required observation is
 unavailable. The fresh-scan CLI and scheduled filesystem/Lynchpin refresh units
-use this live condition before starting their writers. The existing timers
+select their Realm output volume for this live condition. `--volume /outer-realm`
+checks an outer-disk writer explicitly; an offline selected destination defers.
+An unrelated full media disk does not block Realm-only work. The existing timers
 retry on their next firing; there is no separate paused-job scheduler. Manual
 Lynchpin operations, retained-input recovery, captures, backups and maintenance
-remain available. No running job is interrupted and no space is reserved. A 30-day forecast remains
+remain available. No running job is interrupted and no space is reserved.
+A 30-day forecast remains
 unavailable until comparable growth observations exist. Offline outer mounts
 are not activated for a capacity check. Mount IDs and an open mount descriptor
 bind each capacity observation, so an unmount race cannot silently probe a
