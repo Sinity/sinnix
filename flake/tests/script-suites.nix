@@ -255,20 +255,13 @@
           scripts = [ "sinnix-quest-player" ];
           extraPythonPackages = [ sinnix-lib ];
         };
-        # Provably fails when: a migrated rank-pairs domain stops fitting as
-        # the old tool fitted it (ties, choice sets, item priors, ids the
-        # roster no longer carries), `ingest` re-imports a tombstoned or
-        # already-seen judgment, or `serve` records a judgment the log already
-        # carries, undoes one by rewriting rather than tombstoning, re-asks a
-        # pair the operator has already judged, serves a file the roster does
-        # not name, or reports a ranking that is not the engine's own.
+        # Provably fails when ingest re-imports a tombstoned or already-seen
+        # judgment, or the retained image/feedback frontends stop using the
+        # canonical store, selector and engine without rewriting history.
         rank-suite = mkScriptSuite {
           name = "sinnix-rank";
           suiteDir = ../../pkgs/sinnix-rank/tests;
-          scripts = [
-            "sinnix-rank"
-            "sinnix-rank-migrate-elicit"
-          ];
+          scripts = [ "sinnix-rank" ];
           extraPythonPackages = [
             sinnix-rank-core
             sinnix-lib
