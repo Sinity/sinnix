@@ -10,6 +10,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+# Native root fixtures must not leave root-owned bytecode in the checkout.
+sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location("cut", sys.argv.pop(1))
 cut = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(cut)
