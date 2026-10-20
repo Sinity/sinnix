@@ -21,7 +21,7 @@ their own series.
 | `/persist`               | btrbk read-only snapshot, archived by the Borg job                                                                   | same as `/realm`                               | `borg-persist-v1`         |
 | The ephemeral root       | snapshot the initrd takes before each wipe                                                                           | daily                                          | `borg-root-snapshots-v1`  |
 | Sinex blob store         | direct                                                                                                               | daily 05:40                                    | `borg-sinex-blobs-v1`     |
-| Polylogue state          | hooks sealed from a read-only snapshot of its subvolume, plus the `state/polylogue-aside-20260926T182000Z` subvolume | daily 04:15                                    | `borg-polylogue-state-v1` |
+| Polylogue state          | hooks archived directly from a read-only snapshot of its subvolume, plus the `state/polylogue-aside-20260926T182000Z` subvolume | daily 04:15                                    | `borg-polylogue-state-v1` |
 | Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm`                                               | dumps 03:42, seal Sunday                       | `borg-realm-v2`           |
 
 Left out of the `/realm` archive (`realmExcludes` in `modules/backup.nix`):
@@ -43,6 +43,14 @@ from the archive are listed for the check too, so an exclusion is never read
 as missing data. If the check fails, the snapshot stays and the job fails,
 which keeps local snapshots piling up rather than losing data. Backup failures
 are therefore also disk-space problems on `/realm`.
+
+Polylogue hooks are read directly from a verified read-only Btrfs cut through
+a private temporary path view that preserves `realm/state/polylogue/hooks` in
+the archive. No hook cache is copied or synced. The cut is deleted only after
+Borg exits successfully and its UUID, parent UUID and read-only flag still
+match. Failures retain the cut under `state/cache/polylogue-backup-hooks/cuts`
+for recovery; the temporary view is removed on exit. An absent hooks directory
+is archived as empty, while unavailable roots and nested subvolumes fail.
 
 ### Telemetry
 

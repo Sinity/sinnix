@@ -205,14 +205,17 @@ assert lib.assertMsg (
           "Polylogue state Borg job must not name retired database siblings in its exclude list -- they must stay covered by this direct-path job";
         assert lib.assertMsg (lib.hasInfix "/tmp/sentinel-polylogue-root/hooks/**" script)
           "Polylogue state Borg job must omit only the live hook input by its physical source path";
-        assert lib.assertMsg (lib.hasInfix "seal-polylogue-hooks.py" script)
-          "Polylogue state Borg job must seal hook carriers before archiving them";
-        assert lib.assertMsg (lib.hasInfix "cut-polylogue-hooks.py" script)
-          "Polylogue state hooks must be sealed from a verified read-only native cut";
+        assert lib.assertMsg
+          (
+            lib.hasInfix "with_borg_lock" script
+            && lib.hasInfix "cut-polylogue-hooks.py" script
+            && lib.hasInfix "-- borg create" script
+          )
+          "Polylogue state must hold its verified native cut through Borg completion under the repository lock";
         assert lib.assertMsg (lib.hasInfix "state/cache/polylogue-backup-hooks" script)
-          "Polylogue state Borg job must use its stable private hooks cache";
+          "Polylogue state Borg job must use its stable private cut storage";
         assert lib.assertMsg (lib.hasInfix "install -d -m 0700 -o root -g root" script)
-          "Polylogue state hook cache must be private to root";
+          "Polylogue state cut storage must be private to root";
         assert lib.assertMsg (
           timer.OnCalendar == "*-*-* 04:15:00"
           && timer.RandomizedDelaySec == "5min"
@@ -707,247 +710,16 @@ assert lib.assertMsg (
         ${borgHealthLanesJson}
         EOF_LANES
       '';
-      polylogueHookSealRuntime =
-        pkgs.runCommand "backup-polylogue-hook-seal-check"
+      polylogueHookCutRuntime =
+        pkgs.runCommand "backup-polylogue-hook-cut-check"
           {
-            nativeBuildInputs = [ pkgs.python3 ];
+            nativeBuildInputs = [
+              pkgs.python3
+              pkgs.borgbackup
+            ];
           }
           ''
-            ${pkgs.python3}/bin/python3 ${./polylogue-hook-cut.py} \
-              ${../../modules/lib/backup/cut-polylogue-hooks.py} \
-              ${../../modules/lib/backup/seal-polylogue-hooks.py}
-            missing_state="$TMPDIR/state-root"
-            missing_source="$missing_state/hooks"
-            missing_stage="$TMPDIR/missing-sealed/realm/state/polylogue/hooks"
-            mkdir -p "$missing_state" "$missing_stage"
-            printf 'stale-cache' > "$missing_stage/previous.ndjson"
-            ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
-              "$missing_source" "$missing_stage"
-            test -d "$missing_stage"
-            test -z "$(find "$missing_stage" -mindepth 1 -print -quit)"
-            if ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
-              "$TMPDIR/unavailable-state/hooks" "$TMPDIR/unavailable-sealed/hooks"; then
-              echo 'unavailable Polylogue state root unexpectedly succeeded' >&2
-              exit 1
-            fi
-            mkdir -p "$TMPDIR/source/hooks/carriers/codex/2026-09-27"
-            printf '%s\n' '{"event":"captured"}' > "$TMPDIR/source/hooks/carriers/codex/2026-09-27/4242.ndjson"
-            ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
-              "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
-            before_inode=$(stat -c %i "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4242.ndjson")
-            cmp "$TMPDIR/source/hooks/carriers/codex/2026-09-27/4242.ndjson" \
-              "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4242.ndjson"
-            printf '%s\n' '{"event":"appended-after-seal"}' \
-              >> "$TMPDIR/source/hooks/carriers/codex/2026-09-27/4242.ndjson"
-            ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
-              "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
-            after_inode=$(stat -c %i "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4242.ndjson")
-            test "$before_inode" != "$after_inode"
-            printf '%s\n' '{"event":"new-carrier"}' \
-              > "$TMPDIR/source/hooks/carriers/codex/2026-09-27/4343.ndjson"
-            ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
-              "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
-            cmp "$TMPDIR/source/hooks/carriers/codex/2026-09-27/4343.ndjson" \
-              "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4343.ndjson"
-            before_inode=$(stat -c %i "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4343.ndjson")
-            ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
-              "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
-            test "$before_inode" = "$(stat -c %i "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4343.ndjson")"
-            printf 'outside' > "$TMPDIR/outside"
-            ln -s "$TMPDIR/outside" "$TMPDIR/source/hooks/transition"
-            ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
-              "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
-            rm "$TMPDIR/source/hooks/transition"
-            mkdir "$TMPDIR/source/hooks/transition"
-            printf 'inside' > "$TMPDIR/source/hooks/transition/child"
-            ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
-              "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
-            test -d "$TMPDIR/sealed/realm/state/polylogue/hooks/transition"
-            test "$(cat "$TMPDIR/outside")" = outside
-            rm "$TMPDIR/source/hooks/transition/child"
-            rmdir "$TMPDIR/source/hooks/transition"
-            printf 'replacement' > "$TMPDIR/source/hooks/transition"
-            ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
-              "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
-            test -f "$TMPDIR/sealed/realm/state/polylogue/hooks/transition"
-            rm "$TMPDIR/source/hooks/transition"
-            mkdir "$TMPDIR/source/hooks/transition"
-            ln -s "$TMPDIR/outside" "$TMPDIR/source/hooks/transition/link"
-            ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
-              "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
-            rm -r "$TMPDIR/source/hooks/transition"
-            ln -s "$TMPDIR/outside" "$TMPDIR/source/hooks/transition"
-            ${pkgs.python3}/bin/python3 ${../../modules/lib/backup/seal-polylogue-hooks.py} \
-              "$TMPDIR/source/hooks" "$TMPDIR/sealed/realm/state/polylogue/hooks"
-            test -L "$TMPDIR/sealed/realm/state/polylogue/hooks/transition"
-            ${pkgs.python3}/bin/python3 - ${../../modules/lib/backup/seal-polylogue-hooks.py} <<'PY'
-            import importlib.util
-            import os
-            import tempfile
-            from pathlib import Path
-            import sys
-
-            spec = importlib.util.spec_from_file_location("hook_sealer", sys.argv[1])
-            sealer = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(sealer)
-            root = Path(tempfile.mkdtemp())
-            source = root / "source"
-            source.mkdir()
-            outside = root / "outside"
-            outside.write_text("outside")
-            original = source / "event"
-            original.write_text("inside")
-            record = sealer._file_record(os.stat(original, follow_symlinks=False))
-            original.unlink()
-            original.symlink_to(outside)
-            try:
-                sealer._copy_file(source, "event", root / "sealed-event", record)
-                raise AssertionError("final symlink replacement was followed")
-            except OSError:
-                pass
-            assert outside.read_text() == "outside"
-
-            nested = source / "nested"
-            nested.mkdir()
-            (nested / "event").write_text("inside nested")
-            nested_record = sealer._file_record(
-                os.stat(nested / "event", follow_symlinks=False)
-            )
-            outside_directory = root / "outside-directory"
-            outside_directory.mkdir()
-            (outside_directory / "event").write_text("outside nested")
-            nested.rename(source / "held-directory")
-            nested.symlink_to(outside_directory, target_is_directory=True)
-            try:
-                sealer._copy_file(source, "nested/event", root / "sealed-nested", nested_record)
-                raise AssertionError("intermediate symlink replacement was followed")
-            except OSError:
-                pass
-            assert (outside_directory / "event").read_text() == "outside nested"
-            manifest = sealer._manifest(source)
-            assert manifest["nested"]["kind"] == "symlink"
-            assert "nested/event" not in manifest
-            os.utime(source / "held-directory", ns=(1, 2))
-            assert sealer._manifest(source) == sealer._manifest(source)
-
-            retry_source = root / "retry-source"
-            retry_source.mkdir()
-            (retry_source / "a-stable").write_text("stable")
-            (retry_source / "z-changing").write_text("first")
-            retry_destination = root / "retry-sealed"
-            real_clone = sealer._copy_file
-            calls = []
-
-            def clone_then_change(source, relative, destination, expected):
-                calls.append(relative)
-                real_clone(source, relative, destination, expected)
-                if calls == ["a-stable"]:
-                    (source / "z-changing").write_text("second")
-
-            sealer._copy_file = clone_then_change
-            sys.argv = ["seal", str(retry_source), str(retry_destination)]
-            assert sealer.main() == 0
-            assert calls.count("a-stable") == 1
-            assert calls.count("z-changing") == 2
-            assert (retry_destination / "a-stable").read_text() == "stable"
-            assert (retry_destination / "z-changing").read_text() == "second"
-            saved_manifest = retry_destination.with_name(retry_destination.name + ".manifest.json")
-            import json
-            assert json.loads(saved_manifest.read_text()) == sealer._manifest(retry_source)
-
-            resume_source = root / "resume-source"
-            resume_source.mkdir()
-            (resume_source / "a-stable").write_text("stable across interruption")
-            (resume_source / "z-blocked").write_text("finish later")
-            resume_destination = root / "resume-sealed"
-            calls = []
-
-            def interrupt_after_stable(source, relative, destination, expected):
-                calls.append(relative)
-                if relative == "z-blocked":
-                    raise OSError("synthetic interruption")
-                real_clone(source, relative, destination, expected)
-
-            sealer._copy_file = interrupt_after_stable
-            sys.argv = ["seal", str(resume_source), str(resume_destination)]
-            assert sealer.main() == 1
-            resume_manifest = resume_destination.with_name(
-                resume_destination.name + ".manifest.json"
-            )
-            assert not resume_manifest.exists()
-            assert calls.count("a-stable") == 1
-            try:
-                os.getxattr(resume_destination / "a-stable", sealer.SOURCE_RECORD_XATTR)
-                checkpoint_supported = True
-            except OSError as error:
-                assert error.errno == sealer.errno.EOPNOTSUPP
-                checkpoint_supported = False
-            calls.clear()
-
-            def trace_clone(source, relative, destination, expected):
-                calls.append(relative)
-                real_clone(source, relative, destination, expected)
-
-            sealer._copy_file = trace_clone
-            assert sealer.main() == 0
-            assert calls == (["z-blocked"] if checkpoint_supported else ["a-stable", "z-blocked"])
-            assert json.loads(resume_manifest.read_text()) == sealer._manifest(resume_source)
-            for item in resume_source.iterdir():
-                assert (resume_destination / item.name).read_bytes() == item.read_bytes()
-
-            # Invalid checkpoints and changed sources must be recloned.
-            if checkpoint_supported:
-                os.setxattr(resume_destination / "a-stable", sealer.SOURCE_RECORD_XATTR, b"invalid")
-            (resume_source / "z-blocked").write_text("source changed")
-            resume_manifest.unlink()
-            calls.clear()
-            assert sealer.main() == 0
-            assert calls == ["a-stable", "z-blocked"]
-            for item in resume_source.iterdir():
-                assert (resume_destination / item.name).read_bytes() == item.read_bytes()
-
-            # A failed file barrier must not publish a reusable clone or manifest.
-            barrier_source = root / "barrier-source"
-            barrier_source.mkdir()
-            (barrier_source / "event").write_text("durable event")
-            barrier_destination = root / "barrier-sealed"
-            real_fsync = os.fsync
-            import stat
-
-            def reject_file_barrier(fd):
-                if stat.S_ISREG(os.fstat(fd).st_mode):
-                    raise OSError(sealer.errno.EIO, "synthetic durability failure")
-                real_fsync(fd)
-
-            sealer._copy_file = real_clone
-            os.fsync = reject_file_barrier
-            sys.argv = ["seal", str(barrier_source), str(barrier_destination)]
-            assert sealer.main() == 1
-            assert not (barrier_destination / "event").exists()
-            assert not barrier_destination.with_name(barrier_destination.name + ".manifest.json").exists()
-            os.fsync = real_fsync
-            assert sealer.main() == 0
-            assert (barrier_destination / "event").read_bytes() == (barrier_source / "event").read_bytes()
-
-            manifest_probe = root / "manifest-probe.json"
-            barriers = []
-
-            def record_manifest_barriers(fd):
-                if stat.S_ISDIR(os.fstat(fd).st_mode):
-                    assert manifest_probe.exists()
-                    barriers.append("directory")
-                else:
-                    assert stat.S_IMODE(os.fstat(fd).st_mode) == 0o600
-                    barriers.append("file")
-                real_fsync(fd)
-
-            os.fsync = record_manifest_barriers
-            sealer._write_manifest(manifest_probe, {"verified": {"kind": "file"}})
-            os.fsync = real_fsync
-            assert barriers == ["file", "directory"]
-            PY
-            cmp "$TMPDIR/sealed/realm/state/polylogue/hooks/carriers/codex/2026-09-27/4242.ndjson" \
-              <(printf '%s\n' '{"event":"captured"}' '{"event":"appended-after-seal"}')
+            python3 ${./polylogue-hook-cut.py} ${../../modules/lib/backup/cut-polylogue-hooks.py}
             touch "$out"
           '';
     in
@@ -955,7 +727,7 @@ assert lib.assertMsg (
       checks = {
         backup-borg-hook-runtime = backupBorgHookRuntime;
         backup-health-lanes-runtime = borgHealthLanesRuntime;
-        backup-polylogue-hook-seal = polylogueHookSealRuntime;
+        backup-polylogue-hook-cut = polylogueHookCutRuntime;
         backup-headless-default =
           assert headlessBackupUnits == [ ];
           pkgs.runCommand "backup-headless-default-check" { } ''

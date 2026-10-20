@@ -1,202 +1,234 @@
-"""Synthetic source-cut ownership and cache-continuity regressions."""
+"""Exercise Borg's archive paths and exact native-cut cleanup ownership."""
 
-import errno
 import importlib.util
+import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
-
-def load(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-cut = load("cut", sys.argv.pop(1))
-sealer = load("sealer", sys.argv.pop(1))
+spec = importlib.util.spec_from_file_location("cut", sys.argv.pop(1))
+cut = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(cut)
 ORIGIN = "bd4b5bed-7abc-1e48-b9ff-1a3df8651105"
 CUT_UUID = "79daa3e5-d30a-44c8-8e50-f73316d27a95"
-
-
-class CopyTests(unittest.TestCase):
-    def test_unsupported_clone_streams_complete_payload_and_metadata(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source = root / "source"
-            source.mkdir()
-            original = source / "event"
-            payload = b"neutral hook payload\n" * 120000
-            original.write_bytes(payload)
-            original.chmod(0o600)
-            record = sealer._file_record(original.stat())
-            destination = root / "sealed"
-            with (
-                patch.object(
-                    sealer.fcntl,
-                    "ioctl",
-                    side_effect=OSError(errno.EINVAL, "incompatible NoCoW"),
-                ),
-                patch.object(
-                    sealer.shutil, "copyfileobj", wraps=sealer.shutil.copyfileobj
-                ) as copied,
-            ):
-                sealer._copy_file(source, "event", destination, record)
-            self.assertEqual(destination.read_bytes(), payload)
-            self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
-            self.assertEqual(
-                destination.stat().st_mtime_ns, original.stat().st_mtime_ns
-            )
-            self.assertLessEqual(copied.call_args.kwargs["length"], 1024 * 1024)
-            self.assertFalse(destination.with_name(".sealed.seal-tmp").exists())
-
-    def test_io_error_keeps_previous_cache_and_removes_temporary(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source = root / "source"
-            source.mkdir()
-            original = source / "event"
-            original.write_text("new neutral payload")
-            record = sealer._file_record(original.stat())
-            destination = root / "sealed"
-            destination.write_text("previous verified payload")
-            with (
-                patch.object(
-                    sealer.fcntl, "ioctl", side_effect=OSError(errno.EIO, "read error")
-                ),
-                patch.object(sealer.shutil, "copyfileobj") as copied,
-            ):
-                with self.assertRaises(OSError):
-                    sealer._copy_file(source, "event", destination, record)
-                copied.assert_not_called()
-            self.assertEqual(destination.read_text(), "previous verified payload")
-            self.assertFalse(destination.with_name(".sealed.seal-tmp").exists())
+NATIVE = os.environ.get("NATIVE_BTRFS") == "1"
 
 
 class CutTests(unittest.TestCase):
-    def test_device_drift_requires_verified_origin_and_unchanged_metadata(self):
-        old = {"dev": 1, "ino": 2, "ctime_ns": 3, "source_subvolume_uuid": ORIGIN}
-        new = {**old, "dev": 4}
-        self.assertTrue(sealer._same_source_record(old, new))
-        for changed in (
-            {"ctime_ns": 9},
-            {"ino": 9},
-            {"source_subvolume_uuid": CUT_UUID},
-        ):
-            self.assertFalse(sealer._same_source_record(old, {**new, **changed}))
-        self.assertFalse(sealer._same_source_record({"dev": 1}, {"dev": 4}))
-        self.assertFalse(sealer._same_source_record(None, new))
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name).resolve()
+        self.environment = patch.dict(
+            os.environ,
+            {
+                "BORG_BASE_DIR": str(self.root / "borg-home"),
+                "BORG_CACHE_DIR": str(self.root / "borg-cache"),
+                "BORG_SECURITY_DIR": str(self.root / "borg-security"),
+            },
+        )
+        self.environment.start()
+        self.addCleanup(self.environment.stop)
+        self.state = self.root / "realm/state/polylogue"
+        self.state.parent.mkdir(parents=True)
+        self.cuts = self.root / "cuts"
+        self.cuts.mkdir()
+        if NATIVE:
+            cut.btrfs("subvolume", "create", str(self.state))
+        else:
+            self.state.mkdir()
+            self.native = patch.object(cut, "btrfs", side_effect=self.btrfs)
+            self.identities = patch.object(cut, "identity", side_effect=self.identity)
+            self.native.start()
+            self.identities.start()
+        self.commands = []
+        self.hooks = self.state / "hooks"
+        self.hooks.mkdir()
+        (self.hooks / "event").write_bytes(b"synthetic original\n")
+        (self.hooks / "link").symlink_to("event")
+        self.repo = self.root / "repo"
+        subprocess.run(
+            ["borg", "init", "--encryption=none", str(self.repo)], check=True
+        )
 
-    def test_verified_device_drift_reuses_actual_staged_file(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            source, stage = root / "source", root / "stage"
-            source.mkdir()
-            stage.mkdir()
-            (source / "journal").write_text("neutral")
-            records = sealer._sync_once(source, stage, {}, ORIGIN)
-            inode = (stage / "journal").stat().st_ino
-            records["journal"]["dev"] += 1
-            with patch.object(
-                sealer,
-                "_copy_file",
-                side_effect=AssertionError("unchanged cut recopied"),
+    def tearDown(self):
+        if not NATIVE:
+            self.native.stop()
+            self.identities.stop()
+        else:
+            # The fixture owns only this temporary root. Delete recorded native
+            # subvolumes deepest first, never host data or historical cuts.
+            for path in sorted(
+                self.root.rglob("*"), key=lambda p: len(p.parts), reverse=True
             ):
-                sealer._sync_once(source, stage, records, ORIGIN)
-            self.assertEqual((stage / "journal").stat().st_ino, inode)
+                if path.is_dir() and not path.is_symlink():
+                    probe = subprocess.run(
+                        ["btrfs", "subvolume", "show", str(path)], capture_output=True
+                    )
+                    if probe.returncode == 0:
+                        cut.btrfs("subvolume", "delete", str(path))
+        self.tmp.cleanup()
 
-    def test_cleanup_refuses_replacement_or_writable_cut(self):
-        correct = {"UUID": CUT_UUID, "Parent UUID": ORIGIN, "Flags": "readonly"}
-        for changed in ({"UUID": ORIGIN}, {"Parent UUID": CUT_UUID}, {"Flags": "-"}):
-            with patch.object(cut, "identity", return_value={**correct, **changed}):
+    def identity(self, path):
+        return {
+            "UUID": ORIGIN if path == self.state else CUT_UUID,
+            "Parent UUID": ORIGIN,
+            "Flags": "readonly",
+        }
+
+    def btrfs(self, *args):
+        self.commands.append(args)
+        if args[:2] == ("subvolume", "snapshot"):
+            shutil.copytree(args[-2], args[-1], symlinks=True)
+        if args[:2] == ("subvolume", "delete"):
+            shutil.rmtree(args[-1])
+        return ""
+
+    def create(self, command=None):
+        return cut.archive(
+            self.state,
+            self.cuts,
+            command
+            or [
+                "borg",
+                "create",
+                "--exclude",
+                f"{self.state}/hooks/**",
+                f"{self.repo}::fixture",
+                str(self.state),
+            ],
+        )
+
+    def test_borg_paths_bytes_and_source_mutation(self):
+        real_run = subprocess.run
+
+        def mutate_then_run(argv, **kwargs):
+            if argv[0] == "borg":
+                (self.hooks / "event").write_bytes(b"synthetic changed after cut\n")
+            return real_run(argv, **kwargs)
+
+        with patch.object(cut.subprocess, "run", side_effect=mutate_then_run):
+            self.assertEqual(self.create(), 0)
+        prefix = str(self.state).lstrip("/") + "/hooks"
+        listing = subprocess.check_output(
+            ["borg", "list", "--short", f"{self.repo}::fixture"], text=True
+        ).splitlines()
+        self.assertEqual(
+            set(listing),
+            {str(self.state).lstrip("/"), prefix, prefix + "/event", prefix + "/link"},
+        )
+        restored = subprocess.check_output(
+            ["borg", "extract", "--stdout", f"{self.repo}::fixture", prefix + "/event"]
+        )
+        self.assertEqual(restored, b"synthetic original\n")
+        self.assertEqual(list(self.cuts.iterdir()), [])
+
+    def test_absent_hooks_archives_empty_directory(self):
+        shutil.rmtree(self.hooks)
+        self.assertEqual(self.create(), 0)
+        listing = subprocess.check_output(
+            ["borg", "list", "--short", f"{self.repo}::fixture"], text=True
+        ).splitlines()
+        self.assertEqual(
+            set(listing), {str(self.state).lstrip("/"), str(self.hooks).lstrip("/")}
+        )
+
+    def test_command_failure_retains_cut_removes_view(self):
+        self.assertEqual(self.create([sys.executable, "-c", "raise SystemExit(7)"]), 7)
+        self.assertEqual(len(list(self.cuts.glob("cut-*"))), 1)
+        self.assertEqual(list(self.cuts.glob("view-*")), [])
+
+    def test_interruption_retains_cut(self):
+        real_run = subprocess.run
+
+        def interrupt_borg(argv, **kwargs):
+            if argv[0] == "borg":
+                raise KeyboardInterrupt
+            return real_run(argv, **kwargs)
+
+        with patch.object(cut.subprocess, "run", side_effect=interrupt_borg):
+            with self.assertRaises(KeyboardInterrupt):
+                self.create()
+        self.assertEqual(len(list(self.cuts.glob("cut-*"))), 1)
+        self.assertEqual(list(self.cuts.glob("view-*")), [])
+
+    def test_bad_paths_refused_before_snapshot(self):
+        alias = self.root / "alias"
+        alias.symlink_to(self.state, target_is_directory=True)
+        for state, cuts in (
+            (alias, self.cuts),
+            (self.root / "absent", self.cuts),
+            (self.state, self.state),
+        ):
+            with self.assertRaises(OSError):
+                cut.archive(state, cuts, ["true"])
+        self.assertEqual(list(self.cuts.iterdir()), [])
+
+    def test_hook_root_symlink_refused(self):
+        shutil.rmtree(self.hooks)
+        self.hooks.symlink_to(self.root, target_is_directory=True)
+        with self.assertRaises(OSError):
+            self.create()
+        self.assertEqual(len(list(self.cuts.glob("cut-*"))), 1)
+
+    def test_unavailable_hook_root_is_error(self):
+        real_scandir = os.scandir
+
+        def denied(path):
+            if isinstance(path, Path) and path.parent.parent == self.cuts:
+                raise PermissionError("synthetic denied")
+            return real_scandir(path)
+
+        with patch.object(cut.os, "scandir", side_effect=denied):
+            with self.assertRaises(PermissionError):
+                self.create()
+        self.assertEqual(len(list(self.cuts.glob("cut-*"))), 1)
+
+    def test_nested_subvolume_refused(self):
+        if NATIVE:
+            cut.btrfs("subvolume", "create", str(self.hooks / "nested"))
+            with self.assertRaises(OSError):
+                self.create()
+        else:
+            with patch.object(cut, "btrfs", return_value="nested"):
                 with self.assertRaises(OSError):
-                    cut.verify_cut(Path("cut"), ORIGIN, CUT_UUID)
+                    self.create()
+        self.assertEqual(list(self.cuts.iterdir()), [])
 
-    def run_seal(self, outcome, replacement=False, nested=False):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp).resolve()
-            state, cuts, stage = (root / name for name in ("state", "cuts", "stage"))
-            for path in (state, cuts, stage):
-                path.mkdir()
-            commands = []
-            cut_checks = 0
-
-            def identity(path):
-                nonlocal cut_checks
-                if path == state:
-                    return {"UUID": ORIGIN}
-                cut_checks += 1
-                return {
-                    "UUID": ORIGIN if replacement and cut_checks == 3 else CUT_UUID,
+    def test_changed_cut_refuses_deletion(self):
+        real_verify = cut.verify_cut
+        probe = self.cuts / "identity-probe"
+        probe.mkdir()
+        for change in ({"UUID": ORIGIN}, {"Parent UUID": CUT_UUID}, {"Flags": "-"}):
+            with patch.object(
+                cut,
+                "identity",
+                return_value={
+                    "UUID": CUT_UUID,
                     "Parent UUID": ORIGIN,
                     "Flags": "readonly",
-                }
-
-            def btrfs(*args):
-                commands.append(args)
-                if args[:3] == ("subvolume", "list", "-o"):
-                    return "nested" if nested else ""
-                return ""
-
-            loader = SimpleNamespace(
-                exec_module=lambda module: setattr(module, "main", lambda **kw: outcome)
-            )
-            with (
-                patch.object(cut, "identity", side_effect=identity),
-                patch.object(cut, "btrfs", side_effect=btrfs),
-                patch.object(
-                    cut.importlib.util,
-                    "spec_from_file_location",
-                    return_value=SimpleNamespace(loader=loader),
-                ),
-                patch.object(
-                    cut.importlib.util,
-                    "module_from_spec",
-                    return_value=SimpleNamespace(),
-                ),
+                    **change,
+                },
             ):
-                if nested or replacement:
-                    with self.assertRaises(OSError):
-                        cut.seal(state, stage / "hooks", cuts, Path("sealer"))
-                else:
-                    self.assertEqual(
-                        cut.seal(state, stage / "hooks", cuts, Path("sealer")), outcome
-                    )
-            return commands
+                with self.assertRaises(OSError):
+                    real_verify(probe, ORIGIN, CUT_UUID)
+        probe.rmdir()
+        checks = 0
 
-    def test_failed_seal_retains_cut(self):
-        commands = self.run_seal(1)
-        self.assertTrue(
-            any(args[:3] == ("subvolume", "snapshot", "-r") for args in commands)
-        )
-        self.assertFalse(any(args[:2] == ("subvolume", "delete") for args in commands))
+        def verify(*args):
+            nonlocal checks
+            checks += 1
+            if checks == 2:
+                raise OSError("synthetic replacement or writable cut")
+            return real_verify(*args)
 
-    def test_success_deletes_only_verified_cut(self):
-        commands = self.run_seal(0)
-        snapshots = [args for args in commands if args[:2] == ("subvolume", "snapshot")]
-        deletes = [args for args in commands if args[:2] == ("subvolume", "delete")]
-        self.assertEqual(len(deletes), 1)
-        self.assertEqual(deletes[0][-1], snapshots[0][-1])
-
-    def test_replacement_after_seal_is_retained(self):
-        self.assertFalse(
-            any(
-                args[:2] == ("subvolume", "delete")
-                for args in self.run_seal(0, replacement=True)
-            )
-        )
-
-    def test_nested_subvolume_refused_before_cut(self):
-        self.assertFalse(
-            any(
-                args[:2] == ("subvolume", "snapshot")
-                for args in self.run_seal(0, nested=True)
-            )
-        )
+        with patch.object(cut, "verify_cut", side_effect=verify):
+            with self.assertRaises(OSError):
+                self.create()
+        self.assertEqual(len(list(self.cuts.glob("cut-*"))), 1)
 
 
 unittest.main()

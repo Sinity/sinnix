@@ -159,7 +159,7 @@
 
   # Direct-path borg covers the state root, except live SQLite files and the
   # append-only hook tree. SQLite is covered by the dump job above; hooks are
-  # reflink-sealed from a read-only state cut so writers can keep appending.
+  # archived directly from a read-only state cut so writers can keep appending.
   # Failed provisional cuts remain in the private cache for owner recovery.
   (mkBackupJob "borgbackup-job-polylogue-state" {
     description = "Back up Polylogue state (blob CAS and non-live files) into Borg";
@@ -207,14 +207,7 @@
       archive_name="polylogue-state-$(date -u +%Y%m%dT%H%M%SZ)"
       stage_root=${lib.escapeShellArg "${realmRoot}/state/cache/polylogue-backup-hooks"}
       install -d -m 0700 -o root -g root "$stage_root"
-      stage_relative_root=${lib.escapeShellArg (lib.removePrefix "/" polylogueStateRoot)}
-      stage_hooks="$stage_root/$stage_relative_root/hooks"
-      staged_hook_source="$stage_root/./$stage_relative_root/hooks"
-      echo "polylogue state backup phase: sealing hooks"
-      install -d -m 0700 -o root -g root "$stage_root/cuts" "$(dirname "$stage_hooks")"
-      ${pkgs.python3}/bin/python3 ${./cut-polylogue-hooks.py} \
-        ${lib.escapeShellArg polylogueStateRoot} "$stage_hooks" "$stage_root/cuts" \
-        ${./seal-polylogue-hooks.py}
+      install -d -m 0700 -o root -g root "$stage_root/cuts"
       # The aside subvolume holds a pre-reindex copy of Polylogue state that
       # no snapshot reaches: realm snapshots stop at nested subvolumes. It is
       # archived here, beside the live state its blobs deduplicate against.
@@ -223,7 +216,8 @@
         aside_sources+=(${lib.escapeShellArg polylogueAsideRoot})
       fi
       echo "polylogue state backup phase: creating archive"
-      with_borg_lock borg create \
+      with_borg_lock ${pkgs.python3}/bin/python3 ${./cut-polylogue-hooks.py} \
+        ${lib.escapeShellArg polylogueStateRoot} "$stage_root/cuts" -- borg create \
         --compression auto,zstd,1 \
         --lock-wait ${toString borgLockWaitSec} \
         ${
@@ -232,7 +226,6 @@
         --exclude ${lib.escapeShellArg "${polylogueStateRoot}/hooks/**"} \
         "::$archive_name" \
         ${lib.escapeShellArg polylogueStateRoot} \
-        "$staged_hook_source" \
         "''${aside_sources[@]}"
       echo "polylogue state backup complete: $archive_name"
 

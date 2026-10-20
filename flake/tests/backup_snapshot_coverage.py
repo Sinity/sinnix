@@ -8,7 +8,6 @@ import io
 import json
 import os
 import re
-import resource
 import shutil
 import sqlite3
 import subprocess
@@ -2296,27 +2295,22 @@ else: sys.exit(1)
                     (root / "live-polylogue" / relative).read_text(),
                     original + '{"event":"written-during-borg-create"}\n',
                 )
-            # The first create deliberately races a live append. Seal that
-            # append, then compare unchanged hook payloads. The snapshot mock
-            # copies files into fresh inodes; native cut reuse is checked separately.
-            hook = next(
-                (root / "realm-data/state/cache/polylogue-backup-hooks").rglob(
-                    "codex-session-live.jsonl"
-                )
-            )
-            time.sleep(1.1)
-            run("polylogue")
+            # Repeated archives read native cuts directly. There is no staged
+            # hook copy to retain, and each successful command releases its cut.
+            hook = root / "live-polylogue/hooks/codex-session-live.jsonl"
             stable_payload = hook.read_bytes()
-            time.sleep(1.1)
-            before_io = resource.getrusage(resource.RUSAGE_CHILDREN).ru_inblock
-            started = time.monotonic()
-            run("polylogue")
-            print(
-                "unchanged Polylogue hook archive: "
-                f"elapsed_seconds={time.monotonic() - started:.3f} "
-                f"child_input_blocks={resource.getrusage(resource.RUSAGE_CHILDREN).ru_inblock - before_io}"
-            )
-            self.assertEqual(hook.read_bytes(), stable_payload)
+            for _ in range(2):
+                time.sleep(1.1)
+                run("polylogue")
+                self.assertEqual(hook.read_bytes(), stable_payload)
+                self.assertEqual(
+                    list(
+                        (
+                            root / "realm-data/state/cache/polylogue-backup-hooks/cuts"
+                        ).iterdir()
+                    ),
+                    [],
+                )
             shutil.rmtree(root / "live-polylogue/hooks")
             time.sleep(1.1)
             run("polylogue")
