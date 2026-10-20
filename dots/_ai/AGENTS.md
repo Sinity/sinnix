@@ -116,7 +116,7 @@ running agents in parallel.
 - The operator's Chrome is shared. Check `sinnix-chrome-control status`, and
   retry and inspect `list-tabs` before concluding it is unavailable. Agent work
   uses its own agent window or background tab by page ID; the operator's tabs
-  are touched only when a request is about them. Load `desktop-control-plane`
+  are touched only when a request is about them. Load `desktop-control`
   for browser, Kitty, Hyprland, and screenshot work. `sinnix-observe` gives live
   host evidence.
 - Sinnix activation changes the live machine; follow the Activation section of

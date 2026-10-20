@@ -1,0 +1,3 @@
+interface:
+  display_name: "Desktop control"
+  short_description: "Chrome, Kitty, Hyprland and screenshots"

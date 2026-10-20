@@ -10,7 +10,7 @@ reads use the provider-native conversation endpoint in an explicitly selected
 tab. Use Polylogue for durable historical session search.
 
 Run the bundled `scripts/sinnix-chatgpt-conversations` helper. It uses the
-shared Chrome CDP control plane and requires an explicit page ID for reads
+shared Chrome CDP connection and requires an explicit page ID for reads
 and downloads. Read commands do not alter the browser.
 
 ## Read conversations

@@ -102,7 +102,7 @@ Servers: context7, github, lynchpin, sinex.
 | `claude-self-knowledge` | Verify what the installed Claude Code harness does (versions, models, dispatch and forks, hooks, permissions, compaction, notifications, local state) or diagnose a surprising harness behavior. |
 | `claude-sessions` | Extract readable prose from raw Claude Code session JSONL when Polylogue is unavailable, including bounded user and assistant text, optional thinking, and tool summaries. |
 | `codebase-design` | Design or restructure modules, interfaces, seams, and adapters; judge module depth; or decide whether apparently unused code should be completed or deleted. |
-| `desktop-control-plane` | "Drive the operator's desktop from an agent: shared Chrome through CDP, Kitty remote input and capture, Hyprland windows and shortcuts, and HDR-safe screenshots." |
+| `desktop-control` | "Control the operator's desktop: shared Chrome through CDP, Kitty remote input and capture, Hyprland windows and shortcuts, and HDR-safe screenshots." |
 | `grilling` | Grill the user relentlessly about a plan or design. Use when the user wants to stress-test a plan before building, or uses any 'grill' trigger phrases. |
 | `grok` | Audit an entire codebase systematically by measuring and partitioning it, dispatching tiered review lanes, triaging recurring defect patterns, and filing concrete findings when one context cannot cover the target. |
 | `handoff` | "Leave or resume a handoff when stopping mid-work, before compaction, passing work to another agent, or re-entering after one: job IDs, worktrees, Git and PR state, next action." |
@@ -110,7 +110,7 @@ Servers: context7, github, lynchpin, sinex.
 | `investigate` | Diagnose a bug, regression, flaky test, performance problem, incident, or missing artifact, or verify a contested claim, through reproduction, measurement, and preserved evidence. |
 | `lynchpin` | Query or develop Lynchpin evidence sources, materialization, DuckDB substrate generations, graphs, analyses, Chisel reports, Polylogue boundaries, and MCP evidence products. |
 | `orchestrate` | "Coordinate several agents on one goal: task groups, model choice, native agents, forks or AgentCTL batches, integration review, and landing the result." |
-| `polylogue` | "Query past AI sessions through Polylogue, or develop Polylogue itself: ingestion, storage tiers, lineage, CLI, MCP, daemon convergence, devtools verification." |
+| `polylogue` | "Query past AI sessions through Polylogue, or develop Polylogue itself: ingestion, provenance, queries, CLI, MCP, daemon behavior, and verification." |
 | `prompting` | "Write, rewrite, or diagnose prompts: dispatch prompts for subagents, prompts for external or browser models, prompt portfolios and templates, or enhancing the user's rough request." |
 | `quest-hmd-control` | Control and verify a Meta Quest HMD through ADB, app intents, media forwarding, and immersive-session evidence. Use for Quest setup, pairing, streaming, capture, or headset UI beyond ordinary Android automation. |
 | `rank-options` | Order several generated options by real operator preference (brainstorm shortlists, design alternatives, candidate plans) with a few pairwise comparisons, a fitted order, and a resumable domain. |

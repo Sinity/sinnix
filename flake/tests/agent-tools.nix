@@ -277,27 +277,27 @@ in
         fixtureAssets = [
           {
             target = ".local/bin/sinnix-chrome-control";
-            source = ../../dots/_ai/skills/desktop-control-plane/scripts/chrome-control.sh;
+            source = ../../dots/_ai/skills/desktop-control/scripts/chrome-control.sh;
             executable = true;
           }
           {
             target = ".local/bin/sinnix-hypr-control";
-            source = ../../dots/_ai/skills/desktop-control-plane/scripts/hypr-control.sh;
+            source = ../../dots/_ai/skills/desktop-control/scripts/hypr-control.sh;
             executable = true;
           }
           {
             target = ".local/bin/sinnix-keyboard-control";
-            source = ../../dots/_ai/skills/desktop-control-plane/scripts/keyboard-control.sh;
+            source = ../../dots/_ai/skills/desktop-control/scripts/keyboard-control.sh;
             executable = true;
           }
           {
             target = ".local/bin/sinnix-kitty-control";
-            source = ../../dots/_ai/skills/desktop-control-plane/scripts/kitty-remote-control.sh;
+            source = ../../dots/_ai/skills/desktop-control/scripts/kitty-remote-control.sh;
             executable = true;
           }
           {
             target = ".local/bin/sinnix-screenshot-control";
-            source = ../../dots/_ai/skills/desktop-control-plane/scripts/screenshot-color-lab.sh;
+            source = ../../dots/_ai/skills/desktop-control/scripts/screenshot-color-lab.sh;
             executable = true;
           }
           {
@@ -1371,7 +1371,7 @@ in
           }
           ''
             helper="$TMPDIR/kitty-remote-control.sh"
-            cp ${../../dots/_ai/skills/desktop-control-plane/scripts/kitty-remote-control.sh} "$helper"
+            cp ${../../dots/_ai/skills/desktop-control/scripts/kitty-remote-control.sh} "$helper"
             chmod +x "$helper"
             patchShebangs "$helper"
             ${pkgs.bash}/bin/bash ${../../flake/tests/kitty-agent-here.sh} "$helper"
@@ -1390,7 +1390,7 @@ in
           }
           ''
             helper="$TMPDIR/kitty-remote-control.sh"
-            cp ${../../dots/_ai/skills/desktop-control-plane/scripts/kitty-remote-control.sh} "$helper"
+            cp ${../../dots/_ai/skills/desktop-control/scripts/kitty-remote-control.sh} "$helper"
             chmod +x "$helper"
             patchShebangs "$helper"
             ${pkgs.bash}/bin/bash ${../../flake/tests/kitty-launch-keep-focus.sh} "$helper"

@@ -14,7 +14,7 @@
 {
   sinnix.runtime.captures = [
     {
-      # screenshot-color-lab.sh (desktop-control-plane skill), fired from the
+      # screenshot-color-lab.sh (desktop-control skill), fired from the
       # Hyprland "Show display capture status" binding and by ad-hoc operator
       # or agent screenshots. Never a daemon.
       name = "screenshot";

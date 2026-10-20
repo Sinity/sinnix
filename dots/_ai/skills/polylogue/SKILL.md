@@ -1,46 +1,59 @@
 ---
 name: polylogue
-description: "Query past AI sessions through Polylogue, or develop Polylogue itself: ingestion, storage tiers, lineage, CLI, MCP, daemon convergence, devtools verification."
+description: "Query past AI sessions through Polylogue, or develop Polylogue itself: ingestion, provenance, queries, CLI, MCP, daemon behavior, and verification."
 ---
 
 # Polylogue
 
-Polylogue archives AI sessions and serves them through a query-first CLI, an
-MCP server, a Python API, and a daemon. Use it to reconstruct past work
-instead of guessing. For development, the repository's `AGENTS.md` holds the
-product invariants and `docs/atlas/` orients each area.
+Polylogue archives AI conversations and agent sessions. Use it to reconstruct
+past work from source evidence. Select instructions for the executable or
+checkout you are actually using: the installed Python service and the Rust
+rewrite can coexist, with different commands and archives.
 
-## Reading history
+## Read history
 
-- Prefer the MCP operations: `status` before freshness-sensitive or
-  completeness claims, `explain` when fields or grammar are uncertain,
-  `query` to find sets, `read` or `get` for bounded context, `context` for a
-  resume or prior-art packet (`context(intent="resume", repo_path=<abs>,
-cwd=<abs>)` after an interruption). Keep the returned refs and fetch full
-  message text only when needed.
-- On the CLI, signal query intent with `find`, a quoted expression, or field
-  syntax, and filter by `origin`, not provider. `polylogued status` shows
-  freshness when results look stale.
-- When ingestion is unavailable, `claude-sessions` reads raw Claude
-  transcripts.
+1. Inspect the available MCP tool descriptions or `polylogue --help` before
+   choosing a command. `polylogue status` establishes freshness and service
+   availability; an empty result alone does not establish absent history.
+2. On the Python query-first CLI, use `polylogue find 'QUERY'` and
+   `polylogue find 'QUERY' then read`. Filter source families with `origin`,
+   not provider. Its MCP operations include `status`, `explain`, `query`,
+   `read`, `get`, and `context`; use the exposed schemas for their arguments.
+3. On the Rust CLI, use its current README and command help. Its query syntax,
+   daemon entry point and context commands differ from Python. Run a checkout's
+   built binary explicitly when checking the rewrite, rather than assuming the
+   ambient `polylogue` command comes from that checkout.
+4. Find a bounded set, retain returned references, and read the complete
+   relevant messages before making a claim about prior work. When ingestion
+   is unavailable, [claude-sessions](../claude-sessions/SKILL.md) reads raw
+   Claude transcripts.
 
-## Developing
+## Develop Polylogue
 
-- Six SQLite tiers, split by durability: `source`, `user`, and `audit` are
-  durable; `index` and `embeddings` rebuildable; `ops` disposable. Rebuildable
-  state is never the authority for a durable mutation. Live writes go through
-  the daemon's single writer; lineage is stored as a divergent tail and
-  recomposed on read.
-- Code edits can move the derived schema identity even without DDL. Check
-  `devtools schema closure <file>` for anything you change and land closure
-  changes before a rebuild starts.
-- `devtools test <selector>` runs an explicit focused selection; keep exact
-  selectors in a task's `verification_commands`. `devtools verify --quick`
-  runs static checks only. `devtools verify` makes one bounded selection from
-  a usable testmon graph and reports zero honestly; if the graph is unusable
-  it refuses, and you run a focused selection instead. `devtools verify
---all` runs the complete corpus only when scheduled or explicitly
-  requested. Do not re-run a green or failed verification on the same
-  revision to get a bigger selection. `devtools why` and the run receipt show
-  what ran; an empty selection is not a pass.
-- Product work lands through feature branches and squash-merged PRs.
+Read the target checkout's `AGENTS.md`, `README.md` and
+`docs/development.md`. They own the current architecture and development
+commands. The main repository at `/realm/project/polylogue/repo` is the Rust
+rewrite; its README identifies whether it has replaced the deployed Python
+version. Verify that boundary before using real archives or service commands.
+
+For the Rust checkout:
+
+- `crates/` and `xtask/` own implementation and developer checks. Follow the
+  repository's crate boundaries and typed store interfaces; inspect the
+  actual schema and archive layout instead of importing Python tier rules.
+- Run focused tests while editing. The repository's fast check runs on push;
+  full checks belong to integrated batches under its development policy.
+  Read `docs/development.md` for current selectors and declared AgentCTL
+  operations rather than applying Python `devtools` commands to Rust.
+- Use synthetic test archives. Treat the rewrite's archive and the deployed
+  archive as separate until a verified cutover establishes otherwise.
+- Follow the checkout's delivery rules. A merge proves integration; report
+  the checks that actually ran separately.
+
+For an older Python checkout, read that checkout's own instructions and CLI
+help. Its `devtools`, storage-tier and schema-closure procedures apply only
+where that checkout still implements them.
+
+A source edit does not switch the installed CLI, daemon, capture hooks or MCP
+server. Deployment and data migration require their own authorized operation
+and verification against the intended installed executable and archive.

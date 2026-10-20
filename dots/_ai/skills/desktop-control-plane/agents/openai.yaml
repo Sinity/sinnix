@@ -1,3 +1,0 @@
-interface:
-  display_name: "Desktop Control Plane"
-  short_description: "Desktop control primitives for Kitty and Hyprland"

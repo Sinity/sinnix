@@ -26,7 +26,7 @@
           }
           ''
             helper="$TMPDIR/sinnix-chrome-control"
-            cp ${../../dots/_ai/skills/desktop-control-plane/scripts/chrome-control.sh} "$helper"
+            cp ${../../dots/_ai/skills/desktop-control/scripts/chrome-control.sh} "$helper"
             chmod +x "$helper"
             patchShebangs "$helper"
             shellcheck -S warning "$helper" ${./chrome-agent-window.sh}

@@ -467,7 +467,7 @@ let
   # parser only binds those two flags in their separated form, so `--provider=x`
   # lands in its unknown-extension-flag map and selects no provider. A
   # provider-prefixed `--model openai/gpt-4o` does still select a provider; that
-  # is a deliberate interactive affordance, and the AgentCTL route never reaches
+  # is allowed in interactive sessions; the AgentCTL route never reaches
   # it because the adapter supplies --model from the backend registry.
   mkPiWrapper = {
     text = ''

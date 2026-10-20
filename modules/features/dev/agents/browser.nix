@@ -1,4 +1,4 @@
-# Chrome DevTools MCP wrappers and the desktop-control-plane script bundle
+# Chrome DevTools MCP wrappers and the desktop-control script bundle
 # (chrome/hypr/keyboard/kitty/screenshot control). Plain helper (not a
 # NixOS module) — imported directly by mcp.nix's configFn, not picked up by
 # auto-import.
@@ -31,7 +31,7 @@ let
   # before any edit to these control scripts could be exercised. Consumers must
   # reference this via mkOutOfStoreSymlink rather than string interpolation, or
   # Nix copies the directory into the store and the indirection is lost.
-  desktopControlScripts = dotsRoot + "/_ai/skills/desktop-control-plane/scripts";
+  desktopControlScripts = dotsRoot + "/_ai/skills/desktop-control/scripts";
 in
 {
   inherit
