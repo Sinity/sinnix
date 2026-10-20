@@ -466,6 +466,7 @@ def broker_service(tmp_path: Path, max_bytes: int = 262_144) -> McpBrokerService
                 "transport": "stdio",
                 "tier": "evidence",
                 "brokered": True,
+                "sessionPolicy": "stateless",
                 "command": "fixture-mcp",
                 "args": ["--fixture"],
                 "env": {"FIXTURE": "1"},
@@ -554,6 +555,7 @@ def test_catalog_probes_admitted_servers_and_keeps_exclusions_static(
                 "transport": "stdio",
                 "tier": "browser",
                 "brokered": False,
+                "session_policy": "per-call",
                 "availability": "unavailable",
                 "reason": "preserves browser isolation",
             },
@@ -563,6 +565,7 @@ def test_catalog_probes_admitted_servers_and_keeps_exclusions_static(
                 "transport": "stdio",
                 "tier": "evidence",
                 "brokered": True,
+                "session_policy": "stateless",
                 "availability": "available",
                 "tool_count": 1,
                 "read_only_tool_count": 1,
@@ -635,6 +638,7 @@ for line in sys.stdin:
         "transport": "stdio",
         "tier": "evidence",
         "brokered": True,
+        "session_policy": "stateless",
         "availability": "available",
         "tool_count": 1,
         "read_only_tool_count": 1,
@@ -1075,7 +1079,11 @@ def test_gateway_config_loads_broker_servers(tmp_path: Path) -> None:
     )
 
     assert GatewayConfig.load(config_path).mcp_broker_servers == {
-        "fixture": {"brokered": True, "callTimeoutSeconds": 30}
+        "fixture": {
+            "brokered": True,
+            "sessionPolicy": "per-call",
+            "callTimeoutSeconds": 30,
+        }
     }
 
 
@@ -1513,3 +1521,87 @@ asyncio.run(main())
     assert sum(row[0] == "server" for row in observed) == 1
     assert observed.count(["call", "blocked"]) == 1
     assert observed.count(["call", "after"]) == 1
+
+
+@pytest.mark.parametrize("policy", [None, "per-call"])
+def test_default_sessions_do_not_share_connection_context(
+    tmp_path, monkeypatch, policy
+):
+    broker = broker_service(tmp_path)
+    server = broker.config.mcp_broker_servers["fixture"]
+    server.pop("sessionPolicy")
+    if policy is not None:
+        server["sessionPolicy"] = policy
+
+    class ContextSession(FakeSession):
+        def __init__(self, *args):
+            self.context = None
+
+        async def call_tool(self, name, arguments):
+            previous = self.context
+            self.context = arguments["query"]
+            return SimpleNamespace(
+                model_dump=lambda **kwargs: {
+                    "content": [{"type": "text", "text": str(previous)}],
+                    "isError": False,
+                }
+            )
+
+    monkeypatch.setattr(
+        "sinnix_agent_gateway.mcp_broker.stdio_client", lambda *a, **k: FakeTransport()
+    )
+    monkeypatch.setattr("sinnix_agent_gateway.mcp_broker.ClientSession", ContextSession)
+
+    async def calls():
+        async with broker.lifespan():
+            await broker.call("fixture", "lookup", {"query": "caller-a"}, write=False)
+            result = await broker.call(
+                "fixture", "lookup", {"query": "caller-b"}, write=False
+            )
+            assert result["response"]["content"][0]["text"] == "None"
+            assert not broker._sessions
+
+    anyio.run(calls)
+
+
+def test_real_stdio_default_discards_connection_local_context(tmp_path):
+    broker = broker_service(tmp_path)
+    broker.config.mcp_broker_servers["fixture"].pop("sessionPolicy")
+    fixture = write_stdio_fixture(
+        tmp_path,
+        """import json
+import sys
+context = None
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request["method"]
+    if method == "initialize":
+        result = {
+            "protocolVersion": request["params"]["protocolVersion"],
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": "context-fixture", "version": "1"},
+        }
+    elif method == "tools/list":
+        result = {"tools": [{"name": "lookup", "inputSchema": {"type": "object"},
+                             "annotations": {"readOnlyHint": True}}]}
+    elif method == "tools/call":
+        result = {"content": [{"type": "text", "text": str(context)}]}
+        context = request["params"]["arguments"]["query"]
+    else:
+        continue
+    print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
+""",
+    )
+    broker.config.mcp_broker_servers["fixture"].update(
+        command=sys.executable, args=[str(fixture)]
+    )
+
+    async def calls():
+        async with broker.lifespan():
+            for caller in ("caller-a", "caller-b"):
+                result = await broker.call(
+                    "fixture", "lookup", {"query": caller}, write=False
+                )
+                assert result["response"]["content"][0]["text"] == "None"
+
+    anyio.run(calls)

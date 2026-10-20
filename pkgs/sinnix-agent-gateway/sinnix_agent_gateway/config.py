@@ -252,6 +252,11 @@ class GatewayConfig:
             raise ValueError("mcpBrokerServers must map names to objects")
         normalized_broker_servers: dict[str, dict[str, Any]] = {}
         for name, server in broker_servers.items():
+            policy = server.get("sessionPolicy", "per-call")
+            if policy not in ("per-call", "stateless"):
+                raise ValueError(
+                    f"mcpBrokerServers.{name}.sessionPolicy must be per-call or stateless"
+                )
             timeout = server.get("callTimeoutSeconds", DEFAULT_MCP_CALL_TIMEOUT_SECONDS)
             try:
                 timeout = validate_mcp_call_timeout(timeout)
@@ -259,6 +264,7 @@ class GatewayConfig:
                 raise ValueError(f"mcpBrokerServers.{name}.{exc}") from exc
             normalized_broker_servers[name] = {
                 **server,
+                "sessionPolicy": policy,
                 "callTimeoutSeconds": timeout,
             }
         return cls(

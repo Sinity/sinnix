@@ -55,3 +55,20 @@ def test_project_default_checkout_is_an_explicit_absolute_path(
     )
     with pytest.raises(ValueError, match="defaultCheckout must be an absolute path"):
         GatewayConfig.load(config_path)
+
+
+@pytest.mark.parametrize("policy", ["per-call", "stateless", "session-local", None])
+def test_broker_session_policy_is_explicit(tmp_path, policy):
+    path = tmp_path / "config.json"
+    server = {} if policy is None else {"sessionPolicy": policy}
+    path.write_text(json.dumps({"mcpBrokerServers": {"fixture": server}}))
+    if policy == "session-local":
+        with pytest.raises(
+            ValueError, match="sessionPolicy must be per-call or stateless"
+        ):
+            GatewayConfig.load(path)
+    else:
+        config = GatewayConfig.load(path)
+        assert config.mcp_broker_servers["fixture"]["sessionPolicy"] == (
+            policy or "per-call"
+        )

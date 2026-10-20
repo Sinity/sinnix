@@ -214,6 +214,16 @@ names one tool plus argument values that must all match. Reads go through
 `mcp.call`; everything else needs `mcp.change`. The last complete tool list is
 cached for discovery, but every call checks the live server and current policy.
 
+Upstream connections default to `per-call`: discovery and each invocation use
+fresh sessions, so one caller cannot inherit another caller's connection-local
+context. Session-local cursors and contexts across calls are unsupported; use
+owner references that carry their state explicitly. An owner whose complete
+contract is stateless may opt into warm shared connections with
+`gatewaySessionPolicy = "stateless"` in the registry. This asserts that no
+connection-local state or visibility belongs to a logical caller. The broker
+catalog reports `session_policy`; an upstream failure is returned to the caller
+without replaying the request. Current production owners use `per-call`.
+
 ## Filesystem moves
 
 Same-filesystem moves use one `renameat2(RENAME_NOREPLACE)`: never a link and

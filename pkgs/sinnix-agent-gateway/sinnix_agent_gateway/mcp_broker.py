@@ -157,6 +157,11 @@ class McpBrokerService:
         environment: dict[str, str],
         stderr_directory: Path,
     ) -> _PersistentSession | None:
+        policy = server.get("sessionPolicy", "per-call")
+        if policy not in ("per-call", "stateless"):
+            raise McpBrokerError(f"MCP upstream {name} has invalid sessionPolicy")
+        if policy == "per-call":
+            return None
         task_group = self._task_group
         if task_group is None:
             return None
@@ -518,6 +523,7 @@ class McpBrokerService:
             "transport": row.get("transport"),
             "tier": row.get("tier"),
             "brokered": row.get("brokered") is True,
+            "session_policy": row.get("sessionPolicy", "per-call"),
         }
         if row.get("brokered") is not True:
             return {
