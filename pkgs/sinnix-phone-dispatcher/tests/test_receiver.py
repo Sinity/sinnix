@@ -49,15 +49,22 @@ def running_server(tmp_path: Path):
         server.server_close()
 
 
-def _wait_for_lane_file(lane_dir: Path, timeout: float = 5.0) -> Path:
+def _wait_for_lane_records(
+    lane_dir: Path, count: int, timeout: float = 5.0
+) -> list[dict]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         files = sorted(lane_dir.glob("*-index.jsonl"))
         if files:
-            return files[0]
+            # Creation precedes the append. Only newline-terminated rows are
+            # published records; an empty file or partial row is still pending.
+            rows = files[0].read_text().split("\n")[:-1]
+            records = [json.loads(row) for row in rows if row.strip()]
+            if len(records) >= count:
+                return records
         time.sleep(0.02)
     faulthandler.dump_traceback()
-    raise TimeoutError(f"no index file appeared under {lane_dir}")
+    raise TimeoutError(f"{count} index records did not appear under {lane_dir}")
 
 
 def test_envelope_seq_is_continuous_across_lines(
@@ -67,14 +74,8 @@ def test_envelope_seq_is_continuous_across_lines(
     try:
         for i in range(3):
             sock.sendall((json.dumps({"kind": "battery", "n": i}) + "\n").encode())
-        index_path = _wait_for_lane_file(tmp_path / "phone-battery")
-        deadline = time.monotonic() + 5.0
-        while time.monotonic() < deadline:
-            lines = [ln for ln in index_path.read_text().splitlines() if ln.strip()]
-            if len(lines) >= 3:
-                break
-            time.sleep(0.02)
-        seqs = [json.loads(ln)["seq"] for ln in lines]
+        records = _wait_for_lane_records(tmp_path / "phone-battery", 3)
+        seqs = [record["seq"] for record in records]
     finally:
         sock.close()
     assert seqs == [1, 2, 3]
@@ -87,14 +88,13 @@ def test_malformed_line_is_dropped_but_connection_survives(
     try:
         sock.sendall(b"not json at all\n")
         sock.sendall((json.dumps({"kind": "battery", "n": 1}) + "\n").encode())
-        index_path = _wait_for_lane_file(tmp_path / "phone-battery")
-        lines = [ln for ln in index_path.read_text().splitlines() if ln.strip()]
+        records = _wait_for_lane_records(tmp_path / "phone-battery", 1)
     finally:
         sock.close()
     # Exactly one record made it through: the malformed line produced no
     # envelope, and the valid line behind it was still ingested on the same
     # connection.
-    assert len(lines) == 1
+    assert len(records) == 1
 
 
 def test_oversized_line_is_dropped_but_connection_survives(
@@ -107,11 +107,10 @@ def test_oversized_line_is_dropped_but_connection_survives(
         )
         sock.sendall(oversized.encode() + b"\n")
         sock.sendall((json.dumps({"kind": "battery", "n": 1}) + "\n").encode())
-        index_path = _wait_for_lane_file(tmp_path / "phone-battery")
-        lines = [ln for ln in index_path.read_text().splitlines() if ln.strip()]
+        records = _wait_for_lane_records(tmp_path / "phone-battery", 1)
     finally:
         sock.close()
-    assert len(lines) == 1
+    assert len(records) == 1
 
 
 def test_ingest_line_demuxes_by_kind_into_separate_lanes(tmp_path: Path) -> None:
