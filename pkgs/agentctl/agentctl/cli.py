@@ -3,16 +3,9 @@
 Every verb runs to completion in this process, does what it was told, and
 reports.
 
-Output: a read verb (``project``, ``result validate-worker``,
-``job list|get|logs|result|wait``, ``batch status|list|task``, ``view``,
-``events tail``) prints a table in local time with an age column, or the
-document with ``--json``. A write verb
-(``job start|cancel|retry|clean``, ``worktree clean``,
-``batch start|land|abandon|result|resume``,
-``pools apply``, ``pressure tick``) prints the
-document as JSON on stdout and one summary line on stderr. Tables show a
-run's 8-character suffix and 8 characters of a commit; ``--full`` prints
-them whole, and every verb that takes a run accepts either form.
+Reads print tables or JSON; native mutations print JSON and a summary line.
+Batch and evidence verbs read retained records only. Worktree cleanup preserves
+checkout-only bytes and original history before release.
 
 The project is ``--project``, a leading positional that names a configured
 project or a checkout path, or else the checkout enclosing the working
@@ -40,25 +33,18 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from . import (
-    batch,
     evidence,
     job_queries,
     launch,
     operator_view,
     pools,
     pressure,
-    results,
     worktree_cleanup,
 )
 from .batch_history import HistoryError, HistoryRefusal, list_runs, load, resolve_run_id
 from .config import Config, ConfigError, load_config, resolve_project
 from .github import GithubError
 from .job_queries import JobError
-from .manifest import (
-    HARNESSES,
-    BatchError,
-    BatchRefusal,
-)
 from .operator_view import DEFAULT_JOB_ROWS, Output, local_clock, table
 from .projects import (
     ProjectAdapter,
@@ -66,9 +52,8 @@ from .projects import (
     ProjectEnvironmentError,
     ProjectOperation,
 )
-from .prompts import PromptError
 from .pueue import PueueError
-from .start import check_result_contract, load_dispatched_result
+from .task_reads import TaskReadError
 from .worktree_cleanup import CleanupError
 from .worktrunk import WorktrunkError
 
@@ -85,15 +70,13 @@ MAX_EVENT_LINE_BYTES = 1024 * 1024
 
 _REFUSALS = (
     HistoryRefusal,
-    BatchRefusal,
     ConfigError,
     JobError,
-    PromptError,
+    TaskReadError,
     ProjectConfigError,
     ProjectEnvironmentError,
 )
 _SUBSTRATE_ERRORS = (
-    BatchError,
     CleanupError,
     HistoryError,
     GithubError,
@@ -102,12 +85,6 @@ _SUBSTRATE_ERRORS = (
 )
 
 PROJECT_HELP = "project id or checkout path (default: the checkout enclosing the working directory)"
-
-
-def _agent_arguments(target: argparse.ArgumentParser) -> None:
-    target.add_argument("--backend")
-    target.add_argument("--model")
-    target.add_argument("--effort")
 
 
 def _output_arguments(target: argparse.ArgumentParser) -> None:
@@ -141,7 +118,7 @@ def _job_id_option(target: argparse.ArgumentParser) -> None:
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
         prog="agentctl",
-        description="Jobs over pueue, batches over worktrunk + gh + bd, one operator view.",
+        description="Native project jobs, preserved worktrees and retained history.",
     )
     root.add_argument(
         "--config", type=Path, help="agentctl.json (default /etc/sinnix/agentctl.json)"
@@ -173,32 +150,6 @@ def parser() -> argparse.ArgumentParser:
     clean.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
     _project_option(clean)
     _output_arguments(clean)
-
-    result = verbs.add_parser("result", help="validate agent result documents")
-    result_verbs = result.add_subparsers(dest="result_verb", required=True)
-    validate_worker = result_verbs.add_parser(
-        "validate-worker", help="validate one worker result with the batch contract"
-    )
-    validate_worker.add_argument("path", type=Path)
-    validate_worker.add_argument(
-        "--run",
-        default=os.environ.get("AGENTCTL_RUN_ID"),
-        help="the batch run whose current attempt must file this result "
-        "(default: $AGENTCTL_RUN_ID, set for queued batch workers)",
-    )
-    validate_worker.add_argument(
-        "--worker",
-        default=os.environ.get("AGENTCTL_WORKER_ID"),
-        help="the worker within --run (default: $AGENTCTL_WORKER_ID)",
-    )
-    validate_worker.add_argument(
-        "--attempt",
-        type=int,
-        default=os.environ.get("AGENTCTL_ATTEMPT"),
-        help="the dispatch attempt that will file this result (default: "
-        "$AGENTCTL_ATTEMPT, set for queued batch workers)",
-    )
-    _output_arguments(validate_worker)
 
     job = verbs.add_parser("job", help="declared operations as pueue tasks")
     job_verbs = job.add_subparsers(dest="job_verb", required=True)
@@ -287,144 +238,21 @@ def parser() -> argparse.ArgumentParser:
     wait.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)
     _output_arguments(wait)
 
-    batch_verb = verbs.add_parser(
-        "batch", help="several workers on one base commit, landed as one candidate"
+    history = verbs.add_parser("batch", help="read retained batch history")
+    history_verbs = history.add_subparsers(dest="batch_verb", required=True)
+    status = history_verbs.add_parser(
+        "status", help="read an original run with native job observations"
     )
-    batch_verbs = batch_verb.add_subparsers(dest="batch_verb", required=True)
-    batch_start = batch_verbs.add_parser(
-        "start",
-        help="validate the members, claim them, create one worktree per worker, "
-        "queue the workers and the landing task behind them",
-    )
-    batch_start.add_argument(
-        "target",
-        nargs="*",
-        metavar="[project] bead",
-        help="seed beads, optionally preceded by the project; "
-        "each bead's dispatch group is a worker",
-    )
-    _project_option(batch_start)
-    batch_start.add_argument(
-        "--worker",
-        action="append",
-        default=[],
-        metavar="BEADS",
-        help="an explicit worker: comma-separated bead ids, the first leads",
-    )
-    batch_start.add_argument(
-        "--workers",
-        choices=HARNESSES,
-        default="queued",
-        dest="harness",
-        help="queued: agentctl runs the workers; external: another harness does",
-    )
-    batch_start.add_argument(
-        "--mcp-server",
-        action="append",
-        default=[],
-        metavar="NAME",
-        help="enable one named MCP server for each queued worker",
-    )
-    _agent_arguments(batch_start)
-    _output_arguments(batch_start)
-    batch_land = batch_verbs.add_parser(
-        "land",
-        help="integrate, verify, review, publish and accept a run; "
-        "the landing task's body, re-runnable after a named failure",
-    )
-    batch_land.add_argument("run_id", help="a run id or its 8-character suffix")
-    batch_land.add_argument(
-        "--keep-integration",
-        action="store_true",
-        help="land the integration worktree's current HEAD without re-merging",
-    )
-    _project_option(batch_land)
-    _output_arguments(batch_land)
-    batch_queue = batch_verbs.add_parser(
-        "queue",
-        help="queue the landing as a job instead of running it here; "
-        "recovers a run whose landing task the queue lost",
-    )
-    batch_queue.add_argument("run_id", help="a run id or its 8-character suffix")
-    _project_option(batch_queue)
-    _output_arguments(batch_queue)
-    batch_task = batch_verbs.add_parser(
-        "task", help="current beads tasks and changes from one worker's dispatch"
-    )
-    batch_task.add_argument("--run", default=os.environ.get("AGENTCTL_RUN_ID"))
-    batch_task.add_argument("--worker", default=os.environ.get("AGENTCTL_WORKER_ID"))
-    batch_task.add_argument(
-        "--attempt", type=int, default=os.environ.get("AGENTCTL_ATTEMPT")
-    )
-    _project_option(batch_task)
-    _output_arguments(batch_task)
-    batch_status = batch_verbs.add_parser(
-        "status",
-        help="one run: the manifest joined with pueue task state and the landing PR",
-    )
-    batch_status.add_argument("run_id", help="a run id or its 8-character suffix")
-    _project_option(batch_status)
-    _output_arguments(batch_status)
-    batch_abandon = batch_verbs.add_parser(
-        "abandon",
-        help="release a run: unclaim its members, remove worktrees holding "
-        "no unpreserved work, mark the manifest abandoned",
-    )
-    batch_abandon.add_argument("run_id", help="a run id or its 8-character suffix")
-    batch_abandon.add_argument("--reason", default="", help="recorded in the manifest")
-    _project_option(batch_abandon)
-    _output_arguments(batch_abandon)
-    batch_list = batch_verbs.add_parser(
-        "list", help="every run of a project with its stage"
-    )
-    batch_list.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
-    _project_option(batch_list)
-    _output_arguments(batch_list)
-    batch_result = batch_verbs.add_parser(
-        "result", help="file a worker's schema-validated result"
-    )
-    batch_result.add_argument("run_id", help="a run id or its 8-character suffix")
-    batch_result.add_argument("worker_id")
-    batch_result.add_argument("path", type=Path)
-    batch_result.add_argument(
-        "--attempt",
-        type=int,
-        help="the dispatch attempt filing this result; the queued filing "
-        "command supplies it, and the result's dispatch identity is then "
-        "taken from the dispatch record",
-    )
-    _project_option(batch_result)
-    _output_arguments(batch_result)
-    batch_scope = batch_verbs.add_parser(
-        "scope-correct", help="record corrected write authority for an existing worker"
-    )
-    batch_scope.add_argument("run_id", help="a run id or its 8-character suffix")
-    batch_scope.add_argument("worker_id")
-    batch_scope.add_argument("candidate")
-    batch_scope.add_argument(
-        "--authorize", action="append", required=True, metavar="BEAD=GLOB"
-    )
-    _output_arguments(batch_scope)
-    batch_resume = batch_verbs.add_parser(
-        "resume", help="queue a fresh agent into a worker's worktree"
-    )
-    batch_resume.add_argument("run_id", help="a run id or its 8-character suffix")
-    batch_resume.add_argument("--worker", required=True, dest="worker_id")
-    _project_option(batch_resume)
-    _agent_arguments(batch_resume)
-    _output_arguments(batch_resume)
+    status.add_argument("run_id", help="a run id or its suffix")
+    _project_option(status)
+    _output_arguments(status)
+    listing = history_verbs.add_parser("list", help="read retained runs for a project")
+    listing.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
+    _project_option(listing)
+    _output_arguments(listing)
 
-    native_evidence = verbs.add_parser(
-        "evidence", help="file and read evidence of work done outside a batch"
-    )
+    native_evidence = verbs.add_parser("evidence", help="read retained native evidence")
     evidence_verbs = native_evidence.add_subparsers(dest="evidence_verb", required=True)
-    evidence_file = evidence_verbs.add_parser(
-        "file",
-        help="validate and retain one worker-result claim, with observations, for work done outside a batch",
-    )
-    evidence_file.add_argument("path", type=Path)
-    _project_option(evidence_file)
-    _output_arguments(evidence_file)
     evidence_list = evidence_verbs.add_parser(
         "list", help="retained evidence of work done outside a batch, for one project"
     )
@@ -642,188 +470,27 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     raise AssertionError(verb)
 
 
-def _landing_recovery(run_id: str, filed: Mapping[str, Any]) -> str:
-    """What `batch result` did about a landing task the queue no longer has."""
-    lost = filed.get("landing_vanished")
-    if lost is None:
-        return ""
-    text = f"\npueue no longer has landing task {lost}"
-    if filed.get("landing_requeued") is not None:
-        return f"{text}; queued {filed['landing_requeued']} in its place"
-    error = filed.get("landing_requeue_error")
-    return (
-        f"{text}{' (' + str(error) + ')' if error else ''}; "
-        f"queue one with `agentctl batch queue {run_id}`"
-    )
-
-
 def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
-    verb = arguments.batch_verb
-    if verb == "start":
-        project, beads = _split_target(config, arguments.project, arguments.target)
-        workers = [
-            [item.strip() for item in group.split(",") if item.strip()]
-            for group in arguments.worker
-        ]
-        started = batch.start(
-            config,
-            project,
-            beads,
-            workers=workers or None,
-            harness=arguments.harness,
-            backend=arguments.backend,
-            model=arguments.model,
-            effort=arguments.effort,
-            mcp_servers=arguments.mcp_server,
-        )
-        note = (
-            "already prepared; nothing launched"
-            if started.get("existing") and not started.get("resumed")
-            else "preparation completed"
-            if started.get("resumed")
-            else "started"
-        )
-        out.write(started, f"{out.run_lines(started)}\n{note}")
-        return EXIT_OK
-    if verb == "land":
+    if arguments.batch_verb == "status":
         run_id = resolve_run_id(config, arguments.run_id)
         project = resolve_project(
             config, arguments.project or load(config, run_id).project
         )
-        landed = batch.land(
-            config, project, run_id, keep_integration=arguments.keep_integration
-        )
-        acceptance = landed["acceptance"] or {}
-        members = acceptance.get("beads", {})
-        out.write(
-            landed,
-            f"{out.run_lines(landed)}\nlanded {out.sha(acceptance.get('candidate_sha'))}: "
-            + ", ".join(
-                f"{bead} {state['state']}" for bead, state in sorted(members.items())
-            )
-            + (
-                f"\nresidual: {'; '.join(acceptance['residual'])}"
-                if acceptance.get("residual")
-                else ""
-            ),
-        )
-        return EXIT_OK
-    if verb == "queue":
-        run_id = resolve_run_id(config, arguments.run_id)
-        project = resolve_project(
-            config, arguments.project or load(config, run_id).project
-        )
-        queued = batch.queue(config, project, run_id)
-        out.write(
-            queued,
-            f"queued landing task {queued['landing_task_id']} for {out.run(run_id)}",
-        )
-        return EXIT_OK
-    if verb == "task":
-        if not arguments.run or not arguments.worker:
-            parser().error("name --run and --worker, or use their dispatch environment")
-        run_id = resolve_run_id(config, arguments.run)
-        project = resolve_project(
-            config, arguments.project or load(config, run_id).project
-        )
-        document = batch.task_context(
-            config, project, run_id, arguments.worker, attempt=arguments.attempt
-        )
-        out.read(document)
-        return EXIT_OK if document["complete"] else EXIT_SUBSTRATE
-    if verb == "status":
-        run_id = resolve_run_id(config, arguments.run_id)
-        project = resolve_project(
-            config, arguments.project or load(config, run_id).project
-        )
-        document = batch.status(config, run_id, project=project)
+        document = operator_view.status(config, run_id, project=project)
         out.read(document, out.run_lines(document))
         return EXIT_OK
-    if verb == "abandon":
-        run_id = resolve_run_id(config, arguments.run_id)
-        project = resolve_project(
-            config, arguments.project or load(config, run_id).project
-        )
-        abandoned = batch.abandon(config, project, run_id, reason=arguments.reason)
-        residual = abandoned["abandoned"]["residual"]
-        out.write(
-            abandoned,
-            f"abandoned {out.run(run_id)}"
-            + (f"\nresidual: {'; '.join(residual)}" if residual else ""),
-        )
-        return EXIT_OK
-    if verb == "list":
+    if arguments.batch_verb == "list":
         project = _select_project(config, arguments.project, arguments.selector)
         rows = [
-            batch.status(config, run.run_id, project=project)
+            operator_view.status(config, run.run_id, project=project)
             for run in list_runs(config, project.project_id)
         ]
         out.read(rows, out.runs_table(rows))
         return EXIT_OK
-    if verb == "result":
-        run_id = resolve_run_id(config, arguments.run_id)
-        project = resolve_project(
-            config, arguments.project or load(config, run_id).project
-        )
-        filed = batch.result(
-            config,
-            run_id,
-            arguments.worker_id,
-            arguments.path,
-            project=project,
-            attempt=arguments.attempt,
-        )
-        out.write(
-            filed,
-            f"recorded result for {arguments.worker_id} in {out.run(run_id)}"
-            + (
-                " and released the landing task"
-                if filed.get("landing_released")
-                else ""
-            )
-            + _landing_recovery(run_id, filed),
-        )
-        return EXIT_OK
-    if verb == "resume":
-        run_id = resolve_run_id(config, arguments.run_id)
-        project = resolve_project(
-            config, arguments.project or load(config, run_id).project
-        )
-        resumed = batch.resume(
-            config,
-            project,
-            run_id,
-            arguments.worker_id,
-            backend=arguments.backend,
-            model=arguments.model,
-            effort=arguments.effort,
-        )
-        out.write(
-            resumed, f"resumed {arguments.worker_id}: {out.job_line(resumed['job'])}"
-        )
-        return EXIT_OK
-    if verb == "scope-correct":
-        run_id = resolve_run_id(config, arguments.run_id)
-        corrected = batch.correct_scope(
-            config,
-            run_id,
-            arguments.worker_id,
-            arguments.candidate,
-            arguments.authorize,
-        )
-        out.write(
-            corrected, f"corrected scope for {arguments.worker_id} in {out.run(run_id)}"
-        )
-        return EXIT_OK
-    raise AssertionError(verb)
+    raise AssertionError(arguments.batch_verb)
 
 
 def _evidence(arguments: argparse.Namespace, config: Config, out: Output) -> int:
-    if arguments.evidence_verb == "file":
-        project = resolve_project(config, arguments.project)
-        filed = evidence.file(config, project, arguments.path)
-        out.write(filed, f"recorded evidence {filed['evidence_id']}")
-        return EXIT_OK
     if arguments.evidence_verb == "list":
         project = _select_project(config, arguments.project, arguments.selector)
         records = evidence.list_records(
@@ -1087,36 +754,10 @@ def _project(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     return EXIT_OK
 
 
-def _result(arguments: argparse.Namespace, config: Config, out: Output) -> int:
-    if arguments.result_verb == "validate-worker":
-        if bool(arguments.run) != bool(arguments.worker):
-            parser().error("--run and --worker name one batch worker together")
-        if arguments.run:
-            # The filing contract, so `batch-worker done` refuses what `batch result`
-            # would refuse for this attempt, and fills the same identity.
-            run = load(config, resolve_run_id(config, arguments.run))
-            worker = run.worker(arguments.worker)
-            value = load_dispatched_result(
-                worker, arguments.path, attempt=arguments.attempt
-            )
-            check_result_contract(run, worker, value)
-        else:
-            value, errors = results.load_result(arguments.path, kind="worker")
-            if errors:
-                raise BatchRefusal(
-                    "invalid_result", "; ".join(errors[:6]), errors=errors
-                )
-        out.read({"valid": True}, "worker result is valid")
-        return EXIT_OK
-    raise AssertionError(arguments.result_verb)
-
-
 def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     verb = arguments.verb
     if verb == "project":
         return _project(arguments, config, out)
-    if verb == "result":
-        return _result(arguments, config, out)
     if verb == "job":
         return _job(arguments, config, out)
     if verb == "worktree":

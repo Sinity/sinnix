@@ -1,348 +1,14 @@
-"""Native evidence filing uses task, Beads and Git observations without batches."""
+"""Original evidence stays readable without the retired filing workflow."""
 
-from __future__ import annotations
-
+import hashlib
 import json
 import tracemalloc
-from copy import deepcopy
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from agentctl import evidence, job_queries, launch
-from agentctl.config import Config, resolve_project
-from agentctl.run import outcome_path_for
-from conftest import SELF_REVIEW, FakeBd, FakePueue, begin_attempt
-
-SHA = "a" * 40
-
-
-def _claim(*, receipt: str, schema_version: int | None = None) -> dict:
-    value = {
-        "candidate_sha": SHA,
-        "beads": [{"id": "fx-1", "criteria": []}],
-        "unresolved": [],
-        "self_review": deepcopy(SELF_REVIEW),
-        "verification": [
-            {
-                "command": "fixture check",
-                "receipt": receipt,
-                "tested_sha": SHA,
-                "status": "passed",
-                "coverage": {"ac_ids": ["AC-1"], "scope": "focused"},
-            }
-        ],
-    }
-    if schema_version is not None:
-        value.update(
-            schema_version=schema_version,
-            execution="native",
-            attempt=1,
-            model_segments=[],
-            measured_usage=None,
-            beads=[
-                {
-                    "id": "fx-1",
-                    "bead_revision": "17",
-                    "acceptance_digest": "1791badcc7ac5f89d864ebf64b72eaf3b941d4e2eeb80de2c72245a1a0c9d9dc",
-                    "criteria": [
-                        {
-                            "ac_id": "AC-1",
-                            "text": "the check passes",
-                            "status": "satisfied",
-                            "evidence": "claimed",
-                        }
-                    ],
-                }
-            ],
-        )
-    return value
-
-
-def _receipt_job(
-    config: Config, fake_pueue: FakePueue, project, *, start_sha: str = SHA
-) -> tuple[int, str]:
-    queued = launch.enqueue(
-        config,
-        project=project,
-        operation="check",
-        label="fixture:check",
-        group="normal",
-        argv=("true",),
-        working_directory=project.root,
-        timeout_seconds=60,
-        result_kind="exit",
-        environment={},
-        tree_receipt={"head": SHA, "tree": "b" * 40, "dirty": False},
-    )
-    fake_pueue.succeed(queued["task_id"])
-    begin_attempt(config, queued["job_id"])
-    outcome = outcome_path_for(config.jobs_dir / f"{queued['job_id']}.log")
-    outcome.write_text(
-        json.dumps(
-            {
-                "outcome": "success",
-                "exit_code": 0,
-                "execution_receipt": {
-                    "binding": "unchanged_endpoints",
-                    "start": {
-                        "head": start_sha,
-                        "tree": "b" * 40,
-                        "dirty": False,
-                        "status": "observed",
-                    },
-                    "end": {
-                        "head": SHA,
-                        "tree": "b" * 40,
-                        "dirty": False,
-                        "status": "observed",
-                    },
-                },
-            }
-        )
-    )
-    return queued["task_id"], queued["job_id"]
-
-
-def _beads() -> FakeBd:
-    return FakeBd(
-        {
-            "fx-1": {
-                "id": "fx-1",
-                "revision": 17,
-                "metadata": {
-                    "acceptance_criteria": [{"id": "AC-1", "text": "the check passes"}]
-                },
-            }
-        }
-    )
-
-
-@pytest.mark.parametrize("cleaned", [False, True])
-def test_file_keeps_claim_separate_from_clean_receipt_observation(
-    cleaned: bool,
-    config: Config,
-    fake_pueue: FakePueue,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    project = resolve_project(config, "fixture")
-    task_id, job_id = _receipt_job(config, fake_pueue, project)
-    if cleaned:
-        launch.clean(config, task_id, job_id)
-    monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
-    monkeypatch.setattr(
-        evidence,
-        "_candidate",
-        lambda project, candidate: {
-            "candidate_sha": candidate,
-            "checked": True,
-            "eligible": True,
-        },
-    )
-    monkeypatch.setattr(
-        evidence,
-        "_publication",
-        lambda project, candidate: {
-            "state": "published",
-            "candidate_reachable": True,
-            "checked": True,
-        },
-    )
-    path = tmp_path / "native.json"
-    path.write_text(json.dumps(_claim(receipt=f"agentctl://jobs/{task_id}/{job_id}")))
-
-    record = evidence.file(config, project, path)
-
-    assert record["worker_result"]["verification"][0]["receipt"].endswith(job_id)
-    observation = record["verification"][0]["observation"]
-    assert observation["eligible"] is True
-    assert observation["queue_present"] is not cleaned
-    assert observation["attempt"] == 1
-    assert Path(observation["artifacts"]["outcome"]).is_file()
-    assert observation["execution_receipt"]["end"] == {
-        "head": SHA,
-        "tree": "b" * 40,
-        "dirty": False,
-        "status": "observed",
-    }
-    assert observation["tree_receipt"] == {
-        "head": SHA,
-        "tree": "b" * 40,
-        "dirty": False,
-    }
-    assert record["task_snapshot"][0]["evidence_binding"]["bead_revision"] == "17"
-    assert record["task_snapshot"][0]["acceptance_criteria"] == [
-        {"id": "AC-1", "text": "the check passes"}
-    ]
-    summary = evidence.list_records(config, "fixture")["records"][0]
-    assert summary["evidence_id"] == record["evidence_id"]
-    assert evidence.get_record(config, "fixture", record["evidence_id"]) == record
-
-
-def test_file_without_publication_workspace_retains_unknown_observation(
-    config: Config,
-    fake_pueue: FakePueue,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    root = resolve_project(config, "fixture").root
-    descriptor = root / ".agentctl" / "project.toml"
-    text = descriptor.read_text()
-    start = text.index("[workspace]")
-    end = text.index("[packets]", start)
-    descriptor.write_text(text[:start] + text[end:])
-    project = resolve_project(config, "fixture")
-    assert project.workspace is None
-    task_id, job_id = _receipt_job(config, fake_pueue, project)
-    monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
-    monkeypatch.setattr(
-        evidence,
-        "_candidate",
-        lambda project, candidate: {
-            "candidate_sha": candidate,
-            "checked": True,
-            "eligible": True,
-        },
-    )
-
-    def unexpected_remote(*args, **kwargs):
-        pytest.fail("missing publication policy must not invent a remote branch")
-
-    monkeypatch.setattr(evidence.github, "remote_head", unexpected_remote)
-    path = tmp_path / "native.json"
-    path.write_text(
-        json.dumps(
-            _claim(
-                receipt=f"agentctl://jobs/{task_id}/{job_id}",
-                schema_version=2,
-            )
-        )
-    )
-    record = evidence.file(config, project, path)
-    publication = record["publication"]
-    assert publication["state"] == "unknown"
-    assert publication["checked"] is False
-    assert publication["candidate_reachable"] is None
-    assert publication["branch"] is None
-    assert publication["policy"] is None
-    assert publication["gaps"] == ["project has no workspace publication policy"]
-    assert record["verification"][0]["observation"]["eligible"] is True
-    assert evidence.get_record(config, "fixture", record["evidence_id"]) == record
-
-
-def test_v2_claim_must_match_the_current_filing_snapshot(
-    config: Config,
-    fake_pueue: FakePueue,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    project = resolve_project(config, "fixture")
-    task_id, job_id = _receipt_job(config, fake_pueue, project)
-    monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
-    path = tmp_path / "native.json"
-    claim = _claim(receipt=f"agentctl://jobs/{task_id}/{job_id}", schema_version=2)
-    claim["beads"][0]["bead_revision"] = "old"
-    path.write_text(json.dumps(claim))
-
-    with pytest.raises(job_queries.JobError, match="filing snapshot"):
-        evidence.file(config, project, path)
-
-
-def test_receipt_requires_the_immutable_job_id(
-    config: Config,
-    fake_pueue: FakePueue,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    project = resolve_project(config, "fixture")
-    task_id, _reference = _receipt_job(config, fake_pueue, project)
-    monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
-    path = tmp_path / "native.json"
-    path.write_text(json.dumps(_claim(receipt=f"agentctl://jobs/{task_id}")))
-
-    with pytest.raises(job_queries.JobError, match="<job-id>"):
-        evidence.file(config, project, path)
-
-
-def test_native_evidence_requires_a_narrated_self_review(
-    config: Config,
-    fake_pueue: FakePueue,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    """Breaks if native filing accepts a claim with no self_review: native
-    work has no dispatch record to carry the requirement."""
-    project = resolve_project(config, "fixture")
-    task_id, job_id = _receipt_job(config, fake_pueue, project)
-    monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
-    path = tmp_path / "native.json"
-    claim = _claim(receipt=f"agentctl://jobs/{task_id}/{job_id}")
-    del claim["self_review"]
-    path.write_text(json.dumps(claim))
-
-    with pytest.raises(job_queries.JobError, match="requires self_review"):
-        evidence.file(config, project, path)
-
-
-def test_v2_native_route_rejects_a_queued_execution_claim(
-    config: Config,
-    fake_pueue: FakePueue,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    project = resolve_project(config, "fixture")
-    task_id, job_id = _receipt_job(config, fake_pueue, project)
-    monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
-    path = tmp_path / "native.json"
-    claim = _claim(receipt=f"agentctl://jobs/{task_id}/{job_id}", schema_version=2)
-    claim["execution"] = "queued"
-    path.write_text(json.dumps(claim))
-
-    with pytest.raises(job_queries.JobError, match="execution=native"):
-        evidence.file(config, project, path)
-
-
-def test_receipt_needs_clean_candidate_at_both_execution_endpoints(
-    config: Config,
-    fake_pueue: FakePueue,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    project = resolve_project(config, "fixture")
-    task_id, job_id = _receipt_job(config, fake_pueue, project, start_sha="c" * 40)
-    monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
-    monkeypatch.setattr(evidence, "_candidate", lambda project, candidate: {})
-    monkeypatch.setattr(evidence, "_publication", lambda project, candidate: {})
-    path = tmp_path / "native.json"
-    path.write_text(json.dumps(_claim(receipt=f"agentctl://jobs/{task_id}/{job_id}")))
-
-    record = evidence.file(config, project, path)
-
-    observation = record["verification"][0]["observation"]
-    assert observation["eligible"] is False
-    assert any("endpoints" in gap for gap in observation["gaps"])
-
-
-def test_publication_requires_advertised_head_to_match_local_tracking_ref(
-    config: Config, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    project = resolve_project(config, "fixture")
-    monkeypatch.setattr(evidence.github, "remote_head", lambda root, branch: "b" * 40)
-    calls = []
-
-    def git(root, *arguments, **kwargs):
-        calls.append(arguments)
-        if arguments[0] == "rev-parse":
-            return "b" * 40
-        return ""
-
-    monkeypatch.setattr(evidence.gitcmd, "git", git)
-    publication = evidence._publication(project, SHA)
-
-    assert publication["state"] == "published"
-    assert publication["candidate_reachable"] is True
-    assert any(call[0] == "merge-base" for call in calls)
+from agentctl import evidence
+from agentctl.config import Config
+from agentctl.job_queries import JobError
 
 
 def test_list_ignores_malformed_or_other_project_records(config: Config) -> None:
@@ -356,50 +22,6 @@ def test_list_ignores_malformed_or_other_project_records(config: Config) -> None
     listed = evidence.list_records(config, "fixture")
     assert listed["records"] == []
     assert listed["coverage"] == "partial"
-
-
-def test_large_valid_execution_receipt_is_filed_and_retrievable(
-    config: Config,
-    fake_pueue: FakePueue,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    project = resolve_project(config, "fixture")
-    task_id, job_id = _receipt_job(config, fake_pueue, project)
-    outcome = outcome_path_for(config.jobs_dir / f"{job_id}.log")
-    value = json.loads(outcome.read_text())
-    value["execution_evidence"] = {
-        "dirty_manifest": [
-            {"path": f"tree/{i:05d}", "sha256": "b" * 64} for i in range(4_000)
-        ]
-    }
-    outcome.write_text(json.dumps(value))
-    monkeypatch.setattr(evidence, "SubprocessBdReader", lambda root: _beads())
-    monkeypatch.setattr(
-        evidence, "_candidate", lambda project, candidate: {"candidate_sha": candidate}
-    )
-    monkeypatch.setattr(
-        evidence, "_publication", lambda project, candidate: {"state": "unknown"}
-    )
-    path = tmp_path / "native.json"
-    path.write_text(json.dumps(_claim(receipt=f"agentctl://jobs/{task_id}/{job_id}")))
-
-    record = evidence.file(config, project, path)
-    listed = evidence.list_records(config, "fixture")
-    fetched = evidence.get_record(config, "fixture", record["evidence_id"])
-
-    assert listed["records"][0]["bytes"] > evidence.MAX_EVIDENCE_BYTES
-    assert len(json.dumps(listed)) < evidence.MAX_EVIDENCE_BYTES
-    assert (
-        fetched["verification"][0]["observation"]["execution_evidence"]
-        == value["execution_evidence"]
-    )
-    artifact = (
-        config.state_dir / "native-evidence" / f"{record['evidence_id']}.artifact.json"
-    )
-    artifact.write_bytes(artifact.read_bytes()[:-1] + b" ")
-    with pytest.raises(job_queries.JobError, match="identity mismatch"):
-        evidence.get_record(config, "fixture", record["evidence_id"])
 
 
 def test_list_cursor_crosses_other_projects_and_retrieves_later_record(
@@ -484,149 +106,37 @@ def test_list_selects_a_page_from_a_large_directory_with_bounded_memory(
     assert peak < 1_500_000
 
 
-def test_read_paths_need_no_owner_and_reject_misaddressed_reference(
-    config: Config, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.parametrize("damage", [None, "bytes", "sha256", "evidence_id", "project"])
+def test_original_artifact_identity_and_scope_are_checked(config, damage):
     evidence_id = "a" * 32
-    path = config.state_dir / "native-evidence" / f"{evidence_id}.json"
-    document = {
-        "schema_version": 1,
-        "kind": "native_evidence",
+    directory = config.state_dir / "native-evidence"
+    directory.mkdir(parents=True)
+    original = {
         "evidence_id": evidence_id,
         "project": "fixture",
-        "recorded_at": "fixture",
+        "raw": "x" * 300_000,
+        "unknown_field": {"exact": 9223372036854775807},
     }
-    evidence._write_record(path, document)
-
-    def unavailable(*args: object, **kwargs: object) -> None:
-        raise AssertionError("read path called the owner")
-
-    monkeypatch.setattr(evidence, "SubprocessBdReader", unavailable)
-    monkeypatch.setattr(evidence, "_publication", unavailable)
-    assert (
-        evidence.list_records(config, "fixture")["records"][0]["evidence_id"]
-        == evidence_id
-    )
-    assert evidence.get_record(config, "fixture", evidence_id) == document
-
-    job_id = json.loads(path.read_text())
-    job_id["bytes"] += 1
-    path.write_text(json.dumps(job_id))
-    with pytest.raises(job_queries.JobError, match="size mismatch"):
-        evidence.get_record(config, "fixture", evidence_id)
-
-    job_id["bytes"] -= 1
-    job_id["evidence_id"] = "b" * 32
-    path.write_text(json.dumps(job_id))
-    listed = evidence.list_records(config, "fixture")
-    assert listed["records"] == []
-    assert listed["coverage"] == "partial"
-
-
-@pytest.mark.parametrize("retained", [True, False])
-def test_cleaned_receipt_never_substitutes_an_unrelated_reused_queue_id(
-    config: Config,
-    fake_pueue: FakePueue,
-    retained: bool,
-) -> None:
-    project = resolve_project(config, "fixture")
-    task_id, job_id = _receipt_job(config, fake_pueue, project, start_sha="c" * 40)
-    launch.clean(config, task_id, job_id)
-    fake_pueue.next_id = task_id
-    unrelated = launch.enqueue(
-        config,
-        project=project,
-        operation="unrelated",
-        label="fixture:unrelated",
-        group="normal",
-        argv=("true",),
-        working_directory=project.root,
-        timeout_seconds=60,
-        result_kind="exit",
-        environment={},
-    )
-    fake_pueue.succeed(unrelated["task_id"])
-    original_outcome = outcome_path_for(config.jobs_dir / f"{job_id}.log")
-    begin_attempt(config, unrelated["job_id"])
-    other_outcome = outcome_path_for(config.jobs_dir / f"{unrelated['job_id']}.log")
-    successful = json.loads(original_outcome.read_text())
-    successful["execution_receipt"]["start"]["head"] = SHA
-    other_outcome.write_text(json.dumps(successful))
-    assert unrelated["task_id"] == task_id
-    claim = {"receipt": f"agentctl://jobs/{task_id}/{job_id}"}
-    if not retained:
-        (config.inputs_dir / f"{job_id}.json").unlink()
-        with pytest.raises(job_queries.JobError, match="does not resolve"):
-            evidence._receipt_observation(config, claim, SHA, project_id="fixture")
-        return
-    observation = evidence._receipt_observation(
-        config, claim, SHA, project_id="fixture"
-    )
-    assert observation["job_id"] == job_id
-    assert observation["operation"] == "check"
-    assert observation["queue_present"] is False
-    assert observation["eligible"] is False
-    assert observation["execution_receipt"]["start"]["head"] == "c" * 40
-    assert any("endpoints" in gap for gap in observation["gaps"])
-
-
-@pytest.mark.parametrize(
-    "damage", ["missing-outcome", "incomplete-endpoint", "other-project"]
-)
-def test_cleaned_receipt_still_requires_complete_project_bound_execution_evidence(
-    config: Config,
-    fake_pueue: FakePueue,
-    damage: str,
-) -> None:
-    project = resolve_project(config, "fixture")
-    task_id, job_id = _receipt_job(config, fake_pueue, project)
-    launch.clean(config, task_id, job_id)
-    outcome_path = outcome_path_for(config.jobs_dir / f"{job_id}.log")
-    if damage == "missing-outcome":
-        outcome_path.resolve().unlink()
-    elif damage == "incomplete-endpoint":
-        outcome = json.loads(outcome_path.read_text())
-        outcome["execution_receipt"].pop("end")
-        outcome_path.write_text(json.dumps(outcome))
-    else:
-        input_path = config.inputs_dir / f"{job_id}.json"
-        document = json.loads(input_path.read_text())
-        document["project_id"] = "another-project"
-        input_path.write_text(json.dumps(document))
-    claim = {"receipt": f"agentctl://jobs/{task_id}/{job_id}"}
-    if damage == "other-project":
-        with pytest.raises(job_queries.JobError, match="another project"):
-            evidence._receipt_observation(config, claim, SHA, project_id="fixture")
-    else:
-        observation = evidence._receipt_observation(
-            config, claim, SHA, project_id="fixture"
-        )
-        assert observation["eligible"] is False
-        assert observation["gaps"]
-
-
-def test_native_evidence_record_is_private_and_exclusive(tmp_path: Path) -> None:
-    path = tmp_path / "record.json"
-    document = {
-        "schema_version": 1,
-        "kind": "native_evidence",
-        "evidence_id": "a" * 32,
+    raw = json.dumps(original).encode()
+    artifact = directory / f"{evidence_id}.artifact.json"
+    artifact.write_bytes(raw)
+    pointer = {
+        "schema_version": 2,
+        "kind": "native_evidence_reference",
+        "evidence_id": evidence_id,
         "project": "fixture",
-        "recorded_at": "fixture",
-        "complete": True,
+        "artifact": artifact.name,
+        "bytes": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest(),
     }
-
-    evidence._write_record(path, document)
-    pointer = json.loads(path.read_text())
-    assert pointer["kind"] == "native_evidence_reference"
-    assert (
-        pointer["sha256"]
-        == __import__("hashlib")
-        .sha256(json.dumps(document, sort_keys=True, separators=(",", ":")).encode())
-        .hexdigest()
-    )
-    assert path.stat().st_mode & 0o777 == 0o600
-    assert path.with_suffix(".artifact.json").stat().st_mode & 0o777 == 0o600
-    with pytest.raises(FileExistsError):
-        evidence._write_record(path, {"replacement": True})
-    assert json.loads(path.read_text()) == pointer
+    if damage == "bytes":
+        pointer[damage] += 1
+    elif damage is not None:
+        pointer[damage] = "wrong"
+    (directory / f"{evidence_id}.json").write_text(json.dumps(pointer))
+    if damage:
+        with pytest.raises(JobError):
+            evidence.get_record(config, "fixture", evidence_id)
+    else:
+        assert evidence.get_record(config, "fixture", evidence_id) == original
+    assert artifact.read_bytes() == raw

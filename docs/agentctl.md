@@ -1,7 +1,7 @@
 # agentctl
 
-`agentctl` runs declared project operations as queued jobs and runs batches of
-coding agents on isolated worktrees. It is an in-process CLI with no daemon.
+`agentctl` runs declared project operations as queued jobs and reads preserved
+work history. It is an in-process CLI with no daemon.
 External tools own the state it reads and writes:
 
 | Owner     | Owns                                                       | Read through                       |
@@ -12,9 +12,8 @@ External tools own the state it reads and writes:
 | Beads     | tasks and claims                                           | `bd ... --json`                    |
 | systemd   | each job's unit, and the timers that start operations      | `systemctl --user`                 |
 
-agentctl itself owns the project descriptors (`.agentctl/project.toml`), the
-prompt compiled from a task, each job's launch input and result artifacts, each
-batch's run manifest, and the `view` screen.
+agentctl itself owns the project descriptors (`.agentctl/project.toml`), each job's launch input and result artifacts, retained historical manifests,
+and the `view` screen.
 
 Within the Python package, `job_queries` owns stable-identity reads, selected
 attempts, bounded and redacted artifact pages, and observational waiting.
@@ -24,30 +23,21 @@ never cancels a job, and a queue cleanup retains its historical artifacts.
 
 ## Verbs
 
-| Verb                                                                        | Does                                                                                                                                                 |
-| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `project list \| get [p] \| operations [p]`                                 | the configured descriptors                                                                                                                           |
-| `job start [p] <op> [--workspace P] [--wait] [--if-idle] [-- args…]`        | queue an operation in its pool, label `<p>:<op>`; `--if-idle` skips it while the same label is queued or running                                     |
-| `job list [--project p] [--active] [--all]`                                 | job rows, newest first (40 unless `--all`)                                                                                                           |
-| `job snapshot [--limit N]`                                                  | group state and counts plus bounded job rows, unfinished first                                                                                       |
-| `job get \| logs \| result \| cancel \| retry \| wait <id>`                 | one job by pueue task id, plus `--job-id` to follow it across a reorder; `--attempt` selects a retry; `logs`/`result` page with `--offset`/`--limit` |
-| `job clean <id> \| --all-terminal`                                          | remove terminal queue entries; inputs, attempts, results and evidence are kept                                                                       |
-| `batch start [p] <bead>… [--worker a,b]…`                                   | validate members, write the manifest, claim, create worktrees, queue workers and the landing behind them                                             |
-| `batch land <run>`                                                          | the landing body: integrate, verify, review, publish, accept, clean up; re-runnable                                                                  |
-| `batch queue <run>`                                                         | queue the landing as a job instead of running it here                                                                                                |
-| `batch status <run>` / `batch list [p]`                                     | the manifest joined with pueue state and the landing PR                                                                                              |
-| `batch result <run> <worker> <result.json> [--attempt n]`                   | file a worker result produced by another harness                                                                                                     |
-| `batch resume <run> --worker <w>`                                           | queue a fresh agent into the worker's worktree with a resume prompt                                                                                  |
-| `batch task [--run r --worker w --attempt n]`                               | a worker's current tasks beside its dispatch-time bindings; read-only                                                                                |
-| `batch scope-correct <run> <worker> <candidate> --authorize <bead>=<glob>…` | replace a malformed stored worker scope, keeping the correction history                                                                              |
-| `batch abandon <run> [--reason R]`                                          | release a run that will not land                                                                                                                     |
-| `worktree clean [p]`                                                        | remove worktrees of landed or abandoned runs, keeping any with uncommitted or unmerged work                                                          |
-| `result validate-worker <result.json>`                                      | validate a worker result without filing it (same checks as `batch result`)                                                                           |
-| `evidence file \| list \| get`                                              | retain or read evidence for work done outside a batch                                                                                                |
-| `view [p]`                                                                  | queue groups, failures, active jobs, open runs and ready tasks                                                                                       |
-| `events tail [--lines N] [--follow] [--project p]`                          | the event log (`/realm/state/agentctl/events.jsonl`)                                                                                                 |
-| `pools apply`                                                               | write the declared pool widths into the running pueued                                                                                               |
-| `pressure tick`                                                             | one pass pausing or reopening groups against memory pressure                                                                                         |
+| Verb                                                                 | Does                                                                                                                                                 |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `project list \| get [p] \| operations [p]`                          | the configured descriptors                                                                                                                           |
+| `job start [p] <op> [--workspace P] [--wait] [--if-idle] [-- args…]` | queue an operation in its pool, label `<p>:<op>`; `--if-idle` skips it while the same label is queued or running                                     |
+| `job list [--project p] [--active] [--all]`                          | job rows, newest first (40 unless `--all`)                                                                                                           |
+| `job snapshot [--limit N]`                                           | group state and counts plus bounded job rows, unfinished first                                                                                       |
+| `job get \| logs \| result \| cancel \| retry \| wait <id>`          | one job by pueue task id, plus `--job-id` to follow it across a reorder; `--attempt` selects a retry; `logs`/`result` page with `--offset`/`--limit` |
+| `job clean <id> \| --all-terminal`                                   | remove terminal queue entries; inputs, attempts, results and evidence are kept                                                                       |
+| `batch status <run>` / `batch list [p]`                              | the manifest joined with pueue state and the landing PR                                                                                              |
+| `worktree clean [p]`                                                 | remove worktrees of landed or abandoned runs, keeping any with uncommitted or unmerged work                                                          |
+| `evidence list \| get`                                               | read original retained native evidence                                                                                                               |
+| `view [p]`                                                           | queue groups, failures, active jobs, open runs and ready tasks                                                                                       |
+| `events tail [--lines N] [--follow] [--project p]`                   | the event log (`/realm/state/agentctl/events.jsonl`)                                                                                                 |
+| `pools apply`                                                        | write the declared pool widths into the running pueued                                                                                               |
+| `pressure tick`                                                      | one pass pausing or reopening groups against memory pressure                                                                                         |
 
 `job start` and `job wait` take `--timeout-seconds` for the wait.
 The project is `--project`, a leading positional naming a project or checkout
@@ -171,127 +161,31 @@ repository's `index.lock`. Listing takes no lock and runs with
 `GIT_OPTIONAL_LOCKS=0`, as do agentctl's other Git reads and every queued
 command.
 
-agentctl's own index-writing Git calls are refused in a main checkout except
-the post-publish fast-forward under `publish = "master"`. A timed-out Git call
+agentctl's own index-writing Git calls are refused in a main checkout. A timed-out Git call
 gets SIGTERM, then SIGKILL after ten seconds. An `index.lock` stranded by a
 failed call is removed only from a worktree agentctl owns. Elsewhere it is
 reported, and the job wrapper records any it finds in the outcome's
 `stranded_index_locks`.
 
-## Batches
+## Retained history
 
-A batch is several workers on one base commit, landed as one candidate. Its
-record is the run manifest `$XDG_STATE_HOME/agentctl/runs/<run-id>.json`, with
-the run's workers and their attempts, worktrees, results, landing state and
-acceptance record. Pueue holds live task state, Beads the claims, worktrunk the
-worktrees and GitHub the PR.
+`batch list` and `batch status` read the original documents without loading a
+workflow engine. Status may join native queue observations and the recorded PR.
+Unknown original fields, incomplete attempts and artifact mappings remain in
+the document. Inaccessible history is unavailable, not an empty inventory.
 
-### Start
+New work uses native agents, Git worktrees and selected declared operations.
+Batch start, landing, result filing, resumption, task compilation and abandonment
+commands are retired. An unfinished historical record is inspection-only.
 
-`batch start` resolves each seed task's dispatch group into one worker
-(`--worker a,b` names one explicitly). It validates every member: open or in
-progress, no open external blocker, no assignee, not in a live run.
-
-For each worker it then:
-
-1. Claims the tasks as `agentctl-batch-<run>`.
-2. Creates a worktree on `batch/<run>/<worker>` from the base.
-3. Writes the worker prompt to `.agentctl/prompt.md`.
-4. Queues the worker in pool `agent`, with `MemoryMax` from
-   `[workspace].agent_memory_max`.
-
-The landing task goes in `<p>-land`, behind every worker.
-
-A worker runs `agentctl-agent` with that prompt and the worker result schema,
-then `agentctl batch result`, which validates its last message and binds it to
-the worktree head. Backend, model and effort come from the flags, the task's
-`model_policy` metadata, or `[packets.defaults]`. Agents start with no MCP
-servers unless `--mcp-server NAME` selects some from the generated profile.
-
-Worker, resume and review units cannot publish or change tasks:
-
-- **Git:** pushes go to a dead URL, the credential helper is empty, and
-  `SSH_AUTH_SOCK` and `GH_TOKEN` are cleared.
-- **Beads:** `bd` is shimmed to `bd --readonly`.
-- **Files:** the unit sees the project root read-only (with `.git` writable),
-  and other workers' worktrees are hidden.
-
-`--workers external` makes the same manifest, claims, worktrees and prompts but
-queues only the landing (stashed). Another harness runs the workers and files
-results with `batch result`. The last filed result releases the landing.
-Re-running `batch start` on an existing manifest completes missing steps.
-
-List-valued task metadata (`verification_commands`, `affected_paths`,
-`write_scope`, `acceptance_criteria`) may be a JSON array or a `;`-separated
-string. A value starting with `[` that is not an array of non-empty strings is
-refused.
-
-### Landing
-
-`batch land <run>` records each step before starting the next, so a repeat
-resumes. It holds `runs/<run>.land.lock`.
-
-1. **Results.** Refuse unless every worker filed a valid result. A result whose
-   `candidate_sha` is the base carries no commit. It is `verified` when every
-   criterion is satisfied and `no_op` otherwise, and that worker is left out
-   of the merge.
-2. **Integrate.** Fetch the base and merge the worker commits into the
-   integration worktree. On a conflict, queue one integration agent in pool
-   `land-agent`. Refuse if conflict markers remain.
-3. **Verify.** Run one `[workspace].verify.candidate` job on the candidate, or
-   wait for the hosted check named `hosted:<check>`. The receipt records the
-   tested SHA only if the checkout was clean before and after.
-4. **Review.** One reviewer job (pool `land-agent`) on `git diff
-base..candidate`, using the `review` agent and the judge schema. The verdict
-   must be `pass`. `[workspace].review = "none"` skips this step and records
-   that it was skipped.
-5. **Publish.** Under `publish = "master"`, push with
-   `--force-with-lease=<branch>:<base>` and fast-forward a clean main checkout.
-   Under `publish = "pr"`, create or reuse the PR, wait for the declared check
-   on the exact candidate, then `gh pr merge --squash --match-head-commit`.
-   One base movement triggers a refresh from step 2; a second is
-   `target_moved_twice`.
-6. **Accept.** Write the acceptance record, close each task whose criteria are
-   all satisfied or superseded, comment the residual on the rest, and remove
-   worktrees that hold no unique work.
-
-A retry reuses earlier verification and review only when the run's
-`inputs_digest` (base, worker commits and results, task content, descriptor,
-templates, schemas) is unchanged.
-
-`batch abandon` cancels queued tasks, unclaims members, removes clean
-worktrees (keeping branches) and records the reason. It is refused while
-landing runs or after acceptance. `worktree clean` removes worktrees of landed or
-abandoned runs. Before deleting a branch it saves the exact commit under
-`refs/agentctl/recovery/`, and it keeps any worktree that a process is using
-or that holds unmerged work.
-
-When the queue loses a task (for example after a pueued reset), `batch status`
-and `view` show it as `vanished` and name the exact next command: `batch
-queue`, `batch result` or `batch resume`.
-
-### Worker result
-
-The worker's final message is the JSON document
-`dots/claude/agents/schemas/worker.schema.json` describes:
-
-- `candidate_sha`.
-- `beads`, with each acceptance criterion marked `satisfied`, `unsatisfied`
-  or `superseded`, plus evidence.
-- `unresolved` findings.
-- `verification` receipts.
-- `self_review` (required for new dispatches).
-
-Filing checks the attempt and the dispatch-time acceptance bindings.
-
-Changed paths are compared with the workers' `write_scope` globs. Paths outside
-the scope are recorded for the reviewer, not refused. A worker may explain them
-with `scope_expansion`.
+`worktree clean` uses terminal recorded ownership, process/queue holders, hidden
+file checks, artifact verification and recovery refs. It keeps any checkout
+whose evidence or working bytes cannot be preserved.
 
 ### Refusals
 
-A batch verb that cannot proceed exits 1 with `<code>: <detail>`. A landing
-also records the code in `landing.failure`.
+Historical manifests may contain these original refusal codes. The batch
+mutation commands are retired; reading a record never resumes its executor.
 
 | code                           | meaning                                                                  |
 | ------------------------------ | ------------------------------------------------------------------------ |
@@ -342,22 +236,12 @@ also records the code in `landing.failure`.
 | `worker_result_missing`        | a worker filed no valid result                                           |
 | `workspace`                    | the descriptor declares no `[workspace]`                                 |
 
-## Evidence outside batches
+## Original native evidence
 
-Work done by an agent outside a batch can still close tasks:
-
-```text
-agentctl evidence file result.json --project <project>
-agentctl evidence list <project> [--cursor C] --json
-agentctl evidence get <evidence_id> --project <project> --json
-```
-
-The result names a candidate SHA, its tasks, their acceptance bindings and a
-`self_review`. Each verification claim must be a job receipt,
-`agentctl://jobs/<task-id>/<job-id>`. Filing checks that the job
-succeeded on a clean checkout of the candidate, and records whether the
-candidate is published on the base branch. Records are immutable files under
-`$XDG_STATE_HOME/agentctl/native-evidence/`.
+`evidence list` pages summaries and reports unreadable entries. `evidence get`
+returns the complete original record after checking its project, artifact size
+and SHA-256 identity. Filing new worker-schema claims is retired. Record native
+verification and decisions directly with the owning task and repository tools.
 
 ## Descriptors
 

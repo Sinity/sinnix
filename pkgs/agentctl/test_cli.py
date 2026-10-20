@@ -77,83 +77,6 @@ def test_job_controls_refuse_discarded_operation_arguments(
     assert refused.value.code == 2
 
 
-@pytest.mark.parametrize(
-    ("overrides", "expected_error"),
-    [
-        ({"schema_version": 99}, "schema_version"),
-        ({"attempt": 0}, "attempt"),
-    ],
-)
-def test_result_validate_worker_uses_owner_contract(
-    tmp_path: Path,
-    cli_config: Config,
-    capsys: pytest.CaptureFixture[str],
-    overrides: dict[str, object],
-    expected_error: str,
-) -> None:
-    result = {
-        "candidate_sha": "a" * 40,
-        "beads": [
-            {
-                "id": "fixture-1",
-                "criteria": [
-                    {
-                        "text": "synthetic criterion",
-                        "status": "satisfied",
-                        "evidence": "synthetic verification",
-                    }
-                ],
-            }
-        ],
-        "unresolved": [],
-        "verification": [
-            {"command": "synthetic check", "receipt": "synthetic receipt"}
-        ],
-        "self_review": deepcopy(SELF_REVIEW),
-        **overrides,
-    }
-    path = tmp_path / "worker-result.json"
-    path.write_text(json.dumps(result))
-
-    assert cli.main(["result", "validate-worker", str(path)]) == cli.EXIT_REFUSED
-    assert expected_error in capsys.readouterr().err
-
-
-def test_result_validate_worker_accepts_a_valid_synthetic_result(
-    tmp_path: Path,
-    cli_config: Config,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    path = tmp_path / "worker-result.json"
-    path.write_text(
-        json.dumps(
-            {
-                "candidate_sha": "a" * 40,
-                "beads": [
-                    {
-                        "id": "fixture-1",
-                        "criteria": [
-                            {
-                                "text": "synthetic criterion",
-                                "status": "satisfied",
-                                "evidence": "synthetic verification",
-                            }
-                        ],
-                    }
-                ],
-                "unresolved": [],
-                "verification": [
-                    {"command": "synthetic check", "receipt": "synthetic receipt"}
-                ],
-                "self_review": deepcopy(SELF_REVIEW),
-            }
-        )
-    )
-
-    assert cli.main(["result", "validate-worker", str(path)]) == cli.EXIT_OK
-    assert capsys.readouterr().out.strip() == "worker result is valid"
-
-
 def test_cli_cancel_before_start_retains_not_started_across_reads(
     fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -740,10 +663,7 @@ def test_batch_reads_accept_the_run_suffix_and_shorten_ids_unless_full(
     assert text.startswith("run 0123abcd fixture external base aaaaaaaa stage")
     assert "started 2026" not in text and "candidate bbbbbbbb" in text
     assert "  w1: prompt /nowhere/.agentctl/prompt.md\n" in text
-    assert (
-        "    next: agentctl batch result fixture-20260903-080000-0123abcd w1 "
-        "/nowhere/.agentctl/prompt.result.json\n" in text
-    )
+    assert "    next:" not in text
     assert cli.main(["batch", "status", "0123abcd", "--full"]) == 0
     text = capsys.readouterr().out
     assert "run fixture-20260903-080000-0123abcd" in text and "b" * 40 in text
@@ -953,63 +873,15 @@ def _lost_landing(config: Config, run_id: str, *, filed: bool) -> Path:
     return path
 
 
-def test_batch_status_asks_for_the_outstanding_result_not_a_landing(
-    fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """mzw2: a landing queued while a worker owes a result only refuses it.
-
-    The phantom stage read `ready to land`; naming `batch queue` in its place
-    would buy a task that fails `worker_not_done` the moment it runs.
-    """
+def test_unfinished_history_is_inspection_only(fake_pueue, cli_config, capsys):
     run_id = "fixture-20260903-080000-0123abcd"
     _lost_landing(cli_config, run_id, filed=False)
-
     assert cli.main(["batch", "status", "0123abcd"]) == 0
     text = capsys.readouterr().out
     assert "stage landing vanished" in text
     assert "landing: task 4547 (pueue no longer has it)" in text
-    assert (
-        f"    next: agentctl batch result {run_id} w1 "
-        "/nowhere/.agentctl/prompt.result.json\n" in text
-    )
-    assert "agentctl batch queue" not in text
-    assert "  next: the worker commands above" in text
-    assert cli.main(["--json", "batch", "status", "0123abcd"]) == 0
-    assert json.loads(capsys.readouterr().out)["landing"]["vanished"] == 4547
-
-    # A caller that queues one anyway gets a task that waits for the result
-    # rather than one that runs into a refusal.
-    assert cli.main(["batch", "queue", "0123abcd"]) == 0
-    stashed = json.loads(capsys.readouterr().out)["landing_task_id"]
-    assert fake_pueue.task(stashed).status == "Stashed"
-
-
-def test_batch_queue_replaces_a_lost_landing_once_the_results_are_in(
-    fake_pueue: FakePueue, cli_config: Config, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """mzw2: with every result filed, the landing is all that is missing."""
-    run_id = "fixture-20260903-080000-0123abcd"
-    path = _lost_landing(cli_config, run_id, filed=True)
-
-    assert cli.main(["batch", "status", "0123abcd"]) == 0
-    text = capsys.readouterr().out
-    assert "stage landing vanished" in text
-    assert "landing: task 4547 (pueue no longer has it)" in text
-    assert f"  next: agentctl batch queue {run_id}\n" in text
-
-    assert cli.main(["batch", "queue", "0123abcd"]) == 0
-    printed, summary = capsys.readouterr()
-    queued = json.loads(printed)["landing_task_id"]
-    task = fake_pueue.task(queued)
-    assert task.label == f"fixture:land:{run_id}"
-    # Nothing is left to wait for, so the replacement runs.
-    assert task.status != "Stashed" and task.dependencies == ()
-    assert summary == f"queued landing task {queued} for 0123abcd\n"
-    stored = json.loads(path.read_text())["landing"]
-    assert stored["task_id"] == queued and stored["job_id"] is not None
-
-    assert cli.main(["batch", "status", "0123abcd"]) == 0
-    assert "pueue no longer has it" not in capsys.readouterr().out
+    assert "retired workflow; inspect retained evidence" in text
+    assert not fake_pueue.added
 
 
 def test_wait_reports_elapsed_age_after_blocking(
@@ -1087,124 +959,6 @@ def test_job_launch_wait_success_is_success(
     assert json.loads(capsys.readouterr().out)["phase"] == "succeeded"
 
 
-@pytest.mark.parametrize(
-    ("change", "comparison"),
-    [
-        (
-            {"notes": "new owner note", "revision": -9007199254740995},
-            "contract_unchanged",
-        ),
-        (
-            {"design": "new obligation", "revision": -9007199254740995},
-            "contract_changed",
-        ),
-        (
-            {"acceptance_criteria": "new criterion", "revision": -9007199254740995},
-            "acceptance_changed",
-        ),
-        ({}, "contract_unchanged"),
-    ],
-)
-def test_batch_task_reads_amendments_without_changing_dispatch(
-    cli_config,
-    monkeypatch,
-    capsys,
-    change,
-    comparison,
-):
-    from agentctl import landing, prompts
-
-    run_id = "fixture-20260903-080000-0123abcd"
-    _manifest(cli_config, run_id)
-    path = manifest.manifest_path(cli_config, run_id)
-    row = {
-        "id": "fixture-1",
-        "title": "Original task",
-        "description": "original body",
-        "acceptance_criteria": "original criterion",
-        "revision": 9007199254740993,
-    }
-    doc = json.loads(path.read_text())
-    doc["workers"][0].update(
-        attempts=[{"number": 1}],
-        evidence_binding=[{"id": row["id"], **prompts.evidence_binding(row)}],
-    )
-    path.write_text(json.dumps(doc))
-    before = path.read_bytes()
-    row.update(change)
-
-    class Reader:
-        def show(self, ident):
-            assert ident == row["id"]
-            return deepcopy(row)
-
-    monkeypatch.setattr(landing, "SubprocessBeads", lambda root: Reader())
-    monkeypatch.setenv("AGENTCTL_RUN_ID", run_id)
-    monkeypatch.setenv("AGENTCTL_WORKER_ID", "w1")
-    monkeypatch.setenv("AGENTCTL_ATTEMPT", "1")
-    assert cli.main(["batch", "task", "--json"]) == 0
-    result = json.loads(capsys.readouterr().out)
-    assert result["complete"] is True
-    task = result["tasks"][0]
-    assert task["comparison"] == comparison
-    assert task["current_task"]["revision"] == str(row["revision"])
-    assert task["row_revision_changed"] == bool(change)
-    if "notes" in change:
-        assert task["current_task"]["notes"] == change["notes"]
-    assert path.read_bytes() == before
-
-
-def test_batch_task_unknown_baseline_and_owner_failure_are_explicit(
-    cli_config, monkeypatch, capsys
-):
-    from agentctl import landing
-
-    run_id = "fixture-20260903-080000-0123abcd"
-    _manifest(cli_config, run_id)
-
-    class Reader:
-        failed = False
-
-        def show(self, ident):
-            if self.failed:
-                raise OSError("synthetic owner unavailable")
-            return {
-                "id": ident,
-                "revision": -9007199254740995,
-                "description": "current body",
-            }
-
-    reader = Reader()
-    monkeypatch.setattr(landing, "SubprocessBeads", lambda root: reader)
-    args = ["batch", "task", "--run", run_id, "--worker", "w1", "--json"]
-    assert cli.main(args) == 0
-    result = json.loads(capsys.readouterr().out)
-    assert result["tasks"][0]["comparison"] == "unavailable"
-    assert result["tasks"][0]["current_task"]["description"] == "current body"
-    reader.failed = True
-    assert cli.main(args) == cli.EXIT_SUBSTRATE
-    result = json.loads(capsys.readouterr().out)
-    assert result["complete"] is False
-    assert result["tasks"][0]["status"] == "unavailable"
-
-
-def test_batch_task_refuses_superseded_attempt_before_owner_read(
-    cli_config, monkeypatch, capsys
-):
-    from agentctl import landing
-
-    run_id = "fixture-20260903-080000-0123abcd"
-    _manifest(cli_config, run_id)
-    monkeypatch.setattr(
-        landing, "SubprocessBeads", lambda root: pytest.fail("owner should not be read")
-    )
-    assert (
-        cli.main(["batch", "task", "--run", run_id, "--worker", "w1", "--attempt", "1"])
-        == cli.EXIT_REFUSED
-    )
-    assert "current attempt" in capsys.readouterr().err
-
-
 def test_wait_archived_cancellation_retains_job_failure_exit(
     fake_pueue, cli_config, capsys
 ):
@@ -1249,3 +1003,24 @@ def test_worktree_cleanup_uses_the_selected_project(cli_config, monkeypatch, cap
     assert cli.main(["worktree", "clean", "fixture", "--json"]) == cli.EXIT_OK
     assert selected == ["fixture"]
     assert json.loads(capsys.readouterr().out)["project"] == "fixture"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["batch", "start", "fixture", "fx-1"],
+        ["batch", "land", "run"],
+        ["batch", "queue", "run"],
+        ["batch", "resume", "run"],
+        ["batch", "result", "run"],
+        ["batch", "task"],
+        ["batch", "abandon", "run"],
+        ["batch", "scope-correct", "run"],
+        ["result", "validate-worker", "result.json"],
+        ["evidence", "file", "result.json"],
+    ],
+)
+def test_retired_mutation_commands_are_not_admitted(args):
+    with pytest.raises(SystemExit) as failure:
+        cli.parser().parse_args(args)
+    assert failure.value.code == cli.EXIT_USAGE

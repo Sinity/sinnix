@@ -1278,6 +1278,21 @@ def retry(config: Config, task_id: int, job_id: str | None = None) -> dict[str, 
             raise job_queries.JobError(
                 f"task {task.task_id} is still {task.status.lower()}"
             )
+        value = job_queries.read_launch_input(config, task) or {}
+        binding = value.get("binding") or {}
+        label_parts = task.label.split(":")
+        if (
+            value.get("kind") == "attested-agent"
+            or (isinstance(binding, Mapping) and binding.get("run_id"))
+            or str(value.get("operation") or "").startswith("land:")
+            or (
+                len(label_parts) >= 3
+                and label_parts[1] in job_queries.AGENT_OPERATIONS | {"land"}
+            )
+        ):
+            raise job_queries.JobError(
+                "retired batch executor is history-only; start a declared operation for new work"
+            )
         hold = _admission_hold(config, task.group, label=task.label)
         if hold is not None:
             value = job_queries.read_launch_input(config, task)

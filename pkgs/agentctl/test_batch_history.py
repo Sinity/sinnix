@@ -114,7 +114,7 @@ def test_cleanup_import_does_not_load_workflow_or_prompt_engine():
     )
 
 
-@pytest.mark.parametrize("module", ["operator_view", "launch"])
+@pytest.mark.parametrize("module", ["operator_view", "launch", "cli"])
 def test_native_jobs_and_views_do_not_import_the_workflow(module):
     packages = Path(__file__).parent.parent
     env = {

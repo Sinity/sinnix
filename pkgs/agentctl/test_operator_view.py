@@ -178,17 +178,23 @@ def stages_of(snap: operator_view.Snapshot) -> dict[str, dict[str, Any]]:
 def test_stage_and_next_follow_from_the_queue_then_the_manifest() -> None:
     """Breaks if a failed worker, a stashed landing or a landed run stops naming its next step."""
     stages = stages_of(snapshot())
-    assert (stages["run-1"]["stage"], stages["run-1"]["next"]) == ("working", "wait")
+    assert (stages["run-1"]["stage"], stages["run-1"]["next"]) == (
+        "working",
+        "retired workflow; inspect retained evidence",
+    )
     assert [w["stage"] for w in stages["run-1"]["workers"]] == ["running", "done"]
     assert (stages["run-2"]["stage"], stages["run-2"]["next"]) == (
         "landing dependency-failed",
-        "job logs 7, then batch land or batch resume",
+        "retired workflow; inspect retained evidence",
     )
     assert stages["run-2"]["workers"][0]["stage"] == "failed"
-    assert (stages["run-3"]["stage"], stages["run-3"]["next"]) == ("landing", "wait")
+    assert (stages["run-3"]["stage"], stages["run-3"]["next"]) == (
+        "landing",
+        "retired workflow; inspect retained evidence",
+    )
     assert (stages["run-4"]["stage"], stages["run-4"]["next"]) == ("landed", "-")
     assert stages["run-5"]["stage"] == "stashed"
-    assert stages["run-5"]["next"].startswith("batch result")
+    assert stages["run-5"]["next"] == "retired workflow; inspect retained evidence"
     assert stages["run-5"]["workers"][0]["stage"] == "awaiting result"
 
 
@@ -327,10 +333,13 @@ def test_a_recorded_failure_names_itself_and_a_failed_worker_asks_for_resume() -
     )
     row = operator_view.run_dict(failed, snapshot().tasks, NOW)
     assert row["stage"] == "failed: review_rejected"
-    assert row["next"] == "batch land"
+    assert row["next"] == "retired workflow; inspect retained evidence"
     awaiting = run("run-w", [worker("fx", task_id=5)])
     row = operator_view.run_dict(awaiting, snapshot().tasks, NOW)
-    assert (row["stage"], row["next"]) == ("awaiting workers", "batch resume --worker")
+    assert (row["stage"], row["next"]) == (
+        "awaiting workers",
+        "retired workflow; inspect retained evidence",
+    )
 
 
 def test_render_shows_groups_attention_jobs_runs_with_timing_and_ready() -> None:
@@ -340,7 +349,10 @@ def test_render_shows_groups_attention_jobs_runs_with_timing_and_ready() -> None
     assert "normal global unknown; fixture idle PAUSED" in text
     assert "agent global unknown; fixture 1 running" in text
     assert "! job 3 fixture:check failed exit 2 at" in text and "(20m ago)" in text
-    assert "! run run-2 landing dependency-failed: job logs 7" in text
+    assert (
+        "! run run-2 landing dependency-failed: retired workflow; inspect retained evidence"
+        in text
+    )
     assert "== jobs: 5 active" in text
     assert "== runs: 4 open, 1 landed, 0 abandoned" in text
     rows = [
@@ -349,7 +361,9 @@ def test_render_shows_groups_attention_jobs_runs_with_timing_and_ready() -> None
     by_key = {(row[0], row[1]): row for row in rows}
     assert by_key[("run-1", "fx-1")][2] == "running"
     assert "#2" in by_key[("run-1", "fx-1")] and "30m" in by_key[("run-1", "fx-1")]
-    assert by_key[("run-1", "landing")][-1] == "wait"
+    assert "retired workflow; inspect retained evidence" in " ".join(
+        by_key[("run-1", "landing")]
+    )
     assert by_key[("run-2", "fx-4")][2] == "failed"
     assert ("run-4", "landing") not in by_key
     assert "== ready: 1 beads" in text and "fx-9" in text
@@ -574,7 +588,10 @@ def test_to_dict_carries_stage_next_timing_and_group_counts() -> None:
     }
     assert payload["groups"]["agent"]["running"] == 1
     runs = {row["run"]: row for row in payload["runs"]}
-    assert runs["run-1"]["stage"] == "working" and runs["run-1"]["next"] == "wait"
+    assert (
+        runs["run-1"]["stage"] == "working"
+        and runs["run-1"]["next"] == "retired workflow; inspect retained evidence"
+    )
     assert runs["run-4"]["stage"] == "landed" and runs["run-4"]["accepted"]
     first = runs["run-1"]["workers"][0]
     assert first["elapsed"] == "30m" and first["since"] == "2026-09-03T08:30:00+00:00"
@@ -592,11 +609,14 @@ def test_a_landing_the_queue_no_longer_has_is_named_not_ready_to_land() -> None:
 
     row = operator_view.run_dict(lost, snapshot().tasks, NOW)
 
-    assert (row["stage"], row["next"]) == ("landing vanished", "batch queue")
+    assert (row["stage"], row["next"]) == (
+        "landing vanished",
+        "retired workflow; inspect retained evidence",
+    )
     assert row["landing"]["vanished"] == 99 and row["landing"]["job"] is None
     text = operator_view.render(snapshot(runs=(lost,)))
     assert (
-        "! run run-6 landing vanished (landing task 99 gone from pueue): batch queue"
+        "! run run-6 landing vanished (landing task 99 gone from pueue): retired workflow; inspect retained evidence"
         in text
     )
     assert "#99 gone" in text
@@ -608,7 +628,10 @@ def test_a_worker_task_lost_with_the_queue_state_asks_for_a_resume() -> None:
     row = operator_view.run_dict(lost, snapshot().tasks, NOW)
 
     assert row["workers"][0]["stage"] == "vanished"
-    assert (row["stage"], row["next"]) == ("awaiting workers", "batch resume --worker")
+    assert (row["stage"], row["next"]) == (
+        "awaiting workers",
+        "retired workflow; inspect retained evidence",
+    )
     assert "! run run-7 awaiting workers (worker fx-8 gone from pueue)" in (
         operator_view.render(snapshot(runs=(lost,)))
     )
@@ -643,7 +666,10 @@ def test_a_lost_landing_with_a_result_outstanding_asks_for_the_result() -> None:
 
     row = operator_view.run_dict(external, snapshot().tasks, NOW)
 
-    assert (row["stage"], row["next"]) == ("landing vanished", "batch result")
+    assert (row["stage"], row["next"]) == (
+        "landing vanished",
+        "retired workflow; inspect retained evidence",
+    )
     assert row["landing"]["vanished"] == 99
 
     # A reset that took the landing took the worker task with it; only a
@@ -652,9 +678,13 @@ def test_a_lost_landing_with_a_result_outstanding_asks_for_the_result() -> None:
 
     row = operator_view.run_dict(queued, snapshot().tasks, NOW)
 
-    assert (row["stage"], row["next"]) == ("landing vanished", "batch resume --worker")
+    assert (row["stage"], row["next"]) == (
+        "landing vanished",
+        "retired workflow; inspect retained evidence",
+    )
     assert row["workers"][0]["stage"] == "vanished"
     assert (
         "! run run-11 landing vanished (landing task 99; worker fx-8 gone from pueue)"
-        ": batch resume --worker" in operator_view.render(snapshot(runs=(queued,)))
+        ": retired workflow; inspect retained evidence"
+        in operator_view.render(snapshot(runs=(queued,)))
     )

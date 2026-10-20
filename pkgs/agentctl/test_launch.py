@@ -1907,3 +1907,31 @@ def test_wait_retained_unverified_launch_is_not_terminal(
             own["task_id"], timeout_seconds=5, job_id=own["job_id"], config=config
         )
     assert fake_pueue.waited == []
+
+
+@pytest.mark.parametrize("marker", ["kind", "binding", "operation", "label"])
+def test_retry_preserves_retired_executor_history_without_restarting(
+    fake_pueue, config, project_root, marker
+):
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    task_id, job_id = started["task_id"], started["job_id"]
+    fake_pueue.fail(task_id, exit_code=1)
+    task = fake_pueue.task(task_id)
+    path = job_queries.launch_input_path(task)
+    value = read_launch(config, task)
+    if marker == "kind":
+        value[marker] = "attested-agent"
+    elif marker == "binding":
+        value[marker] = {"run_id": "fixture-run", "attempt": 1}
+    elif marker == "operation":
+        value[marker] = "land:fixture-run"
+    else:
+        fake_pueue._tasks[task_id] = replace(task, label="fixture:land:fixture-run")
+    path.write_text(json.dumps(value))
+    original = path.read_bytes()
+    with pytest.raises(JobError, match="history-only"):
+        launch.retry(config, task_id, job_id)
+    assert fake_pueue.restarted == []
+    assert path.read_bytes() == original
+    assert job_queries.get_job(task_id, config, job_id)["phase"] == "failed"
