@@ -1,6 +1,7 @@
 # Capture producers
 
-Each unit-owned producer is declared under `sinnix.capture.producers` by its
+The shared user-session capture family is declared under
+`sinnix.capture.producers` by its
 own service module, inside the existing enable gate. The service owns device
 options, package construction and auxiliary configuration. The producer
 specification contains typed output contracts and exactly one lifecycle:
@@ -20,3 +21,27 @@ runtime output contract. They are not forced into a single user service.
 Changing a declaration changes orchestration and observations, not stored
 capture envelopes or historical data. Verify the evaluated unit and output
 contract, then a genuine new producer record when activating a changed writer.
+
+## Native evidence owners
+
+The typed user-session renderer does not replace native capture stores:
+
+| Owner             | Retained responsibility                                                      | Storage and lifecycle                                                                                    |
+| ----------------- | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Machine telemetry | Host sensors, power, pressure, service/cgroup state, GPU and network samples | Active/sealed SQLite files and their manifest; native seal, verification and lossless archive operations |
+| Below             | Process/cgroup replay at its configured one-second cadence                   | Native dictionary-compressed store; indefinite history                                                   |
+| Sinex             | Its event and activity evidence                                              | Sinex owns ingestion and historical source archives                                                      |
+| Sinnix runtime    | Current operator observations and guarded action receipts                    | Shared CLI/hub/gateway semantics; the hub remains the sole action-receipt writer                         |
+
+Machine telemetry and Below remain enabled. Shared CPU or memory fields do
+not establish equivalent collection: cadence, attribution, missingness,
+source-specific fields, reset behavior and numeric precision must agree for
+all affected readers before a collector can be retired. Current-state views
+and derived products do not replace historical raw evidence. Netdata is not
+the selected operator UI or a replacement canonical store.
+
+The telemetry module owns live/sealed SQLite placement and weekly sealing;
+its host manifest remains in the machine home. Lynchpin owns interpretation
+and its derived read model. Existing SQLite files, Below records and source
+archives remain available at original precision. No TTL, downsampling or
+rollup substitution is part of the shared runtime or capture refactors.
