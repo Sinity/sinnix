@@ -5,11 +5,8 @@ description: Write, revise, or audit text agents load (global and project AGENTS
 
 # Writing for agents
 
-Instructions, skills, agent definitions, memory, and task text are live
-infrastructure: every sentence is read by agents that act on it. The goal is
-that the same situation produces the same behavior every run, at the smallest
-standing cost. Skill lifecycle and validation belong to `skill-authoring`;
-this skill owns the writing and the audit.
+Write instructions that produce consistent decisions with little standing
+reading cost. `skill-authoring` owns skill packaging and validation.
 
 ## Where text lives
 
@@ -23,10 +20,8 @@ this skill owns the writing and the audit.
 - Resolve an installed file to its source before editing. Live symlinks
   change on the next read, though a running agent keeps what it loaded;
   generated or copied files change only after their install or activation.
-- The environment is a source of truth. Commands, generated references, and
-  descriptors confess their own syntax; restating them creates a cache that
-  goes stale. Record only what no lookup reveals: the convention, the reason,
-  the trap.
+- Commands, generated references, and descriptors own their syntax. Point to
+  them; record the convention, reason, or trap that lookup cannot explain.
 
 ## Standing cost
 
@@ -39,8 +34,7 @@ costs attention on every turn whether it fires or not. Prune it hardest.
 - Push material only some branches need into the skill body, and material
   only some readers of the body need into a `references/` file behind a
   pointer. Keep a skill body near 120 lines.
-- A pointer's wording decides whether the agent ever reaches its target.
-  Sharpen weak wording before inlining the material.
+- Say when to follow each pointer before considering inlining its target.
 
 ## Writing
 
@@ -49,15 +43,12 @@ costs attention on every turn whether it fires or not. Prune it hardest.
   accounted for" gets done; "understanding reached" invites stopping early.
 - State the positive target. A prohibition drags its subject into context;
   keep one only as a hard guardrail, paired with what to do instead.
-- Apply the no-op test: delete any sentence that would not change behavior
-  against the model's default. Replace emphasis with a missing rule.
+- Delete sentences that do not change a decision. Replace emphasis with the
+  missing rule; omit incident stories and measurements from standing rules.
 - Name artifacts and behaviors, not rituals ("run the checks and keep the
   result", not "emit a proof-carrying receipt"). Reuse existing terms; coin a
   term only when it removes real ambiguity, define it at first use, and
   challenge a second meaning the moment one attaches.
-- Test each distilled fact: what decision changes if it is wrong or absent?
-  If none, delete it. Incident stories, dates, benchmark numbers, and vendor
-  trivia rarely pass.
 - Every edit to an always-loaded file deletes as deliberately as it adds.
   State what got shorter.
 

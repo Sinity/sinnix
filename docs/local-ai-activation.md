@@ -37,7 +37,7 @@ other AI containers.
 
 The canonical model roster is `flake/data/local-models.nix`. The canonical port and proxy map is `flake/data/ports.nix`. Edit those sources when changing the platform. Do not add a model only to LiteLLM or only to an agent wrapper.
 
-## The operator control plane
+## Start, stop, and pin services
 
 Use the `sinnix ai` command for lifecycle operations:
 
@@ -53,7 +53,7 @@ sinnix ai pin muse-glimmer 2h
 sinnix ai unpin muse-glimmer
 ```
 
-`start` is useful when you want the cold load to happen before sending work. A first Glimmer load can take several minutes because the 17 GB GGUF is being mapped and the hybrid layer fit is computed. `pin` holds the private activation socket through a transient user unit. Its socket is accessible only to the operator and Caddy. It releases at the deadline, or earlier if the backend closes the connection. The pin is a transient user unit, releases automatically, and does not survive a reboot.
+`start` prewarms a backend before work arrives. Glimmer can take several minutes to map its 17 GB GGUF and fit layers across GPU and RAM. `pin` keeps the private activation socket open through a transient user unit until its deadline, the backend closes the connection, or reboot. Only the operator and Caddy can access that socket.
 
 The GPU services share an exclusive `gpu-inference` resource. Ollama, the llama.cpp GPU profiles, ComfyUI, and the GPU TTS service cannot use the card concurrently. Starting one can stop a conflicting resident service. Check before and after a switch with `sinnix ai status` and `sinnix ai gpu`.
 
@@ -72,6 +72,7 @@ Glimmer is served directly by llama.cpp because the packaged Ollama build does n
 The direct endpoint accepts the OpenAI chat-completions shape. The model field can be `muse-glimmer`:
 
 ```bash
+set -o pipefail
 curl --fail --silent --show-error \
   http://127.0.0.1:8083/v1/chat/completions \
   -H 'Content-Type: application/json' \
@@ -93,13 +94,14 @@ systemctl status muse-glimmer.service muse-glimmer-proxy.service --no-pager
 sinnix ai logs muse-glimmer -n 100
 ```
 
-The llama.cpp startup log prints the layer placement. On this machine, a normal loaded run uses roughly 7.2 GiB of VRAM and about 13.4 GiB of process RSS. The measured decode rate is approximately 4.8 tokens per second for this deployment. Prompt ingestion and long reasoning traces take longer than the visible answer suggests.
+The startup log records actual layer placement. Inspect current GPU usage and process memory rather than assuming an earlier measurement still applies. Prompt ingestion and reasoning add latency before visible output.
 
 ### Use Glimmer through LiteLLM
 
 LiteLLM exposes the same backend as `local-glimmer` on port 4000. This is the preferred route for generic OpenAI clients and the local agent wrappers:
 
 ```bash
+set -o pipefail
 curl --fail --silent --show-error \
   http://127.0.0.1:4000/v1/chat/completions \
   -H 'Authorization: Bearer sk-local' \
@@ -115,31 +117,29 @@ curl --fail --silent --show-error \
 List the models currently advertised by the gateway:
 
 ```bash
+set -o pipefail
 curl --fail --silent http://127.0.0.1:4000/v1/models | jq '.data[].id'
 ```
 
 The gateway path can start both LiteLLM and the selected backend. The first request can therefore be a cold request. Use `sinnix ai pin muse-glimmer 2h` before a longer session if you want to avoid an idle teardown.
 
-## The other local language models
+## Choose a model
 
-The model name is the stable LiteLLM name. The Ollama tag is the storage and pull name:
+[The model roster](../flake/data/local-models.nix) owns LiteLLM names, Ollama
+pull tags, embedding models, and llama.cpp profiles. The advertised-model query
+above shows the running gateway's names; `ollama list` shows installed Ollama
+weights. These lists answer different questions: a gateway route does not prove
+that its weights are present or its backend is ready.
 
-| LiteLLM name                   | Ollama tag                                                 | Intended use                                |
-| ------------------------------ | ---------------------------------------------------------- | ------------------------------------------- |
-| `local-chat`                   | `huihui_ai/gemma-4-abliterated:12b`                        | daily text chat                             |
-| `local-vision`                 | `gemma4:12b-it-qat`                                        | text plus image/audio input                 |
-| `local-coder`                  | `qwen2.5-coder:7b`                                         | fast coding and triage                      |
-| `local-coder-moe`              | `qwen3-coder:30b`                                          | slower, stronger coding stretch tier        |
-| `local-reasoner`               | `gpt-oss:20b`                                              | general reasoning and agent jobs            |
-| `local-thinker`                | `qwen3:30b`                                                | reasoning-heavy general work                |
-| `local-multimodal-moe`         | `gemma4:26b`                                               | larger multimodal generalist                |
-| `local-gemma4-26b-abliterated` | `hf.co/TrevorJS/gemma-4-26B-A4B-it-uncensored-GGUF:Q4_K_M` | abliterated larger multimodal MoE           |
-| `local-reader`                 | `hf.co/rbehzadan/ReaderLM-v2.gguf`                         | HTML to Markdown or JSON                    |
-| `local-glimmer`                | direct llama.cpp                                           | dense reasoning with CPU/RAM hybrid offload |
+Use `local-chat` for the wrappers' default chat route, `local-coder` for small
+GPU-resident coding work, and `local-glimmer` for the hybrid Glimmer service.
+Other reasoning and multimodal routes are defined in the roster. Change the
+roster rather than maintaining a second model list here.
 
 Use the Ollama API when you need Ollama-specific options or model management:
 
 ```bash
+set -o pipefail
 ollama list
 ollama pull qwen2.5-coder:7b
 curl --fail --silent http://127.0.0.1:11434/api/chat \
@@ -151,7 +151,7 @@ curl --fail --silent http://127.0.0.1:11434/api/chat \
   }' | jq .message
 ```
 
-The RAG embedding model is `qwen3-embedding:0.6b`. It is used by Open WebUI and is not advertised as a chat model through LiteLLM. Experimental embedding and reader pulls are kept at the end of the roster so one unsupported model does not prevent the core pulls from completing.
+Open WebUI uses the roster's RAG embedding model directly through Ollama; it is not a LiteLLM chat route. Experimental embedding and reader pulls follow the core models so one unsupported pull cannot prevent the core pulls from completing.
 
 ## Driving local models from agents
 
@@ -171,7 +171,7 @@ codex-local --model local-glimmer
 hermes-local --model local-coder
 ```
 
-The same wrappers can select `local-coder`, `local-reasoner`, `local-thinker`, or the multimodal model. Glimmer is a useful choice for bounded batch work, extraction, judging, and autonomous jobs. `local-coder` is the better first choice for interactive coding because it stays GPU-resident and avoids the 30B hybrid cold path.
+Choose any advertised model with the client's model option. Glimmer suits bounded batch work, extraction, and judging; its hybrid load and decode cost make `local-coder` a better starting point for interactive coding.
 
 ## Open WebUI
 
@@ -203,7 +203,7 @@ The reranker is the llama.cpp endpoint at `127.0.0.1:8081` and answers `/v1/rera
 - Do not run `ollama pull muse-glimmer`. This deployment is intentionally not in the Ollama pull roster.
 - If a request returns `finish_reason: "length"` with no visible content, raise `max_tokens`; the reasoning trace consumed the budget.
 - If VRAM is tight, inspect `sinnix ai status` and stop the current GPU occupant before starting another. The services are designed to be mutually exclusive.
-- After configuration changes, run `nix develop --command switch` from the intended Sinnix checkout, then verify `nixos-version --configuration-revision`. The wrapper builds the devshell's evaluated source and checks that source's revision against a fresh `origin/master` before activation. It refuses a dirty or stale source. `SINNIX_ALLOW_DIRTY=1` explicitly permits uncommitted files; it does not permit a stale revision. A successful switch is confirmed when the live revision matches the repository commit.
+- Activate configuration changes through [the repository activation procedure](../AGENTS.md#activation). Check both the installed revision and the affected endpoint or unit; a matching revision alone does not prove model readiness.
 
 Container-backed AI services enable the shared Podman runtime through the AI service factory. NVIDIA CDI is enabled only when an enabled container backend declares `requiresCuda`; CPU-only Kokoro does not require an NVIDIA driver. OCI layers stay under the managed service-state root.
 
@@ -215,6 +215,21 @@ Browser pages are kept away from these services in two places. Caddy checks Host
 
 ### HTTP activation boundary
 
-The system Caddy service fronts the registry-declared loopback ports independently of the tailnet hub. Each private activation socket is owned by the operator, with group access for Caddy and mode `0660`. Its unit name carries a hash of its definition (`<name>-proxy-<hash>.socket`, named by the proxy service's `Sockets=`), because NixOS activation does not restart a changed socket unit; a changed definition becomes a new unit that activation starts. STT declares a native-only entrance matching its receiver, so even same-origin browser metadata is refused before it loads. The backend and proxy retain the readiness wait, idle timeout, native manual-start route and GPU conflict mesh. Their systemd lifetimes are bound so a natural proxy idle exit releases the backend. Manual prewarming acquires the listening socket before starting its proxy; idle timing starts after the first proxy connection. Declared public-API consumers (such as the Ollama model loader) require the HTTP gate before they start. Caddy does not pool upstream connections, so it cannot extend a backend's idle window after a request ends. Streaming and WebSocket connections remain active work until they close.
+System Caddy fronts the registry's loopback ports independently of the tailnet
+hub. The activation factory preserves these lifecycle rules:
+
+- Private activation sockets have operator ownership, Caddy group access, and
+  mode `0660`. Their names include a definition hash
+  (`<name>-proxy-<hash>.socket`, listed in the proxy's `Sockets=`), so activation
+  starts a new unit when a socket definition changes.
+- STT accepts native clients only; even same-origin browser metadata is refused
+  before model load. Public-API consumers such as the Ollama model loader wait
+  for the HTTP gate before starting.
+- Proxies wait for backend readiness and stop idle backends. Prewarming acquires
+  the socket before starting the proxy; idle timing starts after its first
+  connection. GPU services retain exclusive admission during this lifecycle.
+- Caddy does not pool upstream connections. Streaming and WebSocket connections
+  count as active work until they close; completed requests cannot keep a
+  backend resident through a pooled connection.
 
 Caddy's administration endpoint is an owner-only Unix socket under `/run/caddy`; it does not expose an additional TCP control API. `ai-http-boundary` checks the generated request gate with no models. `ai-http-activation-vm` checks the actual systemd/Caddy lifecycle using lightweight fake backends, including zero starts for refused requests, idle release and exclusive-resource transitions.

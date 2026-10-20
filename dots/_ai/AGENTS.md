@@ -1,8 +1,7 @@
 # Operator environment
 
-Rules for every agent on this machine, in every repository. A repository's
-`AGENTS.md` owns its own semantics. Runtime and task state live with the owners
-named below, not in instructions.
+These rules apply across repositories. Each repository's `AGENTS.md` owns its
+project rules; runtime and task state stay with their owning tools.
 
 ## Work
 
@@ -12,23 +11,18 @@ named below, not in instructions.
   request to improve or implement authorizes scoped changes and their normal
   verification. Ask only when authority, an irreversible consequence, or the
   intended outcome is genuinely ambiguous.
-- Keep the requested outcome. For multi-step work, state scope and exclusions;
-  follow discoveries that affect the outcome and record the rest instead of
-  silently widening the task.
-- Decide from the evidence that settles the question. Keep observations,
-  inferences, and unverified claims apart. When blocked, name the missing
-  evidence.
-- Work in coherent batches, including connected callers and docs. Use a quick
-  probe to settle a concrete uncertainty; verify when the change is coherent.
-- Fix cheap, well-understood related or nearby defects while context is loaded,
-  with proportionate checks and a brief note. No separate ticket, plan, or
-  review cycle for a small correction. Separate work only for substantial
-  investigation, new architectural dependencies, conflicting ownership, or
-  material delivery delay. Keep remaining failures and unfinished scope visible.
-- When a replacement ships, remove its predecessor together with its callers,
-  commands, docs, and tests. Do not keep a compatibility path beside it.
-  Unfinished code is not obsolete: deleting it needs a shipped replacement, a
-  recorded retirement, or explicit authorization.
+- State scope and exclusions for multi-step work. Follow discoveries that
+  affect the outcome; record the rest without widening the task.
+- Separate observations, inferences, and unverified claims. When blocked,
+  name the missing evidence.
+- Change connected callers and docs together. Probe concrete uncertainties;
+  verify once the change is coherent.
+- Fix cheap, understood nearby defects with proportionate checks and a brief
+  note. Separate work that needs substantial investigation, new dependencies,
+  conflicting ownership, or material delay. Keep unfinished scope and failures visible.
+- When a replacement ships, remove its predecessor and connected callers,
+  commands, docs, and tests. Deleting unfinished code needs a shipped
+  replacement, recorded retirement, or explicit authorization.
 - Preserve unrelated edits. Before destructive recovery, resolve the exact
   targets, preserve recoverable evidence, and state the intended action.
 
@@ -38,15 +32,12 @@ Load `writing-style` for prose people read and `writing-for-agents` for
 instructions, skills, and memory.
 
 - Report the outcome, changed files, exact verification, and residual risk.
-  Keep progress updates short and decision-relevant.
+  Keep progress updates short.
 - Write each fact once, where it is owned: comments hold constraints, docs hold
   current behavior, Beads hold problems, decisions, and evidence. Incident
   history belongs in its task, never in always-loaded instructions.
-- Use ordinary language. Coin a term only when it removes real ambiguity, and
-  define it at first use.
-- Read exit statuses directly. Capture large output and inspect it on purpose;
-  a pipeline's final status says nothing about earlier stages, so never pipe
-  verification through `tail` or a summarizing filter.
+- Read exit statuses directly. Capture large output for inspection; never
+  infer verification success from `tail` or another pipeline's final status.
 - Before compaction or stopping mid-work, leave a handoff, and on re-entry
   verify the live facts needed for the next action. Load `handoff` for the
   compact current-state note; do not reread unchanged records routinely.
@@ -56,8 +47,8 @@ instructions, skills, and memory.
 Host `sinnix-prime`. Root storage is wear-limited; heavy work belongs on
 `/realm`.
 
-- `/realm/project/`: subject homes; active repositories live in each home’s `repo/`. `/realm/worktree/`: isolated
-  checkouts and compile-heavy work.
+- `/realm/project/<subject>/repo/`: active repositories.
+  `/realm/worktree/`: isolated checkouts and compile-heavy work.
 - `/realm/`: subject folders and service storage; read `/realm/INVENTORY.md`
   and mutate through the owning tools. `/realm/state/`: live service state and
   the external Beads databases.
@@ -104,24 +95,20 @@ running agents in parallel.
   them.
 - Use `bd` from the owning repository with an explicit `--actor`; load `beads`
   to read, change, or write tasks.
-- For ordinary fixes, briefly review the actual delta and use a cheap import,
-  static check, or small discriminating test when useful. Run broader regression
-  at integration milestones or for a concrete risk, not after every patch.
-  Preserve required CI checks and assertions. Report failures and untested
-  areas honestly; ordinary known reds need not block unrelated work.
-- The author owns correctness review. Review a coherent delivery once, then
-  review changed deltas and affected invariants after fixes. Use project guides
-  for relevant risks; no narrated per-item checklist or restart from the top.
-  A second reviewer needs a named unresolved question. Stage explicit paths.
-  Never bypass hooks or branch protection.
+- The author reviews the coherent change and uses a focused import, static
+  check, or discriminating test when useful. After fixes, revisit the delta
+  and affected invariants. Broaden checks at integration milestones or for a
+  concrete risk. Preserve required CI checks and assertions; report failures
+  and untested areas. Known failures need not block unrelated work.
+- A second reviewer needs a named unresolved question. Stage explicit paths;
+  preserve hooks and branch protection.
 - Where a forge runs a hosted reviewer on PRs, that review is the independent
   review; add a reviewer agent only for a named risk it cannot cover. Answer
   findings with a fix or a concrete refutation. Follow the repository's actual
   required statuses and review-resolution rules. Where the forge enforces these,
   merge with
   `gh pr merge --auto --squash --match-head-commit <sha>` and let it gate.
-  Substantial findings outside this delivery or arriving after a merge become
-  a follow-up; cheap nearby corrections belong in the current work.
+  File substantial out-of-scope or post-merge findings as follow-up work.
 - A partial delivery leaves its unmet acceptance criteria open.
 
 ## Desktop and host changes
@@ -145,11 +132,10 @@ running agents in parallel.
   Cross-source history: Lynchpin. Host evidence: the runtime inventory,
   `sinnix-observe`, `/realm/activity/`, `/realm/device/sinnix-prime/`. Operator stream:
   `/realm/personal/journal/raw-log.md`.
-- Project memory (`~/.claude/projects/<project>/memory/MEMORY.md`) is a short
-  index of stable facts and pointers. Verify recalled mechanisms against
-  current code, and archive superseded memories with their evidence.
-  Current work and task-shaped lessons belong in Beads; memory points to them.
-  Review and sanitize private memory before it enters public text.
+- Project memory (`~/.claude/projects/<project>/memory/MEMORY.md`) indexes
+  stable facts and pointers. Verify recalled mechanisms against current code;
+  archive superseded memories with their evidence. Beads owns current work
+  and task lessons. Sanitize private memory before using it in public text.
 - In recovery, preserve volatile evidence first, then inspect live state, Git,
   tasks, history, and backups; verify recovered content before deleting a
   source. Load `investigate` when the recovery is ambiguous.

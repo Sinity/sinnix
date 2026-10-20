@@ -1,191 +1,99 @@
 # Sinnix
 
-Sinnix is the NixOS and Home Manager configuration that runs a personal
-workstation, a headless replica host, and an OpenWrt router. Host configuration,
-desktop behavior, services, storage, recovery, monitoring, data capture, and
-coding-agent tooling are versioned as one operating environment.
+Sinnix is the NixOS and Home Manager configuration for a personal workstation,
+a headless replica, and an OpenWrt router. It versions desktop behavior,
+services, storage, recovery, capture, and coding-agent tools together.
+Hardware, paths, secrets, and policy are specific to this environment; adapt
+these sources before using them elsewhere.
 
-This is a personal system, not a generic NixOS framework. The repository shows
-how one daily-use environment can remain reproducible while still accounting
-for hardware-specific behavior, private state, heavy development workloads,
-local data systems, and frequent operational changes.
+## Hosts and capabilities
 
-[Subsystem documentation](docs/)
+| Host              | Role                                                                                   |
+| ----------------- | -------------------------------------------------------------------------------------- |
+| `sinnix-prime`    | Hyprland and Noctalia desktop, development, capture, local AI, storage, and backups    |
+| `sinnix-ethereal` | Headless NixOS replica with declarative storage, Tailscale, and the replica Sinex role |
+| `sinnix-gw`       | OpenWrt router with generated UCI configuration, deployment, and health checks         |
 
-## What the repository manages
+The workstation includes NVIDIA and Intel GPU modes, audio and media tools,
+terminal recording, and browser and desktop control. Home Manager out-of-store
+links make user configuration edits available without a rebuild.
 
-| Area                 | Current scope                                                                                                                                                        |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Workstation          | Hyprland and Noctalia desktop, Home Manager configuration, GPU modes, audio, terminal capture, local AI services, development environments, and desktop applications |
-| Services             | typed service inventory, systemd resource classes, monitoring, and common policy for user and system units                                                           |
-| Local data           | Sinex, Polylogue, Lynchpin, ActivityWatch, machine telemetry, shell history, and terminal recordings                                                                 |
-| Storage and recovery | impermanence, explicit persistence, Btrfs snapshots, Borg archives, restore drills, and separate treatment for durable, rebuildable, and bulk data                   |
-| Agent tooling        | shared instructions and skills, generated MCP profiles, browser and desktop control, local model backends, and a trusted repository gateway                          |
-| Other hosts          | a headless NixOS replica using the same module system and a router built from declarative OpenWrt configuration                                                      |
+Sinnix deploys the host-facing parts of **Sinex** (event capture and processing),
+**Polylogue** (AI conversation archives), and **Lynchpin** (cross-source analysis).
+ActivityWatch, telemetry, shell history, and terminal recording supply additional
+host context. Each data project owns its databases, provenance, and product
+rules. Sinnix owns their service wiring, resources, paths, secrets, and recovery.
+Private captures, reports, notes, and secrets remain outside the checkout.
 
-## Hosts
-
-| Host              | Role                                           | Main responsibilities                                                     |
-| ----------------- | ---------------------------------------------- | ------------------------------------------------------------------------- |
-| `sinnix-prime`    | interactive workstation and local service host | desktop, development, capture, analysis, local AI, storage, and backups   |
-| `sinnix-ethereal` | headless replica                               | cloud profile, declarative storage, Tailscale, and the replica Sinex role |
-| `sinnix-gw`       | OpenWrt router                                 | generated UCI configuration, packages, deployment, and health checks      |
-
-## Repository structure
-
-```text
-flake.nix
-  |-- flake/nixos.nix       host construction
-  |      `-- hosts/{sinnix-prime,sinnix-ethereal}
-  |             `-- modules/
-  |                  |-- platform policy
-  |                  |-- features/
-  |                  |-- services/
-  |                  `-- profiles/
-  |-- flake/router.nix      sinnix-gw
-  |-- flake/scripts.nix     packaged operational tools
-  `-- flake/tests.nix       evaluation and runtime checks
-
-dots/                      Home Manager out-of-store configuration
-```
-
-`modules/default.nix` imports the active module tree. The hierarchy is split by
-purpose:
-
-- features describe user-facing capabilities and are normally part of the
-  workstation character;
-- services describe long-running processes and are enabled deliberately;
-- profiles define workstation and cloud defaults;
-- top-level modules own persistence, backups, networking, storage, and runtime
-  policy;
-- host files remain the final place where roles and settings are chosen.
-
-Auto-discovery removes registration boilerplate. It does not hide which modules
-a host enables.
-
-## Main design choices
-
-### Reproducible but machine-specific
-
-The workstation configuration includes real hardware and workflow decisions:
-NVIDIA and Intel GPU modes, an OLED-oriented Wayland setup, local capture
-services, storage topology, media tools, and specific browser and terminal
-workflows.
-
-NixOS supplies a reproducible system closure. Home Manager out-of-store links
-keep actively edited user configuration live without forcing a full rebuild for
-every change.
-
-### Resource policy belongs with the service
-
-Services register in a shared runtime inventory with a resource class, manager,
-unit name, observation policy, and capture role. That inventory drives:
-
-- systemd slice placement and memory, CPU, and I/O defaults;
-- named AgentCTL operations for scheduled and heavy work;
-- `/etc/sinnix/runtime-inventory.json` for inspection;
-- machine telemetry and `sinnix-observe` status output;
-- evaluation checks for unknown or inconsistent service wiring.
-
-Heavy builds are treated differently from interactive agents and capture
-services. Rebuild commands share a lock and scheduling policy, so separate tools
-cannot start competing system builds by accident.
-
-### Temporary files live on NVMe
-
-`/tmp` is a small RAM-backed tmpfs, so login sessions and the user manager set
-`TMPDIR=/realm/tmp/work` on NVMe; system services keep the default. Every
-fifteen minutes `sinnix-tmp-sweep` removes leftover `nix-shell.*` and
-`nix-develop-*` directories that no running process still uses.
-
-### Each data system keeps its own authority
-
-Sinnix deploys and connects the host-facing parts of several local data systems:
-
-- **Sinex** captures and processes event streams.
-- **Polylogue** archives AI conversations and coding-agent runs.
-- **Lynchpin** joins sources and builds analysis products.
-- **ActivityWatch**, machine telemetry, shell history, and terminal recording
-  provide additional host context.
-
-They do not share one database. Each project keeps its own storage, provenance,
-and product rules. Sinnix owns service wiring, resource policy, paths, secrets,
-and recovery contracts.
-
-The repository contains deployment and capture configuration, not private data.
-Raw captures, exports, notes, generated reports, and secrets live outside the
-checkout.
-
-### Recovery follows data type
-
-The filesystem layout separates projects, canonical personal data, service
-state, staging, temporary work, and media. Persistence is declared instead of
-being an accidental consequence of a path.
-
-The runtime inventory classifies each declared store and capture as canonical,
-derived, cache, or exact-copy data. Canonical data is preserved indefinitely;
-derived data names its inputs; caches are explicitly ephemeral; exact copies
-name their source and backup responsibility. Evaluation rejects contradictory
-or dangling declarations before activation.
-
-Snapshots and Borg jobs cover durable data. Rebuildable or nested subvolumes use
-explicit alternative handling. Restore drills exercise the recovery path rather
-than assuming that an archive is usable.
-
-Agent CLI recovery installs the versioned, hash-checked tarballs listed in
-`flake/data/agent-cli-sources.nix`; updates stay with each CLI.
-
-## Working with the repository
-
-Enter the development environment:
-
-```bash
-direnv allow
-# or
-nix develop
-```
-
-Common commands:
-
-| Command       | Purpose                                                                        |
-| ------------- | ------------------------------------------------------------------------------ |
-| `check`       | run the curated default verification tier sequentially                         |
-| `lint`        | run static Nix and shell checks without modifying files                        |
-| `format`      | format supported source with treefmt                                           |
-| `switch`      | build and activate the workstation through the shared lock and resource policy |
-| `boot`        | build and register the next boot generation without activating it              |
-| `test-system` | test activation without changing the boot default                              |
-| `test-vm`     | build the NixOS VM smoke test                                                  |
-
-Heavy or scheduled work runs as a named AgentCTL project operation
-(`agentctl project operations sinnix` lists them). Package test suites are
-separate checks in `flake/tests/pkg-suites.nix`, so changing a test does not
-rebuild the package it tests.
-
-## Repository guide
+## Repository map
 
 | Path        | Purpose                                                                                     |
 | ----------- | ------------------------------------------------------------------------------------------- |
-| `flake.nix` | inputs and flake-parts composition                                                          |
-| `flake/`    | host construction, packages, overlays, checks, development commands, and deployment outputs |
-| `hosts/`    | host-specific roles and settings                                                            |
-| `modules/`  | platform modules plus feature, service, profile, and library trees                          |
-| `dots/`     | Home Manager configuration and shared agent tooling                                         |
-| `scripts/`  | packaged operational tools with declared runtime dependencies                               |
-| `pkgs/`     | larger packages, and test suites for scripts                                                |
-| `docs/`     | current subsystem and bootstrap documentation                                               |
+| `flake.nix` | Inputs and flake-parts composition                                                          |
+| `flake/`    | Host construction, packages, overlays, checks, development commands, and router outputs     |
+| `hosts/`    | Host roles, hardware, and settings                                                          |
+| `modules/`  | Platform policy, default-on features, default-off services, profiles, and factories         |
+| `dots/`     | Home Manager configuration, shared agent instructions and skills, client settings and hooks |
+| `scripts/`  | Small packaged tools with declared runtime dependencies                                     |
+| `pkgs/`     | Larger packages and test suites for scripts                                                 |
+| `docs/`     | Subsystem behavior and bootstrap guides                                                     |
 
-## Further reading
+`modules/default.nix` discovers the module tree. Host files choose enabled
+roles and settings; profiles supply workstation and cloud defaults.
 
-- [Agent gateway](docs/agent-gateway.md)
-- [Agent environment reference](docs/agent-environment.md)
+## Runtime and recovery
+
+Services register their manager, unit, resource class, observation policy, and
+capture role in a shared inventory. It drives systemd slice placement,
+resource defaults, telemetry, and `/etc/sinnix/runtime-inventory.json`.
+`sinnix-observe` inspects live state; evaluation checks reject inconsistent
+service wiring. Named AgentCTL operations schedule heavy and recurring work.
+Rebuild commands share a lock to prevent competing system builds.
+
+Login sessions and the user manager put temporary work on NVMe at
+`TMPDIR=/realm/tmp/work`; `/tmp` is a small tmpfs and remains the default for
+system services. `sinnix-tmp-sweep` removes unused `nix-shell.*` and
+`nix-develop-*` directories every fifteen minutes.
+
+The filesystem separates projects, personal data, service state, staging,
+temporary work, and media. Persistence is declared. Stores and captures are
+classified by recovery needs:
+
+- canonical data is preserved indefinitely;
+- derived data names its inputs;
+- caches are ephemeral;
+- exact copies name their source and backup responsibility.
+
+Evaluation rejects contradictory or dangling declarations. Btrfs snapshots and
+Borg archives cover durable data; nested or rebuildable subvolumes declare
+alternative handling. Restore drills exercise recovery. Agent CLI recovery uses
+the versioned, hash-checked tarballs in `flake/data/agent-cli-sources.nix`.
+
+## Development
+
+Enter the environment with `nix develop`, or `direnv allow` after reviewing the
+checkout's `.envrc`.
+
+| Command       | Purpose                                                        |
+| ------------- | -------------------------------------------------------------- |
+| `check`       | Run the curated default verification tier sequentially         |
+| `lint`        | Check Nix and shell sources without modifying them             |
+| `format`      | Format supported sources with treefmt                          |
+| `switch`      | Build and activate through the shared lock and resource policy |
+| `boot`        | Register the next boot generation without activating it        |
+| `test-system` | Test activation without changing the boot default              |
+| `test-vm`     | Build the NixOS VM smoke test                                  |
+
+Run heavy or scheduled work as a declared operation; list them with
+`agentctl project operations sinnix`. Package test suites are separate checks
+in `flake/tests/pkg-suites.nix`, so editing a test does not rebuild its package.
+Editing, publication, verification, and activation rules live in
+[AGENTS.md](AGENTS.md).
+
+## Subsystem guides
+
+- [Agent operations](docs/agentctl.md) and [gateway](docs/agent-gateway.md)
+- [Generated agent environment reference](docs/agent-environment.md)
+- [Local AI activation](docs/local-ai-activation.md)
 - [Headless replica bootstrap](docs/ethereal-bootstrap.md)
-
-Editing and publication rules live in [AGENTS.md](AGENTS.md).
-
-## Status
-
-This repository describes and operates one real personal environment. It is
-published as a complete example and as reusable source material, but consumers
-should expect to adapt hardware, paths, secrets, services, and policy rather
-than import it as a drop-in distribution.
+- [Other subsystem documentation](docs/)

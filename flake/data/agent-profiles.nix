@@ -38,8 +38,7 @@
       ];
     };
 
-    # Local Ollama hub via the LiteLLM gateway; model names live in
-    # litellm.nix's model_list.
+    # Local models through LiteLLM; names live in local-models.nix.
     local = {
       toolsets = [ "hermes-cli" ];
       model = {
@@ -63,9 +62,8 @@
     };
 
     oracle = {
-      # Interactive counterpart to the nx0 deep-research Workflow
-      # (dots/_ai/workflows/deep-research.mjs); mirrors the `research`
-      # profile's shape since both need the full evidence stack.
+      # Same tools and delegation limits as research, retained as a named
+      # interactive profile.
       toolsets = [
         "web"
         "browser"

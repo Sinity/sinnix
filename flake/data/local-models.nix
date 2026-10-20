@@ -1,19 +1,13 @@
-# Local model roster — single source shared by four consumers:
-# modules/services/ollama.nix (loadModels), modules/services/litellm.nix
-# (settings.model_list), and modules/services/open-webui.nix
-# (RAG_EMBEDDING_MODEL), and modules/features/cli/aichat.nix (default chat).
-# Edit the roster here; the consumer modules only
-# render it.
+# Local model roster. Ollama renders pull tags, LiteLLM renders routes,
+# Open WebUI selects embeddings, and aichat selects the default chat model.
+# Model names, fit arguments, and notes belong here; consumers render them.
 { lib }:
 let
   # Loopback endpoint every local-model consumer targets.
   ollamaApiBase = "http://127.0.0.1:11434";
 
-  # Canonical roster, in ollama-pull order (the order modules/services/
-  # ollama.nix pre-pulls them at boot via the ollama-model-loader oneshot).
-  # litellmName is null for models never exposed through the LiteLLM
-  # Anthropic/OpenAI gateway — the RAG/embedding models are consumed
-  # directly by Ollama/Open WebUI instead.
+  # Ollama pull order. A null litellmName keeps a model out of the chat
+  # gateway; embedding consumers use Ollama directly.
   models = [
     {
       ollamaTag = "huihui_ai/gemma-4-abliterated:12b";
@@ -21,8 +15,7 @@ let
       role = "uncensored-chat";
       expectedBytes = null;
       notes = ''
-        Uncensored chat tier: Gemma 4 12B abliterated (current gen, dense,
-        VRAM-resident). Replaces the 2024-era llama3.2-abliterate 3B.
+        Gemma 4 12B abliterated, dense and VRAM-resident, for text chat.
       '';
     }
     {
@@ -31,9 +24,7 @@ let
       role = "vision-multimodal";
       expectedBytes = null;
       notes = ''
-        Vision + general multimodal tier: Gemma 4 12B QAT (7.2 GB, dense,
-        fully VRAM-resident, text+image+audio in, 128K ctx). Replaces llava,
-        which it outclasses across the board.
+        Gemma 4 12B QAT: dense, VRAM-resident text, image, and audio input.
       '';
     }
     {
@@ -42,9 +33,8 @@ let
       role = "rag-embedding";
       expectedBytes = null;
       notes = ''
-        Embeddings for Open WebUI RAG / document chat. qwen3-embedding 0.6b:
-        70.7 MTEB-eng-v2 vs nomic-embed-text's ~62 at 1.2 GB. Existing RAG
-        collections re-embed on next use.
+        Open WebUI document embeddings. Changing the embedding model
+        requires re-embedding existing collections.
       '';
     }
     {
@@ -53,8 +43,7 @@ let
       role = "coding-gpu-resident";
       expectedBytes = null;
       notes = ''
-        Coding, GPU-resident tier: dense 7B coder fits the 3080's 10 GB at Q4
-        with room for KV cache. Triage/dedup/format-verdict grade.
+        Dense 7B coding model at Q4, sized for the RTX 3080 with KV cache.
       '';
     }
     {
@@ -63,9 +52,8 @@ let
       role = "coding-moe-stretch";
       expectedBytes = null;
       notes = ''
-        Coding, stretch tier: 30B MoE with only ~3B active params (19 GB Q4).
-        Ollama splits GPU/CPU automatically; the active-expert working set
-        keeps token rates usable despite not fitting VRAM.
+        30B MoE coding model, about 3B active parameters and 19 GB at Q4.
+        Ollama splits weights across GPU and system RAM.
       '';
     }
     {
@@ -74,8 +62,8 @@ let
       role = "general-reasoning-moe";
       expectedBytes = null;
       notes = ''
-        General reasoning/agentic MoE (~3.6B active, native MXFP4, 14 GB).
-        Same partial-offload story as qwen3-coder.
+        General reasoning MoE, about 3.6B active parameters and 14 GB in
+        MXFP4. Requires partial offload to system RAM.
       '';
     }
     {
@@ -84,8 +72,8 @@ let
       role = "general-reasoning-hybrid-thinking";
       expectedBytes = null;
       notes = ''
-        General MoE with hybrid thinking mode (~3B active, 19 GB Q4) —
-        reasoning-heavy non-code tasks.
+        General reasoning MoE with hybrid thinking mode, about 3B active
+        parameters and 19 GB at Q4.
       '';
     }
     {
@@ -94,8 +82,7 @@ let
       role = "multimodal-moe-generalist";
       expectedBytes = null;
       notes = ''
-        Multimodal MoE (18 GB, 256K ctx, Arena 1441) — the strongest local
-        generalist this host can run via partial offload.
+        Multimodal MoE, about 18 GB, served with partial RAM offload.
       '';
     }
     {
@@ -116,14 +103,8 @@ let
       role = "uncensored-flagship-offload";
       expectedBytes = null;
       notes = ''
-        Qwen3.8 27B abliterated (huihui; 2026-08 release, 28B dense,
-        hybrid attention, 262K native ctx) — the flagship general tier,
-        ~17 GB Q4-class with partial RAM offload like qwen3-coder:30b.
-        Hybrid attention caches only 16 of 64 layers (~64 KB/token), so
-        long contexts stay affordable despite the dense parameter count.
-        The official qwen3.8:27b tag needs a newer client than ollama
-        0.32.7 (registry answers 412); huihui's upload carries no such
-        gate and pulled cleanly (verified 2026-08-31).
+        Dense Qwen3.8 27B abliterated, about 17 GB with partial RAM offload.
+        This community tag avoids the official tag's client-version gate.
       '';
     }
     {
@@ -135,14 +116,10 @@ let
       litellmApiBase = "http://127.0.0.1:8085/v1";
       litellmApiKey = "sk-local";
       notes = ''
-        Qwen3.8 27B UD-IQ2_XXS on the dedicated qwen38-vram llama.cpp
-        profile, which owns the exact
-        fit: strict full offload, batch 64, ctx 16384 with q8_0 KV. Measured 2026-08-31:
-        40.7 tok/s fully resident vs 1.2 tok/s when ollama silently spilled
-        16% of layers to CPU — ollama cannot pin per-model load options,
-        which is why this tier is not an ollama tag. Text-only (no mmproj);
-        larger quants (UD-IQ2_S 8.42 GB abliterated included) exceed the
-        ~8.7 GB the desktop leaves free once compute buffers are counted.
+        Text-only Qwen3.8 27B UD-IQ2_XXS through the dedicated llama.cpp
+        profile below. Explicit full offload, batch, context, and KV settings
+        avoid Ollama's automatic CPU spill. Larger quants need additional
+        VRAM for compute buffers beyond their weight size.
       '';
     }
     {
@@ -151,8 +128,7 @@ let
       role = "uncensored-vlm-bulk";
       expectedBytes = null;
       notes = ''
-        Qwen3-VL abliterated 4B (3.3 GB, dense) — bulk frame-captioning
-        tier for library-scale passes where per-image cost dominates.
+        Dense Qwen3-VL abliterated 4B, about 3.3 GB, for bulk captioning.
       '';
     }
     {
@@ -161,11 +137,9 @@ let
       role = "uncensored-vlm";
       expectedBytes = null;
       notes = ''
-        Qwen3-VL abliterated 8B instruct (6.1 GB, dense, fully
-        VRAM-resident) — the default uncensored vision lane. Instruct, since
-        thinking tags can spend max_tokens on reasoning and return empty
-        content for bulk caption calls. Private media consumers use it through
-        LiteLLM.
+        Dense Qwen3-VL abliterated 8B instruct, about 6.1 GB and
+        VRAM-resident, for vision through LiteLLM. Instruct avoids thinking
+        variants spending the caption token budget before visible output.
       '';
     }
     {
@@ -174,8 +148,8 @@ let
       role = "uncensored-vlm-moe";
       expectedBytes = null;
       notes = ''
-        Qwen3-VL abliterated 30B-A3B (20 GB, MoE, ~3B active) — quality
-        tier via partial RAM offload, same fit story as qwen3-coder:30b.
+        Qwen3-VL abliterated 30B-A3B, about 20 GB with 3B active
+        parameters, for vision with partial RAM offload.
       '';
     }
     {
@@ -194,19 +168,15 @@ let
         local-glimmer through LiteLLM.
       '';
     }
-    # Experimental embedding pulls (HF GGUF, community/official builds) —
-    # kept LAST in the ollama pull order so an unsupported-architecture pull
-    # failure cannot block the core roster above. Verify each actually loads
-    # before relying on it (novel embedder archs can outrun ollama's
-    # llama.cpp vintage).
+    # Experimental embeddings and the reader follow core pulls so an
+    # unsupported architecture cannot block them. Verify model load before use.
     {
       ollamaTag = "hf.co/jinaai/jina-embeddings-v5-text-small-retrieval-GGUF";
       litellmName = null;
       role = "experimental-embedding";
       expectedBytes = null;
       notes = ''
-        Jina v5 text-small retrieval-tuned (official GGUF; ~71.7 MTEB v2
-        class at 677M).
+        Jina v5 text-small retrieval embeddings, official GGUF.
       '';
     }
     {
@@ -215,8 +185,7 @@ let
       role = "experimental-embedding";
       expectedBytes = null;
       notes = ''
-        Microsoft Harrier-OSS v1 0.6b (MIT; the family's headline 74.3
-        multilingual score is the 27b — this small one will land lower).
+        Microsoft Harrier-OSS v1 0.6B embeddings, community GGUF.
       '';
     }
     {
@@ -225,8 +194,7 @@ let
       role = "experimental-embedding";
       expectedBytes = null;
       notes = ''
-        Voyage 4 nano — the open-weight member of the Voyage 4 shared
-        embedding space (community GGUF).
+        Voyage 4 nano embeddings, community GGUF.
       '';
     }
     {
@@ -235,8 +203,7 @@ let
       role = "html-to-markdown-reader";
       expectedBytes = null;
       notes = ''
-        ReaderLM-v2: Jina's open 1.5B HTML->markdown/JSON converter (beats
-        GPT-4o-class on that niche; 512K combined tokens).
+        ReaderLM-v2, Jina's 1.5B HTML to Markdown or JSON converter.
       '';
     }
   ];
@@ -269,8 +236,7 @@ in
 rec {
   inherit models ollamaApiBase;
 
-  # One llama.cpp service plane. Profiles preserve the established unit names
-  # and endpoints while sharing one renderer and lifecycle contract.
+  # Named llama.cpp services share one renderer and activation lifecycle.
   llamaCppProfiles = {
     llama-cpp = {
       description = "llama.cpp reranker";
@@ -378,10 +344,8 @@ rec {
   # modules/services/open-webui.nix `RAG_EMBEDDING_MODEL`.
   ragEmbeddingOllamaTag = (lib.findFirst (m: m.role == "rag-embedding") null models).ollamaTag;
 
-  # Sideloaded GGUF files under /realm/library/model/gguf (not pulled through
-  # ollama). Consumed by modules/services/llama-cpp.nix's reranker endpoint;
-  # the profiled llama.cpp service plane. Data only today — no fetch/verify
-  # machinery reads this list yet.
+  # GGUF download metadata for /realm/library/model/gguf. llama.cpp profiles
+  # above select active files. No fetch or verification job consumes this list.
   ggufSideloads = [
     {
       file = "Qwen3.8-27B-UD-IQ2_XXS.gguf";

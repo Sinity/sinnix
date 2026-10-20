@@ -1,9 +1,8 @@
 # Sinnix
 
-Sinnix is the declarative NixOS and Home Manager configuration of the primary
-workstation, and the home of `agentctl` (the CLI that runs declared project
-operations and coding-agent batches) and the agent gateway. Keep configuration
-declarative, generated files reproducible, and host behavior observable.
+Sinnix owns NixOS and Home Manager configuration, `agentctl` project operations
+and agent batches, and the agent gateway. Keep configuration declarative and
+generated files reproducible; verify host changes against live behavior.
 
 ## Public boundary
 
@@ -25,9 +24,9 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
               instructions (AGENTS.md) and shared skills
 ```
 
-- Nix modules own fixed services, packages, files, secrets, users, mounts, and
-  activation. Systemd is the live process and service authority; do not
-  duplicate its process tree, timeouts, or results in shell supervisors.
+- Nix modules declare services, packages, files, secrets, users, mounts, and
+  activation. Systemd owns live processes, timeouts, and results; shell
+  supervisors must not duplicate that state.
 - `agentctl` owns project descriptors, the worker prompt built from a task,
   the launch and result contract of a queued command, and the operator view
   (`docs/agentctl.md`). It does not own product-domain concurrency; Sinex's
@@ -35,10 +34,9 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
 - The gateway owns who may call which tool, and the high-level machine and
   project tools (`docs/agent-gateway.md`). It calls agentctl's routes in
   process and never becomes a second job controller.
-- A _receipt_ is the JSON record a job, action or backup writes about its own
-  outcome; tools read receipts instead of re-running the work. A _capture
-  lane_ is one stream of captured data under `/realm` and the unit that
-  writes it.
+- A _receipt_ records a job, action, or backup outcome as JSON; read it rather
+  than re-running work. A _capture lane_ is a captured stream under `/realm`
+  and its producer unit.
 
 ## Modules
 
@@ -83,16 +81,19 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
 
 ## Agent configuration
 
-The managed agent configuration stays small: the global instructions at
-`dots/_ai/AGENTS.md` (linked as `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`,
-and `~/.gemini/GEMINI.md`), shared skills under `dots/_ai/skills/`, agent
-definitions and hooks under `dots/claude/`, the Polylogue capture hooks, one
-destructive-command guard, and the agentctl job and batch lifecycle. Instruction
-and skill text is live through symlinks; adding, renaming, or removing a skill
-changes Codex's per-skill links only at activation. After a change to the skill
-set, agent definitions, or MCP registry, regenerate `docs/agent-environment.md`
-with `nix run .#sinnix-agent-environment-doc -- --output
-docs/agent-environment.md`.
+`dots/_ai/AGENTS.md` supplies global instructions through the Claude, Codex,
+and Gemini home links. `dots/_ai/skills/` supplies shared procedures;
+`dots/claude/` holds agent definitions, settings, and hooks. Capture hooks,
+the destructive-command guard, and agentctl own their respective behavior.
+Instruction and skill text is live through symlinks; Codex's per-skill links
+change at activation when a skill is added, renamed, or removed.
+
+After changing the skill set or descriptions, agent definitions, or MCP
+registry, regenerate `docs/agent-environment.md`:
+
+```sh
+nix run .#sinnix-agent-environment-doc -- --output docs/agent-environment.md
+```
 
 ## Workflow and verification
 

@@ -1,5 +1,5 @@
-# llama.cpp inference profiles rendered through one service plane. Profile
-# data owns model/fit arguments; this module owns units, lifecycle and policy.
+# llama.cpp profiles. Registry data owns model and fit arguments; this module
+# renders units, activation, and resource policy.
 {
   mkServiceModule,
   lib,
@@ -30,7 +30,7 @@ let
 in
 mkServiceModule {
   name = "llama-cpp";
-  description = "profiled llama.cpp inference plane";
+  description = "Named llama.cpp model services";
   docs = "docs/local-ai-activation.md";
   extraOptions.profiles = args.lib.mkOption {
     type = args.lib.types.attrsOf profileType;

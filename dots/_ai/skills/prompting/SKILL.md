@@ -9,7 +9,7 @@ A prompt is a contract with an executor you cannot steer once it starts. Write
 it so the only way to satisfy the words is to produce the outcome you want,
 and no longer than that takes.
 
-## Decision-completeness
+## Resolve consequential choices
 
 Simulate a competent but literal executor. At every fork (which file, which
 reading, what if the test fails), the prompt must contain the decision, a rule
@@ -48,8 +48,8 @@ useful strategy, acceptance criteria, and the deliverable.
 
 ## Failure modes to design against
 
-- Vacuous compliance: green output that proves nothing. Require anti-vacuity
-  evidence.
+- Empty success: green output that misses the outcome. Require evidence of
+  the behavior the task is meant to change.
 - Scope substitution: an easier adjacent task done instead. Name non-goals and
   ask what was not done.
 - Invented grounding: fake paths, APIs, citations. Require inspection before
