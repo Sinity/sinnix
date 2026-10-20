@@ -67,6 +67,7 @@ from .projects import (
 from .prompts import PromptError
 from .pueue import PueueError
 from .start import check_result_contract, load_dispatched_result
+from .worktree_cleanup import CleanupError
 from .worktrunk import WorktrunkError
 
 EXIT_OK = 0
@@ -89,7 +90,14 @@ _REFUSALS = (
     ProjectConfigError,
     ProjectEnvironmentError,
 )
-_SUBSTRATE_ERRORS = (BatchError, HistoryError, GithubError, PueueError, WorktrunkError)
+_SUBSTRATE_ERRORS = (
+    BatchError,
+    CleanupError,
+    HistoryError,
+    GithubError,
+    PueueError,
+    WorktrunkError,
+)
 
 PROJECT_HELP = "project id or checkout path (default: the checkout enclosing the working directory)"
 

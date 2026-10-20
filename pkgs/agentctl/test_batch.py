@@ -33,7 +33,9 @@ from agentctl import (
     worktrunk,
 )
 from agentctl import landing as landing_module
+from agentctl import worktree_cleanup as cleanup_module
 from agentctl.batch import BatchError, BatchRefusal
+from agentctl.batch_history import HistoryError
 from agentctl.beads import SubprocessBeads
 from agentctl.config import Config
 from agentctl.projects import ProjectAdapter, load_project_adapter
@@ -641,7 +643,7 @@ def harness(
     monkeypatch.setattr(worktrunk, "worktrunk_list", wt.list)
     monkeypatch.setattr(worktrunk, "worktrunk_create", create)
     monkeypatch.setattr(worktrunk, "worktrunk_remove", wt.remove)
-    monkeypatch.setattr(landing_module, "_process_users", lambda path: [])
+    monkeypatch.setattr(cleanup_module, "_process_users", lambda path: [])
     built = Harness(
         config=config,
         project=project,
@@ -3357,7 +3359,7 @@ def test_cleanup_leaves_a_branch_without_a_checkout_alone(
     harness.git.parents[OTHER] = (BASE,)
     harness.git.holders[OTHER] = [f"refs/heads/{branch}"]
 
-    kept = landing_module._drop_branch(
+    kept = cleanup_module._drop_branch(
         harness.config, harness.project, branch, base=BASE
     )
 
@@ -3400,7 +3402,7 @@ def test_cleanup_keeps_an_unregistered_recorded_checkout(harness: Harness) -> No
     worker = run["workers"][0]
     harness.wt.trees.pop(worker["branch"])
 
-    reason = landing_module._drop_branch(
+    reason = cleanup_module._drop_branch(
         harness.config,
         harness.project,
         worker["branch"],
@@ -3420,7 +3422,7 @@ def test_cleanup_keeps_a_deregistered_checkout_residue(harness: Harness) -> None
     worker = run["workers"][0]
     harness.wt.leave_paths = {worker["branch"]}
 
-    reason = landing_module._drop_branch(
+    reason = cleanup_module._drop_branch(
         harness.config,
         harness.project,
         worker["branch"],
@@ -3449,7 +3451,7 @@ def test_cleanup_removes_a_detached_owned_worktree_by_its_recorded_path(
     harness.git.heads[str(recorded_path)] = BASE
     harness.git.branches[branch] = BASE
 
-    residual = landing_module._drop_worktrees(harness.config, harness.project, stored)
+    residual = cleanup_module._drop_worktrees(harness.config, harness.project, stored)
 
     assert residual == []
     assert harness.wt.removed == [str(recorded_path)]
@@ -3465,7 +3467,7 @@ def test_terminal_cleanup_keeps_a_checkout_used_by_a_nonterminal_task(
     worker = run["workers"][0]
     harness.pueue.running(worker["task_id"])
 
-    residual = landing_module._drop_worktrees(
+    residual = cleanup_module._drop_worktrees(
         harness.config, harness.project, manifest.load(harness.config, run["run_id"])
     )
 
@@ -3484,7 +3486,7 @@ def test_terminal_cleanup_rehomes_agent_evidence_before_release(
     source = Path(worker["prompt_path"])
     source_text = source.read_text()
 
-    residual = landing_module._drop_worktrees(
+    residual = cleanup_module._drop_worktrees(
         harness.config, harness.project, manifest.load(harness.config, run["run_id"])
     )
 
@@ -3502,7 +3504,7 @@ def test_terminal_cleanup_retries_with_a_changed_receipt(harness: Harness) -> No
     source = Path(worker["prompt_path"])
     harness.wt.refuse_remove = {worker["branch"]}
 
-    first = landing_module._drop_worktrees(
+    first = cleanup_module._drop_worktrees(
         harness.config, harness.project, manifest.load(harness.config, run["run_id"])
     )
     first_path = Path(
@@ -3511,7 +3513,7 @@ def test_terminal_cleanup_retries_with_a_changed_receipt(harness: Harness) -> No
     source.write_text(source.read_text() + "updated receipt\n")
     harness.wt.refuse_remove = set()
 
-    second = landing_module._drop_worktrees(
+    second = cleanup_module._drop_worktrees(
         harness.config, harness.project, manifest.load(harness.config, run["run_id"])
     )
     second_path = Path(
@@ -3534,10 +3536,10 @@ def test_privileged_cwd_refusal_fails_closed(
             args=args[0], returncode=1, stdout="", stderr="sudo denied"
         )
 
-    monkeypatch.setattr(landing_module.subprocess, "run", refused)
+    monkeypatch.setattr(cleanup_module.subprocess, "run", refused)
 
-    with pytest.raises(BatchError, match="sudo denied"):
-        landing_module._privileged_cwd(tmp_path / "123")
+    with pytest.raises(cleanup_module.CleanupError, match="sudo denied"):
+        cleanup_module._privileged_cwd(tmp_path / "123")
 
 
 def test_privileged_cwd_reports_the_exact_target(
@@ -3552,9 +3554,9 @@ def test_privileged_cwd_reports_the_exact_target(
             args=args[0], returncode=0, stdout=f"{target}\n", stderr=""
         )
 
-    monkeypatch.setattr(landing_module.subprocess, "run", succeeded)
+    monkeypatch.setattr(cleanup_module.subprocess, "run", succeeded)
 
-    assert landing_module._privileged_cwd(tmp_path / "123") == target
+    assert cleanup_module._privileged_cwd(tmp_path / "123") == target
 
 
 def test_privileged_cwd_refuses_a_reused_pid(
@@ -3562,13 +3564,13 @@ def test_privileged_cwd_refuses_a_reused_pid(
 ) -> None:
     """Anti-vacuity: a PID reused during sudo probing cannot authorize removal."""
     times = iter(("before", "after"))
-    monkeypatch.setattr(landing_module, "_process_starttime", lambda entry: next(times))
+    monkeypatch.setattr(cleanup_module, "_process_starttime", lambda entry: next(times))
     monkeypatch.setattr(
-        landing_module, "_privileged_cwd", lambda entry: tmp_path / "checkout"
+        cleanup_module, "_privileged_cwd", lambda entry: tmp_path / "checkout"
     )
 
-    with pytest.raises(BatchError, match="changed during cwd probe"):
-        landing_module._stable_privileged_cwd(tmp_path / "123")
+    with pytest.raises(cleanup_module.CleanupError, match="changed during cwd probe"):
+        cleanup_module._stable_privileged_cwd(tmp_path / "123")
 
 
 def test_privileged_cwd_ignores_a_vanished_pid(
@@ -3576,14 +3578,14 @@ def test_privileged_cwd_ignores_a_vanished_pid(
 ) -> None:
     """Anti-vacuity: a PID that exits during probing is not an active user."""
     times = iter(("before", None))
-    monkeypatch.setattr(landing_module, "_process_starttime", lambda entry: next(times))
+    monkeypatch.setattr(cleanup_module, "_process_starttime", lambda entry: next(times))
 
     def vanished(entry: Path) -> Path:
-        raise BatchError("cannot inspect process 123 cwd: vanished")
+        raise cleanup_module.CleanupError("cannot inspect process 123 cwd: vanished")
 
-    monkeypatch.setattr(landing_module, "_privileged_cwd", vanished)
+    monkeypatch.setattr(cleanup_module, "_privileged_cwd", vanished)
 
-    assert landing_module._stable_privileged_cwd(tmp_path / "123") is None
+    assert cleanup_module._stable_privileged_cwd(tmp_path / "123") is None
 
 
 def test_clean_refuses_before_removing_worktrees_when_a_manifest_is_unreadable(
@@ -3598,7 +3600,7 @@ def test_clean_refuses_before_removing_worktrees_when_a_manifest_is_unreadable(
         manifest.runs_dir(harness.config) / "fixture-20260101-000000-corrupt.json"
     ).write_text("{not-json")
 
-    with pytest.raises(BatchRefusal, match="manifest"):
+    with pytest.raises(HistoryError, match="manifest"):
         batch.clean(harness.config, harness.project)
 
     assert harness.wt.removed == []
@@ -4703,7 +4705,7 @@ def test_cleanup_reloads_runs_after_waiting_for_concurrent_start(
         with original_lock(config, project_id):
             yield True
 
-    monkeypatch.setattr(landing_module, "project_locked", interleaved_lock)
+    monkeypatch.setattr(cleanup_module, "project_locked", interleaved_lock)
 
     cleaned = batch.clean(harness.config, harness.project)
 

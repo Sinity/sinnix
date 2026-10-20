@@ -91,3 +91,24 @@ def test_invalid_document_shape_has_a_history_error(tmp_path, raw):
     (tmp_path / "runs/broken.json").write_text(raw)
     with pytest.raises(history.HistoryError, match="manifest"):
         history.load(cfg, "broken")
+
+
+def test_cleanup_import_does_not_load_workflow_or_prompt_engine():
+    packages = Path(__file__).parent.parent
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join(
+            (str(packages / "agentctl"), str(packages / "sinnix-lib"))
+        ),
+    }
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import agentctl.worktree_cleanup; "
+            "assert not {'agentctl.config', 'agentctl.manifest', 'agentctl.start', "
+            "'agentctl.landing', 'agentctl.prompts', 'agentctl.agents'} & sys.modules.keys()",
+        ],
+        env=env,
+        check=True,
+    )

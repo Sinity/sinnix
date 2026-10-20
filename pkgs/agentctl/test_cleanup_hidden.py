@@ -5,7 +5,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from agentctl import landing, worktrunk
+from agentctl import worktree_cleanup as cleanup
+from agentctl import worktrunk
 from agentctl.worktrunk import Worktree
 
 
@@ -42,8 +43,8 @@ def checkout(config, project_root, tmp_path, monkeypatch):
         lambda root: (Worktree(branch="master", path=project_root, main=True), tree),
     )
     monkeypatch.setattr(worktrunk, "worktrunk_find", lambda root, branch: tree)
-    monkeypatch.setattr(landing, "_task_users", lambda path: [])
-    monkeypatch.setattr(landing, "_process_users", lambda path: [])
+    monkeypatch.setattr(cleanup, "_task_users", lambda path: [])
+    monkeypatch.setattr(cleanup, "_process_users", lambda path: [])
 
     def remove(root, branch, **kwargs):
         git(root, "worktree", "remove", str(path))
@@ -54,7 +55,7 @@ def checkout(config, project_root, tmp_path, monkeypatch):
 
 def drop(checkout):
     config, project, path = checkout
-    return landing._drop_branch(
+    return cleanup._drop_branch(
         config, project, "candidate", base=git(project.root, "rev-parse", "HEAD")
     )
 
@@ -114,14 +115,14 @@ def test_cleanup_keeps_artifact_changed_after_preservation(checkout, monkeypatch
     _, _, path = checkout
     receipt = path / ".agentctl/receipt-private.txt"
     receipt.write_bytes(b"first result")
-    original = landing._preserve_artifacts
+    original = cleanup._preserve_artifacts
 
     def changed(*args, **kwargs):
         copied = original(*args, **kwargs)
         receipt.write_bytes(b"later unpublished result")
         return copied
 
-    monkeypatch.setattr(landing, "_preserve_artifacts", changed)
+    monkeypatch.setattr(cleanup, "_preserve_artifacts", changed)
     reason = drop(checkout)
     assert reason and "changed after preservation" in reason
     assert receipt.read_bytes() == b"later unpublished result"
@@ -156,7 +157,7 @@ def test_cleanup_keeps_inaccessible_detached_checkout(checkout, monkeypatch):
         raise AssertionError("unavailable checkout must not reach removal")
 
     monkeypatch.setattr(worktrunk, "worktrunk_remove", no_remove)
-    reason = landing._drop_branch(
+    reason = cleanup._drop_branch(
         config,
         project,
         "candidate",
@@ -189,7 +190,7 @@ def test_absent_checkout_retirement_really_removes_branch_and_retains_head(
 ):
     config, project, path, head = unregistered_branch
     assert (
-        landing._drop_branch(
+        cleanup._drop_branch(
             config,
             project,
             "candidate",
@@ -243,7 +244,7 @@ def test_unregistered_checkout_uncertainty_keeps_branch(
         blocked.write_bytes(b"unexpected parent object")
         path = blocked / "residue"
     try:
-        reason = landing._drop_branch(
+        reason = cleanup._drop_branch(
             config,
             project,
             "candidate",
@@ -279,7 +280,7 @@ def test_post_removal_broken_link_is_retained_as_residue(checkout, monkeypatch):
         path.symlink_to(path.parent / "absent")
 
     monkeypatch.setattr(worktrunk, "worktrunk_remove", remove)
-    reason = landing._drop_branch(
+    reason = cleanup._drop_branch(
         config, project, "candidate", base=head, recorded_path=path, delete_branch=True
     )
     assert reason and "remains after removal" in reason

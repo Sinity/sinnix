@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from agentctl import landing, worktrunk
+from agentctl import worktree_cleanup as cleanup
 from agentctl.config import Config
 from agentctl.projects import load_project_adapter
 from agentctl.worktrunk import (
@@ -58,9 +59,9 @@ def test_cleanup_keeps_an_open_file_holder_outside_the_checkout(
             else original(path)
         ),
     )
-    monkeypatch.setattr(landing, "_task_users", lambda _path: [])
+    monkeypatch.setattr(cleanup, "_task_users", lambda _path: [])
     if probe != "direct":
-        original_open_files = landing._process_open_files
+        original_open_files = cleanup._process_open_files
 
         def denied(entry: Path) -> list[Path]:
             if entry.name == str(process.pid):
@@ -69,15 +70,15 @@ def test_cleanup_keeps_an_open_file_holder_outside_the_checkout(
 
         def privileged(entry: Path) -> list[Path]:
             if probe == "refused":
-                raise landing.BatchError("fixture privileged denial")
+                raise cleanup.CleanupError("fixture privileged denial")
             return [held]
 
-        monkeypatch.setattr(landing, "_process_open_files", denied)
-        monkeypatch.setattr(landing, "_privileged_open_files", privileged)
+        monkeypatch.setattr(cleanup, "_process_open_files", denied)
+        monkeypatch.setattr(cleanup, "_privileged_open_files", privileged)
     try:
         assert process.stdout is not None
         assert process.stdout.readline().strip() == "ready"
-        result = landing._drop_branch(
+        result = cleanup._drop_branch(
             config,
             project,
             branch,
@@ -94,7 +95,7 @@ def test_cleanup_keeps_an_open_file_holder_outside_the_checkout(
     finally:
         process.communicate("done", timeout=5)
     assert (
-        landing._drop_branch(
+        cleanup._drop_branch(
             config,
             project,
             branch,
@@ -111,7 +112,7 @@ def test_privileged_open_files_preserve_newlines(
 ) -> None:
     target = tmp_path / "held\r\nfile"
     monkeypatch.setattr(
-        landing.subprocess,
+        cleanup.subprocess,
         "run",
         lambda *args, **kwargs: subprocess.CompletedProcess(
             args=args[0],
@@ -120,24 +121,24 @@ def test_privileged_open_files_preserve_newlines(
             stderr=b"",
         ),
     )
-    assert landing._privileged_open_files(tmp_path / "123") == [target]
+    assert cleanup._privileged_open_files(tmp_path / "123") == [target]
 
 
 def test_privileged_open_files_refuse_reused_pid(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     times = iter(("before", "after"))
-    monkeypatch.setattr(landing, "_process_starttime", lambda _entry: next(times))
-    monkeypatch.setattr(landing, "_privileged_open_files", lambda _entry: [])
-    with pytest.raises(landing.BatchError, match="changed during open-file probe"):
-        landing._stable_privileged_open_files(tmp_path / "123")
+    monkeypatch.setattr(cleanup, "_process_starttime", lambda _entry: next(times))
+    monkeypatch.setattr(cleanup, "_privileged_open_files", lambda _entry: [])
+    with pytest.raises(cleanup.CleanupError, match="changed during open-file probe"):
+        cleanup._stable_privileged_open_files(tmp_path / "123")
 
 
 def test_privileged_open_files_refusal_fails_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        landing.subprocess,
+        cleanup.subprocess,
         "run",
         lambda *args, **kwargs: subprocess.CompletedProcess(
             args=args[0],
@@ -146,8 +147,8 @@ def test_privileged_open_files_refusal_fails_closed(
             stderr=b"sudo denied",
         ),
     )
-    with pytest.raises(landing.BatchError, match="sudo denied"):
-        landing._privileged_open_files(tmp_path / "123")
+    with pytest.raises(cleanup.CleanupError, match="sudo denied"):
+        cleanup._privileged_open_files(tmp_path / "123")
 
 
 def _repository(root: Path) -> Path:
@@ -343,11 +344,11 @@ def test_retiring_a_squashed_branch_retains_its_original_commit(
     )
     if not checkout_present:
         worktrunk_remove(root, branch, keep_branch=True, reap=False)
-    monkeypatch.setattr(landing, "_task_users", lambda _path: [])
-    monkeypatch.setattr(landing, "_process_users", lambda _path: [])
+    monkeypatch.setattr(cleanup, "_task_users", lambda _path: [])
+    monkeypatch.setattr(cleanup, "_process_users", lambda _path: [])
     for _attempt in range(2):
         assert (
-            landing._drop_branch(
+            cleanup._drop_branch(
                 config,
                 project,
                 branch,
@@ -415,7 +416,7 @@ def test_branch_retirement_refuses_a_concurrent_move(
     second = subprocess.check_output(
         ["git", "-C", str(root), "rev-parse", "HEAD"], text=True
     ).strip()
-    preserve = landing._recovery_ref
+    preserve = cleanup._recovery_ref
 
     def move_after_preservation(*args: object) -> str:
         ref = preserve(*args)
@@ -425,8 +426,8 @@ def test_branch_retirement_refuses_a_concurrent_move(
         )
         return ref
 
-    monkeypatch.setattr(landing, "_recovery_ref", move_after_preservation)
-    reason = landing._drop_branch(
+    monkeypatch.setattr(cleanup, "_recovery_ref", move_after_preservation)
+    reason = cleanup._drop_branch(
         config, project, branch, base="master", delete_branch=True
     )
     assert reason and reason.startswith("branch kept;")
@@ -473,16 +474,16 @@ def test_terminal_release_archives_ignored_descriptor_artifacts_across_a_retry(
     receipt = target / ".cache" / "verify" / "receipt.json"
     receipt.parent.mkdir(parents=True)
     receipt.write_text('{"attempt": 1}\n')
-    initial = landing._digest(receipt)
+    initial = cleanup._digest(receipt)
     artifacts: list[dict[str, str]] = []
-    monkeypatch.setattr(landing, "_task_users", lambda _path: [])
-    monkeypatch.setattr(landing, "_process_users", lambda _path: [])
+    monkeypatch.setattr(cleanup, "_task_users", lambda _path: [])
+    monkeypatch.setattr(cleanup, "_process_users", lambda _path: [])
 
     def fail_remove(*_args: object, **_kwargs: object) -> None:
         raise WorktrunkError("simulated release failure")
 
-    monkeypatch.setattr(landing.worktrunk, "worktrunk_remove", fail_remove)
-    first = landing._drop_branch(
+    monkeypatch.setattr(cleanup.worktrunk, "worktrunk_remove", fail_remove)
+    first = cleanup._drop_branch(
         config,
         project,
         branch,
@@ -492,16 +493,16 @@ def test_terminal_release_archives_ignored_descriptor_artifacts_across_a_retry(
     )
 
     assert first == "simulated release failure"
-    first_destination = landing._artifact_destination(
+    first_destination = cleanup._artifact_destination(
         config, "orphan", target, receipt.relative_to(target), initial
     )
     assert first_destination.read_text() == '{"attempt": 1}\n'
     assert receipt.exists(), "a failed removal must leave the checkout intact"
 
     receipt.write_text('{"attempt": 2}\n')
-    updated = landing._digest(receipt)
-    monkeypatch.setattr(landing.worktrunk, "worktrunk_remove", worktrunk_remove)
-    second = landing._drop_branch(
+    updated = cleanup._digest(receipt)
+    monkeypatch.setattr(cleanup.worktrunk, "worktrunk_remove", worktrunk_remove)
+    second = cleanup._drop_branch(
         config,
         project,
         branch,
@@ -510,7 +511,7 @@ def test_terminal_release_archives_ignored_descriptor_artifacts_across_a_retry(
         artifacts=artifacts,
     )
 
-    second_destination = landing._artifact_destination(
+    second_destination = cleanup._artifact_destination(
         config, "orphan", target, receipt.relative_to(target), updated
     )
     assert second is None and not target.exists()
@@ -540,8 +541,8 @@ def test_detached_recovery_retains_each_head_after_a_failed_release(
     ).stdout.strip()
     checkout = tmp_path / "worktrees" / "detached"
 
-    first_ref = landing._recovery_ref(root, "run", checkout, first)
-    second_ref = landing._recovery_ref(root, "run", checkout, second)
+    first_ref = cleanup._recovery_ref(root, "run", checkout, first)
+    second_ref = cleanup._recovery_ref(root, "run", checkout, second)
 
     assert first_ref != second_ref
     for ref, expected in ((first_ref, first), (second_ref, second)):
