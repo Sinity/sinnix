@@ -88,6 +88,8 @@ mkFeatureModule {
                 input-ipc-server = mpvSocket;
                 hwdec = "auto-safe";
                 video-sync = "display-resample";
+                # Pace Wayland frames internally instead of using the Vulkan FIFO path.
+                wayland-internal-vsync = "yes";
                 drm-vrr-enabled = "no";
                 wayland-content-type = "none";
                 audio-file-auto = "fuzzy";
