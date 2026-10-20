@@ -48,6 +48,7 @@ mkFeatureModule {
     }:
     let
       capturePaths = config.sinnix.paths.capturePaths;
+      mpvSocket = "/run/user/${toString config.users.users.${user}.uid}/mpv.sock";
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
       videoDownloader = pkgs.symlinkJoin {
         name = "sinnix-yt-dlp";
@@ -68,6 +69,7 @@ mkFeatureModule {
           {
             home.sessionVariables = {
               MPV_SCREENSHOT_DIR = "${capturePaths.screenshot}/mpv";
+              MPVC_SOCKET = mpvSocket;
             };
 
             home.packages = with pkgs; [
@@ -82,6 +84,8 @@ mkFeatureModule {
                 profile = "normal";
                 fs = true;
                 force-window = "yes";
+                # Local control follows the newest player; the runtime directory is private.
+                input-ipc-server = mpvSocket;
                 hwdec = "auto-safe";
                 video-sync = "display-resample";
                 drm-vrr-enabled = "no";
