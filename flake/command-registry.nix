@@ -172,11 +172,50 @@ let
       "--setenv=SINNIX_REBUILD_ACTIVE=1"
       ''--setenv=SINNIX_SECRET_DECLARATIONS="$SINNIX_SECRET_DECLARATIONS"''
       "--slice=nix-build.slice"
-      "-p CPUSchedulingPolicy=batch"
+      "-p CPUSchedulingPolicy=other"
+      "-p KillMode=control-group"
+      "-p ExitType=main"
+      "-p TimeoutStopSec=5s"
       "-p IOSchedulingClass=best-effort"
       "-p IOSchedulingPriority=6"
     ]
     + " \\";
+  rebuildGuard = pkgs.writeShellScript "sinnix-rebuild-guard" ''
+    exec ${pkgs.python3}/bin/python3 ${./rebuild-guard.py} \
+      --chrt ${pkgs.util-linux}/bin/chrt "$@"
+  '';
+  rebuildOwner = name: systemManager: ''
+    _rebuild_unit="sinnix-${name}-$$"
+    _rebuild_complete=0
+    exec 8</dev/null
+    _rebuild_condition="/proc/$$/fd/8"
+    IFS= read -r _rebuild_stat < "/proc/$$/stat"
+    _rebuild_stat_tail="''${_rebuild_stat##*) }"
+    read -r -a _rebuild_stat_fields <<< "$_rebuild_stat_tail"
+    _rebuild_start_ticks="''${_rebuild_stat_fields[19]}"
+    cleanup_rebuild() {
+      exec 8<&-
+      if [ "$_rebuild_complete" -eq 0 ]; then
+        ${pkgs.coreutils}/bin/timeout 5s ${lib.optionalString systemManager "sudo -n "}${pkgs.systemd}/bin/systemctl \
+          ${
+            lib.optionalString (!systemManager) "--user"
+          } --no-block stop "$_rebuild_unit.service" >&2 || true
+      fi
+    }
+    trap cleanup_rebuild EXIT
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+  '';
+  rebuildWait = ''
+    _rebuild_runner=$!
+    _rebuild_status=0
+    wait "$_rebuild_runner" || _rebuild_status=$?
+    if [ "$_rebuild_status" -eq 0 ]; then
+      _rebuild_complete=1
+      exec 8<&-
+      trap - EXIT INT TERM
+    fi
+  '';
   # Nothing else populates sinity.cachix.org: the desktop compiles the sinex
   # workspace locally on every input bump, so publish the freshly activated
   # closure after a successful switch and let ethereal/reinstalls/post-GC
@@ -235,15 +274,21 @@ let
         # build-vm builds a separate guest and does not activate the live host.
         # Not `exec`: sudo may close inherited fds (including the lock fd held
         # above), so this shell retains the lock until the build completes.
+        ${rebuildOwner "test-vm" true}
         sudo ${pkgs.systemd}/bin/systemd-run \
-          --quiet --collect --pipe --service-type=exec --wait \
+          --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" \
+          --property="ConditionPathExists=$_rebuild_condition" \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
+          ${rebuildGuard} \
+            --owner-pid "$$" --owner-start-ticks "$_rebuild_start_ticks" -- \
           ${pkgs.nixos-rebuild}/bin/nixos-rebuild build-vm \
             --flake "$_flake_dir#sinnix-prime" \
             "''${rebuild_args[@]}" \
             --impure \
-            "''${nix_override_args[@]}"
+            "''${nix_override_args[@]}" &
+        ${rebuildWait}
+        exit "$_rebuild_status"
       '';
     };
 
@@ -256,17 +301,23 @@ let
         ${avoidRepoCwdForActivation}
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
+        ${rebuildOwner "test-system" false}
         ${pkgs.systemd}/bin/systemd-run \
           --user \
-          --quiet --collect --pipe --service-type=exec --wait \
+          --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" \
+          --property="ConditionPathExists=$_rebuild_condition" \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
+          ${rebuildGuard} \
+            --owner-pid "$$" --owner-start-ticks "$_rebuild_start_ticks" -- \
           ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
             ${pkgs.nh}/bin/nh os test \
             "''${_invoke_flake_dir}#sinnix-prime" \
             --no-nom \
             "''${rebuild_args[@]}" \
-            "''${nh_extra_args[@]}"
+            "''${nh_extra_args[@]}" &
+        ${rebuildWait}
+        exit "$_rebuild_status"
       '';
     };
 
@@ -280,18 +331,22 @@ let
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
         ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
-        _rebuild_status=0
+        ${rebuildOwner "boot" false}
         ${pkgs.systemd}/bin/systemd-run \
           --user \
-          --quiet --collect --pipe --service-type=exec --wait \
+          --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" \
+          --property="ConditionPathExists=$_rebuild_condition" \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
+          ${rebuildGuard} \
+            --owner-pid "$$" --owner-start-ticks "$_rebuild_start_ticks" -- \
           ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
             ${pkgs.nh}/bin/nh os boot \
             "''${_invoke_flake_dir}#sinnix-prime" \
             --no-nom \
             "''${rebuild_args[@]}" \
-            "''${nh_extra_args[@]}" || _rebuild_status=$?
+            "''${nh_extra_args[@]}" &
+        ${rebuildWait}
         exit "$_rebuild_status"
       '';
     };
@@ -329,22 +384,7 @@ let
         ${localInputOverrideArgs}
         ${rebuildDefaultArgs}
         ${scriptPkgs.sinnix-preflight}/bin/sinnix-preflight switch
-        _rebuild_status=0
-        _rebuild_unit="sinnix-switch-$$"
-        _rebuild_complete=0
-        # The start condition disappears even if the wrapper is killed before
-        # systemd-run registers its unit. Keep fd 9 for the activation lock.
-        exec 8</dev/null
-        _rebuild_condition="/proc/$$/fd/8"
-        cleanup_rebuild() {
-          exec 8<&-
-          if [ "$_rebuild_complete" -eq 0 ]; then
-            ${pkgs.systemd}/bin/systemctl --user stop "$_rebuild_unit.service" >&2 || true
-          fi
-        }
-        trap cleanup_rebuild EXIT
-        trap 'exit 130' INT
-        trap 'exit 143' TERM
+        ${rebuildOwner "switch" false}
         ${pkgs.systemd}/bin/systemd-run \
           --user \
           --quiet --collect --pipe --service-type=exec --wait --unit="$_rebuild_unit" \
@@ -352,19 +392,15 @@ let
           --setenv="SINNIX_ACTIVATION_SOURCE_REV=''${SINNIX_DEV_SHELL_REV:-}" \
           --setenv=PATH="${rebuildServicePath}:$PATH" \
           ${rebuildContainmentFlags}
+          ${rebuildGuard} \
+            --owner-pid "$$" --owner-start-ticks "$_rebuild_start_ticks" -- \
           ${pkgs.coreutils}/bin/env -u FLAKE NH_FLAKE="$_invoke_flake_dir" \
             ${pkgs.nh}/bin/nh os switch \
             "''${_invoke_flake_dir}#sinnix-prime" \
             --no-nom \
             "''${rebuild_args[@]}" \
             "''${nh_extra_args[@]}" &
-        _rebuild_runner=$!
-        wait "$_rebuild_runner" || _rebuild_status=$?
-        if [ "$_rebuild_status" -eq 0 ]; then
-          _rebuild_complete=1
-          exec 8<&-
-          trap - EXIT INT TERM
-        fi
+        ${rebuildWait}
         ${sinexCachePush}
         exit "$_rebuild_status"
       '';
@@ -587,6 +623,7 @@ in
     loadCheckTargets
     rebuildLock
     rebuildContainmentFlags
+    rebuildGuard
     rebuildDefaultArgs
     rebuildServicePath
     localInputOverrideArgs
