@@ -81,6 +81,15 @@ scratch = "nvme"
 timeout_seconds = 600
 admission = { memory_mib = 2048 }
 
+[operations.compare_preserved_tree]
+description = "Compare explicit source and preserved trees read-only, including content and metadata"
+exec = ["sudo", "-n", "rsync", "--archive", "--hard-links", "--acls", "--xattrs", "--numeric-ids", "--dry-run", "--checksum", "--delete", "--itemize-changes", "--stats"]
+arguments = "required"
+pool = "bulk"
+result = "exit"
+scratch = "nvme"
+timeout_seconds = 28800
+
 [operations.reverse_engineering_verify]
 description = "Verify firmware extraction and Ghidra decompilation on synthetic inputs"
 exec = ["nix", "develop", ".#reverse-engineering", "--command", "python3", "flake/tests/reverse-engineering.py"]

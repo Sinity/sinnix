@@ -66,6 +66,15 @@ Borg stores mostly new data; the `/realm` snapshots archive them.
 
 ## Is it healthy?
 
+For a preserved filesystem tree, run
+`agentctl job start sinnix compare_preserved_tree -- -- /absolute/source/ /absolute/copy/`.
+This runs native rsync with checksums, metadata comparison and dry-run deletion
+reporting. It writes neither tree. Keep the trailing slashes and capture the
+job's complete output and exit status. Exit zero means the comparison ran;
+equality also requires no itemized changes or deletion entries. Record source
+and destination identities before and after, and keep the source stable during
+the comparison. This checks a tree copy, not a Borg archive.
+
 - **Notifications.** A failed backup unit raises a critical desktop
   notification, repeated daily while it stays failed.
 - **Do not trust `systemctl --failed` alone.** Every NixOS switch resets the
