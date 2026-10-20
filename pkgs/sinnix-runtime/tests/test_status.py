@@ -1,4 +1,4 @@
-"""`sinnix-hub-server status`: composition, degrade paths, and the folded
+"""`sinnix status`: composition, degrade paths, and the folded
 acknowledged-outages hook contract."""
 
 from __future__ import annotations

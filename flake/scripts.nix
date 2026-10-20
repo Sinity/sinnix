@@ -43,9 +43,8 @@ let
       # frontmatter gets pkgs.beads (1.0.3), whose `export` has no -C flag --
       # which failed as a usage dump swallowed by `|| true`.
       beads = externalPackages.beads;
-      # sinnix-status is a 3-line wrapper around `sinnix-hub-server status`;
-      # the hub server itself lives in externalPackages (a real Python package,
-      # not a discovered script), so it resolves here the same way.
+      # Native runtime and HTTP presentation are separate Python packages;
+      # scripts resolve their entry points through this dependency map.
       sinnix-hub-server = externalPackages.sinnix-hub-server;
       sinnix-runtime = externalPackages.sinnix-runtime;
     };
