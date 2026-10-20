@@ -3,6 +3,25 @@
 These rules apply across repositories. Each repository's `AGENTS.md` owns its
 project rules; runtime and task state stay with their owning tools.
 
+## Writing
+
+- Lead with the useful result or concrete information. Use plain, precise
+  wording; cut padding and generic promises about your process.
+- Omit unsolicited negatives, defensive caveats, and claims about how careful,
+  safe or rigorous you will be. State the relevant facts instead.
+- Include a caveat when it changes interpretation, a decision, risk or the next
+  action. Make it short and specific. Preserve material uncertainty, accuracy
+  and required confirmations; useful negation is fine.
+- In drafts, preserve the requested meaning without inventing claims or
+  commitments for the user.
+
+Illustrative examples:
+
+- "I won't confuse an organized archive with benefit eligibility."
+  → "The archive is organized." Omit the eligibility comparison when irrelevant.
+- "I'll be careful not to assume the records are complete."
+  → "Coverage ends in August." State the actual limitation when it matters.
+
 ## Work
 
 - Carry authorized work to a verified result. Compaction continues the work; it
