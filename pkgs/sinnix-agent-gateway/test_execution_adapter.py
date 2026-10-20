@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from agentctl import artifacts, batch, job_queries, launch, pueue
+from agentctl import artifacts, batch_history, job_queries, launch, operator_view, pueue
 from agentctl.config import Config
 from agentctl.limits import MAX_AGENT_TIMEOUT_SECONDS
 from sinnix_agent_gateway.execution import JobOwnerError, LocalJobs
@@ -55,10 +55,7 @@ def _call(
         "job.shell.start": adapter.shell_start,
         "job.queues": adapter.queues,
         "batch.list": adapter.batch_list,
-        "batch.start": adapter.batch_start,
         "batch.status": adapter.batch_status,
-        "batch.land": adapter.batch_land,
-        "batch.resume": adapter.batch_resume,
     }
     return methods[operation](**arguments)
 
@@ -298,107 +295,14 @@ RUN_DOCUMENT = {
 }
 
 
-def test_batch_start_hands_the_beads_to_agentctl_and_answers_from_the_manifest(
-    adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Red if the gateway compiles its own prompt or worktree instead of
-    handing the beads to agentctl's batch route."""
-    seen: dict[str, Any] = {}
-
-    def fake_start(config, project, seeds, *, workers, backend, model, effort, **_kw):
-        seen.update(
-            project=project.project_id,
-            seeds=list(seeds),
-            workers=workers,
-            backend=backend,
-        )
-        return {"run_id": RUN_DOCUMENT["run_id"], "existing": False, "resumed": False}
-
-    monkeypatch.setattr(batch, "start", fake_start)
-    monkeypatch.setattr(batch, "status", lambda *_a, **_k: RUN_DOCUMENT)
-    payload = _call(
-        adapter,
-        "batch.start",
-        {
-            "project_id": "fixture",
-            "beads": ["fixture-1", "fixture-2"],
-            "workers": [["fixture-1", "fixture-2"]],
-            "backend": "claude",
-        },
-    )
-    assert seen == {
-        "project": "fixture",
-        "seeds": ["fixture-1", "fixture-2"],
-        "workers": [["fixture-1", "fixture-2"]],
-        "backend": "claude",
-    }
-    assert payload["run_id"] == RUN_DOCUMENT["run_id"]
-    assert payload["stage"] == "working" and payload["accepted"] is False
-    worker = payload["workers"][0]
-    assert worker["worker_id"] == "fixture-1"
-    assert worker["beads"] == ["fixture-1", "fixture-2"]
-    assert worker["task_id"] == "41" and worker["task_ids"] == ["41"]
-    # The manifest's stable job_id for each job, which jobs.* addresses by.
-    assert worker["job_id"] == "fixture-worker-abcd1234"
-    assert worker["state"] == {
-        "phase": "running",
-        "terminal": False,
-        "exit_code": None,
-        "dependencies": None,
-    }
-    assert worker["result_filed"] is False
-    assert payload["landing"]["task_id"] == "42"
-    assert payload["landing"]["job_id"] == "fixture-integrate-9f10"
-    assert payload["landing"]["state"]["phase"] == "queued"
-
-    def refuse(config, project, seeds, **_kwargs):
-        raise batch.BatchRefusal("members", "fixture-1: claimed by agent-x")
-
-    monkeypatch.setattr(batch, "start", refuse)
-    with pytest.raises(JobOwnerError) as refused:
-        _call(adapter, "batch.start", {"project_id": "fixture", "beads": ["fixture-1"]})
-    assert refused.value.code == "owner_failed"
-    assert refused.value.details == {"refusal": "members"}
-    assert "claimed by agent-x" in str(refused.value)
-
-
-def test_batch_land_queues_a_landing_task_and_reports_the_refusal_class(
-    adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Red if landing runs inside the request instead of on the queue."""
-    monkeypatch.setattr(
-        batch, "resolve_run_id", lambda _c, token: RUN_DOCUMENT["run_id"]
-    )
-    monkeypatch.setattr(
-        batch, "load", lambda *_a: type("R", (), {"project": "fixture"})()
-    )
-    monkeypatch.setattr(batch, "status", lambda *_a, **_k: RUN_DOCUMENT)
-    monkeypatch.setattr(batch, "queue", lambda *_a: {"landing_task_id": 77})
-    monkeypatch.setattr(
-        batch, "land", lambda *_a, **_k: pytest.fail("landing ran in the request")
-    )
-
-    response = _call(adapter, "batch.land", {"run_id": "a2c81926"})
-    assert response["landing_task_id"] == "77"
-
-    def refuse(*_args):
-        raise batch.BatchRefusal("landing_in_progress", "landing task 42 is queued")
-
-    monkeypatch.setattr(batch, "queue", refuse)
-    with pytest.raises(JobOwnerError) as refused:
-        _call(adapter, "batch.land", {"run_id": "a2c81926"})
-    assert refused.value.code == "owner_failed"
-    assert refused.value.details == {"refusal": "landing_in_progress"}
-
-
 def test_batch_verbs_refuse_a_run_that_belongs_to_another_project(
     adapter: LocalJobs, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        batch, "resolve_run_id", lambda _c, token: RUN_DOCUMENT["run_id"]
+        batch_history, "resolve_run_id", lambda _c, token: RUN_DOCUMENT["run_id"]
     )
     monkeypatch.setattr(
-        batch, "load", lambda *_a: type("R", (), {"project": "other"})()
+        batch_history, "load", lambda *_a: type("R", (), {"project": "other"})()
     )
     with pytest.raises(JobOwnerError) as refused:
         _call(
@@ -617,3 +521,32 @@ def test_an_unfinished_job_answers_with_its_place_in_the_queue(
     assert "queue" not in degraded
     assert degraded["queue_unavailable"] == "daemon unreachable"
     assert degraded["task_id"] == "41"
+
+
+def test_original_status_preserves_worker_and_job_identities(adapter, monkeypatch):
+    monkeypatch.setattr(
+        batch_history, "resolve_run_id", lambda config, token: RUN_DOCUMENT["run_id"]
+    )
+    monkeypatch.setattr(
+        batch_history, "load", lambda *args: type("R", (), {"project": "fixture"})()
+    )
+    monkeypatch.setattr(operator_view, "status", lambda *args, **kwargs: RUN_DOCUMENT)
+    payload = adapter.batch_status(run_id="a2c81926")
+    assert payload["run_id"] == RUN_DOCUMENT["run_id"]
+    worker = payload["workers"][0]
+    assert worker["beads"] == ["fixture-1", "fixture-2"]
+    assert worker["task_id"] == "41" and worker["task_ids"] == ["41"]
+    assert worker["job_id"] == "fixture-worker-abcd1234"
+    assert payload["landing"]["job_id"] == "fixture-integrate-9f10"
+
+
+@pytest.mark.parametrize("code", ["unknown_run", "ambiguous_run"])
+def test_history_identity_refusals_keep_their_typed_code(adapter, monkeypatch, code):
+    def refuse(*args):
+        raise batch_history.HistoryRefusal(code, "fixture history refusal")
+
+    monkeypatch.setattr(batch_history, "resolve_run_id", refuse)
+    with pytest.raises(JobOwnerError) as failure:
+        adapter.batch_status(run_id="not-an-executor")
+    assert failure.value.details == {"refusal": code}
+    assert failure.value.code == "invalid_request"

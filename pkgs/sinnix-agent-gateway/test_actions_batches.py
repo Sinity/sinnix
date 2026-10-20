@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 from conftest import DirectJobs, call, ok
+from mcp.server.mcpserver.exceptions import ToolError
 from sinnix_agent_gateway import server as server_module
 from sinnix_agent_gateway.actions import batches, jobs
 from sinnix_agent_gateway.app import Runtime, create_server
@@ -144,92 +145,6 @@ def test_list_pages_runs_and_forwards_the_project_filter(
     assert unknown["error"]["code"] == "not_found"
 
 
-def test_start_sends_the_beads_and_the_worker_grouping(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    server, fake = make_server(tmp_path, monkeypatch)
-    fake.responses["batch.start"] = {**RUN, "existing": False, "resumed": True}
-
-    started = ok(
-        server,
-        "batches.start",
-        {
-            "project": {"project": "fixture"},
-            "beads": ["fixture-7", "fixture-8"],
-            "workers": [["fixture-7", "fixture-8"]],
-            "backend": "claude",
-            "model": "claude-opus-5",
-            "effort": "high",
-            "idempotency_key": "batch-1",
-        },
-    )
-
-    assert started["run_id"] == RUN_ID and started["resumed"] is True
-    assert started["existing"] is False
-    assert fake.calls[-1].arguments == {
-        "project_id": "fixture",
-        "beads": ["fixture-7", "fixture-8"],
-        "workers": [["fixture-7", "fixture-8"]],
-        "backend": "claude",
-        "model": "claude-opus-5",
-        "effort": "high",
-    }
-
-    fake.errors["batch.start"] = (
-        "owner_failed",
-        "members: fixture-7 is claimed by agent-x",
-        {"refusal": "members"},
-    )
-    refused = call(
-        server,
-        "batches.start",
-        {
-            "project": {"project": "fixture"},
-            "beads": ["fixture-7"],
-            "idempotency_key": "batch-2",
-        },
-    )
-    assert refused["error"]["code"] == "conflict"
-    assert refused["error"]["details"]["next_action"] == "beads.query"
-    assert "claimed by agent-x" in refused["error"]["message"]
-
-
-def test_land_and_resume_return_the_queued_task_rather_than_running_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Breaks if a caller has to hold an MCP request open for a whole landing."""
-    server, fake = make_server(tmp_path, monkeypatch)
-    fake.responses["batch.land"] = {**RUN, "landing_task_id": "77"}
-    fake.responses["batch.resume"] = {**RUN, "resumed_task_id": "78"}
-
-    landed = ok(
-        server,
-        "batches.land",
-        {"target": {"run_id": "a2c81926"}, "idempotency_key": "land-1"},
-    )
-    assert landed["landing_task_id"] == 77
-    assert landed["landing_job_ref"] == "sinnix://jobs/77"
-
-    resumed = ok(
-        server,
-        "batches.resume",
-        {
-            "target": {"run_id": "a2c81926"},
-            "worker": "fixture-7",
-            "effort": "high",
-            "idempotency_key": "resume-1",
-        },
-    )
-    assert resumed["resumed_task_id"] == 78
-    assert fake.calls[-1].arguments == {
-        "run_id": "a2c81926",
-        "worker_id": "fixture-7",
-        "backend": None,
-        "model": None,
-        "effort": "high",
-    }
-
-
 def test_a_landed_run_offers_no_further_transition(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -244,3 +159,11 @@ def test_a_landed_run_offers_no_further_transition(
     data = ok(server, "batches.status", {"target": {"run_id": "a2c81926"}})
 
     assert data["accepted"] is True and data["next_actions"] == ["batches.list"]
+
+
+@pytest.mark.parametrize("action", ["batches.start", "batches.land", "batches.resume"])
+def test_retired_mutations_have_no_tool_or_owner_effect(tmp_path, monkeypatch, action):
+    server, owner = make_server(tmp_path, monkeypatch)
+    with pytest.raises(ToolError, match="Unknown tool"):
+        call(server, action, {})
+    assert owner.calls == []

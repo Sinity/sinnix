@@ -300,15 +300,12 @@ def test_declared_deadline_and_idempotency_failures_persist_bounded_envelopes(
     tmp_path,
 ) -> None:
     runtime = Runtime.create(config(tmp_path))
-    action = ACTIONS["batches.start"]
+    action = ACTIONS["operations.run"]
     request = {
         "project": {"project": "fixture"},
-        "beads": ["fixture-1"],
-        "backend": "codex",
-        "model": "gpt-5.6-terra",
-        "effort": "high",
+        "operation": "verify",
         "request_id": "2e46daf5-e9b1-4c6e-b99d-bcd46631730b",
-        "idempotency_key": "batch-failure-fixture",
+        "idempotency_key": "operation-failure-fixture",
     }
 
     deadline = _execute(
@@ -322,7 +319,7 @@ def test_declared_deadline_and_idempotency_failures_persist_bounded_envelopes(
         runtime,
         action,
         lambda: pytest.fail("conflicting request reached the owner"),
-        {**request, "instructions": "different request"},
+        {**request, "operation": "different-operation"},
     )
     unexpected = _execute(
         runtime,

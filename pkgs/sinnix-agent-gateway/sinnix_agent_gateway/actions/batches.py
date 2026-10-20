@@ -1,4 +1,4 @@
-"""Batches: several workers on one base commit, landed as one candidate.
+"""Read retained batch manifests and their native job observations.
 
 A batch is agentctl's run manifest; ``runtime.jobs`` (``LocalJobs``) answers
 every batch operation from it. Worker and landing tasks are ordinary jobs, so
@@ -9,14 +9,13 @@ membership comes from the manifest, never from a task label.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
 from ..action import (
     Action,
     Example,
-    MutationControls,
     RequestControls,
 )
 from ..contracts import VerbFamily
@@ -36,7 +35,6 @@ from .jobs import JobState
 if TYPE_CHECKING:
     from ..runtime import Runtime
 
-Backend = Literal["claude", "codex", "gemini", "grok", "antigravity"]
 
 # What a run's stage lets the caller do next; nothing here dispatches.
 _TERMINAL_STAGES = {"landed", "abandoned"}
@@ -56,7 +54,6 @@ _REFUSALS: dict[str, tuple[str, str]] = {
     "worker_active": ("conflict", "jobs.wait"),
     "verify_running": ("conflict", "jobs.wait"),
     "worker_not_done": ("conflict", "jobs.wait"),
-    "worker_result_missing": ("conflict", "batches.resume"),
 }
 
 
@@ -210,7 +207,7 @@ def _next_actions(stage: str | None, accepted: bool, abandoned: Any) -> list[str
         return ["batches.list"]
     if stage == "working":
         return ["batches.status", "jobs.wait", "jobs.logs"]
-    return ["batches.status", "batches.land", "batches.resume"]
+    return ["batches.status", "jobs.logs"]
 
 
 def _run_view(payload: Mapping[str, Any]) -> RunView:
@@ -303,121 +300,6 @@ def _status(runtime: Runtime, inp: StatusInput) -> RunView:
 # ----------------------------------------------------------------- start
 
 
-class AgentChoice(MutationControls):
-    backend: Backend | None = Field(
-        default=None, description="Defaults to the project descriptor's packet default."
-    )
-    model: str | None = Field(default=None, min_length=1, max_length=256)
-    effort: str | None = Field(default=None, min_length=1, max_length=32)
-
-
-class StartInput(AgentChoice):
-    project: ProjectLocator
-    beads: list[str] = Field(
-        min_length=1,
-        max_length=16,
-        description="The bead ids to work; each becomes its own worker unless workers groups them.",
-    )
-    workers: list[list[str]] | None = Field(
-        default=None,
-        max_length=16,
-        description="Group the beads into workers; every bead must appear in exactly one group.",
-    )
-
-
-class RunStarted(RunView):
-    existing: bool = Field(
-        default=False, description="The run already held these beads; nothing launched."
-    )
-    resumed: bool = Field(
-        default=False, description="An unprepared run was carried to prepared."
-    )
-
-
-def _start(runtime: Runtime, inp: StartInput) -> RunStarted:
-    arguments: dict[str, Any] = {
-        "project_id": inp.project.resolve(runtime),
-        "beads": inp.beads,
-        "backend": inp.backend,
-        "model": inp.model,
-        "effort": inp.effort,
-    }
-    if inp.workers is not None:
-        arguments["workers"] = inp.workers
-    result = _owner(runtime, "batch.start", arguments)
-    return RunStarted(
-        **_run_view(result).model_dump(),
-        existing=bool(result.get("existing")),
-        resumed=bool(result.get("resumed")),
-    )
-
-
-# ------------------------------------------------------------------ land
-
-
-class LandInput(MutationControls):
-    target: RunLocator
-
-
-class LandQueued(RunView):
-    landing_task_id: int = Field(description="The landing task this call queued.")
-    landing_job_ref: str
-
-
-def _land(runtime: Runtime, inp: LandInput) -> LandQueued:
-    result = _owner(runtime, "batch.land", inp.target.resolve())
-    queued = _task_id(result.get("landing_task_id"))
-    if queued is None:
-        raise ProtocolError("owner_failed", "batch owner queued no landing task")
-    return LandQueued(
-        **_run_view(result).model_dump(),
-        landing_task_id=queued,
-        landing_job_ref=job_ref(queued),
-    )
-
-
-# ---------------------------------------------------------------- resume
-
-
-class ResumeInput(AgentChoice):
-    target: RunLocator
-    worker: str = Field(
-        min_length=1,
-        max_length=128,
-        description="The worker id, as batches.status names it.",
-    )
-
-
-class ResumeQueued(RunView):
-    resumed_task_id: int = Field(description="The agent task this call queued.")
-    resumed_job_ref: str
-
-
-def _resume(runtime: Runtime, inp: ResumeInput) -> ResumeQueued:
-    result = _owner(
-        runtime,
-        "batch.resume",
-        {
-            **inp.target.resolve(),
-            "worker_id": inp.worker,
-            "backend": inp.backend,
-            "model": inp.model,
-            "effort": inp.effort,
-        },
-    )
-    queued = _task_id(result.get("resumed_task_id"))
-    if queued is None:
-        raise ProtocolError("owner_failed", "batch owner queued no agent task")
-    return ResumeQueued(
-        **_run_view(result).model_dump(),
-        resumed_task_id=queued,
-        resumed_job_ref=job_ref(queued),
-    )
-
-
-# --------------------------------------------------------------- actions
-
-
 _RUN = "sinnix://projects/sinnix/runs/sinnix-20260906-012123-a2c81926"
 _SUFFIX = {"run_id": "a2c81926"}
 
@@ -449,7 +331,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=RunView,
         handler=_status,
         resource_kinds=("run", "bead", "job"),
-        next_actions=("jobs.logs", "jobs.wait", "batches.land", "batches.resume"),
+        next_actions=("jobs.logs", "jobs.wait", "batches.list"),
         aliases=(
             "batch status",
             "run status",
@@ -460,83 +342,6 @@ ACTIONS: tuple[Action, ...] = (
         examples=(
             Example(title="By run suffix", input={"target": _SUFFIX}),
             Example(title="By canonical ref", input={"target": {"ref": _RUN}}),
-        ),
-    ),
-    Action(
-        name="batches.start",
-        family=VerbFamily.RUN,
-        owner="systemd-jobs",
-        summary="Start a batch: claim the beads, create a worktree per worker, queue the workers and the landing.",
-        Input=StartInput,
-        Output=RunStarted,
-        handler=_start,
-        resource_kinds=("project", "bead", "run", "job"),
-        next_actions=("batches.status", "jobs.wait", "jobs.logs", "jobs.cancel"),
-        aliases=("dispatch", "agentctl batch start", "work on bead", "start agents"),
-        documentation="backend, model and effort default to the project descriptor's packet defaults. Refused when a bead is claimed or already in a live run. The landing task is queued behind the workers and runs itself.",
-        examples=(
-            Example(
-                title="One bead, one worker",
-                input={
-                    "project": {"project": "sinnix"},
-                    "beads": ["sinnix-abc1"],
-                    "idempotency_key": "batch-sinnix-abc1",
-                },
-            ),
-            Example(
-                title="Two workers, pinned agent",
-                input={
-                    "project": {"project": "sinnix"},
-                    "beads": ["sinnix-abc1", "sinnix-abc2", "sinnix-abc3"],
-                    "workers": [["sinnix-abc1", "sinnix-abc2"], ["sinnix-abc3"]],
-                    "backend": "codex",
-                    "model": "gpt-6-sol",
-                    "effort": "high",
-                    "idempotency_key": "batch-sinnix-abc1-3",
-                },
-            ),
-        ),
-    ),
-    Action(
-        name="batches.land",
-        family=VerbFamily.RUN,
-        owner="systemd-jobs",
-        summary="Queue a landing task for a run: integrate, verify, review, publish, accept.",
-        Input=LandInput,
-        Output=LandQueued,
-        handler=_land,
-        resource_kinds=("run", "job"),
-        next_actions=("jobs.wait", "jobs.logs", "batches.status"),
-        aliases=("land", "agentctl batch land", "publish the batch", "merge the run"),
-        documentation="batches.start already queues the first landing behind the workers; this re-queues one after a landing failed. The landing runs as a job, so wait on landing_task_id rather than on this call.",
-        examples=(
-            Example(
-                title="Re-run a failed landing",
-                input={"target": _SUFFIX, "idempotency_key": "land-a2c81926"},
-            ),
-        ),
-    ),
-    Action(
-        name="batches.resume",
-        family=VerbFamily.RUN,
-        owner="systemd-jobs",
-        summary="Queue a fresh agent into one worker's existing worktree with its original packet.",
-        Input=ResumeInput,
-        Output=ResumeQueued,
-        handler=_resume,
-        resource_kinds=("run", "job"),
-        next_actions=("jobs.wait", "jobs.logs", "batches.status"),
-        aliases=("resume worker", "agentctl batch resume", "retry the agent"),
-        documentation="backend, model and effort default to the worker's own. Refused while the worker's task is still queued or running.",
-        examples=(
-            Example(
-                title="Resume one worker",
-                input={
-                    "target": _SUFFIX,
-                    "worker": "sinnix-abc1",
-                    "idempotency_key": "resume-a2c81926-sinnix-abc1",
-                },
-            ),
         ),
     ),
 )

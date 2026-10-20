@@ -1,4 +1,4 @@
-"""The gateway's job owner: agentctl's launch and batch routes, called in process.
+"""The gateway's job owner: agentctl's native launch and history routes, called in process.
 
 A job is a pueue task and a batch is a run manifest. Direct adapter calls
 return owner mappings and raise typed owner errors.
@@ -11,12 +11,12 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from agentctl import batch, job_queries, launch
+from agentctl import batch_history, job_queries, launch, operator_view
 from agentctl.config import Config, ConfigError, load_config, resolve_project
 from agentctl.limits import MAX_AGENT_TIMEOUT_SECONDS
 from agentctl.projects import ProjectConfigError
-from agentctl.prompts import PromptError
 from agentctl.pueue import PueueError
+from agentctl.task_reads import TaskReadError
 from agentctl.worktrunk import WorktrunkError
 
 from . import shell_pools
@@ -251,7 +251,7 @@ def run_payload(document: Mapping[str, Any]) -> dict[str, Any]:
 
 
 class LocalJobs:
-    """Calls agentctl's job and batch routes directly in this process.
+    """Calls agentctl's native job and retained history routes directly in this process.
 
     The adapter exposes one method per owner operation.  Runtime translates
     the gateway operation name to one of these methods, so no protocol
@@ -276,7 +276,7 @@ class LocalJobs:
             payload = handler(arguments)
         except _Refusal as refusal:
             raise JobOwnerError(refusal.code, str(refusal)) from refusal
-        except batch.BatchRefusal as refusal:
+        except batch_history.HistoryRefusal as refusal:
             raise JobOwnerError(
                 "invalid_request"
                 if refusal.code in ARGUMENT_REFUSALS
@@ -288,10 +288,10 @@ class LocalJobs:
             raise JobOwnerError("unavailable", str(error)) from error
         except (
             job_queries.JobError,
-            batch.BatchError,
+            batch_history.HistoryError,
             WorktrunkError,
             ConfigError,
-            PromptError,
+            TaskReadError,
             ProjectConfigError,
             KeyError,
             OSError,
@@ -358,22 +358,13 @@ class LocalJobs:
     def batch_list(self, **arguments: Any) -> dict[str, Any]:
         return self._call(self._batch_list, arguments)
 
-    def batch_start(self, **arguments: Any) -> dict[str, Any]:
-        return self._call(self._batch_start, arguments)
-
     def batch_status(self, **arguments: Any) -> dict[str, Any]:
         return self._call(self._batch_status, arguments)
-
-    def batch_land(self, **arguments: Any) -> dict[str, Any]:
-        return self._call(self._batch_land, arguments)
-
-    def batch_resume(self, **arguments: Any) -> dict[str, Any]:
-        return self._call(self._batch_resume, arguments)
 
     def _project(self, project_id: str) -> Any:
         try:
             return resolve_project(self.config, project_id)
-        except (KeyError, PromptError) as error:
+        except (KeyError, ConfigError, TaskReadError) as error:
             raise _Refusal(
                 "invalid_request", f"unknown project: {project_id}"
             ) from error
@@ -599,26 +590,28 @@ class LocalJobs:
 
     def _run_id(self, arguments: Mapping[str, Any]) -> str:
         """A run id or the suffix every agentctl verb also accepts."""
-        return batch.resolve_run_id(self.config, _require_str(arguments, "run_id"))
+        return batch_history.resolve_run_id(
+            self.config, _require_str(arguments, "run_id")
+        )
 
     def _run_project(self, run_id: str, arguments: Mapping[str, Any]) -> Any:
         """The run's own project; an explicit project_id must agree with it."""
         declared = _optional_str(arguments, "project_id")
-        owner = batch.load(self.config, run_id).project
+        owner = batch_history.load(self.config, run_id).project
         if declared is not None and declared != owner:
-            raise batch.BatchRefusal(
+            raise batch_history.HistoryRefusal(
                 "project", f"run {run_id} belongs to {owner}, not {declared}"
             )
         return self._project(owner)
 
     def _status(self, run_id: str, project: Any) -> dict[str, Any]:
-        return run_payload(batch.status(self.config, run_id, project=project))
+        return run_payload(operator_view.status(self.config, run_id, project=project))
 
     def _batch_list(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         project_id = _optional_str(arguments, "project_id")
         if project_id is not None:
             self._project(project_id)
-        runs = batch.list_runs(self.config, project_id)
+        runs = batch_history.list_runs(self.config, project_id)
         limit = int(arguments.get("limit") or 50)
         page = sorted(runs, key=lambda run: run.created_at, reverse=True)[:limit]
         # No project: `batch status` reads the landing PR from GitHub when it
@@ -629,77 +622,9 @@ class LocalJobs:
             "truncated": len(runs) > len(page),
         }
 
-    def _batch_start(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        """agentctl validates the members, claims them, creates the worktrees, queues the workers and the landing."""
-        project = self._project(_require_str(arguments, "project_id"))
-        beads = arguments.get("beads")
-        if (
-            not isinstance(beads, list)
-            or not beads
-            or any(not isinstance(item, str) or not item for item in beads)
-        ):
-            raise _Refusal(
-                "invalid_request", "beads must be a non-empty list of bead ids"
-            )
-        workers = arguments.get("workers")
-        if workers is not None and (
-            not isinstance(workers, list)
-            or not all(
-                isinstance(group, list)
-                and group
-                and all(isinstance(item, str) and item for item in group)
-                for group in workers
-            )
-        ):
-            raise _Refusal(
-                "invalid_request",
-                "workers must be a list of non-empty bead id lists",
-            )
-        run = batch.start(
-            self.config,
-            project,
-            beads,
-            workers=workers,
-            backend=_optional_str(arguments, "backend"),
-            model=_optional_str(arguments, "model"),
-            effort=_optional_str(arguments, "effort"),
-        )
-        return {
-            **self._status(str(run["run_id"]), project),
-            "existing": bool(run.get("existing")),
-            "resumed": bool(run.get("resumed")),
-        }
-
     def _batch_status(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         run_id = self._run_id(arguments)
         return self._status(run_id, self._run_project(run_id, arguments))
-
-    def _batch_land(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        """Queue a landing task; pueue runs the landing, which can take hours."""
-        run_id = self._run_id(arguments)
-        project = self._run_project(run_id, arguments)
-        queued = batch.queue(self.config, project, run_id)
-        return {
-            **self._status(run_id, project),
-            "landing_task_id": str(queued["landing_task_id"]),
-        }
-
-    def _batch_resume(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        run_id = self._run_id(arguments)
-        project = self._run_project(run_id, arguments)
-        resumed = batch.resume(
-            self.config,
-            project,
-            run_id,
-            _require_str(arguments, "worker_id"),
-            backend=_optional_str(arguments, "backend"),
-            model=_optional_str(arguments, "model"),
-            effort=_optional_str(arguments, "effort"),
-        )
-        return {
-            **self._status(run_id, project),
-            "resumed_task_id": str(resumed["job"]["task_id"]),
-        }
 
     def _shell_start(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         """One argv queued in a shell pool, inside the project's environment."""

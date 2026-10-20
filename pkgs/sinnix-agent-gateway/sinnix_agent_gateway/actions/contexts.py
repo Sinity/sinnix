@@ -99,8 +99,8 @@ _NEXT_ACTIONS: dict[str, list[str]] = {
     "session.orchestration": ["sessions.orchestration", "sessions.list"],
     "verification.regression": ["campaign.progress", "jobs.get"],
     "project.trajectory": ["campaign.progress", "sessions.list"],
-    "project.overview": ["batches.start", "jobs.list", "events.tail"],
-    "project.triage": ["batches.start", "jobs.list", "events.tail"],
+    "project.overview": ["operations.run", "jobs.list", "events.tail"],
+    "project.triage": ["operations.run", "jobs.list", "events.tail"],
     "job.review": ["jobs.logs", "jobs.retry", "jobs.cancel"],
     "incident": ["events.tail", "jobs.list", "wait.for"],
 }
@@ -394,7 +394,7 @@ ACTIONS: tuple[Action, ...] = (
         next_actions=(
             "jobs.list",
             "jobs.logs",
-            "batches.start",
+            "operations.run",
             "events.tail",
             "wait.for",
         ),

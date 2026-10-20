@@ -141,8 +141,10 @@ argv confined to a checkout. `jobs.list`, `jobs.get`, `jobs.logs`, `jobs.wait`,
 `jobs.queues`, `jobs.cancel`, `jobs.retry` and `jobs.clean` read and control any
 job. A job has a numeric `task_id` (pueue's queue position) and a stable string `job_id`
 that survives queue reordering; each
-retry is a separate attempt with its own logs and result. `batches.*` wrap
-agentctl batches (`batches.start`, `status`, `list`, `resume`, `land`).
+retry is a separate attempt with its own logs and result. `batches.list` and
+`batches.status` read retained original manifests. Batch mutation tools are
+retired; new work uses native agents and declared operations. Historical agent
+and landing executors remain readable and cannot be retried through jobs.retry.
 
 `shell.run` picks a pool: `shell-quick` (width 8) for reads and short commands,
 or `shell-long` (width 4) for agent CLIs (`claude`, `codex`, `gemini`,

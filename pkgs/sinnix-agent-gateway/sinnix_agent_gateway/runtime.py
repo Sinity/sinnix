@@ -355,10 +355,7 @@ class Runtime:
                 "job.shell.start": "shell_start",
                 "job.queues": "queues",
                 "batch.list": "batch_list",
-                "batch.start": "batch_start",
                 "batch.status": "batch_status",
-                "batch.land": "batch_land",
-                "batch.resume": "batch_resume",
             }.items()
         }
         handler = handlers.get(operation)
