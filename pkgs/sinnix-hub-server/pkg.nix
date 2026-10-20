@@ -2,6 +2,7 @@
   lib,
   python3Packages,
   sinnix-lib,
+  sinnix-runtime,
   nodejs,
 }:
 
@@ -14,7 +15,10 @@ python3Packages.buildPythonApplication {
   # Sinnix's shared primitives (atomic state, ledgers, locks, desktop
   # notification, batched systemd probes) the health sweep and the action
   # receipts are written against, rather than private copies of each.
-  dependencies = [ sinnix-lib ];
+  dependencies = [
+    sinnix-lib
+    sinnix-runtime
+  ];
   nativeCheckInputs = [
     python3Packages.pytest
     nodejs

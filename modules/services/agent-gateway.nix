@@ -135,7 +135,7 @@ mkServiceModule {
       gatewayPath =
         lib.makeBinPath [
           pkgs.systemd
-          scriptPkgs.sinnix-hub-server # sinnix-observe
+          scriptPkgs.sinnix-runtime # sinnix-observe
           scriptPkgs.beads
           scriptPkgs.sinnix-capture
         ]

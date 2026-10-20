@@ -27,7 +27,7 @@ from .events import EventCursorError, NormalizedEventService
 from .execution import JobOwnerError, LocalJobs
 from .files import HostFileService
 from .locators import decode_file_ref
-from .machine_actions import MachineActionService
+from sinnix_runtime.client import RuntimeClient
 from .mcp_broker import McpBrokerService
 from .observe import ObserveService
 from .owner_execution import OwnerDiagnosticError
@@ -146,7 +146,7 @@ class Runtime:
     results: ResultService
     jobs: LocalJobs
     observe: ObserveService
-    machine_actions: MachineActionService
+    machine_actions: RuntimeClient
     desktop: DesktopService
     terminals: TerminalService
     browser: BrowserService
@@ -176,7 +176,7 @@ class Runtime:
             results=results,
             jobs=LocalJobs(),
             observe=ObserveService(config, artifacts),
-            machine_actions=MachineActionService(config),
+            machine_actions=RuntimeClient(config.hub_socket_path, config.max_result_bytes),
             desktop=DesktopService(config, artifacts),
             terminals=TerminalService(config, artifacts),
             browser=BrowserService(config, artifacts),

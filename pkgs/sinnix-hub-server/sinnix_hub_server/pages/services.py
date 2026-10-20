@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ..actions import POLICY_PROPERTIES
+from sinnix_runtime.actions import POLICY_PROPERTIES
 from .probes import unit_states
 from .shell import (
     ACTION_SCRIPT,

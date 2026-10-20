@@ -1,7 +1,7 @@
 import json
 import time
 
-from sinnix_hub_server.ambient import product_source
+from sinnix_runtime.ambient import product_source
 
 
 def test_product_source_accepts_current_product(tmp_path):

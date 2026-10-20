@@ -10,15 +10,15 @@ import sys
 from pathlib import Path
 
 import pytest
-from sinnix_hub_server import actions as actions_module
-from sinnix_hub_server.actions import (
+from sinnix_runtime import actions as actions_module
+from sinnix_runtime.actions import (
     ActionError,
     ActionService,
     process_admitted_slices,
     validate_request,
 )
-from sinnix_hub_server.agent_jobs import AgentCtlError
-from sinnix_hub_server.snapshot import SnapshotBuilder
+from sinnix_runtime.agent_jobs import AgentCtlError
+from sinnix_runtime.snapshot import SnapshotBuilder
 
 
 def receipt_service(root: Path) -> ActionService:
@@ -90,7 +90,7 @@ def test_receipts_fifo_refuses_without_waiting(tmp_path):
             """
 import sys
 from pathlib import Path
-from sinnix_hub_server.actions import ActionService, ActionError
+from sinnix_runtime.actions import ActionService, ActionError
 root = Path(sys.argv[1])
 try:
     ActionService(lambda: {}, root / 'inventory.json', root / 'receipts.jsonl')
@@ -965,7 +965,7 @@ def test_process_stop_kills_a_real_process(tmp_path: Path) -> None:
     SIGSTOP) and this test hangs until the surrounding pytest timeout, or
     the final `proc.wait` never returns 0 alive processes.
     """
-    from sinnix_hub_server.actions import ActionService
+    from sinnix_runtime.actions import ActionService
 
     # Ignores SIGTERM so the escalation path is exercised for real; exits
     # promptly on SIGKILL because that signal cannot be caught or ignored.

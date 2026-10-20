@@ -47,6 +47,7 @@ let
       # the hub server itself lives in externalPackages (a real Python package,
       # not a discovered script), so it resolves here the same way.
       sinnix-hub-server = externalPackages.sinnix-hub-server;
+      sinnix-runtime = externalPackages.sinnix-runtime;
     };
   };
   discovered = discovery.discover (inputs.self + "/scripts");
@@ -152,6 +153,7 @@ let
   };
   agentGatewayPackage = pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix {
     sinnix-lib = externalPackages.sinnix-lib;
+    sinnix-runtime = externalPackages.sinnix-runtime;
     agentctl = agentctlPackage;
   };
   mkSanitizedPythonWrapper =
@@ -446,7 +448,7 @@ let
     };
 
     sinnix-hub-server = pkgs.callPackage ../pkgs/sinnix-hub-server/pkg.nix {
-      inherit sinnix-lib;
+      inherit sinnix-lib sinnix-runtime;
     };
 
     # Shared Python library (importable, not a CLI): atomic state, ledgers,
@@ -454,6 +456,7 @@ let
     # it instead of carrying private copies of these helpers.
     sinnix-lib = pkgs.callPackage ../pkgs/sinnix-lib/pkg.nix { };
     sinnix-fs = pkgs.callPackage ../pkgs/sinnix-fs/pkg.nix { inherit sinnix-lib; };
+    sinnix-runtime = pkgs.callPackage ../pkgs/sinnix-runtime/pkg.nix { inherit sinnix-lib; };
 
     # Shared pairwise/choice-set preference ranking engine (importable, not
     # a CLI): Plackett-Luce fit, stopping statistic, selection, draw

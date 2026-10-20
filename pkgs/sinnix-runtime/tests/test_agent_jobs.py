@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 import pytest
-from sinnix_hub_server.agent_jobs import (
+from sinnix_runtime.agent_jobs import (
     MAX_RESPONSE_BYTES,
     MAX_SNAPSHOT_JOBS,
     AgentCtlClient,

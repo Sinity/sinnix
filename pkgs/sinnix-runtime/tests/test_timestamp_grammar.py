@@ -19,12 +19,12 @@ import re
 from pathlib import Path
 from typing import Any
 
-from sinnix_hub_server import actions as actions_module
-from sinnix_hub_server import health
-from sinnix_hub_server import snapshot as snapshot_module
-from sinnix_hub_server import status as hub_status
-from sinnix_hub_server.actions import ActionService
-from sinnix_hub_server.snapshot import SnapshotBuilder
+from sinnix_runtime import actions as actions_module
+from sinnix_runtime import health
+from sinnix_runtime import snapshot as snapshot_module
+from sinnix_runtime import status as hub_status
+from sinnix_runtime.actions import ActionService
+from sinnix_runtime.snapshot import SnapshotBuilder
 
 UTC_TS = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 SENTINEL = "1999-12-31T23:59:58Z"

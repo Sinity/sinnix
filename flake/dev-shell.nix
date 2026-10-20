@@ -135,6 +135,7 @@
           !(lib.elem (p.pname or "") [
             "agentctl"
             "sinnix-lib"
+            "sinnix-runtime"
           ])
         ) scriptPkgs.sinnix-agent-gateway.dependencies
       );
@@ -153,7 +154,7 @@
         ++ agentctlTestTools;
         shellHook = ''
           _gateway_root="''${PRJ_ROOT:-$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-          export PYTHONPATH="$_gateway_root/pkgs/sinnix-lib:$_gateway_root/pkgs/agentctl:$_gateway_root/pkgs/sinnix-agent-gateway:''${PYTHONPATH:-}"
+          export PYTHONPATH="$_gateway_root/pkgs/sinnix-runtime:$_gateway_root/pkgs/sinnix-lib:$_gateway_root/pkgs/agentctl:$_gateway_root/pkgs/sinnix-agent-gateway:''${PYTHONPATH:-}"
         '';
       };
     in

@@ -6,10 +6,10 @@ import socket
 from typing import Any, Callable
 from urllib.parse import quote
 
-from .config import GatewayConfig
+from pathlib import Path
 
 
-class MachineActionError(ValueError):
+class RuntimeClientError(ValueError):
     pass
 
 
@@ -24,15 +24,17 @@ class UnixConnection(http.client.HTTPConnection):
         self.sock.connect(self.path)
 
 
-class MachineActionService:
+class RuntimeClient:
     def __init__(
         self,
-        config: GatewayConfig,
+        socket_path: Path,
+        max_response_bytes: int = 8 << 20,
         connection_factory: Callable[
             [str], http.client.HTTPConnection
         ] = UnixConnection,
     ) -> None:
-        self.config = config
+        self.socket_path = socket_path
+        self.max_response_bytes = max_response_bytes
         self.connection_factory = connection_factory
 
     def _request(
@@ -45,23 +47,23 @@ class MachineActionService:
     ) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"} if body is not None else {}
         try:
-            connection = self.connection_factory(str(self.config.hub_socket_path))
+            connection = self.connection_factory(str(self.socket_path))
             connection.request(method, path, body, headers)
             response = connection.getresponse()
-            payload_bytes = response.read(self.config.max_result_bytes + 1)
+            payload_bytes = response.read(self.max_response_bytes + 1)
         except (OSError, http.client.HTTPException) as exc:
-            raise MachineActionError("hub server endpoint is unavailable") from exc
+            raise RuntimeClientError("hub server endpoint is unavailable") from exc
         finally:
             try:
                 connection.close()
             except (OSError, UnboundLocalError):
                 pass
-        if len(payload_bytes) > self.config.max_result_bytes:
-            raise MachineActionError("hub server response exceeded response bound")
+        if len(payload_bytes) > self.max_response_bytes:
+            raise RuntimeClientError("hub server response exceeded response bound")
         try:
             payload = json.loads(payload_bytes)
         except json.JSONDecodeError as exc:
-            raise MachineActionError(
+            raise RuntimeClientError(
                 "hub server returned a malformed response"
             ) from exc
         if response.status == 404 and missing_ok:
@@ -69,10 +71,10 @@ class MachineActionService:
         if response.status >= 400:
             message = payload.get("error") if isinstance(payload, dict) else None
             if isinstance(message, str):
-                raise MachineActionError(f"hub server rejected request: {message}")
-            raise MachineActionError("hub server rejected request")
+                raise RuntimeClientError(f"hub server rejected request: {message}")
+            raise RuntimeClientError("hub server rejected request")
         if not isinstance(payload, dict):
-            raise MachineActionError("hub server returned a malformed response")
+            raise RuntimeClientError("hub server returned a malformed response")
         return payload
 
     def snapshot(self) -> dict[str, Any]:
@@ -85,7 +87,7 @@ class MachineActionService:
             or payload["sequence"] < 0
             or not isinstance(payload.get("observed_at"), str)
         ):
-            raise MachineActionError("hub server returned a malformed snapshot")
+            raise RuntimeClientError("hub server returned a malformed snapshot")
         return {
             "available": True,
             "operation": "actions",
@@ -116,7 +118,7 @@ class MachineActionService:
             or not payload["expected_target"]
             or not isinstance(payload.get("observed_at"), str)
         ):
-            raise MachineActionError("hub server returned malformed action preparation")
+            raise RuntimeClientError("hub server returned malformed action preparation")
         return payload
 
     def lookup(self, idempotency_key: str) -> dict[str, Any] | None:

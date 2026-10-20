@@ -8,8 +8,8 @@ import re
 import sqlite3
 
 import pytest
-from sinnix_hub_server.observe import cli, joins, render, runtime_inventory, util
-from sinnix_hub_server.observe.sources import (
+from sinnix_runtime.observe import cli, joins, render, runtime_inventory, util
+from sinnix_runtime.observe.sources import (
     agent_gateway,
     below,
     chrome,
@@ -604,7 +604,7 @@ def test_sqlite_failure_is_recorded_not_swallowed(tmp_path):
     the empty list was the only signal, so a query that could not run and a
     table with no rows produced identical output.
     """
-    from sinnix_hub_server.observe.sources import sqlite_util
+    from sinnix_runtime.observe.sources import sqlite_util
 
     sqlite_util.clear_sqlite_errors()
     missing = tmp_path / "not-a-database.db"
@@ -623,7 +623,7 @@ def test_successful_read_records_no_error(tmp_path):
     """Anti-vacuity for the test above: the accumulator must stay empty on
     the happy path, or 'errors is empty' would mean nothing."""
 
-    from sinnix_hub_server.observe.sources import sqlite_util
+    from sinnix_runtime.observe.sources import sqlite_util
 
     db = tmp_path / "real.db"
     with sqlite3.connect(db) as conn:
@@ -674,7 +674,7 @@ def test_report_header_stamps_one_utc_grammar_through_the_shared_helper(
 def test_below_live_path_returns_the_report_dict(monkeypatch) -> None:
     """The live path must not lose the report to the subprocess result.
     Mutation: assigning `run(...)` to `result` fails this with TypeError."""
-    from sinnix_hub_server.observe.sources import below as below_module
+    from sinnix_runtime.observe.sources import below as below_module
 
     class Dump:
         ok = True

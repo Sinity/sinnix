@@ -33,7 +33,7 @@ import datetime as dt
 from pathlib import Path
 from typing import Any
 
-from .. import capabilities as capability_index
+from sinnix_runtime import capabilities as capability_index
 from .dashboard import render_dashboard
 from .probes import load_json
 from .services import render_services

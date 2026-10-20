@@ -13,6 +13,7 @@
   at-spi2-core,
   gobject-introspection,
   sinnix-lib,
+  sinnix-runtime,
   agentctl,
   ...
 }:
@@ -132,6 +133,7 @@ python3Packages.buildPythonApplication {
     python3Packages.anyio
     mcp-sdk
     sinnix-lib
+    sinnix-runtime
     agentctl
     python3Packages.psutil
     python3Packages.pillow

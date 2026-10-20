@@ -1,4 +1,4 @@
-"""`sinnix-hub-server status` -- one-call system status for agents.
+"""`sinnix status` -- one-call system status for agents.
 
 Thin, read-only composition over sources that are already authoritative
 elsewhere: the hub server's own /v1/snapshot (which embeds the runtime
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import http.client
+from .client import UnixConnection
 import json
 import os
 import subprocess
@@ -33,20 +34,6 @@ BD_HEAD_LIMIT = 5
 TITLE_MAX = 88
 
 
-class UnixConnection(http.client.HTTPConnection):
-    """HTTP over the hub server's Unix socket -- same shape as cli.py's, kept
-    local so this module has no import-time dependency on the CLI module."""
-
-    def __init__(self, path: str, timeout: float = SOCKET_TIMEOUT) -> None:
-        super().__init__("localhost", timeout=timeout)
-        self.path = path
-
-    def connect(self) -> None:
-        import socket
-
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.settimeout(self.timeout)
-        self.sock.connect(self.path)
 
 
 def fetch_socket_json(
@@ -358,7 +345,7 @@ def default_socket_path() -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="sinnix-hub-server status")
+    parser = argparse.ArgumentParser(prog="sinnix status")
     parser.add_argument(
         "--json", action="store_true", help="Emit the composed document as JSON."
     )

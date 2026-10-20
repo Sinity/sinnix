@@ -17,7 +17,9 @@ ChatGPT operator connector
 The tunnel unit owns the remote connection; the MCP unit serves `/mcp` on a
 socket in the user runtime directory. Jobs are pueue tasks owned by agentctl
 (`docs/agentctl.md`); the gateway calls agentctl in process and is not a second
-job controller. Local agents use the agentctl CLI directly.
+job controller. Local agents use the agentctl CLI directly. Machine actions use the shared
+`sinnix-runtime` socket client, which delegates to the existing hub action
+owner; remote and local clients do not create additional action writers.
 
 ## Authority
 

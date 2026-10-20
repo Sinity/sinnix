@@ -17,7 +17,7 @@ from ..action import (
 )
 from ..contracts import VerbFamily
 from ..locators import UNIT_REF_PREFIX, UnitLocator, UnitScope
-from ..machine_actions import MachineActionError
+from sinnix_runtime.client import RuntimeClientError
 from ..owner_execution import (
     EnvironmentProfile,
     ExecutionProfile,
@@ -182,7 +182,7 @@ class MachineSection(GatewayModel):
 def _ops_revision(runtime: Runtime) -> dict[str, Any]:
     try:
         return runtime.machine_actions.snapshot()
-    except MachineActionError as exc:
+    except RuntimeClientError as exc:
         return {
             "available": False,
             "operation": "actions",
@@ -766,7 +766,7 @@ def _prepare(runtime: Runtime, inp: PrepareInput) -> PreparedAction:
             action=inp.request.action,
             parameters=inp.request.parameters(),
         )
-    except MachineActionError as exc:
+    except RuntimeClientError as exc:
         raise ProtocolError("unavailable", str(exc)) from exc
     return PreparedAction(**{**payload, "ref": inp.target})
 
@@ -825,7 +825,7 @@ def _operate_via_hub(
             idempotency_key=inp.idempotency_key,
             preconditions=preconditions,
         )
-    except MachineActionError as exc:
+    except RuntimeClientError as exc:
         message = str(exc)
         code = (
             "conflict"

@@ -3,10 +3,10 @@ import json
 from pathlib import Path
 
 import pytest
-from sinnix_hub_server.clodex_usage import clodex_usage
-from sinnix_hub_server.snapshot import SnapshotBuilder
+from sinnix_runtime.clodex_usage import clodex_usage
+from sinnix_runtime.snapshot import SnapshotBuilder
 
-usage_module = importlib.import_module("sinnix_hub_server.clodex_usage")
+usage_module = importlib.import_module("sinnix_runtime.clodex_usage")
 
 
 def usage_row(tokens: object) -> bytes:

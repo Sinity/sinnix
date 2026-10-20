@@ -1,4 +1,4 @@
-from sinnix_hub_server.hyprland import (
+from sinnix_runtime.hyprland import (
     HyprlandState,
     reconcile_activewindow,
     reduce_socket_event,

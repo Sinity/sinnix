@@ -58,6 +58,7 @@
             ''
               NOCTALIA_HUB_PLUGIN=${../../dots/noctalia/plugins/sinnix-hub} \
               NOCTALIA_HUB_SERVER=${../../pkgs/sinnix-hub-server} \
+              NOCTALIA_RUNTIME=${../../pkgs/sinnix-runtime} \
               NOCTALIA_HUB_CONTRACT=${../../flake/tests/noctalia-state-contract.py} \
               NOCTALIA_HUB_ORDERING=${./noctalia-hub-ordering.py} \
                 ${pkgs.bash}/bin/bash ${../../flake/tests/noctalia-hub-bridge.sh}

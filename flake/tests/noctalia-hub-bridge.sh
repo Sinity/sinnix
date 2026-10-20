@@ -31,7 +31,7 @@ done
 # the way the hub server's SSE handler expects. Both sides are read from their
 # own source, so this is an agreement between two components rather than a
 # literal restated from one.
-schema="$(sed -n 's/^SCHEMA = "\(.*\)"$/\1/p' "$hub_root/sinnix_hub_server/__init__.py")"
+schema="$(sed -n 's/^SCHEMA = "\(.*\)"$/\1/p' "$NOCTALIA_RUNTIME/sinnix_runtime/__init__.py")"
 test -n "$schema"
 grep -Fq "$schema" "$plugin/service.luau" ||
   {

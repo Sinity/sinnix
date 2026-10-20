@@ -1,8 +1,8 @@
 import json
 from datetime import datetime, timedelta, timezone
 
-from sinnix_hub_server.anchor import expire_anchor, reduce_anchor_event
-from sinnix_hub_server.snapshot import SnapshotBuilder
+from sinnix_runtime.anchor import expire_anchor, reduce_anchor_event
+from sinnix_runtime.snapshot import SnapshotBuilder
 
 
 def test_long_afk_produces_reference_only_anchor_and_deduplicates() -> None:

@@ -1,13 +1,11 @@
 [project]
 name = "sinnix-hub-server"
 version = "0.1.0"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
+dependencies = ["sinnix-runtime==0.1.0"]
 
 [project.scripts]
 sinnix-hub-server = "sinnix_hub_server.cli:main"
-# The observability report, also `sinnix-hub-server observe`; the gateway and
-# below's wrapper run it by this name.
-sinnix-observe = "sinnix_hub_server.observe.cli:main"
 
 [build-system]
 requires = ["setuptools"]

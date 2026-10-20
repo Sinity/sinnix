@@ -4,34 +4,23 @@ import argparse
 import http.client
 import json
 import os
-import socket
 import sys
 from pathlib import Path
 
-from . import capabilities, feedback, health, pages
-from . import inventory as runtime_inventory
-from .actions import ActionService
-from .agent_jobs import AgentCtlClient
-from .ambient import product_source
-from .clodex_usage import clodex_usage
+from sinnix_runtime import capabilities, health
+from sinnix_runtime.client import UnixConnection
+from . import feedback, pages
+from sinnix_runtime import inventory as runtime_inventory
+from sinnix_runtime.actions import ActionService
+from sinnix_runtime.agent_jobs import AgentCtlClient
+from sinnix_runtime.ambient import product_source
+from sinnix_runtime.clodex_usage import clodex_usage
 from .feedback import CoalescingTrigger, FeedbackSpool
 from .server import FAILURE_PATH, ensure_token, serve
-from .snapshot import SnapshotBuilder, observe_section
+from sinnix_runtime.snapshot import SnapshotBuilder, observe_section
 from .state import StateLayer
 
 
-class UnixConnection(http.client.HTTPConnection):
-    """HTTP over the hub server's Unix socket, so the fast path speaks to the
-    running process rather than to its state file behind its back."""
-
-    def __init__(self, path: str, timeout: float = 5.0) -> None:
-        super().__init__("localhost", timeout=timeout)
-        self.path = path
-
-    def connect(self) -> None:
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.settimeout(self.timeout)
-        self.sock.connect(self.path)
 
 
 def post_failure(
@@ -46,7 +35,7 @@ def post_failure(
         payload["manager"] = manager
     body = json.dumps(payload)
     try:
-        connection = UnixConnection(str(socket_path))
+        connection = UnixConnection(str(socket_path), timeout=5.0)
         connection.request(
             "POST", FAILURE_PATH, body, {"Content-Type": "application/json"}
         )
@@ -152,11 +141,11 @@ def main() -> None:
     if len(sys.argv) > 1 and sys.argv[1] == "capabilities":
         raise SystemExit(capabilities_command(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "status":
-        from .status import main as status_main
+        from sinnix_runtime.status import main as status_main
 
         raise SystemExit(status_main(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "observe":
-        from .observe.cli import main as observe_main
+        from sinnix_runtime.observe.cli import main as observe_main
 
         raise SystemExit(observe_main(sys.argv[2:]))
     parser = argparse.ArgumentParser()

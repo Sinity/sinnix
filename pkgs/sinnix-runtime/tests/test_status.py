@@ -9,8 +9,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sinnix_hub_server import inventory
-from sinnix_hub_server import status as hub_status
+from sinnix_runtime import inventory
+from sinnix_runtime import status as hub_status
 
 SNAPSHOT_HEALTHY: dict[str, Any] = {
     "schema": "sinnix-hub-v1",

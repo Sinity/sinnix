@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sinnix_hub_server.snapshot import SnapshotBuilder
+from sinnix_runtime.snapshot import SnapshotBuilder
 
 
 def test_healthy_stale_missing_and_malformed_sources_are_distinct(

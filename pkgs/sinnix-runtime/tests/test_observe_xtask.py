@@ -3,7 +3,7 @@
 import sqlite3
 from pathlib import Path
 
-from sinnix_hub_server.observe.sources import xtask
+from sinnix_runtime.observe.sources import xtask
 
 
 def test_missing_explicit_root_cannot_select_another_checkout(tmp_path, monkeypatch):

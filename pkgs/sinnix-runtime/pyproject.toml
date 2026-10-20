@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sinnix-runtime"
+version = "0.1.0"
+description = "Native machine observations and guarded owner action client"
+requires-python = ">=3.12"
+
+[project.scripts]
+sinnix-observe = "sinnix_runtime.observe.cli:main"
+sinnix-runtime-status = "sinnix_runtime.status:main"
+
+[tool.setuptools.packages.find]
+include = ["sinnix_runtime*"]

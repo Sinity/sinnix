@@ -178,7 +178,7 @@ def test_prepare_and_execute_share_the_http_target_contract(
     import urllib.request
     from urllib.parse import quote
 
-    from sinnix_hub_server.actions import ActionService
+    from sinnix_runtime.actions import ActionService
 
     inventory = tmp_path / "inventory.json"
     inventory.write_text(

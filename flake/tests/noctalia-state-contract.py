@@ -39,7 +39,7 @@ def observe_report_keys(observe_root: Path) -> set[str]:
 
 def snapshot_state_keys(hub_root: Path) -> set[str]:
     """Keys the hub server adds on top of the observe report in refresh()."""
-    tree = ast.parse((hub_root / "sinnix_hub_server/snapshot.py").read_text())
+    tree = ast.parse((Path(os.environ["NOCTALIA_RUNTIME"]) / "sinnix_runtime/snapshot.py").read_text())
     keys: set[str] = set()
     for node in ast.walk(tree):
         # `report["attention"] = ...` style additions.
@@ -97,7 +97,7 @@ def plugin_bound_keys(plugin_root: Path) -> dict[str, list[str]]:
 def main() -> int:
     plugin_root = Path(os.environ["NOCTALIA_HUB_PLUGIN"])
     hub_root = Path(os.environ["NOCTALIA_HUB_SERVER"])
-    observe_root = hub_root / "sinnix_hub_server/observe"
+    observe_root = Path(os.environ["NOCTALIA_RUNTIME"]) / "sinnix_runtime/observe"
     published = observe_report_keys(observe_root) | snapshot_state_keys(hub_root)
     failures = []
     for entry, keys in plugin_bound_keys(plugin_root).items():

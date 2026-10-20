@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sinnix_hub_server import health, pressure
+from sinnix_runtime import health, pressure
 from sinnix_lib.atomic_json import write_json_atomic
 
 # Swap with headroom and nothing stalling: the swap lane's healthy path, held
@@ -777,7 +777,7 @@ def test_cache_publish_failure_after_append_allows_duplicate(
 def test_newest_mtime_handles_file_lane_paths(tmp_path):
     """Marker/ledger lanes point at files; os.walk alone yields nothing for
     them. Mutation: dropping the is_file branch fails this."""
-    from sinnix_hub_server.health import newest_mtime
+    from sinnix_runtime.health import newest_mtime
 
     lane_file = tmp_path / "persist.last-success"
     lane_file.write_text("ok\n")
@@ -791,7 +791,7 @@ def test_newest_mtime_handles_file_lane_paths(tmp_path):
 
 def test_newest_mtime_marks_populated_directory_fanout_incomplete(tmp_path):
     """Mutation: treating a 512-entry prefix as exhaustion invents no-file."""
-    from sinnix_hub_server import health
+    from sinnix_runtime import health
 
     for index in range(512):
         child = tmp_path / f"dir-{index:03}"
@@ -823,7 +823,7 @@ def test_capped_flat_scan_uses_declared_append_only_directory_progress(
     """A fresh file after the prefix proves output without raising the stat cap."""
     import os
 
-    from sinnix_hub_server import health
+    from sinnix_runtime import health
 
     for index in range(512):
         entry = tmp_path / f"capture-{index:03}.bin"
@@ -876,7 +876,7 @@ def test_capped_flat_scan_uses_declared_append_only_directory_progress(
 
 def test_unreadable_capture_scan_is_unknown_not_empty_or_healthy(tmp_path, monkeypatch):
     """Mutation: swallowing a read error as an empty or healthy tree fails."""
-    from sinnix_hub_server import health
+    from sinnix_runtime import health
 
     (tmp_path / "old.bin").write_bytes(b"old")
     monkeypatch.setattr(
@@ -908,7 +908,7 @@ def test_persisted_progress_marker_supports_stale_verdict_after_budget(tmp_path)
     """An old marker plus no post-marker directory change proves real silence."""
     import os
 
-    from sinnix_hub_server import health
+    from sinnix_runtime import health
 
     for index in range(512):
         child = tmp_path / f"dir-{index:03}"
@@ -944,7 +944,7 @@ def test_newest_mtime_is_bounded_and_finds_newest_partition_first(tmp_path):
     the stat budget. Mutation: restoring os.walk fails the call-count bound."""
     import os
 
-    from sinnix_hub_server import health
+    from sinnix_runtime import health
 
     for day in range(50):
         sub = tmp_path / f"2026-01-{day + 1:02d}"

@@ -2,7 +2,7 @@ import json
 import os
 import time
 
-from sinnix_hub_server.observe.sources.drift import collect_config_drift
+from sinnix_runtime.observe.sources.drift import collect_config_drift
 
 
 def test_drift_source_preserves_unavailable_and_drifted_rows(tmp_path):

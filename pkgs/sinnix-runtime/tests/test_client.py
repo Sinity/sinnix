@@ -4,10 +4,9 @@ import json
 from pathlib import Path
 
 import pytest
-from sinnix_agent_gateway.config import GatewayConfig
-from sinnix_agent_gateway.machine_actions import (
-    MachineActionError,
-    MachineActionService,
+from sinnix_runtime.client import (
+    RuntimeClientError,
+    RuntimeClient,
 )
 
 
@@ -38,16 +37,11 @@ class FakeConnection:
 
 def service(
     tmp_path: Path, response: FakeResponse
-) -> tuple[MachineActionService, FakeConnection]:
+) -> tuple[RuntimeClient, FakeConnection]:
     connection = FakeConnection(response)
-    config = GatewayConfig(
-        state_dir=tmp_path / "state",
-        projects={},
-        hub_socket_path=tmp_path / "hub.sock",
-    )
     return (
-        MachineActionService(
-            config,
+        RuntimeClient(
+            tmp_path / "hub.sock",
             connection_factory=lambda _path: connection,
         ),
         connection,
@@ -138,7 +132,7 @@ def test_machine_action_snapshot_rejects_malformed_revision(tmp_path: Path) -> N
         ),
     )
 
-    with pytest.raises(MachineActionError, match="malformed snapshot"):
+    with pytest.raises(RuntimeClientError, match="malformed snapshot"):
         actions.snapshot()
 
 
@@ -148,7 +142,7 @@ def test_machine_action_returns_owner_rejection(tmp_path: Path) -> None:
         FakeResponse(409, {"error": "expected_target is stale"}),
     )
 
-    with pytest.raises(MachineActionError, match="expected_target is stale"):
+    with pytest.raises(RuntimeClientError, match="expected_target is stale"):
         actions.execute(
             "restart",
             {"unit": "fixture.service"},
@@ -199,7 +193,7 @@ def test_prepare_rejects_mismatched_target(tmp_path: Path) -> None:
             },
         ),
     )
-    with pytest.raises(MachineActionError, match="malformed action preparation"):
+    with pytest.raises(RuntimeClientError, match="malformed action preparation"):
         actions.prepare("restart", {"unit": "fixture.service"})
 
 
@@ -208,7 +202,7 @@ def test_lookup_distinguishes_missing_from_owner_failure(tmp_path: Path) -> None
     assert actions.lookup("request / #") is None
     assert connection.request_args[:2] == ("GET", "/v1/actions/request%20%2F%20%23")
     actions, _ = service(tmp_path, FakeResponse(503, {"error": "unavailable"}))
-    with pytest.raises(MachineActionError, match="unavailable"):
+    with pytest.raises(RuntimeClientError, match="unavailable"):
         actions.lookup("request")
 
 
@@ -216,3 +210,13 @@ def test_lookup_returns_retained_receipt(tmp_path: Path) -> None:
     receipt = {"idempotency_key": "one", "status": "accepted"}
     actions, _ = service(tmp_path, FakeResponse(200, receipt))
     assert actions.lookup("one") == receipt
+
+
+def test_client_keeps_response_bound_before_decoding(tmp_path):
+    response = FakeResponse(200, {"value": "x" * 100})
+    connection = FakeConnection(response)
+    actions = RuntimeClient(tmp_path / "owner.sock", max_response_bytes=16,
+                            connection_factory=lambda _: connection)
+    with pytest.raises(RuntimeClientError, match="response bound"):
+        actions.snapshot()
+    assert connection.closed

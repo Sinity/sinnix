@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: One-call system orientation for agents/humans (hub-server snapshot, acknowledged outages, capture freshness, bd ready head)
-# runtimeInputs: bash @sinnix-hub-server
+# description: System status, acknowledged outages, capture freshness and ready work
+# runtimeInputs: bash @sinnix-runtime
 set -euo pipefail
-
-# Thin wrapper: `sinnix status` (this wrapper, discovered like every other
-# scripts/ entry) execs straight into the real implementation, which lives in
-# the hub-server package (pkgs/sinnix-hub-server/sinnix_hub_server/status.py)
-# next to the hub server state it reads. See `sinnix-hub-server status --help`.
-exec sinnix-hub-server status "$@"
+exec sinnix-runtime-status "$@"

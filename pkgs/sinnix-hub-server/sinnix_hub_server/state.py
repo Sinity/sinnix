@@ -55,7 +55,7 @@ class StateLayer:
     feedback_spool_dir: Path
 
     def stores(self) -> list[Store]:
-        from . import health  # local: avoids a health<->state import cycle
+        from sinnix_runtime import health  # local: avoids a health<->state import cycle
 
         return [
             Store(

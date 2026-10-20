@@ -21,7 +21,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sinnix_hub_server import capabilities, pages
+from sinnix_runtime import capabilities
+from sinnix_hub_server import pages
 from sinnix_hub_server.cli import capabilities_command
 
 INDEX: dict[str, Any] = {

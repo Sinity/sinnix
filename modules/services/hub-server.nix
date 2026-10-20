@@ -41,7 +41,7 @@ mkServiceModule {
         operatorRestart = true;
         workload = {
           class = "protected";
-          rationale = "Read-only operator snapshot publisher; it never owns lifecycle actions.";
+          rationale = "Current-state operator snapshot publisher; it never owns lifecycle actions.";
           processMatchers = [ "sinnix-hub-server" ];
           earlyoomAvoid = true;
         };

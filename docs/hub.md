@@ -4,7 +4,10 @@
 dashboard, generated reports, and the phone's receiver. It is
 reachable from the desktop and over Tailscale (the phone), and from nowhere
 else. It runs as a Caddy user service in front of `sinnix-hub-server`, the
-user service that collects machine state and executes actions.
+user service that serves machine state and executes actions through the shared
+`sinnix-runtime` implementation. CLI observation and gateway machine actions
+use that same runtime package. The existing hub socket remains the single
+action writer; clients never create an independent receipt owner.
 
 ## Routes
 

@@ -16,9 +16,10 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
-from sinnix_hub_server import cli, health
+from sinnix_runtime import health
+from sinnix_hub_server import cli
 from sinnix_hub_server.server import Handler
-from sinnix_hub_server.snapshot import SnapshotBuilder
+from sinnix_runtime.snapshot import SnapshotBuilder
 
 INVENTORY: dict[str, Any] = {
     "schema": "sinnix-runtime-inventory-v2",

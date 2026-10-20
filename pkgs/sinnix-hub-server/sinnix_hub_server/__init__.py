@@ -1,3 +1,1 @@
-"""Current-state snapshot and bounded action contract for the Sinnix operator surface."""
-
-SCHEMA = "sinnix-hub-v1"
+"""HTTP and desktop presentation adapters for Sinnix runtime."""

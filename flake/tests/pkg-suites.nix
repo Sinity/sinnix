@@ -198,6 +198,7 @@
         # (subprocess.TimeoutExpired; 1 failed, 30 passed); reverted after
         # confirming red.
         sinnix-lib-suite = pythonSuite { name = "sinnix-lib"; };
+        sinnix-runtime-suite = pythonSuite { name = "sinnix-runtime"; };
         xiaomi-cloud-cli = sinnixScriptRegistry.packageSet.sinnix-capture-xiaomi-cloud;
         xiaomi-cloud-dispatch =
           pkgs.runCommand "xiaomi-cloud-dispatch-check"
