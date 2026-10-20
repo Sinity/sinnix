@@ -108,3 +108,28 @@ claim a broken consumer. An unreachable repository exits 2.
 `pkgs/sinnix-fs/tests` uses small synthetic files and real DuckDB databases,
 including same-sample-different-middle files, legacy digest demotion, files
 changing during a scan, FIFOs, aliases and malformed JSON.
+
+## Maintenance
+
+`sinnix fs maintain plan` emits a bounded JSON plan without traversing payloads.
+It reports mounted-volume availability and the 15% Realm / 10% outer-volume
+targets, with discretionary-work deferral below 10% / 5%. These are reported
+policy decisions; they do not pause running jobs. A 30-day forecast remains
+unavailable until comparable growth observations exist. Offline outer mounts
+are not activated for a capacity check. Filesystem availability is not an
+estimate of exclusive or reclaimable Btrfs extents.
+
+The first executable lifecycle is `uv cache prune`: uv owns dangling entries
+and in-use refusal. The plan binds the physical cache root's device, inode
+and owner. Apply checks the exact plan SHA-256, refuses a replaced or symlinked
+root, and pins the reviewed directory through an inherited descriptor. No force
+flag or command from the plan is executed. Queue the operation with
+`agentctl job start sinnix filesystem_maintenance -- PLAN --expected-sha256 SHA`.
+The native exit status and output remain visible; a filesystem-space delta
+includes concurrent activity and is not attributed wholly to pruning.
+
+Historical scan inputs, manifests, AgentCTL events, genomes and uncertain
+subvolumes are retained. The maintenance surface does not authorize deleting
+them by age, size or a generated label. Their owners must establish exact
+rebuildability, references and preservation before another lifecycle can retire
+them. Plans are transient review inputs, not another state database.

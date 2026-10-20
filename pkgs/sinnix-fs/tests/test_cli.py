@@ -41,7 +41,7 @@ def test_packaged_navigation_reports_a_real_missing_target(executable, tmp_path)
     assert "absent.txt" in result.stdout
 
 
-@pytest.mark.parametrize("command", ["scan", "refresh", "status", "query", "classify", "catalog", "layout", "links"])
+@pytest.mark.parametrize("command", ["scan", "refresh", "status", "query", "classify", "catalog", "layout", "links", "maintain"])
 def test_installed_command_help_needs_no_live_store(executable, command, tmp_path):
     result = subprocess.run([executable, command, "--help"], cwd=tmp_path, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

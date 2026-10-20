@@ -361,3 +361,12 @@ result = "exit"
 cache = "none"
 timeout_seconds = 1800
 admission = { memory_mib = 1024 }
+
+[operations.filesystem_maintenance]
+description = "Apply a digest-bound filesystem maintenance plan through native owners"
+exec = ["sinnix-fs", "maintain", "apply"]
+arguments = "required"
+pool = "bulk"
+result = "json"
+cache = "none"
+timeout_seconds = 1800
