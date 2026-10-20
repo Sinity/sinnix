@@ -14,6 +14,7 @@ write) fails test_envelope_seq_is_continuous_across_lines.
 from __future__ import annotations
 
 import base64
+import faulthandler
 import io
 import json
 import socket
@@ -55,6 +56,7 @@ def _wait_for_lane_file(lane_dir: Path, timeout: float = 5.0) -> Path:
         if files:
             return files[0]
         time.sleep(0.02)
+    faulthandler.dump_traceback()
     raise TimeoutError(f"no index file appeared under {lane_dir}")
 
 
