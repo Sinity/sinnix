@@ -17,6 +17,8 @@ _PR_FIELDS = (
     "number,url,title,state,isDraft,mergeable,headRefName,headRefOid,baseRefName,"
     "mergeCommit,autoMergeRequest,statusCheckRollup,reviewDecision,updatedAt"
 )
+
+
 class GithubError(RuntimeError):
     """gh refused a request or published output this module cannot read."""
 

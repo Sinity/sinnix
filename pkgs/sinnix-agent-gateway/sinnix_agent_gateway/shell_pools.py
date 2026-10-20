@@ -22,9 +22,7 @@ GROUPS: dict[Pool, str] = {"quick": "shell-quick", "long": "shell-long"}
 
 # Agent command-line harnesses: each one launched from a shell is a session
 # that runs for minutes to hours.
-AGENT_CLIS = frozenset(
-    {"claude", "codex", "gemini", "opencode", "pi", "cursor-agent"}
-)
+AGENT_CLIS = frozenset({"claude", "codex", "gemini", "opencode", "pi", "cursor-agent"})
 SHELLS = frozenset({"bash", "sh", "zsh", "dash", "fish"})
 # Commands that run their remaining arguments as another command.
 WRAPPERS = frozenset(
