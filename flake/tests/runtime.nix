@@ -604,6 +604,7 @@ in
             {
               assertion =
                 lib.hasInfix "/bin/agentctl job start --if-idle lynchpin converge --wait" service.ExecStart
+                && lib.hasInfix "/bin/sinnix-fs maintain admission" service.ExecCondition
                 && service.TimeoutStartSec == "4h"
                 && surface.resourceClass == "ordinary";
               message = "the Lynchpin timer must fire (coalesce) the bounded convergence operation";

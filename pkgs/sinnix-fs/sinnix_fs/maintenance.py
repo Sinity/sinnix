@@ -12,6 +12,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from sinnix_lib.mounts import read_payload_mounts
+
 SCHEMA = "sinnix.fs-maintenance.v1"
 UV_CACHE = Path("/realm/state/cache/uv")
 VOLUMES = (
@@ -21,8 +23,7 @@ VOLUMES = (
 )
 
 
-def capacity(path: Path, target: int, floor: int) -> dict:
-    info = os.statvfs(path)
+def capacity(path: Path, target: int, floor: int, *, info) -> dict:
     total = info.f_blocks * info.f_frsize
     available = info.f_bavail * info.f_frsize
     percent = 100 * available / total if total else 0
@@ -33,8 +34,10 @@ def capacity(path: Path, target: int, floor: int) -> dict:
         "available_percent": percent,
         "target_percent": target,
         "defer_below_percent": floor,
-        "discretionary_work": "defer" if percent < floor else "admit",
-        "target_met": percent >= target,
+        "discretionary_work": "defer"
+        if available * 100 < total * floor or not total
+        else "admit",
+        "target_met": bool(total) and available * 100 >= total * target,
         "forecast": {
             "status": "unavailable",
             "reason": "no comparable growth series; current free space is not a 30-day forecast",
@@ -51,20 +54,68 @@ def identity(path: Path) -> dict:
     return {"device": info.st_dev, "inode": info.st_ino, "owner": info.st_uid}
 
 
-def plan() -> dict:
+def volume_capacity() -> list[dict]:
+    """Observe only mounted payloads, pinning the observed mount before probing."""
+    try:
+        mounted = read_payload_mounts()
+    except (OSError, ValueError) as error:
+        return [
+            {"path": str(path), "status": "unavailable", "reason": str(error)}
+            for path, _, _ in VOLUMES
+        ]
     volumes = []
-    mounted = set()
-    for line in Path("/proc/self/mountinfo").read_text().splitlines():
-        fields = line.split()
-        separator = fields.index("-")
-        if fields[separator + 1] != "autofs":
-            mounted.add(fields[4])
     for path, target, floor in VOLUMES:
-        # Do not trigger an offline/automounted outer disk just to inspect capacity.
-        if str(path) not in mounted:
+        if path not in mounted:
             volumes.append({"path": str(path), "status": "not_mounted"})
             continue
-        volumes.append(capacity(path, target, floor))
+        try:
+            # O_PATH does not trigger the final automount. A concurrent unmount
+            # or replacement cannot redirect the later fstatvfs to a payload
+            # other than the mount observed above.
+            fd = os.open(path, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC)
+            try:
+                fields = Path(f"/proc/self/fdinfo/{fd}").read_text().splitlines()
+                ids = [
+                    int(line.partition(":")[2].strip())
+                    for line in fields
+                    if line.startswith("mnt_id:")
+                ]
+                if ids != [mounted[path]]:
+                    raise ValueError("payload mount changed during observation")
+                row = capacity(path, target, floor, info=os.fstatvfs(fd))
+                row.update(
+                    status="observed", mount_id=ids[0], device=os.fstat(fd).st_dev
+                )
+                volumes.append(row)
+            finally:
+                os.close(fd)
+        except (OSError, ValueError) as error:
+            volumes.append(
+                {"path": str(path), "status": "unavailable", "reason": str(error)}
+            )
+    return volumes
+
+
+def admission() -> dict:
+    volumes = volume_capacity()
+    blocked = [
+        row["path"]
+        for row in volumes
+        if row.get("status") == "unavailable"
+        or (row["path"] == str(VOLUMES[0][0]) and row.get("status") != "observed")
+        or row.get("discretionary_work") == "defer"
+    ]
+    return {
+        "schema": "sinnix.fs-admission.v1",
+        "admitted": not blocked,
+        "blocked": blocked,
+        "volumes": volumes,
+        "scope": "discretionary work only; no reservation or running-job interruption",
+    }
+
+
+def plan() -> dict:
+    volumes = volume_capacity()
     try:
         root_identity = identity(UV_CACHE)
         action = {
@@ -230,6 +281,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="sinnix fs maintain", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("plan")
+    commands.add_parser("admission")
     inspect = commands.add_parser("account")
     inspect.add_argument("roots", type=Path, nargs="+")
     execute = commands.add_parser("apply")
@@ -239,6 +291,10 @@ def main(argv=None) -> int:
     try:
         if args.command == "account":
             result = account(args.roots)
+        elif args.command == "admission":
+            result = admission()
+            print(json.dumps(result, indent=2))
+            return 0 if result["admitted"] else 1
         elif args.command == "plan":
             result = plan()
         else:

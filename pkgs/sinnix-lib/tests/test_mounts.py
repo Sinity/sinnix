@@ -3,7 +3,11 @@
 from pathlib import Path
 
 import pytest
-from sinnix_lib.mounts import has_mounted_ancestor, read_mountpoints
+from sinnix_lib.mounts import (
+    has_mounted_ancestor,
+    read_mountpoints,
+    read_payload_mounts,
+)
 
 
 def test_mountinfo_decodes_escapes_once(monkeypatch):
@@ -37,5 +41,6 @@ def test_automount_placeholder_does_not_prove_payload_presence(monkeypatch):
     monkeypatch.setattr(Path, "read_text", lambda _: raw)
     mounted = read_mountpoints()
     assert mounted == {Path("/"), Path("/mnt/online")}
+    assert read_payload_mounts() == {Path("/"): 1, Path("/mnt/online"): 4}
     assert not has_mounted_ancestor(Path("/mnt/offline/item"), Path("/mnt"), mounted)
     assert has_mounted_ancestor(Path("/mnt/online/item"), Path("/mnt"), mounted)

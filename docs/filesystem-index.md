@@ -113,10 +113,17 @@ changing during a scan, FIFOs, aliases and malformed JSON.
 
 `sinnix fs maintain plan` emits a bounded JSON plan without traversing payloads.
 It reports mounted-volume availability and the 15% Realm / 10% outer-volume
-targets, with discretionary-work deferral below 10% / 5%. These are reported
-policy decisions; they do not pause running jobs. A 30-day forecast remains
+targets. `sinnix fs maintain admission` admits discretionary work at or above
+10% / 5%, and exits 1 below either floor or when a required observation is
+unavailable. The fresh-scan CLI and scheduled filesystem/Lynchpin refresh units
+use this live condition before starting their writers. The existing timers
+retry on their next firing; there is no separate paused-job scheduler. Manual
+Lynchpin operations, retained-input recovery, captures, backups and maintenance
+remain available. No running job is interrupted and no space is reserved. A 30-day forecast remains
 unavailable until comparable growth observations exist. Offline outer mounts
-are not activated for a capacity check. Filesystem availability is not an
+are not activated for a capacity check. Mount IDs and an open mount descriptor
+bind each capacity observation, so an unmount race cannot silently probe a
+different filesystem. Filesystem availability is not an
 estimate of exclusive or reclaimable Btrfs extents.
 
 The first executable lifecycle is `uv cache prune`: uv owns dangling entries

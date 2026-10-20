@@ -1785,6 +1785,12 @@ def cmd_ledger(args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     """Build a fresh scan and publish one coherent generation."""
+    from .maintenance import admission
+
+    decision = admission()
+    if not decision["admitted"]:
+        print(json.dumps(decision), file=sys.stderr)
+        return 1
     return publish_generation(Path(args.out_dir), roots=args.root or DEFAULT_ROOTS)
 
 
