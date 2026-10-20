@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Agent definition contract: every dispatchable definition carries the fields
 # the dispatch hook requires, the read-only workers deny write-shaped tools
-# while the batch worker is granted them, and each structured-output
+# while the native implementer inherits editing tools, and each structured-output
 # schema is closed and validates a representative verdict.
 #
 # Provably fails when: a definition loses model/effort, a read-only worker is
@@ -13,7 +13,7 @@ agents_dir=${1:?agent definitions directory}
 schemas_dir="$agents_dir/schemas"
 test -d "$agents_dir" -a -d "$schemas_dir"
 
-for name in batch-worker triage review judge; do
+for name in triage review judge; do
   file="$agents_dir/$name.md"
   test -f "$file"
   frontmatter=$(awk 'BEGIN { in_fm=0 } /^---$/ { in_fm++; next } in_fm == 1 { print } in_fm == 2 { exit }' "$file")
@@ -29,7 +29,7 @@ done
 
 # Capability boundaries, read from the definitions rather than a restated
 # table: the read-only workers must deny every write-shaped tool, and the
-# batch worker must be granted them. `disallowedTools` may wrap onto
+# native implementer must retain its inherited editing toolset. `disallowedTools` may wrap onto
 # the following line, so the block is read as one flattened string.
 frontmatter_field() {
   awk -v field="$2" '
@@ -60,14 +60,9 @@ for name in triage review judge; do
   done
 done
 
-worker_granted=$(frontmatter_field "$agents_dir/batch-worker.md" tools)
-for tool in Write Edit; do
-  printf '%s' "$worker_granted" | grep -q "\b$tool\b" ||
-    {
-      printf 'batch-worker must be granted %s\n' "$tool" >&2
-      exit 1
-    }
-done
+test -f "$agents_dir/implementer.md"
+worker_granted=$(frontmatter_field "$agents_dir/implementer.md" tools)
+printf '%s' "$worker_granted" | grep -Fq '*'
 
 for name in triage judge; do
   test -f "$schemas_dir/$name.schema.json"

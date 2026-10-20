@@ -234,7 +234,6 @@ in
                 ".local/bin/sinnix-keyboard-control"
                 ".local/bin/sinnix-kitty-control"
                 ".local/bin/sinnix-screenshot-control"
-                ".local/bin/batch-worker"
               ];
               message = "Agent control helpers must be installed through Home Manager.";
             }
@@ -300,11 +299,7 @@ in
             source = ../../dots/_ai/skills/desktop-control/scripts/screenshot-color-lab.sh;
             executable = true;
           }
-          {
-            target = ".local/bin/batch-worker";
-            source = ../../dots/_ai/skills/agent-runtime/scripts/batch-worker;
-            executable = true;
-          }
+
         ];
         xdgConfigFiles = [
           "claude/mcp.json"
@@ -389,8 +384,6 @@ in
           managedWork = userSlices.agentctl;
           poolSlices = lib.genAttrs [
             "agentctl-agent"
-            "agentctl-land"
-            "agentctl-land-agent"
             "agentctl-pytest"
             "agentctl-pytest-heavy"
             "agentctl-pytest-quick"
@@ -467,9 +460,6 @@ in
             &&
               sliceBytes poolSlices.agentctl-pytest.MemoryHigh
               >= sliceBytes poolSlices.agentctl-pytest-quick.MemoryHigh
-            &&
-              sliceBytes poolSlices.agentctl-land.MemoryHigh
-              >= sliceBytes poolSlices.agentctl-land-agent.MemoryHigh
             # The shell lanes' parent must not bind below either lane.
             &&
               sliceBytes poolSlices.agentctl-shell.MemoryHigh
@@ -780,8 +770,6 @@ in
             grep -Fq '.patchedSize' "$patch_check"
             grep -Fq 'run clodex patch' "$patch_check"
             SINNIX_CLODEX_MODULE=${../../modules/services/clodex.nix} python3 ${../../scripts/tests/test_clodex_patch_check.py}
-            test -x "$HOME/.local/bin/batch-worker"
-            bash -n "$HOME/.local/bin/batch-worker"
             python3 - "$HOME/.hermes/config.yaml" <<'PYCODE'
             import pathlib, re, sys
             config = pathlib.Path(sys.argv[1]).read_text()
@@ -1189,8 +1177,6 @@ in
             with TemporaryDirectory() as state:
                 config = Config(
                     project_roots=(root,),
-                    agent_runner=Path("/nonexistent"),
-                    worker_contract=Path("/nonexistent"),
                     event_spool=Path(state) / "events.jsonl",
                     state_dir=Path(state),
                     agentctl_executable="agentctl",

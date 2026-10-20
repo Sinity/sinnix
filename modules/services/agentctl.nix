@@ -22,11 +22,6 @@ let
     )
   );
   eventSpool = "${config.sinnix.paths.stateRoot}/agentctl/events.jsonl";
-  # One landing slot per project: `agentctl batch land` serializes through
-  # <project>-land.
-  landPools = lib.mapAttrs' (id: _: lib.nameValuePair "${id}-land" { parallel = 1; }) (
-    lib.filterAttrs (_: project: project.agentctl) config.sinnix.projects.entries
-  );
 in
 mkServiceModule {
   name = "agentctl";
@@ -47,11 +42,7 @@ mkServiceModule {
         throw "sinnix.services.agentctl.projectRoots must contain unique absolute project roots";
     description = "Explicit project roots whose .agentctl/project.toml descriptors agentctl reads; no parent directory is scanned.";
   };
-  extraOptions.agentRunner = lib.mkOption {
-    type = lib.types.str;
-    default = "${scriptPkgs.agentctl}/bin/agentctl-agent";
-    description = "The backend adapter agentctl queues for batch workers and reviewers; it turns a prompt file into one backend invocation.";
-  };
+
   extraOptions.pools = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule {
@@ -87,9 +78,6 @@ mkServiceModule {
       # 80-95% full memory pressure (2026-09-28), which also paused the pytest
       # pools through pressure pauses. Six fit.
       agent.parallel = 6;
-      # The agents a landing owns (integration, review): a pool of their own so
-      # a paused `agent` pool holds back new workers without stalling landings.
-      land-agent.parallel = 2;
       pytest.parallel = 2;
       pytest-heavy = {
         parallel = 1;
@@ -124,19 +112,10 @@ mkServiceModule {
       # ChatGPT sessions launch 10-60 min `claude -p` workers here
       # (2026-09-29); four at once is what the old shared pool held.
       shell-long.parallel = 4;
-    }
-    // landPools
-    // {
-      # Polylogue lands several runs at once; each run still lands one at a time.
-      polylogue-land.parallel = 3;
     };
     description = "Each pueue group's width and cross-pool admission policy.";
   };
-  extraOptions.workerContract = lib.mkOption {
-    type = lib.types.str;
-    default = "${config.sinnix.paths.dotsRoot}/_ai/skills/orchestrate/references/worker-contract.md";
-    description = "The worker contract compiled into a worker prompt when a project descriptor names no template of its own.";
-  };
+
   # No runtime surface: the job plane is pueued (declared by the CLI feature)
   # inside the agentctl slice hierarchy; the units here drive it.
   configFn =
@@ -162,8 +141,6 @@ mkServiceModule {
               LYNCHPIN_LOCAL_ROOT = "${config.environment.variables.LYNCHPIN_REPO_ROOT}/.lynchpin";
             };
           private_project_catalog = config.sinnix.projects.privateCatalogFile;
-          agent_runner = cfg.agentRunner;
-          worker_contract = cfg.workerContract;
           event_spool = eventSpool;
           agentctl = "${scriptPkgs.agentctl}/bin/agentctl";
           pools = lib.mapAttrs (

@@ -10,12 +10,20 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from agentctl import manifest, operator_view
+from agentctl import batch_history as manifest
+from agentctl import operator_view
+from agentctl.batch_history import Run
 from agentctl.config import Config
-from agentctl.manifest import Run
 from agentctl.projects import load_project_adapter
 from agentctl.pueue import Task
 from conftest import SELF_REVIEW, FakeBd, FakePueue, bead
+
+
+def write_original(config, run):
+    path = manifest.manifest_path(config, run.run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(run.to_dict()))
+
 
 NOW = datetime(2026, 9, 3, 9, 0, tzinfo=UTC)
 SHA = "c" * 40
@@ -273,11 +281,15 @@ def test_many_run_snapshot_indexes_tasks_once_and_preserves_job_id_resolution(
     tasks[10] = replace(tasks[10], command="agentctl-run /s/inputs/duplicate.json")
     tasks[20] = replace(tasks[20], command="agentctl-run /s/inputs/duplicate.json")
     duplicate = run("duplicate", [worker("duplicate", task_id=20)], landing_task=20)
-    duplicate.workers[0]["job_id"] = "duplicate"
-    duplicate.landing["job_id"] = "duplicate"
+    document = duplicate.to_dict()
+    document["workers"][0]["job_id"] = "duplicate"
+    document["landing"]["job_id"] = "duplicate"
+    duplicate = Run.from_dict(document)
     runs.append(duplicate)
     missing = run("missing", [worker("missing", task_id=1_150)])
-    missing.workers[0]["job_id"] = "unknown"
+    document = missing.to_dict()
+    document["workers"][0]["job_id"] = "unknown"
+    missing = Run.from_dict(document)
     runs.append(missing)
     runs.append(run("id-fallback", [worker("fallback", task_id=1_150)]))
 
@@ -447,8 +459,8 @@ def test_collect_reads_each_source_and_keeps_going_when_one_is_down(
         working_directory=project_root,
     )
     run_manifest = run("run-1", [worker("fx-1", task_id=1)])
-    manifest.create(config, run_manifest)
-    manifest.create(
+    write_original(config, run_manifest)
+    write_original(
         config,
         Run.from_dict(
             {

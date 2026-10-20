@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
-from agentctl import landing, run
+from agentctl import run
 from agentctl.limits import valid_timeout_seconds
 from agentctl.projects import load_project_adapter
 from conftest import write_project
@@ -59,33 +59,6 @@ def test_no_deadline_wait_requires_actual_terminal_unit(
         "ActiveState": "inactive",
         "Result": "success",
     }
-
-
-def test_landing_no_deadline_reuses_live_job_until_terminal(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    views = iter(
-        [
-            {
-                "task_id": 17,
-                "terminal": False,
-                "phase": "running",
-                "started_at": "2000-01-01T00:00:00Z",
-            },
-            {"task_id": 17, "terminal": True, "phase": "done"},
-        ]
-    )
-    calls = []
-
-    def wait(task_id: int, **kwargs: object) -> dict[str, object]:
-        calls.append(task_id)
-        return next(views)
-
-    monkeypatch.setattr(landing.job_queries, "wait", wait)
-    monkeypatch.setattr(landing.pueue, "tasks", lambda: [])
-    monkeypatch.setattr(landing.job_queries, "find_task", lambda *args: None)
-    assert landing._await_verification("fixture", 17, "same-job", 0)["terminal"] is True
-    assert calls == [17, 17]
 
 
 @pytest.mark.parametrize("already_exited", [False, True])

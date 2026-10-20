@@ -1,5 +1,6 @@
 """Retirement must not discard bytes Git status omits."""
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -286,3 +287,25 @@ def test_post_removal_broken_link_is_retained_as_residue(checkout, monkeypatch):
     assert reason and "remains after removal" in reason
     assert path.is_symlink()
     assert git(project.root, "rev-parse", "candidate") == head
+
+
+def test_unreadable_untracked_agent_state_prevents_release(checkout, monkeypatch):
+    if os.geteuid() == 0:
+        pytest.skip("root bypasses directory mode checks")
+    config, project, path = checkout
+    state = path / ".agentctl" / "interrupted"
+    state.mkdir(parents=True)
+    payload = state / "payload.bin"
+    payload.write_bytes(b"original interrupted output")
+
+    def refuse_removal(*args, **kwargs):
+        pytest.fail("release attempted with inaccessible unpreserved state")
+
+    monkeypatch.setattr(worktrunk, "worktrunk_remove", refuse_removal)
+    state.chmod(0)
+    try:
+        reason = drop(checkout)
+        assert reason and "not preserved" in reason
+    finally:
+        state.chmod(0o700)
+    assert payload.read_bytes() == b"original interrupted output"

@@ -7,7 +7,6 @@
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
-      agentctl = inputs.self.packages.${system}.agentctl;
       script = ../../scripts/sinnix-agent-environment-doc;
       data = pkgs.writeText "agent-environment-fixture.json" (
         builtins.toJSON {
@@ -76,8 +75,8 @@
             test "$(grep -c '^### full' $out)" = 1
             if grep -Eq '/(home|persist|realm/cache|realm/data|nix/store)/' $out; then exit 1; fi
           '';
-      nativeRunnerContract =
-        pkgs.runCommand "agent-native-runner-contract"
+      nativeBootstrapContract =
+        pkgs.runCommand "agent-native-bootstrap-contract"
           {
             nativeBuildInputs = [
               pkgs.bash
@@ -91,31 +90,8 @@
             ];
           }
           ''
-            mkdir -p "$TMPDIR/bin" "$TMPDIR/worktree"
-            cat > "$TMPDIR/bin/codex" <<EOF
-            #!${pkgs.bash}/bin/bash
-            if [ "\$1 \$2" = "mcp list" ]; then echo '[]'; exit 0; fi
-            printf '%s\\n' "\$@" > "\$CODEX_ARGS"
-            EOF
-            chmod +x "$TMPDIR/bin/codex"
-            printf 'fixture prompt' > "$TMPDIR/prompt"
-            export CODEX_ARGS="$TMPDIR/codex-args"
-            export PATH="$TMPDIR/bin:$PATH"
-            ${agentctl}/bin/agentctl-agent \
-              --agent codex \
-              --workdir "$TMPDIR/worktree" \
-              --prompt-file "$TMPDIR/prompt" \
-              --last-file "$TMPDIR/result" \
-              --model fixture-model \
-              --reasoning-effort medium
-            awk '
-              previous == "-c" && $0 == "shell_environment_policy.inherit=all" { found = 1 }
-              { previous = $0 }
-              END { exit !found }
-            ' "$CODEX_ARGS"
-            AGENT_RUNNER_PATH=${agentctl}/bin/agentctl-agent \
-              AGENT_BOOTSTRAP_PATH=${../../scripts/sinnix-agent-npm-bootstrap} \
-              python3 ${../../scripts/tests/test_agent_output.py}
+            AGENT_BOOTSTRAP_PATH=${../../scripts/sinnix-agent-npm-bootstrap} \
+              python3 ${../../scripts/tests/test_agent_bootstrap.py}
             touch "$out"
           '';
     in
@@ -129,6 +105,6 @@
             test -s $rendered
             touch $out
           '';
-      checks.agent-native-runner-contract = nativeRunnerContract;
+      checks.agent-native-bootstrap-contract = nativeBootstrapContract;
     };
 }

@@ -32,8 +32,8 @@ next, not on supervising progress.
   - In Codex, native spawn takes `model`, `reasoning_effort`, and `fork_turns`
     (`'none'` by default; `'all'` for deliberate full-history inheritance,
     with no model or effort override).
-- AgentCTL batches are historical recovery workflows. Use `agent-runtime` for
-  retained records and recovery controls; use native agents for new work.
+- AgentCTL batch records are read-only history. Use `agent-runtime` for
+  retained records and native jobs; use native agents for new work.
 - Add workers only when independent work benefits from parallelism. Keep one
   owner for a small connected change; available slots are not a dispatch target.
 
@@ -54,7 +54,7 @@ next, not on supervising progress.
   needed; avoid copied instructions, complete manifests, and unchanged history.
 - Ask the owner to read every assigned task, write the whole connected change
   in one pass, use proportional verification, and briefly review the delivery
-  ([worker-contract.md](references/worker-contract.md), step 4). After fixes,
+  under the repository workflow. After fixes,
   review only the delta and affected invariants. Report unmet criteria honestly.
   Implementation, testing, and self-review stay with one owner, never split
   into handoffs or a separate reviewer stage.

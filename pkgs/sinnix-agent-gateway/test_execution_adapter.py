@@ -82,11 +82,9 @@ def root(tmp_path: Path) -> Path:
 def adapter(tmp_path: Path, root: Path) -> LocalJobs:
     config = Config(
         project_roots=(root,),
-        agent_runner=tmp_path / "runner.sh",
         event_spool=tmp_path / "events.jsonl",
         state_dir=tmp_path / "state",
         agentctl_executable="/bin/true",
-        worker_contract=tmp_path / "worker-contract.md",
     )
     return LocalJobs(config)
 

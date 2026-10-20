@@ -1,7 +1,7 @@
 # Sinnix
 
 Sinnix owns NixOS and Home Manager configuration, `agentctl` project operations
-and agent batches, and the agent gateway. Keep configuration declarative and
+and the agent gateway. Keep configuration declarative and
 generated files reproducible; verify host changes against live behavior.
 
 ## Public boundary
@@ -27,8 +27,8 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
 - Nix modules declare services, packages, files, secrets, users, mounts, and
   activation. Systemd owns live processes, timeouts, and results; shell
   supervisors must not duplicate that state.
-- `agentctl` owns project descriptors, the worker prompt built from a task,
-  the launch and result contract of a queued command, and the operator view
+- `agentctl` owns project descriptors, the launch and result contract of a
+  queued command, retained history reads, and the operator view
   (`docs/agentctl.md`). It does not own product-domain concurrency; Sinex's
   byte, rate, and destructive-operation budgets stay in Sinex.
 - The gateway owns who may call which tool, and the high-level machine and
@@ -71,7 +71,7 @@ dots/         managed user configuration; dots/_ai/ holds the global agent
   `agentctl pressure tick` pauses and reopens groups through pueue.
 - Memory is bounded by the slice hierarchy and the resource classes in
   `flake/data/runtime-defaults.nix`. Hard `MemoryMax` is reserved for explicit
-  safety boundaries such as a batch worker's unit. The `bulk` group admits
+  safety boundaries. The `bulk` group admits
   large Nix operations; nothing wraps `nix` by basename.
 - Scheduled work is a module's `mkScheduledJob` timer. When the work is a
   declared operation, its command is
@@ -100,9 +100,8 @@ nix run .#sinnix-agent-environment-doc -- --output docs/agent-environment.md
 Sinnix publishes to `master` directly: verify, commit on `master` (or
 fast-forward a short-lived branch), and push. No PRs; hosted CI does not gate
 this repository. Worktrees remain the isolation for in-flight work.
-New Sinnix batches are closed. Use native changes and declared operations;
-historical batch reads and recovery controls remain available. Other projects
-retain their own admission policies.
+Use native changes and declared operations. Historical batch records remain
+read-only; preservation-aware cleanup uses `agentctl worktree clean`.
 
 - Short checks run from the devshell. Heavy checks run as declared operations:
   `agentctl job start sinnix lint`, `agentctl job start sinnix check`

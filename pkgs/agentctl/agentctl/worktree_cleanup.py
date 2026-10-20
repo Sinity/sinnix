@@ -440,33 +440,35 @@ def _cleanup_obstacle(
             if parent == path:
                 break
             parent = parent.parent
-    ignored = _git(
-        path,
-        "ls-files",
-        "--others",
-        "--ignored",
-        "--exclude-standard",
-        "--directory",
-        "-z",
-    )
-    pending = [path / name for name in ignored.split("\0") if name]
+    pending = []
+    for kind, flags in (("ignored", ("--ignored",)), ("untracked", ())):
+        listing = _git(
+            path,
+            "ls-files",
+            "--others",
+            *flags,
+            "--exclude-standard",
+            "--directory",
+            "-z",
+        )
+        pending.extend((path / name, kind) for name in listing.split("\0") if name)
     while pending:
-        candidate = pending.pop()
+        candidate, kind = pending.pop()
         mode = candidate.lstat().st_mode
         if stat.S_ISDIR(mode):
             if candidate not in covered_dirs:
-                return f"worktree kept; ignored directory is not preserved: {str(candidate)!r}"
+                return f"worktree kept; {kind} directory is not preserved: {str(candidate)!r}"
             with os.scandir(candidate) as children:
                 for child in children:
                     child_path = Path(child.path)
                     if child.is_dir(follow_symlinks=False):
                         if child_path not in covered_dirs:
-                            return f"worktree kept; ignored directory is not preserved: {str(child_path)!r}"
-                        pending.append(child_path)
+                            return f"worktree kept; {kind} directory is not preserved: {str(child_path)!r}"
+                        pending.append((child_path, kind))
                     elif child_path not in sources:
-                        return f"worktree kept; ignored path is not preserved: {str(child_path)!r}"
+                        return f"worktree kept; {kind} path is not preserved: {str(child_path)!r}"
         elif candidate not in sources:
-            return f"worktree kept; ignored path is not preserved: {str(candidate)!r}"
+            return f"worktree kept; {kind} path is not preserved: {str(candidate)!r}"
     return None
 
 

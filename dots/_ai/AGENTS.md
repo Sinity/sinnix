@@ -87,7 +87,7 @@ them; test fixtures stay synthetic and neutral.
 
 ## Runtime
 
-Load `agent-runtime` before AgentCTL job or batch work and `orchestrate` before
+Load `agent-runtime` before AgentCTL job or history work and `orchestrate` before
 running agents in parallel.
 
 - State lives with its owners (pueue, Git and worktrunk, GitHub, Beads,

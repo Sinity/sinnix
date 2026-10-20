@@ -1129,8 +1129,6 @@ def test_cancelling_a_queued_task_drops_it_out_of_the_queue(
         started["task_id"],
         Config(
             project_roots=config.project_roots,
-            agent_runner=config.agent_runner,
-            worker_contract=config.worker_contract,
             event_spool=config.event_spool,
             state_dir=config.state_dir,
             agentctl_executable=config.agentctl_executable,
@@ -1735,9 +1733,7 @@ def test_every_queued_task_carries_the_config_the_launch_was_started_with(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Anti-vacuity: without this the `agentctl batch result` step of a worker
-    task queued under AGENTCTL_CONFIG reads the default state directory and
-    refuses its own run as unknown."""
+    """Nested AgentCTL calls must retain the operation's config and state namespace."""
     location = tmp_path / "agentctl.json"
     location.write_text(
         json.dumps(

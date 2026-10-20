@@ -17,11 +17,6 @@ unset = ["PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "_PYTHON_SYSCONFIGDATA_NAME"
 [workspace]
 root = "/realm/worktree"
 default_base = "origin/master"
-verify = { candidate = "check" }
-publish = "master"
-
-[packets]
-admission = "closed"
 
 [operations.check]
 description = "Run default Sinnix checks"

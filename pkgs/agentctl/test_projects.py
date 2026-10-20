@@ -46,13 +46,7 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
     assert project.environment.command == ("env",)
     assert project.workspace is not None
     assert project.workspace.default_base == "origin/master"
-    assert project.workspace.agent_memory_max == "10G"
-    assert project.workspace.verify == {
-        "focused": "verify_quick",
-        "candidate": "check",
-        "corpus": "verify",
-    }
-    assert project.workspace.review == "agent"
+    assert project.workspace.retain_artifacts == ()
     nightly = project.operation("nightly")
     assert nightly.checkout == "default"
     assert nightly.pool == "bulk"
@@ -68,50 +62,13 @@ def test_the_fixture_descriptor_loads_every_declared_field(project_root: Path) -
     ]
 
 
-def test_focused_verification_must_run_on_a_worker_worktree(tmp_path: Path) -> None:
-    # A worker's focused verification is always launched with
-    # --workspace <worktree>, and launch refuses a "default" checkout outside
-    # the project root, so such a declaration can never execute for the batch
-    # it exists to serve. It must be refused at declaration time, not once per
-    # packet (sinnix-59zd).
-    root = write_project(tmp_path / "p")
-    descriptor = root / ".agentctl" / "project.toml"
-    # The fixture's focused operation is worktree-capable, so it loads.
-    assert load_project_adapter(root).workspace.verify["focused"] == "verify_quick"
-
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            'exec = ["fixture-verify-quick"]',
-            'exec = ["fixture-verify-quick"]\ncheckout = "default"',
-        )
-    )
-    with pytest.raises(ProjectConfigError, match="must name an operation that runs"):
-        load_project_adapter(root)
-
-
-def test_focused_verification_accepts_an_explicit_selector_requirement(
-    tmp_path: Path,
-) -> None:
-    """A focused profile forwards a caller selector to its operation."""
-    root = write_project(tmp_path / "p")
-    descriptor = root / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            'exec = ["fixture-verify-quick"]',
-            'exec = ["fixture-verify-quick"]\narguments = "required"',
-        )
-    )
-    operation = load_project_adapter(root).operation("verify_quick")
-    assert operation.arguments == "required"
-
-
 def test_workspace_artifacts_must_be_relative(tmp_path: Path) -> None:
     root = write_project(tmp_path / "p")
     descriptor = root / ".agentctl" / "project.toml"
     descriptor.write_text(
         descriptor.read_text().replace(
-            'publish = "master"',
-            'publish = "master"\nretain_artifacts = [".cache/verify/*.json"]',
+            "[workspace]",
+            '[workspace]\nretain_artifacts = [".cache/verify/*.json"]',
         )
     )
     assert load_project_adapter(root).workspace.retain_artifacts == (
@@ -170,19 +127,17 @@ def test_unknown_or_retired_fields_warn_and_load(
     assert f"[{table}] ignores unknown fields: {name}" in capsys.readouterr().err
 
 
-def test_unknown_packet_and_operation_fields_warn_and_load(
+def test_unknown_operation_fields_warn_and_load(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = write_project(tmp_path / "p")
     descriptor = root / ".agentctl" / "project.toml"
     descriptor.write_text(
         descriptor.read_text()
-        + "[packets.extra]\nx = 1\n"
         + '[operations.check.parameters.apply]\ntype = "bool"\nflag = "--apply"\n'
     )
     load_project_adapter(root)
     err = capsys.readouterr().err
-    assert "[packets] ignores unknown fields: extra" in err
     assert "operation check ignores unknown fields: parameters" in err
 
 
@@ -245,69 +200,6 @@ def test_a_declared_scratch_tier_is_carried_by_the_operation(tmp_path: Path) -> 
     assert project.operation("check").scratch == "none"
 
 
-def test_a_malformed_agent_ceiling_is_a_typed_refusal(tmp_path: Path) -> None:
-    root = write_project(tmp_path / "p")
-    descriptor = root / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            'agent_memory_max = "10G"', 'agent_memory_max = "lots"'
-        )
-    )
-    with pytest.raises(ProjectConfigError, match="agent_memory_max"):
-        load_project_adapter(root)
-
-
-def test_verify_profiles_and_publish_policy_are_validated(
-    project_root: Path, tmp_path: Path
-) -> None:
-    adapter = load_project_adapter(project_root)
-    assert adapter.workspace is not None
-    assert adapter.workspace.verify == {
-        "focused": "verify_quick",
-        "candidate": "check",
-        "corpus": "verify",
-    }
-    assert adapter.workspace.publish == "master"
-    assert adapter.workspace.base_branch == "master"
-
-    descriptor = (project_root / ".agentctl" / "project.toml").read_text()
-    hosted = descriptor.replace(
-        'candidate = "check"', 'candidate = "hosted:verify"'
-    ).replace('publish = "master"', 'publish = "pr"')
-    hosted_root = write_project(tmp_path / "hosted")
-    (hosted_root / ".agentctl" / "project.toml").write_text(hosted)
-    loaded = load_project_adapter(hosted_root)
-    assert loaded.workspace is not None
-    assert loaded.workspace.verify["candidate"] == "hosted:verify"
-    assert loaded.workspace.publish == "pr"
-
-    for broken, fragment in (
-        (
-            descriptor.replace('candidate = "check"', 'candidate = "nowhere"'),
-            "undeclared",
-        ),
-        (
-            descriptor.replace('publish = "master"', 'publish = "email"'),
-            "workspace.publish",
-        ),
-        (descriptor.replace("focused = ", "nightly = "), "workspace.verify"),
-    ):
-        broken_root = write_project(tmp_path / "broken")
-        (broken_root / ".agentctl" / "project.toml").write_text(broken)
-        with pytest.raises(ProjectConfigError, match=fragment):
-            load_project_adapter(broken_root)
-
-
-def test_default_agent_ceiling_is_per_lane(tmp_path: Path) -> None:
-    root = write_project(tmp_path / "p")
-    descriptor = root / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace('agent_memory_max = "10G"\n', "")
-    )
-
-    assert load_project_adapter(root).workspace.agent_memory_max == "4G"
-
-
 def test_a_required_variable_missing_at_launch_fails_loudly(
     project_root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -361,11 +253,12 @@ def test_config_reads_the_host_file_and_resolves_projects_by_id_or_path(
     config = load_config()
 
     assert config.project_roots == (project_root,)
-    assert config.agent_runner == Path("/r/run.sh")
     assert config.jobs_dir == Path("/s/jobs")
     assert resolve_project(config, "fixture").root == project_root
     assert resolve_project(config, str(project_root)).root == project_root
-    monkeypatch.chdir(project_root / "atlas")
+    nested = project_root / "nested"
+    nested.mkdir()
+    monkeypatch.chdir(nested)
     assert resolve_project(config, None).root == project_root
 
 
@@ -377,7 +270,6 @@ def test_an_absent_config_file_yields_the_defaults(
     assert isinstance(config, Config)
     assert config.project_roots == ()
     assert config.event_spool == Path("/realm/state/agentctl/events.jsonl")
-    assert config.worker_contract.name == "worker-contract.md"
 
 
 def test_config_adds_agentctl_projects_from_private_runtime_catalog(
@@ -447,24 +339,6 @@ def test_config_rejects_duplicate_private_project_roots(
         load_config()
 
 
-def test_packets_review_names_the_reviewer_agent_completely(tmp_path: Path) -> None:
-    root = write_project(tmp_path / "p")
-    descriptor = root / ".agentctl" / "project.toml"
-    base = descriptor.read_text()
-    descriptor.write_text(
-        base
-        + '\n[packets.review]\nbackend = "claude"\nmodel = "claude-opus-5"\neffort = "high"\n'
-    )
-    assert load_project_adapter(root).packets.review == {
-        "backend": "claude",
-        "model": "claude-opus-5",
-        "effort": "high",
-    }
-    descriptor.write_text(base + '\n[packets.review]\nbackend = "claude"\n')
-    with pytest.raises(ProjectConfigError, match=r"\[packets.review\]"):
-        load_project_adapter(root)
-
-
 # ----------------------------------------------- checkout and admission keys
 
 
@@ -532,24 +406,6 @@ def test_every_existing_declaration_keeps_working_without_the_new_keys(
     assert project.operation("check").admission is None
     assert project.operation("nightly").checkout == "default"
     assert project.operation("check").catalog_row()["admission"] is None
-
-
-def test_a_focused_profile_cannot_name_a_main_checkout_operation(
-    tmp_path: Path,
-) -> None:
-    """A worker verifies its own worktree, so a focused `default` operation
-    could never run for it."""
-    root = write_project(tmp_path / "p")
-    descriptor = root / ".agentctl" / "project.toml"
-    descriptor.write_text(
-        descriptor.read_text().replace(
-            '[operations.verify_quick]\ndescription = "Fixture quick verification"',
-            '[operations.verify_quick]\ncheckout = "default"\n'
-            'description = "Fixture quick verification"',
-        )
-    )
-    with pytest.raises(ProjectConfigError, match='checkout = "default"'):
-        load_project_adapter(root)
 
 
 def test_nix_develop_cache_inputs_route_jobs_through_the_cached_realization(
@@ -634,32 +490,21 @@ def test_host_environment_is_loaded_without_requiring_a_caller_value(
     assert load_config(location).inherited_environment == {"FIXTURE_ROOT": "/current"}
 
 
-@pytest.mark.parametrize("admission", ["open", "closed", "unknown"])
-def test_batch_admission_policy(project_root: Path, admission: str) -> None:
-    path = project_root / ".agentctl/project.toml"
-    path.write_text(
-        path.read_text().replace(
-            "[packets]\n", f'[packets]\nadmission = "{admission}"\n'
+def test_retired_reviewer_policy_cannot_disable_native_operations(project_root, capsys):
+    descriptor = project_root / ".agentctl/project.toml"
+    descriptor.write_text(
+        descriptor.read_text().replace(
+            "[workspace]\n",
+            "[workspace]\nreview = [123]\nverify = false\npublish = 42\nagent_memory_max = false\n",
         )
     )
-    if admission == "unknown":
-        with pytest.raises(
-            ProjectConfigError, match="packets.admission must be open or closed"
-        ):
-            load_project_adapter(project_root)
-    else:
-        project = load_project_adapter(project_root)
-        assert project.packets.admission == admission
-        assert project.catalog_row()["batch_admission"] == admission
-        assert project.operation("verify").name == "verify"
-
-
-def test_operation_only_project_has_closed_batch_admission(project_root: Path) -> None:
-    path = project_root / ".agentctl/project.toml"
-    text = path.read_text()
-    start = text.index("[packets]")
-    end = text.index("[operations.check]", start)
-    path.write_text(text[:start] + text[end:])
     project = load_project_adapter(project_root)
-    assert project.packets.admission == "closed"
     assert project.operation("check").command == ("true",)
+    assert "ignores unknown fields" in capsys.readouterr().err
+
+
+def test_retired_packet_table_is_an_explicit_unknown_table(project_root):
+    descriptor = project_root / ".agentctl/project.toml"
+    descriptor.write_text(descriptor.read_text() + "\n[packets]\nreview = false\n")
+    with pytest.raises(ProjectConfigError, match="unknown tables: packets"):
+        load_project_adapter(project_root)

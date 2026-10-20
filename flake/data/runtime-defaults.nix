@@ -433,29 +433,7 @@ rec {
         MemoryHigh = "8G";
         MemorySwapMax = "1G";
       };
-      # The agents a landing owns. Same envelope as the agent pool: they are
-      # the same kind of process, held apart only so the queue can pause new
-      # worker dispatch without stalling a landing.
-      # Parent of agentctl-land-agent, by the same name hierarchy that makes
-      # agentctl-pytest a parent. It hosts no pool of its own, but it was
-      # undeclared and so inherited the plane with no accounting and no
-      # ceiling: invisible to cgroup sampling and unbounded below the plane's
-      # 20G. Declared here at accounting plus a ceiling that stays above its
-      # only child (4G), so it measures the landing without binding it.
-      agentctl-land = {
-        IOAccounting = true;
-        CPUWeight = 400;
-        IOWeight = 300;
-        MemoryHigh = "6G";
-        MemorySwapMax = "1G";
-      };
-      agentctl-land-agent = {
-        IOAccounting = true;
-        CPUWeight = 400;
-        IOWeight = 300;
-        MemoryHigh = "4G";
-        MemorySwapMax = "1G";
-      };
+
       # Slice names encode hierarchy, so this is not just the `pytest` pool: it
       # is also the PARENT of agentctl-pytest-heavy and agentctl-pytest-quick.
       # Its ceiling is what the three pools share, and it is the only one that

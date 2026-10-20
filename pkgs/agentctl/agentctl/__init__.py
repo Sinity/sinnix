@@ -1,4 +1,4 @@
-"""agentctl: jobs over pueue, batches over worktrunk, gh and bd."""
+"""agentctl: native project jobs and preserved work history."""
 
 __all__ = ["ProjectAdapter", "ProjectCatalog", "ProjectOperation"]
 

@@ -1,127 +1,54 @@
 ---
 name: agent-runtime
-description: "Run, watch, recover, or clean AgentCTL work: declared operations as pueue jobs, batches of isolated workers, landing tasks, results, events, and pressure pauses."
+description: "Run, watch, recover, or clean AgentCTL jobs and retained history: native queue state, exact identities, artifacts, pressure pauses, and preservation-aware worktree cleanup."
 ---
 
 # Agent runtime
 
-`agentctl` is a CLI over owners that keep their own state: pueue for jobs,
-worktrunk for batch worktrees, GitHub for publication, Beads for tasks, systemd
-for fixed services and timers. It holds no campaign state, so neither should
-you. `agentctl <verb> --help` gives the installed syntax and
-`/realm/project/sinnix/repo/docs/agentctl.md` the output and exit-code contract.
-A capability you need but cannot find is a task against agentctl itself; the
-extension point is a declared operation in the project's
-`.agentctl/project.toml`.
+AgentCTL runs declared operations over pueue and systemd. Git owns checkouts
+and publication; Beads owns tasks and decisions. Use `agentctl <verb> --help`
+and [the command contract](../../../../docs/agentctl.md) for syntax.
 
-## Where state is
+## Native jobs
 
-- `agentctl view <project>`: queue pressure, active jobs, open runs, ready
-  work. `--json` gives the same document.
-- `agentctl events tail --follow --project <project>`: every task start and
-  finish and every pressure pause. Keep one watch per concern; on
-  takeover, inspect the existing watches' argv before adding one, and stop a
-  watch you own when its purpose ends. Coordinators only: a batch worker
-  waits on its own job with `agentctl job wait <id>`.
-- `agentctl job get|logs|result <id>`: one job by numeric pueue `task_id`.
-  Keep the stable string `job_id` too and pass `--job-id` so later calls follow
-  the same job across queue reordering.
-- `agentctl batch status <run>`: one run, joining its manifest
-  (`~/.local/state/agentctl/runs/<run>.json`) with pueue state and the landing
-  PR. A run ID's suffix is accepted everywhere.
+- Discover operations with `agentctl project operations <project>`. Short
+  foreground probes run directly; queued, heavy, detached or shared checks use
+  `agentctl job start <project> <operation> [--workspace <worktree>] -- <args>`.
+- Keep both the numeric task_id and stable string job_id. Pass `--job-id` to
+  reads and controls so a queue reorder cannot redirect the call.
+- Use `job get`, `logs`, `result` or `wait` for the selected job and attempt.
+  Waiting observes completion without cancelling. Read original artifacts;
+  a receipt or successful transport proves only what its payload covers.
+- Keep one `agentctl events tail --follow --project <project>` watch per
+  concern. Reuse its live handle and stop a watch you own when its purpose ends.
+- A queued job is already running work. Wait for its completion event before
+  retrying. Diagnose a terminal failure first; an uncertain launch is not a
+  reason to submit it again. Cancel by recorded identity, then confirm terminal
+  state before retrying. `pressure tick` reconciles admission holds.
+- Freeze the candidate during a bound check or publication. Reuse unchanged
+  behavioral evidence; broaden qualification at integration or for a concrete
+  risk. Keep known failures and untested scope explicit.
+- In Codex, an exec session_id remains live after the outer tool call returns.
+  Observe it through write_stdin; terminate owned supervision and confirm exit
+  when it ends. At about twice an evidence-based expected duration, inspect
+  live state and decide to repair, cancel, or extend.
 
-Capture JSON job details and results locally, then print the fields needed for
-the decision: task_id/job_id, terminal status and exit, candidate binding, result
-summary, and artifact paths. Responses can repeat result encodings; inspect
-the full artifact only when needed, and do not dump the envelope into agent
-context.
+## Retained history and cleanup
 
-## Jobs
+`batch list` and `batch status` read original manifests and native job
+observations. `evidence list` and `evidence get` read original native evidence
+and verify artifact identities. Missing or inaccessible history stays explicit.
+Historical executors cannot be resumed or retried through the supported route.
+Record new verification and publication references directly with Beads and Git.
 
-List the declared work with `agentctl project operations <project>` and start
-it with `agentctl job start <project> <operation>`; never rebuild its
-environment, pool, timeout, `systemd-run` scope, or reaper by hand. Keep the
-returned `task_id` and `job_id`. A queued job is running work: wait for its finish event
-instead of starting it again. Retry only after reading the terminal result and
-fixing its named cause. A wedged job gets one cancel, a check that it is
-terminal, then a retry.
+`agentctl worktree clean <project>` releases terminal owned checkouts only
+when process/queue holders, working bytes, ignored files and artifact custody
+permit it. It retains recovery refs and reports every checkout it keeps.
+`job clean` releases terminal queue entries while retaining their inputs,
+attempts and original output. Use these owners rather than deleting state files.
 
-A paused pool is an admission hold. Run `agentctl pressure tick` and wait
-for the release before dispatching more; running jobs continue.
+## Finish
 
-Agents spawned inside a Claude or Codex session are not pueue jobs. Heavy
-gates, broad type checks, suites, and builds use `agentctl job start` with
-`--workspace <worktree>`. Bounded low-memory import/static probes and small
-diagnostics may run directly; avoid launching a managed job for every tiny check.
-Freeze the candidate while a bound verification or publication runs. A source
-edit or commit can invalidate its receipt. Reuse unchanged behavioral evidence;
-when normal publication runs the required static gates, do not queue a duplicate
-static run for the same candidate.
-
-In Codex, a `functions.exec` call that returns a `session_id` is still
-running and continues through `write_stdin`; the outer "Script completed"
-describes only the JavaScript call. Terminate what you own and confirm the
-exit when supervision ends.
-
-## Batches
-
-`agentctl batch start <project> <task>… [--worker a,b]… [--backend B --model M
---effort E]` validates and claims the members, creates one worktree per
-task group (a seed task plus its open `dispatch_group` members, or an
-explicit `--worker` list), and queues the workers with the landing task behind
-them. With `--workers external`, you run the workers yourself in the manifest's
-worktrees and file each with `batch result <run> <worker> <result.json>`; the
-last result queues the landing. Landing integrates, runs the declared
-candidate checks and review policy, publishes per the descriptor's
-`[workspace].publish` (`pr`: one squash-merged PR titled from the leader task,
-`bug` → `fix:`, `feature` → `feat:`, otherwise `chore:`; `master`: a
-fast-forward), and closes the tasks its acceptance record satisfies.
-
-| Stage                       | Next                                                         |
-| --------------------------- | ------------------------------------------------------------ |
-| `working`, `landing`        | wait for the event                                           |
-| `stashed`                   | file `batch result` for each external worker                 |
-| `awaiting workers`          | read worker tasks and results; file or recover, then resume  |
-| `ready to land`             | `batch land <run>`                                           |
-| `landing dependency-failed` | fix the failed worker, then `batch resume --worker <w>`      |
-| `failed: <code>`            | read landing logs and `landing.review_verdict`; fix, re-land |
-| `unprepared`                | read the refusal and correct it before starting again        |
-| `landed`, `abandoned`       | nothing                                                      |
-
-- A finding confined to one worker goes back to it with `batch resume`.
-  Cross-worker findings are fixed on the integration branch, then
-  `batch land <run> --keep-integration`.
-- `batch abandon <run>` releases a run that will not land; it keeps any
-  worktree holding unpreserved work. `agentctl worktree clean <project>` removes finished
-  runs' worktrees by recorded state, never by age.
-- The standing worker rules live in
-  [worker-contract.md](../orchestrate/references/worker-contract.md), which
-  AgentCTL compiles into every worker prompt.
-
-## Worker toolbelt
-
-Batch workers have `batch-worker` on PATH. `batch-worker task` prints the original prompt and
-current beads task amendments for its bound attempt. Assess changed requirements
-against retained work; unavailable comparisons stay explicit. `batch-worker
-verify` runs the descriptor's focused profile without arguments. For an
-operation requiring a selector, use `agentctl job start <project> <operation>
---workspace <worktree> -- <selector>` explicitly. `batch-worker done <result.json>` requires a clean tree,
-validates the result, checks `candidate_sha` against `HEAD`, and prints it as
-the final message; it never pushes.
-
-## Before reporting work finished
-
-Report the actual terminal result of work you claim finished, with useful job
-IDs and any remaining blockers. A batch is landed when its merge is on the
-default branch. Preserve WIP, name worktrees kept for continuation, and stop
-watches you own when their purpose ends. No per-item narration is needed.
-
-## Failures
-
-- Dead worker: preserve its worktree, then resume its owner or abandon the
-  run.
-- Failed landing: read the status and landing logs, fix the named cause, land
-  again. Reuse earlier evidence only when its base and contract still match.
-- Unknown pool or environment mismatch: fix the descriptor, not a wrapper.
-- Give long work an evidence-based duration; at about twice it, inspect and
-  decide to repair, cancel, or extend.
+Report the actual outcome, exact verification and unresolved criteria. Preserve
+recoverable WIP and name the owning worktree or job. Native agents land through
+the repository's publication policy; use `orchestrate` when coordinating agents.

@@ -148,7 +148,7 @@ and landing executors remain readable and cannot be retried through jobs.retry.
 
 `shell.run` picks a pool: `shell-quick` (width 8) for reads and short commands,
 or `shell-long` (width 4) for agent CLIs (`claude`, `codex`, `gemini`,
-`opencode`, `pi`, `cursor-agent`, `agentctl-agent`). `pool=auto`, the default,
+`opencode`, `pi`, `cursor-agent`). `pool=auto`, the default,
 detects them past `env`, `nohup`, `timeout` and `sh -c`. A quick-pool command
 still running after 20 s stops counting against the width, so long work never
 blocks the quick pool. `timeout_seconds` is an optional kill ceiling.

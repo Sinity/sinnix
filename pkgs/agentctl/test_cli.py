@@ -14,7 +14,8 @@ from types import SimpleNamespace
 from typing import Callable
 
 import pytest
-from agentctl import cli, github, manifest, operator_view, pueue
+from agentctl import batch_history as manifest
+from agentctl import cli, github, operator_view, pueue
 from agentctl.config import Config
 from conftest import SELF_REVIEW, FakePueue, read_launch
 
@@ -28,7 +29,6 @@ def cli_config(
         json.dumps(
             {
                 "project_roots": [str(root) for root in config.project_roots],
-                "agent_runner": str(config.agent_runner),
                 "event_spool": str(config.event_spool),
                 "state_dir": str(config.state_dir),
                 "agentctl": config.agentctl_executable,

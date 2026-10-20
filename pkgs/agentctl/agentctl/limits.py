@@ -6,8 +6,6 @@ DEFAULT_TIMEOUT_SECONDS = 3_600
 # reaped eventually.
 MAX_AGENT_TIMEOUT_SECONDS = 7 * 24 * 3_600
 MAX_DECLARED_OPERATION_TIMEOUT_SECONDS = 28_800
-# Hard ceiling on one agent's unit; the job plane's MemoryHigh is 20G.
-AGENT_MEMORY_MAX = "4G"
 # One round trip to a local tool (pueue, wt, gh, git, bd). Five minutes:
 # worktree provisioning under a corpus run takes over a minute and a wedged daemon still surfaces.
 CALL_TIMEOUT_SECONDS = 300

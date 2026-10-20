@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agentctl"
 version = "0.1.0"
-description = "agentctl: jobs over pueue, worktrees over worktrunk, gh and bd"
+description = "agentctl: native project jobs and retained history"
 requires-python = ">=3.12"
 dependencies = []
 
@@ -16,6 +16,3 @@ agentctl-devenv = "agentctl.devenv:main"
 
 [tool.setuptools.packages.find]
 include = ["agentctl*"]
-
-[tool.setuptools.package-data]
-"agentctl.prompts" = ["*.md"]

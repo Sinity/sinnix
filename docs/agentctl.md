@@ -268,15 +268,6 @@ POLYLOGUE_ARCHIVE_ROOT = "/realm/state/polylogue"
 [workspace]
 root = "/realm/worktree"
 default_base = "origin/master"
-agent_memory_max = "10G"
-verify = { focused = "verify_quick", candidate = "hosted:verify", corpus = "verify_all" }
-publish = "pr"
-
-[packets.defaults]
-backend = "codex"
-model = "gpt-6-luna"
-effort = "medium"
-
 [operations.verify_all]
 description = "Run the complete corpus"
 exec = ["devtools", "verify", "--all"]
@@ -307,29 +298,20 @@ Unknown operation fields are ignored with a warning.
 `[environment]` declares `kind`, `command`, `inherit`, `unset`, `values` and
 `require`. A missing required variable fails the launch.
 
-`[workspace]` declares:
+`[workspace]` optionally declares `root`, `default_base` and relative
+`retain_artifacts` globs for preservation-aware cleanup. Operations choose their
+own checkouts, resources and argument requirements. The old packet, reviewer,
+verification-profile and publication policy configuration is retired.
 
-- `root`, `default_base`, `agent_memory_max`.
-- `verify`: the `focused`, `candidate` and `corpus` operations; `candidate`
-  may be `hosted:<check>`.
-- `publish`: `pr` or `master`.
-- `review`: `agent` (default) or `none`.
-- `retain_artifacts`: globs copied into run state before a checkout is
-  released.
+`[packets]` is no longer a descriptor table. Remove it when updating a producer.
+Unknown tables are rejected; unknown fields within known tables warn.
 
-`[packets] admission = "closed"` refuses new batches before task reads, claims,
-worktree creation or queue submission. A descriptor without `[packets]` has
-closed admission; an explicit legacy `[packets]` table defaults to `"open"`.
-Existing run reads and recovery controls keep their original contracts. New
-work uses native changes with declared operations. During a
-supported rollback, retain the closed descriptor and compatible admission check;
-older binaries are recovery-only and must not be activated as new-batch launchers.
-This supported-route policy does not revoke arbitrary same-user native authority.
-
-`[packets]` also declares `template`, `atlas_dir`, `branch_prefix`,
-`[packets.model_policy.<name>]`, `[packets.defaults]` and `[packets.review]`.
-An unknown table takes the project out of service; an unknown field in a
-known table is ignored with a warning.
+For a supported rollback, use revision `4845906d` or later, whose absent packet
+table keeps old admissions closed. Keep current manifests, dispositions, inputs
+and outputs in place. Rollback changes code, never historical state, and does
+not replay old executors. Earlier revisions are for historical source inspection
+and are excluded from automatic activation. Arbitrary same-user native commands
+remain outside this cooperative routing guarantee.
 
 Descriptor changes apply on the next call.
 
@@ -342,15 +324,14 @@ the operation runs on the project's main checkout.
 
 ## Limits
 
-Timeouts, size bounds and exit codes are named constants in
-`pkgs/agentctl/agentctl/limits.py`, `run.py`, `landing.py` and `prompts/`. The
-agent watchdog is one week, and agents run until they finish or are
-cancelled.
+Timeouts, size bounds and exit codes are owned by `limits.py`, `run.py` and
+`job_queries.py`. Operations declare their deadline; waiting observes the native
+unit until terminal state, and cancellation targets its recorded identity.
 
 ## Host wiring
 
 `modules/services/agentctl.nix` renders `/etc/sinnix/agentctl.json`:
-`project_roots`, `agent_runner`, `worker_contract`, `event_spool` and `pools`,
+`project_roots`, `event_spool`, `state_dir` and `pools`,
 with each pool as `{parallel, ...}`. It installs `agentctl`, `wt`, `pueue` and
 `gh`, persists `~/.local/state/agentctl`, and declares these units:
 
@@ -362,7 +343,3 @@ with each pool as `{parallel, ...}`. It installs `agentctl`, `wt`, `pueue` and
 pueued and the pool slices come from `modules/features/cli/core.nix` and
 `flake/data/runtime-defaults.nix`. The package's test suite drives a private
 pueued end to end.
-
-The worker tool `batch-worker` (`dots/_ai/skills/agent-runtime/scripts/batch-worker`) is what a
-queued worker uses while it works. `batch-worker task` shows the worker its current
-tasks beside the dispatch-time snapshot, and `batch-worker done` files its result.

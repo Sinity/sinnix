@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import sinnix_lib
 from agentctl import batch_history as history
 
 
@@ -94,11 +95,13 @@ def test_invalid_document_shape_has_a_history_error(tmp_path, raw):
 
 
 def test_cleanup_import_does_not_load_workflow_or_prompt_engine():
-    packages = Path(__file__).parent.parent
     env = {
         **os.environ,
         "PYTHONPATH": os.pathsep.join(
-            (str(packages / "agentctl"), str(packages / "sinnix-lib"))
+            (
+                str(Path(__file__).parent),
+                *(str(Path(p).parent) for p in sinnix_lib.__path__),
+            )
         ),
     }
     subprocess.run(
@@ -116,11 +119,13 @@ def test_cleanup_import_does_not_load_workflow_or_prompt_engine():
 
 @pytest.mark.parametrize("module", ["operator_view", "launch", "cli"])
 def test_native_jobs_and_views_do_not_import_the_workflow(module):
-    packages = Path(__file__).parent.parent
     env = {
         **os.environ,
         "PYTHONPATH": os.pathsep.join(
-            (str(packages / "agentctl"), str(packages / "sinnix-lib"))
+            (
+                str(Path(__file__).parent),
+                *(str(Path(p).parent) for p in sinnix_lib.__path__),
+            )
         ),
     }
     subprocess.run(

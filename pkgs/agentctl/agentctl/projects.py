@@ -12,7 +12,7 @@ import hashlib
 import os
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -21,7 +21,6 @@ import tomllib
 from .environment import build_environment
 from .launch_input import supported_unit_property
 from .limits import (
-    AGENT_MEMORY_MAX,
     DECLARABLE_RESULT_KINDS,
     DEFAULT_TIMEOUT_SECONDS,
     MAX_DECLARED_OPERATION_TIMEOUT_SECONDS,
@@ -42,41 +41,23 @@ CACHE_KINDS = frozenset({"none", "tree+environment"})
 SCRATCH_KINDS = frozenset({"none", "tmpfs", "nvme"})
 # Whether `job start` may be invoked with extra argv. `required` is a
 # declaration that the operation cannot execute without a caller-supplied
-# selector. A focused profile can name such an operation; its packet command
-# then makes the selector position explicit.
+# selector. Callers pass the selector explicitly after the operation name.
 ARGUMENTS_KINDS = frozenset({"none", "required"})
 
-_TABLES = frozenset(
-    {"schema", "project", "environment", "workspace", "packets", "operations"}
-)
+_TABLES = frozenset({"schema", "project", "environment", "workspace", "operations"})
 _ENVIRONMENT_FIELDS = frozenset(
     {"kind", "command", "inherit", "unset", "values", "require", "cache_inputs"}
 )
 # The one environment kind whose realization agentctl-devenv can cache.
 NIX_DEVELOP_KIND = "nix-develop"
 DEVENV_COMMAND = "agentctl-devenv"
-_WORKSPACE_FIELDS = frozenset(
-    {
-        "root",
-        "default_base",
-        "agent_memory_max",
-        "verify",
-        "publish",
-        "review",
-        "retain_artifacts",
-    }
-)
-# `[workspace].verify` names one operation per profile; `candidate` may be
-# `hosted:<check>` for a project whose candidate verification is a required
-# PR check.
-_VERIFY_PROFILES = frozenset({"focused", "candidate", "corpus"})
-PUBLISH_POLICIES = frozenset({"pr", "master"})
+_WORKSPACE_FIELDS = frozenset({"root", "default_base", "retain_artifacts"})
 
 
 def _warn_unknown(descriptor: Path, table: str, unknown: set[str]) -> None:
     """A field this agentctl does not read is ignored, never a reason to take
     the project out of service: a descriptor written for a newer agentctl
-    must keep the older one's landings running."""
+    must keep existing native operations available."""
     if unknown:
         print(
             f"agentctl: {descriptor} {table} ignores unknown fields: "
@@ -85,32 +66,6 @@ def _warn_unknown(descriptor: Path, table: str, unknown: set[str]) -> None:
         )
 
 
-# Whether a landing runs a separate review agent on the candidate (`agent`)
-# or records the candidate verification as the review (`none`).
-REVIEW_POLICIES = frozenset({"agent", "none"})
-# systemd's size grammar for MemoryMax: an integer with an optional K/M/G/T
-# suffix.
-_MEMORY_SIZE = re.compile(r"[1-9][0-9]*[KMGT]?\Z")
-# `[packets]`: how a worker prompt is compiled. `backend`, `model` and
-# `effort` may sit in the table or under `[packets.defaults]`;
-# `[packets.review]` names the reviewer's and integrator's agent.
-_PACKETS_FIELDS = frozenset(
-    {
-        "admission",
-        "template",
-        "atlas_dir",
-        "branch_prefix",
-        "template_version",
-        "model_policy",
-        "defaults",
-        "review",
-        "backend",
-        "model",
-        "effort",
-    }
-)
-_PACKETS_DEFAULTS = ("backend", "model", "effort", "template_version", "branch_prefix")
-_PACKETS_REVIEW = ("backend", "model", "effort")
 _OPERATION_FIELDS = frozenset(
     {
         "description",
@@ -203,55 +158,18 @@ class ProjectEnvironment:
 
 @dataclass(frozen=True)
 class WorkspacePolicy:
+    """Filesystem placement and artifact custody for preserved checkouts."""
+
     root: Path
     default_base: str
-    # The hard MemoryMax of one agent's scope; the descriptor's only say in
-    # an agent's resources.
-    agent_memory_max: str = AGENT_MEMORY_MAX
-    # Profile name -> operation name, or `hosted:<check>` for `candidate`.
-    verify: Mapping[str, str] = field(default_factory=dict)
-    # How a landed candidate reaches the default branch: a squash-merged PR
-    # or a fast-forward push.
-    publish: str = "pr"
-    # `agent` queues a reviewer per landing; `none` lands on verification alone.
-    review: str = "agent"
-    # Relative files to retain before a terminal checkout is released.
     retain_artifacts: tuple[str, ...] = ()
-
-    @property
-    def base_branch(self) -> str:
-        base = self.default_base
-        return base.split("/", 1)[1] if base.startswith("origin/") else base
 
     def catalog_row(self) -> dict[str, Any]:
         return {
             "root": str(self.root),
             "default_base": self.default_base,
-            "agent_memory_max": self.agent_memory_max,
-            "verify": dict(self.verify),
-            "publish": self.publish,
-            "review": self.review,
             "retain_artifacts": list(self.retain_artifacts),
         }
-
-
-@dataclass(frozen=True)
-class PacketsPolicy:
-    """The descriptor's `[packets]`; None or empty means the compiler's default."""
-
-    admission: str = "open"
-    template: Path | None = None
-    atlas_dir: Path | None = None
-    branch_prefix: str | None = None
-    template_version: str | None = None
-    backend: str | None = None
-    model: str | None = None
-    effort: str | None = None
-    # Policy name -> (backend, model), from `[packets.model_policy.<name>]`.
-    model_policy: Mapping[str, tuple[str, str]] = field(default_factory=dict)
-    # `[packets.review]`: backend, model, effort of the reviewer and the
-    # integration agent; None means the leader worker's.
-    review: Mapping[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -321,7 +239,6 @@ class ProjectAdapter:
     environment: ProjectEnvironment
     workspace: WorkspacePolicy | None
     operations: tuple[ProjectOperation, ...]
-    packets: PacketsPolicy = field(default_factory=PacketsPolicy)
 
     def operation(self, name: str) -> ProjectOperation:
         for operation in self.operations:
@@ -336,7 +253,6 @@ class ProjectAdapter:
             "root": str(self.root),
             "descriptor": str(self.descriptor),
             "digest": self.digest,
-            "batch_admission": self.packets.admission,
             "environment": self.environment.catalog_row(),
             "workspace": self.workspace.catalog_row() if self.workspace else None,
             "operations": [operation.catalog_row() for operation in self.operations],
@@ -437,41 +353,6 @@ def _workspace(raw: Mapping[str, Any], descriptor: Path) -> WorkspacePolicy | No
             f"{descriptor} workspace.default_base must be non-empty"
         )
     fields: dict[str, Any] = {}
-    if "agent_memory_max" in raw_workspace:
-        memory_max = raw_workspace["agent_memory_max"]
-        if (
-            not isinstance(memory_max, str)
-            or _MEMORY_SIZE.fullmatch(memory_max) is None
-        ):
-            raise ProjectConfigError(
-                f"{descriptor} workspace.agent_memory_max must be a systemd size such as 10G"
-            )
-        fields["agent_memory_max"] = memory_max
-    if "verify" in raw_workspace:
-        raw_verify = raw_workspace["verify"]
-        if (
-            not isinstance(raw_verify, Mapping)
-            or set(raw_verify) - _VERIFY_PROFILES
-            or any(
-                not isinstance(value, str) or not value for value in raw_verify.values()
-            )
-        ):
-            raise ProjectConfigError(
-                f"{descriptor} workspace.verify must map focused/candidate/corpus to operation names"
-            )
-        fields["verify"] = dict(raw_verify)
-    if "publish" in raw_workspace:
-        if raw_workspace["publish"] not in PUBLISH_POLICIES:
-            raise ProjectConfigError(
-                f"{descriptor} workspace.publish must be one of {sorted(PUBLISH_POLICIES)}"
-            )
-        fields["publish"] = raw_workspace["publish"]
-    if "review" in raw_workspace:
-        if raw_workspace["review"] not in REVIEW_POLICIES:
-            raise ProjectConfigError(
-                f"{descriptor} workspace.review must be one of {sorted(REVIEW_POLICIES)}"
-            )
-        fields["review"] = raw_workspace["review"]
     if "retain_artifacts" in raw_workspace:
         patterns = _optional_string_list(
             raw_workspace["retain_artifacts"], "workspace.retain_artifacts"
@@ -484,70 +365,6 @@ def _workspace(raw: Mapping[str, Any], descriptor: Path) -> WorkspacePolicy | No
                 )
         fields["retain_artifacts"] = patterns
     return WorkspacePolicy(root=Path(root), default_base=default_base, **fields)
-
-
-def _packets(raw: Mapping[str, Any], root: Path, descriptor: Path) -> PacketsPolicy:
-    packets = raw.get("packets", {})
-    if not isinstance(packets, Mapping):
-        raise ProjectConfigError(f"{descriptor} [packets] must be a table")
-    _warn_unknown(descriptor, "[packets]", set(packets) - _PACKETS_FIELDS)
-    defaults = packets.get("defaults", {})
-    if not isinstance(defaults, Mapping) or set(defaults) - set(_PACKETS_DEFAULTS):
-        raise ProjectConfigError(
-            f"{descriptor} [packets.defaults] may set only "
-            + ", ".join(_PACKETS_DEFAULTS)
-        )
-    admission = packets.get("admission", "open" if "packets" in raw else "closed")
-    if admission not in ("open", "closed"):
-        raise ProjectConfigError(
-            f"{descriptor} packets.admission must be open or closed"
-        )
-    fields: dict[str, Any] = {"admission": admission}
-    for name in ("template", "atlas_dir"):
-        if name in packets:
-            value = packets[name]
-            if not isinstance(value, str) or not value:
-                raise ProjectConfigError(
-                    f"{descriptor} packets.{name} must be a non-empty path"
-                )
-            path = Path(value)
-            fields[name] = path if path.is_absolute() else root / path
-    for name in _PACKETS_DEFAULTS:
-        value = packets.get(name, defaults.get(name))
-        if value is None:
-            continue
-        if not isinstance(value, str) or not value:
-            raise ProjectConfigError(
-                f"{descriptor} packets.{name} must be a non-empty string"
-            )
-        fields[name] = value
-    raw_review = packets.get("review")
-    if raw_review is not None:
-        if (
-            not isinstance(raw_review, Mapping)
-            or set(raw_review) != set(_PACKETS_REVIEW)
-            or any(
-                not isinstance(value, str) or not value for value in raw_review.values()
-            )
-        ):
-            raise ProjectConfigError(
-                f"{descriptor} [packets.review] must set exactly "
-                + ", ".join(_PACKETS_REVIEW)
-            )
-        fields["review"] = dict(raw_review)
-    raw_map = packets.get("model_policy", {})
-    if not isinstance(raw_map, Mapping):
-        raise ProjectConfigError(f"{descriptor} packets.model_policy must be a table")
-    policy_map: dict[str, tuple[str, str]] = {}
-    for policy, value in raw_map.items():
-        backend = value.get("backend") if isinstance(value, Mapping) else None
-        model = value.get("model") if isinstance(value, Mapping) else None
-        if not isinstance(backend, str) or not isinstance(model, str):
-            raise ProjectConfigError(
-                f"{descriptor} packets.model_policy entries need backend and model"
-            )
-        policy_map[str(policy)] = (backend, model)
-    return PacketsPolicy(model_policy=policy_map, **fields)
 
 
 def _admission(name: str, definition: Any, descriptor: Path) -> AdmissionEnvelope:
@@ -676,38 +493,7 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         _operation(str(name), definition, descriptor)
         for name, definition in sorted(raw_operations.items())
     )
-    operation_names = {operation.name for operation in operations}
     workspace = _workspace(raw, descriptor)
-    if workspace is not None:
-        unknown_verifiers = {
-            name
-            for profile, name in workspace.verify.items()
-            if not (profile == "candidate" and name.startswith("hosted:"))
-            and name not in operation_names
-        }
-        if unknown_verifiers:
-            raise ProjectConfigError(
-                f"{descriptor} workspace verification operation(s) are undeclared: "
-                + ", ".join(sorted(unknown_verifiers))
-            )
-        # A worker's focused verification is compiled as
-        # `job start <project> <focused> --workspace <worktree>` (start.py's
-        # focused_verification), and launch refuses any checkout that names its
-        # own tree anywhere but that tree. So a focused profile naming a
-        # `default` operation cannot execute for the batch it exists to serve:
-        # every worker's verification would raise JobError. Refuse the declaration here rather than let each packet
-        # discover it (sinnix-59zd). Required selectors are supported by adding
-        # an explicit placeholder to that command.
-        focused = workspace.verify.get("focused")
-        focused_operation = next(
-            (operation for operation in operations if operation.name == focused), None
-        )
-        if focused_operation is not None and focused_operation.checkout != "any":
-            raise ProjectConfigError(
-                f"{descriptor} workspace.verify.focused must name an operation that runs "
-                f"on a worker worktree, but {focused} declares "
-                f'checkout = "{focused_operation.checkout}"'
-            )
     return ProjectAdapter(
         project_id=project_id,
         display_name=display_name,
@@ -717,7 +503,6 @@ def load_project_adapter(root: Path) -> ProjectAdapter:
         environment=_environment(raw, descriptor),
         workspace=workspace,
         operations=operations,
-        packets=_packets(raw, root, descriptor),
     )
 
 

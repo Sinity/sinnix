@@ -22,10 +22,10 @@ import pytest
 from agentctl import launch as launch_module
 from agentctl import pueue as pueue_module
 from agentctl.config import Config
-from agentctl.prompts import PromptError
 from agentctl.pueue import PueueError, PueueGroupError, PueueTimeout, Status, Task
+from agentctl.task_reads import TaskReadError
 
-# A worker result's required self-review narration (see results.SELF_REVIEW_SCHEMA).
+# Historical self-review fields retained in synthetic original-run fixtures.
 SELF_REVIEW: dict[str, Any] = {
     "checklists": ["worker-contract"],
     "passes": 1,
@@ -499,7 +499,9 @@ class FakeBd:
         try:
             return dict(self.beads[bead_id])
         except KeyError as error:
-            raise PromptError(f"bd show {bead_id} returned an invalid bead") from error
+            raise TaskReadError(
+                f"bd show {bead_id} returned an invalid bead"
+            ) from error
 
     def list(self) -> Sequence[Mapping[str, Any]]:
         return [dict(bead) for bead in self.beads.values()]
@@ -546,19 +548,6 @@ inherit = ["PATH"]
 [workspace]
 root = "{worktrees}"
 default_base = "origin/master"
-agent_memory_max = "10G"
-verify = {{ focused = "verify_quick", candidate = "check", corpus = "verify" }}
-publish = "master"
-
-[packets]
-template = "contract.md"
-atlas_dir = "atlas"
-
-[packets.defaults]
-backend = "codex"
-model = "fixture-model"
-effort = "low"
-
 [operations.check]
 description = "Fixture check"
 exec = ["true"]
@@ -594,11 +583,6 @@ def write_project(root: Path, *, worktrees: Path | None = None) -> Path:
     (root / ".agentctl" / "project.toml").write_text(
         DESCRIPTOR.format(worktrees=worktrees or root.parent / "worktrees")
     )
-    (root / "contract.md").write_text(
-        "# Worker contract\n\nCommit by path, push, never merge.\n"
-    )
-    (root / "atlas").mkdir(exist_ok=True)
-    (root / "atlas" / "core.md").write_text("# core\n")
     return root
 
 
@@ -609,13 +593,8 @@ def project_root(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def config(tmp_path: Path, project_root: Path) -> Config:
-    runner = tmp_path / "runner.sh"
-    runner.write_text("#!/bin/sh\nexit 0\n")
-    runner.chmod(0o755)
     return Config(
         project_roots=(project_root,),
-        agent_runner=runner,
-        worker_contract=project_root / "contract.md",
         event_spool=tmp_path / "events.jsonl",
         state_dir=tmp_path / "state",
         agentctl_executable="/fixture/agentctl",
