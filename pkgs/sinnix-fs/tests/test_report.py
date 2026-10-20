@@ -1,3 +1,4 @@
+import sys
 import json
 import runpy
 import stat
@@ -7,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-MODULE = runpy.run_path(str(Path(__file__).parents[3] / "scripts/sinnix-file-catalog"))
+MODULE = runpy.run_path(str(Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)))
 TEMPLATE = '<html data-accent=""><head><title>Example</title></head><body><script>/* shared controls */</script></body></html>'
 
 
@@ -82,10 +83,10 @@ def test_cli_publishes_private_report(tmp_path):
     template = tmp_path / "template.html"
     template.write_text(TEMPLATE, encoding="utf-8")
     output = tmp_path / "reports" / "catalog.html"
-    script = Path(__file__).parents[3] / "scripts/sinnix-file-catalog"
+    script = Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)
     result = subprocess.run(
         [
-            str(script),
+            sys.executable, str(script),
             "--catalog",
             str(catalog),
             "report",
@@ -478,7 +479,7 @@ def test_nonregular_input_keeps_previous_report(tmp_path, source):
     os.mkfifo(blocked)
     result = subprocess.run(
         [
-            str(Path(__file__).parents[3] / "scripts/sinnix-file-catalog"),
+            sys.executable, str(Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)),
             "--catalog",
             str(catalog),
             "report",

@@ -169,7 +169,7 @@ def observe_location(tmp_path, catalog, asset_id, action, source=None):
         "reason": "location transition",
     }
     if source is not None:
-        script = Path(__file__).parents[3] / "scripts" / "sinnix-file-catalog"
+        script = Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)
         row["expected_identity"] = runpy.run_path(str(script))["identity"](source)
     path = tmp_path / "location-observations.json"
     path.write_text(json.dumps([row]))

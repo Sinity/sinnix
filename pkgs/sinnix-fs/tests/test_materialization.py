@@ -1,6 +1,7 @@
 """Failure preservation for the filesystem index's derived artifacts."""
 
 from __future__ import annotations
+import sys
 
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -8,11 +9,11 @@ from types import SimpleNamespace
 
 import pytest
 
-SCRIPT = Path(__file__).parents[3] / "scripts" / "sinnix-fs"
+SCRIPT = Path(__import__("sinnix_fs.inventory", fromlist=["__file__"]).__file__)
 
 
 def load_script():
-    return SourceFileLoader("sinnix_fs", str(SCRIPT)).load_module()
+    return SourceFileLoader("sinnix_inventory", str(SCRIPT)).load_module()
 
 
 def test_failed_materialization_keeps_the_previous_complete_pair(tmp_path, monkeypatch):

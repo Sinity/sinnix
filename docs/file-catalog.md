@@ -1,28 +1,21 @@
 # File catalog
 
-`sinnix-file-catalog` maintains a JSON catalog of files and collections whose
+`sinnix fs catalog` maintains a JSON catalog of files and collections whose
 observations need to remain joined to the object that was inspected. It only
 changes the catalog; it never moves, renames, hashes, or deletes payloads.
 
-The tools are local to the Sinnix checkout. Run these examples from the checkout
-with its scripts and Python library available:
-
-```sh
-export PATH="$PWD/scripts:$PATH"
-export PYTHONPATH="$PWD/pkgs/sinnix-lib${PYTHONPATH:+:$PYTHONPATH}"
-```
-
-Terminal output quotes paths and escapes control characters. Pipe output retains
-raw resolved paths and JSON data; display formatting does not change catalog bytes.
+The installed `sinnix fs catalog` command owns these operations. It is available
+through the same package as scanning, classification and navigation checks;
+no checkout-local PATH or Python import configuration is needed.
 
 The catalog path is always explicit:
 
 ```sh
-sinnix-file-catalog --catalog /path/catalog.json import observations.json
-sinnix-file-catalog --catalog /path/catalog.json search transcript
-sinnix-file-catalog --catalog /path/catalog.json show ASSET-UUID
-sinnix-file-catalog --catalog /path/catalog.json relocate ASSET-UUID /new/path
-sinnix-file-catalog --catalog /path/catalog.json validate
+sinnix fs catalog --catalog /path/catalog.json import observations.json
+sinnix fs catalog --catalog /path/catalog.json search transcript
+sinnix fs catalog --catalog /path/catalog.json show ASSET-UUID
+sinnix fs catalog --catalog /path/catalog.json relocate ASSET-UUID /new/path
+sinnix fs catalog --catalog /path/catalog.json validate
 ```
 
 An observations file is a JSON list. Each item has `current_path`, `title`,
@@ -100,12 +93,12 @@ relationships. Distinguish a whole still image, a sampled video frame, an
 opening excerpt, embedded metadata and a filename-only classification. Keep
 private annotations outside the repository.
 
-`sinnix-file-catalog report` renders an offline searchable HTML view from the
+`sinnix fs catalog report` renders an offline searchable HTML view from the
 catalog and the HTML report template. It includes inspection limits, former
 paths and links between related records:
 
 ```sh
-sinnix-file-catalog --catalog /path/catalog.json report \
+sinnix fs catalog --catalog /path/catalog.json report \
   --template dots/_ai/skills/html-report/templates/report.html \
   --output /path/catalog.html
 ```
@@ -123,9 +116,9 @@ of an active link. Rendering does not open or validate evidence payloads.
 Workers write separate observation lists. Import a reviewed batch atomically:
 
 ```sh
-sinnix-file-catalog --catalog /path/catalog.json import part-a.json part-b.json --on-conflict record
-sinnix-file-catalog --catalog /path/catalog.json coverage --kind collection
-sinnix-file-catalog --catalog /path/catalog.json search geology --kind collection --limit 20 --offset 0
+sinnix fs catalog --catalog /path/catalog.json import part-a.json part-b.json --on-conflict record
+sinnix fs catalog --catalog /path/catalog.json coverage --kind collection
+sinnix fs catalog --catalog /path/catalog.json search geology --kind collection --limit 20 --offset 0
 ```
 
 Duplicate paths within one batch are refused so the coordinator must reconcile overlapping assignments. `record` preserves existing conflicting annotations and stores proposed values with their incoming inspection evidence in `annotation_conflicts`; compatible new fields and list observations are retained. `error` refuses a conflicting batch. The default `replace` retains the original update behavior for deliberate revisions. All modes enforce file identity and preserve inspection snapshots. A changed device number is still insufficient evidence to rebind an old observation.
@@ -154,11 +147,11 @@ The renderer remains an offline projection of one JSON catalog. It sends no anno
 
 `resolve HISTORICAL-PATH` uses retained collection boundaries and path history to resolve references without filesystem aliases. An address reused for a different cataloged object requires `--id ASSET-UUID`; unavailable records remain unavailable.
 
-The report renderer accepts `--judgments` for authoritative current classifications, displayed separately from original asset observations. Shared role definitions normalize legacy categories while retaining their attributed wording. Raw catalog and navigation sources stay private. `sinnix-file-catalog publish --publication MANIFEST --output DIR` stages an explicit manifest of individual files; it refuses directory links, unsafe URLs and sources beneath declared private roots. Subject homes own canonical analyses, while the site holds the selected publication projection.
+The report renderer accepts `--judgments` for authoritative current classifications, displayed separately from original asset observations. Shared role definitions normalize legacy categories while retaining their attributed wording. Raw catalog and navigation sources stay private. `sinnix fs catalog publish --publication MANIFEST --output DIR` stages an explicit manifest of individual files; it refuses directory links, unsafe URLs and sources beneath declared private roots. Subject homes own canonical analyses, while the site holds the selected publication projection.
 
 ## Current navigation checks
 
-`sinnix-file-catalog links --manifest /path/navigation-audit.json` checks local
+`sinnix fs catalog links --manifest /path/navigation-audit.json` checks local
 Markdown links in explicitly selected current index documents. The JSON
 manifest has `schema_version: 1`, an absolute-path `documents` list, and an
 optional absolute-path `external_roots` list. Targets below mounted external
@@ -173,7 +166,7 @@ and does not scan imported packages or historical reports.
 
 The workstation's private manifest is owned by the report catalog. Run its
 declared `navigation_audit` operation after moving managed collections or
-editing current index documents. `sinnix-realm-layout-check` separately verifies declared managed
+editing current index documents. `sinnix fs layout` separately verifies declared managed
 containers and rejects recreation of retired paths.
 
 Navigation audits report denied and inaccessible targets separately from missing

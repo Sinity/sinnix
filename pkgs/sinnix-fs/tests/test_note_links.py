@@ -1,6 +1,7 @@
 """Synthetic tests for conservative note-link planning and pure rewrites."""
 
 from __future__ import annotations
+import sys
 
 import importlib.util
 import json
@@ -239,9 +240,9 @@ def test_cli_returns_a_plan_without_modifying_notes(tmp_path):
 
     source = note(tmp_path, "one.md", "[[two]]")
     note(tmp_path, "two.md", "body")
-    script = Path(__file__).parents[3] / "scripts" / "sinnix-fs"
+    script = Path(__import__("sinnix_fs.inventory", fromlist=["__file__"]).__file__)
     run = subprocess.run(
-        [sys.executable, str(script), "note-links", "--root", str(tmp_path)],
+        [sys.executable, str(script), "notes", "--root", str(tmp_path)],
         capture_output=True,
         text=True,
         timeout=10,
@@ -256,9 +257,9 @@ def test_cli_missing_scope_fails_without_edit_proposals(tmp_path):
     import subprocess
     import sys
 
-    script = Path(__file__).parents[3] / "scripts" / "sinnix-fs"
+    script = Path(__import__("sinnix_fs.inventory", fromlist=["__file__"]).__file__)
     run = subprocess.run(
-        [sys.executable, str(script), "note-links", "--root", str(tmp_path / "absent")],
+        [sys.executable, str(script), "notes", "--root", str(tmp_path / "absent")],
         capture_output=True,
         text=True,
         timeout=10,

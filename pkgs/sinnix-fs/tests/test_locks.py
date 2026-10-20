@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).parents[3] / "scripts" / "sinnix-fs"
+SCRIPT = Path(__import__("sinnix_fs.inventory", fromlist=["__file__"]).__file__)
 CHILD = r"""
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -83,7 +83,7 @@ def test_regular_import_lock_still_serializes_writers(tmp_path):
                 CHILD,
                 str(SCRIPT),
                 str(tmp_path),
-                "judgments",
+                "classify",
                 "announce",
             ],
             stdout=subprocess.PIPE,

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from test_catalog import assets, import_rows, invoke, observation
 
-SCRIPT = Path(__file__).parents[3] / "scripts" / "sinnix-file-catalog"
+SCRIPT = Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)
 
 
 def test_revision_keeps_asset_and_old_inspection_but_refuses_stale_review(tmp_path):

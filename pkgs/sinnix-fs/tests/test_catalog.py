@@ -1,4 +1,5 @@
 from __future__ import annotations
+import sys
 
 import json
 import stat
@@ -6,12 +7,12 @@ import subprocess
 import uuid
 from pathlib import Path
 
-SCRIPT = Path(__file__).parents[3] / "scripts" / "sinnix-file-catalog"
+SCRIPT = Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)
 
 
 def invoke(catalog: Path, command: str, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [str(SCRIPT), "--catalog", str(catalog), command, *args],
+        [sys.executable, str(SCRIPT), "--catalog", str(catalog), command, *args],
         text=True,
         capture_output=True,
         check=False,
@@ -504,7 +505,7 @@ def test_nonregular_catalog_fails_promptly(tmp_path):
     catalog = tmp_path / "catalog.fifo"
     os.mkfifo(catalog)
     result = subprocess.run(
-        [str(SCRIPT), "--catalog", str(catalog), "coverage"],
+        [sys.executable, str(SCRIPT), "--catalog", str(catalog), "coverage"],
         text=True,
         capture_output=True,
         timeout=2,
@@ -567,7 +568,7 @@ def test_nonregular_import_preserves_authored_catalog(tmp_path):
     source = tmp_path / "observations.fifo"
     os.mkfifo(source)
     result = subprocess.run(
-        [str(SCRIPT), "--catalog", str(catalog), "import", str(source)],
+        [sys.executable, str(SCRIPT), "--catalog", str(catalog), "import", str(source)],
         text=True,
         capture_output=True,
         timeout=2,

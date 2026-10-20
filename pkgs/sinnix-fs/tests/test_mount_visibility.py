@@ -6,7 +6,7 @@ import stat
 from pathlib import Path
 from types import SimpleNamespace
 
-SCRIPT = Path(__file__).parents[3] / "scripts" / "sinnix-file-catalog"
+SCRIPT = Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)
 
 
 def diagnosis_with_mounts(monkeypatch, mountinfo, path, *, exists=False):

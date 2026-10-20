@@ -41,12 +41,12 @@ mkServiceModule {
     {
       description = "Rebuild the filesystem inventory, content scan and judgment ledger";
       user = config.sinnix.user.name;
-      # One unit, one script invocation: `sinnix-fs run` chains inventory,
+      # One unit, one script invocation: `sinnix-fs scan` chains inventory,
       # content and ledger itself -- the ledger step reads the scan's own
       # DuckDB output, so splitting into three units would need a
       # dependency chain for no benefit -- nothing else consumes the scan
       # without the ledger materialized on top of it.
-      execStart = "${scriptPkgs.sinnix-fs}/bin/sinnix-fs run --out-dir ${lib.escapeShellArg indexDir}";
+      execStart = "${scriptPkgs.sinnix-fs}/bin/sinnix-fs scan --out-dir ${lib.escapeShellArg indexDir}";
       serviceConfig = {
         TimeoutStartSec = cfg.maxSecondsPerRun;
         # DuckDB also allocates outside its buffer manager. A soft boundary

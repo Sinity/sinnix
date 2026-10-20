@@ -1,4 +1,5 @@
 """Current link audit catches absent local targets without probing offline stores."""
+import sys
 
 import json
 import subprocess
@@ -6,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "sinnix-file-catalog"
+SCRIPT = Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)
 
 
 def test_audit_relative_reference_encoded_and_offline_links(tmp_path):
@@ -26,7 +27,7 @@ def test_audit_relative_reference_encoded_and_offline_links(tmp_path):
         )
     )
     result = subprocess.run(
-        [str(SCRIPT), "links", "--manifest", str(manifest), "--json"],
+        [sys.executable, str(SCRIPT), "links", "--manifest", str(manifest), "--json"],
         capture_output=True,
         text=True,
     )
@@ -42,7 +43,7 @@ def test_audit_relative_reference_encoded_and_offline_links(tmp_path):
     document.write_text("[present](a%20b.md)\n")
     assert (
         subprocess.run(
-            [str(SCRIPT), "links", "--manifest", str(manifest)], capture_output=True
+            [sys.executable, str(SCRIPT), "links", "--manifest", str(manifest)], capture_output=True
         ).returncode
         == 0
     )
@@ -63,10 +64,10 @@ def test_retired_managed_child_fails_without_rejecting_native_package_names(tmp_
         (realm / "device/sinnix-prime" / relative).mkdir(parents=True, exist_ok=True)
     (realm / "library/model/native-package/embeddings").mkdir(parents=True)
     env = {**os.environ, "LAKE_LINT_ROOT_PREFIX": str(tmp_path)}
-    script = SCRIPT.with_name("sinnix-realm-layout-check")
-    assert subprocess.run([str(script)], env=env, capture_output=True).returncode == 0
+    script = Path(__import__("sinnix_fs.layout", fromlist=["__file__"]).__file__)
+    assert subprocess.run([sys.executable, str(script)], env=env, capture_output=True).returncode == 0
     (realm / "device/sinnix-prime/peripherals").mkdir()
-    result = subprocess.run([str(script)], env=env, capture_output=True, text=True)
+    result = subprocess.run([sys.executable, str(script)], env=env, capture_output=True, text=True)
     assert result.returncode == 1
     assert "RETIRED managed path recreated" in result.stdout
 
@@ -500,7 +501,7 @@ def test_malformed_links_do_not_block_following_entrances(tmp_path, malformed):
     manifest = tmp_path / "manifest.json"
     manifest.write_text(json.dumps({"schema_version": 1, "documents": [str(document)]}))
     result = subprocess.run(
-        [str(SCRIPT), "links", "--manifest", str(manifest), "--json"],
+        [sys.executable, str(SCRIPT), "links", "--manifest", str(manifest), "--json"],
         capture_output=True,
         text=True,
         timeout=2,
@@ -539,7 +540,7 @@ def test_manifest_fifo_fails_promptly(tmp_path):
     manifest = tmp_path / "manifest.fifo"
     os.mkfifo(manifest)
     result = subprocess.run(
-        [str(SCRIPT), "links", "--manifest", str(manifest), "--json"],
+        [sys.executable, str(SCRIPT), "links", "--manifest", str(manifest), "--json"],
         capture_output=True,
         text=True,
         timeout=2,

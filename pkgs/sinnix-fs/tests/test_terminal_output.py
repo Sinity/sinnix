@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).parents[3] / "scripts" / "sinnix-file-catalog"
+SCRIPT = Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)
 
 
 class Output(io.StringIO):
@@ -60,7 +60,7 @@ def test_error_paths_cannot_execute_terminal_controls(monkeypatch, terminal):
         patch.setattr(module.sys, "stderr", output)
         assert module.fail(value) == 2
     expected = json.dumps(value, ensure_ascii=True) if terminal else value
-    assert output.getvalue() == "sinnix-file-catalog: " + expected + "\n"
+    assert output.getvalue() == "sinnix fs catalog: " + expected + "\n"
 
 
 @pytest.mark.parametrize("terminal", [False, True])

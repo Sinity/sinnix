@@ -185,13 +185,7 @@
         # Provably fails when: either direction of the /realm taxonomy
         # assertion is dropped, or a retired level-1 name is readmitted to the
         # manifest. Verified by all three mutations.
-        realm-layout-check-suite = mkScriptSuite {
-          name = "sinnix-realm-layout-check";
-          suiteDir = ../../pkgs/sinnix-realm-layout-check/tests;
-          scripts = [ "sinnix-realm-layout-check" ];
-          extraPythonPackages = [ sinnix-lib ];
-          nativeBuildInputs = [ pkgs.ripgrep ];
-        };
+
         stt-suite = mkScriptSuite {
           name = "sinnix-stt";
           suiteDir = ../../pkgs/sinnix-stt/tests;
@@ -254,16 +248,7 @@
             pkgs.util-linux
           ];
         };
-        fs-materialization-suite = mkScriptSuite {
-          name = "sinnix-fs";
-          suiteDir = ../../pkgs/sinnix-fs/tests;
-          scripts = [ "sinnix-fs" ];
-          extraPythonPackages = [ sinnix-lib ];
-          nativeBuildInputs = [
-            pkgs.duckdb
-            pkgs.file
-          ];
-        };
+
         quest-player-suite = mkScriptSuite {
           name = "sinnix-quest-player";
           suiteDir = ../../pkgs/sinnix-quest-player/tests;

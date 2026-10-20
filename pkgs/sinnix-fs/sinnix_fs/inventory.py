@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-# @sinnix-package
-# description: Publish and query coherent filesystem-index generations
-# runtimeInputs: python3 duckdb coreutils file
-# pythonPackages: @sinnix-lib
 
 """Publish coherent filesystem inventories and judgment materializations.
 
@@ -1549,17 +1545,17 @@ def cmd_judgments(args: argparse.Namespace) -> int:
         print("Long facet values and role details are retained once here; table references carry the full text without repeating it for every descendant.\n")
         for text, number in shared_values.items():
             print(f'<a id="facet-value-{number}"></a>\n\n### Value {number}\n\n{cell(text)}\n')
-    print("\nUse `sinnix-fs judgments explain /absolute/path` for winning rule targets, dates, methods and evidence. A `preservation` classification never authorizes deletion. Native application state, workflow dependencies and independent backup evidence still control actual maintenance.")
+    print("\nUse `sinnix fs classify explain /absolute/path` for winning rule targets, dates, methods and evidence. A `preservation` classification never authorizes deletion. Native application state, workflow dependencies and independent backup evidence still control actual maintenance.")
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="sinnix-fs", description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="command", required=True)
 
     led = sub.add_parser(
-        "ledger", description=LEDGER_DOC,
+        "refresh", description=LEDGER_DOC,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="Materialize the judgment ledger into resolved judgments, prefix inheritance and a coverage report",
     )
@@ -1569,7 +1565,7 @@ def main() -> int:
     led.set_defaults(func=cmd_ledger)
 
     run = sub.add_parser(
-        "run", description=cmd_run.__doc__,
+        "scan", description=cmd_run.__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="Build and publish one fresh filesystem-index generation",
     )
@@ -1586,7 +1582,7 @@ def main() -> int:
     query.add_argument("--database", choices=list(RELATIONS), default="inventory.duckdb")
     query.add_argument("sql")
     query.set_defaults(func=cmd_query)
-    judgments = sub.add_parser("judgments", help="Read or import authored classifications without scanning or materializing")
+    judgments = sub.add_parser("classify", help="Read or import authored classifications without scanning or materializing")
     judgments.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"))
     actions = judgments.add_subparsers(dest="action", required=True)
     explain = actions.add_parser("explain", help="Explain lexical path classification with evidence; no payload access")
@@ -1605,7 +1601,7 @@ def main() -> int:
     import_judgments.add_argument("--expected-sha256", help="Refuse if the existing ledger changed since review")
     judgments.set_defaults(func=cmd_judgments)
     from sinnix_lib.note_links import command as note_links_command
-    note_links = sub.add_parser("note-links", help="Plan unambiguous legacy Markdown links without writing notes")
+    note_links = sub.add_parser("notes", help="Plan unambiguous legacy Markdown links without writing notes")
     note_links.add_argument("--root", type=Path, action="append", required=True)
     note_links.add_argument("--reference-root", type=Path, action="append", default=[])
     note_links.add_argument("--exclude-component", action="append", default=[])
@@ -1614,11 +1610,11 @@ def main() -> int:
     note_links.add_argument("--max-file-bytes", type=int, default=2 << 20)
     note_links.add_argument("--max-depth", type=int, default=12)
     note_links.set_defaults(func=note_links_command)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     try:
         return args.func(args)
     except (ValueError, OSError) as exc:
-        if args.command not in ("judgments", "note-links"):
+        if args.command not in ("classify", "notes"):
             raise
         print(f"sinnix-fs {args.command}: {exc}", file=sys.stderr)
         return 2

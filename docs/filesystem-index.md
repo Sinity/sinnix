@@ -3,28 +3,28 @@
 `sinnix fs` (package `sinnix-fs`) keeps an inventory of directories, bounded
 content fingerprints, and views of the authored file judgments. It does not own
 any storage and never deletes or deduplicates anything. The weekly
-`sinnix-fs-index.service` runs `sinnix-fs run --out-dir /realm/state/fs-index`.
+`sinnix-fs-index.service` runs `sinnix fs scan --out-dir /realm/state/fs-index`.
 
 ## Commands
 
 ```text
-sinnix fs run --out-dir INDEX         # fresh scan into a new generation
-sinnix fs ledger --index-dir INDEX    # reuse the last scan, refresh classifications
+sinnix fs scan --out-dir INDEX         # fresh scan into a new generation
+sinnix fs refresh --index-dir INDEX    # reuse the last scan, refresh classifications
 sinnix fs status --index-dir INDEX    # validity, freshness, coverage, last attempt
 sinnix fs query --index-dir INDEX 'SELECT * FROM coverage'   # read-only SQL
-sinnix fs judgments explain|audit|report|import|vocabulary
-sinnix fs note-links --root DIR [--reference-root DIR]       # plan wiki-link repairs
-sinnix realm-layout-check --refs            # literal /realm paths in source must exist
+sinnix fs classify explain|audit|report|import|vocabulary
+sinnix fs links notes --root DIR [--reference-root DIR]       # plan wiki-link repairs
+sinnix fs layout --refs            # literal /realm paths in source must exist
 ```
 
 ## Generations
 
-Each `run` or `ledger` builds a complete generation in a private directory,
+Each `scan` or `refresh` builds a complete generation in a private directory,
 reopens and validates every database and Parquet file, then switches one
 `current` pointer. A failed attempt leaves the previous generation in place and
 keeps its own candidate for inspection; `status` lists such leftovers and says
 whether a writer is still active. Older generations are kept until reviewed.
-`ledger --retained-inputs PATH` rebuilds from a retained scan and records that
+`refresh --retained-inputs PATH` rebuilds from a retained scan and records that
 the scan was not fresh.
 
 DuckDB sessions use a 512 MiB buffer and two workers and spill to disk beside
@@ -93,7 +93,7 @@ Exit 2 means incomplete input, 1 that links were found, 0 none.
 
 ## Literal references
 
-`sinnix realm-layout-check --refs` finds literal `/realm` paths in sinnix,
+`sinnix fs layout --refs` finds literal `/realm` paths in sinnix,
 Lynchpin and Polylogue source and exits 1 when a referenced path is missing.
 Test fixtures and docstrings are classified `fixture` and `cosmetic` and not
 checked, so a missing example is not a broken consumer. An unreachable

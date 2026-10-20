@@ -52,6 +52,13 @@ let
   discovered = discovery.discover (inputs.self + "/scripts");
 
   registry = discovered.registry // {
+    sinnix-fs = {
+      description = "Inspect, classify, catalog and maintain the filesystem";
+      package = externalPackages.sinnix-fs;
+      runtimeInputs = [ ];
+      owner = "pkgs/sinnix-fs";
+      docs = "docs/filesystem-index.md";
+    };
     # The witness and its login helper are packaged entry points, so script
     # discovery cannot expose their existing operator commands by itself.
     sinnix-capture-xiaomi-cloud = {
@@ -446,6 +453,7 @@ let
     # locks, notify, systemd probes. Python packages here depend on
     # it instead of carrying private copies of these helpers.
     sinnix-lib = pkgs.callPackage ../pkgs/sinnix-lib/pkg.nix { };
+    sinnix-fs = pkgs.callPackage ../pkgs/sinnix-fs/pkg.nix { inherit sinnix-lib; };
 
     # Shared pairwise/choice-set preference ranking engine (importable, not
     # a CLI): Plackett-Luce fit, stopping statistic, selection, draw

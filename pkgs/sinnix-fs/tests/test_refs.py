@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-SCRIPT = Path(__file__).parents[3] / "scripts/sinnix-realm-layout-check"
+SCRIPT = Path(__import__("sinnix_fs.layout", fromlist=["__file__"]).__file__)
 
 
 def load_refs():
@@ -44,7 +44,7 @@ def test_unavailable_scan_fails_rather_than_passing(
         monkeypatch.setattr(refs.subprocess, "run", fail)
     monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--refs"])
     assert refs.main() == 2
-    assert "sinnix-realm-layout-check:" in capsys.readouterr().err
+    assert "sinnix fs layout:" in capsys.readouterr().err
 
 
 def test_readable_empty_source_is_a_valid_empty_result(tmp_path):

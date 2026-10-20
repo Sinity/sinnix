@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-SCRIPT = Path(__file__).parents[3] / "scripts" / "sinnix-file-catalog"
+SCRIPT = Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)
 BASE = {
     "device": 1,
     "inode": 2,

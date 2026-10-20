@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-# @sinnix-package
-# description: Maintain an evidence catalog of files and collections, render it, audit index links, stage the report site
-# runtimeInputs: python3 util-linux btrfs-progs
-# pythonPackages: @sinnix-lib
 
 """Maintain attributed file observations and their location history.
 
@@ -62,7 +58,7 @@ def entry_exists(path: Path) -> bool:
 
 def fail(message: str) -> int:
     display = json.dumps(message, ensure_ascii=True) if sys.stderr.isatty() else message
-    print(f"sinnix-file-catalog: {display}", file=sys.stderr)
+    print(f"sinnix fs catalog: {display}", file=sys.stderr)
     return 2
 
 
@@ -1428,7 +1424,7 @@ def cmd_publish(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(prog="sinnix fs catalog")
     parser.add_argument("--catalog", help="catalog JSON path (every command but links and publish)")
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("import"); p.add_argument("observations", nargs="+")

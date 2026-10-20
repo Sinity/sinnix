@@ -59,7 +59,7 @@ in
     ./tests/runtime.nix
     ./tests/script-suites.nix
     ./tests/phone-bcr.nix
-    ./tests/file-catalog.nix
+    ./tests/filesystem.nix
     ./tests/report-navigation.nix
     ./tests/pkg-suites.nix
     ./tests/hub-server.nix

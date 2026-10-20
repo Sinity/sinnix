@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-SCRIPT = Path(__file__).parents[3] / "scripts" / "sinnix-fs"
+SCRIPT = Path(__import__("sinnix_fs.inventory", fromlist=["__file__"]).__file__)
 
 
 def load():
@@ -239,7 +239,7 @@ def test_cli_failure_is_bounded_and_has_no_partial_output(tmp_path):
         [
             sys.executable,
             str(SCRIPT),
-            "judgments",
+            "classify",
             "--index-dir",
             str(tmp_path),
             "explain",

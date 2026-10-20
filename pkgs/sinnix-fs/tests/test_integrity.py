@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).parents[3] / "scripts" / "sinnix-fs"
+SCRIPT = Path(__import__("sinnix_fs.inventory", fromlist=["__file__"]).__file__)
 
 
 def load(host_policy=False):

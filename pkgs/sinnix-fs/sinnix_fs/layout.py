@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-# @sinnix-package
-# description: Assert root nodes match the shared filesystem taxonomy, or (--refs) that literal /realm paths in source exist
-# runtimeInputs: python3 ripgrep coreutils
-# pythonPackages: @sinnix-lib
 
 """Check /realm against its declared shape.
 
@@ -59,16 +55,16 @@ def check_taxonomy() -> int:
         try:
             node = metadata(root)
             if node is None:
-                print(f"sinnix-realm-layout-check: SKIP {root} (not present)", file=sys.stderr)
+                print(f"sinnix fs layout: SKIP {root} (not present)", file=sys.stderr)
                 skipped += 1
                 continue
             if not stat.S_ISDIR(node.st_mode):
-                print(f"sinnix-realm-layout-check: INVALID root (expected directory without alias): {root}")
+                print(f"sinnix fs layout: INVALID root (expected directory without alias): {root}")
                 status = 1
                 continue
             children = sorted(root.iterdir())
         except OSError as error:
-            print(f"sinnix-realm-layout-check: INACCESSIBLE root: {root}: {error}")
+            print(f"sinnix fs layout: INACCESSIBLE root: {root}: {error}")
             status = 1
             continue
         inspected += 1
@@ -78,27 +74,27 @@ def check_taxonomy() -> int:
         for path in children:
             try:
                 if path.name not in required | OPTIONAL[absolute] and not is_tool_cache(path):
-                    print(f"sinnix-realm-layout-check: UNEXPECTED node: {path}")
+                    print(f"sinnix fs layout: UNEXPECTED node: {path}")
                     status = 1
             except OSError as error:
-                print(f"sinnix-realm-layout-check: INACCESSIBLE node: {path}: {error}")
+                print(f"sinnix fs layout: INACCESSIBLE node: {path}: {error}")
                 status = 1
         for name in sorted(required):
             path = root / name
             try:
                 node = metadata(path)
             except OSError as error:
-                print(f"sinnix-realm-layout-check: INACCESSIBLE required node: {path}: {error}")
+                print(f"sinnix fs layout: INACCESSIBLE required node: {path}: {error}")
                 status = 1
                 continue
             if node is None:
-                print(f"sinnix-realm-layout-check: MISSING required node: {path}")
+                print(f"sinnix fs layout: MISSING required node: {path}")
             elif stat.S_ISLNK(node.st_mode):
-                print(f"sinnix-realm-layout-check: SYMLINK at canonical node: {path}")
+                print(f"sinnix fs layout: SYMLINK at canonical node: {path}")
             elif name == "INVENTORY.md" and not stat.S_ISREG(node.st_mode):
-                print(f"sinnix-realm-layout-check: WRONG TYPE (expected regular file): {path}")
+                print(f"sinnix fs layout: WRONG TYPE (expected regular file): {path}")
             elif name != "INVENTORY.md" and not stat.S_ISDIR(node.st_mode):
-                print(f"sinnix-realm-layout-check: WRONG TYPE (expected directory): {path}")
+                print(f"sinnix fs layout: WRONG TYPE (expected directory): {path}")
             else:
                 continue
             status = 1
@@ -113,24 +109,24 @@ def check_taxonomy() -> int:
                 node = metadata(path)
                 if node is not None and stat.S_ISDIR(node.st_mode):
                     continue
-                print(f"sinnix-realm-layout-check: INVALID managed directory: {path}")
+                print(f"sinnix fs layout: INVALID managed directory: {path}")
             except OSError as error:
-                print(f"sinnix-realm-layout-check: INACCESSIBLE managed directory: {path}: {error}")
+                print(f"sinnix fs layout: INACCESSIBLE managed directory: {path}: {error}")
             status = 1
         for relative in RETIRED_PATHS:
             path = realm / relative
             try:
                 if metadata(path) is not None:
-                    print(f"sinnix-realm-layout-check: RETIRED managed path recreated: {path}")
+                    print(f"sinnix fs layout: RETIRED managed path recreated: {path}")
                     status = 1
             except OSError as error:
-                print(f"sinnix-realm-layout-check: INACCESSIBLE retired-path check: {path}: {error}")
+                print(f"sinnix fs layout: INACCESSIBLE retired-path check: {path}: {error}")
                 status = 1
     if status == 0:
         if skipped:
-            print(f"sinnix-realm-layout-check: {inspected} present roots match taxonomy; {skipped} absent roots skipped")
+            print(f"sinnix fs layout: {inspected} present roots match taxonomy; {skipped} absent roots skipped")
         else:
-            print("sinnix-realm-layout-check: all roots match taxonomy")
+            print("sinnix fs layout: all roots match taxonomy")
     return status
 
 
@@ -291,11 +287,11 @@ def check_refs() -> int:
             missing.append((path, existing_ancestor(path)))
 
     if not missing:
-        print(f"sinnix-realm-layout-check: OK -- {len(unique_paths)} distinct live "
+        print(f"sinnix fs layout: OK -- {len(unique_paths)} distinct live "
               f"paths across {len(live)} references, all exist")
         return 0
 
-    print(f"sinnix-realm-layout-check: {len(missing)} of {len(unique_paths)} live "
+    print(f"sinnix fs layout: {len(missing)} of {len(unique_paths)} live "
           f"paths do not exist:", file=sys.stderr)
     for path, ancestor in missing:
         sites = [r for r in live if r["path"] == path]
@@ -308,20 +304,20 @@ def check_refs() -> int:
     return 1
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="sinnix fs layout", description=__doc__.splitlines()[0])
     parser.add_argument(
         "--refs",
         action="store_true",
         help="check literal /realm paths in source instead of the taxonomy",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not args.refs:
         return check_taxonomy()
     try:
         return check_refs()
     except (ScanError, OSError) as exc:
-        print(f"sinnix-realm-layout-check: {exc}", file=sys.stderr)
+        print(f"sinnix fs layout: {exc}", file=sys.stderr)
         return 2
 
 

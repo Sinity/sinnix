@@ -6,6 +6,7 @@ change needs no edit in this file and cannot be ratified by one.
 """
 
 from __future__ import annotations
+import sys
 
 import os
 import subprocess
@@ -13,15 +14,14 @@ from pathlib import Path
 
 from sinnix_lib.layout import ROOTS as LAYOUT_ROOTS
 
-ROOT = Path(__file__).parents[3]
-SCRIPT = ROOT / "scripts" / "sinnix-realm-layout-check"
+SCRIPT = Path(__import__("sinnix_fs.layout", fromlist=["__file__"]).__file__)
 
 ROOTS = tuple(root.lstrip("/") for root in LAYOUT_ROOTS)
 
 
 def run(prefix: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [str(SCRIPT)],
+        [sys.executable, str(SCRIPT)],
         env={**os.environ, "LAKE_LINT_ROOT_PREFIX": str(prefix)},
         capture_output=True,
         text=True,
