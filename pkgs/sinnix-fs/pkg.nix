@@ -11,6 +11,7 @@
   ripgrep,
   uv,
   compsize,
+  nix,
 }:
 python3Packages.buildPythonPackage {
   pname = "sinnix-fs";
@@ -37,6 +38,7 @@ python3Packages.buildPythonPackage {
         ripgrep
         uv
         compsize
+        nix
       ]
     }
   '';

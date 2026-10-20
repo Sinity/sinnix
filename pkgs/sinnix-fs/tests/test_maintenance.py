@@ -222,3 +222,49 @@ def test_explicit_offline_destination_defers_without_probing(monkeypatch):
     decision = m.admission(Path("/outer-realm"))
     assert not decision["admitted"] and decision["blocked"] == ["/outer-realm"]
     assert len(decision["volumes"]) == 1
+
+
+@pytest.fixture
+def store(monkeypatch, tmp_path):
+    root = tmp_path / "store"
+    root.mkdir()
+    monkeypatch.setattr(m, "NIX_STORE", root)
+    monkeypatch.setattr(m, "VOLUMES", ())
+    monkeypatch.setattr(m.shutil, "which", lambda name: "/synthetic/bin/" + name)
+    return root
+
+
+def test_nix_owner_keeps_native_root_authority_and_excludes_env_override(
+    store, monkeypatch
+):
+    plan = m.plan("nix-store")
+    monkeypatch.setenv("NIX_REMOTE", "ssh://unexpected")
+    monkeypatch.setenv("NIX_CONFIG", "keep-derivations = false")
+    (store / "retained-root").write_text("neutral rooted payload")
+
+    def native(command, **kwargs):
+        assert command == ["/synthetic/bin/nix-store", "--store", "daemon", "--gc"]
+        assert not any(key.startswith("NIX_") for key in kwargs["env"])
+        return SimpleNamespace(
+            returncode=1, stdout="native roots retained", stderr="native refusal"
+        )
+
+    result = m.apply(plan, run=native)
+    assert result["exit_code"] == 1 and result["stderr"] == "native refusal"
+    assert (store / "retained-root").read_text() == "neutral rooted payload"
+
+
+def test_nix_replaced_store_or_forged_operation_refuses_before_native_call(store):
+    plan = m.plan("nix-store")
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("must not invoke the native owner")
+
+    plan["actions"][0]["operation"] = "delete"
+    with pytest.raises(ValueError, match="declared native Nix"):
+        m.apply(plan, run=forbidden)
+    plan["actions"][0]["operation"] = "gc"
+    store.rename(store.with_name("retained"))
+    store.mkdir()
+    with pytest.raises(ValueError, match="identity changed"):
+        m.apply(plan, run=forbidden)

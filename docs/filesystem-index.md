@@ -129,7 +129,7 @@ bind each capacity observation, so an unmount race cannot silently probe a
 different filesystem. Filesystem availability is not an
 estimate of exclusive or reclaimable Btrfs extents.
 
-The first executable lifecycle is `uv cache prune`: uv owns dangling entries
+One executable lifecycle is `uv cache prune`: uv owns dangling entries
 and in-use refusal. The plan binds the physical cache root's device, inode
 and owner. Apply checks the exact plan SHA-256, refuses a replaced or symlinked
 root, and pins the reviewed directory through an inherited descriptor. No force
@@ -154,3 +154,11 @@ output distinguish requested addresses from current extent observations.
 extents can also belong to files outside the selected set. Reported bytes
 therefore do not equal reclaimable bytes. Neither measurement is a backup
 check or deletion decision.
+
+`plan --owner nix-store` selects native Nix garbage collection. Review native
+unreachable paths with the `filesystem_store_gc_plan` operation, then apply the
+digest-bound plan through `filesystem_maintenance`. The local Nix daemon owns
+GC roots, concurrent temporary roots and collection locks. This route never
+removes profile or generation roots and never uses forced store-path deletion.
+Nix configuration environment overrides are removed before calling the fixed
+local daemon route. Its complete output and failure status remain in the receipt.

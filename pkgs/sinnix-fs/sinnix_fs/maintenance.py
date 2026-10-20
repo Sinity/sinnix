@@ -16,6 +16,7 @@ from sinnix_lib.mounts import read_payload_mounts
 
 SCHEMA = "sinnix.fs-maintenance.v1"
 UV_CACHE = Path("/realm/state/cache/uv")
+NIX_STORE = Path("/nix/store")
 VOLUMES = (
     (Path("/realm"), 15, 10),
     (Path("/outer-realm"), 10, 5),
@@ -120,19 +121,23 @@ def admission(volume: Path | None = None) -> dict:
     }
 
 
-def plan() -> dict:
+def plan(owner: str = "uv") -> dict:
     volumes = volume_capacity()
+    root = {"uv": UV_CACHE, "nix-store": NIX_STORE}.get(owner)
+    if root is None:
+        raise ValueError("unsupported maintenance owner")
     try:
-        root_identity = identity(UV_CACHE)
         action = {
-            "owner": "uv",
-            "operation": "cache-prune",
-            "root": str(UV_CACHE),
-            "identity": root_identity,
-            "in_use_policy": "native refusal; force is forbidden",
+            "owner": owner,
+            "operation": "cache-prune" if owner == "uv" else "gc",
+            "root": str(root),
+            "identity": identity(root),
+            "in_use_policy": "native refusal; force is forbidden"
+            if owner == "uv"
+            else "native GC roots and live temporary roots; profile roots are never removed",
         }
     except (OSError, ValueError) as error:
-        action = {"owner": "uv", "status": "unavailable", "reason": str(error)}
+        action = {"owner": owner, "status": "unavailable", "reason": str(error)}
     return {
         "schema": SCHEMA,
         "volumes": volumes,
@@ -166,6 +171,8 @@ def apply(document: dict, *, run=subprocess.run) -> dict:
     if not isinstance(actions, list) or len(actions) != 1:
         raise ValueError("plan must contain exactly the native cache operation")
     action = actions[0]
+    if action.get("owner") == "nix-store":
+        return apply_nix(action, run=run)
     if (
         action.get("owner") != "uv"
         or action.get("operation") != "cache-prune"
@@ -220,6 +227,41 @@ def apply(document: dict, *, run=subprocess.run) -> dict:
         }
     finally:
         os.close(fd)
+
+
+def apply_nix(action: dict, *, run=subprocess.run) -> dict:
+    """The local Nix daemon owns roots, locks and liveness; never unlink them."""
+    if action.get("operation") != "gc" or action.get("root") != str(NIX_STORE):
+        raise ValueError("plan does not select the declared native Nix GC operation")
+    if identity(NIX_STORE) != action.get("identity"):
+        raise ValueError("Nix store identity changed since planning")
+    executable = shutil.which("nix-store")
+    if not executable:
+        raise ValueError("native nix-store is unavailable")
+    environment = {
+        key: value for key, value in os.environ.items() if not key.startswith("NIX_")
+    }
+    before = os.statvfs(NIX_STORE)
+    completed = run(
+        [executable, "--store", "daemon", "--gc"],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    after = os.statvfs(NIX_STORE)
+    return {
+        "schema": SCHEMA,
+        "owner": "nix-store",
+        "operation": "gc",
+        "identity": action["identity"],
+        "exit_code": completed.returncode,
+        "stdout": completed.stdout,
+        "stderr": completed.stderr,
+        "filesystem_available_delta_bytes": after.f_bavail * after.f_frsize
+        - before.f_bavail * before.f_frsize,
+        "accounting": "native GC reports unreachable store paths; global filesystem delta includes concurrent activity. No profile or generation roots are removed.",
+    }
 
 
 def account(roots: list[Path], *, run=subprocess.run) -> dict:
@@ -286,7 +328,8 @@ def account(roots: list[Path], *, run=subprocess.run) -> dict:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="sinnix fs maintain", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("plan")
+    preview = commands.add_parser("plan")
+    preview.add_argument("--owner", choices=["uv", "nix-store"], default="uv")
     admit = commands.add_parser("admission")
     admit.add_argument("--volume", type=Path, choices=[row[0] for row in VOLUMES])
     inspect = commands.add_parser("account")
@@ -303,7 +346,7 @@ def main(argv=None) -> int:
             print(json.dumps(result, indent=2))
             return 0 if result["admitted"] else 1
         elif args.command == "plan":
-            result = plan()
+            result = plan(args.owner)
         else:
             data = args.plan.read_bytes()
             if hashlib.sha256(data).hexdigest() != args.expected_sha256:
