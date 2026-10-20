@@ -58,6 +58,11 @@ def make_server(tmp_path, monkeypatch):
             "memory.raw.search",
         ),
         (
+            "memory.raw.get",
+            {"reference": "codex:fixture.jsonl", "offset": 4, "max_bytes": 8},
+            "memory.raw.get",
+        ),
+        (
             "timeline.query",
             {"since": "2026-01-01T00:00:00Z", "continuation": "events-page"},
             "sessions.timeline",

@@ -408,22 +408,11 @@ def _activity(runtime: Runtime, inp: ActivityInput) -> Activity:
         ],
         lanes_unavailable=[row.lane for row in coverage if not row.available],
         coverage=coverage,
-        next_actions=["captures.query", "sessions.query", "timeline.query"],
+        next_actions=["captures.query", "sessions.list", "timeline.query"],
     )
 
 
 # Session parsing, scan cursors and cross-source ordering are Polylogue products.
-
-
-class SessionsInput(RequestControls):
-    request: (
-        session_owner.SessionList
-        | session_owner.SessionSearch
-        | session_owner.SessionRead
-        | session_owner.RawList
-        | session_owner.RawSearch
-        | session_owner.RawRead
-    ) = Field(discriminator="operation")
 
 
 class SessionsResult(GatewayModel):
@@ -434,37 +423,7 @@ class SessionsResult(GatewayModel):
     )
 
 
-async def _sessions(runtime: Runtime, inp: SessionsInput) -> ActionResult:
-    product = await owner_product(
-        runtime,
-        "polylogue",
-        "query",
-        {
-            "projection": "session-operations",
-            "session_operation": inp.request.model_dump(mode="json"),
-        },
-        deadline_at=inp.deadline_at,
-    )
-    return ActionResult(
-        SessionsResult(operation=inp.request.operation, owner_product=product)
-    )
-
-
-class MemoryInput(RequestControls):
-    request: session_owner.RawMemorySearch | session_owner.RawRead = Field(
-        discriminator="operation"
-    )
-
-
-async def _memory(runtime: Runtime, inp: MemoryInput) -> ActionResult:
-    return await _sessions(runtime, inp)
-
-
-class TimelineInput(RequestControls, session_owner.SessionTimeline):
-    pass
-
-
-async def _timeline(runtime: Runtime, inp: TimelineInput) -> ActionResult:
+async def _session_operation(runtime: Runtime, inp: RequestControls) -> ActionResult:
     product = await owner_product(
         runtime,
         "polylogue",
@@ -579,7 +538,7 @@ def _session_action(name: str, model: type, summary: str) -> Action:
         summary=summary,
         Input=Input,
         Output=SessionsResult,
-        handler=_timeline,
+        handler=_session_operation,
         resource_kinds=(),
         next_actions=("sessions.read", "sessions.search", "timeline.query"),
         examples=(_SESSION_EXAMPLES[name],),
@@ -622,7 +581,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=Activity,
         handler=_activity,
         resource_kinds=("capture_lane",),
-        next_actions=("captures.query", "sessions.query", "timeline.query"),
+        next_actions=("captures.query", "sessions.list", "timeline.query"),
         aliases=(
             "what was I doing",
             "recent activity",
@@ -635,45 +594,6 @@ ACTIONS: tuple[Action, ...] = (
             Example(
                 title="Last hour of clipboard and notifications",
                 input={"kinds": ["clipboard", "notifications"], "limit": 50},
-            ),
-        ),
-    ),
-    Action(
-        name="sessions.query",
-        family=VerbFamily.QUERY,
-        owner="polylogue",
-        summary="Read indexed session pages or explicit original-source fallback through Polylogue.",
-        Input=SessionsInput,
-        Output=SessionsResult,
-        handler=_sessions,
-        resource_kinds=(),
-        next_actions=("sessions.read", "sessions.search", "timeline.query"),
-        examples=(
-            Example(
-                title="Project sessions",
-                input={"request": {"operation": "sessions.list", "repo": "sinnix"}},
-            ),
-        ),
-    ),
-    Action(
-        name="memory.query",
-        family=VerbFamily.QUERY,
-        owner="polylogue",
-        summary="Search original session sources or read one source object with explicit coverage.",
-        Input=MemoryInput,
-        Output=SessionsResult,
-        handler=_memory,
-        resource_kinds=(),
-        next_actions=("memory.raw.search", "sessions.raw.read"),
-        examples=(
-            Example(
-                title="Search original sources",
-                input={
-                    "request": {
-                        "operation": "memory.raw.search",
-                        "query": "screenshot probe",
-                    }
-                },
             ),
         ),
     ),

@@ -224,7 +224,7 @@ class OrchestrationResult(GatewayModel):
     projection_version: int = 1
     sessions: list[OwnerProduct]
     next_actions: list[str] = Field(
-        default_factory=lambda: ["sessions.query", "context.compose"]
+        default_factory=lambda: ["sessions.list", "context.compose"]
     )
 
 
@@ -343,7 +343,7 @@ ACTIONS = (
         Output=OrchestrationResult,
         handler=_orchestration,
         resource_kinds=(),
-        next_actions=("sessions.query", "context.compose"),
+        next_actions=("sessions.list", "context.compose"),
         documentation="Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.",
         examples=(
             Example(

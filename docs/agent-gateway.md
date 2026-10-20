@@ -52,6 +52,12 @@ sinnix-agent-gateway catalog <action> --schema     # one action, live
 The family (`status`, `catalog`, `query`, `get`, `context`, `events`, `wait`,
 `change`, `operate`, `run`) sets the MCP annotations and the effect class.
 
+Session reads use `sessions.list`, `sessions.search`, `sessions.read` and the
+explicit `sessions.raw.*` actions. Original memory sources use
+`memory.raw.search` and `memory.raw.get`. Their input fields come from the
+Polylogue operation contract; native continuations, coverage and source guards
+remain in `owner_product`. These actions take their fields at the top level.
+
 - **Reads** are audited and side-effect free.
 - **Effects** (`change`, `operate`, `run`) require an `idempotency_key` and
   accept `preconditions`. A repeated key replays the confirmed response. A

@@ -205,16 +205,13 @@ def test_structured_sessions_use_native_owner_pagination(tmp_path, monkeypatch):
     runtime.mcp_broker = Broker(
         {"items": [], "continuation": "owner-next", "coverage": {"complete": False}}
     )
+    action = next(
+        action for action in activity.ACTIONS if action.name == "sessions.search"
+    )
     result = anyio.run(
-        activity._sessions,
+        action.handler,
         runtime,
-        activity.SessionsInput(
-            request={
-                "operation": "sessions.search",
-                "expression": "late match",
-                "limit": 3,
-            }
-        ),
+        action.Input(expression="late match", limit=3),
     )
     assert result.data.owner_product.data["continuation"] == "owner-next"
     sent = runtime.mcp_broker.calls[0][2]["session_operation"]

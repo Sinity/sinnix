@@ -96,9 +96,9 @@ class ComposedContext(GatewayModel):
 
 _NEXT_ACTIONS: dict[str, list[str]] = {
     "campaign.progress": ["campaign.progress", "beads.get"],
-    "session.orchestration": ["sessions.orchestration", "sessions.query"],
+    "session.orchestration": ["sessions.orchestration", "sessions.list"],
     "verification.regression": ["campaign.progress", "jobs.get"],
-    "project.trajectory": ["campaign.progress", "sessions.query"],
+    "project.trajectory": ["campaign.progress", "sessions.list"],
     "project.overview": ["batches.start", "jobs.list", "events.tail"],
     "project.triage": ["batches.start", "jobs.list", "events.tail"],
     "job.review": ["jobs.logs", "jobs.retry", "jobs.cancel"],
