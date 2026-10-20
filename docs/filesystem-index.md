@@ -133,3 +133,14 @@ subvolumes are retained. The maintenance surface does not authorize deleting
 them by age, size or a generated label. Their owners must establish exact
 rebuildability, references and preservation before another lifecycle can retire
 them. Plans are transient review inputs, not another state database.
+
+Use `sinnix fs maintain account ABSOLUTE_PATH...` through the declared
+`filesystem_accounting` operation for compression and sharing measurements.
+It invokes the packaged native `compsize` and `btrfs filesystem du` tools with
+noninteractive read-only root access, retains their complete output and exit
+statuses, and returns incomplete on either failure. Physical roots and native
+output distinguish requested addresses from current extent observations.
+`compsize` counts referenced extents once, including compression; those
+extents can also belong to files outside the selected set. Reported bytes
+therefore do not equal reclaimable bytes. Neither measurement is a backup
+check or deletion decision.

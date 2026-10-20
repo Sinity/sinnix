@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -164,16 +165,81 @@ def apply(document: dict, *, run=subprocess.run) -> dict:
         os.close(fd)
 
 
+def account(roots: list[Path], *, run=subprocess.run) -> dict:
+    """Read native extent accounting; never infer exclusive/reclaimable bytes."""
+    observed = []
+    for root in roots:
+        if not root.is_absolute():
+            raise ValueError("accounting roots must be absolute")
+        resolved = root.resolve(strict=True)
+        info = resolved.stat()
+        observed.append(
+            {
+                "requested": str(root),
+                "path": str(resolved),
+                "device": info.st_dev,
+                "inode": info.st_ino,
+            }
+        )
+    reports = []
+    for name, arguments in (
+        ("compsize", ["--bytes", "--one-file-system"]),
+        ("btrfs", ["filesystem", "du", "--raw", "--summarize"]),
+    ):
+        executable = shutil.which(name)
+        if not executable:
+            raise ValueError(f"native accounting tool is unavailable: {name}")
+        completed = run(
+            [
+                "sudo",
+                "-n",
+                executable,
+                *arguments,
+                "--",
+                *[row["path"] for row in observed],
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        reports.append(
+            {
+                "owner": name,
+                "command": [
+                    executable,
+                    *arguments,
+                    "--",
+                    *[row["path"] for row in observed],
+                ],
+                "exit_code": completed.returncode,
+                "stdout": completed.stdout,
+                "stderr": completed.stderr,
+            }
+        )
+    return {
+        "schema": "sinnix.fs-accounting.v1",
+        "roots": observed,
+        "reports": reports,
+        "complete": all(report["exit_code"] == 0 for report in reports),
+        "scope": "native extent metadata; changing files are not a point-in-time snapshot",
+        "accounting": "compsize counts each referenced extent once including compression; extents may be shared outside the requested set. Btrfs du reports sharing. Neither report authorizes deletion or certifies backup coverage.",
+    }
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="sinnix fs maintain", description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("plan")
+    inspect = commands.add_parser("account")
+    inspect.add_argument("roots", type=Path, nargs="+")
     execute = commands.add_parser("apply")
     execute.add_argument("plan", type=Path)
     execute.add_argument("--expected-sha256", required=True)
     args = parser.parse_args(argv)
     try:
-        if args.command == "plan":
+        if args.command == "account":
+            result = account(args.roots)
+        elif args.command == "plan":
             result = plan()
         else:
             data = args.plan.read_bytes()
@@ -181,7 +247,7 @@ def main(argv=None) -> int:
                 raise ValueError("plan digest changed")
             result = apply(json.loads(data))
         print(json.dumps(result, indent=2))
-        return result.get("exit_code", 0)
+        return result.get("exit_code", 0) if result.get("complete", True) else 1
     except (OSError, ValueError) as error:
         print(f"maintenance refused: {error}", file=sys.stderr)
         return 2

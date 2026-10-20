@@ -23,6 +23,7 @@ let
   ];
   storageMaintenancePackages = with pkgs; [
     btrfs-progs
+    compsize
     parted
     ioping
     udisks2

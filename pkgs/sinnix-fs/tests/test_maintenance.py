@@ -80,3 +80,35 @@ def test_floor_defers_discretionary_work_without_fabricating_forecast(monkeypatc
     assert result["discretionary_work"] == "defer"
     assert result["available_bytes"] == 16384
     assert result["forecast"]["status"] == "unavailable"
+
+
+def test_accounting_native_failure_is_incomplete_not_zero(tmp_path, monkeypatch):
+    payload = tmp_path / "synthetic.bin"
+    payload.write_bytes(b"neutral")
+    calls = []
+    monkeypatch.setattr(m.shutil, "which", lambda name: "/synthetic/bin/" + name)
+
+    def native(command, **kwargs):
+        calls.append(command)
+        assert command[:2] == ["sudo", "-n"]
+        assert command[-2:] == ["--", str(payload)]
+        return SimpleNamespace(
+            returncode=1, stdout="partial native output", stderr="metadata unavailable"
+        )
+
+    result = m.account([payload], run=native)
+    assert not result["complete"]
+    assert len(calls) == 2
+    assert all(row["exit_code"] == 1 for row in result["reports"])
+    assert result["reports"][0]["stdout"] == "partial native output"
+    assert payload.read_bytes() == b"neutral"
+
+
+def test_accounting_refuses_missing_or_relative_roots_before_native_call(tmp_path):
+    def native(*args, **kwargs):
+        pytest.fail("must not call native owner")
+
+    with pytest.raises(ValueError, match="absolute"):
+        m.account([Path("relative")], run=native)
+    with pytest.raises(FileNotFoundError):
+        m.account([tmp_path / "absent"], run=native)

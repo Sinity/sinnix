@@ -10,6 +10,7 @@
   btrfs-progs,
   ripgrep,
   uv,
+  compsize,
 }:
 python3Packages.buildPythonPackage {
   pname = "sinnix-fs";
@@ -35,6 +36,7 @@ python3Packages.buildPythonPackage {
         btrfs-progs
         ripgrep
         uv
+        compsize
       ]
     }
   '';
