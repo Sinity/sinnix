@@ -433,10 +433,10 @@ Unknown operation fields are ignored with a warning.
   released.
 
 `[packets] admission = "closed"` refuses new batches before task reads, claims,
-worktree creation or queue submission. The default is `"open"`; existing run
-reads and recovery controls keep their original contracts. Sinnix closes new
-admission and uses native changes with declared operations. Other projects
-retain the shared engine until their callers and accepted work move. During a
+worktree creation or queue submission. A descriptor without `[packets]` has
+closed admission; an explicit legacy `[packets]` table defaults to `"open"`.
+Existing run reads and recovery controls keep their original contracts. New
+work uses native changes with declared operations. During a
 supported rollback, retain the closed descriptor and compatible admission check;
 older binaries are recovery-only and must not be activated as new-batch launchers.
 This supported-route policy does not revoke arbitrary same-user native authority.

@@ -1,6 +1,6 @@
 ---
 name: orchestrate
-description: "Coordinate several agents on one goal: task groups, model choice, native agents, forks or AgentCTL batches, integration review, and landing the result."
+description: "Coordinate several agents on one goal: task groups, model choice, native agents, isolated worktrees, integration, verification, and publication."
 ---
 
 # Orchestrate
@@ -32,17 +32,14 @@ next, not on supervising progress.
   - In Codex, native spawn takes `model`, `reasoning_effort`, and `fork_turns`
     (`'none'` by default; `'all'` for deliberate full-history inheritance,
     with no model or effort override).
-- **AgentCTL batch** (`agentctl batch start`) for independent groups that
-  need isolated worktrees on one base, unattended queueing, or an explicit
-  backend. Its landing task integrates, checks, and publishes;
-  `agent-runtime` covers the batch verbs, stages, and recovery.
+- AgentCTL batches are historical recovery workflows. Use `agent-runtime` for
+  retained records and recovery controls; use native agents for new work.
 - Add workers only when independent work benefits from parallelism. Keep one
   owner for a small connected change; available slots are not a dispatch target.
 
 ## Shape the work
 
-- A task group (one worker's share; in AgentCTL, a seed task plus its
-  `dispatch_group` members) is defined by its accepted outcome: tasks that need the
+- A task group (one worker's share) is defined by its accepted outcome: tasks that need the
   same source edits, evidence, or test selection go to one owner even when
   their file lists differ. The owner may change connected callers, tests,
   docs, schemas, and generated files to meet its criteria without asking
@@ -73,9 +70,7 @@ next, not on supervising progress.
 | Unresolved architecture, design-critical implementation     | `opus`   | strong, high     |
 
 Codex model IDs are not repeated here: the everyday model is `model` and the
-strong one `default_subagent_model` in `dots/codex/config.toml`; AgentCTL's
-default worker model is `DEFAULT_MODEL` in
-`pkgs/agentctl/agentctl/prompts/__init__.py`. These are starting points; raise
+strong one `default_subagent_model` in `dots/codex/config.toml`. These are starting points; raise
 effort or tier for a named problem. `scripts/probe_agent_runtime.sh` checks a
 backend's availability and quota before a large dispatch, not before every
 small task. [model-landscape.md](references/model-landscape.md) covers
@@ -108,8 +103,7 @@ pinned candidate; required hosted review stays with the forge.
 
 ## Land
 
-- Batches land with `agentctl batch land <run>`. Native work lands through the
-  repository's normal route: one PR per coherent change whose title is the
+- Native work lands through the repository's normal route: one PR per coherent change whose title is the
   permanent squash subject and whose body explains the problem, behavior,
   verification, and residuals; use the repository's template when present.
   Repositories that publish to `master` directly fast-forward instead.
@@ -129,6 +123,6 @@ pinned candidate; required hosted review stays with the forge.
   landed. A stacked merge counts as landed on the default branch. Report the
   commit or PR, useful check results, and residuals without a ceremonial list.
   Preserve WIP and clean only worktrees and watches you own.
-- After landing, file native task evidence with `agentctl evidence file`,
-  close the tasks whose criteria the evidence meets (with PR and merge SHA),
-  carry the rest into named successors, and remove the worktrees you created.
+- After landing, record the native verification and publication references in
+  Beads, close the tasks whose criteria they meet, carry remaining work into
+  named successors, and remove the worktrees you created.

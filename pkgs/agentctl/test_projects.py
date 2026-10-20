@@ -652,3 +652,14 @@ def test_batch_admission_policy(project_root: Path, admission: str) -> None:
         assert project.packets.admission == admission
         assert project.catalog_row()["batch_admission"] == admission
         assert project.operation("verify").name == "verify"
+
+
+def test_operation_only_project_has_closed_batch_admission(project_root: Path) -> None:
+    path = project_root / ".agentctl/project.toml"
+    text = path.read_text()
+    start = text.index("[packets]")
+    end = text.index("[operations.check]", start)
+    path.write_text(text[:start] + text[end:])
+    project = load_project_adapter(project_root)
+    assert project.packets.admission == "closed"
+    assert project.operation("check").command == ("true",)

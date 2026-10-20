@@ -497,7 +497,7 @@ def _packets(raw: Mapping[str, Any], root: Path, descriptor: Path) -> PacketsPol
             f"{descriptor} [packets.defaults] may set only "
             + ", ".join(_PACKETS_DEFAULTS)
         )
-    admission = packets.get("admission", "open")
+    admission = packets.get("admission", "open" if "packets" in raw else "closed")
     if admission not in ("open", "closed"):
         raise ProjectConfigError(
             f"{descriptor} packets.admission must be open or closed"
