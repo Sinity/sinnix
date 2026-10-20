@@ -40,6 +40,7 @@ class ServerRow(GatewayModel):
     transport: str | None = None
     tier: str | None = None
     brokered: bool
+    session_policy: Literal["per-call", "stateless"] = "per-call"
     availability: Literal["available", "unavailable"]
     failure_class: str | None = None
     reason: str | None = None
@@ -88,6 +89,7 @@ def _server_row(
         transport=probe.get("transport"),
         tier=probe.get("tier"),
         brokered=bool(probe.get("brokered")),
+        session_policy=probe.get("session_policy", "per-call"),
         availability=probe.get("availability", "unavailable"),
         failure_class=probe.get("failure_class"),
         reason=probe.get("reason"),

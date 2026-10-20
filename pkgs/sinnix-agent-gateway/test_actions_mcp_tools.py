@@ -18,6 +18,14 @@ from test_mcp_broker import FakeSession, FakeTransport
 BY_NAME = {action.name: action for action in mcp_tools.ACTIONS}
 
 
+@pytest.mark.parametrize("policy", ["per-call", "stateless"])
+def test_typed_server_catalog_preserves_session_policy(tmp_path, monkeypatch, policy):
+    rt = runtime(tmp_path, monkeypatch)
+    rt.config.mcp_broker_servers["fixture"]["sessionPolicy"] = policy
+    result = call(rt, "mcp.servers", {"servers": ["fixture"]}, BY_NAME)
+    assert result["data"]["servers"][0]["session_policy"] == policy
+
+
 def test_offline_owner_keeps_stale_contract_in_typed_catalogs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
