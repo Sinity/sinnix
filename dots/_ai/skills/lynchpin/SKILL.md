@@ -19,9 +19,10 @@ documented maintenance actions, which are dry-run first.
 
 ## Materialization
 
-Current materialization is procedural. The AgentCTL operations wrap the
-existing CLI; the planned typed DAG and per-node executor are not current
-architecture. Discover the exact operation names and requirements with
+Materialization uses a typed product catalog and convergence planner. Declared
+AgentCTL operations preview the plan, execute individual product nodes,
+promote a complete substrate generation, or run the convergence sequence.
+Discover the exact operation names and requirements with
 `agentctl project operations lynchpin`, then run the declared route. Do not
 copy an operation name from this skill into a command without checking the
 descriptor first.
