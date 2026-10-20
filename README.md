@@ -43,12 +43,13 @@ roles and settings; profiles supply workstation and cloud defaults.
 
 ## Runtime and recovery
 
-Services register their manager, unit, resource class, observation policy, and
-capture role in a shared inventory. It drives systemd slice placement,
-resource defaults, telemetry, and `/etc/sinnix/runtime-inventory.json`.
-`sinnix-observe` inspects live state; evaluation checks reject inconsistent
-service wiring. Named AgentCTL operations schedule heavy and recurring work.
-Rebuild commands share a lock to prevent competing system builds.
+Runtime declarations name systemd units, resource classes, failure monitoring,
+and capture outputs. Modules apply resource defaults to units and export their
+inventory to `/etc/sinnix/runtime-inventory.json` for telemetry and inspection.
+`sinnix-observe` inspects live state. Evaluation checks include duplicate unit
+identities, duplicate capture names and paths, and unapplied service resource
+classes. Named AgentCTL operations schedule heavy and recurring work. Rebuild
+commands share a lock to prevent competing system builds.
 
 Login sessions and the user manager put temporary work on NVMe at
 `TMPDIR=/realm/tmp/work`; `/tmp` is a small tmpfs and remains the default for
@@ -56,18 +57,15 @@ system services. `sinnix-tmp-sweep` removes unused `nix-shell.*` and
 `nix-develop-*` directories every fifteen minutes.
 
 The filesystem separates projects, personal data, service state, staging,
-temporary work, and media. Persistence is declared. Stores and captures are
-classified by recovery needs:
+temporary work, and media. Modules declare system and home paths that survive
+the ephemeral root through `/persist`.
 
-- canonical data is preserved indefinitely;
-- derived data names its inputs;
-- caches are ephemeral;
-- exact copies name their source and backup responsibility.
-
-Evaluation rejects contradictory or dangling declarations. Btrfs snapshots and
-Borg archives cover durable data; nested or rebuildable subvolumes declare
-alternative handling. Restore drills exercise recovery. Agent CLI recovery uses
-the versioned, hash-checked tarballs in `flake/data/agent-cli-sources.nix`.
+Backup jobs declare their snapshot sources, Borg archive paths, exclusions,
+and retention. Nested subvolumes need explicit coverage: database dumps and
+separate archive jobs cover selected state outside the ordinary snapshot path.
+Integrity checks and targeted restore drills verify parts of the recovery path.
+Agent CLI recovery uses the versioned, hash-checked tarballs in
+`flake/data/agent-cli-sources.nix`.
 
 ## Development
 

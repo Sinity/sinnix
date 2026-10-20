@@ -11,7 +11,9 @@
 #     description = "...";         # service Description= default
 #     surface = surfaceValue;      # optional: the job's own registered surface,
 #                                  # so failure-notify is not attached twice
-#     job = { execStart = "..."; timer = { ... }; ... };
+#   } {
+#     execStart = "...";
+#     timer = { ... };
 #   }
 # returns { systemd = { services.<name> = ...; timers.<name> = ...; }; } or
 # the systemd.user twin, ready to merge into a module's config.

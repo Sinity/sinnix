@@ -1,14 +1,8 @@
 # Per-host NixOS module list + specialArgs.
 #
-# Shared verbatim between the direct system build (flake/nixos.nix ->
-# flake.nixosConfigurations, used by `switch`/`nix build`) and colmena's
-# steady-state hive (flake/deploy.nix, used by `apply-all`). Colmena needs
-# the actual unevaluated module list for each host — not a realized
-# `system.build.toplevel` closure. Importing a built derivation as a module
-# forces an IFD build and then fails during module merging (the derivation
-# attrset coerces to its store path string where a NixOS module is expected,
-# throwing "you're trying to define a value of type `string' rather than an
-# attribute set").
+# Direct system builds and Colmena use the same unevaluated module lists.
+# Colmena cannot use system.build.toplevel as a module: a derivation is a
+# store path, not module configuration.
 { inputs }:
 let
   libContext = import ./lib-context.nix { inherit inputs; };
