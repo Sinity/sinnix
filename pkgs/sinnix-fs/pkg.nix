@@ -3,6 +3,7 @@
   lib,
   makeWrapper,
   sinnix-lib,
+  machine-telemetry,
   duckdb,
   coreutils,
   file,
@@ -25,7 +26,10 @@ python3Packages.buildPythonPackage {
     ];
   };
   build-system = [ python3Packages.setuptools ];
-  dependencies = [ sinnix-lib ];
+  dependencies = [
+    sinnix-lib
+    machine-telemetry
+  ];
   nativeBuildInputs = [ makeWrapper ];
   postFixup = ''
     wrapProgram "$out/bin/sinnix-fs" --prefix PATH : ${

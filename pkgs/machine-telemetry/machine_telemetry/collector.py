@@ -31,6 +31,8 @@ from sinnix_lib.procfs import (
 from sinnix_lib.systemd import show_units, show_units_as_user
 from sinnix_lib.values import float_or_none, int_or_none, read_text
 
+from machine_telemetry import capacity as filesystem_capacity
+
 # Sampling cadence and probe targets. One host runs this collector and nothing
 # ever tuned these per host, so they are constants rather than options.
 SAMPLE_INTERVAL_SEC = 10.0
@@ -51,7 +53,7 @@ PROCESS_MEMORY_INTERVAL_SEC = 60.0
 # Journald scans for earlyoom, systemd-oomd and kernel OOM kills.
 KILL_EVENT_INTERVAL_SEC = 30.0
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 # Interval between explicit `wal_checkpoint(TRUNCATE)` runs on the main
 # writer connection; see the checkpoint block at the bottom of the heartbeat
 # loop for why the implicit autocheckpoint is not enough here.
@@ -1237,6 +1239,7 @@ def ensure_columns(
 
 
 def init_db(conn: sqlite3.Connection) -> None:
+    filesystem_capacity.init_db(conn)
     conn.executescript(
         """
         PRAGMA journal_mode=WAL;
@@ -2358,6 +2361,7 @@ def collect(args: argparse.Namespace) -> int:
         prev_time = time.monotonic()
         next_service = 0.0
         next_network = 0.0
+        next_capacity = 0.0
         next_process_memory = 0.0
         next_kill_event = 0.0
         next_wal_checkpoint = time.monotonic() + WAL_CHECKPOINT_INTERVAL_S
@@ -2613,6 +2617,11 @@ def collect(args: argparse.Namespace) -> int:
                     ),
                 )
                 next_service = sample_start + SERVICE_INTERVAL_SEC
+            if sample_start >= next_capacity:
+                filesystem_capacity.insert_samples(
+                    conn, observed_at, args.host, boot_id
+                )
+                next_capacity = sample_start + filesystem_capacity.INTERVAL_SECONDS
             if NETWORK_INTERVAL_SEC > 0 and sample_start >= next_network:
                 do_bloat = (
                     BUFFERBLOAT_INTERVAL_SEC > 0

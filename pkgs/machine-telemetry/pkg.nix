@@ -3,7 +3,7 @@
   python3Packages,
   sinnix-lib,
 }:
-python3Packages.buildPythonApplication {
+python3Packages.buildPythonPackage {
   pname = "machine-telemetry";
   version = "0.1.0";
   pyproject = true;

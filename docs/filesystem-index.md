@@ -122,8 +122,24 @@ An unrelated full media disk does not block Realm-only work. The existing timers
 retry on their next firing; there is no separate paused-job scheduler. Manual
 Lynchpin operations, retained-input recovery, captures, backups and maintenance
 remain available. No running job is interrupted and no space is reserved.
-A 30-day forecast remains
-unavailable until comparable growth observations exist. Offline outer mounts
+`sinnix fs maintain forecast` and the maintenance plan read capacity history
+through the machine-telemetry segment owner. Its existing collector records
+exact block counts and fragment size every five minutes, with filesystem UUID,
+mount root, host and observed boot/mount identity. Existing sealed history is
+retained; files predating this table remain explicit coverage absences.
+The reader holds the owner's shared lock, validates membership and opens SQLite
+read-only. Missing or changed members make the forecast unavailable.
+
+The projection horizon is 30 days and requires 30 days of comparable observations,
+with no gap over 30 minutes and a latest observation at most 15 minutes old.
+UUID, mount root or total-capacity changes split the series. It sums positive
+decreases in available bytes over the observed span; cleanup increases do not
+cancel consumption. Rates, projections and threshold-crossing times use exact
+rationals. The output names the selected segment/row identities, actual coverage
+and assumptions. Until this history exists it reports insufficient history.
+Admission uses current availability independently of this projection.
+
+Offline outer mounts
 are not activated for a capacity check. Mount IDs and an open mount descriptor
 bind each capacity observation, so an unmount race cannot silently probe a
 different filesystem. Filesystem availability is not an

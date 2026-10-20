@@ -381,7 +381,7 @@ let
     # locks, notify, systemd probes. Python packages here depend on
     # it instead of carrying private copies of these helpers.
     sinnix-lib = pkgs.callPackage ../pkgs/sinnix-lib/pkg.nix { };
-    sinnix-fs = pkgs.callPackage ../pkgs/sinnix-fs/pkg.nix { inherit sinnix-lib; };
+    sinnix-fs = pkgs.callPackage ../pkgs/sinnix-fs/pkg.nix { inherit sinnix-lib machine-telemetry; };
     sinnix-runtime = pkgs.callPackage ../pkgs/sinnix-runtime/pkg.nix { inherit sinnix-lib; };
 
     # Shared pairwise/choice-set preference ranking engine (importable, not

@@ -79,7 +79,7 @@ def test_floor_defers_discretionary_work_without_fabricating_forecast(monkeypatc
     )
     assert result["discretionary_work"] == "defer"
     assert result["available_bytes"] == 16384
-    assert result["forecast"]["status"] == "unavailable"
+    assert result["forecast"]["status"] == "not_requested"
 
 
 def test_accounting_native_failure_is_incomplete_not_zero(tmp_path, monkeypatch):

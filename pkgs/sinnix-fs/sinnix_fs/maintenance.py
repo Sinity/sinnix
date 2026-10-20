@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from sinnix_lib.mounts import read_payload_mounts
+from sinnix_lib.mounts import pinned_mount, read_payload_mounts
 
 SCHEMA = "sinnix.fs-maintenance.v1"
 UV_CACHE = Path("/realm/state/cache/uv")
@@ -40,8 +40,8 @@ def capacity(path: Path, target: int, floor: int, *, info) -> dict:
         else "admit",
         "target_met": bool(total) and available * 100 >= total * target,
         "forecast": {
-            "status": "unavailable",
-            "reason": "no comparable growth series; current free space is not a 30-day forecast",
+            "status": "not_requested",
+            "reason": "use maintain forecast for historical projection; admission uses current availability",
         },
     }
 
@@ -76,23 +76,14 @@ def volume_capacity(volume: Path | None = None) -> list[dict]:
             # O_PATH does not trigger the final automount. A concurrent unmount
             # or replacement cannot redirect the later fstatvfs to a payload
             # other than the mount observed above.
-            fd = os.open(path, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC)
-            try:
-                fields = Path(f"/proc/self/fdinfo/{fd}").read_text().splitlines()
-                ids = [
-                    int(line.partition(":")[2].strip())
-                    for line in fields
-                    if line.startswith("mnt_id:")
-                ]
-                if ids != [mounted[path]]:
-                    raise ValueError("payload mount changed during observation")
+            with pinned_mount(path, mounted[path]) as fd:
                 row = capacity(path, target, floor, info=os.fstatvfs(fd))
                 row.update(
-                    status="observed", mount_id=ids[0], device=os.fstat(fd).st_dev
+                    status="observed",
+                    mount_id=mounted[path],
+                    device=os.fstat(fd).st_dev,
                 )
                 volumes.append(row)
-            finally:
-                os.close(fd)
         except (OSError, ValueError) as error:
             volumes.append(
                 {"path": str(path), "status": "unavailable", "reason": str(error)}
@@ -122,6 +113,8 @@ def admission(volume: Path | None = None) -> dict:
 
 
 def plan(owner: str = "uv") -> dict:
+    from .forecast import forecast
+
     volumes = volume_capacity()
     root = {"uv": UV_CACHE, "nix-store": NIX_STORE}.get(owner)
     if root is None:
@@ -141,6 +134,7 @@ def plan(owner: str = "uv") -> dict:
     return {
         "schema": SCHEMA,
         "volumes": volumes,
+        "capacity_forecast": forecast(VOLUMES),
         "actions": [action],
         "retained": [
             {
@@ -332,6 +326,7 @@ def main(argv=None) -> int:
     preview.add_argument("--owner", choices=["uv", "nix-store"], default="uv")
     admit = commands.add_parser("admission")
     admit.add_argument("--volume", type=Path, choices=[row[0] for row in VOLUMES])
+    commands.add_parser("forecast")
     inspect = commands.add_parser("account")
     inspect.add_argument("roots", type=Path, nargs="+")
     execute = commands.add_parser("apply")
@@ -339,7 +334,11 @@ def main(argv=None) -> int:
     execute.add_argument("--expected-sha256", required=True)
     args = parser.parse_args(argv)
     try:
-        if args.command == "account":
+        if args.command == "forecast":
+            from .forecast import forecast
+
+            result = forecast(VOLUMES)
+        elif args.command == "account":
             result = account(args.roots)
         elif args.command == "admission":
             result = admission(args.volume)

@@ -44,3 +44,27 @@ def test_automount_placeholder_does_not_prove_payload_presence(monkeypatch):
     assert read_payload_mounts() == {Path("/"): 1, Path("/mnt/online"): 4}
     assert not has_mounted_ancestor(Path("/mnt/offline/item"), Path("/mnt"), mounted)
     assert has_mounted_ancestor(Path("/mnt/online/item"), Path("/mnt"), mounted)
+
+
+def test_capacity_never_opens_an_automount(monkeypatch):
+    from sinnix_lib import mounts
+
+    monkeypatch.setattr(mounts, "read_payload_mounts", lambda: {})
+    monkeypatch.setattr(
+        mounts.os, "open", lambda *a: pytest.fail("offline payload opened")
+    )
+    assert mounts.observe_capacity(Path("/fixture")) == {
+        "path": "/fixture",
+        "status": "not_mounted",
+    }
+
+
+def test_replaced_mount_refuses_before_statvfs(tmp_path, monkeypatch):
+    from sinnix_lib import mounts
+
+    monkeypatch.setattr(
+        mounts.os, "fstatvfs", lambda *_: pytest.fail("replacement probed")
+    )
+    with pytest.raises(ValueError, match="mount changed"):
+        with mounts.pinned_mount(tmp_path, -1):
+            pass
