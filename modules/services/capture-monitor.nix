@@ -86,7 +86,7 @@ mkServiceModule (mkCaptureLane {
   inherit username laneDir;
   mode = "poll";
   captureName = "monitor";
-  cadenceSeconds = 300;
+  cadenceSeconds = cfg.intervalSec;
   # A gap here means the panel is off, unplugged, or DDC broke -- all worth
   # surfacing, but on a slower clock than a live sensor: normal sleep/wake
   # or an input switch can legitimately silence a poll or two.

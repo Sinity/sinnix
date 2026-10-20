@@ -18,6 +18,9 @@
             sinnix.services.capture-audio.enable = true;
             sinnix.services.capture-netflow.enable = true;
             sinnix.services.capture-xiaomi-cloud.enable = true;
+            sinnix.services.capture-xiaomi-cloud.intervalSec = 3600;
+            sinnix.services.capture-monitor.enable = true;
+            sinnix.services.capture-monitor.intervalSec = 600;
             sinnix.services.polylogue.enable = true;
             sinnix.services.machine-telemetry.enable = true;
             sinnix.services.below.enable = true;
@@ -36,6 +39,19 @@
           }
         ];
         assertions = config: [
+          {
+            assertion =
+              let
+                monitor = config.sinnix.runtime.units.capture-monitor;
+                xiaomi = config.sinnix.runtime.units.capture-xiaomi-cloud;
+                timers = config.systemd.user.timers;
+              in
+              (builtins.head monitor.captures).cadenceSeconds == 600
+              && timers.sinnix-capture-monitor.timerConfig.OnCalendar == "*:0/10"
+              && (builtins.head xiaomi.captures).cadenceSeconds == 3600
+              && timers.sinnix-capture-xiaomi-cloud.timerConfig.OnCalendar == "0/1:00:00";
+            message = "Capture registration and timers must use configured monitor and Xiaomi intervals.";
+          }
           {
             assertion =
               let

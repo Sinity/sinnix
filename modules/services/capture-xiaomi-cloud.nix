@@ -9,6 +9,7 @@
   ...
 }@args:
 let
+  cfg = config.sinnix.services.capture-xiaomi-cloud;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   stateDir = "/realm/state/xiaomi-witness";
   laneDir = "${config.sinnix.paths.healthRoot}/xiaomi-cloud";
@@ -33,7 +34,7 @@ mkServiceModule {
       {
         name = "xiaomi-cloud";
         path = laneDir;
-        cadenceSeconds = 1800;
+        cadenceSeconds = cfg.intervalSec;
         # Write-on-change means a quiet pass appends nothing, and the cloud
         # side goes genuinely quiet when the phone is off. Sleep lands every
         # morning and daily aggregates revise through the day, so half a day
