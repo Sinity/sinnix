@@ -369,7 +369,7 @@ arguments = "required"
 pool = "bulk"
 result = "json"
 cache = "none"
-timeout_seconds = 1800
+timeout_seconds = 3600
 
 [operations.filesystem_accounting]
 description = "Read compression and shared-extent accounting for explicit physical paths"
