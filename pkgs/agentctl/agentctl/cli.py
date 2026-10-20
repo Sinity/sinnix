@@ -7,7 +7,8 @@ Output: a read verb (``project``, ``result validate-worker``,
 ``job list|get|logs|result|wait``, ``batch status|list|task``, ``view``,
 ``events tail``) prints a table in local time with an age column, or the
 document with ``--json``. A write verb
-(``job start|cancel|retry|clean``, ``batch start|land|abandon|clean|result|resume``,
+(``job start|cancel|retry|clean``, ``worktree clean``,
+``batch start|land|abandon|result|resume``,
 ``pools apply``, ``pressure tick``) prints the
 document as JSON on stdout and one summary line on stderr. Tables show a
 run's 8-character suffix and 8 characters of a commit; ``--full`` prints
@@ -47,6 +48,7 @@ from . import (
     pools,
     pressure,
     results,
+    worktree_cleanup,
 )
 from .batch_history import HistoryError, HistoryRefusal, list_runs, load, resolve_run_id
 from .config import Config, ConfigError, load_config, resolve_project
@@ -160,6 +162,17 @@ def parser() -> argparse.ArgumentParser:
         one.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
         _project_option(one)
         _output_arguments(one)
+
+    worktree = verbs.add_parser(
+        "worktree", help="preserve and clean terminal owned checkouts"
+    )
+    worktree_verbs = worktree.add_subparsers(dest="worktree_verb", required=True)
+    clean = worktree_verbs.add_parser(
+        "clean", help="remove terminal owned checkouts, retaining unpreserved work"
+    )
+    clean.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
+    _project_option(clean)
+    _output_arguments(clean)
 
     result = verbs.add_parser("result", help="validate agent result documents")
     result_verbs = result.add_subparsers(dest="result_verb", required=True)
@@ -361,15 +374,6 @@ def parser() -> argparse.ArgumentParser:
     batch_abandon.add_argument("--reason", default="", help="recorded in the manifest")
     _project_option(batch_abandon)
     _output_arguments(batch_abandon)
-    batch_clean = batch_verbs.add_parser(
-        "clean",
-        help="remove the worktrees of runs that are over (never by age)",
-    )
-    batch_clean.add_argument(
-        "selector", nargs="?", metavar="project", help=PROJECT_HELP
-    )
-    _project_option(batch_clean)
-    _output_arguments(batch_clean)
     batch_list = batch_verbs.add_parser(
         "list", help="every run of a project with its stage"
     )
@@ -748,16 +752,6 @@ def _batch(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             + (f"\nresidual: {'; '.join(residual)}" if residual else ""),
         )
         return EXIT_OK
-    if verb == "clean":
-        project = _select_project(config, arguments.project, arguments.selector)
-        cleaned = batch.clean(config, project)
-        kept = [f"{row['branch']}: {row['reason']}" for row in cleaned["kept"]]
-        out.write(
-            cleaned,
-            f"removed {len(cleaned['removed'])} worktree(s)"
-            + (f"\nkept: {'; '.join(kept)}" if kept else ""),
-        )
-        return EXIT_OK
     if verb == "list":
         project = _select_project(config, arguments.project, arguments.selector)
         rows = [
@@ -1125,6 +1119,18 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
         return _result(arguments, config, out)
     if verb == "job":
         return _job(arguments, config, out)
+    if verb == "worktree":
+        if arguments.worktree_verb == "clean":
+            project = _select_project(config, arguments.project, arguments.selector)
+            cleaned = worktree_cleanup.clean(config, project)
+            kept = [f"{row['branch']}: {row['reason']}" for row in cleaned["kept"]]
+            out.write(
+                cleaned,
+                f"removed {len(cleaned['removed'])} worktree(s)"
+                + (f"\nkept: {'; '.join(kept)}" if kept else ""),
+            )
+            return EXIT_OK
+        raise AssertionError(arguments.worktree_verb)
     if verb == "batch":
         return _batch(arguments, config, out)
     if verb == "evidence":

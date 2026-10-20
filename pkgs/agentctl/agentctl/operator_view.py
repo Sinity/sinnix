@@ -21,8 +21,8 @@ from .github import GithubError
 from .job_queries import job_view
 from .limits import SHORT_ID
 from .projects import ProjectAdapter
-from .prompts import PromptError, SubprocessBdReader
 from .pueue import PueueError, Task
+from .task_reads import SubprocessBdReader, TaskReadError
 
 MAX_READY_SHOWN = 8
 MAX_FAILED_SHOWN = 6
@@ -495,7 +495,7 @@ def collect(
             for bead in reader.ready()
             if str(bead.get("issue_type") or "") not in UNREADY_TYPES
         )
-    except PromptError as error:
+    except TaskReadError as error:
         ready = ()
         errors.append(f"bd: {error}")
     return Snapshot(

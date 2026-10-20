@@ -47,7 +47,6 @@ from .manifest import (
 )
 from .projects import ProjectAdapter
 from .prompts import (
-    BdReader,
     PromptConfig,
     PromptError,
     compile_worker_prompt,
@@ -61,6 +60,7 @@ from .prompts import (
     write_scope,
 )
 from .pueue import PueueError
+from .task_reads import BdReader
 from .worktrunk import WorktrunkError
 
 

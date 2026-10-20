@@ -41,7 +41,7 @@ never cancels a job, and a queue cleanup retains its historical artifacts.
 | `batch task [--run r --worker w --attempt n]`                               | a worker's current tasks beside its dispatch-time bindings; read-only                                                                                |
 | `batch scope-correct <run> <worker> <candidate> --authorize <bead>=<glob>…` | replace a malformed stored worker scope, keeping the correction history                                                                              |
 | `batch abandon <run> [--reason R]`                                          | release a run that will not land                                                                                                                     |
-| `batch clean [p]`                                                           | remove worktrees of landed or abandoned runs, keeping any with uncommitted or unmerged work                                                          |
+| `worktree clean [p]`                                                        | remove worktrees of landed or abandoned runs, keeping any with uncommitted or unmerged work                                                          |
 | `result validate-worker <result.json>`                                      | validate a worker result without filing it (same checks as `batch result`)                                                                           |
 | `evidence file \| list \| get`                                              | retain or read evidence for work done outside a batch                                                                                                |
 | `view [p]`                                                                  | queue groups, failures, active jobs, open runs and ready tasks                                                                                       |
@@ -261,7 +261,7 @@ templates, schemas) is unchanged.
 
 `batch abandon` cancels queued tasks, unclaims members, removes clean
 worktrees (keeping branches) and records the reason. It is refused while
-landing runs or after acceptance. `batch clean` removes worktrees of landed or
+landing runs or after acceptance. `worktree clean` removes worktrees of landed or
 abandoned runs. Before deleting a branch it saves the exact commit under
 `refs/agentctl/recovery/`, and it keeps any worktree that a process is using
 or that holds unmerged work.
@@ -295,6 +295,7 @@ also records the code in `landing.failure`.
 
 | code                           | meaning                                                                  |
 | ------------------------------ | ------------------------------------------------------------------------ |
+| `admission_closed`             | the project accepts native changes instead of new batches                |
 | `abandoned`                    | the run was abandoned                                                    |
 | `already_accepted`             | the run already has an acceptance record                                 |
 | `ambiguous_run`                | the suffix names more than one run                                       |

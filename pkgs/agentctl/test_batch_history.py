@@ -112,3 +112,25 @@ def test_cleanup_import_does_not_load_workflow_or_prompt_engine():
         env=env,
         check=True,
     )
+
+
+@pytest.mark.parametrize("module", ["operator_view", "launch"])
+def test_native_jobs_and_views_do_not_import_the_workflow(module):
+    packages = Path(__file__).parent.parent
+    env = {
+        **os.environ,
+        "PYTHONPATH": os.pathsep.join(
+            (str(packages / "agentctl"), str(packages / "sinnix-lib"))
+        ),
+    }
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            f"import sys; import agentctl.{module}; "
+            "assert not {'agentctl.manifest', 'agentctl.start', 'agentctl.landing', "
+            "'agentctl.prompts', 'agentctl.agents', 'agentctl.batch'} & sys.modules.keys()",
+        ],
+        env=env,
+        check=True,
+    )

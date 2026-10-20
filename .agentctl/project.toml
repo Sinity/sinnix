@@ -322,7 +322,7 @@ cache = "tree+environment"
 
 [operations.clean_terminal_worktrees]
 description = "Release terminal managed worktrees through their lifecycle owner, retaining evidence and uncertain work"
-exec = ["agentctl", "batch", "clean", "--json", "--project"]
+exec = ["agentctl", "worktree", "clean", "--json", "--project"]
 arguments = "required"
 pool = "normal"
 result = "exit"

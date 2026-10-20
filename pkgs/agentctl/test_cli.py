@@ -429,16 +429,16 @@ def test_project_verbs_read_the_catalog(
     assert "nightly" in capsys.readouterr().out
 
 
-def test_batch_cleanup_refuses_unknown_positional_owner(
+def test_worktree_cleanup_refuses_unknown_positional_owner(
     cli_config: Config,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.chdir(cli_config.project_roots[0])
     monkeypatch.setattr(
-        cli.batch, "clean", lambda *_: pytest.fail("wrong owner cleanup")
+        cli.worktree_cleanup, "clean", lambda *_: pytest.fail("wrong owner cleanup")
     )
-    assert cli.main(["batch", "clean", "nowhere"]) == cli.EXIT_REFUSED
+    assert cli.main(["worktree", "clean", "nowhere"]) == cli.EXIT_REFUSED
     assert (
         "could not resolve an AgentCTL project for nowhere" in capsys.readouterr().err
     )
@@ -1236,3 +1236,16 @@ def test_wait_archived_cancellation_retains_job_failure_exit(
     assert observed["phase"] == "cancelled" and observed["terminal"] is True
     assert observed["job_id"] == own["job_id"] and observed["exit_code"] == 130
     assert "no task" not in output.err
+
+
+def test_worktree_cleanup_uses_the_selected_project(cli_config, monkeypatch, capsys):
+    selected = []
+
+    def clean(config, project):
+        selected.append(project.project_id)
+        return {"project": project.project_id, "removed": [], "kept": []}
+
+    monkeypatch.setattr(cli.worktree_cleanup, "clean", clean)
+    assert cli.main(["worktree", "clean", "fixture", "--json"]) == cli.EXIT_OK
+    assert selected == ["fixture"]
+    assert json.loads(capsys.readouterr().out)["project"] == "fixture"

@@ -23,7 +23,8 @@ from . import gitcmd, github, job_queries, results
 from .config import Config
 from .job_queries import JobError
 from .projects import ProjectAdapter
-from .prompts import PromptError, SubprocessBdReader, evidence_binding
+from .prompts import PromptError, evidence_binding
+from .task_reads import SubprocessBdReader
 
 RECORD_SCHEMA_VERSION = 1
 MAX_EVIDENCE_BYTES = 256 * 1024

@@ -9,6 +9,7 @@ import pytest
 from agentctl import batch, job_queries, launch, manifest, prompts
 from agentctl import start as start_module
 from agentctl.batch import BatchError, BatchRefusal
+from agentctl.batch_history import HistoryError
 from conftest import read_launch
 from test_batch import BASE, MOVED, SHA, Harness, labels, prepared_run, verdict
 from test_batch import harness as harness
@@ -281,7 +282,7 @@ def test_bulk_cleanup_refuses_unreadable_manifest_authority(
         return original(path, *args, **kwargs)
 
     monkeypatch.setattr(Path, "read_text", read)
-    with pytest.raises(BatchRefusal, match="manifest"):
+    with pytest.raises(HistoryError, match="manifest"):
         launch.clean_terminal(harness.config)
     assert harness.pueue.task(run["workers"][0]["task_id"]) is not None
 
@@ -383,7 +384,7 @@ def test_bulk_cleanup_requires_a_complete_run_inventory(
             return original(path)
 
         monkeypatch.setattr(Path, "iterdir", inventory)
-    with pytest.raises(BatchRefusal, match="manifest"):
+    with pytest.raises(HistoryError, match="manifest"):
         launch.clean_terminal(harness.config)
     assert harness.pueue.removed == []
 

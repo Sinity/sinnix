@@ -92,7 +92,7 @@ fast-forward), and closes the tasks its acceptance record satisfies.
   Cross-worker findings are fixed on the integration branch, then
   `batch land <run> --keep-integration`.
 - `batch abandon <run>` releases a run that will not land; it keeps any
-  worktree holding unpreserved work. `batch clean <project>` removes finished
+  worktree holding unpreserved work. `agentctl worktree clean <project>` removes finished
   runs' worktrees by recorded state, never by age.
 - The standing worker rules live in
   [worker-contract.md](../orchestrate/references/worker-contract.md), which

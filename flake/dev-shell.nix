@@ -146,6 +146,7 @@
         name = "sinnix-agent-gateway-tests";
         packages = [
           gatewayTestRunner
+          scriptPkgs.sinnix-capture
           pkgs.fd
           pkgs.file
           pkgs.git

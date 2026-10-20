@@ -3305,7 +3305,7 @@ def test_clean_drops_the_worktrees_of_finished_runs_and_leaves_the_others(
     for branch, path in planted.items():
         harness.wt.trees[branch] = Worktree(branch=branch, path=path)
 
-    cleaned = batch.clean(harness.config, harness.project)
+    cleaned = cleanup_module.clean(harness.config, harness.project)
 
     assert sorted(cleaned["removed"]) == sorted(
         [*over_branches, "batch/fixture-20260101-000000-aaaaaaaa/w1"]
@@ -3342,7 +3342,7 @@ def test_clean_deletes_only_abandoned_branches_reachable_from_default(
     harness.git.off_base.add(OTHER)
     harness.abandon(unsafe["run_id"])
 
-    cleaned = batch.clean(harness.config, harness.project)
+    cleaned = cleanup_module.clean(harness.config, harness.project)
 
     assert safe_branch not in harness.git.branches, cleaned
     assert unsafe_branch in harness.git.branches
@@ -3372,7 +3372,7 @@ def test_clean_reports_a_branch_without_a_checkout_as_absent(harness: Harness) -
     branch = "batch/fixture-20260101-000000-cccccccc/w1"
     harness.wt.trees[branch] = Worktree(branch=branch, path=None)
 
-    cleaned = batch.clean(harness.config, harness.project)
+    cleaned = cleanup_module.clean(harness.config, harness.project)
 
     assert cleaned["removed"] == []
     assert cleaned["absent"] == [branch]
@@ -3388,7 +3388,7 @@ def test_clean_retiring_an_accepted_branch_does_not_count_an_absent_checkout(
     harness.git.branches[branch] = OTHER
     harness.wt.trees[branch] = Worktree(branch=branch, path=None)
 
-    cleaned = batch.clean(harness.config, harness.project)
+    cleaned = cleanup_module.clean(harness.config, harness.project)
 
     assert cleaned["removed"] == []
     assert branch in cleaned["absent"]
@@ -3601,7 +3601,7 @@ def test_clean_refuses_before_removing_worktrees_when_a_manifest_is_unreadable(
     ).write_text("{not-json")
 
     with pytest.raises(HistoryError, match="manifest"):
-        batch.clean(harness.config, harness.project)
+        cleanup_module.clean(harness.config, harness.project)
 
     assert harness.wt.removed == []
     assert branch in harness.wt.trees
@@ -4707,7 +4707,7 @@ def test_cleanup_reloads_runs_after_waiting_for_concurrent_start(
 
     monkeypatch.setattr(cleanup_module, "project_locked", interleaved_lock)
 
-    cleaned = batch.clean(harness.config, harness.project)
+    cleaned = cleanup_module.clean(harness.config, harness.project)
 
     assert cleaned["removed"] == []
     assert harness.wt.removed == []
@@ -4780,7 +4780,7 @@ def test_clean_keeps_denied_recorded_checkout_instead_of_reporting_absent(
     parent = path.parent
     parent.chmod(0)
     try:
-        cleaned = batch.clean(harness.config, harness.project)
+        cleaned = cleanup_module.clean(harness.config, harness.project)
         assert branch not in cleaned["absent"] and branch not in cleaned["removed"]
         assert branch in {row["branch"] for row in cleaned["kept"]}
         assert harness.git.branches[branch] == OTHER

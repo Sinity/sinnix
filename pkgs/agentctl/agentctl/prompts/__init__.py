@@ -11,15 +11,15 @@ import fnmatch
 import hashlib
 import json
 import re
-import subprocess
 from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Sequence
+from typing import Any, Mapping, Sequence
 
 from ..backend_capabilities import BACKEND_CAPABILITIES, supported_backends
-from ..limits import CALL_TIMEOUT_SECONDS
 from ..projects import ProjectAdapter
+from ..task_reads import BdReader
+from ..task_reads import TaskReadError as PromptError
 
 TEMPLATE_VERSION = "v2"
 MAX_PROMPT_BYTES = 200_000
@@ -77,82 +77,12 @@ UNTRUSTED_JSON_PREAMBLE = (
 )
 
 
-class PromptError(ValueError):
-    """A prompt cannot be compiled or dispatched safely."""
-
-
 def validate_effort(value: str) -> str:
     if EFFORT.fullmatch(value) is None:
         raise PromptError(
             f"effort must be one of low, medium, high, xhigh; got {value!r}"
         )
     return value
-
-
-class BdReader(Protocol):
-    def show(self, bead_id: str) -> Mapping[str, Any]: ...
-
-    def list(self) -> Sequence[Mapping[str, Any]]: ...
-
-    def ready(self) -> Sequence[Mapping[str, Any]]: ...
-
-
-@dataclass(frozen=True)
-class SubprocessBdReader:
-    """`bd` resolves its database from the working directory: run it in the project."""
-
-    root: Path
-    executable: str = "bd"
-
-    def _run(self, arguments: Sequence[str]) -> Any:
-        try:
-            result = subprocess.run(
-                [self.executable, *arguments],
-                cwd=self.root,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=CALL_TIMEOUT_SECONDS,
-            )
-        except (OSError, subprocess.SubprocessError) as error:
-            raise PromptError(
-                f"bd {' '.join(arguments)} failed in {self.root}"
-            ) from error
-        try:
-            return json.loads(result.stdout)
-        except json.JSONDecodeError as error:
-            raise PromptError("bd returned invalid JSON") from error
-
-    def show(self, bead_id: str) -> Mapping[str, Any]:
-        return _one_bead(self._run(("show", bead_id, "--json")), bead_id)
-
-    def list(self) -> Sequence[Mapping[str, Any]]:
-        return _bead_list(
-            self._run(("list", "--all", "--limit", "0", "--json")), "list"
-        )
-
-    def ready(self) -> Sequence[Mapping[str, Any]]:
-        return _bead_list(self._run(("ready", "--limit", "0", "--json")), "ready")
-
-
-def _bead_list(value: Any, what: str) -> Sequence[Mapping[str, Any]]:
-    if not isinstance(value, list) or any(
-        not isinstance(item, Mapping) for item in value
-    ):
-        raise PromptError(f"bd {what} returned an invalid bead list")
-    return value
-
-
-def _one_bead(value: Any, bead_id: str) -> Mapping[str, Any]:
-    if isinstance(value, Mapping) and "error" not in value:
-        bead = value
-    elif isinstance(value, list) and len(value) == 1 and isinstance(value[0], Mapping):
-        bead = value[0]
-    else:
-        raise PromptError(f"bd show {bead_id} returned an invalid bead")
-    if bead.get("id") != bead_id:
-        raise PromptError(f"bd show {bead_id} returned the wrong bead")
-    return bead
 
 
 def _metadata(bead: Mapping[str, Any]) -> Mapping[str, Any]:
