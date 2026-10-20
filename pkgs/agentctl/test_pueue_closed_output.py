@@ -33,11 +33,15 @@ def test_quiet_wait_survives_closed_output_and_panic_reporting():
             )
             try:
                 deadline = time.monotonic() + 10
-                while subprocess.run(
-                    [*command, "status", "--json"], capture_output=True
-                ).returncode:
-                    assert daemon.poll() is None, (root / "daemon.log").read_text()
-                    assert time.monotonic() < deadline
+                while True:
+                    status = subprocess.run(
+                        [*command, "status", "--json"], capture_output=True, text=True
+                    )
+                    if status.returncode == 0:
+                        break
+                    diagnostic = (root / "daemon.log").read_text() + status.stderr
+                    assert daemon.poll() is None, diagnostic
+                    assert time.monotonic() < deadline, diagnostic
                     time.sleep(0.05)
                 # Prevent this deliberate synthetic abort from creating a host core.
                 launcher = root / "undumpable.py"

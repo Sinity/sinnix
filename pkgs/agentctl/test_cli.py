@@ -929,7 +929,7 @@ def test_an_unknown_operation_is_a_refusal_and_a_key_error_is_not(
     def broken(project_id: str | None = None) -> list[dict[str, object]]:
         raise KeyError("phase")
 
-    monkeypatch.setattr(cli.launch, "list_jobs", broken)
+    monkeypatch.setattr(cli.job_queries, "list_jobs", broken)
     with pytest.raises(KeyError):
         cli.main(["job", "list"])
 
@@ -1039,7 +1039,7 @@ def test_wait_reports_elapsed_age_after_blocking(
             "wait_timed_out": True,
         }
 
-    monkeypatch.setattr(cli.launch, "wait", wait)
+    monkeypatch.setattr(cli.job_queries, "wait", wait)
     assert cli.main(["job", "wait", "1"]) == cli.EXIT_JOB_NOT_SUCCEEDED
     text = capsys.readouterr().out
     assert "(10m) (wait timed out)" in text

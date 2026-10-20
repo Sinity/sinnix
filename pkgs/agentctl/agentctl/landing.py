@@ -17,7 +17,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 from sinnix_lib.procfs import held_paths
 
-from . import gitcmd, github, launch, prompts, pueue, results, worktrunk
+from . import gitcmd, github, job_queries, launch, prompts, pueue, results, worktrunk
 from .agents import (
     LANDING_AGENT_GROUP,
     WORKTREE_STATE_DIR,
@@ -34,7 +34,7 @@ from .beads import Beads, SubprocessBeads
 from .checkout import PUSH_TIMEOUT_SECONDS
 from .config import Config
 from .github import GithubError
-from .launch import JobError
+from .job_queries import JobError
 from .limits import CALL_TIMEOUT_SECONDS, MAX_AGENT_TIMEOUT_SECONDS
 from .manifest import (
     BatchError,
@@ -113,7 +113,7 @@ def _refuse_unless_workers_done(run: Run) -> None:
             continue
         if run.harness == "queued":
             task_id = worker.get("task_id")
-            task = launch.find_task(tasks, task_id, worker.get("job_id"))
+            task = job_queries.find_task(tasks, task_id, worker.get("job_id"))
             if task is None:
                 raise BatchRefusal(
                     "worker_not_done",
@@ -623,7 +623,7 @@ def _integrate(
             requested=selection,
             prompt_path=path / WORKTREE_STATE_DIR / "integrate.md",
         )
-        waited = launch.wait(
+        waited = job_queries.wait(
             job["task_id"],
             timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS,
             job_id=job.get("job_id"),
@@ -1055,19 +1055,19 @@ def _await_verification(
     first_seen: float | None = None
     wait_for = limit if limit is not None else VERIFY_EXIT_GRACE_SECONDS
     while True:
-        waited = launch.wait(
+        waited = job_queries.wait(
             task_id, timeout_seconds=wait_for, job_id=job_id, config=config
         )
-        # `launch.wait` can return the last non-terminal view at the instant
+        # `job_queries.wait` can return the last non-terminal view at the instant
         # its deadline passes; pueue's current record decides.
         try:
-            task = launch.find_task(
+            task = job_queries.find_task(
                 pueue.tasks(), waited.get("task_id", task_id), job_id
             )
         except PueueError:
             task = None
         if task is not None:
-            waited = {**waited, **launch.job_view(task)}
+            waited = {**waited, **job_queries.job_view(task)}
         if waited.get("terminal"):
             return waited
         task_id = int(waited.get("task_id", task_id))
@@ -1270,7 +1270,9 @@ def _verify(
             "verify_failed",
             f"verification {profile} succeeded without an AgentCTL launch job_id",
         )
-    task = launch.find_task(pueue.tasks(), waited["task_id"], started.get("job_id"))
+    task = job_queries.find_task(
+        pueue.tasks(), waited["task_id"], started.get("job_id")
+    )
     execution = (
         launch.successful_cached_attempt(
             config,
@@ -1327,7 +1329,7 @@ def _verify(
         receipt["executed_attempt"] = execution["attempt"]
     if task is not None:
         for key, suffix in (("log_path", ".log"), ("result_path", ".result")):
-            artifact = launch._artifact(config, task, suffix)
+            artifact = job_queries.artifact_path(config, task, suffix)
             if artifact is not None and (suffix == ".log" or artifact.is_file()):
                 receipt[key] = str(artifact)
     return run, receipt
@@ -1387,7 +1389,7 @@ def _review(
         requested=selection,
         prompt_path=path / WORKTREE_STATE_DIR / "review.md",
     )
-    waited = launch.wait(
+    waited = job_queries.wait(
         job["task_id"],
         timeout_seconds=MAX_AGENT_TIMEOUT_SECONDS,
         job_id=job.get("job_id"),
@@ -1733,7 +1735,7 @@ def queue(config: Config, project: ProjectAdapter, run_id: str) -> dict[str, Any
         if run.landing.get("pending_launch"):
             run, queued = requeue_landing(config, project, run, tasks)
             return {**run.to_dict(), "landing_task_id": queued}
-        current = launch.find_task(tasks, task_id, run.landing.get("job_id"))
+        current = job_queries.find_task(tasks, task_id, run.landing.get("job_id"))
         if current is not None and not current.terminal:
             raise BatchRefusal(
                 "landing_in_progress",
@@ -2629,7 +2631,7 @@ def abandon(
         if run.landing.get("pending_launch"):
             pending_task(config, run.landing["pending_launch"], tasks)
         landing_id = run.landing.get("task_id")
-        landing_task = launch.find_task(
+        landing_task = job_queries.find_task(
             tasks,
             landing_id,
             run.landing.get("pending_launch") or run.landing.get("job_id"),
@@ -2649,7 +2651,7 @@ def abandon(
         residual: list[str] = []
         for worker in run.workers:
             task_id = worker.get("task_id")
-            task = launch.find_task(
+            task = job_queries.find_task(
                 pueue.tasks(),
                 task_id,
                 worker.get("pending_launch") or worker.get("job_id"),

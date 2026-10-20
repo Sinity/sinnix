@@ -81,9 +81,9 @@ def test_landing_no_deadline_reuses_live_job_until_terminal(
         calls.append(task_id)
         return next(views)
 
-    monkeypatch.setattr(landing.launch, "wait", wait)
+    monkeypatch.setattr(landing.job_queries, "wait", wait)
     monkeypatch.setattr(landing.pueue, "tasks", lambda: [])
-    monkeypatch.setattr(landing.launch, "find_task", lambda *args: None)
+    monkeypatch.setattr(landing.job_queries, "find_task", lambda *args: None)
     assert landing._await_verification("fixture", 17, "same-job", 0)["terminal"] is True
     assert calls == [17, 17]
 

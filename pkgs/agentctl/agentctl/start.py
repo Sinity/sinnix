@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from . import checkout, gitcmd, launch, pueue, results, worktrunk
+from . import checkout, gitcmd, job_queries, pueue, results, worktrunk
 from .agents import (
     STRUCTURED_RESULT_BACKENDS,
     WORKTREE_STATE_DIR,
@@ -26,7 +26,7 @@ from .agents import (
 from .beads import Beads, SubprocessBeads
 from .checkout import CheckoutError
 from .config import Config
-from .launch import JobError
+from .job_queries import JobError
 from .manifest import (
     HARNESSES,
     REVIEW_PROFILE,
@@ -611,7 +611,7 @@ def _prepare(
                 if task is not None:
                     job = {
                         "task_id": task.task_id,
-                        "job_id": launch.job_id_of(task),
+                        "job_id": job_queries.job_id_of(task),
                     }
                 else:
                     job = queue_agent(
@@ -675,7 +675,9 @@ def _prepare(
                 task_id=landing_id,
                 pending_launch=None,
                 job_id=(
-                    launch.job_id_of(landing_task) if landing_task is not None else None
+                    job_queries.job_id_of(landing_task)
+                    if landing_task is not None
+                    else None
                 ),
                 # Only the external harness starts its landing stashed for result
                 # filing. A normal queued landing can later be stashed by an
@@ -1193,7 +1195,7 @@ def _result_locked(
                     "landing_requeued": requeued,
                     "landing_requeue_error": requeue_error,
                 }
-            task = launch.find_task(tasks, landing_id, job_id)
+            task = job_queries.find_task(tasks, landing_id, job_id)
             if task is None:
                 # The queue lost the landing task with its state. Nothing else
                 # would queue another, and the manifest would keep naming a task
@@ -1286,7 +1288,7 @@ def _resume_locked(
             f"worker {worker_id} has no worktree; start the batch instead",
         )
     tasks = pueue.tasks()
-    current = launch.find_task(tasks, worker.get("task_id"), worker.get("job_id"))
+    current = job_queries.find_task(tasks, worker.get("task_id"), worker.get("job_id"))
     if (
         current is not None
         and not current.terminal
@@ -1333,7 +1335,7 @@ def _resume_locked(
     if recovered is not None:
         job = {
             "task_id": recovered.task_id,
-            "job_id": launch.job_id_of(recovered),
+            "job_id": job_queries.job_id_of(recovered),
         }
     else:
 
@@ -1413,7 +1415,7 @@ def _resume_locked(
         # A landing task waits on the worker tasks it was queued behind; the
         # new worker task is not among them, so any landing that has not
         # started is replaced by one queued behind every current worker task.
-        old = launch.find_task(tasks, landing_id, run.landing.get("job_id"))
+        old = job_queries.find_task(tasks, landing_id, run.landing.get("job_id"))
         replace = old is None or old.status != "Running"
         if old is not None and replace:
             pueue.remove([old.task_id])
@@ -1423,7 +1425,7 @@ def _resume_locked(
                 task.task_id
                 for item in run.workers
                 if (
-                    task := launch.find_task(
+                    task := job_queries.find_task(
                         current_tasks,
                         item.get("task_id"),
                         item.get("job_id"),
@@ -1439,7 +1441,7 @@ def _resume_locked(
                 document["landing"]["task_id"] = new_landing
                 task = pueue.task(new_landing)
                 document["landing"]["job_id"] = (
-                    launch.job_id_of(task)
+                    job_queries.job_id_of(task)
                     if task is not None
                     else document["landing"].get("pending_launch")
                 )

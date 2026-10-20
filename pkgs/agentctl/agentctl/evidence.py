@@ -19,9 +19,9 @@ from typing import Any, Mapping
 
 from sinnix_lib.atomic import atomic_publish
 
-from . import gitcmd, github, launch, results
+from . import gitcmd, github, job_queries, results
 from .config import Config
-from .launch import JobError
+from .job_queries import JobError
 from .projects import ProjectAdapter
 from .prompts import PromptError, SubprocessBdReader, evidence_binding
 
@@ -32,8 +32,8 @@ MAX_PAGE_SIZE = 100
 MAX_BEADS = 100
 MAX_VERIFICATIONS = 100
 MAX_ARTIFACT_BYTES = (
-    MAX_VERIFICATIONS * launch.MAX_OUTCOME_BYTES
-    + launch.MAX_LAUNCH_INPUT_BYTES
+    MAX_VERIFICATIONS * job_queries.MAX_OUTCOME_BYTES
+    + job_queries.MAX_LAUNCH_INPUT_BYTES
     + MAX_EVIDENCE_BYTES
 )
 _RECEIPT = re.compile(r"^agentctl://jobs/([0-9]+)/([A-Za-z0-9._-]+)$")
@@ -44,7 +44,7 @@ def _records_dir(config: Config) -> Path:
 
 
 def _read_input(path: Path) -> Mapping[str, Any]:
-    raw = launch.read_bounded(path, MAX_EVIDENCE_BYTES + 1)
+    raw = job_queries.read_bounded(path, MAX_EVIDENCE_BYTES + 1)
     if raw is None:
         raise JobError(f"native evidence input is not a bounded regular file: {path}")
     if len(raw) > MAX_EVIDENCE_BYTES:
@@ -156,13 +156,13 @@ def _receipt_observation(
         )
     task_id, job_id = int(match.group(1)), match.group(2)
     try:
-        task = launch._read_task(config, task_id, job_id)
-        job = launch.get_job(task.task_id, config, job_id)
+        task = job_queries.read_task(config, task_id, job_id)
+        job = job_queries.get_job(task.task_id, config, job_id)
     except JobError as error:
         raise JobError(
             f"native verification receipt does not resolve: {receipt}"
         ) from error
-    launch_input = launch._launch_input(config, task)
+    launch_input = job_queries.read_launch_input(config, task)
     if launch_input is None:
         raise JobError(
             f"native verification receipt has no AgentCTL launch input: {receipt}"
@@ -447,7 +447,7 @@ def get_record(config: Config, project_id: str, evidence_id: str) -> dict[str, A
     if not re.fullmatch(r"[0-9a-f]{32}", evidence_id):
         raise JobError("invalid native evidence id")
     path = _records_dir(config) / f"{evidence_id}.json"
-    raw = launch.read_bounded(path, MAX_EVIDENCE_BYTES + 1)
+    raw = job_queries.read_bounded(path, MAX_EVIDENCE_BYTES + 1)
     if raw is None or len(raw) > MAX_EVIDENCE_BYTES:
         raise JobError(
             f"native evidence record is unavailable or oversized: {evidence_id}"
@@ -469,7 +469,7 @@ def get_record(config: Config, project_id: str, evidence_id: str) -> dict[str, A
         artifact_name = pointer.get("artifact")
         if artifact_name != f"{evidence_id}.artifact.json":
             raise JobError("native evidence reference has an invalid artifact path")
-        artifact_raw = launch.read_bounded(
+        artifact_raw = job_queries.read_bounded(
             _records_dir(config) / artifact_name, MAX_ARTIFACT_BYTES + 1
         )
         if artifact_raw is None or len(artifact_raw) > MAX_ARTIFACT_BYTES:
@@ -554,7 +554,7 @@ def list_records(
         for path_name in page_paths:
             scanned.append(path_name)
             path = directory / path_name
-            raw = launch.read_bounded(path, MAX_EVIDENCE_BYTES + 1)
+            raw = job_queries.read_bounded(path, MAX_EVIDENCE_BYTES + 1)
             if raw is None or len(raw) > MAX_EVIDENCE_BYTES:
                 document["coverage"] = "partial"
                 document["gaps"].append(f"unreadable or oversized record: {path.name}")

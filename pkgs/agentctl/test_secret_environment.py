@@ -13,7 +13,7 @@ import stat
 from pathlib import Path
 
 import pytest
-from agentctl import artifacts, launch
+from agentctl import artifacts, job_queries, launch
 from agentctl.config import Config
 from agentctl.launch_input import read_input, secret_environment, write_input
 from agentctl.projects import load_project_adapter
@@ -133,10 +133,10 @@ def test_job_log_reads_mask_a_secret_written_before_masking(
     log_path.write_text(text)
     fake_pueue.succeed(started["task_id"])
 
-    assert SECRET not in launch.logs(config, started["task_id"])
+    assert SECRET not in job_queries.logs(config, started["task_id"])
     split = text.index(SECRET) + 5
-    first = launch.read_job_artifact(config, started["task_id"], limit=split)
-    second = launch.read_job_artifact(
+    first = job_queries.read_job_artifact(config, started["task_id"], limit=split)
+    second = job_queries.read_job_artifact(
         config, started["task_id"], offset=first["next_offset"], limit=1000
     )
     joined = first["text"] + second["text"]

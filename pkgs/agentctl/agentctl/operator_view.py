@@ -14,10 +14,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Mapping, Sequence
 
-from . import github, launch, pueue
+from . import github, job_queries, pueue
 from .config import Config
 from .github import GithubError
-from .launch import job_view
+from .job_queries import job_view
 from .limits import SHORT_ID
 from .manifest import Run, list_runs, load, short_run_id
 from .projects import ProjectAdapter
@@ -72,7 +72,7 @@ def vanished_of(
     landing_id = run.landing.get("task_id")
     return Vanished(
         landing=landing_id
-        if launch.vanished(
+        if job_queries.vanished(
             tasks,
             landing_id,
             run.landing.get("job_id"),
@@ -82,7 +82,7 @@ def vanished_of(
         workers=tuple(
             worker["id"]
             for worker in run.workers
-            if launch.vanished(
+            if job_queries.vanished(
                 tasks,
                 worker.get("task_id"),
                 worker.get("job_id"),
@@ -103,7 +103,7 @@ def worker_stage(
     if worker.get("result"):
         return "done"
     if task is not None and task.terminal:
-        return launch.phase_of(task)
+        return job_queries.phase_of(task)
     if vanished:
         return "vanished"
     return "awaiting result" if worker.get("worktree") else "unprepared"
@@ -136,7 +136,7 @@ def run_stage(
         # waiting anywhere.
         return "landing vanished"
     if landing is not None and landing.terminal and not landing.succeeded:
-        return f"landing {launch.phase_of(landing)}"
+        return f"landing {job_queries.phase_of(landing)}"
     return (
         "awaiting workers"
         if not all(w.get("result") for w in run.workers)
@@ -150,11 +150,11 @@ def status(
     """The manifest with each task's pueue view and the landing PR's state."""
     run = load(config, run_id)
     tasks = pueue.tasks()
-    job_ids = launch.index_tasks_by_job_id(tuple(tasks.values()))
+    job_ids = job_queries.index_tasks_by_job_id(tuple(tasks.values()))
     lost = vanished_of(run, tasks, job_ids=job_ids)
     document = run.to_dict()
     for worker in document["workers"]:
-        task = launch.find_task(
+        task = job_queries.find_task(
             tasks,
             worker.get("task_id"),
             worker.get("job_id"),
@@ -163,7 +163,7 @@ def status(
         worker["task"] = job_view(task) if task else None
         worker["vanished"] = worker["id"] in lost.workers
         worker["stage"] = worker_stage(worker, task, vanished=worker["vanished"])
-    landing_task = launch.find_task(
+    landing_task = job_queries.find_task(
         tasks,
         document["landing"].get("task_id"),
         document["landing"].get("job_id"),
@@ -173,7 +173,7 @@ def status(
     for attempt in document["landing"].get("agent_attempts") or []:
         if not isinstance(attempt, dict):
             continue
-        task = launch.find_task(
+        task = job_queries.find_task(
             tasks,
             attempt.get("task_id"),
             attempt.get("job_id"),
@@ -187,7 +187,7 @@ def status(
         run,
         landing_task,
         [
-            launch.find_task(
+            job_queries.find_task(
                 tasks,
                 w.get("task_id"),
                 w.get("job_id"),
@@ -323,7 +323,7 @@ def run_dict(
 ) -> dict[str, Any]:
     """One run's rows: stage from pueue first, the manifest second."""
     if job_ids is None:
-        job_ids = launch.index_tasks_by_job_id(tasks)
+        job_ids = job_queries.index_tasks_by_job_id(tasks)
     # By launch job_id where the manifest has one: an id alone names a
     # queue position, which `pueue switch` and a daemon reset both reassign.
     index = (
@@ -331,7 +331,7 @@ def run_dict(
     )
     lost = vanished_of(run, index if queue_read else None, job_ids=job_ids)
     worker_tasks = [
-        launch.find_task(
+        job_queries.find_task(
             index,
             worker.get("task_id"),
             worker.get("job_id"),
@@ -339,7 +339,7 @@ def run_dict(
         )
         for worker in run.workers
     ]
-    landing_task = launch.find_task(
+    landing_task = job_queries.find_task(
         index,
         run.landing.get("task_id"),
         run.landing.get("job_id"),
@@ -379,7 +379,7 @@ def run_dict(
         "workers": workers,
         "landing": {
             "job": landing_task.task_id if landing_task else None,
-            "phase": launch.phase_of(landing_task) if landing_task else None,
+            "phase": job_queries.phase_of(landing_task) if landing_task else None,
             "vanished": lost.landing,
             "candidate_sha": landing.get("candidate_sha"),
             "pr_number": landing.get("pr_number"),
@@ -591,7 +591,7 @@ def _lost_jobs(row: Mapping[str, Any]) -> str:
 
 def render(snapshot: Snapshot) -> str:
     now = snapshot.now
-    job_ids = launch.index_tasks_by_job_id(snapshot.tasks)
+    job_ids = job_queries.index_tasks_by_job_id(snapshot.tasks)
     task_index = {task.task_id: task for task in snapshot.tasks}
     lines = [
         f"== {snapshot.project_id} at {now.astimezone().strftime('%Y-%m-%d %H:%M')}"
@@ -669,7 +669,7 @@ def render(snapshot: Snapshot) -> str:
         for task in failed[:MAX_FAILED_SHOWN]:
             exit_text = f" exit {task.exit_code}" if task.exit_code is not None else ""
             lines.append(
-                f"  ! job {task.task_id} {task.label} {launch.phase_of(task)}{exit_text}"
+                f"  ! job {task.task_id} {task.label} {job_queries.phase_of(task)}{exit_text}"
                 f" at {local_clock(task.ended_at)} ({age(task.ended_at, now)} ago)"
             )
         for row in attention:

@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
-from agentctl import launch
+from agentctl import job_queries, launch
 from agentctl.config import Config, PoolPolicy
 from agentctl.projects import ProjectAdapter, load_project_adapter
 from conftest import FakePueue, read_launch
@@ -60,7 +60,7 @@ def _legacy_stash(
     )["task_id"]
     task = launch.pueue.task(task_id)
     assert task is not None
-    path = launch.launch_input_path(task)
+    path = job_queries.launch_input_path(task)
     assert path is not None
     value = json.loads(path.read_text())
     value["hold"] = {"reason": "pool-exclusivity"}
@@ -78,7 +78,7 @@ def test_new_launches_do_not_stash_or_read_cross_pool_policy(
         "task_id"
     ]
     assert fake_pueue.task(job).status == "Running"
-    assert "hold" not in launch._launch_input(config, fake_pueue.task(job))
+    assert "hold" not in job_queries.read_launch_input(config, fake_pueue.task(job))
 
 
 def test_unverified_legacy_stashes_are_not_released(

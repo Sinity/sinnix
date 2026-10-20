@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from agentctl import batch, launch
+from agentctl import batch, job_queries, launch
 from agentctl.config import Config, ConfigError, load_config, resolve_project
 from agentctl.limits import MAX_AGENT_TIMEOUT_SECONDS
 from agentctl.projects import ProjectConfigError
@@ -89,7 +89,7 @@ def _job_id_argument(arguments: Mapping[str, Any]) -> str | None:
     component here and not a path.
     """
     job_id = _optional_str(arguments, "job_id")
-    if job_id is not None and not launch.JOB_ID.match(job_id):
+    if job_id is not None and not job_queries.JOB_ID.match(job_id):
         raise _Refusal("invalid_request", "job_id must be a job id")
     return job_id
 
@@ -287,7 +287,7 @@ class LocalJobs:
         except PueueError as error:
             raise JobOwnerError("unavailable", str(error)) from error
         except (
-            launch.JobError,
+            job_queries.JobError,
             batch.BatchError,
             WorktrunkError,
             ConfigError,
@@ -432,7 +432,7 @@ class LocalJobs:
         already has its result.
         """
         try:
-            queue = launch.job_queue(self.config, job)
+            queue = job_queries.job_queue(self.config, job)
         except PueueError as error:
             return {**job, "queue_unavailable": str(error)}
         return {**job, "queue": queue} if queue is not None else dict(job)
@@ -440,7 +440,7 @@ class LocalJobs:
     def _get(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         return job_payload(
             self._with_queue(
-                launch.get_job(
+                job_queries.get_job(
                     _require_int(arguments, "task_id"),
                     self.config,
                     _job_id_argument(arguments),
@@ -456,7 +456,7 @@ class LocalJobs:
     def _wait(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         task_id = _require_int(arguments, "task_id")
         timeout_seconds = _require_int(arguments, "timeout_seconds")
-        job = launch.wait(
+        job = job_queries.wait(
             task_id,
             timeout_seconds=float(timeout_seconds),
             job_id=_job_id_argument(arguments),
@@ -474,7 +474,7 @@ class LocalJobs:
             or any(not isinstance(group, str) or not group for group in groups)
         ):
             raise _Refusal("invalid_request", "groups must be a list of group names")
-        states = launch.queue_state(self.config, groups)
+        states = job_queries.queue_state(self.config, groups)
         return {"queues": [states[name] for name in sorted(states)]}
 
     def _logs(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
@@ -482,7 +482,7 @@ class LocalJobs:
         job_id = _job_id_argument(arguments)
         offset = int(arguments.get("offset") or 0)
         max_bytes = int(arguments.get("max_bytes") or MAX_LOG_BYTES)
-        page = launch.read_job_artifact(
+        page = job_queries.read_job_artifact(
             self.config,
             task_id,
             job_id,
@@ -490,7 +490,9 @@ class LocalJobs:
             offset=offset,
             limit=max_bytes,
         )
-        view = launch.get_job(task_id, self.config, job_id, attempt=page["attempt"])
+        view = job_queries.get_job(
+            task_id, self.config, job_id, attempt=page["attempt"]
+        )
         return {
             **job_payload(view),
             **page,
@@ -501,7 +503,7 @@ class LocalJobs:
 
     def _result(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         task_id = _require_int(arguments, "task_id")
-        observed = launch.result(
+        observed = job_queries.result(
             self.config,
             task_id,
             _job_id_argument(arguments),
@@ -537,7 +539,7 @@ class LocalJobs:
         limit = int(arguments.get("limit") or 50)
         project_id = arguments.get("project_id")
         rows = sorted(
-            launch.list_jobs(project_id if isinstance(project_id, str) else None),
+            job_queries.list_jobs(project_id if isinstance(project_id, str) else None),
             key=_sort_key,
             reverse=True,
         )
@@ -551,7 +553,7 @@ class LocalJobs:
                     "job list cursor does not match the project filter",
                 )
             rows = [row for row in rows if _sort_key(row) < after]
-        page = launch.attach_bindings(self.config, rows[:limit])
+        page = job_queries.attach_bindings(self.config, rows[:limit])
         truncated = len(rows) > len(page)
         active_total = sum(1 for row in rows if not row.get("terminal"))
         active_returned = sum(1 for row in page if not row.get("terminal"))

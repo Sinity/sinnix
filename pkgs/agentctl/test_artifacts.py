@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from agentctl import launch, pueue, run
+from agentctl import job_queries, launch, pueue, run
 from agentctl.config import Config
 from agentctl.projects import load_project_adapter
 from conftest import FakePueue, read_launch
@@ -51,9 +51,9 @@ def test_retry_preserves_complete_outputs_outcomes_and_reads_after_clean(
         stdout=json.dumps({"payload": "x" * 100_000}),
         exit_code=7,
     )
-    input_path = str(launch.launch_input_path(fake_pueue.task(job["task_id"])))
+    input_path = str(job_queries.launch_input_path(fake_pueue.task(job["task_id"])))
     assert run.run(document, launch_input=input_path) == 7
-    first = launch.result(config, job["task_id"])
+    first = job_queries.result(config, job["task_id"])
     assert first["attempt"] == 1
     assert first["value"] is None
     assert not first["page"]["complete"]
@@ -67,16 +67,19 @@ def test_retry_preserves_complete_outputs_outcomes_and_reads_after_clean(
         "import sys; print('{\"second\": true}'); print('diagnostics', file=sys.stderr)",
     ]
     assert run.run(document, launch_input=input_path) == 0
-    second = launch.result(config, job["task_id"])
+    second = job_queries.result(config, job["task_id"])
     assert second["attempt"] == 2 and second["value"] == {"second": True}
     assert canonical.read_bytes() == original
     assert Path(first["artifacts"]["outcome"]).read_bytes() == first_outcome
-    assert launch.result(config, job["task_id"], attempt=1)["outcome"]["exit_code"] == 7
-    assert launch.logs(config, job["task_id"], attempt=2).strip() == "diagnostics"
+    assert (
+        job_queries.result(config, job["task_id"], attempt=1)["outcome"]["exit_code"]
+        == 7
+    )
+    assert job_queries.logs(config, job["task_id"], attempt=2).strip() == "diagnostics"
     restored = bytearray()
     offset = 0
     while True:
-        page = launch.read_job_artifact(
+        page = job_queries.read_job_artifact(
             config,
             job["task_id"],
             artifact="result",
@@ -92,7 +95,7 @@ def test_retry_preserves_complete_outputs_outcomes_and_reads_after_clean(
     fake_pueue.succeed(job["task_id"])
     cleaned = launch.clean(config, job["task_id"], job["job_id"])
     assert cleaned["retained"]
-    archived = launch.result(config, job["task_id"], job["job_id"], attempt=1)
+    archived = job_queries.result(config, job["task_id"], job["job_id"], attempt=1)
     assert archived["queue_present"] is False
     assert archived["attempt_count"] == 2
     assert archived["outcome"]["exit_code"] == 7
@@ -116,13 +119,13 @@ def test_interrupted_attempt_partial_output_survives_the_next_invocation(
     monkeypatch.setattr(run, "_run_bare", interrupt)
     with pytest.raises(KeyboardInterrupt):
         run.run(document, launch_input="fixture-input")
-    partial = launch.get_job(job["task_id"], config)
+    partial = job_queries.get_job(job["task_id"], config)
     monkeypatch.setattr(run, "_run_bare", original)
     assert run.run(document, launch_input="fixture-input") == 0
     assert Path(partial["artifacts"]["result"]).read_bytes() == b'{"partial":'
     assert Path(partial["artifacts"]["log"]).read_bytes() == b"interrupted diagnostics"
     assert not Path(partial["artifacts"]["outcome"]).exists()
-    assert launch.get_job(job["task_id"], config)["attempt"] == 2
+    assert job_queries.get_job(job["task_id"], config)["attempt"] == 2
 
 
 def test_attempt_job_id_survives_pueue_reordering(
@@ -136,7 +139,7 @@ def test_attempt_job_id_survives_pueue_reordering(
     fake_pueue.queue(first["task_id"])
     fake_pueue.queue(second["task_id"])
     fake_pueue.switch(first["task_id"], second["task_id"])
-    read = launch.result(config, first["task_id"], first["job_id"], attempt=1)
+    read = job_queries.result(config, first["task_id"], first["job_id"], attempt=1)
     assert read["value"] == {"first": True}
     assert read["task_id"] == second["task_id"]
 
@@ -166,7 +169,7 @@ def test_durable_idempotent_request_reconciles_acceptance_and_survives_clean(
     retained = launch.lookup_operation_request(config, "fixture-request")
     assert retained["job_id"] == first["job_id"]
     assert retained["queue_present"] is False
-    with pytest.raises(launch.JobError, match="different launch request"):
+    with pytest.raises(job_queries.JobError, match="different launch request"):
         launch.start_operation(
             config,
             project,
@@ -199,7 +202,7 @@ def test_keyed_shell_launch_reuses_exact_job_and_refuses_changed_request(
     )
     assert again["job_id"] == first["job_id"]
     assert len(fake_pueue.added) == 1
-    with pytest.raises(launch.JobError, match="identity mismatch"):
+    with pytest.raises(job_queries.JobError, match="identity mismatch"):
         launch.enqueue_request(
             config, idempotency_key="shell-key", request_digest="changed", **arguments
         )
@@ -295,11 +298,11 @@ def test_cancel_attempt_guard_rejects_a_newer_retry_before_mutating_queue(
 ):
     monkeypatch.setattr(pueue, "status", lambda: pueue.Status(fake_pueue.tasks(), {}))
     job, document = execute(config, fake_pueue, project_root)
-    assert launch.get_job(job["task_id"], config)["attempt"] == 0
-    assert launch.snapshot_jobs(10, config)["jobs"][0]["attempt"] == 0
+    assert job_queries.get_job(job["task_id"], config)["attempt"] == 0
+    assert job_queries.snapshot_jobs(10, config)["jobs"][0]["attempt"] == 0
     assert run.run(document, launch_input="fixture-input") == 0
-    assert launch.snapshot_jobs(10, config)["jobs"][0]["attempt"] == 1
-    with pytest.raises(launch.JobError, match="attempt changed"):
+    assert job_queries.snapshot_jobs(10, config)["jobs"][0]["attempt"] == 1
+    with pytest.raises(job_queries.JobError, match="attempt changed"):
         launch.cancel(config, job["task_id"], job_id=job["job_id"], expected_attempt=0)
     assert not fake_pueue.killed and not fake_pueue.removed
     fake_pueue.queue(job["task_id"])
@@ -307,7 +310,7 @@ def test_cancel_attempt_guard_rejects_a_newer_retry_before_mutating_queue(
         config, job["task_id"], job_id=job["job_id"], expected_attempt=1
     )
     assert cancelled["state"] == "removed"
-    assert launch.result(config, job["task_id"], job["job_id"])["attempt"] == 1
+    assert job_queries.result(config, job["task_id"], job["job_id"])["attempt"] == 1
 
 
 def test_guarded_cancel_allows_real_wrapper_to_finalize(
@@ -318,7 +321,7 @@ def test_guarded_cancel_allows_real_wrapper_to_finalize(
 
     job, document = execute(config, fake_pueue, project_root)
     task = fake_pueue.task(job["task_id"])
-    input_path = launch.launch_input_path(task)
+    input_path = job_queries.launch_input_path(task)
     running = threading.Event()
     stopped = threading.Event()
     failures = []
@@ -388,7 +391,7 @@ def test_guarded_cancel_never_escalates_onto_a_new_wrapper(
 
     job, document = execute(config, fake_pueue, project_root)
     task = fake_pueue.task(job["task_id"])
-    input_path = str(launch.launch_input_path(task))
+    input_path = str(job_queries.launch_input_path(task))
     first = artifacts.begin(document, input_path)
     path = run.outcome_path_for(first["log_path"])
     clock = [0.0]
@@ -412,7 +415,7 @@ def test_guarded_cancel_never_escalates_onto_a_new_wrapper(
             )
         clock[0] = 1.0
 
-    with pytest.raises(launch.JobError, match="attempt changed while waiting"):
+    with pytest.raises(job_queries.JobError, match="attempt changed while waiting"):
         launch.cancel(
             config,
             task.task_id,
@@ -435,7 +438,7 @@ def test_guarded_cancel_can_kill_only_the_same_unsettled_wrapper(
 
     job, document = execute(config, fake_pueue, project_root)
     task = fake_pueue.task(job["task_id"])
-    artifacts.begin(document, str(launch.launch_input_path(task)))
+    artifacts.begin(document, str(job_queries.launch_input_path(task)))
     monkeypatch.setattr(
         launch.subprocess,
         "run",
@@ -464,7 +467,7 @@ def test_guarded_cancel_keeps_a_published_attempt_while_wrapper_exits(
 
     job, document = execute(config, fake_pueue, project_root)
     task = fake_pueue.task(job["task_id"])
-    allocated = artifacts.begin(document, str(launch.launch_input_path(task)))
+    allocated = artifacts.begin(document, str(job_queries.launch_input_path(task)))
     path = run.outcome_path_for(allocated["log_path"])
     previous = b'{"attempt":1,"outcome":"cancelled","exit_code":130}'
     path.write_bytes(previous)

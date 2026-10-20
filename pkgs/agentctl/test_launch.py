@@ -14,10 +14,10 @@ from pathlib import Path
 from typing import Callable
 
 import pytest
-from agentctl import artifacts, launch, pueue
+from agentctl import artifacts, job_queries, launch, pueue
 from agentctl import run as run_module
 from agentctl.config import Config, load_config
-from agentctl.launch import JobError
+from agentctl.job_queries import JobError
 from agentctl.launch_input import write_input
 from agentctl.projects import load_project_adapter
 from agentctl.pueue import PueueError, PueueGroupError, Task
@@ -89,7 +89,7 @@ def test_start_writes_the_launch_input_and_queues_the_wrapper_in_the_pool(
     assert written["argv"] == ["env", "fixture-verify"]
     assert written["timeout_seconds"] == 120
     assert written["pool"] == "pytest"
-    assert launch.unit_of(fake_pueue.task(1)) == unit_for(input_path, "pytest")
+    assert job_queries.unit_of(fake_pueue.task(1)) == unit_for(input_path, "pytest")
     assert written["result_kind"] == "json"
     assert written["result_path"].endswith(".result")
     assert written["event_spool_path"] == str(config.event_spool)
@@ -203,7 +203,7 @@ def test_cached_operation_reuses_an_active_and_completed_exact_receipt(
 
 def _write_execution_attempt(config: Config, task: Task, head: str, tree: str) -> None:
     launch_input = read_launch(config, task)
-    input_path = launch.launch_input_path(task)
+    input_path = job_queries.launch_input_path(task)
     assert input_path is not None
     attempt_dir = artifacts.root_for(Path(launch_input["log_path"])) / "1"
     attempt_dir.mkdir(parents=True)
@@ -354,7 +354,7 @@ def test_phases_come_from_pueue_results_and_the_wrapper_exit_codes(
     fake_pueue.fail(ids[7], exit_code=VANISHED_EXIT_CODE)
     fake_pueue.fail(ids[8], exit_code=SLOT_OCCUPIED_EXIT_CODE)
 
-    phases = [launch.get_job(task_id)["phase"] for task_id in ids]
+    phases = [job_queries.get_job(task_id)["phase"] for task_id in ids]
 
     assert phases == [
         "succeeded",
@@ -383,9 +383,9 @@ def test_logs_and_result_are_read_by_the_job_id_in_the_task_command(
     fake_pueue.set_log(started["task_id"], "wrapper stderr")
     fake_pueue.succeed(started["task_id"])
 
-    assert "ran" in launch.logs(config, started["task_id"])
-    assert "wrapper stderr" in launch.logs(config, started["task_id"])
-    outcome = launch.result(config, started["task_id"])
+    assert "ran" in job_queries.logs(config, started["task_id"])
+    assert "wrapper stderr" in job_queries.logs(config, started["task_id"])
+    outcome = job_queries.result(config, started["task_id"])
     assert outcome["kind"] == "artifact"
     assert outcome["value"] == {"passed": 3}
     assert outcome["phase"] == "succeeded"
@@ -399,7 +399,7 @@ def test_result_of_an_exit_operation_is_the_status_alone(
     started = launch.start_operation(config, project, project.operation("check"))
     fake_pueue.succeed(started["task_id"])
 
-    outcome = launch.result(config, started["task_id"])
+    outcome = job_queries.result(config, started["task_id"])
 
     assert outcome["kind"] == "exit" and outcome["value"] is None
     assert outcome["exit_code"] == 0
@@ -424,7 +424,7 @@ def test_result_of_an_exit_operation_keeps_the_wrapper_execution_receipt(
     )
     fake_pueue.succeed(started["task_id"])
 
-    result = launch.result(config, started["task_id"])
+    result = job_queries.result(config, started["task_id"])
 
     assert result["kind"] == "exit"
     assert result["outcome"]["execution_receipt"]["binding"] == "unchanged_endpoints"
@@ -441,7 +441,7 @@ def test_cancel_marks_then_stops_the_unit_then_kills_the_task(
     project = load_project_adapter(project_root)
     started = launch.start_operation(config, project, project.operation("check"))
     task = fake_pueue.task(started["task_id"])
-    unit = launch.unit_of(task)
+    unit = job_queries.unit_of(task)
     marker = cancel_marker_for(read_launch(config, task)["log_path"])
 
     cancelled = launch.cancel(config, started["task_id"], settle_seconds=0)
@@ -467,7 +467,7 @@ def test_running_cancel_records_request_before_stopping_and_keeps_retry_identity
     started = launch.start_operation(config, project, project.operation("check"))
     task = fake_pueue.task(started["task_id"])
     document = read_launch(config, task)
-    first = artifacts.begin(document, str(launch.launch_input_path(task)))
+    first = artifacts.begin(document, str(job_queries.launch_input_path(task)))
 
     cancelled = launch.cancel(
         config,
@@ -487,7 +487,8 @@ def test_running_cancel_records_request_before_stopping_and_keeps_retry_identity
     assert cancelled["cancellation"] == request
     assert cancelled["already_terminal"] is False
     assert (
-        launch.get_job(started["task_id"], config, attempt=1)["cancellation"] == request
+        job_queries.get_job(started["task_id"], config, attempt=1)["cancellation"]
+        == request
     )
 
     outcome = Path(first["log_path"]).with_name("output.outcome")
@@ -495,7 +496,7 @@ def test_running_cancel_records_request_before_stopping_and_keeps_retry_identity
     fake_pueue.restart(started["task_id"])
     fake_pueue.running(started["task_id"])
     fake_pueue._set(started["task_id"], started_at="2026-09-03T08:00:02+00:00")
-    second = artifacts.begin(document, str(launch.launch_input_path(task)))
+    second = artifacts.begin(document, str(job_queries.launch_input_path(task)))
     assert second["attempt"] == 2
     launch.cancel(
         config,
@@ -505,10 +506,13 @@ def test_running_cancel_records_request_before_stopping_and_keeps_retry_identity
         settle_seconds=0,
     )
     assert (
-        launch.get_job(started["task_id"], config, attempt=1)["cancellation"] == request
+        job_queries.get_job(started["task_id"], config, attempt=1)["cancellation"]
+        == request
     )
     assert (
-        launch.get_job(started["task_id"], config, attempt=2)["cancellation"]["actor"]
+        job_queries.get_job(started["task_id"], config, attempt=2)["cancellation"][
+            "actor"
+        ]
         == "fixture-reviewer"
     )
 
@@ -556,7 +560,9 @@ def test_default_cancel_actor_uses_os_identity_not_user_environment(
     assert cancelled["cancellation"]["actor"] == pwd.getpwuid(os.getuid()).pw_name
     assert cancelled["cancellation"]["reason"] is None
     assert (
-        launch.get_job(started["task_id"], config, started["job_id"])["cancellation"]
+        job_queries.get_job(started["task_id"], config, started["job_id"])[
+            "cancellation"
+        ]
         == cancelled["cancellation"]
     )
 
@@ -573,7 +579,7 @@ def test_cancel_request_round_trips_the_declared_unicode_limit(
     cancelled = launch.cancel(
         config, started["task_id"], actor="fixture-worker", reason=reason
     )
-    observed = launch.get_job(started["task_id"], config, started["job_id"])
+    observed = job_queries.get_job(started["task_id"], config, started["job_id"])
     assert observed["cancellation"]["reason"] == reason
     assert observed["cancellation"] == cancelled["cancellation"]
     assert observed["attempt_count"] == 0
@@ -592,7 +598,7 @@ def test_cancel_waits_for_inflight_service_creation_then_stops_unit(
     written = read_launch(config, task)
     marker = cancel_marker_for(written["log_path"])
     artifacts.root_for(Path(written["log_path"])).mkdir(parents=True)
-    unit = launch.unit_of(task)
+    unit = job_queries.unit_of(task)
     admission_entered = threading.Event()
     allow_admission = threading.Event()
     cancel_lock_attempted = threading.Event()
@@ -761,7 +767,7 @@ def test_cancel_lets_the_wrapper_record_the_outcome_before_any_kill(
     assert not marker.exists()
     assert cancelled["phase"] == "cancelled" and cancelled["state"] == "unresolved"
     assert cancelled["outcome"] == {"outcome": "cancelled", "exit_code": 130}
-    stop = ["systemctl", "--user", "stop", launch.unit_of(task)]
+    stop = ["systemctl", "--user", "stop", job_queries.unit_of(task)]
     assert stop in recording_systemctl()
 
 
@@ -806,7 +812,7 @@ def test_clean_finds_a_task_pueue_forgot_by_its_launch_input(
     for key in ("log_path", "result_path"):
         Path(written[key]).parent.mkdir(parents=True, exist_ok=True)
         Path(written[key]).write_text("x")
-    input_path = launch.launch_input_path(task)
+    input_path = job_queries.launch_input_path(task)
     fake_pueue.remove([started["task_id"]])
 
     cleaned = launch.clean(config, started["task_id"], started["job_id"])
@@ -847,7 +853,7 @@ def test_clean_leaves_the_launch_input_of_a_job_the_queue_moved(
         launch.clean(config, vacated)
 
     assert survivor_input.exists(), "the queued job lost its own launch input"
-    assert launch.get_job(doomed["task_id"])["job_id"] == survivor["job_id"]
+    assert job_queries.get_job(doomed["task_id"])["job_id"] == survivor["job_id"]
 
 
 def test_clean_by_reference_removes_only_the_named_queue_entry(
@@ -905,10 +911,10 @@ def test_a_read_by_reference_answers_about_that_job_after_a_reorder(
 
     asked = first["task_id"]
     job_id = first["job_id"]
-    moved = launch.get_job(asked, config, job_id)
+    moved = job_queries.get_job(asked, config, job_id)
     assert (moved["job_id"], moved["task_id"]) == (job_id, second["task_id"])
-    assert launch.result(config, asked, job_id)["value"] == {"ran": "first"}
-    assert launch.logs(config, asked, job_id).strip() == "first log"
+    assert job_queries.result(config, asked, job_id)["value"] == {"ran": "first"}
+    assert job_queries.logs(config, asked, job_id).strip() == "first log"
 
     cancelled = launch.cancel(config, asked, job_id=job_id)
 
@@ -926,7 +932,7 @@ def test_a_retained_reference_remains_readable_after_the_queue_forgets_it(
     started = launch.start_operation(config, project, project.operation("check"))
     fake_pueue.remove([started["task_id"]])
 
-    view = launch.get_job(started["task_id"], config, started["job_id"])
+    view = job_queries.get_job(started["task_id"], config, started["job_id"])
     assert view["queue_present"] is False
     assert view["job_id"] == started["job_id"]
 
@@ -945,7 +951,7 @@ def test_clean_removes_a_terminal_queue_task_and_retains_its_evidence(
         Path(written["result_path"]),
         cancel_marker_for(log),
         outcome_path_for(log),
-        launch.launch_input_path(task),
+        job_queries.launch_input_path(task),
     ]
     for path in artifacts:
         path.write_text("x")
@@ -1003,8 +1009,10 @@ def test_a_binding_is_stored_in_the_launch_input_and_read_back_on_get(
 
     written = read_launch(config, fake_pueue.task(started["task_id"]))
     assert written["binding"] == {"beads": ["fx-1", "fx-2"], "run_id": "run-7"}
-    assert launch.get_job(started["task_id"], config)["binding"] == written["binding"]
-    assert "binding" not in launch.get_job(started["task_id"])
+    assert (
+        job_queries.get_job(started["task_id"], config)["binding"] == written["binding"]
+    )
+    assert "binding" not in job_queries.get_job(started["task_id"])
 
 
 def test_enqueue_preserves_a_pending_launch_after_an_uncertain_add(
@@ -1082,9 +1090,9 @@ def test_a_declared_scratch_tier_reaches_the_launch_input_and_job_get(
     )
     fake_pueue.succeed(started["task_id"])
 
-    document = launch.get_job(started["task_id"], config)
+    document = job_queries.get_job(started["task_id"], config)
     assert document["scratch"]["bytes"] == 2048 and document["scratch"]["files"] == 3
-    assert "scratch" not in launch.get_job(plain["task_id"], config)
+    assert "scratch" not in job_queries.get_job(plain["task_id"], config)
 
 
 def test_cancelling_a_queued_task_drops_it_out_of_the_queue(
@@ -1099,7 +1107,7 @@ def test_cancelling_a_queued_task_drops_it_out_of_the_queue(
     started = launch.start_operation(config, project, project.operation("check"))
     fake_pueue.queue(started["task_id"])
 
-    input_path = launch.launch_input_path(fake_pueue.task(started["task_id"]))
+    input_path = job_queries.launch_input_path(fake_pueue.task(started["task_id"]))
     assert input_path is not None and input_path.exists()
 
     cancelled = launch.cancel(config, started["task_id"])
@@ -1115,9 +1123,9 @@ def test_cancelling_a_queued_task_drops_it_out_of_the_queue(
     }
     assert cancelled["removed"] == []
     assert input_path.exists()
-    first = launch.get_job(started["task_id"], config, started["job_id"])
-    second = launch.get_job(started["task_id"], config, started["job_id"])
-    restarted = launch.get_job(
+    first = job_queries.get_job(started["task_id"], config, started["job_id"])
+    second = job_queries.get_job(started["task_id"], config, started["job_id"])
+    restarted = job_queries.get_job(
         started["task_id"],
         Config(
             project_roots=config.project_roots,
@@ -1162,12 +1170,14 @@ def test_cancelling_a_queued_retry_keeps_the_previous_attempt_and_its_output(
     cancelled = launch.cancel(config, started["task_id"], job_id=started["job_id"])
 
     assert cancelled["phase"] == "cancelled" and cancelled["started"] is False
-    latest = launch.get_job(started["task_id"], config, started["job_id"])
+    latest = job_queries.get_job(started["task_id"], config, started["job_id"])
     assert latest["phase"] == "cancelled" and latest["started"] is False
-    previous = launch.get_job(started["task_id"], config, started["job_id"], attempt=1)
+    previous = job_queries.get_job(
+        started["task_id"], config, started["job_id"], attempt=1
+    )
     assert previous["outcome"]["outcome"] == "success"
     assert previous["artifacts"]["result"]
-    page = launch.result(config, started["task_id"], started["job_id"], attempt=1)
+    page = job_queries.result(config, started["task_id"], started["job_id"], attempt=1)
     assert page["value"] == {"passed": 4}
     assert Path(written["log_path"]).read_bytes() == original_log
     assert Path(written["result_path"]).read_bytes() == original_result
@@ -1184,10 +1194,10 @@ def test_get_job_keeps_first_attempt_allocation_out_of_its_selected_view(
     started = launch.start_operation(config, project, project.operation("check"))
     task = fake_pueue.task(started["task_id"])
     document = read_launch(config, task)
-    input_path = launch.launch_input_path(task)
+    input_path = job_queries.launch_input_path(task)
     assert input_path is not None
 
-    original_view = launch._artifact_view
+    original_view = job_queries.artifact_view
     views = 0
 
     def allocate_after_view(
@@ -1205,20 +1215,20 @@ def test_get_job_keeps_first_attempt_allocation_out_of_its_selected_view(
             )
         return view
 
-    monkeypatch.setattr(launch, "_artifact_view", allocate_after_view)
-    first = launch.get_job(started["task_id"], config, started["job_id"])
+    monkeypatch.setattr(job_queries, "artifact_view", allocate_after_view)
+    first = job_queries.get_job(started["task_id"], config, started["job_id"])
     assert views == 1
     assert first["attempt"] == 0
     assert first["attempts"] == [] and first["attempt_count"] == 0
     assert first["artifacts"] == {} and "outcome" not in first
     assert first["phase"] == "running"
 
-    second = launch.get_job(started["task_id"], config, started["job_id"])
+    second = job_queries.get_job(started["task_id"], config, started["job_id"])
     assert second["attempt"] == 1 and second["attempt_count"] == 1
     assert second["outcome"] == {"outcome": "success", "exit_code": 0}
     assert second["phase"] == "running"
     with pytest.raises(JobError, match="has no attempt 0"):
-        launch.get_job(started["task_id"], config, started["job_id"], attempt=0)
+        job_queries.get_job(started["task_id"], config, started["job_id"], attempt=0)
 
 
 def test_result_keeps_first_attempt_allocation_out_of_its_selected_view(
@@ -1231,10 +1241,10 @@ def test_result_keeps_first_attempt_allocation_out_of_its_selected_view(
     started = launch.start_operation(config, project, project.operation("verify"))
     task = fake_pueue.task(started["task_id"])
     document = read_launch(config, task)
-    input_path = launch.launch_input_path(task)
+    input_path = job_queries.launch_input_path(task)
     assert input_path is not None
 
-    original_view = launch._artifact_view
+    original_view = job_queries.artifact_view
     views = 0
 
     def allocate_after_view(
@@ -1249,14 +1259,14 @@ def test_result_keeps_first_attempt_allocation_out_of_its_selected_view(
             Path(allocated["result_path"]).write_text('{"passed": 4}')
         return view
 
-    monkeypatch.setattr(launch, "_artifact_view", allocate_after_view)
-    first = launch.result(config, started["task_id"], started["job_id"])
+    monkeypatch.setattr(job_queries, "artifact_view", allocate_after_view)
+    first = job_queries.result(config, started["task_id"], started["job_id"])
     assert views == 1
     assert first["attempt"] == first["page"]["attempt"] == 0
     assert first["attempt_count"] == 0 and first["page"]["available"] is False
     assert first["value"] is None and first["kind"] == "exit"
 
-    second = launch.result(config, started["task_id"], started["job_id"])
+    second = job_queries.result(config, started["task_id"], started["job_id"])
     assert second["attempt"] == second["page"]["attempt"] == 1
     assert second["value"] == {"passed": 4}
 
@@ -1270,7 +1280,7 @@ def test_cancel_racing_runner_start_does_not_fabricate_not_started(
     started = launch.start_operation(config, project, project.operation("check"))
     fake_pueue.queue(started["task_id"])
     document = read_launch(config, fake_pueue.task(started["task_id"]))
-    input_path = launch.launch_input_path(fake_pueue.task(started["task_id"]))
+    input_path = job_queries.launch_input_path(fake_pueue.task(started["task_id"]))
     assert input_path is not None
     artifacts.begin(document, str(input_path))
 
@@ -1323,11 +1333,11 @@ def test_cancel_start_race_targets_the_attempt_allocated_after_it(
 
     side_effect = tmp_path / "cancelled-runner-side-effect"
     document["argv"] = ["sh", "-c", f"touch {side_effect}"]
-    write_input(launch.launch_input_path(original_task(task_id)), document)
+    write_input(job_queries.launch_input_path(original_task(task_id)), document)
     monkeypatch.setattr("agentctl.run.unit_pool", lambda _pool: None)
 
     assert (
-        run_main([str(launch.launch_input_path(original_task(task_id)))])
+        run_main([str(job_queries.launch_input_path(original_task(task_id)))])
         == CANCELLED_EXIT_CODE
     )
     assert not side_effect.exists()
@@ -1335,7 +1345,7 @@ def test_cancel_start_race_targets_the_attempt_allocated_after_it(
         "systemctl",
         "--user",
         "stop",
-        launch.unit_of(original_task(task_id)),
+        job_queries.unit_of(original_task(task_id)),
     ] in recording_systemctl()
 
 
@@ -1383,7 +1393,7 @@ def test_a_command_that_only_mentions_the_wrapper_owns_no_scope_and_no_artifacts
     """
     project = load_project_adapter(project_root)
     victim = launch.start_operation(config, project, project.operation("check"))
-    borrowed = launch.launch_input_path(fake_pueue.task(victim["task_id"]))
+    borrowed = job_queries.launch_input_path(fake_pueue.task(victim["task_id"]))
     task_id = fake_pueue.add(
         group="pytest",
         label="other:report:1",
@@ -1392,8 +1402,8 @@ def test_a_command_that_only_mentions_the_wrapper_owns_no_scope_and_no_artifacts
     )
     task = fake_pueue.task(task_id)
 
-    assert launch.launch_input_path(task) is None
-    assert launch.unit_of(task) is None
+    assert job_queries.launch_input_path(task) is None
+    assert job_queries.unit_of(task) is None
     cancelled = launch.cancel(config, task_id)
 
     assert cancelled["unit"] is None
@@ -1431,10 +1441,10 @@ def test_an_artifact_outside_the_task_own_directories_is_not_published(
     for task_id in tasks.values():
         fake_pueue.set_log(task_id, "wrapper stderr")
 
-    assert launch.logs(config, tasks["outside"]) == "wrapper stderr"
-    assert "secret material" not in launch.logs(config, tasks["outside"])
+    assert job_queries.logs(config, tasks["outside"]) == "wrapper stderr"
+    assert "secret material" not in job_queries.logs(config, tasks["outside"])
     # The same rule must publish the artifacts a task really does own.
-    assert "this task's own output" in launch.logs(config, tasks["reachable"])
+    assert "this task's own output" in job_queries.logs(config, tasks["reachable"])
 
 
 def test_get_job_does_not_read_outcome_beside_an_outside_log_symlink(
@@ -1458,7 +1468,7 @@ def test_get_job_does_not_read_outcome_beside_an_outside_log_symlink(
         working_directory=checkout,
     )
 
-    detail = launch.get_job(task_id, config)
+    detail = job_queries.get_job(task_id, config)
 
     assert "outcome" not in detail
 
@@ -1476,10 +1486,10 @@ def test_an_artifact_that_is_not_a_regular_file_is_refused_without_blocking(
     regular = tmp_path / "regular"
     regular.write_bytes(b"x" * 4096)
 
-    assert launch.read_bounded(fifo, 64) is None
-    assert launch.read_bounded(tmp_path, 64) is None
-    assert launch.read_bounded(tmp_path / "absent", 64) is None
-    assert launch.read_bounded(regular, 64) == b"x" * 64
+    assert job_queries.read_bounded(fifo, 64) is None
+    assert job_queries.read_bounded(tmp_path, 64) is None
+    assert job_queries.read_bounded(tmp_path / "absent", 64) is None
+    assert job_queries.read_bounded(regular, 64) == b"x" * 64
 
 
 def test_retry_is_pueue_restart_and_only_for_terminal_tasks(
@@ -1504,11 +1514,11 @@ def test_wait_returns_the_terminal_view_and_reports_a_timeout_as_such(
     started = launch.start_operation(config, project, project.operation("check"))
     fake_pueue.finish_when_waited(started["task_id"], lambda fake: fake.succeed(1))
 
-    waited = launch.wait(started["task_id"], timeout_seconds=5)
+    waited = job_queries.wait(started["task_id"], timeout_seconds=5)
     assert waited["phase"] == "succeeded"
 
     second = launch.start_operation(config, project, project.operation("check"))
-    timed_out = launch.wait(second["task_id"], timeout_seconds=1)
+    timed_out = job_queries.wait(second["task_id"], timeout_seconds=1)
     assert timed_out["wait_timed_out"] is True
     assert timed_out["phase"] == "running"
 
@@ -1535,13 +1545,13 @@ def test_a_wait_follows_its_job_when_the_queue_reorders_beneath_it(
 
     fake_pueue.finish_when_waited(own["task_id"], reorder)
 
-    waited = launch.wait(own["task_id"], timeout_seconds=30, job_id=own["job_id"])
+    waited = job_queries.wait(own["task_id"], timeout_seconds=30, job_id=own["job_id"])
 
     assert waited["job_id"] == own["job_id"]
     assert (waited["task_id"], waited["phase"]) == (other["task_id"], "succeeded")
     # Blocked once on the id it started with, never on the task moved there.
     assert fake_pueue.waited == [own["task_id"]]
-    assert launch.get_job(own["task_id"])["job_id"] == other["job_id"]
+    assert job_queries.get_job(own["task_id"])["job_id"] == other["job_id"]
 
 
 def test_a_wait_finds_the_job_the_queue_moved_before_the_wait_began(
@@ -1560,7 +1570,7 @@ def test_a_wait_finds_the_job_the_queue_moved_before_the_wait_began(
     fake_pueue.switch(other["task_id"], own["task_id"])
     fake_pueue.succeed(other["task_id"])
 
-    waited = launch.wait(own["task_id"], timeout_seconds=30, job_id=own["job_id"])
+    waited = job_queries.wait(own["task_id"], timeout_seconds=30, job_id=own["job_id"])
 
     assert (waited["job_id"], waited["phase"]) == (own["job_id"], "succeeded")
     assert fake_pueue.waited == []
@@ -1603,14 +1613,14 @@ def test_wait_keeps_relocated_hint_without_repeating_reference_scans(
             fake.finish_when_waited(current, advance)
 
     fake_pueue.finish_when_waited(current, advance)
-    result = launch.wait(own["task_id"], job_id=own["job_id"], timeout_seconds=60)
+    result = job_queries.wait(own["task_id"], job_id=own["job_id"], timeout_seconds=60)
     assert result["job_id"] == own["job_id"]
     assert (result["task_id"], result["phase"]) == (current, "succeeded")
     assert len(scans) == (2 if move_again else 1)
     assert set(scans) == {own["job_id"] + ".json"}
     assert len(fake_pueue.waited) == 3
     for stranger in (first, second):
-        task = launch.find_task(
+        task = job_queries.find_task(
             fake_pueue.tasks(), stranger["task_id"], stranger["job_id"]
         )
         assert task is not None and task.status == "Queued"
@@ -1638,9 +1648,9 @@ def test_every_read_by_task_id_answers_about_the_job_that_id_now_holds(
     fake_pueue.switch(first["task_id"], second["task_id"])
 
     moved = first["task_id"]
-    assert launch.get_job(moved, config)["job_id"] == second["job_id"]
-    assert launch.result(config, moved)["value"] == {"ran": "second"}
-    assert launch.logs(config, moved).strip() == "second log"
+    assert job_queries.get_job(moved, config)["job_id"] == second["job_id"]
+    assert job_queries.result(config, moved)["value"] == {"ran": "second"}
+    assert job_queries.logs(config, moved).strip() == "second log"
     cancelled = launch.cancel(config, moved)
     assert cancelled["job_id"] == second["job_id"]
     assert cancelled["removed"] == []
@@ -1661,8 +1671,10 @@ def test_list_filters_by_project_prefix(
         working_directory=project_root,
     )
 
-    assert [row["label"] for row in launch.list_jobs("fixture")] == ["fixture:check"]
-    assert len(launch.list_jobs()) == 2
+    assert [row["label"] for row in job_queries.list_jobs("fixture")] == [
+        "fixture:check"
+    ]
+    assert len(job_queries.list_jobs()) == 2
 
 
 def test_snapshot_projects_a_large_terminal_history_without_reading_artifacts(
@@ -1706,7 +1718,7 @@ def test_snapshot_projects_a_large_terminal_history_without_reading_artifacts(
         lambda arguments, **_kwargs: calls.append(tuple(arguments)) or payload,
     )
 
-    snapshot = launch.snapshot_jobs(2)
+    snapshot = job_queries.snapshot_jobs(2)
 
     assert calls == [("status", "--json")]
     assert [row["task_id"] for row in snapshot["jobs"]] == [6001, 4999]
@@ -1787,7 +1799,7 @@ def test_wait_rechecks_terminal_state_at_observer_timeout(
         raise pueue.PueueTimeout("observer expired as the task finished")
 
     monkeypatch.setattr(pueue, "wait", wait)
-    observed = launch.wait(started["task_id"], timeout_seconds=5)
+    observed = job_queries.wait(started["task_id"], timeout_seconds=5)
     assert observed["phase"] == "succeeded"
     assert "wait_timed_out" not in observed
 
@@ -1843,7 +1855,7 @@ def test_wait_retained_cancelled_launch_does_not_follow_reused_id(
     fake_pueue.next_id = own["task_id"]
     other = launch.start_operation(config, project, project.operation("check"))
     fake_pueue.succeed(other["task_id"])
-    observed = launch.wait(
+    observed = job_queries.wait(
         own["task_id"], timeout_seconds=5, job_id=own["job_id"], config=config
     )
     assert observed["phase"] == "cancelled" and observed["terminal"] is True
@@ -1869,7 +1881,7 @@ def test_wait_retained_cancellation_during_observation(
 
     fake_pueue.finish_when_waited(own["task_id"], cancel_then_reuse)
     # No explicit job_id: a wait must retain the identity it first saw.
-    observed = launch.wait(own["task_id"], timeout_seconds=5, config=config)
+    observed = job_queries.wait(own["task_id"], timeout_seconds=5, config=config)
     assert observed["phase"] == "cancelled" and observed["terminal"] is True
     assert observed["job_id"] == own["job_id"] and not observed.get("wait_timed_out")
     assert fake_pueue.waited == [own["task_id"]]
@@ -1887,9 +1899,11 @@ def test_wait_retained_unverified_launch_is_not_terminal(
             config, task, {"outcome": "cancelled", "unresolved": True, "started": True}
         )
     fake_pueue.remove([own["task_id"]])
-    assert launch.get_job(own["task_id"], config, own["job_id"])["terminal"] is False
+    assert (
+        job_queries.get_job(own["task_id"], config, own["job_id"])["terminal"] is False
+    )
     with pytest.raises(JobError, match="no verified terminal"):
-        launch.wait(
+        job_queries.wait(
             own["task_id"], timeout_seconds=5, job_id=own["job_id"], config=config
         )
     assert fake_pueue.waited == []

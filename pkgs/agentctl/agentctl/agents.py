@@ -7,7 +7,7 @@ import shlex
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from . import launch, pueue, results
+from . import job_queries, launch, pueue, results
 from .backend_capabilities import BACKEND_CAPABILITIES
 from .checkout import workspace_of, worktree_path
 from .config import Config
@@ -328,9 +328,11 @@ def pending_task(
     config: Config, job_id: str, tasks: Mapping[int, pueue.Task] | None = None
 ) -> pueue.Task | None:
     """Resolve an interrupted admission without treating a lost response as rejection."""
-    found = launch.find_task(pueue.tasks() if tasks is None else tasks, None, job_id)
+    found = job_queries.find_task(
+        pueue.tasks() if tasks is None else tasks, None, job_id
+    )
     if found is None and (config.inputs_dir / f"{job_id}.json").exists():
-        raise launch.JobError(
+        raise job_queries.JobError(
             f"launch {job_id} has uncertain admission; retained input and workspace require reconciliation"
         )
     return found
@@ -399,7 +401,9 @@ def requeue_landing(
         task.task_id
         for worker in run.workers
         if (
-            task := launch.find_task(tasks, worker.get("task_id"), worker.get("job_id"))
+            task := job_queries.find_task(
+                tasks, worker.get("task_id"), worker.get("job_id")
+            )
         )
         is not None
         and not task.terminal
@@ -421,7 +425,7 @@ def requeue_landing(
             task_id=landing_id,
             pending_launch=None,
             job_id=(
-                launch.job_id_of(queued)
+                job_queries.job_id_of(queued)
                 if queued
                 else load(config, run.run_id).landing.get("pending_launch")
             ),

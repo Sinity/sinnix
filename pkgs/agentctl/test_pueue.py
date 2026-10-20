@@ -19,9 +19,9 @@ from pathlib import Path
 
 import pytest
 import sinnix_lib
-from agentctl import launch, pueue
+from agentctl import job_queries, launch, pueue
 from agentctl.config import Config
-from agentctl.launch import JobError
+from agentctl.job_queries import JobError
 from agentctl.projects import load_project_adapter
 from agentctl.run import unit_for
 
@@ -473,7 +473,7 @@ def test_a_waiting_caller_keeps_its_job_when_the_operator_reorders_the_queue(
     operator = threading.Thread(target=reorder)
     operator.start()
     try:
-        waited = launch.wait(own, timeout_seconds=60)
+        waited = job_queries.wait(own, timeout_seconds=60)
     finally:
         operator.join()
 
@@ -530,7 +530,7 @@ def test_cleanup_after_a_real_reorder_spares_the_queued_job_that_moved(
         launch.clean(config, vacated)
 
     assert survivor_input.exists(), "the queued job lost its own launch input"
-    moved = launch.get_job(vacated, config, survivor["job_id"])
+    moved = job_queries.get_job(vacated, config, survivor["job_id"])
     assert (moved["task_id"], moved["job_id"]) == (
         dropped["task_id"],
         survivor["job_id"],
@@ -591,10 +591,12 @@ def test_a_landing_queued_behind_a_worker_is_cancelled_by_its_own_reference(
     )
     assert pueue.task(cancelled["task_id"]) is None
     assert landing_input.read_bytes() == landing_before
-    retained = launch.get_job(cancelled["task_id"], config, job_id=landing["job_id"])
+    retained = job_queries.get_job(
+        cancelled["task_id"], config, job_id=landing["job_id"]
+    )
     assert retained["queue_present"] is False
     assert retained["job_id"] == landing["job_id"]
-    survivor = launch.get_job(landing["task_id"], config, job_id=worker["job_id"])
+    survivor = job_queries.get_job(landing["task_id"], config, job_id=worker["job_id"])
     assert not survivor["terminal"], "the cancel reached the worker, not the landing"
     assert worker_input.read_bytes() == worker_before
 

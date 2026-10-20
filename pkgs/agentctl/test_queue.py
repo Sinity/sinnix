@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 
 import pytest
-from agentctl import launch, pueue
+from agentctl import job_queries, pueue
 from agentctl.config import Config
 from conftest import FakePueue
 
@@ -52,20 +52,20 @@ def test_queue_state_names_what_holds_each_slot_and_who_waits(
         working_directory=tmp_path,
     )
 
-    state = launch.queue_state(config, [GROUP])[GROUP]
+    state = job_queries.queue_state(config, [GROUP])[GROUP]
     assert (state["parallel"], state["status"]) == (1, "Running")
     assert [entry["task_id"] for entry in state["running"]] == [long]
     assert [entry["task_id"] for entry in state["queued"]] == [first, second]
     assert state["queued_count"] == 2
     assert state["oldest_queued_seconds"] is not None
 
-    position = launch.job_queue(config, launch.job_view(pueue.task(second)))
+    position = job_queries.job_queue(config, job_queries.job_view(pueue.task(second)))
     assert position["position"] == 2 and position["ahead"] == [first]
     assert [entry["task_id"] for entry in position["occupied_by"]] == [long]
-    running = launch.job_queue(config, launch.job_view(pueue.task(long)))
+    running = job_queries.job_queue(config, job_queries.job_view(pueue.task(long)))
     assert running["position"] is None and running["occupied_by"] == []
 
-    missing = launch.queue_state(config, ["absent"])["absent"]
+    missing = job_queries.queue_state(config, ["absent"])["absent"]
     assert missing["known"] is False and missing["running"] == []
     pueue.kill(long)
     pueue.remove([first, second])
@@ -104,7 +104,7 @@ def test_a_job_read_by_job_id_never_loads_the_queue_history(
         },
     )
 
-    assert launch.locate(first, "fixture-shell-aaaa1111").task_id == first
+    assert job_queries.locate(first, "fixture-shell-aaaa1111").task_id == first
     # The id now names another job: the job_id finds its own.
-    assert launch.locate(first, "fixture-shell-bbbb2222").task_id == moved
-    assert launch.locate(first, "fixture-shell-cccc3333") is None
+    assert job_queries.locate(first, "fixture-shell-bbbb2222").task_id == moved
+    assert job_queries.locate(first, "fixture-shell-cccc3333") is None

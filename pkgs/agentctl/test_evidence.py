@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from agentctl import evidence, launch
+from agentctl import evidence, job_queries, launch
 from agentctl.config import Config, resolve_project
 from agentctl.run import outcome_path_for
 from conftest import SELF_REVIEW, FakeBd, FakePueue, begin_attempt
@@ -245,7 +245,7 @@ def test_v2_claim_must_match_the_current_filing_snapshot(
     claim["beads"][0]["bead_revision"] = "old"
     path.write_text(json.dumps(claim))
 
-    with pytest.raises(launch.JobError, match="filing snapshot"):
+    with pytest.raises(job_queries.JobError, match="filing snapshot"):
         evidence.file(config, project, path)
 
 
@@ -261,7 +261,7 @@ def test_receipt_requires_the_immutable_job_id(
     path = tmp_path / "native.json"
     path.write_text(json.dumps(_claim(receipt=f"agentctl://jobs/{task_id}")))
 
-    with pytest.raises(launch.JobError, match="<job-id>"):
+    with pytest.raises(job_queries.JobError, match="<job-id>"):
         evidence.file(config, project, path)
 
 
@@ -281,7 +281,7 @@ def test_native_evidence_requires_a_narrated_self_review(
     del claim["self_review"]
     path.write_text(json.dumps(claim))
 
-    with pytest.raises(launch.JobError, match="requires self_review"):
+    with pytest.raises(job_queries.JobError, match="requires self_review"):
         evidence.file(config, project, path)
 
 
@@ -299,7 +299,7 @@ def test_v2_native_route_rejects_a_queued_execution_claim(
     claim["execution"] = "queued"
     path.write_text(json.dumps(claim))
 
-    with pytest.raises(launch.JobError, match="execution=native"):
+    with pytest.raises(job_queries.JobError, match="execution=native"):
         evidence.file(config, project, path)
 
 
@@ -398,7 +398,7 @@ def test_large_valid_execution_receipt_is_filed_and_retrievable(
         config.state_dir / "native-evidence" / f"{record['evidence_id']}.artifact.json"
     )
     artifact.write_bytes(artifact.read_bytes()[:-1] + b" ")
-    with pytest.raises(launch.JobError, match="identity mismatch"):
+    with pytest.raises(job_queries.JobError, match="identity mismatch"):
         evidence.get_record(config, "fixture", record["evidence_id"])
 
 
@@ -468,7 +468,7 @@ def test_list_selects_a_page_from_a_large_directory_with_bounded_memory(
             closed = True
 
     monkeypatch.setattr(evidence.os, "scandir", lambda directory: SyntheticEntries())
-    monkeypatch.setattr(evidence.launch, "read_bounded", lambda path, limit: None)
+    monkeypatch.setattr(evidence.job_queries, "read_bounded", lambda path, limit: None)
     tracemalloc.start()
     try:
         page = evidence.list_records(config, "fixture")
@@ -512,7 +512,7 @@ def test_read_paths_need_no_owner_and_reject_misaddressed_reference(
     job_id = json.loads(path.read_text())
     job_id["bytes"] += 1
     path.write_text(json.dumps(job_id))
-    with pytest.raises(launch.JobError, match="size mismatch"):
+    with pytest.raises(job_queries.JobError, match="size mismatch"):
         evidence.get_record(config, "fixture", evidence_id)
 
     job_id["bytes"] -= 1
@@ -556,7 +556,7 @@ def test_cleaned_receipt_never_substitutes_an_unrelated_reused_queue_id(
     claim = {"receipt": f"agentctl://jobs/{task_id}/{job_id}"}
     if not retained:
         (config.inputs_dir / f"{job_id}.json").unlink()
-        with pytest.raises(launch.JobError, match="does not resolve"):
+        with pytest.raises(job_queries.JobError, match="does not resolve"):
             evidence._receipt_observation(config, claim, SHA, project_id="fixture")
         return
     observation = evidence._receipt_observation(
@@ -595,7 +595,7 @@ def test_cleaned_receipt_still_requires_complete_project_bound_execution_evidenc
         input_path.write_text(json.dumps(document))
     claim = {"receipt": f"agentctl://jobs/{task_id}/{job_id}"}
     if damage == "other-project":
-        with pytest.raises(launch.JobError, match="another project"):
+        with pytest.raises(job_queries.JobError, match="another project"):
             evidence._receipt_observation(config, claim, SHA, project_id="fixture")
     else:
         observation = evidence._receipt_observation(

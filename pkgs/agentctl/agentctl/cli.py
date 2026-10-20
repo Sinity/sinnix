@@ -41,6 +41,7 @@ from typing import Any, Callable, Mapping, Sequence
 from . import (
     batch,
     evidence,
+    job_queries,
     launch,
     operator_view,
     pools,
@@ -49,7 +50,7 @@ from . import (
 )
 from .config import Config, ConfigError, load_config, resolve_project
 from .github import GithubError
-from .launch import JobError
+from .job_queries import JobError
 from .manifest import (
     HARNESSES,
     BatchError,
@@ -519,7 +520,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             extra_argv=(*rest[1:], *getattr(arguments, "extra", [])),
         )
         if arguments.wait:
-            started = launch.wait(
+            started = job_queries.wait(
                 started["task_id"],
                 timeout_seconds=arguments.timeout_seconds,
                 job_id=started.get("job_id"),
@@ -534,7 +535,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             )
         return EXIT_OK
     if verb == "list":
-        rows = launch.list_jobs(arguments.project)
+        rows = job_queries.list_jobs(arguments.project)
         if arguments.active:
             rows = [row for row in rows if not row["terminal"]]
         rows.sort(key=lambda row: row["task_id"], reverse=True)
@@ -543,11 +544,11 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.read(rows, out.jobs_table(rows))
         return EXIT_OK
     if verb == "snapshot":
-        snapshot = launch.snapshot_jobs(arguments.limit, config)
+        snapshot = job_queries.snapshot_jobs(arguments.limit, config)
         out.read(snapshot, out.jobs_table(snapshot["jobs"]))
         return EXIT_OK
     if verb == "get":
-        job = launch.get_job(
+        job = job_queries.get_job(
             arguments.task_id,
             config,
             arguments.job_id,
@@ -558,7 +559,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.read(job, out.job_line(job))
         return EXIT_OK
     if verb == "logs":
-        page = launch.read_job_artifact(
+        page = job_queries.read_job_artifact(
             config,
             arguments.task_id,
             arguments.job_id,
@@ -569,7 +570,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.read(page, page["text"])
         return EXIT_OK
     if verb == "result":
-        result = launch.result(
+        result = job_queries.result(
             config,
             arguments.task_id,
             arguments.job_id,
@@ -615,7 +616,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.write(job, out.job_line(job))
         return EXIT_OK
     if verb == "wait":
-        waited = launch.wait(
+        waited = job_queries.wait(
             arguments.task_id,
             timeout_seconds=arguments.timeout_seconds,
             job_id=arguments.job_id,

@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from agentctl import artifacts, batch, launch, pueue
+from agentctl import artifacts, batch, job_queries, launch, pueue
 from agentctl.config import Config
 from agentctl.limits import MAX_AGENT_TIMEOUT_SECONDS
 from sinnix_agent_gateway.execution import JobOwnerError, LocalJobs
@@ -246,8 +246,8 @@ def test_job_list_cursor_is_bound_to_the_project_filter(
             "enqueued_at": "2026-09-07T01:00:00Z",
         },
     ]
-    monkeypatch.setattr(launch, "list_jobs", lambda _project=None: rows)
-    monkeypatch.setattr(launch, "attach_bindings", lambda _config, page: page)
+    monkeypatch.setattr(job_queries, "list_jobs", lambda _project=None: rows)
+    monkeypatch.setattr(job_queries, "attach_bindings", lambda _config, page: page)
 
     first = adapter.list(limit=1)
     assert [row["task_id"] for row in first["jobs"]] == ["30"]
@@ -429,15 +429,17 @@ def test_job_operations_pass_the_job_id_through_to_agentctl(
 
         return call
 
-    monkeypatch.setattr(launch, "wait", record("wait"))
-    monkeypatch.setattr(launch, "get_job", record("get"))
+    monkeypatch.setattr(job_queries, "wait", record("wait"))
+    monkeypatch.setattr(job_queries, "get_job", record("get"))
     monkeypatch.setattr(launch, "cancel", record("cancel"))
     monkeypatch.setattr(launch, "retry", record("retry"))
     monkeypatch.setattr(
         launch, "clean", record("clean", {**moved, "cleaned": True, "removed": []})
     )
     monkeypatch.setattr(
-        launch, "result", record("result", {**moved, "kind": "exit", "value": None})
+        job_queries,
+        "result",
+        record("result", {**moved, "kind": "exit", "value": None}),
     )
 
     for operation, arguments in (
@@ -592,7 +594,7 @@ def test_an_unfinished_job_answers_with_its_place_in_the_queue(
     )
     monkeypatch.setattr(pueue, "live", lambda: busy)
     queued = {**JOB_ROW, "group": "shell-long", "task_id": 41}
-    monkeypatch.setattr(launch, "get_job", lambda *args, **kwargs: queued)
+    monkeypatch.setattr(job_queries, "get_job", lambda *args, **kwargs: queued)
 
     answer = _call(adapter, "job.get", {"task_id": 41})
 

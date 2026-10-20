@@ -16,6 +16,12 @@ agentctl itself owns the project descriptors (`.agentctl/project.toml`), the
 prompt compiled from a task, each job's launch input and result artifacts, each
 batch's run manifest, and the `view` screen.
 
+Within the Python package, `job_queries` owns stable-identity reads, selected
+attempts, bounded and redacted artifact pages, and observational waiting.
+`launch` owns admission and mutations; `artifacts` owns invocation storage.
+The CLI, gateway and evidence readers call the query owner directly. Waiting
+never cancels a job, and a queue cleanup retains its historical artifacts.
+
 ## Verbs
 
 | Verb                                                                        | Does                                                                                                                                                 |

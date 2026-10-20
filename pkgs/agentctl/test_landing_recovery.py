@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from agentctl import batch, launch, manifest, prompts
+from agentctl import batch, job_queries, launch, manifest, prompts
 from agentctl import start as start_module
 from agentctl.batch import BatchError, BatchRefusal
 from conftest import read_launch
@@ -66,7 +66,7 @@ def test_terminal_cleanup_retains_live_worker_evidence(
     log = Path(written["log_path"])
     log.parent.mkdir(parents=True, exist_ok=True)
     log.write_text("worker complete\n")
-    input_path = launch.launch_input_path(task)
+    input_path = job_queries.launch_input_path(task)
     if legacy:
         written.pop("binding", None)
         input_path.write_text(json.dumps(written))
@@ -96,7 +96,7 @@ def test_terminal_runs_release_worker_jobs_for_cleanup(
     run = prepared_run(harness, "fx-solo")
     worker = run["workers"][0]
     task = harness.pueue.task(worker["task_id"])
-    input_path = launch.launch_input_path(task)
+    input_path = job_queries.launch_input_path(task)
     input_before = input_path.read_bytes()
     written = read_launch(harness.config, task)
     log = Path(written["log_path"])
@@ -114,13 +114,15 @@ def test_terminal_runs_release_worker_jobs_for_cleanup(
 
     assert [row["task_id"] for row in cleaned] == [task.task_id]
     assert harness.pueue.task(task.task_id) is None
-    assert cleaned[0]["job_id"] == launch.job_id_of(task)
+    assert cleaned[0]["job_id"] == job_queries.job_id_of(task)
     assert cleaned[0]["retained"] is True
     assert input_path.read_bytes() == input_before
     assert log.read_text() == "worker completed before terminal cleanup\n"
     assert result_path.read_bytes() == result_before
     assert (
-        launch.logs(harness.config, task.task_id, job_id=launch.job_id_of(task))
+        job_queries.logs(
+            harness.config, task.task_id, job_id=job_queries.job_id_of(task)
+        )
         == "worker completed before terminal cleanup\n"
     )
 
@@ -288,16 +290,16 @@ def test_failed_verification_is_retried_on_the_same_candidate(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     run = prepared_run(harness, "fx-solo")
-    original = launch.wait
+    original = job_queries.wait
 
     def fail(task_id, **kwargs):
         harness.pueue.fail(task_id, exit_code=1)
-        return launch.job_view(harness.pueue.task(task_id))
+        return job_queries.job_view(harness.pueue.task(task_id))
 
-    monkeypatch.setattr(launch, "wait", fail)
+    monkeypatch.setattr(job_queries, "wait", fail)
     with pytest.raises(BatchRefusal, match="verify_failed"):
         harness.land(run["run_id"])
-    monkeypatch.setattr(launch, "wait", original)
+    monkeypatch.setattr(job_queries, "wait", original)
     harness.land(run["run_id"])
     assert labels(harness.pueue).count("fixture:check") == 2
     assert labels(harness.pueue).count(f"fixture:review:{run['run_id']}") == 1
@@ -420,7 +422,7 @@ def test_the_last_result_requeues_a_landing_the_queue_lost(harness: Harness) -> 
     ]
     stored = manifest.load(harness.config, run["run_id"])
     assert stored.landing["task_id"] == queued
-    assert stored.landing["job_id"] == launch.job_id_of(task)
+    assert stored.landing["job_id"] == job_queries.job_id_of(task)
 
 
 def test_concurrent_results_replace_a_lost_landing_once(

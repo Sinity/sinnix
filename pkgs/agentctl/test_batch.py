@@ -24,6 +24,7 @@ from agentctl import (
     cli,
     gitcmd,
     github,
+    job_queries,
     launch,
     manifest,
     operator_view,
@@ -674,7 +675,7 @@ def harness(
         fake_pueue.succeed(task_id)
         if task.label == "fixture:check":
             launch_input = read_launch(built.config, task)
-            input_path = launch.launch_input_path(task)
+            input_path = job_queries.launch_input_path(task)
             assert input_path is not None
             requested = launch_input.get("tree_receipt") or {
                 "head": git.heads.get(task.path, SHA),
@@ -721,13 +722,13 @@ def harness(
                     }
                 )
             )
-        return launch.job_view(fake_pueue.task(task_id))
+        return job_queries.job_view(fake_pueue.task(task_id))
 
-    monkeypatch.setattr(launch, "wait", wait)
+    monkeypatch.setattr(job_queries, "wait", wait)
     return built
 
 
-REAL_WAIT = launch.wait
+REAL_WAIT = job_queries.wait
 
 
 def labels(fake: FakePueue) -> list[str]:
@@ -805,10 +806,10 @@ def test_start_claims_creates_worktrees_and_queues_workers_then_the_landing(
         manifest.manifest_path(harness.config, run["run_id"]).read_text()
     )
     assert stored["workers"][0]["task_id"] == lead["task_id"]
-    assert stored["workers"][0]["job_id"] == launch.job_id_of(worker_task)
-    assert stored["landing"]["job_id"] == launch.job_id_of(landing)
+    assert stored["workers"][0]["job_id"] == job_queries.job_id_of(worker_task)
+    assert stored["landing"]["job_id"] == job_queries.job_id_of(landing)
     assert stored["workers"][0]["claimed_beads"] == ["fx-lead", "fx-member"]
-    assert launch.get_job(lead["task_id"], harness.config)["binding"] == {
+    assert job_queries.get_job(lead["task_id"], harness.config)["binding"] == {
         "beads": ["fx-lead", "fx-member"],
         "run_id": run["run_id"],
         "worker": "fx-lead",
@@ -1307,7 +1308,7 @@ def test_a_failed_start_retains_claims_worktree_and_pending_launch(
     harness: Harness,
 ) -> None:
     harness.pueue.fail_add = True
-    with pytest.raises(launch.JobError):
+    with pytest.raises(job_queries.JobError):
         harness.start("fx-lead")
     run = manifest.list_runs(harness.config)[0]
     assert run.live and not run.prepared
@@ -1316,7 +1317,7 @@ def test_a_failed_start_retains_claims_worktree_and_pending_launch(
     assert Path(run.workers[0]["worktree"]).is_dir()
     assert {item[0] for item in harness.beads.claims} == {"fx-lead", "fx-member"}
     assert not harness.beads.released and not harness.wt.removed
-    with pytest.raises(launch.JobError, match="uncertain admission"):
+    with pytest.raises(job_queries.JobError, match="uncertain admission"):
         harness.start("fx-lead")
     assert not harness.pueue.added
 
@@ -1628,7 +1629,9 @@ def test_land_integrates_verifies_reviews_publishes_and_closes_satisfied_members
     assert (
         verify["receipt"] == f"agentctl://jobs/{verify['task_id']}/{verify['job_id']}"
     )
-    assert verify["job_id"] == launch.job_id_of(harness.pueue.task(verify["task_id"]))
+    assert verify["job_id"] == job_queries.job_id_of(
+        harness.pueue.task(verify["task_id"])
+    )
     verify_task = harness.pueue.task(verify["task_id"])
     assert verify_task.label == "fixture:check"
     assert verify_task.path.endswith(f"fixture-batch-{run_id}-integration")
@@ -1819,7 +1822,7 @@ def test_a_conflict_runs_one_integration_agent_and_requires_every_branch_merged(
     )
     assert attempt["kind"] == "integration"
     assert attempt["task_id"] == task.task_id
-    assert attempt["job_id"] == launch.job_id_of(task)
+    assert attempt["job_id"] == job_queries.job_id_of(task)
     assert attempt["requested"] == {
         key: run["workers"][0][key] for key in ("backend", "model", "effort")
     }
@@ -1963,8 +1966,8 @@ def test_a_verification_running_past_its_timeout_is_verify_running(
 ) -> None:
     """Breaks if landing waits past the job's own run limit, invents a timeout
     for a job still running, or cannot land again once the check finishes."""
-    harness_wait = launch.wait
-    monkeypatch.setattr(launch, "wait", REAL_WAIT)
+    harness_wait = job_queries.wait
+    monkeypatch.setattr(job_queries, "wait", REAL_WAIT)
     run = prepared_run(harness, "fx-solo")
     timeout = harness.project.operation("check").timeout_seconds
     limit = timeout + landing_module.VERIFY_EXIT_GRACE_SECONDS
@@ -1980,7 +1983,7 @@ def test_a_verification_running_past_its_timeout_is_verify_running(
     assert stored.landing["failure"]["code"] == "verify_running"
     assert stored.landing["review_verdict"] is None and stored.acceptance is None
 
-    monkeypatch.setattr(launch, "wait", harness_wait)
+    monkeypatch.setattr(job_queries, "wait", harness_wait)
     landed = harness.land(run["run_id"])
     assert landed["acceptance"]["verify_run"]["phase"] == "succeeded"
 
@@ -1992,7 +1995,7 @@ def test_a_verification_queued_past_its_budget_waits_and_then_succeeds(
     against its run budget, failing a landing whose check later succeeds."""
     run = manifest.Run.from_dict(prepared_run(harness, "fx-solo"))
     timeout = harness.project.operation("check").timeout_seconds
-    harness_wait = launch.wait
+    harness_wait = job_queries.wait
     started = launch.start_operation
 
     def start_queued(*args: Any, **kwargs: Any) -> dict[str, Any]:
@@ -2011,7 +2014,7 @@ def test_a_verification_queued_past_its_budget_waits_and_then_succeeds(
         if harness.pueue.clock < 3 * timeout:
             harness.pueue.clock += timeout_seconds
             return {
-                **launch.job_view(harness.pueue.task(task_id)),
+                **job_queries.job_view(harness.pueue.task(task_id)),
                 "wait_timed_out": True,
             }
         harness.pueue.running(task_id)
@@ -2020,7 +2023,7 @@ def test_a_verification_queued_past_its_budget_waits_and_then_succeeds(
         )
 
     monkeypatch.setattr(launch, "start_operation", start_queued)
-    monkeypatch.setattr(launch, "wait", wait)
+    monkeypatch.setattr(job_queries, "wait", wait)
     checkout = harness.project.root
     harness.git.heads[str(checkout)] = SHA
     harness.git.status[str(checkout)] = ""
@@ -2043,7 +2046,7 @@ def test_a_verification_queued_past_its_budget_waits_and_then_succeeds(
 def test_a_terminal_verification_timeout_reports_outcome_exit_and_duration(
     harness: Harness, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(launch, "wait", REAL_WAIT)
+    monkeypatch.setattr(job_queries, "wait", REAL_WAIT)
     run = prepared_run(harness, "fx-solo")
     timeout = harness.project.operation("check").timeout_seconds
 
@@ -2052,13 +2055,13 @@ def test_a_terminal_verification_timeout_reports_outcome_exit_and_duration(
             task_id, lambda fake: fake.fail(task_id, exit_code=TIMEOUT_EXIT_CODE)
         )
 
-    original_wait = launch.wait
+    original_wait = job_queries.wait
 
     def wait_and_timeout(task_id: int, **kwargs: Any) -> dict[str, Any]:
         timeout_when_waited(task_id, **kwargs)
         return original_wait(task_id, **kwargs)
 
-    monkeypatch.setattr(launch, "wait", wait_and_timeout)
+    monkeypatch.setattr(job_queries, "wait", wait_and_timeout)
     with pytest.raises(BatchRefusal, match="verify_failed") as refused:
         harness.land(run["run_id"])
 
@@ -2396,7 +2399,7 @@ def test_attach_bindings_reads_each_row_binding_from_its_launch_input(
 ) -> None:
     """Breaks if bead membership has to be parsed out of a pueue label."""
     run = harness.start("fx-lead", "fx-solo")
-    rows = launch.attach_bindings(harness.config, launch.list_jobs("fixture"))
+    rows = job_queries.attach_bindings(harness.config, job_queries.list_jobs("fixture"))
     by_label = {row["label"]: row for row in rows}
     assert by_label[f"fixture:worker:{run['run_id']}:fx-lead"]["binding"] == {
         "beads": ["fx-lead", "fx-member"],
@@ -2930,10 +2933,10 @@ def test_resume_recovers_enqueued_attempt_after_lost_response(
 
     def lost_response(*args: Any, **kwargs: Any) -> dict[str, Any]:
         original(*args, **kwargs)
-        raise launch.JobError("response lost after enqueue")
+        raise job_queries.JobError("response lost after enqueue")
 
     monkeypatch.setattr(start, "queue_agent", lost_response)
-    with pytest.raises(launch.JobError, match="response lost"):
+    with pytest.raises(job_queries.JobError, match="response lost"):
         batch.resume(harness.config, harness.project, run["run_id"], "fx-solo")
     pending = manifest.load(harness.config, run["run_id"]).worker("fx-solo")
     assert pending["pending_launch"]
@@ -2998,7 +3001,7 @@ def test_resume_replaces_its_own_landing_after_the_queue_was_reordered(
         "the resume dropped the id the landing was queued at, where the "
         "switch had left an unrelated job"
     )
-    assert launch.job_id_of(harness.pueue.task(queued_landing_at)) == "other", (
+    assert job_queries.job_id_of(harness.pueue.task(queued_landing_at)) == "other", (
         "the unrelated job no longer holds the id the switch gave it"
     )
     landing = harness.pueue.task(resumed["landing"]["task_id"])
@@ -3799,9 +3802,11 @@ def test_landing_agents_get_members_scopes_and_accepted_evidence(
         if name == "review":
             verify = blocks[2][0]
             assert verify["candidate_sha"] == SHA and verify["phase"] == "succeeded"
-            assert verify["job_id"] == launch.job_id_of(tasks["fixture:check"])
+            assert verify["job_id"] == job_queries.job_id_of(tasks["fixture:check"])
             assert verify["log_path"] == str(
-                launch._artifact(harness.config, tasks["fixture:check"], ".log")
+                job_queries.artifact_path(
+                    harness.config, tasks["fixture:check"], ".log"
+                )
             )
 
 
@@ -4587,7 +4592,7 @@ def test_abandon_cancels_worker_accepted_before_manifest_write(
         "systemctl",
         "--user",
         "stop",
-        launch.unit_of(harness.pueue.task(task_id)),
+        job_queries.unit_of(harness.pueue.task(task_id)),
     ] in recording_systemctl()
     assert not harness.wt.trees
 
@@ -4675,7 +4680,7 @@ def test_abandon_refuses_unresolved_admission_without_releasing_claims(
     with pytest.raises(launch.EnqueueUncertain):
         harness.start("fx-solo")
     run = manifest.list_runs(harness.config)[0]
-    with pytest.raises(launch.JobError, match="uncertain admission"):
+    with pytest.raises(job_queries.JobError, match="uncertain admission"):
         harness.abandon(run.run_id)
     assert not harness.wt.removed and not harness.beads.released
     assert manifest.load(harness.config, run.run_id).live
@@ -4785,13 +4790,13 @@ def test_clean_keeps_denied_recorded_checkout_instead_of_reporting_absent(
 def test_attach_bindings_does_not_load_unrelated_history(harness, monkeypatch):
     run = harness.start("fx-solo")
     worker = run["workers"][0]["task_id"]
-    page = [row for row in launch.list_jobs("fixture") if row["task_id"] == worker]
+    page = [row for row in job_queries.list_jobs("fixture") if row["task_id"] == worker]
 
     def history():
         raise AssertionError("binding page loaded unrelated queue history")
 
     monkeypatch.setattr(launch.pueue, "tasks", history)
-    result = launch.attach_bindings(harness.config, page)
+    result = job_queries.attach_bindings(harness.config, page)
     assert result[0]["binding"]["beads"] == ["fx-solo"]
 
 
@@ -4802,20 +4807,20 @@ def test_attach_bindings_follows_job_id_after_queue_reorder(harness):
         harness.pueue._tasks[task_id] = replace(
             harness.pueue.task(task_id), status="Queued"
         )
-    page = [row for row in launch.list_jobs("fixture") if row["task_id"] == first]
+    page = [row for row in job_queries.list_jobs("fixture") if row["task_id"] == first]
     expected = read_launch(harness.config, harness.pueue.task(first))["binding"]
     harness.pueue.switch(first, second)
-    assert launch.attach_bindings(harness.config, page)[0]["binding"] == expected
+    assert job_queries.attach_bindings(harness.config, page)[0]["binding"] == expected
 
 
 def test_attach_bindings_never_uses_a_replacement_jobs_binding(harness):
     run = harness.start("fx-lead", "fx-solo")
     first, second = [worker["task_id"] for worker in run["workers"]]
-    page = [row for row in launch.list_jobs("fixture") if row["task_id"] == first]
+    page = [row for row in job_queries.list_jobs("fixture") if row["task_id"] == first]
     other = harness.pueue.task(second)
     harness.pueue._tasks[first] = replace(other, task_id=first)
     del harness.pueue._tasks[second]
-    assert "binding" not in launch.attach_bindings(harness.config, page)[0]
+    assert "binding" not in job_queries.attach_bindings(harness.config, page)[0]
 
 
 def test_unusable_integer_input_does_not_discard_other_page_bindings(
@@ -4825,20 +4830,20 @@ def test_unusable_integer_input_does_not_discard_other_page_bindings(
 
     run = harness.start("fx-lead", "fx-solo")
     first, second = [worker["task_id"] for worker in run["workers"]]
-    page = launch.list_jobs("fixture")
-    bad_path = launch.launch_input_path(harness.pueue.task(first))
-    original_read = launch.read_bounded
+    page = job_queries.list_jobs("fixture")
+    bad_path = job_queries.launch_input_path(harness.pueue.task(first))
+    original_read = job_queries.read_bounded
 
     def read(path, limit):
         if path == bad_path:
             return b'{"invalid":' + b"9" * 4301 + b"}"
         return original_read(path, limit)
 
-    monkeypatch.setattr(launch, "read_bounded", read)
+    monkeypatch.setattr(job_queries, "read_bounded", read)
     previous = sys.get_int_max_str_digits()
     try:
         sys.set_int_max_str_digits(4300)
-        rows = launch.attach_bindings(harness.config, page)
+        rows = job_queries.attach_bindings(harness.config, page)
     finally:
         sys.set_int_max_str_digits(previous)
     indexed = {row["task_id"]: row for row in rows}

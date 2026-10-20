@@ -220,14 +220,14 @@ def test_run_view_indexes_job_ids_once_for_many_workers(
         workers.append(entry)
 
     parsed = 0
-    original = operator_view.launch.job_id_of
+    original = operator_view.job_queries.job_id_of
 
     def count_parses(value: Task) -> str | None:
         nonlocal parsed
         parsed += 1
         return original(value)
 
-    monkeypatch.setattr(operator_view.launch, "job_id_of", count_parses)
+    monkeypatch.setattr(operator_view.job_queries, "job_id_of", count_parses)
     row = operator_view.run_dict(run("run-many", workers), tasks, NOW)
 
     assert [entry["job"] for entry in row["workers"]] == [
@@ -276,14 +276,14 @@ def test_many_run_snapshot_indexes_tasks_once_and_preserves_job_id_resolution(
     runs.append(run("id-fallback", [worker("fallback", task_id=1_150)]))
 
     parsed = 0
-    original = operator_view.launch.job_id_of
+    original = operator_view.job_queries.job_id_of
 
     def count_parses(value: Task) -> str | None:
         nonlocal parsed
         parsed += 1
         return original(value)
 
-    monkeypatch.setattr(operator_view.launch, "job_id_of", count_parses)
+    monkeypatch.setattr(operator_view.job_queries, "job_id_of", count_parses)
     rows = snapshot(tasks=tasks, runs=tuple(runs), groups={}).to_dict()["runs"]
 
     assert [row["workers"][0]["job"] for row in rows[:160]] == list(range(1_000, 1_160))
