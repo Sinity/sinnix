@@ -5,8 +5,8 @@
 set -euo pipefail
 
 if [ -z "${SINEX_RUNTIME_TARGET_CONFIG:-}" ] \
-  && [ -r /realm/project/sinex/repo/.sinex/state/runtime-target.json ]; then
-  export SINEX_RUNTIME_TARGET_CONFIG=/realm/project/sinex/repo/.sinex/state/runtime-target.json
+  && [ -r /realm/project/sinex/repo/.sinex/state/runtime-target.json ]; then # sinnix-path: optional
+  export SINEX_RUNTIME_TARGET_CONFIG=/realm/project/sinex/repo/.sinex/state/runtime-target.json # sinnix-path: optional
 fi
 if [ -n "${SINEX_MCP_SERVER_BIN:-}" ]; then
   exec "$SINEX_MCP_SERVER_BIN" "$@"

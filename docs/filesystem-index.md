@@ -95,9 +95,13 @@ Exit 2 means incomplete input, 1 that links were found, 0 none.
 
 `sinnix fs layout --refs` finds literal `/realm` paths in sinnix,
 Lynchpin and Polylogue source and exits 1 when a referenced path is missing.
-Test fixtures and docstrings are classified `fixture` and `cosmetic` and not
-checked, so a missing example is not a broken consumer. An unreachable
-repository exits 2.
+The audit retains fixtures, examples, help text, historical inputs, selectors
+and output locations with their source roles. Only required input literals
+assert current availability. Explicit optional, historical, migration, pattern
+and output roles use an inline `# sinnix-path: ROLE` marker at their consumer;
+unknown roles fail the audit. `--refs --json` reports every role and the missing
+required paths. Missing examples and retired-address migration guards do not
+claim a broken consumer. An unreachable repository exits 2.
 
 ## Tests
 

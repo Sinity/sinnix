@@ -15,11 +15,13 @@ import argparse
 import ast
 import base64
 import json
+import io
 import os
 import re
 import stat
 import subprocess
 import sys
+import tokenize
 from pathlib import Path
 
 from sinnix_lib.layout import COLLECTION_PATHS, MACHINE_LANES, OPTIONAL, RETIRED_PATHS, ROOTS
@@ -141,7 +143,9 @@ REPOS = {
 PATH_RE = re.compile(r"/realm/[A-Za-z0-9_./+-]*[A-Za-z0-9_/+-]")
 
 COSMETIC_EXTS = {".md"}
-COSMETIC_PREFIXES = ("#", "//", "*", '"""', "'''")
+COSMETIC_PREFIXES = ("#", "//", "--", "*", '"""', "'''")
+REFERENCE_ROLES = {"historical", "migration", "pattern", "optional", "output"}
+ROLE_MARKER = re.compile(r"#\s*sinnix-path:\s*([a-z-]+)\b")
 
 
 class ScanError(RuntimeError):
@@ -153,6 +157,78 @@ def classify_line(line: str) -> str:
     if stripped.startswith(COSMETIC_PREFIXES):
         return "cosmetic"
     return "live"
+
+
+def source_roles(path: Path) -> dict[int, str]:
+    """Keep non-input literals visible without treating them as required files.
+
+    Explicit roles live beside their consumer. Examples, help heredocs and
+    path selectors can be identified without a second path-exception registry.
+    Unparsed code retains the conservative live-reference default.
+    """
+    text = path.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    roles: dict[int, str] = {}
+    help_end = None
+    for number, line in enumerate(lines, 1):
+        if help_end is not None:
+            roles[number] = "cosmetic"
+            if line.strip() == help_end:
+                help_end = None
+        match = re.search(r"<<-?\s*['\"]?(USAGE|HELP)['\"]?", line)
+        if match:
+            help_end = match[1]
+        if re.search(r"\b[A-Z_]*RETIRED[A-Z_]*\s*=", line):
+            roles[number] = "historical"
+        marker = ROLE_MARKER.search(line)
+        if marker:
+            if marker[1] not in REFERENCE_ROLES:
+                raise ScanError(f"unknown path role {marker[1]!r}: {path}:{number}")
+            roles[number] = marker[1]
+    first = text.partition("\n")[0]
+    if path.suffix != ".py" and not (first.startswith("#!") and "python" in first):
+        return roles
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return roles
+    for node in ast.walk(tree):
+        kind = None
+        if isinstance(node, ast.Call):
+            name = node.func.id if isinstance(node.func, ast.Name) else None
+            if name == "Example":
+                kind = "example"
+        elif isinstance(node, ast.JoinedStr):
+            kind = "pattern"
+        if kind:
+            for number in range(node.lineno, (node.end_lineno or node.lineno) + 1):
+                roles.setdefault(number, kind)
+    return roles
+
+
+def comment_columns(path: Path) -> dict[int, int]:
+    """Python comments can follow executable code on the same source line."""
+    if path.suffix != ".py":
+        return {}
+    try:
+        return {
+            token.start[0]: token.start[1]
+            for token in tokenize.generate_tokens(io.StringIO(path.read_text()).readline)
+            if token.type == tokenize.COMMENT
+        }
+    except (SyntaxError, tokenize.TokenError, UnicodeError):
+        return {}
+
+
+def selector_literal(line: str, start: int) -> bool:
+    """A shell value comparison or case pattern is not a filesystem read."""
+    stripped = line.lstrip()
+    if stripped.startswith("/realm/") and ")" in line:
+        return start < line.index(")")
+    if re.match(r"\s*(?:if|elif)\b", line) and re.search(r"(?:==|!=| = )", line):
+        end = line.find(";")
+        return end < 0 or start < end
+    return False
 
 
 def fixture_file(path: Path, root: Path) -> bool:
@@ -215,6 +291,8 @@ def scan_repo(name: str, root: Path) -> list[dict]:
         raise ScanError(f"rg failed on {name} (exit {proc.returncode}): {proc.stderr}")
     rows = []
     documentation: dict[str, set[int]] = {}
+    semantics: dict[str, dict[int, str]] = {}
+    comments: dict[str, dict[int, int]] = {}
     # JSON keeps filenames and matched source lines separate even when they
     # contain colons, newlines or carriage returns.
     for record in proc.stdout.split("\n"):
@@ -245,15 +323,28 @@ def scan_repo(name: str, root: Path) -> list[dict]:
         else:
             if file_part not in documentation:
                 documentation[file_part] = docstring_lines(path)
+                comments[file_part] = comment_columns(path)
+                try:
+                    semantics[file_part] = source_roles(path)
+                except UnicodeError:
+                    semantics[file_part] = {}
             kind = ("cosmetic" if path.suffix in COSMETIC_EXTS
-                    or int(lineno) in documentation[file_part] else classify_line(text))
+                    or int(lineno) in documentation[file_part]
+                    else semantics[file_part].get(int(lineno), classify_line(text)))
         for m in PATH_RE.finditer(text):
+            reference_kind = kind
+            if kind == "live":
+                comment = comments.get(file_part, {}).get(int(lineno))
+                if comment is not None and m.start() >= comment:
+                    reference_kind = "cosmetic"
+                elif selector_literal(text, m.start()):
+                    reference_kind = "pattern"
             rows.append({
                 "repo": name,
                 "file": str(path),
                 "line": int(lineno),
                 "path": m.group(0).rstrip("/,;)\"'"),
-                "kind": kind,
+                "kind": reference_kind,
             })
     return rows
 
@@ -277,7 +368,7 @@ def existing_ancestor(path: str) -> Path | None:
     return None
 
 
-def check_refs() -> int:
+def check_refs(*, json_output: bool = False) -> int:
     rows = scan()
     live = [r for r in rows if r["kind"] == "live"]
     unique_paths = sorted({r["path"] for r in live})
@@ -286,6 +377,15 @@ def check_refs() -> int:
         if inspect_path(Path(path)) is None:
             missing.append((path, existing_ancestor(path)))
 
+    if json_output:
+        print(json.dumps({
+            "schema": "sinnix.fs-path-references.v1",
+            "references": rows,
+            "required_paths": len(unique_paths),
+            "missing_required_paths": [path for path, _ in missing],
+            "scope": "Source-literal roles; historical, optional, output and example addresses do not assert current availability.",
+        }))
+        return 1 if missing else 0
     if not missing:
         print(f"sinnix fs layout: OK -- {len(unique_paths)} distinct live "
               f"paths across {len(live)} references, all exist")
@@ -311,11 +411,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="check literal /realm paths in source instead of the taxonomy",
     )
+    parser.add_argument("--json", action="store_true", help="Report all source-reference roles as JSON (with --refs)")
     args = parser.parse_args(argv)
+    if args.json and not args.refs:
+        parser.error("--json requires --refs")
     if not args.refs:
         return check_taxonomy()
     try:
-        return check_refs()
+        return check_refs(json_output=args.json)
     except (ScanError, OSError) as exc:
         print(f"sinnix fs layout: {exc}", file=sys.stderr)
         return 2

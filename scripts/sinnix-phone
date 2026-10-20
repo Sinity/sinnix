@@ -1240,7 +1240,7 @@ chroot_module_source() {
 }
 
 chroot_build() (
-  local output="${1:-/realm/tmp/work/sinnix-debian-chroot.zip}"
+  local output="${1:-/realm/tmp/work/sinnix-debian-chroot.zip}" # sinnix-path: output
   local work source
   # The archive command runs inside scratch; resolve the caller's destination
   # before changing directories so cleanup cannot discard a relative output.
@@ -1624,7 +1624,7 @@ chroot-install)
     echo "chroot-install: no adb transport" >&2
     exit 1
   }
-  module_zip="${1:-/realm/tmp/work/sinnix-debian-chroot.zip}"
+  module_zip="${1:-/realm/tmp/work/sinnix-debian-chroot.zip}" # sinnix-path: optional
   [ -f "$module_zip" ] || {
     echo "missing module archive: $module_zip" >&2
     exit 1
@@ -1771,7 +1771,7 @@ mirror)
 screenshot)
   ensure_adb
   mkdir -p /realm/tmp/work
-  out="/realm/tmp/work/phone-$(date +%Y%m%d-%H%M%S).png"
+  out="/realm/tmp/work/phone-$(date +%Y%m%d-%H%M%S).png" # sinnix-path: output
   adb_phone shell screencap -p /sdcard/.sinnix-shot.png
   adb_phone pull /sdcard/.sinnix-shot.png "$out" >/dev/null
   adb_phone shell rm -f /sdcard/.sinnix-shot.png
