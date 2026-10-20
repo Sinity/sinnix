@@ -8,19 +8,18 @@ import sys
 from pathlib import Path
 
 from sinnix_runtime import capabilities, health
-from sinnix_runtime.client import UnixConnection
-from . import feedback, pages
 from sinnix_runtime import inventory as runtime_inventory
 from sinnix_runtime.actions import ActionService
 from sinnix_runtime.agent_jobs import AgentCtlClient
 from sinnix_runtime.ambient import product_source
+from sinnix_runtime.client import UnixConnection
 from sinnix_runtime.clodex_usage import clodex_usage
+from sinnix_runtime.snapshot import SnapshotBuilder, observe_section
+
+from . import feedback, pages
 from .feedback import CoalescingTrigger, FeedbackSpool
 from .server import FAILURE_PATH, ensure_token, serve
-from sinnix_runtime.snapshot import SnapshotBuilder, observe_section
 from .state import StateLayer
-
-
 
 
 def post_failure(

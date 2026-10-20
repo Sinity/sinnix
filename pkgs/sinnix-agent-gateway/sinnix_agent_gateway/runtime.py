@@ -9,6 +9,7 @@ from typing import Any, Awaitable, Callable, Mapping
 
 import anyio
 from agentctl.limits import MAX_AGENT_TIMEOUT_SECONDS
+from sinnix_runtime.client import RuntimeClient
 
 from .action import Action, ActionResult
 from .actions import BY_NAME as ACTIONS_BY_NAME
@@ -27,7 +28,6 @@ from .events import EventCursorError, NormalizedEventService
 from .execution import JobOwnerError, LocalJobs
 from .files import HostFileService
 from .locators import decode_file_ref
-from sinnix_runtime.client import RuntimeClient
 from .mcp_broker import McpBrokerService
 from .observe import ObserveService
 from .owner_execution import OwnerDiagnosticError
@@ -176,7 +176,9 @@ class Runtime:
             results=results,
             jobs=LocalJobs(),
             observe=ObserveService(config, artifacts),
-            machine_actions=RuntimeClient(config.hub_socket_path, config.max_result_bytes),
+            machine_actions=RuntimeClient(
+                config.hub_socket_path, config.max_result_bytes
+            ),
             desktop=DesktopService(config, artifacts),
             terminals=TerminalService(config, artifacts),
             browser=BrowserService(config, artifacts),

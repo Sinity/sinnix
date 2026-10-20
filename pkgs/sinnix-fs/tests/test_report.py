@@ -1,14 +1,16 @@
-import sys
 import json
 import runpy
 import stat
 import subprocess
+import sys
 from html.parser import HTMLParser
 from pathlib import Path
 
 import pytest
 
-MODULE = runpy.run_path(str(Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)))
+MODULE = runpy.run_path(
+    str(Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__))
+)
 TEMPLATE = '<html data-accent=""><head><title>Example</title></head><body><script>/* shared controls */</script></body></html>'
 
 
@@ -86,7 +88,8 @@ def test_cli_publishes_private_report(tmp_path):
     script = Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)
     result = subprocess.run(
         [
-            sys.executable, str(script),
+            sys.executable,
+            str(script),
             "--catalog",
             str(catalog),
             "report",
@@ -479,7 +482,8 @@ def test_nonregular_input_keeps_previous_report(tmp_path, source):
     os.mkfifo(blocked)
     result = subprocess.run(
         [
-            sys.executable, str(Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)),
+            sys.executable,
+            str(Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)),
             "--catalog",
             str(catalog),
             "report",

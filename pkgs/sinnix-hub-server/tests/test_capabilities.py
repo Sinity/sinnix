@@ -21,9 +21,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sinnix_runtime import capabilities
 from sinnix_hub_server import pages
 from sinnix_hub_server.cli import capabilities_command
+from sinnix_runtime import capabilities
 
 INDEX: dict[str, Any] = {
     "schema": capabilities.SCHEMA,

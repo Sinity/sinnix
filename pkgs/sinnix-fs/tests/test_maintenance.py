@@ -1,10 +1,10 @@
 """Destructive boundaries: replaced roots and native in-use refusals stay safe."""
+
 import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from sinnix_fs import maintenance as m
 
 
@@ -38,8 +38,16 @@ def test_native_refusal_is_returned_and_exact_directory_pinned(cache, monkeypatc
     (cache / "retained.txt").write_text("synthetic active data")
     monkeypatch.setenv("UV_NO_CACHE", "1")
     monkeypatch.setenv("UV_CACHE_DIR", "/unexpected")
+
     def native(command, **kwargs):
-        assert command[:6] == ["uv", "--no-config", "--offline", "cache", "prune", "--cache-dir"]
+        assert command[:6] == [
+            "uv",
+            "--no-config",
+            "--offline",
+            "cache",
+            "prune",
+            "--cache-dir",
+        ]
         assert "--force" not in command
         assert Path(command[-1]).samefile(cache)
         assert not any(key.startswith("UV_") for key in kwargs["env"])
@@ -47,9 +55,12 @@ def test_native_refusal_is_returned_and_exact_directory_pinned(cache, monkeypatc
         cache.mkdir()
         assert Path(command[-1]).samefile(cache.with_name("moved"))
         return SimpleNamespace(returncode=2, stdout="", stderr="cache is in use")
+
     result = m.apply(document, run=native)
     assert result["exit_code"] == 2
-    assert (cache.with_name("moved") / "retained.txt").read_text() == "synthetic active data"
+    assert (
+        cache.with_name("moved") / "retained.txt"
+    ).read_text() == "synthetic active data"
 
 
 def test_changed_plan_digest_refuses_before_apply(cache, tmp_path, capsys):
@@ -60,7 +71,11 @@ def test_changed_plan_digest_refuses_before_apply(cache, tmp_path, capsys):
 
 
 def test_floor_defers_discretionary_work_without_fabricating_forecast(monkeypatch):
-    monkeypatch.setattr(m.os, "statvfs", lambda path: SimpleNamespace(f_blocks=100, f_frsize=4096, f_bavail=4))
+    monkeypatch.setattr(
+        m.os,
+        "statvfs",
+        lambda path: SimpleNamespace(f_blocks=100, f_frsize=4096, f_bavail=4),
+    )
     result = m.capacity(Path("/synthetic"), 15, 10)
     assert result["discretionary_work"] == "defer"
     assert result["available_bytes"] == 16384

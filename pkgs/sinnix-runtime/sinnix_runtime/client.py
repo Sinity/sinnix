@@ -3,10 +3,9 @@ from __future__ import annotations
 import http.client
 import json
 import socket
+from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import quote
-
-from pathlib import Path
 
 
 class RuntimeClientError(ValueError):

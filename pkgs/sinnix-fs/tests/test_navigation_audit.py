@@ -1,8 +1,8 @@
 """Current link audit catches absent local targets without probing offline stores."""
-import sys
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -43,7 +43,8 @@ def test_audit_relative_reference_encoded_and_offline_links(tmp_path):
     document.write_text("[present](a%20b.md)\n")
     assert (
         subprocess.run(
-            [sys.executable, str(SCRIPT), "links", "--manifest", str(manifest)], capture_output=True
+            [sys.executable, str(SCRIPT), "links", "--manifest", str(manifest)],
+            capture_output=True,
         ).returncode
         == 0
     )
@@ -65,9 +66,16 @@ def test_retired_managed_child_fails_without_rejecting_native_package_names(tmp_
     (realm / "library/model/native-package/embeddings").mkdir(parents=True)
     env = {**os.environ, "LAKE_LINT_ROOT_PREFIX": str(tmp_path)}
     script = Path(__import__("sinnix_fs.layout", fromlist=["__file__"]).__file__)
-    assert subprocess.run([sys.executable, str(script)], env=env, capture_output=True).returncode == 0
+    assert (
+        subprocess.run(
+            [sys.executable, str(script)], env=env, capture_output=True
+        ).returncode
+        == 0
+    )
     (realm / "device/sinnix-prime/peripherals").mkdir()
-    result = subprocess.run([sys.executable, str(script)], env=env, capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, str(script)], env=env, capture_output=True, text=True
+    )
     assert result.returncode == 1
     assert "RETIRED managed path recreated" in result.stdout
 

@@ -15,14 +15,14 @@ their own series.
 
 ## What is backed up
 
-| Source                   | How                                                                                                                  | When                                           | Repository                |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ------------------------- |
-| `/realm`                 | btrbk read-only snapshot, archived by the Borg job                                                                   | snapshots 00/06/12/18:00, drain at :05 and :25 | `borg-realm-v2`           |
-| `/persist`               | btrbk read-only snapshot, archived by the Borg job                                                                   | same as `/realm`                               | `borg-persist-v1`         |
-| The ephemeral root       | snapshot the initrd takes before each wipe                                                                           | daily                                          | `borg-root-snapshots-v1`  |
-| Sinex blob store         | direct                                                                                                               | daily 05:40                                    | `borg-sinex-blobs-v1`     |
+| Source                   | How                                                                                                                             | When                                           | Repository                |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | ------------------------- |
+| `/realm`                 | btrbk read-only snapshot, archived by the Borg job                                                                              | snapshots 00/06/12/18:00, drain at :05 and :25 | `borg-realm-v2`           |
+| `/persist`               | btrbk read-only snapshot, archived by the Borg job                                                                              | same as `/realm`                               | `borg-persist-v1`         |
+| The ephemeral root       | snapshot the initrd takes before each wipe                                                                                      | daily                                          | `borg-root-snapshots-v1`  |
+| Sinex blob store         | direct                                                                                                                          | daily 05:40                                    | `borg-sinex-blobs-v1`     |
 | Polylogue state          | hooks archived directly from a read-only snapshot of its subvolume, plus the `state/polylogue-aside-20260926T182000Z` subvolume | daily 04:15                                    | `borg-polylogue-state-v1` |
-| Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm`                                               | dumps 03:42, seal Sunday                       | `borg-realm-v2`           |
+| Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm`                                                          | dumps 03:42, seal Sunday                       | `borg-realm-v2`           |
 
 Left out of the `/realm` archive (`realmExcludes` in `modules/backup.nix`):
 downloaded model weights (including embeddings), Steam libraries and runtimes,

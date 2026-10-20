@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sinnix_runtime import health, pressure
 from sinnix_hub_server import server
+from sinnix_runtime import health, pressure
 from sinnix_runtime.actions import process_admitted_slices
 
 CALM = pressure.Sample(

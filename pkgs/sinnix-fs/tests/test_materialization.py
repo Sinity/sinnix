@@ -1,8 +1,8 @@
 """Failure preservation for the filesystem index's derived artifacts."""
 
 from __future__ import annotations
-import sys
 
+import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from types import SimpleNamespace
@@ -601,7 +601,6 @@ def test_status_refuses_fifo_metadata_without_waiting(tmp_path, special):
     import json
     import os
     import subprocess
-    import sys
 
     generation = tmp_path / "generations/selected"
     generation.mkdir(parents=True)

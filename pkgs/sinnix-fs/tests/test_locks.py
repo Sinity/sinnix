@@ -62,7 +62,7 @@ def test_special_write_locks_are_refused_without_mutation(tmp_path, lane, kind):
         [sys.executable, "-c", CHILD, str(SCRIPT), str(tmp_path), lane],
         capture_output=True,
         text=True,
-        timeout=3,
+        timeout=10,
     )
     assert result.returncode != 0, result.stdout
     assert ledger.read_bytes() == b"\n"
@@ -91,18 +91,19 @@ def test_regular_import_lock_still_serializes_writers(tmp_path):
             text=True,
         )
         try:
-            deadline = time.monotonic() + 3
+            deadline = time.monotonic() + 10
             while not (tmp_path / "ready").exists() and time.monotonic() < deadline:
                 time.sleep(0.01)
             assert (tmp_path / "ready").exists()
             assert child.poll() is None
             assert ledger.read_bytes() == b"\n"
             fcntl.flock(holder, fcntl.LOCK_UN)
-            stdout, stderr = child.communicate(timeout=3)
+            # Atomic publication includes fsync; allow bounded shared-disk contention.
+            stdout, stderr = child.communicate(timeout=10)
             assert child.returncode == 0, stderr
             assert json.loads(stdout)["added"] == 1
             assert b'"synthetic"' in ledger.read_bytes()
         finally:
             if child.poll() is None:
                 child.kill()
-                child.communicate(timeout=3)
+                child.communicate(timeout=10)

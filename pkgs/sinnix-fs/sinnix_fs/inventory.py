@@ -11,27 +11,38 @@ or append authored definitions directly without scanning payloads.
 
 from __future__ import annotations
 
-from sinnix_lib.atomic import atomic_text_writer
-from sinnix_lib.files import open_regular
-
 import argparse
 import datetime as dt
 import fcntl
+import grp
 import hashlib
 import json
 import os
 import pwd
-import grp
 import re
+import shutil
 import stat
 import subprocess
 import sys
 import tempfile
 import time
-import shutil
 import uuid
 from collections import Counter, deque
 from pathlib import Path
+
+from sinnix_lib.atomic import atomic_text_writer
+from sinnix_lib.files import open_regular
+from sinnix_lib.judgments import (
+    JUDGMENT_FACETS,
+    JUDGMENT_LIMIT_BYTES,
+    ROLE_VOCABULARY,
+    ROLE_VOCABULARY_VERSION,
+    effective_role_audit,
+    read_judgments,
+    resolve_judgments,
+    resolve_judgments_many,
+    validate_role_decisions,
+)
 
 DEFAULT_ROOTS = ["/realm", "/outer-realm"]
 
@@ -56,28 +67,53 @@ def safe(value):
 # DuckDB otherwise sizes buffers and workers from the whole host, even inside
 # the scheduled service's memory boundary. Leave room for Python, native
 # allocations and file metadata; spill beside the database on /realm.
-DUCKDB_SETTINGS = "SET memory_limit='512MiB'; SET threads=2; SET preserve_insertion_order=false;"
+DUCKDB_SETTINGS = (
+    "SET memory_limit='512MiB'; SET threads=2; SET preserve_insertion_order=false;"
+)
 
 
-def run_duckdb_file(db: Path, sql: str, script_name: str) -> subprocess.CompletedProcess:
+def run_duckdb_file(
+    db: Path, sql: str, script_name: str
+) -> subprocess.CompletedProcess:
     """Execute SQL through a private scratch file beside its staged database."""
     db.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", prefix=f".{script_name}.", suffix=".sql",
-        dir=db.parent, delete=False,
+        mode="w",
+        encoding="utf-8",
+        prefix=f".{script_name}.",
+        suffix=".sql",
+        dir=db.parent,
+        delete=False,
     ) as handle:
         script = Path(handle.name)
         handle.write(DUCKDB_SETTINGS + "\n" + sql)
     try:
-        return subprocess.run(["duckdb", "-no-init", str(db), "-f", str(script)], text=True,
-                              capture_output=True, check=False)
+        return subprocess.run(
+            ["duckdb", "-no-init", str(db), "-f", str(script)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
     finally:
         script.unlink(missing_ok=True)
 
 
 def duckdb_query(db: Path, sql: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["duckdb", "-readonly", "-no-init", str(db), "-noheader", "-list", "-c", DUCKDB_SETTINGS + "\n" + sql],
-                          text=True, capture_output=True, check=False)
+    return subprocess.run(
+        [
+            "duckdb",
+            "-readonly",
+            "-no-init",
+            str(db),
+            "-noheader",
+            "-list",
+            "-c",
+            DUCKDB_SETTINGS + "\n" + sql,
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
 
 
 def _fsync_file(path: Path) -> None:
@@ -89,7 +125,10 @@ def _fsync_file(path: Path) -> None:
 
 
 def materialize_pair(
-    db: Path, parquet: Path, sql_for_parquet, table: str,
+    db: Path,
+    parquet: Path,
+    sql_for_parquet,
+    table: str,
 ) -> str:
     """Build and validate a database/Parquet pair before replacing either output.
 
@@ -99,11 +138,15 @@ def materialize_pair(
     db.parent.mkdir(parents=True, exist_ok=True)
     if db.parent != parquet.parent:
         raise ValueError("database and parquet must share a publication directory")
-    with tempfile.TemporaryDirectory(prefix=f".{db.stem}.materialize-", dir=db.parent) as staging:
+    with tempfile.TemporaryDirectory(
+        prefix=f".{db.stem}.materialize-", dir=db.parent
+    ) as staging:
         stage = Path(staging)
         staged_db = stage / db.name
         staged_parquet = stage / parquet.name
-        proc = run_duckdb_file(staged_db, sql_for_parquet(staged_parquet), "materialize")
+        proc = run_duckdb_file(
+            staged_db, sql_for_parquet(staged_parquet), "materialize"
+        )
         if proc.returncode != 0:
             print(proc.stdout, file=sys.stderr)
             print(proc.stderr, file=sys.stderr)
@@ -112,14 +155,19 @@ def materialize_pair(
         check = duckdb_query(staged_db, f"SELECT count(*) FROM {table}")
         rows = check.stdout.strip()
         if check.returncode != 0 or not rows.isdigit():
-            raise SystemExit(f"materialize row-count validation failed (duckdb said: {rows!r} "
-                             f"{check.stderr.strip()})")
+            raise SystemExit(
+                f"materialize row-count validation failed (duckdb said: {rows!r} "
+                f"{check.stderr.strip()})"
+            )
         parquet_check = duckdb_query(
-            staged_db, f"SELECT count(*) FROM read_parquet({sql_string(staged_parquet)})",
+            staged_db,
+            f"SELECT count(*) FROM read_parquet({sql_string(staged_parquet)})",
         )
-        if (parquet_check.returncode != 0 or parquet_check.stdout.strip() != rows):
-            raise SystemExit(f"parquet validation failed for {staged_parquet}: "
-                             f"{parquet_check.stderr.strip()}")
+        if parquet_check.returncode != 0 or parquet_check.stdout.strip() != rows:
+            raise SystemExit(
+                f"parquet validation failed for {staged_parquet}: "
+                f"{parquet_check.stderr.strip()}"
+            )
 
         # DuckDB has closed its writers; make both completed files durable
         # before either public name moves.  os.replace is same-directory here.
@@ -127,7 +175,9 @@ def materialize_pair(
         _fsync_file(staged_parquet)
         os.replace(staged_db, db)
         os.replace(staged_parquet, parquet)
-        directory = os.open(db.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0))
+        directory = os.open(
+            db.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0)
+        )
         try:
             os.fsync(directory)
         finally:
@@ -200,7 +250,11 @@ INVENTORY_TOP_EXTENSIONS = 15
 
 def is_borg_repo(entries: list[os.DirEntry]) -> bool:
     names = {e.name for e in entries}
-    return "config" in names and "data" in names and any(n.startswith("index.") for n in names)
+    return (
+        "config" in names
+        and "data" in names
+        and any(n.startswith("index.") for n in names)
+    )
 
 
 def owner_of(st: os.stat_result) -> tuple[str, str]:
@@ -224,7 +278,9 @@ def inspect_scan_root(root: str) -> tuple[str, os.stat_result]:
     return str(path), observed
 
 
-def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_every: int) -> int:
+def inventory_scan(
+    roots: list[str], max_depth: int, out_path: Path, progress_every: int
+) -> int:
     """Breadth-first walk, one JSONL record per directory.
 
     BFS rather than DFS so a truncated run still describes the shallow
@@ -254,15 +310,36 @@ def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_ev
                 else:
                     st = os.lstat(path)
             except OSError as exc:
-                out.write(json.dumps({"schema": INVENTORY_SCHEMA, "path": path, "parent": parent,
-                                      "depth": depth, "error": str(exc)}) + "\n")
+                out.write(
+                    json.dumps(
+                        {
+                            "schema": INVENTORY_SCHEMA,
+                            "path": path,
+                            "parent": parent,
+                            "depth": depth,
+                            "error": str(exc),
+                        }
+                    )
+                    + "\n"
+                )
                 written += 1
                 continue
 
             if not stat.S_ISDIR(st.st_mode):
-                out.write(json.dumps(safe({"schema": INVENTORY_SCHEMA, "path": path,
-                    "parent": parent, "depth": depth,
-                    "error": "not a directory (root symlinks are not followed)"})) + "\n")
+                out.write(
+                    json.dumps(
+                        safe(
+                            {
+                                "schema": INVENTORY_SCHEMA,
+                                "path": path,
+                                "parent": parent,
+                                "depth": depth,
+                                "error": "not a directory (root symlinks are not followed)",
+                            }
+                        )
+                    )
+                    + "\n"
+                )
                 written += 1
                 continue
             if depth == 0:
@@ -273,13 +350,33 @@ def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_ev
                 with os.scandir(path) as it:
                     entries = list(it)
             except PermissionError:
-                out.write(json.dumps({"schema": INVENTORY_SCHEMA, "path": path, "parent": parent,
-                                      "depth": depth, "error": "permission denied"}) + "\n")
+                out.write(
+                    json.dumps(
+                        {
+                            "schema": INVENTORY_SCHEMA,
+                            "path": path,
+                            "parent": parent,
+                            "depth": depth,
+                            "error": "permission denied",
+                        }
+                    )
+                    + "\n"
+                )
                 written += 1
                 continue
             except OSError as exc:
-                out.write(json.dumps({"schema": INVENTORY_SCHEMA, "path": path, "parent": parent,
-                                      "depth": depth, "error": str(exc)}) + "\n")
+                out.write(
+                    json.dumps(
+                        {
+                            "schema": INVENTORY_SCHEMA,
+                            "path": path,
+                            "parent": parent,
+                            "depth": depth,
+                            "error": str(exc),
+                        }
+                    )
+                    + "\n"
+                )
                 written += 1
                 continue
 
@@ -359,22 +456,29 @@ def inventory_scan(roots: list[str], max_depth: int, out_path: Path, progress_ev
                 # Counts/bytes describe only observed entries. Reuse the
                 # existing error contract so rollup and coverage mark the
                 # directory and every ancestor incomplete.
-                "error": (f"entry metadata unavailable ({entry_errors} entries): {first_entry_error}"
-                          if entry_errors else None),
+                "error": (
+                    f"entry metadata unavailable ({entry_errors} entries): {first_entry_error}"
+                    if entry_errors
+                    else None
+                ),
             }
             out.write(json.dumps(safe(record), ensure_ascii=False) + "\n")
             written += 1
 
             if progress_every and written % progress_every == 0:
-                print(f"  {written} dirs, {time.monotonic()-started:.0f}s, at depth {depth}",
-                      file=sys.stderr)
+                print(
+                    f"  {written} dirs, {time.monotonic() - started:.0f}s, at depth {depth}",
+                    file=sys.stderr,
+                )
 
             if prune_reason is None:
                 for e in dirs:
                     queue.append((os.path.join(path, e.name), depth + 1))
 
-    print(f"sinnix-fs inventory: {written} directories in {time.monotonic()-started:.0f}s "
-          f"-> {out_path}")
+    print(
+        f"sinnix-fs inventory: {written} directories in {time.monotonic() - started:.0f}s "
+        f"-> {out_path}"
+    )
     return written
 
 
@@ -429,7 +533,14 @@ FROM nodes n LEFT JOIN rollup r USING (path);
 
 COPY (SELECT * FROM inventory) TO {sql_string(parquet)} (FORMAT PARQUET);
 """
-    rows = materialize_pair(db, parquet, lambda staged_parquet: sql.replace(sql_string(parquet), sql_string(staged_parquet)), "inventory")
+    rows = materialize_pair(
+        db,
+        parquet,
+        lambda staged_parquet: sql.replace(
+            sql_string(parquet), sql_string(staged_parquet)
+        ),
+        "inventory",
+    )
     print(f"sinnix-fs inventory: materialized {rows} rows -> {db}, {parquet}")
 
 
@@ -471,11 +582,24 @@ CONTENT_SCHEMA = "sinnix-fs-content-v2"
 CONTENT_FULL_HASH_LIMIT = 8 << 20
 CONTENT_SAMPLE_BYTES = 1 << 20
 CONTENT_COLUMNS = {
-    "schema": "VARCHAR", "path": "VARCHAR", "dir": "VARCHAR", "name": "VARCHAR",
-    "ext": "VARCHAR", "bytes": "BIGINT", "mtime": "DOUBLE", "sha256": "VARCHAR",
-    "sample_sha256": "VARCHAR", "fingerprint_kind": "VARCHAR", "fingerprint_bytes": "BIGINT",
-    "title": "VARCHAR", "head": "VARCHAR", "magic_type": "VARCHAR", "line_count": "BIGINT",
-    "error": "VARCHAR", "kind": "VARCHAR", "symlink_target": "VARCHAR",
+    "schema": "VARCHAR",
+    "path": "VARCHAR",
+    "dir": "VARCHAR",
+    "name": "VARCHAR",
+    "ext": "VARCHAR",
+    "bytes": "BIGINT",
+    "mtime": "DOUBLE",
+    "sha256": "VARCHAR",
+    "sample_sha256": "VARCHAR",
+    "fingerprint_kind": "VARCHAR",
+    "fingerprint_bytes": "BIGINT",
+    "title": "VARCHAR",
+    "head": "VARCHAR",
+    "magic_type": "VARCHAR",
+    "line_count": "BIGINT",
+    "error": "VARCHAR",
+    "kind": "VARCHAR",
+    "symlink_target": "VARCHAR",
     "exclusion_reason": "VARCHAR",
 }
 
@@ -490,11 +614,17 @@ def content_digest_views_sql(*, legacy: bool = False) -> str:
     The source table remains an observation, not a destructive-cleanup plan.
     Legacy sample values are not eligible for exact-content grouping.
     """
-    exact = ("schema = 'sinnix-fs-content-v1' AND bytes BETWEEN 0 AND 8388608"
-             if legacy else "fingerprint_kind = 'sha256-full'")
-    sampled = ("sha256" if legacy else "sample_sha256")
-    sample_condition = ("schema = 'sinnix-fs-content-v1' AND bytes > 8388608"
-                        if legacy else "fingerprint_kind = 'sha256-head-tail-size-v1'")
+    exact = (
+        "schema = 'sinnix-fs-content-v1' AND bytes BETWEEN 0 AND 8388608"
+        if legacy
+        else "fingerprint_kind = 'sha256-full'"
+    )
+    sampled = "sha256" if legacy else "sample_sha256"
+    sample_condition = (
+        "schema = 'sinnix-fs-content-v1' AND bytes > 8388608"
+        if legacy
+        else "fingerprint_kind = 'sha256-head-tail-size-v1'"
+    )
     return f"""
 CREATE OR REPLACE VIEW duplicates AS
 SELECT sha256, count(*) AS copies, sum(bytes) AS total_bytes,
@@ -534,36 +664,76 @@ def content_views_refresh(db: Path) -> int:
     """Repair comparison semantics without rescanning or changing file rows."""
     if not require_regular_index_input(db, "content-views"):
         return 1
-    probe = duckdb_query(db, "SELECT column_name FROM information_schema.columns WHERE table_name='files'")
+    probe = duckdb_query(
+        db,
+        "SELECT column_name FROM information_schema.columns WHERE table_name='files'",
+    )
     if probe.returncode:
         print(probe.stderr, file=sys.stderr)
         return 1
     columns = set(probe.stdout.splitlines())
     if not {"schema", "path", "bytes", "sha256", "error", "name"} <= columns:
-        raise ValueError("content files table does not satisfy the observed v1/v2 contract")
+        raise ValueError(
+            "content files table does not satisfy the observed v1/v2 contract"
+        )
     legacy = not {"fingerprint_kind", "sample_sha256"} <= columns
-    proc = run_duckdb_file(db, "BEGIN TRANSACTION;\n" + content_digest_views_sql(legacy=legacy) + "COMMIT;", "content-views")
+    proc = run_duckdb_file(
+        db,
+        "BEGIN TRANSACTION;\n" + content_digest_views_sql(legacy=legacy) + "COMMIT;",
+        "content-views",
+    )
     if proc.returncode:
         print(proc.stderr, file=sys.stderr)
         return 1
-    print(f"sinnix-fs content-views: corrected {'legacy v1' if legacy else 'typed'} comparison views; source rows and payloads unchanged")
+    print(
+        f"sinnix-fs content-views: corrected {'legacy v1' if legacy else 'typed'} comparison views; source rows and payloads unchanged"
+    )
     return 0
 
 
 CONTENT_EXTS = {
-    ".md", ".markdown", ".txt", ".org", ".rst", ".adoc",
-    ".pdf", ".docx", ".odt", ".rtf", ".epub",
-    ".csv", ".tsv", ".tex", ".bib",
-    ".html", ".htm",
-    ".json", ".yaml", ".yml", ".toml", ".ini", ".conf",
+    ".md",
+    ".markdown",
+    ".txt",
+    ".org",
+    ".rst",
+    ".adoc",
+    ".pdf",
+    ".docx",
+    ".odt",
+    ".rtf",
+    ".epub",
+    ".csv",
+    ".tsv",
+    ".tex",
+    ".bib",
+    ".html",
+    ".htm",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".conf",
 }
 
 # Streams and blobs, not documents. A capture lane's contents are described by
 # the lane; indexing each record would drown the signal in telemetry.
 CONTENT_EXCLUDE_DIR_PARTS = {
-    ".git", "node_modules", "target", ".venv", "venv", "__pycache__",
-    ".direnv", ".mypy_cache", ".pytest_cache", ".ruff_cache", ".cargo",
-    "site-packages", ".cache", "share/doc",
+    ".git",
+    "node_modules",
+    "target",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".direnv",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".cargo",
+    "site-packages",
+    ".cache",
+    "share/doc",
 }
 CONTENT_EXCLUDE_PREFIXES = (
     # btrfs snapshot root. Every snapshot mirrors the whole system, so without
@@ -610,8 +780,10 @@ def content_excluded(path: str) -> str | None:
     for boundary, reason in CONTENT_COLLECTION_BOUNDARIES.items():
         if normalized == boundary or normalized.startswith(boundary + "/"):
             return reason
-    if any(normalized == prefix.rstrip("/") or normalized.startswith(prefix)
-           for prefix in CONTENT_EXCLUDE_PREFIXES):
+    if any(
+        normalized == prefix.rstrip("/") or normalized.startswith(prefix)
+        for prefix in CONTENT_EXCLUDE_PREFIXES
+    ):
         return "bulk lane (stream, media, cache or build)"
     parts = set(Path(path).parts)
     hit = parts & CONTENT_EXCLUDE_DIR_PARTS
@@ -631,8 +803,12 @@ def content_magic_type(path: Path) -> str | None:
     it had existed on the file layer rather than only the config layer.
     """
     try:
-        out = subprocess.run(["file", "-b", "--mime-type", "--", str(path)],
-                              capture_output=True, text=True, timeout=5)
+        out = subprocess.run(
+            ["file", "-b", "--mime-type", "--", str(path)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
     except (OSError, subprocess.TimeoutExpired):
         return None
     if out.returncode != 0:
@@ -640,7 +816,9 @@ def content_magic_type(path: Path) -> str | None:
     return out.stdout.strip() or None
 
 
-def content_extract(path: Path, size: int, ext: str) -> tuple[str | None, str | None, int | None, str | None]:
+def content_extract(
+    path: Path, size: int, ext: str
+) -> tuple[str | None, str | None, int | None, str | None]:
     """(title, head, line_count, error) with a bounded, non-stream read.
 
     Returns the reason in the fourth slot instead of swallowing it. A file that
@@ -649,10 +827,18 @@ def content_extract(path: Path, size: int, ext: str) -> tuple[str | None, str | 
     silent-success bugs -- the sibling scanner (sinnix-fs inventory) already
     gets this right by writing an explicit permission-denied row.
     """
-    if size > CONTENT_MAX_READ_BYTES or ext in {".pdf", ".docx", ".odt", ".epub", ".rtf"}:
+    if size > CONTENT_MAX_READ_BYTES or ext in {
+        ".pdf",
+        ".docx",
+        ".odt",
+        ".epub",
+        ".rtf",
+    }:
         return None, None, None, None
     try:
-        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+        descriptor = os.open(
+            path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0)
+        )
         with os.fdopen(descriptor, "rb") as handle:
             opened = os.fstat(handle.fileno())
             if not stat.S_ISREG(opened.st_mode):
@@ -688,11 +874,13 @@ def content_extract(path: Path, size: int, ext: str) -> tuple[str | None, str | 
     # caught by testing against a file with a real trailing newline rather
     # than trusting the arithmetic.
     line_count = raw.count("\n") + (1 if raw and not raw.endswith("\n") else 0)
-    head = " ".join(raw[:CONTENT_HEAD_CHARS * 3].split())[:CONTENT_HEAD_CHARS] or None
+    head = " ".join(raw[: CONTENT_HEAD_CHARS * 3].split())[:CONTENT_HEAD_CHARS] or None
     return title, head, line_count, None
 
 
-def content_fingerprint(path: Path, size: int, expected: os.stat_result | None = None) -> dict:
+def content_fingerprint(
+    path: Path, size: int, expected: os.stat_result | None = None
+) -> dict:
     """Read a bounded fingerprint of one stable regular file, never a stream.
 
     O_NONBLOCK prevents a substituted FIFO from hanging the scan; O_NOFOLLOW
@@ -700,17 +888,30 @@ def content_fingerprint(path: Path, size: int, expected: os.stat_result | None =
     Metadata stability detects ordinary concurrent writes, not adversarial
     manipulation or the validity of a historical content claim.
     """
-    empty = {"sha256": None, "sample_sha256": None,
-             "fingerprint_kind": None, "fingerprint_bytes": 0}
+    empty = {
+        "sha256": None,
+        "sample_sha256": None,
+        "fingerprint_kind": None,
+        "fingerprint_bytes": 0,
+    }
+
     def token(st):
         return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
     try:
         before = path.lstat()
         if not stat.S_ISREG(before.st_mode):
             return {**empty, "error": "not a regular file"}
-        if before.st_size != size or (expected is not None and token(before) != token(expected)):
+        if before.st_size != size or (
+            expected is not None and token(before) != token(expected)
+        ):
             return {**empty, "error": "changed before fingerprint"}
-        flags = os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+        flags = (
+            os.O_RDONLY
+            | os.O_NONBLOCK
+            | getattr(os, "O_NOFOLLOW", 0)
+            | getattr(os, "O_CLOEXEC", 0)
+        )
         fd = os.open(path, flags)
         with os.fdopen(fd, "rb") as handle:
             opened = os.fstat(handle.fileno())
@@ -728,16 +929,26 @@ def content_fingerprint(path: Path, size: int, expected: os.stat_result | None =
                 head = handle.read(CONTENT_SAMPLE_BYTES)
                 handle.seek(-CONTENT_SAMPLE_BYTES, os.SEEK_END)
                 tail = handle.read(CONTENT_SAMPLE_BYTES)
-                if len(head) != CONTENT_SAMPLE_BYTES or len(tail) != CONTENT_SAMPLE_BYTES:
+                if (
+                    len(head) != CONTENT_SAMPLE_BYTES
+                    or len(tail) != CONTENT_SAMPLE_BYTES
+                ):
                     return {**empty, "error": "short sampled read"}
-                h.update(head); h.update(tail); h.update(str(size).encode())
+                h.update(head)
+                h.update(tail)
+                h.update(str(size).encode())
                 read_bytes = len(head) + len(tail)
                 kind, field = "sha256-head-tail-size-v1", "sample_sha256"
             after = os.fstat(handle.fileno())
         if token(before) != token(after) or token(before) != token(path.lstat()):
             return {**empty, "error": "changed while fingerprinting"}
-        return {**empty, field: h.hexdigest(), "fingerprint_kind": kind,
-                "fingerprint_bytes": read_bytes, "error": None}
+        return {
+            **empty,
+            field: h.hexdigest(),
+            "fingerprint_kind": kind,
+            "fingerprint_bytes": read_bytes,
+            "error": None,
+        }
     except PermissionError:
         return {**empty, "error": "permission denied"}
     except OSError as exc:
@@ -751,35 +962,71 @@ def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
     skipped = 0
     started = time.monotonic()
     with atomic_text_writer(out_path, fsync=True, mode=0o600) as out:
+
         def boundary_error(path, reason):
             nonlocal written, errored
-            out.write(json.dumps(safe({"schema": CONTENT_SCHEMA, "path": str(path),
-                "dir": str(Path(path).parent), "name": Path(path).name,
-                "kind": "directory", "error": reason, "sha256": None,
-                "sample_sha256": None}), ensure_ascii=False) + "\n")
+            out.write(
+                json.dumps(
+                    safe(
+                        {
+                            "schema": CONTENT_SCHEMA,
+                            "path": str(path),
+                            "dir": str(Path(path).parent),
+                            "name": Path(path).name,
+                            "kind": "directory",
+                            "error": reason,
+                            "sha256": None,
+                            "sample_sha256": None,
+                        }
+                    ),
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
             written += 1
             errored += 1
+
         boundary_paths: set[str] = set()
+
         def boundary_record(path, reason):
             nonlocal written, skipped
             path = str(Path(path))
             if path in boundary_paths:
                 return
             boundary_paths.add(path)
-            out.write(json.dumps(safe({"schema": CONTENT_SCHEMA, "path": path,
-                "dir": str(Path(path).parent), "name": Path(path).name,
-                "kind": "collection_boundary", "exclusion_reason": reason,
-                "error": None, "sha256": None, "sample_sha256": None,
-                "head": None, "title": None}), ensure_ascii=False) + "\n")
+            out.write(
+                json.dumps(
+                    safe(
+                        {
+                            "schema": CONTENT_SCHEMA,
+                            "path": path,
+                            "dir": str(Path(path).parent),
+                            "name": Path(path).name,
+                            "kind": "collection_boundary",
+                            "exclusion_reason": reason,
+                            "error": None,
+                            "sha256": None,
+                            "sample_sha256": None,
+                            "head": None,
+                            "title": None,
+                        }
+                    ),
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
             written += 1
             skipped += 1
+
         root_paths: set[str] = set()
         for root in roots:
             root = str(Path(root).absolute())
             try:
                 root, root_stat = inspect_scan_root(root)
                 if not stat.S_ISDIR(root_stat.st_mode):
-                    boundary_error(root, "not a directory (root aliases are not followed)")
+                    boundary_error(
+                        root, "not a directory (root aliases are not followed)"
+                    )
                     continue
             except OSError as exc:
                 boundary_error(root, f"root unavailable: {exc.__class__.__name__}")
@@ -791,9 +1038,16 @@ def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
             if excluded:
                 boundary_record(root, excluded)
                 continue
-            def walk_error(exc):
-                boundary_error(exc.filename or root, f"directory unreadable: {exc.__class__.__name__}")
-            for dirpath, dirnames, filenames in os.walk(root, topdown=True, onerror=walk_error):
+
+            def walk_error(exc, root=root):
+                boundary_error(
+                    exc.filename or root,
+                    f"directory unreadable: {exc.__class__.__name__}",
+                )
+
+            for dirpath, dirnames, filenames in os.walk(
+                root, topdown=True, onerror=walk_error
+            ):
                 excluded = content_excluded(dirpath)
                 if excluded:
                     boundary_record(dirpath, excluded)
@@ -822,35 +1076,75 @@ def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
                         # from the index entirely, indistinguishable from a file
                         # that does not exist. Emit a row saying so instead; a
                         # visible hole is information, a missing row is not.
-                        out.write(json.dumps(safe({
-                            "schema": CONTENT_SCHEMA, "path": str(p), "dir": dirpath,
-                            "name": fn, "ext": ext, "error": "permission denied",
-                        }), ensure_ascii=False) + "\n")
+                        out.write(
+                            json.dumps(
+                                safe(
+                                    {
+                                        "schema": CONTENT_SCHEMA,
+                                        "path": str(p),
+                                        "dir": dirpath,
+                                        "name": fn,
+                                        "ext": ext,
+                                        "error": "permission denied",
+                                    }
+                                ),
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
                         errored += 1
                         written += 1
                         continue
                     except OSError as exc:
-                        out.write(json.dumps(safe({
-                            "schema": CONTENT_SCHEMA, "path": str(p), "dir": dirpath,
-                            "name": fn, "ext": ext,
-                            "error": f"stat failed: {exc.__class__.__name__}",
-                        }), ensure_ascii=False) + "\n")
+                        out.write(
+                            json.dumps(
+                                safe(
+                                    {
+                                        "schema": CONTENT_SCHEMA,
+                                        "path": str(p),
+                                        "dir": dirpath,
+                                        "name": fn,
+                                        "ext": ext,
+                                        "error": f"stat failed: {exc.__class__.__name__}",
+                                    }
+                                ),
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
                         errored += 1
                         written += 1
                         continue
                     if not stat.S_ISREG(st.st_mode):
                         is_link = stat.S_ISLNK(st.st_mode)
-                        out.write(json.dumps(safe({
-                            "schema": CONTENT_SCHEMA, "path": str(p), "dir": dirpath,
-                            "name": fn, "ext": ext, "bytes": st.st_size,
-                            "kind": "symlink" if is_link else "special",
-                            "error": "alias not traversed" if is_link else "not a regular file",
-                            "sha256": None, "sample_sha256": None,
-                        }), ensure_ascii=False) + "\n")
+                        out.write(
+                            json.dumps(
+                                safe(
+                                    {
+                                        "schema": CONTENT_SCHEMA,
+                                        "path": str(p),
+                                        "dir": dirpath,
+                                        "name": fn,
+                                        "ext": ext,
+                                        "bytes": st.st_size,
+                                        "kind": "symlink" if is_link else "special",
+                                        "error": "alias not traversed"
+                                        if is_link
+                                        else "not a regular file",
+                                        "sha256": None,
+                                        "sample_sha256": None,
+                                    }
+                                ),
+                                ensure_ascii=False,
+                            )
+                            + "\n"
+                        )
                         written += 1
                         skipped += 1
                         continue
-                    title, head, line_count, read_error = content_extract(p, st.st_size, ext)
+                    title, head, line_count, read_error = content_extract(
+                        p, st.st_size, ext
+                    )
                     fingerprint = content_fingerprint(p, st.st_size, expected=st)
                     read_error = read_error or fingerprint["error"]
                     if read_error:
@@ -860,37 +1154,55 @@ def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
                     # not computed from a second read, and is a real count of
                     # what was read, not a lower bound guessed from the
                     # excerpt.
-                    out.write(json.dumps(safe({
-                        "schema": CONTENT_SCHEMA,
-                        "path": str(p),
-                        "dir": dirpath,
-                        "name": fn,
-                        "ext": ext,
-                        "bytes": st.st_size,
-                        "mtime": st.st_mtime,
-                        **fingerprint,
-                        "kind": "file",
-                        "title": title,
-                        "head": head,
-                        "magic_type": content_magic_type(p),
-                        "line_count": line_count,
-                        "error": read_error,
-                    }), ensure_ascii=False) + "\n")
+                    out.write(
+                        json.dumps(
+                            safe(
+                                {
+                                    "schema": CONTENT_SCHEMA,
+                                    "path": str(p),
+                                    "dir": dirpath,
+                                    "name": fn,
+                                    "ext": ext,
+                                    "bytes": st.st_size,
+                                    "mtime": st.st_mtime,
+                                    **fingerprint,
+                                    "kind": "file",
+                                    "title": title,
+                                    "head": head,
+                                    "magic_type": content_magic_type(p),
+                                    "line_count": line_count,
+                                    "error": read_error,
+                                }
+                            ),
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
                     written += 1
                     if progress_every and written % progress_every == 0:
-                        print(f"  {written} files, {time.monotonic()-started:.0f}s",
-                              file=sys.stderr)
+                        print(
+                            f"  {written} files, {time.monotonic() - started:.0f}s",
+                            file=sys.stderr,
+                        )
     # errored is reported separately from skipped: `skipped` is deliberate
     # prune-exclusion, `errored` is the scanner failing to see something it was
     # asked to see. Conflating them is how an unreadable subtree reads as an
     # intentionally-excluded one.
-    print(f"sinnix-fs content: {written} observations ({skipped} boundaries/nonregular entries, "
-          f"{errored} unreadable) in {time.monotonic()-started:.0f}s -> {out_path}")
+    print(
+        f"sinnix-fs content: {written} observations ({skipped} boundaries/nonregular entries, "
+        f"{errored} unreadable) in {time.monotonic() - started:.0f}s -> {out_path}"
+    )
     return written
 
 
 def content_materialize(jsonl: Path, db: Path, parquet: Path) -> None:
-    columns = "{" + ", ".join(sql_string(k) + ": " + sql_string(v) for k, v in CONTENT_COLUMNS.items()) + "}"
+    columns = (
+        "{"
+        + ", ".join(
+            sql_string(k) + ": " + sql_string(v) for k, v in CONTENT_COLUMNS.items()
+        )
+        + "}"
+    )
     exact = "regexp_full_match(sha256, '[0-9a-fA-F]{64}') AND error IS NULL AND bytes >= 0 AND ((schema = 'sinnix-fs-content-v2' AND fingerprint_kind = 'sha256-full') OR (schema = 'sinnix-fs-content-v1' AND bytes <= 8388608))"
     sample = "error IS NULL AND bytes > 8388608 AND ((schema = 'sinnix-fs-content-v2' AND fingerprint_kind = 'sha256-head-tail-size-v1' AND regexp_full_match(sample_sha256, '[0-9a-fA-F]{64}')) OR (schema = 'sinnix-fs-content-v1' AND regexp_full_match(sha256, '[0-9a-fA-F]{64}')))"
     sql = f"""
@@ -933,7 +1245,14 @@ FROM files GROUP BY 1;
 
 COPY (SELECT * FROM files) TO {sql_string(parquet)} (FORMAT PARQUET);
 """
-    rows = materialize_pair(db, parquet, lambda staged_parquet: sql.replace(sql_string(parquet), sql_string(staged_parquet)), "files")
+    rows = materialize_pair(
+        db,
+        parquet,
+        lambda staged_parquet: sql.replace(
+            sql_string(parquet), sql_string(staged_parquet)
+        ),
+        "files",
+    )
     print(f"sinnix-fs content: materialized {rows} rows -> {db}, {parquet}")
 
 
@@ -1048,9 +1367,13 @@ FROM subject_state GROUP BY state ORDER BY paths DESC;
 """
 
 LEDGER_OBJECT_KIND = {
-    "resolved_judgments": "VIEW", "prefix_judgments": "VIEW",
-    "files": "TABLE", "effective_judgments": "TABLE",
-    "all_paths": "TABLE", "inherited_judgments": "TABLE", "coverage": "TABLE",
+    "resolved_judgments": "VIEW",
+    "prefix_judgments": "VIEW",
+    "files": "TABLE",
+    "effective_judgments": "TABLE",
+    "all_paths": "TABLE",
+    "inherited_judgments": "TABLE",
+    "coverage": "TABLE",
 }
 
 
@@ -1063,13 +1386,16 @@ def ledger_run(index_dir: Path, judgments_path: Path | None = None) -> int:
             return 1
 
     from sinnix_lib.judgments import effective_target_judgments
+
     ledger = read_judgments(judgments)
     columns = "{target:'VARCHAR', field:'VARCHAR', value:'JSON', confidence:'DOUBLE', observation:'VARCHAR', method:'VARCHAR', evidence:'VARCHAR', ts:'VARCHAR'}"
     effective = index_dir / ".effective.jsonl"
     with atomic_text_writer(effective, fsync=False, mode=0o600) as handle:
         for record in effective_target_judgments(ledger):
             handle.write(json.dumps(record) + "\n")
-    sql = LEDGER_SQL.format(judgments_jsonl=sql_string(judgments), ledger_columns=columns)
+    sql = LEDGER_SQL.format(
+        judgments_jsonl=sql_string(judgments), ledger_columns=columns
+    )
     # A prior run may have left an object with the same name as a different
     # kind (view vs table) -- DROP ... IF EXISTS does not suppress a type
     # mismatch, only a missing name, so a plain drop-then-create can fail
@@ -1080,8 +1406,18 @@ def ledger_run(index_dir: Path, judgments_path: Path | None = None) -> int:
         "SELECT table_name, 'TABLE' FROM duckdb_tables() "
         "UNION ALL SELECT view_name, 'VIEW' FROM duckdb_views();"
     )
-    probe = subprocess.run(["duckdb", str(inv_db), "-csv", "-no-init", "-c", DUCKDB_SETTINGS + "\n" + catalog_probe],
-                            text=True, capture_output=True)
+    probe = subprocess.run(
+        [
+            "duckdb",
+            str(inv_db),
+            "-csv",
+            "-no-init",
+            "-c",
+            DUCKDB_SETTINGS + "\n" + catalog_probe,
+        ],
+        text=True,
+        capture_output=True,
+    )
     existing = {}
     if probe.returncode == 0:
         for line in probe.stdout.splitlines()[1:]:
@@ -1095,13 +1431,19 @@ def ledger_run(index_dir: Path, judgments_path: Path | None = None) -> int:
         if name in existing and existing[name] != LEDGER_OBJECT_KIND[name]
     )
 
-    columns_probe = duckdb_query(content_db, "SELECT column_name FROM information_schema.columns WHERE table_name='files'")
+    columns_probe = duckdb_query(
+        content_db,
+        "SELECT column_name FROM information_schema.columns WHERE table_name='files'",
+    )
     if columns_probe.returncode:
         print(columns_probe.stderr, file=sys.stderr)
         return 1
-    typed = 'fingerprint_kind' in columns_probe.stdout.splitlines()
-    exact_clause = ("fingerprint_kind = 'sha256-full'" if typed else
-                    "schema = 'sinnix-fs-content-v1' AND bytes BETWEEN 0 AND 8388608")
+    typed = "fingerprint_kind" in columns_probe.stdout.splitlines()
+    exact_clause = (
+        "fingerprint_kind = 'sha256-full'"
+        if typed
+        else "schema = 'sinnix-fs-content-v1' AND bytes BETWEEN 0 AND 8388608"
+    )
 
     # inventory.duckdb is opened directly (it already has nodes/rollup); only
     # content.duckdb needs ATTACHing, as a view rather than a copy, so a
@@ -1130,15 +1472,42 @@ SELECT * FROM coverage;
         print(f"sinnix-fs ledger: duckdb failed: {proc.stderr}", file=sys.stderr)
         return 1
     print(proc.stdout)
-    print(f"sinnix-fs ledger: materialized resolved_judgments, prefix_judgments, "
-          f"inherited_judgments, coverage in {inv_db}", file=sys.stderr)
+    print(
+        f"sinnix-fs ledger: materialized resolved_judgments, prefix_judgments, "
+        f"inherited_judgments, coverage in {inv_db}",
+        file=sys.stderr,
+    )
     return 0
 
 
-DERIVED_FILES = ("nodes.jsonl", "files.jsonl", "inventory.duckdb", "content.duckdb", "nodes.parquet", "files.parquet")
+DERIVED_FILES = (
+    "nodes.jsonl",
+    "files.jsonl",
+    "inventory.duckdb",
+    "content.duckdb",
+    "nodes.parquet",
+    "files.parquet",
+)
 RELATIONS = {
-    "inventory.duckdb": ("nodes", "rollup", "inventory", "files", "judgments", "resolved_judgments", "prefix_judgments", "all_paths", "inherited_judgments", "coverage"),
-    "content.duckdb": ("files", "duplicates", "sampled_duplicate_candidates", "scattered_names", "population"),
+    "inventory.duckdb": (
+        "nodes",
+        "rollup",
+        "inventory",
+        "files",
+        "judgments",
+        "resolved_judgments",
+        "prefix_judgments",
+        "all_paths",
+        "inherited_judgments",
+        "coverage",
+    ),
+    "content.duckdb": (
+        "files",
+        "duplicates",
+        "sampled_duplicate_candidates",
+        "scattered_names",
+        "population",
+    ),
 }
 
 
@@ -1152,14 +1521,20 @@ def resolve_generation(index_dir: Path) -> Path:
     try:
         mode = pointer.lstat().st_mode
     except FileNotFoundError:
-        raise ValueError("no published generation; restore retained scan inputs explicitly") from None
+        raise ValueError(
+            "no published generation; restore retained scan inputs explicitly"
+        ) from None
     if not stat.S_ISLNK(mode):
         raise ValueError("generation pointer is not a symbolic link")
     generation = pointer.resolve(strict=True)
     if generation.parent != (index_dir / "generations").resolve():
         raise ValueError("generation pointer escapes its owning store")
     manifest = read_json_metadata(generation / "manifest.json")
-    if not isinstance(manifest, dict) or manifest.get("schema") != "sinnix.fs-generation.v1" or manifest.get("generation") != generation.name:
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schema") != "sinnix.fs-generation.v1"
+        or manifest.get("generation") != generation.name
+    ):
         raise ValueError("invalid generation manifest")
     return generation
 
@@ -1171,55 +1546,103 @@ def validate_generation(stage: Path) -> dict:
         for relation in relations:
             result = duckdb_query(stage / database, f"SELECT count(*) FROM {relation}")
             if result.returncode or not result.stdout.strip().isdigit():
-                raise ValueError(f"reopened {database}.{relation} failed: {result.stderr}")
+                raise ValueError(
+                    f"reopened {database}.{relation} failed: {result.stderr}"
+                )
             counts[database + "." + relation] = int(result.stdout.strip())
-    for database, parquet, relation in (("inventory.duckdb", "nodes.parquet", "nodes"), ("content.duckdb", "files.parquet", "files")):
-        result = duckdb_query(stage / database, f"SELECT count(*) FROM read_parquet({sql_string(stage / parquet)})")
-        if result.returncode or result.stdout.strip() != str(counts[database + "." + relation]):
+    for database, parquet, relation in (
+        ("inventory.duckdb", "nodes.parquet", "nodes"),
+        ("content.duckdb", "files.parquet", "files"),
+    ):
+        result = duckdb_query(
+            stage / database,
+            f"SELECT count(*) FROM read_parquet({sql_string(stage / parquet)})",
+        )
+        if result.returncode or result.stdout.strip() != str(
+            counts[database + "." + relation]
+        ):
             raise ValueError(f"Parquet mismatch: {parquet}")
     return counts
 
 
 def source_identity(path: Path) -> dict:
     info = path.stat()
-    return {"path": str(path), "size": info.st_size, "mtime_ns": info.st_mtime_ns,
-            "observed_at": dt.datetime.fromtimestamp(info.st_mtime, dt.timezone.utc).isoformat()}
+    return {
+        "path": str(path),
+        "size": info.st_size,
+        "mtime_ns": info.st_mtime_ns,
+        "observed_at": dt.datetime.fromtimestamp(
+            info.st_mtime, dt.timezone.utc
+        ).isoformat(),
+    }
 
 
 def generation_coverage(path: Path) -> dict:
-    result = duckdb_query(path / "inventory.duckdb", "SELECT count(*) FILTER (WHERE error IS NOT NULL) || ',' || count(*) FILTER (WHERE prune_reason IS NOT NULL) FROM nodes")
+    result = duckdb_query(
+        path / "inventory.duckdb",
+        "SELECT count(*) FILTER (WHERE error IS NOT NULL) || ',' || count(*) FILTER (WHERE prune_reason IS NOT NULL) FROM nodes",
+    )
     if result.returncode:
         raise ValueError(f"coverage check failed: {result.stderr}")
-    errors, pruned = map(int, result.stdout.strip().split(','))
-    columns = duckdb_query(path / "content.duckdb", "SELECT column_name FROM information_schema.columns WHERE table_name='files'")
+    errors, pruned = map(int, result.stdout.strip().split(","))
+    columns = duckdb_query(
+        path / "content.duckdb",
+        "SELECT column_name FROM information_schema.columns WHERE table_name='files'",
+    )
     if columns.returncode:
         raise ValueError(f"content coverage schema check failed: {columns.stderr}")
     has_boundaries = "kind" in columns.stdout.splitlines()
-    boundary_count = "count(*) FILTER (WHERE kind = 'collection_boundary')" if has_boundaries else "NULL"
+    boundary_count = (
+        "count(*) FILTER (WHERE kind = 'collection_boundary')"
+        if has_boundaries
+        else "NULL"
+    )
     # Alias targets are deliberately not traversed. Keep their coverage gap
     # visible without diagnosing an intentional boundary as a read failure.
-    content = duckdb_query(path / "content.duckdb", f"SELECT count(*) FILTER (WHERE error IS NOT NULL AND error != 'alias not traversed'), {boundary_count}, count(*) FILTER (WHERE error = 'alias not traversed') FROM files")
+    content = duckdb_query(
+        path / "content.duckdb",
+        f"SELECT count(*) FILTER (WHERE error IS NOT NULL AND error != 'alias not traversed'), {boundary_count}, count(*) FILTER (WHERE error = 'alias not traversed') FROM files",
+    )
     if content.returncode:
         raise ValueError(f"content coverage check failed: {content.stderr}")
-    observed_errors, observed_boundaries, observed_aliases = content.stdout.strip().split('|')
+    observed_errors, observed_boundaries, observed_aliases = (
+        content.stdout.strip().split("|")
+    )
     content_errors = int(observed_errors)
     content_aliases = int(observed_aliases)
     content_boundaries = int(observed_boundaries) if has_boundaries else None
-    return {"incomplete": bool(errors or pruned or content_errors or content_aliases or content_boundaries is None or content_boundaries),
-            "directory_errors": errors, "pruned_directories": pruned,
-            "content_errors": content_errors, "content_boundaries": content_boundaries,
-            "content_aliases_not_traversed": content_aliases,
-            "scope": "generic metadata and bounded content scan; native payload coverage remains owner-specific"}
+    return {
+        "incomplete": bool(
+            errors
+            or pruned
+            or content_errors
+            or content_aliases
+            or content_boundaries is None
+            or content_boundaries
+        ),
+        "directory_errors": errors,
+        "pruned_directories": pruned,
+        "content_errors": content_errors,
+        "content_boundaries": content_boundaries,
+        "content_aliases_not_traversed": content_aliases,
+        "scope": "generic metadata and bounded content scan; native payload coverage remains owner-specific",
+    }
 
 
-def publish_generation(index_dir: Path, *, roots=None, retained_inputs: Path | None = None) -> int:
+def publish_generation(
+    index_dir: Path, *, roots=None, retained_inputs: Path | None = None
+) -> int:
     """Publish one validated derived generation; authored ledgers stay outside."""
     index_dir.mkdir(parents=True, exist_ok=True)
     generations = index_dir / "generations"
     generations.mkdir(mode=0o700, exist_ok=True)
     with open_regular(index_dir / "publication.lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        name = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S") + "-" + uuid.uuid4().hex[:12]
+        name = (
+            dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%S")
+            + "-"
+            + uuid.uuid4().hex[:12]
+        )
         stage = generations / (".building-" + name)
         stage.mkdir(mode=0o700)
         try:
@@ -1229,26 +1652,58 @@ def publish_generation(index_dir: Path, *, roots=None, retained_inputs: Path | N
                 for filename in DERIVED_FILES:
                     source = previous / filename
                     # Reflink retains scan evidence without borrowing mutable DB pages.
-                    result = subprocess.run(["cp", "--reflink=auto", "--preserve=mode,timestamps", str(source), str(stage / filename)], check=False)
+                    result = subprocess.run(
+                        [
+                            "cp",
+                            "--reflink=auto",
+                            "--preserve=mode,timestamps",
+                            str(source),
+                            str(stage / filename),
+                        ],
+                        check=False,
+                    )
                     if result.returncode:
                         raise ValueError(f"cannot preserve {source}")
                 prior_manifest = previous / "manifest.json"
-                scan = read_json_metadata(prior_manifest)["scan"] if prior_manifest.exists() else {
-                    "kind": "retained-inputs", "fresh": False,
-                    "inputs": [source_identity(previous / n) for n in ("nodes.jsonl", "files.jsonl")],
-                    "exclusions": "historical exclusions were not recorded; no fresh coverage claim",
-                }
+                scan = (
+                    read_json_metadata(prior_manifest)["scan"]
+                    if prior_manifest.exists()
+                    else {
+                        "kind": "retained-inputs",
+                        "fresh": False,
+                        "inputs": [
+                            source_identity(previous / n)
+                            for n in ("nodes.jsonl", "files.jsonl")
+                        ],
+                        "exclusions": "historical exclusions were not recorded; no fresh coverage claim",
+                    }
+                )
             else:
                 roots = [str(Path(root).absolute()) for root in roots]
                 started = dt.datetime.now(dt.timezone.utc).isoformat()
                 inventory_scan(roots, -1, stage / "nodes.jsonl", 2000)
-                inventory_materialize(stage / "nodes.jsonl", stage / "inventory.duckdb", stage / "nodes.parquet")
+                inventory_materialize(
+                    stage / "nodes.jsonl",
+                    stage / "inventory.duckdb",
+                    stage / "nodes.parquet",
+                )
                 content_walk(roots, stage / "files.jsonl", 5000)
-                content_materialize(stage / "files.jsonl", stage / "content.duckdb", stage / "files.parquet")
-                scan = {"kind": "fresh", "started_at": started, "finished_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-                        "roots": roots, "content_exclusions": list(CONTENT_EXCLUDE_PREFIXES),
-                        "content_collection_boundaries": dict(CONTENT_COLLECTION_BOUNDARIES),
-                        "excluded_components": sorted(CONTENT_EXCLUDE_DIR_PARTS)}
+                content_materialize(
+                    stage / "files.jsonl",
+                    stage / "content.duckdb",
+                    stage / "files.parquet",
+                )
+                scan = {
+                    "kind": "fresh",
+                    "started_at": started,
+                    "finished_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+                    "roots": roots,
+                    "content_exclusions": list(CONTENT_EXCLUDE_PREFIXES),
+                    "content_collection_boundaries": dict(
+                        CONTENT_COLLECTION_BOUNDARIES
+                    ),
+                    "excluded_components": sorted(CONTENT_EXCLUDE_DIR_PARTS),
+                }
             if content_views_refresh(stage / "content.duckdb"):
                 raise ValueError("content comparison view refresh failed")
             # Freeze the exact reviewed ledger for this build without making it authored state.
@@ -1260,14 +1715,25 @@ def publish_generation(index_dir: Path, *, roots=None, retained_inputs: Path | N
                 raise ValueError("ledger construction failed")
             ledger_copy.unlink()
             counts = validate_generation(stage)
-            if read_judgments(index_dir / "judgments.jsonl")["sha256"] != ledger["sha256"]:
+            if (
+                read_judgments(index_dir / "judgments.jsonl")["sha256"]
+                != ledger["sha256"]
+            ):
                 raise ValueError("judgment ledger changed during build")
-            manifest = {"schema": "sinnix.fs-generation.v1", "generation": name,
-                        "published_at": dt.datetime.now(dt.timezone.utc).isoformat(), "scan": scan,
-                        "ledger_sha256": ledger["sha256"], "ledger_records": ledger["records"],
-                        "invalid_definitions": ledger["issues"], "relations": counts,
-                        "coverage": generation_coverage(stage),
-                        "artifacts": {n: {**source_identity(stage / n), "path": n} for n in DERIVED_FILES}}
+            manifest = {
+                "schema": "sinnix.fs-generation.v1",
+                "generation": name,
+                "published_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+                "scan": scan,
+                "ledger_sha256": ledger["sha256"],
+                "ledger_records": ledger["records"],
+                "invalid_definitions": ledger["issues"],
+                "relations": counts,
+                "coverage": generation_coverage(stage),
+                "artifacts": {
+                    n: {**source_identity(stage / n), "path": n} for n in DERIVED_FILES
+                },
+            }
             (stage / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
             for filename in (*DERIVED_FILES, "manifest.json"):
                 _fsync_file(stage / filename)
@@ -1291,13 +1757,24 @@ def publish_generation(index_dir: Path, *, roots=None, retained_inputs: Path | N
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
-            with atomic_text_writer(index_dir / "last-attempt.json", fsync=True, mode=0o600) as handle:
+            with atomic_text_writer(
+                index_dir / "last-attempt.json", fsync=True, mode=0o600
+            ) as handle:
                 json.dump({"status": "published", "generation": name}, handle)
             print(json.dumps(manifest))
             return 0
         except (Exception, SystemExit, KeyboardInterrupt) as exc:
-            with atomic_text_writer(index_dir / "last-attempt.json", fsync=True, mode=0o600) as handle:
-                json.dump({"status": "failed", "candidate": str(stage), "reason": str(exc) or type(exc).__name__}, handle)
+            with atomic_text_writer(
+                index_dir / "last-attempt.json", fsync=True, mode=0o600
+            ) as handle:
+                json.dump(
+                    {
+                        "status": "failed",
+                        "candidate": str(stage),
+                        "reason": str(exc) or type(exc).__name__,
+                    },
+                    handle,
+                )
             # Failed candidates remain private, preserving the reason and partial work.
             raise
 
@@ -1323,10 +1800,20 @@ def cmd_status(args: argparse.Namespace) -> int:
     else:
         try:
             receipt = read_json_metadata(attempt)
-            if not isinstance(receipt, dict) or receipt.get("status") not in ("published", "failed"):
+            if not isinstance(receipt, dict) or receipt.get("status") not in (
+                "published",
+                "failed",
+            ):
                 raise ValueError("invalid publication receipt status")
-            required = ("generation",) if receipt["status"] == "published" else ("candidate", "reason")
-            if any(not isinstance(receipt.get(key), str) or not receipt[key].strip() for key in required):
+            required = (
+                ("generation",)
+                if receipt["status"] == "published"
+                else ("candidate", "reason")
+            )
+            if any(
+                not isinstance(receipt.get(key), str) or not receipt[key].strip()
+                for key in required
+            ):
                 raise ValueError("invalid publication receipt fields")
             result["last_attempt"] = receipt
         except (OSError, ValueError) as exc:
@@ -1343,10 +1830,15 @@ def cmd_status(args: argparse.Namespace) -> int:
         try:
             with os.scandir(generations) as entries:
                 result["unpublished_candidates"] = sorted(
-                    entry.path for entry in entries
-                    if entry.name.startswith(".building-") and entry.is_dir(follow_symlinks=False))
+                    entry.path
+                    for entry in entries
+                    if entry.name.startswith(".building-")
+                    and entry.is_dir(follow_symlinks=False)
+                )
         except OSError as exc:
-            result.update(unpublished_candidates=None, candidate_inventory_error=str(exc))
+            result.update(
+                unpublished_candidates=None, candidate_inventory_error=str(exc)
+            )
     lock = args.index_dir / "publication.lock"
     result["publication_in_progress"] = False
     try:
@@ -1363,25 +1855,46 @@ def cmd_status(args: argparse.Namespace) -> int:
     try:
         generation = resolve_generation(args.index_dir)
         manifest = read_json_metadata(generation / "manifest.json")
-        if (not isinstance(manifest.get("scan"), dict)
-                or not isinstance(manifest.get("invalid_definitions"), list)
-                or not isinstance(manifest.get("ledger_sha256"), str)
-                or not re.fullmatch(r"[0-9a-fA-F]{64}", manifest["ledger_sha256"])):
+        if (
+            not isinstance(manifest.get("scan"), dict)
+            or not isinstance(manifest.get("invalid_definitions"), list)
+            or not isinstance(manifest.get("ledger_sha256"), str)
+            or not re.fullmatch(r"[0-9a-fA-F]{64}", manifest["ledger_sha256"])
+        ):
             raise ValueError("invalid generation status metadata")
         validate_generation(generation)
-        result.update(valid=True, generation=str(generation), scan=manifest["scan"],
-                      invalid_definitions=manifest["invalid_definitions"],
-                      coverage=generation_coverage(generation),
-                      coverage_limitation="bounded generic inspection; native stores and exclusions require owner evidence")
+        result.update(
+            valid=True,
+            generation=str(generation),
+            scan=manifest["scan"],
+            invalid_definitions=manifest["invalid_definitions"],
+            coverage=generation_coverage(generation),
+            coverage_limitation="bounded generic inspection; native stores and exclusions require owner evidence",
+        )
         try:
-            result["classifications_stale"] = read_judgments(args.index_dir / "judgments.jsonl")["sha256"] != manifest["ledger_sha256"]
+            result["classifications_stale"] = (
+                read_judgments(args.index_dir / "judgments.jsonl")["sha256"]
+                != manifest["ledger_sha256"]
+            )
         except (OSError, ValueError) as exc:
             result.update(classifications_stale=True, current_ledger_error=str(exc))
     except (OSError, ValueError) as exc:
         result.update(valid=False, reason=str(exc))
     print(json.dumps(result, indent=2))
-    return 0 if result["valid"] and not result["classifications_stale"] and not any(key in result for key in (
-        "publication_state_error", "last_attempt_error", "candidate_inventory_error")) else 1
+    return (
+        0
+        if result["valid"]
+        and not result["classifications_stale"]
+        and not any(
+            key in result
+            for key in (
+                "publication_state_error",
+                "last_attempt_error",
+                "candidate_inventory_error",
+            )
+        )
+        else 1
+    )
 
 
 def cmd_query(args: argparse.Namespace) -> int:
@@ -1389,23 +1902,38 @@ def cmd_query(args: argparse.Namespace) -> int:
     # Read-only databases still permit external COPY writes. Safe mode locks
     # external access off. Set budgets before safe mode locks configuration;
     # never execute caller SQL until safe mode is enabled. Skip user init files.
-    proc = subprocess.run(["duckdb", "-readonly", "-no-init", "-json", str(generation / args.database), "-cmd", DUCKDB_SETTINGS, "-cmd", ".safe_mode", "-c", args.sql], check=False)
+    proc = subprocess.run(
+        [
+            "duckdb",
+            "-readonly",
+            "-no-init",
+            "-json",
+            str(generation / args.database),
+            "-cmd",
+            DUCKDB_SETTINGS,
+            "-cmd",
+            ".safe_mode",
+            "-c",
+            args.sql,
+        ],
+        check=False,
+    )
     return proc.returncode
-
-
-
-from sinnix_lib.judgments import (
-    JUDGMENT_FACETS, JUDGMENT_LIMIT_BYTES, ROLE_VOCABULARY,
-    ROLE_VOCABULARY_VERSION, validate_role_decisions, effective_role_audit,
-    judgment_target, read_judgments, resolve_judgments, resolve_judgments_many,
-)
 
 
 def cmd_judgments(args: argparse.Namespace) -> int:
     if args.action == "vocabulary":
-        print(json.dumps({"schema": ROLE_VOCABULARY_VERSION, "field": "role",
-                          "roles": ROLE_VOCABULARY,
-                          "detail": "Retain source wording in each decision's detail and evidence; do not replace preservation constraints with role codes."}, indent=2))
+        print(
+            json.dumps(
+                {
+                    "schema": ROLE_VOCABULARY_VERSION,
+                    "field": "role",
+                    "roles": ROLE_VOCABULARY,
+                    "detail": "Retain source wording in each decision's detail and evidence; do not replace preservation constraints with role codes.",
+                },
+                indent=2,
+            )
+        )
         return 0
     if args.action == "import":
         incoming = read_judgments(args.observations)
@@ -1413,15 +1941,21 @@ def cmd_judgments(args: argparse.Namespace) -> int:
             raise ValueError(f"invalid incoming definitions: {incoming['issues']}")
         role_issues = validate_role_decisions(incoming)
         if role_issues and not getattr(args, "allow_legacy_roles", False):
-            raise ValueError(f"invalid incoming roles: {role_issues}; historical import requires explicit --allow-legacy-roles")
+            raise ValueError(
+                f"invalid incoming roles: {role_issues}; historical import requires explicit --allow-legacy-roles"
+            )
         path = args.index_dir / "judgments.jsonl"
         path.parent.mkdir(parents=True, exist_ok=True)
         with open_regular(path.with_name(path.name + ".lock"), "a+") as lock:
             fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            existing = read_judgments(path) if path.exists() else {"valid": [], "records": 0}
+            existing = (
+                read_judgments(path) if path.exists() else {"valid": [], "records": 0}
+            )
             expected = getattr(args, "expected_sha256", None)
             if expected is not None and existing.get("sha256") != expected:
-                raise ValueError("judgment ledger changed since review; expected SHA-256 does not match")
+                raise ValueError(
+                    "judgment ledger changed since review; expected SHA-256 does not match"
+                )
             seen = {entry["record_sha256"] for entry in existing["valid"]}
             additions = []
             for entry in incoming["valid"]:
@@ -1429,29 +1963,53 @@ def cmd_judgments(args: argparse.Namespace) -> int:
                     additions.append(entry["record"])
                     seen.add(entry["record_sha256"])
             original = path.read_bytes().decode("utf-8") if path.exists() else ""
-            appended = ''.join(json.dumps(row, ensure_ascii=False) + '\n' for row in additions)
-            text = original + ('\n' if original and not original.endswith('\n') else '') + appended
-            if len(text.encode()) > JUDGMENT_LIMIT_BYTES or existing["records"] + len(additions) > 25000:
+            appended = "".join(
+                json.dumps(row, ensure_ascii=False) + "\n" for row in additions
+            )
+            text = (
+                original
+                + ("\n" if original and not original.endswith("\n") else "")
+                + appended
+            )
+            if (
+                len(text.encode()) > JUDGMENT_LIMIT_BYTES
+                or existing["records"] + len(additions) > 25000
+            ):
                 raise ValueError("combined judgment ledger exceeds read bounds")
             if additions:
                 with atomic_text_writer(path, fsync=True, mode=0o600) as handle:
                     handle.write(text)
-        print(json.dumps({"added": len(additions), "records": existing["records"] + len(additions),
-                          "path": str(path), "materializations_refreshed": False}))
+        print(
+            json.dumps(
+                {
+                    "added": len(additions),
+                    "records": existing["records"] + len(additions),
+                    "path": str(path),
+                    "materializations_refreshed": False,
+                }
+            )
+        )
         return 0
     ledger = read_judgments(args.index_dir / "judgments.jsonl")
     provenance = {k: ledger[k] for k in ("path", "sha256", "records", "issues")}
     if args.action == "explain":
         fields = resolve_judgments(ledger, args.path)
-        result = {"schema": "sinnix-fs-judgment-explanation-v1", "path": args.path,
-                  "ledger": provenance,
-                  "facets": {k:v for k,v in fields.items() if k in JUDGMENT_FACETS},
-                  "other_fields": {k:v for k,v in fields.items() if k not in JUDGMENT_FACETS},
-                  "scope": "Lexical path inheritance only; no path stat, symlink traversal, payload read, full digest or backup verification. Dates and methods describe the source decisions, not a new operator ruling."}
+        result = {
+            "schema": "sinnix-fs-judgment-explanation-v1",
+            "path": args.path,
+            "ledger": provenance,
+            "facets": {k: v for k, v in fields.items() if k in JUDGMENT_FACETS},
+            "other_fields": {
+                k: v for k, v in fields.items() if k not in JUDGMENT_FACETS
+            },
+            "scope": "Lexical path inheritance only; no path stat, symlink traversal, payload read, full digest or backup verification. Dates and methods describe the source decisions, not a new operator ruling.",
+        }
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 1 if any(x["status"] == "ambiguous" for x in fields.values()) else 0
     if args.action == "audit":
-        targets = sorted({e["address"] for e in ledger["valid"] if e["kind"] == "prefix"})
+        targets = sorted(
+            {e["address"] for e in ledger["valid"] if e["kind"] == "prefix"}
+        )
         locations = []
         if args.check_paths:
             for path in targets:
@@ -1463,18 +2021,41 @@ def cmd_judgments(args: argparse.Namespace) -> int:
                 except OSError:
                     state = "unavailable"
                 locations.append({"path": path, "status": state})
-        modern = {e["address"] for e in ledger["valid"] if e["kind"] == "prefix" and e["record"]["field"] in JUDGMENT_FACETS}
+        modern = {
+            e["address"]
+            for e in ledger["valid"]
+            if e["kind"] == "prefix" and e["record"]["field"] in JUDGMENT_FACETS
+        }
         role_audit = effective_role_audit(ledger, sorted(modern))
-        result = {"schema": "sinnix-fs-judgment-audit-v1", "ledger": provenance,
-                  "role_vocabulary": role_audit,
-                  "valid_records": len(ledger["valid"]), "prefix_targets":len(targets),
-                  "facet_targets":len(modern), "location_counts":dict(Counter(r["status"] for r in locations)),
-                  "locations":locations, "scope":"Definition audit only; missing historical targets are retained, not relocated or deleted. Path checks are opt-in and do not enumerate descendants."}
-        print(json.dumps(result,ensure_ascii=False,indent=2))
-        return 1 if ledger["issues"] or role_audit["noncanonical"] or role_audit["counts"].get("[ambiguous]", 0) or any(r["status"] in ("missing","unavailable") for r in locations) else 0
+        result = {
+            "schema": "sinnix-fs-judgment-audit-v1",
+            "ledger": provenance,
+            "role_vocabulary": role_audit,
+            "valid_records": len(ledger["valid"]),
+            "prefix_targets": len(targets),
+            "facet_targets": len(modern),
+            "location_counts": dict(Counter(r["status"] for r in locations)),
+            "locations": locations,
+            "scope": "Definition audit only; missing historical targets are retained, not relocated or deleted. Path checks are opt-in and do not enumerate descendants.",
+        }
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return (
+            1
+            if ledger["issues"]
+            or role_audit["noncanonical"]
+            or role_audit["counts"].get("[ambiguous]", 0)
+            or any(r["status"] in ("missing", "unavailable") for r in locations)
+            else 0
+        )
     # A rebuildable Markdown projection of selected orthogonal collection facets.
     # Historical and non-facet fields remain in the canonical ledger, not erased.
-    targets = sorted({e["address"] for e in ledger["valid"] if e["kind"] == "prefix" and e["record"]["field"] in JUDGMENT_FACETS})
+    targets = sorted(
+        {
+            e["address"]
+            for e in ledger["valid"]
+            if e["kind"] == "prefix" and e["record"]["field"] in JUDGMENT_FACETS
+        }
+    )
     grouped = getattr(args, "group_by", "path") == "role"
     role_filter = getattr(args, "role", None)
     if getattr(args, "current_only", False):
@@ -1490,41 +2071,79 @@ def cmd_judgments(args: argparse.Namespace) -> int:
     missing_result = {"status": "not-recorded"}
     role_groups = {}
     if role_filter is not None:
-        targets = [path for path in targets
-                   if fields_by_path[path].get("role", {}).get("status") == "known"
-                   and fields_by_path[path]["role"].get("value") == role_filter]
+        targets = [
+            path
+            for path in targets
+            if fields_by_path[path].get("role", {}).get("status") == "known"
+            and fields_by_path[path]["role"].get("value") == role_filter
+        ]
     if grouped:
+
         def group_key(path):
             role = fields_by_path[path].get("role", missing_result)
             key = id(role)
             if key not in role_groups:
-                role_groups[key] = str(role.get("value")) if role.get("status") == "known" else "unclassified"
+                role_groups[key] = (
+                    str(role.get("value"))
+                    if role.get("status") == "known"
+                    else "unclassified"
+                )
             return role_groups[key]
+
         targets.sort(key=lambda path: (group_key(path), path))
+
     def cell(value):
-        return str(value).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ").replace("\r", " ").replace("<", "&lt;").replace(">", "&gt;")
+        return (
+            str(value)
+            .replace("\\", "\\\\")
+            .replace("|", "\\|")
+            .replace("\n", " ")
+            .replace("\r", " ")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+
     shared_values, rendered_fields = {}, {}
+
     def value_cell(value):
         text = str(value)
         if len(text) <= 256:
             return cell(text)
         number = shared_values.setdefault(text, len(shared_values) + 1)
         return f"[value {number}](#facet-value-{number})"
+
     def field_cell(result, details=False):
         key = (id(result), details)
         if key not in rendered_fields:
-            value = "; ".join(result.get("details", [])) if details else (
-                result.get("value", result["status"]) if result["status"] == "known" else result["status"]
+            value = (
+                "; ".join(result.get("details", []))
+                if details
+                else (
+                    result.get("value", result["status"])
+                    if result["status"] == "known"
+                    else result["status"]
+                )
             )
             rendered_fields[key] = value_cell(value)
         return rendered_fields[key]
+
     print("# Current collection facets\n")
-    print("Generated from the existing authored judgment ledger, not a second registry. Each value is an inherited, dated classification of the collection's role—not inspection of every member or proof of backup coverage. Unknown values block broader assumptions.\n")
-    print(f"Ledger: `{cell(ledger['path'])}`. Source SHA-256: `{ledger['sha256']}`. {len(targets)} explicitly described locations. {len(ledger['issues'])} invalid historical definitions excluded from resolution.\n")
-    print(f"Role vocabulary: `{ROLE_VOCABULARY_VERSION}`. Original role wording is retained as detail and in attributed history.\n")
+    print(
+        "Generated from the existing authored judgment ledger, not a second registry. Each value is an inherited, dated classification of the collection's role—not inspection of every member or proof of backup coverage. Unknown values block broader assumptions.\n"
+    )
+    print(
+        f"Ledger: `{cell(ledger['path'])}`. Source SHA-256: `{ledger['sha256']}`. {len(targets)} explicitly described locations. {len(ledger['issues'])} invalid historical definitions excluded from resolution.\n"
+    )
+    print(
+        f"Role vocabulary: `{ROLE_VOCABULARY_VERSION}`. Original role wording is retained as detail and in attributed history.\n"
+    )
+
     def table_header():
-        print("| Location | Topic | Role | Maintenance owner | Preservation constraint | Role detail |")
+        print(
+            "| Location | Topic | Role | Maintenance owner | Preservation constraint | Role detail |"
+        )
         print("|---|---|---|---|---|---|")
+
     if not grouped:
         table_header()
     last_group = None
@@ -1532,76 +2151,143 @@ def cmd_judgments(args: argparse.Namespace) -> int:
         if grouped and group_key(path) != last_group:
             last_group = group_key(path)
             print("\n## " + value_cell(last_group) + "\n")
-            print(cell(ROLE_VOCABULARY.get(last_group, "Noncanonical or unknown historical classification.")) + "\n")
+            print(
+                cell(
+                    ROLE_VOCABULARY.get(
+                        last_group, "Noncanonical or unknown historical classification."
+                    )
+                )
+                + "\n"
+            )
             table_header()
-        fields=fields_by_path[path]
-        values=[]
+        fields = fields_by_path[path]
+        values = []
         for field in JUDGMENT_FACETS:
             values.append(field_cell(fields.get(field, missing_result)))
         details = field_cell(fields.get("role", missing_result), details=True)
-        print("| "+cell(path)+" | "+" | ".join(values)+" | "+details+" |")
+        print("| " + cell(path) + " | " + " | ".join(values) + " | " + details + " |")
     if shared_values:
         print("\n## Shared long values\n")
-        print("Long facet values and role details are retained once here; table references carry the full text without repeating it for every descendant.\n")
+        print(
+            "Long facet values and role details are retained once here; table references carry the full text without repeating it for every descendant.\n"
+        )
         for text, number in shared_values.items():
-            print(f'<a id="facet-value-{number}"></a>\n\n### Value {number}\n\n{cell(text)}\n')
-    print("\nUse `sinnix fs classify explain /absolute/path` for winning rule targets, dates, methods and evidence. A `preservation` classification never authorizes deletion. Native application state, workflow dependencies and independent backup evidence still control actual maintenance.")
+            print(
+                f'<a id="facet-value-{number}"></a>\n\n### Value {number}\n\n{cell(text)}\n'
+            )
+    print(
+        "\nUse `sinnix fs classify explain /absolute/path` for winning rule targets, dates, methods and evidence. A `preservation` classification never authorizes deletion. Native application state, workflow dependencies and independent backup evidence still control actual maintenance."
+    )
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="sinnix-fs", description=__doc__,
-                                  formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        prog="sinnix-fs",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = ap.add_subparsers(dest="command", required=True)
 
     led = sub.add_parser(
-        "refresh", description=LEDGER_DOC,
+        "refresh",
+        description=LEDGER_DOC,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="Materialize the judgment ledger into resolved judgments, prefix inheritance and a coverage report",
     )
-    led.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"),
-                      help="owner directory containing authored ledgers and the current generation pointer")
-    led.add_argument("--retained-inputs", type=Path, help="Explicit recovery source of dated scan artifacts")
+    led.add_argument(
+        "--index-dir",
+        type=Path,
+        default=Path("/realm/state/fs-index"),
+        help="owner directory containing authored ledgers and the current generation pointer",
+    )
+    led.add_argument(
+        "--retained-inputs",
+        type=Path,
+        help="Explicit recovery source of dated scan artifacts",
+    )
     led.set_defaults(func=cmd_ledger)
 
     run = sub.add_parser(
-        "scan", description=cmd_run.__doc__,
+        "scan",
+        description=cmd_run.__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         help="Build and publish one fresh filesystem-index generation",
     )
-    run.add_argument("--root", action="append", default=None,
-                      help=f"Filesystem root to walk (repeatable). Default: {DEFAULT_ROOTS}")
+    run.add_argument(
+        "--root",
+        action="append",
+        default=None,
+        help=f"Filesystem root to walk (repeatable). Default: {DEFAULT_ROOTS}",
+    )
     run.add_argument("--out-dir", default="/realm/state/fs-index")
     run.set_defaults(func=cmd_run)
 
-    status = sub.add_parser("status", help="Validate a reopened generation and distinguish stale classifications or failed publication")
+    status = sub.add_parser(
+        "status",
+        help="Validate a reopened generation and distinguish stale classifications or failed publication",
+    )
     status.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"))
     status.set_defaults(func=cmd_status)
-    query = sub.add_parser("query", help="Run read-only SQL against one resolved generation")
+    query = sub.add_parser(
+        "query", help="Run read-only SQL against one resolved generation"
+    )
     query.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"))
-    query.add_argument("--database", choices=list(RELATIONS), default="inventory.duckdb")
+    query.add_argument(
+        "--database", choices=list(RELATIONS), default="inventory.duckdb"
+    )
     query.add_argument("sql")
     query.set_defaults(func=cmd_query)
-    judgments = sub.add_parser("classify", help="Read or import authored classifications without scanning or materializing")
-    judgments.add_argument("--index-dir", type=Path, default=Path("/realm/state/fs-index"))
+    judgments = sub.add_parser(
+        "classify",
+        help="Read or import authored classifications without scanning or materializing",
+    )
+    judgments.add_argument(
+        "--index-dir", type=Path, default=Path("/realm/state/fs-index")
+    )
     actions = judgments.add_subparsers(dest="action", required=True)
-    explain = actions.add_parser("explain", help="Explain lexical path classification with evidence; no payload access")
+    explain = actions.add_parser(
+        "explain",
+        help="Explain lexical path classification with evidence; no payload access",
+    )
     explain.add_argument("path")
-    audit = actions.add_parser("audit", help="Audit definitions; explicitly request path checks")
+    audit = actions.add_parser(
+        "audit", help="Audit definitions; explicitly request path checks"
+    )
     audit.add_argument("--check-paths", action="store_true")
-    report = actions.add_parser("report", help="Print a rebuildable Markdown collection-facet view")
+    report = actions.add_parser(
+        "report", help="Print a rebuildable Markdown collection-facet view"
+    )
     report.add_argument("--group-by", choices=["path", "role"], default="path")
     report.add_argument("--role", choices=sorted(ROLE_VOCABULARY))
-    report.add_argument("--current-only", action="store_true", help="Include existing locations only; retain historical ledger entries")
-    actions.add_parser("vocabulary", help="Describe the controlled role codes and separate detail contract")
-    import_judgments = actions.add_parser("import", help="Validate and append attributed JSONL definitions, retaining history")
+    report.add_argument(
+        "--current-only",
+        action="store_true",
+        help="Include existing locations only; retain historical ledger entries",
+    )
+    actions.add_parser(
+        "vocabulary",
+        help="Describe the controlled role codes and separate detail contract",
+    )
+    import_judgments = actions.add_parser(
+        "import",
+        help="Validate and append attributed JSONL definitions, retaining history",
+    )
     import_judgments.add_argument("observations", type=Path)
-    import_judgments.add_argument("--allow-legacy-roles", action="store_true",
-                                  help="Explicit historical import only; noncanonical roles remain audit findings")
-    import_judgments.add_argument("--expected-sha256", help="Refuse if the existing ledger changed since review")
+    import_judgments.add_argument(
+        "--allow-legacy-roles",
+        action="store_true",
+        help="Explicit historical import only; noncanonical roles remain audit findings",
+    )
+    import_judgments.add_argument(
+        "--expected-sha256", help="Refuse if the existing ledger changed since review"
+    )
     judgments.set_defaults(func=cmd_judgments)
     from sinnix_lib.note_links import command as note_links_command
-    note_links = sub.add_parser("notes", help="Plan unambiguous legacy Markdown links without writing notes")
+
+    note_links = sub.add_parser(
+        "notes", help="Plan unambiguous legacy Markdown links without writing notes"
+    )
     note_links.add_argument("--root", type=Path, action="append", required=True)
     note_links.add_argument("--reference-root", type=Path, action="append", default=[])
     note_links.add_argument("--exclude-component", action="append", default=[])

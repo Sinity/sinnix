@@ -190,10 +190,10 @@ def test_examples_selectors_and_explicit_roles_do_not_hide_required_inputs(tmp_p
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     (scripts / "tool").write_text(
-        '#!/bin/sh\n'
-        'cat <<\'USAGE\'\nexample /realm/example/help\nUSAGE\n'
+        "#!/bin/sh\n"
+        "cat <<'USAGE'\nexample /realm/example/help\nUSAGE\n"
         'if [ "$OLD" = /realm/retired/source ]; then cat /realm/required/second; fi\n'
-        '/realm/project/old-*/repo) echo selected ;;\n'
+        "/realm/project/old-*/repo) echo selected ;;\n"
     )
     rows = refs.scan_repo("fixture", tmp_path)
     by_path = {row["path"]: row["kind"] for row in rows}
@@ -209,6 +209,8 @@ def test_examples_selectors_and_explicit_roles_do_not_hide_required_inputs(tmp_p
 
 def test_unknown_explicit_role_is_not_a_silent_exclusion(tmp_path):
     refs = load_refs()
-    (tmp_path / "source.py").write_text('ROOT = "/realm/required/input"  # sinnix-path: typo\n')
+    (tmp_path / "source.py").write_text(
+        'ROOT = "/realm/required/input"  # sinnix-path: typo\n'
+    )
     with pytest.raises(refs.ScanError, match="unknown path role"):
         refs.scan_repo("fixture", tmp_path)

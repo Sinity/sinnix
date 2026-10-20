@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
+from sinnix_runtime.client import RuntimeClientError
 
 from ..action import (
     Action,
@@ -17,7 +18,6 @@ from ..action import (
 )
 from ..contracts import VerbFamily
 from ..locators import UNIT_REF_PREFIX, UnitLocator, UnitScope
-from sinnix_runtime.client import RuntimeClientError
 from ..owner_execution import (
     EnvironmentProfile,
     ExecutionProfile,

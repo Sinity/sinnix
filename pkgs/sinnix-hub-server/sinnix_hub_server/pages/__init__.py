@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from sinnix_runtime import capabilities as capability_index
+
 from .dashboard import render_dashboard
 from .probes import load_json
 from .services import render_services

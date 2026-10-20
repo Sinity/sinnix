@@ -10,22 +10,22 @@ catalog cannot silently point at a different object after replacement.
 from __future__ import annotations
 
 import argparse
-import html
-import re
-import shlex
-import string
-from collections import Counter
 import copy
 import datetime as _dt
 import fcntl
 import hashlib
-from itertools import chain
+import html
 import json
-import stat
-import subprocess
 import os
+import re
+import shlex
+import stat
+import string
+import subprocess
 import sys
 import uuid
+from collections import Counter
+from itertools import chain
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import unquote, urlsplit
@@ -38,7 +38,13 @@ from sinnix_lib.note_links import prose_mask
 
 SCHEMA_VERSION = 1
 REQUIRED_INSPECTION = ("method", "scope", "basis")
-COVERAGE_STATES = ("sampled", "metadata_only", "complete", "native_boundary", "unavailable")
+COVERAGE_STATES = (
+    "sampled",
+    "metadata_only",
+    "complete",
+    "native_boundary",
+    "unavailable",
+)
 
 
 class CatalogError(ValueError):
@@ -52,7 +58,9 @@ def entry_exists(path: Path) -> bool:
     except FileNotFoundError:
         return False
     except OSError as error:
-        raise CatalogError(f"cannot establish path presence: {path}: {error}") from error
+        raise CatalogError(
+            f"cannot establish path presence: {path}: {error}"
+        ) from error
     return True
 
 
@@ -63,7 +71,12 @@ def fail(message: str) -> int:
 
 
 def now() -> str:
-    return _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return (
+        _dt.datetime.now(_dt.timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
 
 def read_json(path: Path) -> Any:
@@ -79,7 +92,9 @@ def identity(path: Path) -> dict[str, Any]:
     try:
         s = path.stat()
     except OSError as e:
-        raise CatalogError(f"current_path does not exist or is inaccessible: {path}: {e}") from e
+        raise CatalogError(
+            f"current_path does not exist or is inaccessible: {path}: {e}"
+        ) from e
     observed = {
         "device": s.st_dev,
         "inode": s.st_ino,
@@ -88,12 +103,24 @@ def identity(path: Path) -> dict[str, Any]:
         "mode": stat.S_IMODE(s.st_mode),
     }
     try:
-        mount = subprocess.run(["findmnt", "-T", str(path), "-n", "-o", "FSTYPE,UUID"], text=True, capture_output=True, timeout=5, check=False)
+        mount = subprocess.run(
+            ["findmnt", "-T", str(path), "-n", "-o", "FSTYPE,UUID"],
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
         fields = mount.stdout.split()
         if mount.returncode == 0 and len(fields) == 2:
             observed["filesystem_uuid"] = fields[1]
             if fields[0] == "btrfs":
-                subvolume = subprocess.run(["btrfs", "inspect-internal", "rootid", str(path)], text=True, capture_output=True, timeout=5, check=False)
+                subvolume = subprocess.run(
+                    ["btrfs", "inspect-internal", "rootid", str(path)],
+                    text=True,
+                    capture_output=True,
+                    timeout=5,
+                    check=False,
+                )
                 if subvolume.returncode == 0 and subvolume.stdout.strip().isdigit():
                     observed["btrfs_subvolume_id"] = int(subvolume.stdout.strip())
     except (OSError, subprocess.TimeoutExpired):
@@ -101,18 +128,25 @@ def identity(path: Path) -> dict[str, Any]:
     return observed
 
 
-def identity_differences(a: dict, b: dict, kind: str = "file", *, include_device: bool = False) -> dict:
+def identity_differences(
+    a: dict, b: dict, kind: str = "file", *, include_device: bool = False
+) -> dict:
     """Compare recorded observations; missing evidence never verifies identity."""
     stable = ("filesystem_uuid", "btrfs_subvolume_id")
-    complete_stable = all(a.get(key) is not None and b.get(key) is not None for key in stable)
+    complete_stable = all(
+        a.get(key) is not None and b.get(key) is not None for key in stable
+    )
     keys = ["inode"] if kind == "collection" else ["inode", "size", "mtime_ns", "mode"]
     if include_device or not complete_stable:
         keys.insert(0, "device")
     # Newly available fields are observations, not retrospective requirements
     # on legacy records. Previously recorded fields must still be observed.
     keys.extend(key for key in stable if key in a)
-    return {key: {"recorded": a.get(key), "observed": b.get(key)} for key in keys
-            if a.get(key) is None or b.get(key) is None or a[key] != b[key]}
+    return {
+        key: {"recorded": a.get(key), "observed": b.get(key)}
+        for key in keys
+        if a.get(key) is None or b.get(key) is None or a[key] != b[key]
+    }
 
 
 def same_identity(a: Any, b: Any, kind: str = "file") -> bool:
@@ -123,9 +157,15 @@ def same_identity(a: Any, b: Any, kind: str = "file") -> bool:
 
 def location_identity(asset: dict[str, Any]) -> dict[str, Any]:
     """Latest reviewed identity at this address, separate from older inspections."""
-    for observation in chain((asset.get("current_location"),), reversed(asset.get("location_observations", []))):
-        if (isinstance(observation, dict) and observation.get("path") == asset["current_path"]
-                and isinstance(observation.get("identity"), dict)):
+    for observation in chain(
+        (asset.get("current_location"),),
+        reversed(asset.get("location_observations", [])),
+    ):
+        if (
+            isinstance(observation, dict)
+            and observation.get("path") == asset["current_path"]
+            and isinstance(observation.get("identity"), dict)
+        ):
             return observation["identity"]
     return asset["identity"]
 
@@ -136,13 +176,24 @@ def record_location(asset: dict[str, Any], observation: dict[str, Any]) -> None:
     asset["location_status"] = observation["status"]
 
 
-def record_relocated_location(asset: dict[str, Any], source: str, actual: dict[str, Any]) -> None:
-    record_location(asset, {
-        "observed_at": now(), "actor": "sinnix-file-catalog", "action": "relocation",
-        "path": asset["current_path"], "source": source, "status": "available", "identity": actual,
-        "basis": "Destination matches the reviewed filesystem identity after external rename.",
-        "reason": "Verified relocation", "content_continuity": "unverified",
-    })
+def record_relocated_location(
+    asset: dict[str, Any], source: str, actual: dict[str, Any]
+) -> None:
+    record_location(
+        asset,
+        {
+            "observed_at": now(),
+            "actor": "sinnix-file-catalog",
+            "action": "relocation",
+            "path": asset["current_path"],
+            "source": source,
+            "status": "available",
+            "identity": actual,
+            "basis": "Destination matches the reviewed filesystem identity after external rename.",
+            "reason": "Verified relocation",
+            "content_continuity": "unverified",
+        },
+    )
 
 
 def check_path_kind(path: Path, kind: str) -> None:
@@ -181,15 +232,21 @@ def check_coverage(value: Any) -> None:
     discovered, inspected = value.get("discovered_count"), value["inspected_count"]
     if discovered is not None and inspected > discovered:
         raise CatalogError("coverage inspected_count exceeds discovered_count")
-    if value["status"] == "complete" and (discovered is None or inspected != discovered):
-        raise CatalogError("complete coverage requires an explicit, fully inspected denominator")
+    if value["status"] == "complete" and (
+        discovered is None or inspected != discovered
+    ):
+        raise CatalogError(
+            "complete coverage requires an explicit, fully inspected denominator"
+        )
     if not isinstance(value.get("exclusions", []), list) or not all(
         isinstance(item, str) for item in value.get("exclusions", [])
     ):
         raise CatalogError("coverage exclusions must be strings")
 
 
-def check_asset(asset: Any, *, require_path: bool = True, require_identity: bool = True) -> None:
+def check_asset(
+    asset: Any, *, require_path: bool = True, require_identity: bool = True
+) -> None:
     if not isinstance(asset, dict):
         raise CatalogError("asset must be an object")
     for key in ("id", "kind", "current_path", "title", "description"):
@@ -205,13 +262,18 @@ def check_asset(asset: Any, *, require_path: bool = True, require_identity: bool
                 raise CatalogError(f"identity requires integer {key}")
         if "sha256" in asset["identity"]:
             digest = asset["identity"]["sha256"]
-            if (not isinstance(digest, str) or len(digest) != 64
-                    or any(c not in "0123456789abcdefABCDEF" for c in digest)):
-                raise CatalogError("identity sha256 must contain exactly 64 hexadecimal characters")
+            if (
+                not isinstance(digest, str)
+                or len(digest) != 64
+                or any(c not in "0123456789abcdefABCDEF" for c in digest)
+            ):
+                raise CatalogError(
+                    "identity sha256 must contain exactly 64 hexadecimal characters"
+                )
     try:
         parsed_id = uuid.UUID(asset["id"])
     except (ValueError, AttributeError):
-        raise CatalogError(f"asset id is not a UUID: {asset.get('id')}")
+        raise CatalogError(f"asset id is not a UUID: {asset.get('id')}") from None
     if str(parsed_id) != asset["id"]:
         raise CatalogError(f"asset id is not canonical UUID: {asset['id']}")
     for key in ("previous_paths", "tags", "inspections", "uncertainties", "relations"):
@@ -220,12 +282,16 @@ def check_asset(asset: Any, *, require_path: bool = True, require_identity: bool
     try:
         normalized(asset["current_path"])
     except ValueError as exc:
-        raise CatalogError(f"current_path must be a normalized absolute path: {exc}") from exc
+        raise CatalogError(
+            f"current_path must be a normalized absolute path: {exc}"
+        ) from exc
     for previous in asset.get("previous_paths", []):
         try:
             normalized(previous)
         except ValueError as exc:
-            raise CatalogError(f"previous_paths must contain normalized absolute paths: {exc}") from exc
+            raise CatalogError(
+                f"previous_paths must contain normalized absolute paths: {exc}"
+            ) from exc
     if not asset.get("inspections"):
         raise CatalogError("asset requires at least one inspection")
     if not all(isinstance(tag, str) for tag in asset.get("tags", [])):
@@ -236,52 +302,91 @@ def check_asset(asset: Any, *, require_path: bool = True, require_identity: bool
         check_inspection(inspection)
     if "coverage" in asset:
         check_coverage(asset["coverage"])
-    if "facets" in asset and (not isinstance(asset["facets"], dict) or not all(
-        isinstance(k, str) and isinstance(v, str) for k, v in asset["facets"].items()
-    )):
+    if "facets" in asset and (
+        not isinstance(asset["facets"], dict)
+        or not all(
+            isinstance(k, str) and isinstance(v, str)
+            for k, v in asset["facets"].items()
+        )
+    ):
         raise CatalogError("facets must map names to strings")
     if "organization" in asset:
         organization = asset["organization"]
-        if not isinstance(organization, dict) or organization.get("action") not in (
-            "keep", "navigate", "consolidate", "split", "relocate", "investigate"
-        ) or not isinstance(organization.get("rationale"), str) or not organization["rationale"].strip():
+        if (
+            not isinstance(organization, dict)
+            or organization.get("action")
+            not in (
+                "keep",
+                "navigate",
+                "consolidate",
+                "split",
+                "relocate",
+                "investigate",
+            )
+            or not isinstance(organization.get("rationale"), str)
+            or not organization["rationale"].strip()
+        ):
             raise CatalogError("organization requires action and rationale")
         destination = organization.get("proposed_path")
-        if destination is not None and (not isinstance(destination, str) or not Path(destination).is_absolute()):
+        if destination is not None and (
+            not isinstance(destination, str) or not Path(destination).is_absolute()
+        ):
             raise CatalogError("organization proposed_path must be absolute or null")
         dependencies = organization.get("dependencies", [])
-        if not isinstance(dependencies, list) or not all(isinstance(item, str) for item in dependencies):
+        if not isinstance(dependencies, list) or not all(
+            isinstance(item, str) for item in dependencies
+        ):
             raise CatalogError("organization dependencies must be strings")
     if "related_paths" in asset:
         if not isinstance(asset["related_paths"], list) or not all(
-            isinstance(r, dict) and all(isinstance(r.get(k), str) and r[k].strip()
-                                       for k in ("path", "type", "basis"))
-            and Path(r["path"]).is_absolute() for r in asset["related_paths"]
+            isinstance(r, dict)
+            and all(
+                isinstance(r.get(k), str) and r[k].strip()
+                for k in ("path", "type", "basis")
+            )
+            and Path(r["path"]).is_absolute()
+            for r in asset["related_paths"]
         ):
             raise CatalogError("related_paths require absolute path, type and basis")
     for relation in asset.get("relations", []):
-        if (not isinstance(relation, dict)
-                or not all(isinstance(relation.get(k), str) and relation[k].strip() for k in ("type", "target_id", "basis"))):
+        if not isinstance(relation, dict) or not all(
+            isinstance(relation.get(k), str) and relation[k].strip()
+            for k in ("type", "target_id", "basis")
+        ):
             raise CatalogError("relation requires nonempty type, target_id, and basis")
         try:
             if str(uuid.UUID(relation["target_id"])) != relation["target_id"]:
                 raise ValueError
         except ValueError:
-            raise CatalogError(f"relation target is not a UUID: {relation['target_id']}")
+            raise CatalogError(
+                f"relation target is not a UUID: {relation['target_id']}"
+            ) from None
     if require_path:
         path = Path(asset["current_path"])
-        location = asset.get('current_location')
-        if isinstance(location, dict) and location.get('status') in (
-            'missing', 'offline_mount', 'denied', 'inaccessible', 'wrong_type'
+        location = asset.get("current_location")
+        if isinstance(location, dict) and location.get("status") in (
+            "missing",
+            "offline_mount",
+            "denied",
+            "inaccessible",
+            "wrong_type",
         ):
-            if (location.get('path') != asset['current_path']
-                    or asset.get('location_status') != location['status']
-                    or not all(isinstance(location.get(k), str) and location[k].strip()
-                               for k in ('actor', 'basis', 'reason', 'observed_at'))):
-                raise CatalogError("unavailable location requires consistent path, status and attributed evidence")
-            actual = location_diagnosis(path, asset['kind'])
-            if actual['status'] != location['status']:
-                raise CatalogError(f"availability observation is stale for {path}; record a fresh observation")
+            if (
+                location.get("path") != asset["current_path"]
+                or asset.get("location_status") != location["status"]
+                or not all(
+                    isinstance(location.get(k), str) and location[k].strip()
+                    for k in ("actor", "basis", "reason", "observed_at")
+                )
+            ):
+                raise CatalogError(
+                    "unavailable location requires consistent path, status and attributed evidence"
+                )
+            actual = location_diagnosis(path, asset["kind"])
+            if actual["status"] != location["status"]:
+                raise CatalogError(
+                    f"availability observation is stale for {path}; record a fresh observation"
+                )
             return
         check_path_kind(path, asset["kind"])
         actual = identity(path)
@@ -290,10 +395,15 @@ def check_asset(asset: Any, *, require_path: bool = True, require_identity: bool
 
 
 def validate_catalog(catalog: Any, *, check_paths: bool = True) -> None:
-    if (not isinstance(catalog, dict) or catalog.get("schema_version") != SCHEMA_VERSION
-            or not isinstance(catalog.get("updated_at"), str)
-            or not isinstance(catalog.get("assets"), list)):
-        raise CatalogError("catalog must be an object with schema_version 1, updated_at, and assets list")
+    if (
+        not isinstance(catalog, dict)
+        or catalog.get("schema_version") != SCHEMA_VERSION
+        or not isinstance(catalog.get("updated_at"), str)
+        or not isinstance(catalog.get("assets"), list)
+    ):
+        raise CatalogError(
+            "catalog must be an object with schema_version 1, updated_at, and assets list"
+        )
     ids: set[str] = set()
     paths: set[str] = set()
     for asset in catalog["assets"]:
@@ -349,42 +459,77 @@ def observation_asset(row: dict[str, Any]) -> dict[str, Any]:
     old = item.get("identity")
     if old is not None and not same_identity(old, observed, item["kind"]):
         raise CatalogError(f"supplied identity mismatch for {p}")
-    extras = {k: v for k, v in old.items() if k not in observed} if isinstance(old, dict) else {}
+    extras = (
+        {k: v for k, v in old.items() if k not in observed}
+        if isinstance(old, dict)
+        else {}
+    )
     item["identity"] = {**observed, **extras}
     return item
 
 
-def merge_asset(old: dict[str, Any], incoming: dict[str, Any], *, on_conflict: str = "replace") -> dict[str, Any]:
+def merge_asset(
+    old: dict[str, Any], incoming: dict[str, Any], *, on_conflict: str = "replace"
+) -> dict[str, Any]:
     # Preserve annotation keys unknown to this version and merge known fields.
     merged = copy.deepcopy(old)
     old_identity = old.get("identity")
-    if old_identity is not None and not same_identity(old_identity, incoming["identity"], old["kind"]):
-        raise CatalogError(f"refusing replacement at {incoming['current_path']}; identity differs from catalog")
-    identity_fields = {**old_identity, **incoming["identity"]} if isinstance(old_identity, dict) else incoming["identity"]
+    if old_identity is not None and not same_identity(
+        old_identity, incoming["identity"], old["kind"]
+    ):
+        raise CatalogError(
+            f"refusing replacement at {incoming['current_path']}; identity differs from catalog"
+        )
+    identity_fields = (
+        {**old_identity, **incoming["identity"]}
+        if isinstance(old_identity, dict)
+        else incoming["identity"]
+    )
     conflicts = copy.deepcopy(old.get("annotation_conflicts", []))
-    list_fields = ("previous_paths", "tags", "inspections", "uncertainties", "relations", "related_paths")
+    list_fields = (
+        "previous_paths",
+        "tags",
+        "inspections",
+        "uncertainties",
+        "relations",
+        "related_paths",
+    )
     for key, value in incoming.items():
         if key == "facets" and key in old:
             facets = copy.deepcopy(old[key])
             for facet, proposed in value.items():
                 if facet in facets and facets[facet] != proposed:
                     if on_conflict == "error":
-                        raise CatalogError(f"conflicting facets.{facet} for {incoming['current_path']}")
+                        raise CatalogError(
+                            f"conflicting facets.{facet} for {incoming['current_path']}"
+                        )
                     if on_conflict == "record":
-                        conflict = {"field": f"facets.{facet}", "retained": facets[facet],
-                                    "proposed": proposed, "inspections": incoming["inspections"]}
+                        conflict = {
+                            "field": f"facets.{facet}",
+                            "retained": facets[facet],
+                            "proposed": proposed,
+                            "inspections": incoming["inspections"],
+                        }
                         if conflict not in conflicts:
                             conflicts.append(copy.deepcopy(conflict))
                         continue
                 facets[facet] = copy.deepcopy(proposed)
             merged[key] = facets
             continue
-        if key in old and old[key] != value and key not in (*list_fields, "identity", "annotation_conflicts"):
+        if (
+            key in old
+            and old[key] != value
+            and key not in (*list_fields, "identity", "annotation_conflicts")
+        ):
             if on_conflict == "error":
                 raise CatalogError(f"conflicting {key} for {incoming['current_path']}")
             if on_conflict == "record":
-                conflict = {"field": key, "retained": old[key], "proposed": value,
-                            "inspections": incoming["inspections"]}
+                conflict = {
+                    "field": key,
+                    "retained": old[key],
+                    "proposed": value,
+                    "inspections": incoming["inspections"],
+                }
                 if conflict not in conflicts:
                     conflicts.append(copy.deepcopy(conflict))
                 continue
@@ -397,7 +542,9 @@ def merge_asset(old: dict[str, Any], incoming: dict[str, Any], *, on_conflict: s
         values = []
         seen = set()
         for value in [*old.get(key, []), *incoming.get(key, [])]:
-            marker = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            marker = json.dumps(
+                value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
             if marker not in seen:
                 values.append(copy.deepcopy(value))
                 seen.add(marker)
@@ -423,34 +570,57 @@ def locked(path: Path):
 
 def cmd_import(args: argparse.Namespace) -> int:
     path = Path(args.catalog)
-    rows = [row for source in args.observations for row in observation_list(read_json(Path(source)))]
+    rows = [
+        row
+        for source in args.observations
+        for row in observation_list(read_json(Path(source)))
+    ]
     with locked(path):
         if entry_exists(path):
             # Existing unrelated paths may be temporarily absent while a
             # batch of external renames is being repaired.
             catalog = load_catalog(path, paths=False)
         else:
-            catalog = {"schema_version": SCHEMA_VERSION, "updated_at": now(), "assets": []}
+            catalog = {
+                "schema_version": SCHEMA_VERSION,
+                "updated_at": now(),
+                "assets": [],
+            }
         additions = [observation_asset(row) for row in rows]
         assets = catalog["assets"]
         by_id = {x["id"]: i for i, x in enumerate(assets)}
         by_path = {x["current_path"]: i for i, x in enumerate(assets)}
         seen_ids: set[str] = set()
         seen_paths: set[str] = set()
-        for row, item in zip(rows, additions):
+        for row, item in zip(rows, additions, strict=True):
             if item["id"] in seen_ids:
                 raise CatalogError(f"duplicate asset id in observations: {item['id']}")
             if item["current_path"] in seen_paths:
-                raise CatalogError(f"duplicate current_path in observations: {item['current_path']}")
+                raise CatalogError(
+                    f"duplicate current_path in observations: {item['current_path']}"
+                )
             seen_ids.add(item["id"])
             seen_paths.add(item["current_path"])
             index = by_id.get(item["id"], by_path.get(item["current_path"]))
             old = assets[index] if index is not None else None
-            if old is not None and old["current_path"] == item["current_path"] and "id" not in row:
+            if (
+                old is not None
+                and old["current_path"] == item["current_path"]
+                and "id" not in row
+            ):
                 item["id"] = old["id"]
-            if old is not None and old["id"] == item["id"] and old["current_path"] != item["current_path"]:
+            if (
+                old is not None
+                and old["id"] == item["id"]
+                and old["current_path"] != item["current_path"]
+            ):
                 raise CatalogError(f"asset path changed; use relocate for {item['id']}")
-            if old is not None and old["current_path"] == item["current_path"] and "id" in row and row["id"] != old["id"]:
+            if (
+                old is not None
+                and old["current_path"] == item["current_path"]
+                and "id" in row
+                and row["id"] != old["id"]
+            ):
                 raise CatalogError(f"current_path already belongs to asset {old['id']}")
             if old is None:
                 index = len(assets)
@@ -495,12 +665,22 @@ def cmd_coverage(args: argparse.Namespace) -> int:
         "catalog_updated_at": catalog["updated_at"],
         "asset_count": len(selected),
         "kinds": dict(Counter(a["kind"] for a in selected)),
-        "inspection_status": dict(Counter(a.get("coverage", {}).get("status", "unrecorded") for a in selected)),
-        "organization_actions": dict(Counter(a.get("organization", {}).get("action", "unrecorded") for a in selected)),
-        "assets_with_conflicts": sum(bool(a.get("annotation_conflicts")) for a in selected),
+        "inspection_status": dict(
+            Counter(a.get("coverage", {}).get("status", "unrecorded") for a in selected)
+        ),
+        "organization_actions": dict(
+            Counter(
+                a.get("organization", {}).get("action", "unrecorded") for a in selected
+            )
+        ),
+        "assets_with_conflicts": sum(
+            bool(a.get("annotation_conflicts")) for a in selected
+        ),
         "scope": "Catalog records only. Inherited taxonomy is not inspection; overlapping collection counts are not summed. No filesystem census denominator is implied.",
     }
-    print(json.dumps(result, ensure_ascii=sys.stdout.isatty(), indent=2, sort_keys=True))
+    print(
+        json.dumps(result, ensure_ascii=sys.stdout.isatty(), indent=2, sort_keys=True)
+    )
     return 0
 
 
@@ -508,7 +688,11 @@ def cmd_show(args: argparse.Namespace) -> int:
     catalog = load_catalog(Path(args.catalog), paths=False)
     for asset in catalog["assets"]:
         if asset["id"] == args.id:
-            print(json.dumps(asset, ensure_ascii=sys.stdout.isatty(), indent=2, sort_keys=True))
+            print(
+                json.dumps(
+                    asset, ensure_ascii=sys.stdout.isatty(), indent=2, sort_keys=True
+                )
+            )
             return 0
     return fail(f"asset id not found: {args.id}")
 
@@ -520,23 +704,37 @@ def cmd_relocate(args: argparse.Namespace) -> int:
         # old current_path absent; validate every other catalog invariant first.
         catalog = load_catalog(path, paths=False)
         target = next((a for a in catalog["assets"] if a["id"] == args.id), None)
-        if target is None: raise CatalogError(f"asset id not found: {args.id}")
+        if target is None:
+            raise CatalogError(f"asset id not found: {args.id}")
         old_path = Path(target["current_path"])
-        if entry_exists(old_path): raise CatalogError(f"old path still exists; perform the external rename first: {old_path}")
-        if any(a is not target and a["current_path"] == str(new_path) for a in catalog["assets"]):
+        if entry_exists(old_path):
+            raise CatalogError(
+                f"old path still exists; perform the external rename first: {old_path}"
+            )
+        if any(
+            a is not target and a["current_path"] == str(new_path)
+            for a in catalog["assets"]
+        ):
             raise CatalogError(f"new path already belongs to another asset: {new_path}")
         actual = identity(new_path)
         check_path_kind(new_path, target["kind"])
         known = location_identity(target)
-        if not same_identity(known, actual, target["kind"]): raise CatalogError("new path identity does not match catalog")
+        if not same_identity(known, actual, target["kind"]):
+            raise CatalogError("new path identity does not match catalog")
         prior = copy.deepcopy(target["identity"])
         continuity = same_identity(prior, actual, target["kind"])
-        target.setdefault("relocations", []).append({
-            "at": now(), "source": str(old_path), "destination": str(new_path),
-            "recorded_location_identity": copy.deepcopy(known), "after": actual,
-            "prior_catalog_identity": prior, "prior_identity_matches": continuity,
-            "basis": "Destination matches last reviewed location metadata; payload hashes are not reverified.",
-        })
+        target.setdefault("relocations", []).append(
+            {
+                "at": now(),
+                "source": str(old_path),
+                "destination": str(new_path),
+                "recorded_location_identity": copy.deepcopy(known),
+                "after": actual,
+                "prior_catalog_identity": prior,
+                "prior_identity_matches": continuity,
+                "basis": "Destination matches last reviewed location metadata; payload hashes are not reverified.",
+            }
+        )
         target.setdefault("previous_paths", []).append(target["current_path"])
         target["current_path"] = str(new_path)
         extras = {k: v for k, v in prior.items() if k not in actual}
@@ -555,7 +753,9 @@ def cmd_prepare_relocation(args: argparse.Namespace) -> int:
         catalog = load_catalog(path, paths=False)
         moves = read_json(Path(args.moves))
         if not isinstance(moves, list) or not moves:
-            raise CatalogError("moves must be a nonempty list of source/destination objects")
+            raise CatalogError(
+                "moves must be a nonempty list of source/destination objects"
+            )
         for move in moves:
             normalized(move["source"])
             normalized(move["destination"])
@@ -573,26 +773,55 @@ def cmd_prepare_relocation(args: argparse.Namespace) -> int:
                 continue
             source = Path(old)
             if not entry_exists(source) and args.retain_unavailable:
-                unavailable.append({"id": asset["id"], "source": old, "destination": destination,
-                                    "reason": "Already unavailable before cutover; no physical continuity or new current location asserted."})
+                unavailable.append(
+                    {
+                        "id": asset["id"],
+                        "source": old,
+                        "destination": destination,
+                        "reason": "Already unavailable before cutover; no physical continuity or new current location asserted.",
+                    }
+                )
                 continue
             check_path_kind(source, asset["kind"])
             observed = identity(source)
             continuity = same_identity(asset["identity"], observed, asset["kind"])
-            if not same_identity(location_identity(asset), observed, asset["kind"]) and not args.record_existing_drift:
-                raise CatalogError(f"existing identity drift: {old}; audit and explicitly record it first")
-            rows.append({"id": asset["id"], "source": old, "destination": destination,
-                         "before": observed, "catalog_identity": asset["identity"],
-                         "prior_identity_matches": continuity,
-                         "source_reused_as_container": destination.startswith(old.rstrip("/") + "/")})
-        receipt = {"schema": "sinnix.catalog-relocation.v1", "prepared_at": now(),
-                   "catalog_sha256": hashlib.sha256(raw).hexdigest(), "moves": moves, "assets": rows,
-                   "unavailable": unavailable}
+            if (
+                not same_identity(location_identity(asset), observed, asset["kind"])
+                and not args.record_existing_drift
+            ):
+                raise CatalogError(
+                    f"existing identity drift: {old}; audit and explicitly record it first"
+                )
+            rows.append(
+                {
+                    "id": asset["id"],
+                    "source": old,
+                    "destination": destination,
+                    "before": observed,
+                    "catalog_identity": asset["identity"],
+                    "prior_identity_matches": continuity,
+                    "source_reused_as_container": destination.startswith(
+                        old.rstrip("/") + "/"
+                    ),
+                }
+            )
+        receipt = {
+            "schema": "sinnix.catalog-relocation.v1",
+            "prepared_at": now(),
+            "catalog_sha256": hashlib.sha256(raw).hexdigest(),
+            "moves": moves,
+            "assets": rows,
+            "unavailable": unavailable,
+        }
         output = Path(args.output)
         if entry_exists(output):
             raise CatalogError(f"refusing to overwrite relocation receipt: {output}")
-        atomic_publish(output, (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode(),
-                       fsync=True, mode=0o600)
+        atomic_publish(
+            output,
+            (json.dumps(receipt, indent=2, sort_keys=True) + "\n").encode(),
+            fsync=True,
+            mode=0o600,
+        )
     return 0
 
 
@@ -604,40 +833,69 @@ def cmd_relocate_batch(args: argparse.Namespace) -> int:
         raise CatalogError("unsupported relocation receipt")
     with locked(path):
         if hashlib.sha256(path.read_bytes()).hexdigest() != receipt["catalog_sha256"]:
-            raise CatalogError("stale catalog digest; prepare a new receipt before renaming")
+            raise CatalogError(
+                "stale catalog digest; prepare a new receipt before renaming"
+            )
         catalog = load_catalog(path, paths=False)
         by_id = {asset["id"]: asset for asset in catalog["assets"]}
-        expected = {asset["id"] for asset in catalog["assets"]
-                    if relocate_path(asset["current_path"], receipt["moves"]) != asset["current_path"]}
+        expected = {
+            asset["id"]
+            for asset in catalog["assets"]
+            if relocate_path(asset["current_path"], receipt["moves"])
+            != asset["current_path"]
+        }
         rows = receipt["assets"]
         unavailable = receipt.get("unavailable", [])
         combined = [*rows, *unavailable]
-        if len(combined) != len({row["id"] for row in combined}) or {row["id"] for row in combined} != expected:
+        if (
+            len(combined) != len({row["id"] for row in combined})
+            or {row["id"] for row in combined} != expected
+        ):
             raise CatalogError("receipt must include every affected asset exactly once")
         for row in unavailable:
             asset = by_id[row["id"]]
             if asset["current_path"] != row["source"]:
                 raise CatalogError("stale unavailable-asset exception")
-            if entry_exists(Path(row["source"])) or entry_exists(Path(row["destination"])):
-                raise CatalogError("unavailable-asset exception now has a live candidate; inspect its identity")
-            record_location(asset, {
-                "observed_at": now(), **row, "path": row["source"], "status": "unavailable",
-                "actor": "sinnix-file-catalog", "action": "unavailable",
-                "basis": "Prepared relocation exception; source and destination remain unavailable.",
-                "content_continuity": "unverified",
-            })
+            if entry_exists(Path(row["source"])) or entry_exists(
+                Path(row["destination"])
+            ):
+                raise CatalogError(
+                    "unavailable-asset exception now has a live candidate; inspect its identity"
+                )
+            record_location(
+                asset,
+                {
+                    "observed_at": now(),
+                    **row,
+                    "path": row["source"],
+                    "status": "unavailable",
+                    "actor": "sinnix-file-catalog",
+                    "action": "unavailable",
+                    "basis": "Prepared relocation exception; source and destination remain unavailable.",
+                    "content_continuity": "unverified",
+                },
+            )
         for row in rows:
             asset = by_id[row["id"]]
             old, destination = normalized(row["source"]), normalized(row["destination"])
-            if asset["current_path"] != old or asset["identity"] != row["catalog_identity"]:
+            if (
+                asset["current_path"] != old
+                or asset["identity"] != row["catalog_identity"]
+            ):
                 raise CatalogError(f"stale receipt for {row['id']}")
             if relocate_path(old, receipt["moves"]) != destination:
-                raise CatalogError(f"receipt destination disagrees with moves: {destination}")
+                raise CatalogError(
+                    f"receipt destination disagrees with moves: {destination}"
+                )
             if entry_exists(Path(old)):
                 source = Path(old)
-                reused = (row.get("source_reused_as_container") and destination.startswith(old.rstrip("/") + "/")
-                          and source.is_dir() and not source.is_symlink()
-                          and not same_identity(row["before"], identity(source), "collection"))
+                reused = (
+                    row.get("source_reused_as_container")
+                    and destination.startswith(old.rstrip("/") + "/")
+                    and source.is_dir()
+                    and not source.is_symlink()
+                    and not same_identity(row["before"], identity(source), "collection")
+                )
                 if not reused:
                     raise CatalogError(f"old address still exists: {old}")
             current = Path(destination)
@@ -646,18 +904,30 @@ def cmd_relocate_batch(args: argparse.Namespace) -> int:
             if not same_identity(row["before"], actual, asset["kind"]):
                 raise CatalogError(f"pre/post rename identity mismatch: {destination}")
             asset.setdefault("previous_paths", []).append(old)
-            asset.setdefault("relocations", []).append({
-                "at": now(), "source": old, "destination": destination,
-                "before": row["before"], "after": actual,
-                "prior_catalog_identity": row["catalog_identity"],
-                "prior_identity_matches": row["prior_identity_matches"],
-                "basis": "Same object verified immediately before and after external rename; older observation retained without a continuity claim when mismatched.",
-            })
+            asset.setdefault("relocations", []).append(
+                {
+                    "at": now(),
+                    "source": old,
+                    "destination": destination,
+                    "before": row["before"],
+                    "after": actual,
+                    "prior_catalog_identity": row["catalog_identity"],
+                    "prior_identity_matches": row["prior_identity_matches"],
+                    "basis": "Same object verified immediately before and after external rename; older observation retained without a continuity claim when mismatched.",
+                }
+            )
             asset["current_path"] = destination
             # Hashes are attributed observations, never silently certified for a
             # changed object. Keep them in prior_catalog_identity in that case.
-            extras = {key: value for key, value in asset["identity"].items() if key not in actual}
-            asset["identity"] = {**actual, **(extras if row["prior_identity_matches"] else {})}
+            extras = {
+                key: value
+                for key, value in asset["identity"].items()
+                if key not in actual
+            }
+            asset["identity"] = {
+                **actual,
+                **(extras if row["prior_identity_matches"] else {}),
+            }
             record_relocated_location(asset, old, actual)
         validate_catalog(catalog, check_paths=False)
         write_catalog(path, catalog)
@@ -672,24 +942,44 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
 
 def location_diagnosis(path: Path, kind: str) -> dict:
-    external = next((root for root in (Path('/outer-realm'), Path('/neo-outer-realm'), Path('/mnt')) if path.is_relative_to(root)), None)
+    external = next(
+        (
+            root
+            for root in (Path("/outer-realm"), Path("/neo-outer-realm"), Path("/mnt"))
+            if path.is_relative_to(root)
+        ),
+        None,
+    )
     if external is not None:
         try:
             mounted = read_mountpoints()
         except (OSError, ValueError) as exc:
-            return {"status": "inaccessible", "reason": f"cannot observe external mounts: {exc}"}
+            return {
+                "status": "inaccessible",
+                "reason": f"cannot observe external mounts: {exc}",
+            }
         if not has_mounted_ancestor(path, external, mounted):
             return {"status": "offline_mount", "reason": str(external)}
     try:
         info = path.stat()
-        if not (stat.S_ISDIR(info.st_mode) if kind == "collection" else stat.S_ISREG(info.st_mode)):
+        if not (
+            stat.S_ISDIR(info.st_mode)
+            if kind == "collection"
+            else stat.S_ISREG(info.st_mode)
+        ):
             return {"status": "wrong_type", "reason": "configured object type differs"}
         return {"status": "available", "identity": identity(path)}
     except CatalogError as exc:
         cause = exc.__cause__
         if not isinstance(cause, OSError):
             raise
-        status = "denied" if isinstance(cause, PermissionError) else "missing" if isinstance(cause, FileNotFoundError) else "inaccessible"
+        status = (
+            "denied"
+            if isinstance(cause, PermissionError)
+            else "missing"
+            if isinstance(cause, FileNotFoundError)
+            else "inaccessible"
+        )
         return {"status": status, "reason": str(cause)}
     except PermissionError as exc:
         return {"status": "denied", "reason": str(exc)}
@@ -701,49 +991,80 @@ def location_diagnosis(path: Path, kind: str) -> dict:
 
 def recover_copy(asset: dict[str, Any], row: dict[str, Any], assets: dict) -> None:
     """Recover an unavailable inspected file, not a guessed replacement."""
-    prior = copy.deepcopy(asset['identity'])
-    digest = prior.get('sha256')
+    prior = copy.deepcopy(asset["identity"])
+    digest = prior.get("sha256")
     limit = 8 * 1024 * 1024
-    if (asset['kind'] != 'file' or not isinstance(digest, str)
-            or len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest)
-            or prior.get('fingerprint_kind', 'sha256-full') != 'sha256-full'
-            or not isinstance(prior.get('size'), int) or not 0 <= prior['size'] <= limit):
-        raise CatalogError("recovery requires a recorded full SHA-256 for a regular file up to 8 MiB")
-    old = Path(asset['current_path'])
-    if old.is_symlink() or location_diagnosis(old, 'file')['status'] != 'missing':
+    if (
+        asset["kind"] != "file"
+        or not isinstance(digest, str)
+        or len(digest) != 64
+        or any(c not in "0123456789abcdef" for c in digest)
+        or prior.get("fingerprint_kind", "sha256-full") != "sha256-full"
+        or not isinstance(prior.get("size"), int)
+        or not 0 <= prior["size"] <= limit
+    ):
+        raise CatalogError(
+            "recovery requires a recorded full SHA-256 for a regular file up to 8 MiB"
+        )
+    old = Path(asset["current_path"])
+    if old.is_symlink() or location_diagnosis(old, "file")["status"] != "missing":
         raise CatalogError("recovery requires the original location to be missing")
-    destination = Path(normalized(row['new_path']))
-    if any(a is not asset and a['current_path'] == str(destination) for a in assets.values()):
+    destination = Path(normalized(row["new_path"]))
+    if any(
+        a is not asset and a["current_path"] == str(destination)
+        for a in assets.values()
+    ):
         raise CatalogError("recovery destination already belongs to another asset")
-    diagnosis = location_diagnosis(destination, 'file')
-    if diagnosis['status'] != 'available' or diagnosis['identity'] != row.get('expected_identity'):
+    diagnosis = location_diagnosis(destination, "file")
+    if diagnosis["status"] != "available" or diagnosis["identity"] != row.get(
+        "expected_identity"
+    ):
         raise CatalogError("recovery source metadata differs from reviewed observation")
-    with os.fdopen(os.open(destination, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), 'rb') as handle:
+    with os.fdopen(
+        os.open(destination, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb"
+    ) as handle:
         before = os.fstat(handle.fileno())
         if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
             raise CatalogError("recovery requires a bounded regular file")
-        for key, attr in [('device', 'st_dev'), ('inode', 'st_ino'), ('size', 'st_size'),
-                          ('mtime_ns', 'st_mtime_ns')]:
-            if getattr(before, attr) != diagnosis['identity'][key]:
+        for key, attr in [
+            ("device", "st_dev"),
+            ("inode", "st_ino"),
+            ("size", "st_size"),
+            ("mtime_ns", "st_mtime_ns"),
+        ]:
+            if getattr(before, attr) != diagnosis["identity"][key]:
                 raise CatalogError("recovery source changed before hashing")
         raw = handle.read(limit + 1)
         after = os.fstat(handle.fileno())
-    fields = ('st_dev', 'st_ino', 'st_size', 'st_mtime_ns', 'st_ctime_ns', 'st_mode')
-    if (any(getattr(before, k) != getattr(after, k) for k in fields)
-            or identity(destination) != diagnosis['identity']):
+    fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns", "st_mode")
+    if (
+        any(getattr(before, k) != getattr(after, k) for k in fields)
+        or identity(destination) != diagnosis["identity"]
+    ):
         raise CatalogError("recovery source changed while hashing")
-    if len(raw) != prior['size'] or hashlib.sha256(raw).hexdigest() != digest:
+    if len(raw) != prior["size"] or hashlib.sha256(raw).hexdigest() != digest:
         raise CatalogError("recovered bytes differ from recorded full SHA-256")
-    if str(old) not in asset.setdefault('previous_paths', []):
-        asset['previous_paths'].append(str(old))
-    asset['current_path'] = str(destination)
-    asset['identity'] = {**diagnosis['identity'], 'sha256': digest}
-    record_location(asset, {
-        'observed_at': now(), 'actor': row['actor'], 'action': 'recover_copy',
-        'basis': row['basis'], 'reason': row['reason'], 'review_reason': row['reason'], 'source': str(old),
-        'path': str(destination), **diagnosis, 'prior_catalog_identity': prior,
-        'content_continuity': 'verified_full_sha256', 'sha256': digest,
-    })
+    if str(old) not in asset.setdefault("previous_paths", []):
+        asset["previous_paths"].append(str(old))
+    asset["current_path"] = str(destination)
+    asset["identity"] = {**diagnosis["identity"], "sha256": digest}
+    record_location(
+        asset,
+        {
+            "observed_at": now(),
+            "actor": row["actor"],
+            "action": "recover_copy",
+            "basis": row["basis"],
+            "reason": row["reason"],
+            "review_reason": row["reason"],
+            "source": str(old),
+            "path": str(destination),
+            **diagnosis,
+            "prior_catalog_identity": prior,
+            "content_continuity": "verified_full_sha256",
+            "sha256": digest,
+        },
+    )
 
 
 def cmd_observe(args: argparse.Namespace) -> int:
@@ -752,52 +1073,102 @@ def cmd_observe(args: argparse.Namespace) -> int:
     rows = observation_list(read_json(Path(args.observations)))
     with locked(path):
         if hashlib.sha256(path.read_bytes()).hexdigest() != args.expected_sha256:
-            raise CatalogError("stale catalog digest; review current observations before mutation")
+            raise CatalogError(
+                "stale catalog digest; review current observations before mutation"
+            )
         catalog = load_catalog(path, paths=False)
-        assets = {a['id']: a for a in catalog['assets']}
+        assets = {a["id"]: a for a in catalog["assets"]}
         seen = set()
         for row in rows:
-            if row.get('id') in seen:
+            if row.get("id") in seen:
                 raise CatalogError("duplicate asset observation")
-            seen.add(row.get('id'))
-            asset = assets[row['id']]
-            action = row.get('action')
-            if action not in ('metadata', 'content_revision', 'collection_replacement', 'unavailable', 'recover_copy'):
+            seen.add(row.get("id"))
+            asset = assets[row["id"]]
+            action = row.get("action")
+            if action not in (
+                "metadata",
+                "content_revision",
+                "collection_replacement",
+                "unavailable",
+                "recover_copy",
+            ):
                 raise CatalogError("explicit observation action required")
-            if not all(isinstance(row.get(k), str) and row[k].strip() for k in ('actor', 'basis', 'reason')):
+            if not all(
+                isinstance(row.get(k), str) and row[k].strip()
+                for k in ("actor", "basis", "reason")
+            ):
                 raise CatalogError("actor, basis and reason required")
-            if action == 'recover_copy':
+            if action == "recover_copy":
                 recover_copy(asset, row, assets)
                 continue
-            diagnosis = location_diagnosis(Path(asset['current_path']), asset['kind'])
-            observation = {"observed_at": now(), "actor": row['actor'], "basis": row['basis'], "reason": row['reason'],
-                           "action": action, "path": asset['current_path'], **diagnosis,
-                           "review_reason": row['reason'], "content_continuity": "unverified"}
-            if action == 'unavailable':
-                if diagnosis['status'] == 'available':
+            diagnosis = location_diagnosis(Path(asset["current_path"]), asset["kind"])
+            observation = {
+                "observed_at": now(),
+                "actor": row["actor"],
+                "basis": row["basis"],
+                "reason": row["reason"],
+                "action": action,
+                "path": asset["current_path"],
+                **diagnosis,
+                "review_reason": row["reason"],
+                "content_continuity": "unverified",
+            }
+            if action == "unavailable":
+                if diagnosis["status"] == "available":
                     raise CatalogError("unavailable observation has a live source")
                 record_location(asset, observation)
                 continue
-            if diagnosis['status'] != 'available':
+            if diagnosis["status"] != "available":
                 raise CatalogError("cannot observe an unavailable source as available")
-            if row.get('expected_identity') != diagnosis['identity']:
+            if row.get("expected_identity") != diagnosis["identity"]:
                 raise CatalogError("source metadata differs from reviewed observation")
-            if action != 'metadata':
-                if (action == 'collection_replacement') != (asset['kind'] == 'collection'):
+            if action != "metadata":
+                if (action == "collection_replacement") != (
+                    asset["kind"] == "collection"
+                ):
                     raise CatalogError("revision action does not match asset type")
-                previous_id = asset.get('revision_id', str(uuid.uuid4()))
-                asset.setdefault('revisions', []).append({"revision_id": previous_id,
-                    "identity": copy.deepcopy(asset['identity']), "inspections": copy.deepcopy(asset['inspections']),
-                    "coverage": copy.deepcopy(asset.get('coverage')), "retired_at": now(),
-                    "description": asset['description'],
-                    "content_evidence": {key: copy.deepcopy(asset[key]) for key in ('enrichment', 'visible_text', 'outline', 'claims') if key in asset}})
-                for key in ('enrichment', 'visible_text', 'outline', 'claims'):
+                previous_id = asset.get("revision_id", str(uuid.uuid4()))
+                asset.setdefault("revisions", []).append(
+                    {
+                        "revision_id": previous_id,
+                        "identity": copy.deepcopy(asset["identity"]),
+                        "inspections": copy.deepcopy(asset["inspections"]),
+                        "coverage": copy.deepcopy(asset.get("coverage")),
+                        "retired_at": now(),
+                        "description": asset["description"],
+                        "content_evidence": {
+                            key: copy.deepcopy(asset[key])
+                            for key in (
+                                "enrichment",
+                                "visible_text",
+                                "outline",
+                                "claims",
+                            )
+                            if key in asset
+                        },
+                    }
+                )
+                for key in ("enrichment", "visible_text", "outline", "claims"):
                     asset.pop(key, None)
-                asset['description'] = "Current revision has a location metadata observation. Earlier descriptions and content inspections remain in revision history."
-                asset['revision_id'] = str(uuid.uuid4())
-                asset['identity'] = diagnosis['identity']
-                asset['inspections'] = [{"method": "metadata", "scope": "current location metadata only", "basis": row['basis']}]
-                asset['coverage'] = {"status": "metadata_only", "scope": "current revision; payload not inspected", "unit": "object", "discovered_count": None, "inspected_count": 0}
+                asset["description"] = (
+                    "Current revision has a location metadata observation. Earlier descriptions and content inspections remain in revision history."
+                )
+                asset["revision_id"] = str(uuid.uuid4())
+                asset["identity"] = diagnosis["identity"]
+                asset["inspections"] = [
+                    {
+                        "method": "metadata",
+                        "scope": "current location metadata only",
+                        "basis": row["basis"],
+                    }
+                ]
+                asset["coverage"] = {
+                    "status": "metadata_only",
+                    "scope": "current revision; payload not inspected",
+                    "unit": "object",
+                    "discovered_count": None,
+                    "inspected_count": 0,
+                }
             record_location(asset, observation)
         validate_catalog(catalog, check_paths=False)
         write_catalog(path, catalog)
@@ -818,19 +1189,29 @@ def cmd_audit(args: argparse.Namespace) -> int:
     for asset in catalog["assets"]:
         p = Path(asset["current_path"])
         row: dict[str, Any] = {"id": asset["id"], "path": str(p), "kind": asset["kind"]}
-        diagnosis = location_diagnosis(p, asset['kind'])
-        if diagnosis['status'] != 'available':
+        diagnosis = location_diagnosis(p, asset["kind"])
+        if diagnosis["status"] != "available":
             row.update(diagnosis)
         else:
-            actual = diagnosis['identity']
+            actual = diagnosis["identity"]
             recorded = location_identity(asset)
             # Device remains an observation in the audit even when a complete
             # stable identity permits it to drift during relocation verification.
-            differences = identity_differences(recorded, actual, asset['kind'], include_device=True)
-            row['status'] = 'match' if not differences else 'device_only_mismatch' if list(differences) == ['device'] else 'identity_mismatch'
-            row['content_continuity'] = asset.get('current_location', {}).get('content_continuity', 'not_reverified')
+            differences = identity_differences(
+                recorded, actual, asset["kind"], include_device=True
+            )
+            row["status"] = (
+                "match"
+                if not differences
+                else "device_only_mismatch"
+                if list(differences) == ["device"]
+                else "identity_mismatch"
+            )
+            row["content_continuity"] = asset.get("current_location", {}).get(
+                "content_continuity", "not_reverified"
+            )
             if differences:
-                row['differences'] = differences
+                row["differences"] = differences
         counts[row["status"]] = counts.get(row["status"], 0) + 1
         if row["status"] != "match" or args.all:
             rows.append(row)
@@ -843,7 +1224,9 @@ def cmd_audit(args: argparse.Namespace) -> int:
         "scope": "Filesystem metadata only; no payload hash verification or identity rebinding.",
         "findings": rows,
     }
-    print(json.dumps(result, ensure_ascii=sys.stdout.isatty(), indent=2, sort_keys=True))
+    print(
+        json.dumps(result, ensure_ascii=sys.stdout.isatty(), indent=2, sort_keys=True)
+    )
     return 0 if counts.get("match", 0) == len(catalog["assets"]) else 1
 
 
@@ -943,166 +1326,281 @@ def render_enrichment(asset: dict, catalog: dict | None = None) -> str:
     """
     enrichment = asset.get("enrichment")
     enrichment = enrichment if isinstance(enrichment, dict) else {}
+
     def strings(value):
-        return [x for x in value if isinstance(x, str) and x.strip()] if isinstance(value, list) else []
+        return (
+            [x for x in value if isinstance(x, str) and x.strip()]
+            if isinstance(value, list)
+            else []
+        )
+
     def text(value, missing):
         # A recorded value is shown as written; an absent or non-text one is
         # named as missing rather than invented.
         return value if isinstance(value, str) and value else missing
+
     parts = []
-    labels = [("Document type", document_type(asset)), ("Language", enrichment.get("language"))]
+    labels = [
+        ("Document type", document_type(asset)),
+        ("Language", enrichment.get("language")),
+    ]
     labels = [(k, v) for k, v in labels if isinstance(v, str) and v]
     if labels:
-        parts.append('<dl class="meta">' + ''.join(
-            f'<dt>{esc(k)}</dt><dd>{esc(v)}</dd>' for k, v in labels) + '</dl>')
+        parts.append(
+            '<dl class="meta">'
+            + "".join(f"<dt>{esc(k)}</dt><dd>{esc(v)}</dd>" for k, v in labels)
+            + "</dl>"
+        )
     summary = enrichment.get("summary")
     if isinstance(summary, str) and summary and summary != asset.get("description"):
-        parts.append(f'<p><strong>Catalog summary:</strong> {esc(summary)}</p>')
+        parts.append(f"<p><strong>Catalog summary:</strong> {esc(summary)}</p>")
     topics = strings(enrichment.get("topics"))
     if topics:
-        parts.append('<p><strong>Topics:</strong> ' + '; '.join(map(esc, topics)) + '</p>')
-    questions = list(dict.fromkeys(strings(asset.get("utility")) + strings(enrichment.get("questions"))))
+        parts.append(
+            "<p><strong>Topics:</strong> " + "; ".join(map(esc, topics)) + "</p>"
+        )
+    questions = list(
+        dict.fromkeys(
+            strings(asset.get("utility")) + strings(enrichment.get("questions"))
+        )
+    )
     if questions:
-        parts.append('<div class="retrieval-aid"><strong>Useful for finding</strong><ul>' + ''.join(
-            f'<li>{esc(question)}</li>' for question in questions) + '</ul></div>')
+        parts.append(
+            '<div class="retrieval-aid"><strong>Useful for finding</strong><ul>'
+            + "".join(f"<li>{esc(question)}</li>" for question in questions)
+            + "</ul></div>"
+        )
     claims = enrichment.get("claims")
-    claims = [c for c in claims if isinstance(c, dict) and isinstance(c.get("claim"), str)] if isinstance(claims, list) else []
+    claims = (
+        [c for c in claims if isinstance(c, dict) and isinstance(c.get("claim"), str)]
+        if isinstance(claims, list)
+        else []
+    )
     if claims:
-        parts.append('<details><summary>Recorded claims and source locators</summary>')
-        parts.append('<p class="scope">Statuses and locators belong to the recorded inspection; this view does not independently verify the claims.</p><ul>')
+        parts.append("<details><summary>Recorded claims and source locators</summary>")
+        parts.append(
+            '<p class="scope">Statuses and locators belong to the recorded inspection; this view does not independently verify the claims.</p><ul>'
+        )
         for claim in claims:
             status = text(claim.get("status"), "status not recorded")
             locator = text(claim.get("source_locator"), "locator not recorded")
-            parts.append(f'<li><span class="chip">{esc(status)}</span> {esc(claim["claim"])}'
-                         f'<br><code>{esc(locator)}</code></li>')
-        parts.append('</ul></details>')
+            parts.append(
+                f'<li><span class="chip">{esc(status)}</span> {esc(claim["claim"])}'
+                f"<br><code>{esc(locator)}</code></li>"
+            )
+        parts.append("</ul></details>")
     outline = enrichment.get("outline")
-    outline = [x for x in outline if isinstance(x, dict) and isinstance(x.get("heading"), str)] if isinstance(outline, list) else []
+    outline = (
+        [
+            x
+            for x in outline
+            if isinstance(x, dict) and isinstance(x.get("heading"), str)
+        ]
+        if isinstance(outline, list)
+        else []
+    )
     if outline:
-        parts.append('<details><summary>Inspected document outline</summary><ul>')
-        parts.extend(f'<li>{esc(item["heading"])} <span class="scope">{esc(text(item.get("source_locator"), ""))}</span></li>' for item in outline)
-        parts.append('</ul></details>')
+        parts.append("<details><summary>Inspected document outline</summary><ul>")
+        parts.extend(
+            f'<li>{esc(item["heading"])} <span class="scope">{esc(text(item.get("source_locator"), ""))}</span></li>'
+            for item in outline
+        )
+        parts.append("</ul></details>")
     extraction = enrichment.get("extraction")
     if isinstance(extraction, dict):
-        parts.append('<details><summary>Extraction evidence and limits</summary>')
+        parts.append("<details><summary>Extraction evidence and limits</summary>")
         path = extraction.get("path")
-        if isinstance(path, str) and path.startswith("/") and not path.startswith("//") and not any(ord(c) < 32 for c in path):
+        if (
+            isinstance(path, str)
+            and path.startswith("/")
+            and not path.startswith("//")
+            and not any(ord(c) < 32 for c in path)
+        ):
             historical = catalog is not None and any(
-                path == address or (owner["kind"] == "collection" and path.startswith(address.rstrip("/") + "/"))
-                for owner in catalog["assets"] for address in owner.get("previous_paths", [])
+                path == address
+                or (
+                    owner["kind"] == "collection"
+                    and path.startswith(address.rstrip("/") + "/")
+                )
+                for owner in catalog["assets"]
+                for address in owner.get("previous_paths", [])
             )
             if historical:
-                parts.append(f'<p>Recorded evidence locator: <code>{esc(path)}</code></p>')
+                parts.append(
+                    f"<p>Recorded evidence locator: <code>{esc(path)}</code></p>"
+                )
                 try:
                     current = resolve_historical_path(catalog, path)
                 except ValueError as error:
-                    parts.append(f'<p>Evidence unavailable: {esc(error)}</p>')
+                    parts.append(f"<p>Evidence unavailable: {esc(error)}</p>")
                 else:
-                    parts.append('<p>Evidence: ' + path_link(current) + '</p>')
+                    parts.append("<p>Evidence: " + path_link(current) + "</p>")
             else:
-                parts.append('<p>Evidence: ' + path_link(path) + '</p>')
+                parts.append("<p>Evidence: " + path_link(path) + "</p>")
         elif path is not None:
-            parts.append(f'<p>Evidence locator: <code>{esc(path)}</code></p>')
-        for key, label in (("source_sha256", "Inspected source SHA-256"), ("recipe", "Inspection recipe")):
+            parts.append(f"<p>Evidence locator: <code>{esc(path)}</code></p>")
+        for key, label in (
+            ("source_sha256", "Inspected source SHA-256"),
+            ("recipe", "Inspection recipe"),
+        ):
             if isinstance(extraction.get(key), str):
-                parts.append(f'<p><strong>{label}:</strong> {esc(extraction[key])}</p>')
+                parts.append(f"<p><strong>{label}:</strong> {esc(extraction[key])}</p>")
         if "truncated" in extraction:
             value = extraction["truncated"]
-            scope = "yes" if value is True else "no (does not imply full review)" if value is False else "not established"
-            parts.append(f'<p>Selection/truncation recorded: {scope}.</p>')
+            scope = (
+                "yes"
+                if value is True
+                else "no (does not imply full review)"
+                if value is False
+                else "not established"
+            )
+            parts.append(f"<p>Selection/truncation recorded: {scope}.</p>")
         limitations = strings(enrichment.get("limitations"))
         if limitations:
-            parts.append('<ul>' + ''.join(f'<li>{esc(x)}</li>' for x in limitations) + '</ul>')
-        parts.append('</details>')
+            parts.append(
+                "<ul>" + "".join(f"<li>{esc(x)}</li>" for x in limitations) + "</ul>"
+            )
+        parts.append("</details>")
     elif strings(enrichment.get("limitations")):
-        parts.append('<details><summary>Enrichment limitations</summary><ul>' + ''.join(
-            f'<li>{esc(x)}</li>' for x in strings(enrichment["limitations"])) + '</ul></details>')
-    return '\n'.join(parts)
+        parts.append(
+            "<details><summary>Enrichment limitations</summary><ul>"
+            + "".join(f"<li>{esc(x)}</li>" for x in strings(enrichment["limitations"]))
+            + "</ul></details>"
+        )
+    return "\n".join(parts)
 
 
-def render_asset(asset: dict, by_id: dict, judgments: dict | None = None, catalog: dict | None = None) -> str:
+def render_asset(
+    asset: dict, by_id: dict, judgments: dict | None = None, catalog: dict | None = None
+) -> str:
     asset_id = asset["id"]
     inspections = asset["inspections"]
     methods = sorted({item["method"] for item in inspections})
-    tags = "".join(f'<span class="chip">{esc(tag)}</span>' for tag in asset.get("tags", []))
-    unavailable = asset.get("location_status") in {"unavailable", "missing", "offline_mount", "denied", "inaccessible", "wrong_type"}
-    current_path = f'<span class="path">{esc(asset["current_path"])}</span>' if unavailable else path_link(asset["current_path"])
+    tags = "".join(
+        f'<span class="chip">{esc(tag)}</span>' for tag in asset.get("tags", [])
+    )
+    unavailable = asset.get("location_status") in {
+        "unavailable",
+        "missing",
+        "offline_mount",
+        "denied",
+        "inaccessible",
+        "wrong_type",
+    }
+    current_path = (
+        f'<span class="path">{esc(asset["current_path"])}</span>'
+        if unavailable
+        else path_link(asset["current_path"])
+    )
     parts = [
         f'<article class="asset" id="asset-{esc(asset_id)}" data-kind="{esc(asset["kind"])}" '
         f'data-coverage="{esc(asset.get("coverage", {}).get("status", "unrecorded"))}" '
         f'data-document-type="{esc(document_type(asset))}" data-methods="{esc(json.dumps(methods))}">',
-        f'<h3>{esc(asset["title"])}</h3>',
-        f'<p>{esc(asset["description"])}</p>',
+        f"<h3>{esc(asset['title'])}</h3>",
+        f"<p>{esc(asset['description'])}</p>",
         f'<p>{current_path}</p><div class="tags">{tags}</div>',
     ]
     if unavailable:
-        parts.append('<p><strong>Location unavailable.</strong> The retained address is historical; no new physical identity is asserted.</p>')
+        parts.append(
+            "<p><strong>Location unavailable.</strong> The retained address is historical; no new physical identity is asserted.</p>"
+        )
     location = asset.get("current_location")
     if location:
-        parts.append(f'<p>Latest location observation: {esc(location["observed_at"])}. Content continuity: {esc(location["content_continuity"])}.</p>')
+        parts.append(
+            f"<p>Latest location observation: {esc(location['observed_at'])}. Content continuity: {esc(location['content_continuity'])}.</p>"
+        )
         review = location.get("review_reason") or location.get("reason", "")
-        parts.append(f'<p>Review: {esc(review)}. Basis: {esc(location.get("basis", ""))}.</p>')
+        parts.append(
+            f"<p>Review: {esc(review)}. Basis: {esc(location.get('basis', ''))}.</p>"
+        )
         if location.get("reason") and location["reason"] != review:
-            parts.append(f'<p>Location diagnosis: {esc(location["reason"])}</p>')
+            parts.append(f"<p>Location diagnosis: {esc(location['reason'])}</p>")
     for revision in asset.get("revisions", []):
-        parts.append(f'<details><summary>Earlier revision {esc(revision["revision_id"])}</summary>')
-        parts.append(f'<p>{esc(revision.get("description", ""))}</p>')
+        parts.append(
+            f"<details><summary>Earlier revision {esc(revision['revision_id'])}</summary>"
+        )
+        parts.append(f"<p>{esc(revision.get('description', ''))}</p>")
         for inspection in revision["inspections"]:
-            parts.append(f'<p>{esc(inspection["method"])}: {esc(inspection["scope"])}. {esc(inspection["basis"])}</p>')
-        parts.append('</details>')
+            parts.append(
+                f"<p>{esc(inspection['method'])}: {esc(inspection['scope'])}. {esc(inspection['basis'])}</p>"
+            )
+        parts.append("</details>")
     if judgments is not None:
         from sinnix_lib.judgments import resolve_judgments
+
         current = resolve_judgments(judgments, asset["current_path"])
-        parts.append('<p><strong>Current classification</strong> · ledger precedence and explicit uncertainty</p>')
-        parts.append('<dl class="meta">' + ''.join(
-            f'<dt>{esc(key.replace("_", " "))}</dt><dd>{esc(value.get("value") if value["status"] == "known" else value["status"])}'
-            f'{(" · " + esc("; ".join(value["details"]))) if value.get("details") else ""}</dd>'
-            for key, value in current.items()) + '</dl>')
+        parts.append(
+            "<p><strong>Current classification</strong> · ledger precedence and explicit uncertainty</p>"
+        )
+        parts.append(
+            '<dl class="meta">'
+            + "".join(
+                f"<dt>{esc(key.replace('_', ' '))}</dt><dd>{esc(value.get('value') if value['status'] == 'known' else value['status'])}"
+                f"{(' · ' + esc('; '.join(value['details']))) if value.get('details') else ''}</dd>"
+                for key, value in current.items()
+            )
+            + "</dl>"
+        )
     if asset.get("facets"):
-        parts.append('<p><strong>Recorded observations</strong> · original wording retained</p><dl class="meta">' + ''.join(
-            f'<dt>{esc(key.replace("_", " "))}</dt><dd>{esc(value)}</dd>'
-            for key, value in asset["facets"].items()) + '</dl>')
+        parts.append(
+            '<p><strong>Recorded observations</strong> · original wording retained</p><dl class="meta">'
+            + "".join(
+                f"<dt>{esc(key.replace('_', ' '))}</dt><dd>{esc(value)}</dd>"
+                for key, value in asset["facets"].items()
+            )
+            + "</dl>"
+        )
     if asset.get("coverage"):
         coverage = asset["coverage"]
         denominator = coverage.get("discovered_count")
-        count = f'{coverage["inspected_count"]} / {denominator if denominator is not None else "unknown"} {coverage["unit"]}'
-        parts.append(f'<p><strong>Inspection: {esc(coverage["status"])}</strong> · {esc(count)}. {esc(coverage["scope"])}</p>')
+        count = f"{coverage['inspected_count']} / {denominator if denominator is not None else 'unknown'} {coverage['unit']}"
+        parts.append(
+            f"<p><strong>Inspection: {esc(coverage['status'])}</strong> · {esc(count)}. {esc(coverage['scope'])}</p>"
+        )
     parts.append(render_enrichment(asset, catalog))
     if asset.get("organization"):
         organization = asset["organization"]
-        parts.append(f'<p><strong>Organization proposal: {esc(organization["action"])}</strong>. {esc(organization["rationale"])}</p>')
+        parts.append(
+            f"<p><strong>Organization proposal: {esc(organization['action'])}</strong>. {esc(organization['rationale'])}</p>"
+        )
         if organization.get("proposed_path"):
-            parts.append(f'<p>Proposed location: <code>{esc(organization["proposed_path"])}</code></p>')
+            parts.append(
+                f"<p>Proposed location: <code>{esc(organization['proposed_path'])}</code></p>"
+            )
     if asset.get("annotation_conflicts"):
-        parts.append('<p><strong>Competing annotations retained.</strong> See the evidence details for proposed values.</p>')
+        parts.append(
+            "<p><strong>Competing annotations retained.</strong> See the evidence details for proposed values.</p>"
+        )
     for relation in asset.get("related_paths", []):
-        parts.append(f'<p><strong>{esc(relation["type"])}</strong>: {path_link(relation["path"])}. {esc(relation["basis"])}</p>')
+        parts.append(
+            f"<p><strong>{esc(relation['type'])}</strong>: {path_link(relation['path'])}. {esc(relation['basis'])}</p>"
+        )
     for inspection in inspections:
         parts.append(
             f'<p class="scope"><strong>{esc(inspection["method"])}</strong>: '
-            f'{esc(inspection["scope"])}</p>'
+            f"{esc(inspection['scope'])}</p>"
         )
     if asset.get("uncertainties"):
-        parts.append('<details><summary>Uncertainty and limits</summary><ul>')
-        parts.extend(f'<li>{esc(note)}</li>' for note in asset["uncertainties"])
-        parts.append('</ul></details>')
+        parts.append("<details><summary>Uncertainty and limits</summary><ul>")
+        parts.extend(f"<li>{esc(note)}</li>" for note in asset["uncertainties"])
+        parts.append("</ul></details>")
     if asset.get("visible_text"):
-        parts.append('<details><summary>Selected visible text</summary><ul>')
-        parts.extend(f'<li>{esc(text)}</li>' for text in asset["visible_text"])
-        parts.append('</ul></details>')
+        parts.append("<details><summary>Selected visible text</summary><ul>")
+        parts.extend(f"<li>{esc(text)}</li>" for text in asset["visible_text"])
+        parts.append("</ul></details>")
     related_ids = {"asset-" + asset_id}
     for relation in asset.get("relations", []):
         target = by_id[relation["target_id"]]
         related_ids.add("asset-" + target["id"])
         parts.append(
-            f'<p><strong>{esc(relation["type"].replace("_", " "))}</strong>: '
+            f"<p><strong>{esc(relation['type'].replace('_', ' '))}</strong>: "
             f'<a href="#asset-{esc(target["id"])}">{esc(target["title"])}</a>. '
             f'<span class="scope">{esc(relation["basis"])}</span></p>'
         )
     if len(related_ids) > 1:
         parts.append(
             f'<button class="fs" data-related="{esc(json.dumps(sorted(related_ids)))}">'
-            'Show this record and related files</button>'
+            "Show this record and related files</button>"
         )
     details = {
         "id": asset_id,
@@ -1114,19 +1612,36 @@ def render_asset(asset: dict, by_id: dict, judgments: dict | None = None, catalo
     for key, value in asset.items():
         if key not in {"title", "description", "tags", "relations", *details}:
             details[key] = value
-    parts.append('<details><summary>Identity, path history and inspection evidence</summary>')
-    parts.append(f'<pre class="catalog-data">{esc(json.dumps(details, ensure_ascii=False, indent=2))}</pre>')
-    parts.append('</details></article>')
+    parts.append(
+        "<details><summary>Identity, path history and inspection evidence</summary>"
+    )
+    parts.append(
+        f'<pre class="catalog-data">{esc(json.dumps(details, ensure_ascii=False, indent=2))}</pre>'
+    )
+    parts.append("</details></article>")
     return "\n".join(parts)
 
 
-def render(catalog: dict, source: Path, template: str, command: str, judgments: dict | None = None) -> str:
-    if catalog.get("schema_version") != 1 or not isinstance(catalog.get("assets"), list):
+def render(
+    catalog: dict,
+    source: Path,
+    template: str,
+    command: str,
+    judgments: dict | None = None,
+) -> str:
+    if catalog.get("schema_version") != 1 or not isinstance(
+        catalog.get("assets"), list
+    ):
         raise ValueError("expected schema_version 1 catalog with assets")
     assets = catalog["assets"]
     collections = sum(asset.get("kind") == "collection" for asset in assets)
-    coverage_states = sorted({asset.get("coverage", {}).get("status", "unrecorded") for asset in assets})
-    coverage_options = ''.join(f'<option value="{esc(value)}">{esc(value)}</option>' for value in coverage_states)
+    coverage_states = sorted(
+        {asset.get("coverage", {}).get("status", "unrecorded") for asset in assets}
+    )
+    coverage_options = "".join(
+        f'<option value="{esc(value)}">{esc(value)}</option>'
+        for value in coverage_states
+    )
     by_id = {asset["id"]: asset for asset in assets}
     if len(by_id) != len(assets):
         raise ValueError("duplicate asset IDs")
@@ -1137,30 +1652,48 @@ def render(catalog: dict, source: Path, template: str, command: str, judgments: 
     if "<body>" not in template or "<script>" not in template:
         raise ValueError("template needs body and inline script blocks")
     preamble = template.split("<body>", 1)[0]
-    preamble = re.sub(r"<title>.*?</title>", "<title>File inspection catalog</title>", preamble, flags=re.S)
-    preamble = re.sub(r'data-accent="[^"]*"', 'data-accent="archive"', preamble, count=1)
+    preamble = re.sub(
+        r"<title>.*?</title>",
+        "<title>File inspection catalog</title>",
+        preamble,
+        flags=re.S,
+    )
+    preamble = re.sub(
+        r'data-accent="[^"]*"', 'data-accent="archive"', preamble, count=1
+    )
     preamble = preamble.replace("</head>", f"<style>{STYLE}</style>\n</head>")
     common_script = template.split("<script>", 1)[1].rsplit("</script>", 1)[0]
     generated = _dt.datetime.now(_dt.timezone.utc).isoformat()
-    methods = sorted({item["method"] for asset in assets for item in asset["inspections"]})
-    type_options = '<option value="">All document types</option>' + ''.join(
+    methods = sorted(
+        {item["method"] for asset in assets for item in asset["inspections"]}
+    )
+    type_options = '<option value="">All document types</option>' + "".join(
         f'<option value="{esc(value)}">{esc(value)}</option>'
         for value in sorted({document_type(asset) for asset in assets} - {""})
     )
-    options = ''.join(f'<option value="{esc(method)}">{esc(method)}</option>' for method in methods)
+    options = "".join(
+        f'<option value="{esc(method)}">{esc(method)}</option>' for method in methods
+    )
     relationship_rows = []
     for asset in assets:
         for relation in asset.get("relations", []):
             target = by_id[relation["target_id"]]
             relationship_rows.append(
                 f'<tr><td><a href="#asset-{esc(asset["id"])}">{esc(asset["title"])}</a></td>'
-                f'<td>{esc(relation["type"].replace("_", " "))}</td>'
+                f"<td>{esc(relation['type'].replace('_', ' '))}</td>"
                 f'<td><a href="#asset-{esc(target["id"])}">{esc(target["title"])}</a></td>'
-                f'<td>{esc(relation["basis"])}</td></tr>'
+                f"<td>{esc(relation['basis'])}</td></tr>"
             )
-    cards = '\n'.join(render_asset(asset, by_id, judgments, catalog) for asset in sorted(assets, key=lambda a: a["title"].casefold()))
+    cards = "\n".join(
+        render_asset(asset, by_id, judgments, catalog)
+        for asset in sorted(assets, key=lambda a: a["title"].casefold())
+    )
     # The canonical data is embedded losslessly, but cannot terminate its script element.
-    data = json.dumps(catalog, ensure_ascii=False).replace("<", "\\u003c").replace("&", "\\u0026")
+    data = (
+        json.dumps(catalog, ensure_ascii=False)
+        .replace("<", "\\u003c")
+        .replace("&", "\\u0026")
+    )
     return f'''{preamble}
 <body>
 <header class="page"><h1>File inspection catalog</h1><span class="chip">private · portable</span>
@@ -1171,7 +1704,7 @@ def render(catalog: dict, source: Path, template: str, command: str, judgments: 
 <p>Descriptions, original paths and relationships stay attached to stable asset IDs. Descriptions are authored observations;
 each record states the inspected surface and its limits. A title-page or filename inspection does not imply a full-content review.</p>
 <dl class="meta"><dt>generated</dt><dd><time class="age" datetime="{esc(generated)}">{esc(generated)}</time></dd>
-<dt>catalog updated</dt><dd>{esc(catalog['updated_at'])}</dd><dt>inspection dates</dt><dd>Recorded individually below</dd>
+<dt>catalog updated</dt><dd>{esc(catalog["updated_at"])}</dd><dt>inspection dates</dt><dd>Recorded individually below</dd>
 <dt>canonical source</dt><dd>{path_link(str(source))}</dd><dt>basis</dt><dd>Authored observations and attributed source metadata; counts derived from catalog records</dd></dl>
 <div class="tiles"><div class="tile"><span class="n">{len(assets)}</span><span class="l">catalog records</span></div>
 <div class="tile"><span class="n">{collections}</span><span class="l">collections described</span></div>
@@ -1191,7 +1724,7 @@ each record states the inspected surface and its limits. A title-page or filenam
 <section id="relationships"><h2>Relationships and their evidence</h2>
 <p>These links are explicit assertions with a stated basis. They do not identify unknown people or imply causal relationships.</p>
 <div class="tablewrap"><table><thead><tr><th>From</th><th>Relationship</th><th>To</th><th>Basis</th></tr></thead>
-<tbody>{''.join(relationship_rows)}</tbody></table></div></section>
+<tbody>{"".join(relationship_rows)}</tbody></table></div></section>
 <section id="maintenance"><h2>Updating this view</h2>
 <p>Edit observations through the catalog tool, retain prior inspections and path history, then regenerate this view.
 The page does not edit source files or send annotations anywhere. Original-file links require local access.</p>
@@ -1208,16 +1741,26 @@ def cmd_report(args: argparse.Namespace) -> int:
     source = Path(args.catalog).resolve()
     catalog = json.loads(read_regular_text(source))
     command_args = [
-        sys.executable, str(Path(__file__).resolve()), "--catalog", str(source), "report",
-        "--template", str(args.template.resolve()), "--output", str(args.output.resolve()),
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--catalog",
+        str(source),
+        "report",
+        "--template",
+        str(args.template.resolve()),
+        "--output",
+        str(args.output.resolve()),
     ]
     judgments = None
     if args.judgments is not None:
         from sinnix_lib.judgments import read_judgments
+
         judgments = read_judgments(args.judgments)
         command_args.extend(["--judgments", str(args.judgments.resolve())])
     command = shlex.join(command_args)
-    output = render(catalog, source, read_regular_text(args.template), command, judgments)
+    output = render(
+        catalog, source, read_regular_text(args.template), command, judgments
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     atomic_publish(args.output, output.encode("utf-8"), fsync=True, mode=0o600)
     print(args.output)
@@ -1230,7 +1773,9 @@ def cmd_report(args: argparse.Namespace) -> int:
 # ──────────────────────────────────────────────────────────────────────────
 # Escape and literal alternatives are disjoint; possessive repetitions prevent
 # a missing closing parenthesis from repartitioning the destination exponentially.
-INLINE = re.compile(r"!?\[(?:\\[^\n]|[^\[\]\\\n])*\]\(\s*(<[^<>\n]+>|(?:\\.|[^\s()\\])++(?:\([^()]*\)(?:\\.|[^\s()\\])*+)*+)[^\n)]*\)")
+INLINE = re.compile(
+    r"!?\[(?:\\[^\n]|[^\[\]\\\n])*\]\(\s*(<[^<>\n]+>|(?:\\.|[^\s()\\])++(?:\([^()]*\)(?:\\.|[^\s()\\])*+)*+)[^\n)]*\)"
+)
 REFERENCE = re.compile(r"^\s{0,3}\[[^\]\n]+\]:\s*(<[^>\n]+>|\S+)", re.M)
 # Preserve ordinary backslashes, but decode supported destination escapes
 # before URI delimiters are interpreted. Keep the existing escaped-space form.
@@ -1253,8 +1798,17 @@ def link_targets(text: str):
         yield _unwrap_destination(match.group(1))
 
 
-FAILURES = {"invalid-link", "missing", "denied", "inaccessible", "invalid-document", "wrong-type-document",
-            "missing-document", "denied-document", "inaccessible-document"}
+FAILURES = {
+    "invalid-link",
+    "missing",
+    "denied",
+    "inaccessible",
+    "invalid-document",
+    "wrong-type-document",
+    "missing-document",
+    "denied-document",
+    "inaccessible-document",
+}
 
 
 def access_error(exc: Exception) -> str:
@@ -1266,7 +1820,9 @@ def access_error(exc: Exception) -> str:
 
 
 def audit(manifest: dict) -> dict:
-    if manifest.get("schema_version") != 1 or not isinstance(manifest.get("documents"), list):
+    if manifest.get("schema_version") != 1 or not isinstance(
+        manifest.get("documents"), list
+    ):
         raise ValueError("expected navigation audit manifest version 1 with documents")
     external = [Path(root) for root in manifest.get("external_roots", [])]
     if any(not root.is_absolute() for root in external):
@@ -1288,32 +1844,70 @@ def audit(manifest: dict) -> dict:
             continue
         # Mount policy uses a lexical path; stat/read keep filesystem traversal.
         mount_document = Path(os.path.abspath(document))
-        if mount_error is not None and any(mount_document.is_relative_to(root) for root in external):
-            rows.append({"document": str(document), "status": "inaccessible-document", "reason": mount_error})
+        if mount_error is not None and any(
+            mount_document.is_relative_to(root) for root in external
+        ):
+            rows.append(
+                {
+                    "document": str(document),
+                    "status": "inaccessible-document",
+                    "reason": mount_error,
+                }
+            )
             continue
-        if any(mount_document.is_relative_to(root) and not has_mounted_ancestor(mount_document, root, mounted) for root in external):
+        if any(
+            mount_document.is_relative_to(root)
+            and not has_mounted_ancestor(mount_document, root, mounted)
+            for root in external
+        ):
             rows.append({"document": str(document), "status": "external-unprobed"})
             continue
         try:
             if not stat.S_ISREG(document.stat().st_mode):
-                rows.append({"document": str(document), "status": "wrong-type-document"})
+                rows.append(
+                    {"document": str(document), "status": "wrong-type-document"}
+                )
                 continue
             text = prose_mask(read_regular_text(document))
         except NotRegularFile as exc:
-            rows.append({"document": str(document), "status": "wrong-type-document", "reason": str(exc)})
+            rows.append(
+                {
+                    "document": str(document),
+                    "status": "wrong-type-document",
+                    "reason": str(exc),
+                }
+            )
             continue
         except (OSError, UnicodeError) as exc:
-            rows.append({"document": str(document), "status": access_error(exc) + "-document", "reason": str(exc)})
+            rows.append(
+                {
+                    "document": str(document),
+                    "status": access_error(exc) + "-document",
+                    "reason": str(exc),
+                }
+            )
             continue
         except ValueError as exc:
-            rows.append({"document": str(document), "status": "wrong-type-document", "reason": str(exc)})
+            rows.append(
+                {
+                    "document": str(document),
+                    "status": "wrong-type-document",
+                    "reason": str(exc),
+                }
+            )
             continue
         for target in link_targets(text):
             try:
                 parsed = urlsplit(DESTINATION_ESCAPE.sub(r"\1", target))
             except ValueError as exc:
-                rows.append({"document": str(document), "target": target,
-                             "status": "invalid-link", "reason": str(exc)})
+                rows.append(
+                    {
+                        "document": str(document),
+                        "target": target,
+                        "status": "invalid-link",
+                        "reason": str(exc),
+                    }
+                )
                 continue
             if parsed.scheme and parsed.scheme != "file":
                 continue
@@ -1324,21 +1918,43 @@ def audit(manifest: dict) -> dict:
             try:
                 decoded = unquote(parsed.path, errors="strict")
             except UnicodeError as exc:
-                rows.append({"document": str(document), "target": target,
-                             "status": "invalid-link", "reason": str(exc)})
+                rows.append(
+                    {
+                        "document": str(document),
+                        "target": target,
+                        "status": "invalid-link",
+                        "reason": str(exc),
+                    }
+                )
                 continue
             if "\0" in decoded:
-                rows.append({"document": str(document), "target": target,
-                             "status": "invalid-link", "reason": "local path contains a null character"})
+                rows.append(
+                    {
+                        "document": str(document),
+                        "target": target,
+                        "status": "invalid-link",
+                        "reason": "local path contains a null character",
+                    }
+                )
                 continue
             destination = Path(decoded)
             if not destination.is_absolute():
                 destination = document.parent / destination
             mount_destination = Path(os.path.abspath(destination))
-            offline = any(mount_destination.is_relative_to(root) and not has_mounted_ancestor(mount_destination, root, mounted) for root in external)
-            row = {"document": str(document), "target": target,
-                   "destination": str(destination), "status": "external-unprobed"}
-            if mount_error is not None and any(mount_destination.is_relative_to(root) for root in external):
+            offline = any(
+                mount_destination.is_relative_to(root)
+                and not has_mounted_ancestor(mount_destination, root, mounted)
+                for root in external
+            )
+            row = {
+                "document": str(document),
+                "target": target,
+                "destination": str(destination),
+                "status": "external-unprobed",
+            }
+            if mount_error is not None and any(
+                mount_destination.is_relative_to(root) for root in external
+            ):
                 row.update(status="inaccessible", reason=mount_error)
             elif not offline:
                 try:
@@ -1348,7 +1964,12 @@ def audit(manifest: dict) -> dict:
                     row.update(status=access_error(exc), reason=str(exc))
             rows.append(row)
     failed = sum(row["status"] in FAILURES for row in rows)
-    return {"schema_version": 1, "documents": len(manifest["documents"]), "links": rows, "failures": failed}
+    return {
+        "schema_version": 1,
+        "documents": len(manifest["documents"]),
+        "links": rows,
+        "failures": failed,
+    }
 
 
 def cmd_links(args: argparse.Namespace) -> int:
@@ -1359,7 +1980,9 @@ def cmd_links(args: argparse.Namespace) -> int:
         for row in result["links"]:
             if row["status"] in FAILURES:
                 print(f"{row['document']}: {row['status']}: {row.get('target', '')}")
-        print(f"navigation-audit: {result['documents']} documents, {result['failures']} failures")
+        print(
+            f"navigation-audit: {result['documents']} documents, {result['failures']} failures"
+        )
     return 1 if result["failures"] else 0
 
 
@@ -1370,23 +1993,33 @@ def cmd_links(args: argparse.Namespace) -> int:
 # ──────────────────────────────────────────────────────────────────────────
 def publication_path(url: str) -> PurePosixPath:
     """Map one relative URL to the filename served after URL decoding."""
-    if (not isinstance(url, str) or not url or any(ord(c) < 32 for c in url)
-            or re.search(r"%(?![0-9a-fA-F]{2})", url)):
+    if (
+        not isinstance(url, str)
+        or not url
+        or any(ord(c) < 32 for c in url)
+        or re.search(r"%(?![0-9a-fA-F]{2})", url)
+    ):
         raise ValueError(f"unsafe publication URL: {url!r}")
     parsed = urlsplit(url)
     if parsed.scheme or parsed.netloc or parsed.path != url:
         raise ValueError(f"unsafe publication URL: {url!r}")
     decoded = unquote(parsed.path, errors="strict")
     parts = PurePosixPath(decoded)
-    if (parts.is_absolute() or str(parts) != decoded
-            or any(part.startswith(".") for part in parts.parts)
-            or "\\" in decoded or any(ord(c) < 32 for c in decoded)):
+    if (
+        parts.is_absolute()
+        or str(parts) != decoded
+        or any(part.startswith(".") for part in parts.parts)
+        or "\\" in decoded
+        or any(ord(c) < 32 for c in decoded)
+    ):
         raise ValueError(f"unsafe publication URL: {url!r}")
     return parts
 
 
 def build(manifest: dict, output: Path) -> None:
-    if manifest.get("schema_version") != 1 or not isinstance(manifest.get("files"), list):
+    if manifest.get("schema_version") != 1 or not isinstance(
+        manifest.get("files"), list
+    ):
         raise ValueError("publication manifest requires schema_version 1 and files")
     if output.exists() or output.is_symlink():
         raise ValueError(f"publication output already exists: {output}")
@@ -1401,14 +2034,22 @@ def build(manifest: dict, output: Path) -> None:
             raise ValueError(f"duplicate publication URL: {url}")
         urls.add(serving_path)
         if not source.is_absolute() or not source.is_file():
-            raise ValueError(f"publication source must be an existing absolute file: {source}")
+            raise ValueError(
+                f"publication source must be an existing absolute file: {source}"
+            )
         resolved = source.resolve()
         if any(resolved.is_relative_to(root) for root in private):
-            raise ValueError(f"publication source is inside a private source tree: {source}")
+            raise ValueError(
+                f"publication source is inside a private source tree: {source}"
+            )
         entries.append((parts, resolved))
     # Refuse file/directory URL collisions before creating anything.
     for url in urls:
-        if any(str(parent) in urls for parent in PurePosixPath(url).parents if str(parent) != "."):
+        if any(
+            str(parent) in urls
+            for parent in PurePosixPath(url).parents
+            if str(parent) != "."
+        ):
             raise ValueError(f"file/directory publication collision: {url}")
     output.mkdir(parents=True, mode=0o755)
     for url, source in entries:
@@ -1425,57 +2066,116 @@ def cmd_publish(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="sinnix fs catalog")
-    parser.add_argument("--catalog", help="catalog JSON path (every command but links and publish)")
+    parser.add_argument(
+        "--catalog", help="catalog JSON path (every command but links and publish)"
+    )
     sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("import"); p.add_argument("observations", nargs="+")
-    p.add_argument("--on-conflict", choices=("replace", "record", "error"), default="replace",
-                   help="How to handle competing annotations; record retains existing values and attributed proposals")
+    p = sub.add_parser("import")
+    p.add_argument("observations", nargs="+")
+    p.add_argument(
+        "--on-conflict",
+        choices=("replace", "record", "error"),
+        default="replace",
+        help="How to handle competing annotations; record retains existing values and attributed proposals",
+    )
     p.set_defaults(func=cmd_import)
-    p = sub.add_parser("search"); p.add_argument("text")
+    p = sub.add_parser("search")
+    p.add_argument("text")
     p.add_argument("--kind", choices=("file", "collection"))
-    p.add_argument("--offset", type=int, default=0); p.add_argument("--limit", type=int)
+    p.add_argument("--offset", type=int, default=0)
+    p.add_argument("--limit", type=int)
     p.set_defaults(func=cmd_search)
-    p = sub.add_parser("coverage", help="Summarize explicit inspection coverage, without inherited completion claims")
-    p.add_argument("--kind", choices=("file", "collection")); p.set_defaults(func=cmd_coverage)
-    p = sub.add_parser("show"); p.add_argument("id"); p.set_defaults(func=cmd_show)
-    p = sub.add_parser("relocate"); p.add_argument("id"); p.add_argument("new_path"); p.set_defaults(func=cmd_relocate)
-    p = sub.add_parser("prepare-relocation", help="Capture bounded pre-rename identities and a catalog digest")
-    p.add_argument("moves"); p.add_argument("--output", required=True)
-    p.add_argument("--record-existing-drift", action="store_true",
-                   help="Retain mismatched older identities as attributed history; certify only this rename")
-    p.add_argument("--retain-unavailable", action="store_true",
-                   help="Keep already absent records as explicit unavailable history, without asserting a new identity")
+    p = sub.add_parser(
+        "coverage",
+        help="Summarize explicit inspection coverage, without inherited completion claims",
+    )
+    p.add_argument("--kind", choices=("file", "collection"))
+    p.set_defaults(func=cmd_coverage)
+    p = sub.add_parser("show")
+    p.add_argument("id")
+    p.set_defaults(func=cmd_show)
+    p = sub.add_parser("relocate")
+    p.add_argument("id")
+    p.add_argument("new_path")
+    p.set_defaults(func=cmd_relocate)
+    p = sub.add_parser(
+        "prepare-relocation",
+        help="Capture bounded pre-rename identities and a catalog digest",
+    )
+    p.add_argument("moves")
+    p.add_argument("--output", required=True)
+    p.add_argument(
+        "--record-existing-drift",
+        action="store_true",
+        help="Retain mismatched older identities as attributed history; certify only this rename",
+    )
+    p.add_argument(
+        "--retain-unavailable",
+        action="store_true",
+        help="Keep already absent records as explicit unavailable history, without asserting a new identity",
+    )
     p.set_defaults(func=cmd_prepare_relocation)
-    p = sub.add_parser("relocate-batch", help="Atomically publish a prepared metadata relocation after external renames")
-    p.add_argument("receipt"); p.set_defaults(func=cmd_relocate_batch)
-    p = sub.add_parser("resolve", help="Resolve recorded historical addresses without filesystem aliases")
-    p.add_argument("path"); p.add_argument("--id"); p.set_defaults(func=cmd_resolve)
-    p = sub.add_parser("validate"); p.set_defaults(func=lambda a: (load_catalog(Path(a.catalog)) or 0) and 0)
-    p = sub.add_parser("observe", help="Append reviewed location observations or revisions, retaining prior inspections")
+    p = sub.add_parser(
+        "relocate-batch",
+        help="Atomically publish a prepared metadata relocation after external renames",
+    )
+    p.add_argument("receipt")
+    p.set_defaults(func=cmd_relocate_batch)
+    p = sub.add_parser(
+        "resolve",
+        help="Resolve recorded historical addresses without filesystem aliases",
+    )
+    p.add_argument("path")
+    p.add_argument("--id")
+    p.set_defaults(func=cmd_resolve)
+    p = sub.add_parser("validate")
+    p.set_defaults(func=lambda a: (load_catalog(Path(a.catalog)) or 0) and 0)
+    p = sub.add_parser(
+        "observe",
+        help="Append reviewed location observations or revisions, retaining prior inspections",
+    )
     p.add_argument("observations")
     p.add_argument("--expected-sha256", required=True)
     p.set_defaults(func=cmd_observe)
-    p = sub.add_parser("audit", help="Read-only, all-asset metadata mismatch report; never repairs identity")
-    p.add_argument("--all", action="store_true", help="Include matching assets as well as findings")
+    p = sub.add_parser(
+        "audit",
+        help="Read-only, all-asset metadata mismatch report; never repairs identity",
+    )
+    p.add_argument(
+        "--all", action="store_true", help="Include matching assets as well as findings"
+    )
     p.set_defaults(func=cmd_audit)
-    p = sub.add_parser("report", help="Render the catalog as a searchable offline HTML page")
+    p = sub.add_parser(
+        "report", help="Render the catalog as a searchable offline HTML page"
+    )
     p.add_argument("--template", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
-    p.add_argument("--judgments", type=Path, help="Explicit authored classification ledger; source catalog observations remain unchanged")
+    p.add_argument(
+        "--judgments",
+        type=Path,
+        help="Explicit authored classification ledger; source catalog observations remain unchanged",
+    )
     p.set_defaults(func=cmd_report)
-    p = sub.add_parser("links", help="Audit local links in the index documents a manifest selects")
+    p = sub.add_parser(
+        "links", help="Audit local links in the index documents a manifest selects"
+    )
     p.add_argument("--manifest", type=Path, required=True)
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_links, catalog_free=True)
-    p = sub.add_parser("publish", help="Stage an explicit file-only report site from a publication allowlist")
+    p = sub.add_parser(
+        "publish",
+        help="Stage an explicit file-only report site from a publication allowlist",
+    )
     p.add_argument("--publication", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     p.set_defaults(func=cmd_publish, catalog_free=True)
     args = parser.parse_args(argv)
     if args.catalog is None and not getattr(args, "catalog_free", False):
         parser.error(f"{args.command} needs --catalog")
-    try: return args.func(args)
-    except (ValueError, OSError, KeyError, TypeError) as e: return fail(str(e))
+    try:
+        return args.func(args)
+    except (ValueError, OSError, KeyError, TypeError) as e:
+        return fail(str(e))
 
 
 if __name__ == "__main__":

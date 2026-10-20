@@ -1,11 +1,11 @@
 """Synthetic tests for conservative note-link planning and pure rewrites."""
 
 from __future__ import annotations
-import sys
 
 import importlib.util
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -236,7 +236,6 @@ def test_yaml_evaluation_markers_are_not_identity_strings(alias):
 
 def test_cli_returns_a_plan_without_modifying_notes(tmp_path):
     import subprocess
-    import sys
 
     source = note(tmp_path, "one.md", "[[two]]")
     note(tmp_path, "two.md", "body")
@@ -255,7 +254,6 @@ def test_cli_returns_a_plan_without_modifying_notes(tmp_path):
 
 def test_cli_missing_scope_fails_without_edit_proposals(tmp_path):
     import subprocess
-    import sys
 
     script = Path(__import__("sinnix_fs.inventory", fromlist=["__file__"]).__file__)
     run = subprocess.run(

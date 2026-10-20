@@ -6,10 +6,10 @@ change needs no edit in this file and cannot be ratified by one.
 """
 
 from __future__ import annotations
-import sys
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from sinnix_lib.layout import ROOTS as LAYOUT_ROOTS

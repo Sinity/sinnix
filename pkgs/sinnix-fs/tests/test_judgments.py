@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from sinnix_lib.judgments import judgment_target
 
 SCRIPT = Path(__import__("sinnix_fs.inventory", fromlist=["__file__"]).__file__)
 
@@ -132,7 +133,7 @@ def test_root_and_trailing_slash_are_component_aware(tmp_path):
 )
 def test_ambiguous_path_spellings_are_rejected(path):
     with pytest.raises(ValueError):
-        load().judgment_target("prefix:" + path)
+        judgment_target("prefix:" + path)
 
 
 def test_filename_shaped_digest_is_rejected_and_preserved_on_disk(tmp_path):

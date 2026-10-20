@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sinnix_runtime import health, pressure
 from sinnix_lib.atomic_json import write_json_atomic
+from sinnix_runtime import health, pressure
 
 # Swap with headroom and nothing stalling: the swap lane's healthy path, held
 # fixed so these tests judge the inventory sweeps alone. The lane's own

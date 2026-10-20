@@ -39,7 +39,11 @@ def observe_report_keys(observe_root: Path) -> set[str]:
 
 def snapshot_state_keys(hub_root: Path) -> set[str]:
     """Keys the hub server adds on top of the observe report in refresh()."""
-    tree = ast.parse((Path(os.environ["NOCTALIA_RUNTIME"]) / "sinnix_runtime/snapshot.py").read_text())
+    tree = ast.parse(
+        (
+            Path(os.environ["NOCTALIA_RUNTIME"]) / "sinnix_runtime/snapshot.py"
+        ).read_text()
+    )
     keys: set[str] = set()
     for node in ast.walk(tree):
         # `report["attention"] = ...` style additions.

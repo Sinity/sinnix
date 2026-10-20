@@ -14,8 +14,8 @@ not checked.
 import argparse
 import ast
 import base64
-import json
 import io
+import json
 import os
 import re
 import stat
@@ -24,7 +24,13 @@ import sys
 import tokenize
 from pathlib import Path
 
-from sinnix_lib.layout import COLLECTION_PATHS, MACHINE_LANES, OPTIONAL, RETIRED_PATHS, ROOTS
+from sinnix_lib.layout import (
+    COLLECTION_PATHS,
+    MACHINE_LANES,
+    OPTIONAL,
+    RETIRED_PATHS,
+    ROOTS,
+)
 
 
 def metadata(path: Path):
@@ -61,7 +67,9 @@ def check_taxonomy() -> int:
                 skipped += 1
                 continue
             if not stat.S_ISDIR(node.st_mode):
-                print(f"sinnix fs layout: INVALID root (expected directory without alias): {root}")
+                print(
+                    f"sinnix fs layout: INVALID root (expected directory without alias): {root}"
+                )
                 status = 1
                 continue
             children = sorted(root.iterdir())
@@ -75,7 +83,9 @@ def check_taxonomy() -> int:
         required = {*subjects, "INVENTORY.md"}
         for path in children:
             try:
-                if path.name not in required | OPTIONAL[absolute] and not is_tool_cache(path):
+                if path.name not in required | OPTIONAL[absolute] and not is_tool_cache(
+                    path
+                ):
                     print(f"sinnix fs layout: UNEXPECTED node: {path}")
                     status = 1
             except OSError as error:
@@ -113,7 +123,9 @@ def check_taxonomy() -> int:
                     continue
                 print(f"sinnix fs layout: INVALID managed directory: {path}")
             except OSError as error:
-                print(f"sinnix fs layout: INACCESSIBLE managed directory: {path}: {error}")
+                print(
+                    f"sinnix fs layout: INACCESSIBLE managed directory: {path}: {error}"
+                )
             status = 1
         for relative in RETIRED_PATHS:
             path = realm / relative
@@ -122,11 +134,15 @@ def check_taxonomy() -> int:
                     print(f"sinnix fs layout: RETIRED managed path recreated: {path}")
                     status = 1
             except OSError as error:
-                print(f"sinnix fs layout: INACCESSIBLE retired-path check: {path}: {error}")
+                print(
+                    f"sinnix fs layout: INACCESSIBLE retired-path check: {path}: {error}"
+                )
                 status = 1
     if status == 0:
         if skipped:
-            print(f"sinnix fs layout: {inspected} present roots match taxonomy; {skipped} absent roots skipped")
+            print(
+                f"sinnix fs layout: {inspected} present roots match taxonomy; {skipped} absent roots skipped"
+            )
         else:
             print("sinnix fs layout: all roots match taxonomy")
     return status
@@ -213,7 +229,9 @@ def comment_columns(path: Path) -> dict[int, int]:
     try:
         return {
             token.start[0]: token.start[1]
-            for token in tokenize.generate_tokens(io.StringIO(path.read_text()).readline)
+            for token in tokenize.generate_tokens(
+                io.StringIO(path.read_text()).readline
+            )
             if token.type == tokenize.COMMENT
         }
     except (SyntaxError, tokenize.TokenError, UnicodeError):
@@ -233,9 +251,14 @@ def selector_literal(line: str, start: int) -> bool:
 
 def fixture_file(path: Path, root: Path) -> bool:
     parts = path.relative_to(root).parts
-    return (parts[0] == "tests" or parts[:2] == ("flake", "tests")
-            or (parts[0] == "pkgs" and ("tests" in parts[:-1]
-                or path.name.startswith("test_"))))
+    return (
+        parts[0] == "tests"
+        or parts[:2] == ("flake", "tests")
+        or (
+            parts[0] == "pkgs"
+            and ("tests" in parts[:-1] or path.name.startswith("test_"))
+        )
+    )
 
 
 def docstring_lines(path: Path) -> set[int]:
@@ -252,7 +275,11 @@ def docstring_lines(path: Path) -> set[int]:
         return set()
     lines = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+        if (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
             lines.update(range(node.lineno, (node.end_lineno or node.lineno) + 1))
     return lines
 
@@ -268,7 +295,9 @@ def inspect_path(path: Path):
 def scan_repo(name: str, root: Path) -> list[dict]:
     info = inspect_path(root)
     if info is None or not stat.S_ISDIR(info.st_mode):
-        raise ScanError(f"source repository is unavailable or not a directory: {name}: {root}")
+        raise ScanError(
+            f"source repository is unavailable or not a directory: {name}: {root}"
+        )
     # Source files only, and only source files -- explicitly, not by
     # excluding known-noisy extensions one at a time. First attempt used -uu
     # (include hidden/gitignored) to catch generated files that might carry a
@@ -279,13 +308,34 @@ def scan_repo(name: str, root: Path) -> list[dict]:
     # roughly 131 the manual survey found; the true population is code, so
     # code is what gets searched.
     proc = subprocess.run(
-        ["rg", "--json", "--line-number",
-         "--glob", "scripts/*", "--glob", "!scripts/*.*",
-         "--glob", "*.nix", "--glob", "*.py", "--glob", "*.sh",
-         "--glob", "!.git/**", "--glob", "!node_modules/**",
-         "--glob", "!result/**", "--glob", "!result-*/**",
-         PATH_RE.pattern, "."],
-        cwd=root, capture_output=True, text=True,
+        [
+            "rg",
+            "--json",
+            "--line-number",
+            "--glob",
+            "scripts/*",
+            "--glob",
+            "!scripts/*.*",
+            "--glob",
+            "*.nix",
+            "--glob",
+            "*.py",
+            "--glob",
+            "*.sh",
+            "--glob",
+            "!.git/**",
+            "--glob",
+            "!node_modules/**",
+            "--glob",
+            "!result/**",
+            "--glob",
+            "!result-*/**",
+            PATH_RE.pattern,
+            ".",
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
     )
     if proc.returncode not in (0, 1):  # 1 = no matches, not an error
         raise ScanError(f"rg failed on {name} (exit {proc.returncode}): {proc.stderr}")
@@ -307,7 +357,9 @@ def scan_repo(name: str, root: Path) -> list[dict]:
             for field in (data["path"], data["lines"]):
                 text = field.get("text")
                 if text is None:
-                    text = base64.b64decode(field["bytes"], validate=True).decode("utf-8")
+                    text = base64.b64decode(field["bytes"], validate=True).decode(
+                        "utf-8"
+                    )
                 if not isinstance(text, str):
                     raise ValueError("match text must be a string")
                 fields.append(text)
@@ -328,9 +380,12 @@ def scan_repo(name: str, root: Path) -> list[dict]:
                     semantics[file_part] = source_roles(path)
                 except UnicodeError:
                     semantics[file_part] = {}
-            kind = ("cosmetic" if path.suffix in COSMETIC_EXTS
-                    or int(lineno) in documentation[file_part]
-                    else semantics[file_part].get(int(lineno), classify_line(text)))
+            kind = (
+                "cosmetic"
+                if path.suffix in COSMETIC_EXTS
+                or int(lineno) in documentation[file_part]
+                else semantics[file_part].get(int(lineno), classify_line(text))
+            )
         for m in PATH_RE.finditer(text):
             reference_kind = kind
             if kind == "live":
@@ -339,13 +394,15 @@ def scan_repo(name: str, root: Path) -> list[dict]:
                     reference_kind = "cosmetic"
                 elif selector_literal(text, m.start()):
                     reference_kind = "pattern"
-            rows.append({
-                "repo": name,
-                "file": str(path),
-                "line": int(lineno),
-                "path": m.group(0).rstrip("/,;)\"'"),
-                "kind": reference_kind,
-            })
+            rows.append(
+                {
+                    "repo": name,
+                    "file": str(path),
+                    "line": int(lineno),
+                    "path": m.group(0).rstrip("/,;)\"'"),
+                    "kind": reference_kind,
+                }
+            )
     return rows
 
 
@@ -378,40 +435,57 @@ def check_refs(*, json_output: bool = False) -> int:
             missing.append((path, existing_ancestor(path)))
 
     if json_output:
-        print(json.dumps({
-            "schema": "sinnix.fs-path-references.v1",
-            "references": rows,
-            "required_paths": len(unique_paths),
-            "missing_required_paths": [path for path, _ in missing],
-            "scope": "Source-literal roles; historical, optional, output and example addresses do not assert current availability.",
-        }))
+        print(
+            json.dumps(
+                {
+                    "schema": "sinnix.fs-path-references.v1",
+                    "references": rows,
+                    "required_paths": len(unique_paths),
+                    "missing_required_paths": [path for path, _ in missing],
+                    "scope": "Source-literal roles; historical, optional, output and example addresses do not assert current availability.",
+                }
+            )
+        )
         return 1 if missing else 0
     if not missing:
-        print(f"sinnix fs layout: OK -- {len(unique_paths)} distinct live "
-              f"paths across {len(live)} references, all exist")
+        print(
+            f"sinnix fs layout: OK -- {len(unique_paths)} distinct live "
+            f"paths across {len(live)} references, all exist"
+        )
         return 0
 
-    print(f"sinnix fs layout: {len(missing)} of {len(unique_paths)} live "
-          f"paths do not exist:", file=sys.stderr)
+    print(
+        f"sinnix fs layout: {len(missing)} of {len(unique_paths)} live "
+        f"paths do not exist:",
+        file=sys.stderr,
+    )
     for path, ancestor in missing:
         sites = [r for r in live if r["path"] == path]
         where = ", ".join(f"{r['repo']}:{r['file']}:{r['line']}" for r in sites[:3])
-        more = f" (+{len(sites)-3} more)" if len(sites) > 3 else ""
+        more = f" (+{len(sites) - 3} more)" if len(sites) > 3 else ""
         print(f"  {path}", file=sys.stderr)
-        print(f"    nearest existing ancestor: {ancestor or '(none -- /realm itself?)'}",
-              file=sys.stderr)
+        print(
+            f"    nearest existing ancestor: {ancestor or '(none -- /realm itself?)'}",
+            file=sys.stderr,
+        )
         print(f"    referenced at: {where}{more}", file=sys.stderr)
     return 1
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="sinnix fs layout", description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        prog="sinnix fs layout", description=__doc__.splitlines()[0]
+    )
     parser.add_argument(
         "--refs",
         action="store_true",
         help="check literal /realm paths in source instead of the taxonomy",
     )
-    parser.add_argument("--json", action="store_true", help="Report all source-reference roles as JSON (with --refs)")
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Report all source-reference roles as JSON (with --refs)",
+    )
     args = parser.parse_args(argv)
     if args.json and not args.refs:
         parser.error("--json requires --refs")

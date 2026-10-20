@@ -1,17 +1,17 @@
 """An explicit publication projection must not expose private directories."""
-import sys
 
 import json
 import os
 import runpy
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-BUILD = runpy.run_path(str(Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)))[
-    "build"
-]
+BUILD = runpy.run_path(
+    str(Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__))
+)["build"]
 
 
 def test_only_selected_files_are_published_with_stable_relative_urls(tmp_path):
@@ -189,7 +189,8 @@ def test_publication_fifo_is_rejected_before_creating_output(tmp_path):
     output = tmp_path / "site"
     result = subprocess.run(
         [
-            sys.executable, str(Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)),
+            sys.executable,
+            str(Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)),
             "publish",
             "--publication",
             str(manifest),
@@ -223,7 +224,8 @@ def test_utf16_publication_manifest_remains_supported(tmp_path):
     output = tmp_path / "site"
     result = subprocess.run(
         [
-            sys.executable, str(Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)),
+            sys.executable,
+            str(Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)),
             "publish",
             "--publication",
             str(manifest),
@@ -244,7 +246,8 @@ def test_oversized_publication_manifest_cannot_create_output(tmp_path):
     output = tmp_path / "site"
     result = subprocess.run(
         [
-            sys.executable, str(Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)),
+            sys.executable,
+            str(Path(__import__("sinnix_fs.catalog", fromlist=["__file__"]).__file__)),
             "publish",
             "--publication",
             str(manifest),

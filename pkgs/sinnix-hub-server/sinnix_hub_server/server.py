@@ -18,15 +18,15 @@ from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.http import RequestBodyError, read_json_object
 from sinnix_lib.lock import flock
 from sinnix_lib.systemd import sd_notify, watchdog_period
-
 from sinnix_runtime import health
-from . import pages
 from sinnix_runtime import inventory as runtime_inventory
 from sinnix_runtime.actions import ActionError, ActionService
+from sinnix_runtime.snapshot import SnapshotBuilder
+
+from . import pages
 from .feedback import MAX_BODY as FEEDBACK_MAX_BODY
 from .feedback import SCHEMA as FEEDBACK_SCHEMA
 from .feedback import FeedbackSpool
-from sinnix_runtime.snapshot import SnapshotBuilder
 
 FEEDBACK_PATH = "/feedback"
 FAILURE_PATH = "/v1/health/failure"

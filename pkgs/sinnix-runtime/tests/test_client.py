@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 from sinnix_runtime.client import (
-    RuntimeClientError,
     RuntimeClient,
+    RuntimeClientError,
 )
 
 
@@ -215,8 +215,11 @@ def test_lookup_returns_retained_receipt(tmp_path: Path) -> None:
 def test_client_keeps_response_bound_before_decoding(tmp_path):
     response = FakeResponse(200, {"value": "x" * 100})
     connection = FakeConnection(response)
-    actions = RuntimeClient(tmp_path / "owner.sock", max_response_bytes=16,
-                            connection_factory=lambda _: connection)
+    actions = RuntimeClient(
+        tmp_path / "owner.sock",
+        max_response_bytes=16,
+        connection_factory=lambda _: connection,
+    )
     with pytest.raises(RuntimeClientError, match="response bound"):
         actions.snapshot()
     assert connection.closed

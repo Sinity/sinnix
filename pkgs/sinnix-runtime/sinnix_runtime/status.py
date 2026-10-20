@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import argparse
 import http.client
-from .client import UnixConnection
 import json
 import os
 import subprocess
@@ -25,6 +24,7 @@ from typing import Any, Callable
 from sinnix_lib.ledger import utc_ts
 
 from . import inventory as runtime_inventory
+from .client import UnixConnection
 
 SCHEMA = "sinnix-status-v1"
 
@@ -32,8 +32,6 @@ SOCKET_TIMEOUT = 3.0
 BD_TIMEOUT = 8.0
 BD_HEAD_LIMIT = 5
 TITLE_MAX = 88
-
-
 
 
 def fetch_socket_json(

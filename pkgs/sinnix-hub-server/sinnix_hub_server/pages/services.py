@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from sinnix_runtime.actions import POLICY_PROPERTIES
+
 from .probes import unit_states
 from .shell import (
     ACTION_SCRIPT,

@@ -1,9 +1,9 @@
 from __future__ import annotations
-import sys
 
 import json
 import stat
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 
