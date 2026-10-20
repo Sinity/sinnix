@@ -598,7 +598,7 @@ drain_ambient_adb() {
 # the vendor VOICE_CALL route fails. Decode every newly observed recording at
 # intake so "BCR produced a file" is never confused with "call audio exists".
 drain_bcr_calls_adb() (
-  local remote_dir export_dir dest debug_dir history_dir ledger seen remote name
+  local remote_dir export_dir dest debug_dir ledger seen remote name
   local remote_size export_size duration rate channels
   local source_kind sidecar_target samples expected_frames expected_rate expected_channels staging_bytes
   local levels mean max dead truncated_export log_remote log_name display audio_candidate decode_ok
@@ -615,7 +615,6 @@ drain_bcr_calls_adb() (
   export_dir="/sdcard/sinnix-calls"
   dest="$LAKE_ROOT/calls"
   debug_dir="$dest/debug"
-  history_dir="$dest/history"
   ledger="$dest/levels.jsonl"
   mkdir -p "$dest" || return 1
   # Serialize the complete receipt/publication transaction, including rollback.
@@ -896,7 +895,7 @@ drain_bcr_calls_adb() (
       if adb_shell_args test -f "$remote_dir/$name" >/dev/null 2>&1 </dev/null; then
         continue
       fi
-      source_kind=export
+      source_kind="export"
     fi
     log_remote="${remote%.oga}.log.txt"
     log_name="${name%.oga}.log.txt"

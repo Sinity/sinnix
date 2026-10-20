@@ -112,7 +112,7 @@ exec "${REAL_GIT:?}" "$@"
 EOF
 chmod +x "$bin/git"
 set +e
-(cd "$repo" && REAL_GIT="$real_git" PATH="$bin:$PATH" "$worker" done "$root/result.json") >"$root/status-failed.out" 2>"$root/status-failed.err"
+(cd "$repo" && REAL_GIT="$real_git" PATH="$bin:$PATH" "$worker" "done" "$root/result.json") >"$root/status-failed.out" 2>"$root/status-failed.err"
 status_failed=$?
 set -e
 test "$status_failed" -eq 1
@@ -130,7 +130,7 @@ set -euo pipefail
 printf '{"candidate_sha":"%s","beads":"invalid replacement"}\n' "$RESULT_HEAD" >"$ORIGINAL_RESULT"
 EOF
 chmod +x "$bin/agentctl"
-(cd "$repo" && REAL_AGENTCTL="$real_agentctl" ORIGINAL_RESULT="$root/result.json" RESULT_HEAD="$head" PATH="$bin:$PATH" "$worker" done "$root/result.json") >"$root/replaced-result.json"
+(cd "$repo" && REAL_AGENTCTL="$real_agentctl" ORIGINAL_RESULT="$root/result.json" RESULT_HEAD="$head" PATH="$bin:$PATH" "$worker" "done" "$root/result.json") >"$root/replaced-result.json"
 cmp "$root/expected-result.json" "$root/replaced-result.json"
 cp "$root/expected-result.json" "$root/result.json"
 rm "$bin/agentctl"
