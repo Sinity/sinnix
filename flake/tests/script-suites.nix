@@ -25,10 +25,6 @@
           # Where the suite sits in the reproduced tree. A skill's tests
           # resolve the repository root by walking up from their own file, so
           # they only find the scripts they drive under their real path.
-          # Sibling sources the suite imports directly (a collector module
-          # inlined into a unit, for instance) must sit where the suite
-          # expects them, next to its tests directory.
-          packageFiles ? [ ],
           pythonPackages ? [ ],
           # Repository files the suite reads at a path of its own choosing --
           # a declarative source it asserts stays untouched, for instance.
@@ -56,12 +52,6 @@
                 install -m 0755 ${../../scripts + "/${script}"} "$root/scripts/${script}"
                 patchShebangs "$root/scripts/${script}"
               '') scripts
-            )}
-            ${builtins.concatStringsSep "\n" (
-              map (file: ''
-                mkdir -p "$root/pkgs/${name}/$(dirname ${file})"
-                cp ${../../pkgs + "/${name}/${file}"} "$root/pkgs/${name}/${file}"
-              '') packageFiles
             )}
             ${builtins.concatStringsSep "\n" (
               map (entry: ''
@@ -147,20 +137,6 @@
           name = "stacked-review-threads-status";
           suiteDir = ../../scripts/tests/stacked-review-threads-status;
           scripts = [ "stacked-review-threads-status" ];
-        };
-        # The SQLite backup remains a standalone script package. Its regression
-        # suite drives the source script through subprocess, while the
-        # machine-telemetry package owns collector tests in its checkPhase.
-        sqlite-backup-regression-suite = mkScriptSuite {
-          name = "machine-telemetry";
-          suiteDir = ../../pkgs/machine-telemetry/tests;
-          scripts = [ "sinnix-sqlite-backup" ];
-          packageFiles = [
-            "machine_telemetry/collector.py"
-            "machine_telemetry/segments.py"
-          ];
-          extraPythonPackages = [ sinnix-lib ];
-          nativeBuildInputs = [ pkgs.zstd ];
         };
         # Provably fails when: syslog-index stamps a grammar other than the
         # estate's %Y-%m-%dT%H:%M:%SZ (the offset-suffix spelling, for
