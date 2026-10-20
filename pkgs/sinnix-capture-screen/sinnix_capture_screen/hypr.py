@@ -45,7 +45,11 @@ def socket2_path(runtime_dir: str, instance_signature: str) -> str:
 
 def connect_socket2(path: str) -> socket.socket:
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.connect(path)
+    try:
+        sock.connect(path)
+    except OSError:
+        sock.close()
+        raise
     return sock
 
 

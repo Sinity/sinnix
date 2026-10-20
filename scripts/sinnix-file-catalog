@@ -4,7 +4,7 @@
 # runtimeInputs: python3 util-linux btrfs-progs
 # pythonPackages: @sinnix-lib
 
-"""Small, portable file evidence catalog.
+"""Maintain attributed file observations and their location history.
 
 The catalog is deliberately metadata-only: importing an observation never
 hashes a file or changes the file system.  Paths are checked and stat'ed so a

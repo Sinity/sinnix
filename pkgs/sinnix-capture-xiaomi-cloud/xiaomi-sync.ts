@@ -1,55 +1,10 @@
-// Xiaomi cloud capture: one sync pass (sinnix-ogll).
+// Sync Xiaomi cloud records through the pinned upstream miband-bot client.
+// Keep vendor summaries and raw samples: summaries carry computed scores and
+// distributions absent from samples; samples retain device-attributed series
+// and minute-level sleep stages. Neither representation replaces the other.
 //
-// A second, independent source for the band data, read from Xiaomi's cloud
-// instead of the phone -- no BLE contention, no Health Connect, no screen.
-// Measured 2026-08-17 before this service existed: the cloud held heart
-// rate two hours FRESHER than Health Connect, because Mi Fitness syncs the
-// cloud silently while HC waits for its manual Sync button; and the cloud
-// sleep summaries carry sleep_score, REM duration and per-segment detail
-// that the HC write path never gets.
-//
-// The Xiaomi protocol client is upstream GPL-3 source (miband-bot), fetched
-// pinned by the derivation and imported at runtime -- deliberately not
-// vendored into this repository. This file only orchestrates: fetch the
-// recent window per metric, and append envelopes to the lane.
-//
-// Write-on-change: every envelope carries a content hash, and a state file
-// remembers the hash last written per (kind, day). Xiaomi revises a day's
-// data as more band syncs land, so the same day is legitimately re-fetched
-// every pass; a revision is appended (the history of revisions is
-// evidence), an identical re-read is not. Raw fidelity: the `data` field
-// is the complete parsed API item, never a reduction of it.
-//
-// Two planes, both measured against this account (EU, de shard):
-// - AGGREGATED (vendor_sleep / vendor_*_day): get_aggregated_fitness_data_
-//   by_time daily summaries. Own uid works as relative_uid;
-//   get_latest_fitness_data and relatives/* are family-care surfaces
-//   answering -8/-6 for self and are not used.
-// - RAW (vendor_raw_*): get_fitness_data_by_time returns the band's dense
-//   series -- ~2-minute heart rate, continuous SpO2 and stress, 5-minute
-//   steps/calories, and a per-night sleep object carrying the complete
-//   minute-level stage transition list plus avg_breath and sleep_efficiency.
-//   Each record names its writing device in `sid` (the phone's synthetic
-//   records use an "hlth.gen_" prefix).
-//
-// Both planes are kept, because neither derives from the other. Checked
-// field by field 2026-08-17: the aggregates carry vendor-COMPUTED numbers
-// with no raw counterpart -- personalized heart-rate zone durations,
-// abnormal_hr_count, lack_spo2_count, the stress band histogram, and the
-// sleep_score -- and the raw plane carries the samples the aggregates
-// reduce. Dropping either would lose data that cannot be recomputed here.
-//
-// There WAS a third plane. Xiaomi's FDS blob store serves per-night detail
-// files, and this file used to fetch them: mint a signed URL from
-// gen_download_url (did = the band's sid, not the user id -- upstream's
-// version answers -6 "device not exist" for self access), download, AES-
-// unwrap under the response's obj_key, parse. It never once returned a
-// blob. A 200-key sweep over every anchor x type-byte combination found no
-// object for any night: this band does not upload them. The capability that
-// path existed to deliver -- minute-level sleep staging -- arrives on the
-// raw plane instead, in vendor_raw_sleep's `items[]`. So it is gone rather
-// than "armed": a request per sleep segment per pass, forever, for data
-// already in hand.
+// Re-fetch recent days for delayed uploads. Append changed (kind, day) records
+// with a content hash; preserve the complete parsed API item in `data`.
 
 // Handle informational/invalid requests before importing the credential client.
 const args = process.argv.slice(2);

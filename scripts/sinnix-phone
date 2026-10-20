@@ -3,37 +3,17 @@
 # description: Reach the phone over the tailnet — status, shell, screen mirror, media pull, clipboard push
 # runtimeInputs: bash python3 coreutils util-linux openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl tailscale debootstrap zip avahi @sinnix-phone-dispatcher @sinnix-remote-command @sinnix-phone-keyguard
 
-#
-# Device control uses authenticated Android wireless debugging. Its connection
-# port changes; discover the enrolled phone with Avahi rather than assuming 5555.
-# USB remains a recovery route. `adb-restore` enables wireless debugging through
-# an authorized USB connection without opening legacy TCP debugging.
-#
-# Ambient audio and durable delivery are produced by the native Sinnix app,
-# not by Termux. Termux remains an emergency shell and clipboard surface, but
-# it cannot hold the microphone: only an app declaring
-# foregroundServiceType="microphone" keeps recording once the screen goes off,
-# which is why the Termux recorder truncated chunks and never came back after
-# a reboot (sinnix-hcjq). `app-install` retires Termux's runit `ambient`
-# service with a `down` file so the two never contend for the mic.
-#
-# Clipboard is one-way (desktop -> phone). Android blocks clipboard READS
-# from a backgrounded app (since Android 10): `termux-clipboard-get`
-# silently returns empty unless Termux is the foreground app.
-# `termux-clipboard-set` has no such restriction. Phone->desktop sync would
-# need Termux kept foregrounded or an AccessibilityService-based reader.
-# PRIMARY has no Android equivalent; this covers CLIPBOARD only.
+# Use authenticated wireless ADB discovered through Avahi; its port changes.
+# USB is the recovery route. `adb-restore` enables trusted wireless debugging.
+# The native app owns ambient audio and durable delivery. `app-install` keeps
+# Termux's retired ambient recorder down to prevent microphone contention.
+# Termux remains a shell and desktop-to-phone clipboard surface. Background
+# clipboard reads are restricted by Android; PRIMARY has no Android equivalent.
 set -euo pipefail
 umask 077
 
-# Where the phone is, in preference order, not where it is assumed to be.
-#
-# The tailnet address used to be the only one. That made a dropped VPN sever
-# every lane at once -- drain, stream and dispatcher -- while the phone sat on
-# the same desk, healthy, still recording. Resolution now tries the tailnet
-# first (it works off-wifi, which the LAN paths cannot), then mDNS, then the
-# last address that worked, then a LAN sweep for an authenticated phone.
-# SINNIX_PHONE_IP still overrides address selection; SSH still verifies identity.
+# Prefer tailnet, then mDNS, the last authenticated host, and a bounded LAN
+# sweep. SINNIX_PHONE_IP overrides selection; SSH verifies every candidate.
 PHONE_TS_IP_DEFAULT="100.111.240.107"
 PHONE_MDNS_NAME="${SINNIX_PHONE_MDNS:-redmi-note-11.local}"
 PHONE_HOST_CACHE="${SINNIX_PHONE_STATE_DIR:-/realm/state/sinnix-phone}/last-host"

@@ -171,13 +171,11 @@ colons). A chunk is written as `.m4a.part` in private storage and published only
 after the muxer closes it and its duration is checked; a `.part` left by a
 crashed recorder becomes `.m4a.orphan` and is still uploaded.
 
-The app checks that it is actually recording, because most past failures
-looked healthy: Termux-era truncated chunks, capture dying at reboot, digital
-silence at full bitrate. Every 20 s it checks amplitude (four exact-zero
-samples in a row mean the microphone is muted, so the recorder restarts) and
-file growth (no growth for 90 s, or under half the expected bitrate, also
-restarts it). Each closed chunk's encoded duration is compared with elapsed
-time. On prime, `sinnix phone ambient-audit` decodes every chunk into
+The app checks amplitude and file growth every 20 s. Four exact-zero
+samples in a row restart the recorder. No growth for 90 s, or growth under
+half the expected bitrate, also restarts it. Each closed chunk's encoded
+duration is compared with elapsed time. On prime, `sinnix phone ambient-audit`
+decodes every chunk into
 `ambient-levels.jsonl` and flags all-zero audio.
 
 Another app using the microphone does not stop capture (they use separate
@@ -186,8 +184,8 @@ inputs); phone calls do, by Android policy. Capture restarts on app open, on a
 app is remembered, so the watchdog does not undo it.
 
 A direct-boot-aware service records into device-protected storage before the
-first unlock and moves the data after unlock (verified 2026-08-27). That buffer
-is capped, so a very long locked period drops its oldest audio.
+first unlock and moves the data after unlock. That buffer is capped, so a very
+long locked period drops its oldest audio.
 
 The capture, grants and transport screens grade each source as **evidenced**,
 **unverified** or **broken**; nothing is shown as OK without a measurement

@@ -1,11 +1,6 @@
-"""Frame grab (grim), WebP encoding, phash-array glue, and metadata/JSONL
-payload shape.
+"""Capture PNG bytes with grim, encode WebP, and publish frames with metadata.
 
-See daemon.py's module docstring for why this shells out to `grim` rather
-than driving Noctalia's own screenshot IPC or a hyprland-toplevel-export
-client. `capture_frame_bytes`/`encode_webp`/`write_frame` are thin IO
-wrappers; `build_frame_payload` and `frame_filename` are pure and
-pytest-covered directly.
+The daemon owns trigger policy; this module owns frame I/O and payload shape.
 """
 
 from __future__ import annotations
@@ -100,10 +95,7 @@ def build_frame_payload(
     sha256: str,
     trigger: str,
 ) -> dict[str, Any]:
-    """The exact metadata shape from sinnix-9pd 3.2: {ts, window_class,
-    window_title, workspace, geometry, monitor, sha256} plus `trigger`
-    (which of the three trigger classes fired this capture -- not required
-    by the bead but cheap and useful for later analysis)."""
+    """Describe the captured window, encoded bytes and acquisition trigger."""
     return {
         "ts": ts,
         "window_class": window_class,

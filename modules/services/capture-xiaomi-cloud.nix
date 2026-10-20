@@ -1,18 +1,5 @@
-# Xiaomi cloud capture: the band's data read from Xiaomi's servers,
-# beside (not through) the phone's Health Connect lane.
-#
-# Why it exists (sinnix-ogll, measured 2026-08-17): Mi Fitness writes to
-# Health Connect only when its on-screen Sync button is pressed -- the forced
-# SyncJobService was tested and writes nothing -- but it syncs Xiaomi's cloud
-# silently, so the cloud held heart rate two hours fresher than HC on the
-# night this was built. The cloud sleep summaries also carry sleep_score,
-# REM duration and per-segment naps that the HC write path never gets. This
-# service polls that cloud with a QR-established token (one browser-session
-# confirmation, agent-drivable; token refresh sustains it) and appends
-# write-on-change envelopes to the lane.
-#
-# No BLE contention by construction: this never talks to the band, so it can
-# never fight Mi Fitness for the bond the way Gadgetbridge does.
+# Capture Xiaomi cloud records independently of phone Health Connect and BLE.
+# The writer retains raw samples and vendor summaries as separate records.
 {
   mkServiceModule,
   lib,
@@ -56,9 +43,6 @@ mkServiceModule {
       }
     ];
   };
-  # The timer's own Description= is dropped: the factory's generated timer
-  # body carries no description field, unlike the hand-written one it
-  # replaces -- cosmetic only, doesn't affect scheduling.
   job =
     { cfg, ... }:
     {
@@ -67,10 +51,7 @@ mkServiceModule {
       serviceConfig.UMask = "0077";
       # Scheduled and recovery passes share the write-on-change state.
       execStart = "${pkgs.util-linux}/bin/flock --exclusive ${stateDir}/sync.lock ${lib.getExe scriptPkgs.sinnix-capture-xiaomi-cloud}";
-      # The module declares this lane to the runtime inventory and creates
-      # its directory, so it must also be what the writer uses. It was
-      # not: both sides carried the same literal independently, and when
-      # the lane moved, the declaration followed and the writer did not.
+      # Keep the writer on the registered lane and shared sync state.
       environment = {
         XIAOMI_CLOUD_LANE = laneDir;
         XIAOMI_CLOUD_STATE = stateDir;

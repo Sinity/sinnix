@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+from sinnix_capture_screen import hypr
 from sinnix_capture_screen.hypr import (
     get_active_window,
     get_cursor_pos,
@@ -131,3 +133,13 @@ def test_event_pump_drains_while_capture_consumer_is_busy():
         reader.close()
         writer.close()
     assert not pump._thread.is_alive()
+
+
+def test_failed_socket_connection_releases_descriptor(monkeypatch, tmp_path):
+    import socket
+
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    monkeypatch.setattr(hypr.socket, "socket", lambda *_: sock)
+    with pytest.raises(OSError):
+        hypr.connect_socket2(str(tmp_path / "missing.socket"))
+    assert sock.fileno() == -1

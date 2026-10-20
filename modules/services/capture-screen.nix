@@ -1,21 +1,6 @@
-# capture-screen: Hyprland-event + idle-pause + 30s-floor triggered
-# per-window screen frame capture
-#
-# The frame-grab mechanism and idle-pause heuristic are documented in
-# pkgs/sinnix-capture-screen/sinnix_capture_screen/daemon.py's module docstring --
-# read that before touching the mechanism. Short version: Noctalia's
-# screenshot IPC (`noctalia msg screenshot-*`) is whole-output/region-only
-# with no scriptable raw-bytes interface, so this collector drives `grim`
-# directly -- the SAME wlr-screencopy protocol Noctalia uses. Black frames
-# are a compositor-side problem, cured by
-# `render:keep_unmodified_copy`/`render:use_shader_blur_blend` in
-# modules/features/desktop/hyprland/default.nix, not by swapping grim out;
-# the setting applies to any wlr-screencopy client.
-#
-# `--daily-ceiling-bytes` (default 10GB) is a runaway-bug backstop, NOT a
-# policy cap: it exists only to stop a stuck dedup/trigger loop from writing
-# unbounded data, and it trips loudly (stderr, once per UTC day) rather than
-# silently dropping writes.
+# Event-driven focused-window capture with a periodic attempt floor.
+# The daemon owns capture mechanics; its CLI arguments below set policy.
+# The daily byte ceiling stops runaway writes until the next UTC day.
 {
   mkServiceModule,
   mkCaptureLane,
@@ -92,7 +77,7 @@ mkServiceModule (mkCaptureLane {
     dailyCeilingBytes = lib.mkOption {
       type = lib.types.int;
       default = 10000000000;
-      description = "Runaway-bug backstop on daily write volume (default 10GB), NOT a policy cap -- see module docstring.";
+      description = "Daily write ceiling that suspends capture until the next UTC day (default 10GB).";
     };
   };
   tmpfilesRules = [ "d ${laneDir} 0700 ${username} users -" ];

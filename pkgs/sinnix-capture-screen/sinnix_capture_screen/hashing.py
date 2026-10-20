@@ -91,7 +91,7 @@ def phash64(gray: np.ndarray, hash_size: int = 8) -> int:
 
 
 def hamming_distance(a: int, b: int) -> int:
-    return bin(a ^ b).count("1")
+    return (a ^ b).bit_count()
 
 
 def is_near_duplicate(
@@ -107,22 +107,16 @@ def is_near_duplicate(
 
 
 def is_degenerate_frame(gray: np.ndarray, *, stddev_threshold: float = 1.0) -> bool:
-    """True for a flat/single-color frame (stddev near zero on a 0-255
-    grayscale array) -- the guard against persisting a black/garbage
-    capture (see daemon.py's module docstring: a live GBM/XR30 screencopy
-    regression was found producing exactly this during this lane's
-    authorship). Real desktop content -- even a mostly-dark terminal --
-    has far higher variance than this threshold."""
+    """Reject nearly constant grayscale frames before publication.
+
+    The threshold is measured on 0-255 values; compositor screencopy failures
+    can yield solid black or other single-color frames.
+    """
     return float(np.std(gray)) < stddev_threshold
 
 
-# ---------------------------------------------------------------------------
-# Daily-volume throttle guard: a runaway-bug backstop, NOT a policy cap (see
-# capture-screen.nix's docstring -- the operator's storage stance is "keep
-# full fidelity forever, add capacity"). Trips loudly exactly once per UTC
-# day when the day's write volume would cross `ceiling_bytes`, then refuses
-# further writes until the day rolls over.
-# ---------------------------------------------------------------------------
+# Crossing the byte ceiling blocks writes until UTC day rollover. The caller
+# logs the transition once and persists state across daemon restarts.
 
 
 @dataclass
@@ -189,15 +183,6 @@ def should_capture_periodic(
     if last_capture_ts is None:
         return True
     return (now - last_capture_ts) >= floor_seconds
-
-
-# ---------------------------------------------------------------------------
-# Idle-pause trigger: a simple idle-detection heuristic (cursor position stops
-# changing), approximating a "typing pause". A true keystroke-timing signal
-# (`libinput debug-events`) would need the running user's seat-ACL'd graphical
-# session and its own subprocess/permission shape -- see daemon.py's module
-# docstring.
-# ---------------------------------------------------------------------------
 
 
 class PauseDetector:

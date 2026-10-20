@@ -1,30 +1,7 @@
-# capture-peripherals: desk hardware telemetry -- Logitech HID++ devices and
-# paired Bluetooth audio gear -- into the capture lake.
-#
-# Three sub-lanes, one poller:
-#   - logitech: solaar has no machine-readable output, so `solaar show`'s
-#     text is parsed by anchoring on the "Codename" line every real device
-#     emits (parse_solaar.py). Covers the G502 mouse and G915 keyboard's
-#     battery today. The "Logitech Candy" device named in earlier recon did
-#     not appear in a live sysfs USB scan or `solaar show` at the time this
-#     lane was written -- either it was not connected then, or it enumerates
-#     under a name/bus this lane doesn't yet look at; re-probe if it needs
-#     coverage.
-#   - bt-battery: bluez only exposes org.bluez.Battery1 (GATT Battery
-#     Service 0x180f, or HFP AT-command battery on classic headsets) when
-#     `Experimental=true` (see hardware.bluetooth.settings in
-#     networking.nix) -- this lane assumes that flag and reads whatever
-#     bluez surfaces, rather than hand-rolling a GATT client. An empty
-#     result is the normal state for a device that is paired but not
-#     currently connected (buds in a closed case do not advertise).
-#   - bt-audio: AVRCP's absolute-volume control surfaces as
-#     org.bluez.MediaTransport1.Volume on the active transport object,
-#     alongside codec/state -- confirmed live on the Ultima 40 Aktiv and
-#     the WH-1000XM4 (volume writable, not just readable).
-#
-# One ObjectManager call (`busctl call org.bluez / ... GetManagedObjects`)
-# returns bluez's whole live object tree, parsed by parse_bluez.py rather
-# than walking each device path individually.
+# Poll Logitech HID++ battery and BlueZ battery/audio transport records.
+# Solaar output is parsed by Codename; BlueZ uses one ObjectManager snapshot.
+# Battery1 availability requires BlueZ experimental features (networking.nix).
+# Disconnected devices and inactive transports legitimately produce no records.
 {
   mkServiceModule,
   mkCaptureLane,

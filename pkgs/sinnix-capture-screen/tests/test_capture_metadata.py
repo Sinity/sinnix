@@ -13,7 +13,7 @@ from sinnix_capture_screen.capture import (
 )
 
 
-def test_build_frame_payload_matches_bead_schema() -> None:
+def test_build_frame_payload_preserves_capture_attribution() -> None:
     payload = build_frame_payload(
         ts=1723459200.123,
         window_class="kitty",
@@ -78,12 +78,7 @@ def test_image_to_phash_array_is_square_and_matches_requested_size() -> None:
 
 
 def test_run_grim_never_combines_output_and_geometry(monkeypatch) -> None:
-    """grim exits 1 with "-o and -g are mutually exclusive" when given both.
-
-    Emitting both is what made every window-resolved capture fail while the
-    unit stayed `active running` -- the only records this lane ever wrote
-    were the null-window ones that happened to omit -g.
-    """
+    """grim's output selector and global region crop are mutually exclusive."""
     seen: list[list[str]] = []
 
     class _Proc:
