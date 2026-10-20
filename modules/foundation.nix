@@ -249,7 +249,7 @@ in
                   };
                 };
                 turing_studio = {
-                  path = "/turing-studio/repo";
+                  path = "${config.root}/turing-studio/repo";
                   defaultRef = "main";
                   devtoolsEntrypoint = "nix develop";
                 };
