@@ -455,7 +455,7 @@ ACTIONS: tuple[Action, ...] = (
             "how is the batch",
             "agentctl batch status",
         ),
-        documentation="Every id is a pueue task id: pass a worker's or the landing's task_id to jobs.logs, jobs.wait or jobs.cancel, with its job_id so the call survives a reorder.",
+        documentation="Worker and landing task_id fields are numeric pueue queue positions; job_id fields are stable strings. Pass both in jobs.logs, jobs.wait or jobs.cancel targets so calls follow the job across a reorder.",
         examples=(
             Example(title="By run suffix", input={"target": _SUFFIX}),
             Example(title="By canonical ref", input={"target": {"ref": _RUN}}),

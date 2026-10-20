@@ -85,9 +85,8 @@ Each invocation gets `jobs/<ref>.attempts/<n>/`:
 - `output.outcome`: how the invocation ended.
 
 `jobs/<ref>.log`, `.result` and `.outcome` are links to the latest attempt.
-Jobs from before attempt directories existed keep their plain files as attempt
-
-1. A retry never overwrites an earlier attempt.
+Jobs from before attempt directories existed keep their plain files as
+attempt 1. A retry never overwrites an earlier attempt.
 
 | Outcome         | Exit | Meaning                                                          |
 | --------------- | ---- | ---------------------------------------------------------------- |

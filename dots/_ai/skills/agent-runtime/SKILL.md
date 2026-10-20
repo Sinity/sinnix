@@ -23,7 +23,9 @@ extension point is a declared operation in the project's
   takeover, inspect the existing watches' argv before adding one, and stop a
   watch you own when its purpose ends. Coordinators only: a batch worker
   waits on its own job with `agentctl job wait <id>`.
-- `agentctl job get|logs|result <id>`: one job (the ID is the pueue task ID).
+- `agentctl job get|logs|result <id>`: one job by numeric pueue `task_id`.
+  Keep the stable string `job_id` too and pass `--job-id` so later calls follow
+  the same job across queue reordering.
 - `agentctl batch status <run>`: one run, joining its manifest
   (`~/.local/state/agentctl/runs/<run>.json`) with pueue state and the landing
   PR. A run ID's suffix is accepted everywhere.
@@ -39,7 +41,7 @@ context.
 List the declared work with `agentctl project operations <project>` and start
 it with `agentctl job start <project> <operation>`; never rebuild its
 environment, pool, timeout, `systemd-run` scope, or reaper by hand. Keep the
-returned job ID. A queued job is running work: wait for its finish event
+returned `task_id` and `job_id`. A queued job is running work: wait for its finish event
 instead of starting it again. Retry only after reading the terminal result and
 fixing its named cause. A wedged job gets one cancel, a check that it is
 terminal, then a retry.

@@ -667,14 +667,14 @@ class JobLocator(GatewayModel):
     task_id: int | None = Field(
         default=None,
         ge=0,
-        description="pueue task id, as `agentctl job list` shows it.",
+        description="Numeric pueue queue position, as `agentctl job list` shows it.",
     )
     job_id: str | None = Field(
         default=None,
         min_length=1,
         max_length=512,
         pattern=r"^[A-Za-z0-9._-]+$",
-        description="The job's stable id, as every job response returns it. "
+        description="The job's stable string id, as managed job responses return it. "
         "Include it so the call follows this job if the queue is reordered.",
     )
 

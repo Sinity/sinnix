@@ -486,7 +486,7 @@ ACTIONS: tuple[Action, ...] = (
         resource_kinds=("mcp_tool",),
         next_actions=("mcp.tools", "artifacts.read"),
         aliases=("call mcp tool", "query upstream", "polylogue search"),
-        documentation="Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change (operator only). A target using server=sinnix-agent-gateway is routed to the named direct read action, preserving its native content blocks; changes stay direct-only.",
+        documentation="Reads require an owner read-only annotation or an exact match to trusted registry selectors. Other requests require mcp.change. A target using server=sinnix-agent-gateway is routed to the named direct read action, preserving its native content blocks; changes stay direct-only.",
         examples=(
             Example(
                 title="Call by server and tool",

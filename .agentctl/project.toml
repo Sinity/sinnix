@@ -107,6 +107,7 @@ timeout_seconds = 1800
 [operations.pytest_focused]
 description = "Run selected AgentCTL and gateway Python tests"
 exec = ["nix", "develop", ".#gateway-tests", "--command", "gateway-pytest", "-q"]
+arguments = "required"
 pool = "normal"
 result = "exit"
 scratch = "nvme"

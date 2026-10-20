@@ -23,7 +23,9 @@ job controller. Local agents use the agentctl CLI directly.
 
 The gateway is single-user. It serves the operator's ChatGPT with the
 operator's full power: reads, writes and jobs, with no read-only mode or
-per-caller permissions.
+per-caller permissions. `actor` labels audit records; it does not select a
+role. The configured project scope narrows repository discovery and project
+actions, while host-file and shell tools retain their own action contracts.
 Remote shells and jobs run in the operator's environment, including API keys
 and tokens. Those values stay on the host: agentctl keeps them out of launch
 inputs and masks them in logs, the gateway redacts them from audit rows and call
@@ -129,7 +131,7 @@ otherwise reads name a checkout id from `projects.list`.
 `operations.run` queues a declared project operation; `shell.run` queues one
 argv confined to a checkout. `jobs.list`, `jobs.get`, `jobs.logs`, `jobs.wait`,
 `jobs.queues`, `jobs.cancel`, `jobs.retry` and `jobs.clean` read and control any
-job. A job has a `task_id` (pueue's queue position) and a stable `job_id`
+job. A job has a numeric `task_id` (pueue's queue position) and a stable string `job_id`
 that survives queue reordering; each
 retry is a separate attempt with its own logs and result. `batches.*` wrap
 agentctl batches (`batches.start`, `status`, `list`, `resume`, `land`).
@@ -237,9 +239,15 @@ the package-generated manifest. `manifest-check` runs the same comparison.
 
 1. `switch`.
 2. Check `/healthz` and `/readyz` on the health port.
-3. Refresh the ChatGPT connector.
-4. Run `gateway.status` and record the observed manifest hash in
-   `connector-snapshot.json`.
+3. Refresh the ChatGPT connector, then inspect the schema it actually exposes.
+   For example, `jobs.wait` takes a target with numeric `task_id` and optional
+   string `job_id`. If the client still requires numeric `job_id`, its cached
+   schema is stale; refresh or reconnect that client before using job controls.
+4. Run `gateway.status` and compare the live and package manifest hashes.
+   Record the client-observed hash in `connector-snapshot.json` only after
+   checking the client contract. The snapshot is historical evidence;
+   `current_model_visibility=unknown` means the gateway cannot inspect the
+   client's loaded tools. A local manifest check cannot verify a remote refresh.
 
 To stop per-call approval prompts, enable the app's **Allow all actions**
 permission in ChatGPT settings. That setting is client-side and changes nothing
