@@ -81,10 +81,10 @@ mkAiService {
           serviceConfig = {
             Group = "users";
             UMask = "0077";
-            # Each recording starts a recognizer with resident model weights.
-            # Leave headroom above the recognizer's resident working set so
-            # reclaim does not repeatedly reload weights below the 3G ceiling.
-            MemoryHigh = "2560M";
+            # Resident model weights and decoding buffers vary per recording.
+            # Reclaim below the 3G hard ceiling only refaults those pages when
+            # swap is disabled, stalling unrelated work through host pressure.
+            MemoryHigh = "infinity";
             MemorySwapMax = "0";
             IOReadBandwidthMax = [
               "/realm 20M"
