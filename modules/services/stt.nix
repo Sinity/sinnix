@@ -82,9 +82,9 @@ mkAiService {
             Group = "users";
             UMask = "0077";
             # Each recording starts a recognizer with resident model weights.
-            # Allow its working set without turning the 1G class soft limit
-            # into repeated swap I/O, while retaining the 3G hard boundary.
-            MemoryHigh = "2G";
+            # Leave headroom above the recognizer's resident working set so
+            # reclaim does not repeatedly reload weights below the 3G ceiling.
+            MemoryHigh = "2560M";
             MemorySwapMax = "0";
             IOReadBandwidthMax = [
               "/realm 20M"
