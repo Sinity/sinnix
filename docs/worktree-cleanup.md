@@ -21,7 +21,8 @@ Parent Realm snapshots retain worktree source and WIP without retaining this
 subvolume's compiler outputs. Borg's existing whole-worktree exclusion remains
 separate from local snapshot coverage.
 
-`sinnix-cargo-target` selects a stable per-checkout target there. Polylogue and
+`sinnix-cargo-target` selects a stable per-checkout target there. Its installed
+default and the provisioning unit use the same configured Realm root. Polylogue and
 Sinex devshells use it when installed; other hosts retain the ordinary `target/`
 fallback. Explicit `CARGO_TARGET_DIR` values keep their existing lease. Direnv
 uses the same selection for both projects, and AgentCTL forwards their declared

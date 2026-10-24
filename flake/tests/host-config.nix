@@ -8,7 +8,7 @@
 { inputs, ... }:
 {
   perSystem =
-    { pkgs, sinnixScriptRegistry, ... }:
+    { pkgs, ... }:
     let
       host = inputs.self.nixosConfigurations.sinnix-prime.config;
       failures = builtins.filter (entry: !entry.assertion) host.assertions;
@@ -18,8 +18,22 @@
       checks.cargo-cache =
         let
           unit = host.systemd.services.sinnix-cargo-cache;
+          alternate =
+            (inputs.self.nixosConfigurations.sinnix-prime.extendModules {
+              modules = [ ({ lib, ... }: { sinnix.paths.realmRoot = lib.mkForce "/fixture-realm"; }) ];
+            }).config;
+          selectorFor =
+            config:
+            builtins.head (
+              builtins.filter (
+                package: package.name == "sinnix-cargo-target"
+              ) config.home-manager.users.${config.sinnix.user.name}.home.packages
+            );
         in
         assert unit.environment.CARGO_CACHE_ROOT == "/realm/state/cache/cargo";
+        assert
+          alternate.systemd.services.sinnix-cargo-cache.environment.CARGO_CACHE_ROOT
+          == "/fixture-realm/state/cache/cargo";
         assert unit.serviceConfig.Type == "oneshot";
         assert builtins.elem "/realm" unit.unitConfig.RequiresMountsFor;
         pkgs.runCommand "cargo-cache-check"
@@ -29,7 +43,7 @@
               pkgs.bash
               pkgs.coreutils
               pkgs.git
-              sinnixScriptRegistry.packageSet.sinnix-cargo-target
+              (selectorFor host)
             ];
             provision = pkgs.writeText "cargo-cache-provision" unit.script;
           }
@@ -38,6 +52,11 @@
             explicit="$TMPDIR/explicit-target"
             test "$(CARGO_TARGET_DIR="$explicit" sinnix-cargo-target)" = "$explicit"
             test ! -e "$explicit"
+            if env -u CARGO_TARGET_DIR ${selectorFor alternate}/bin/sinnix-cargo-target >target.out 2>target.err; then
+              echo "unprovisioned alternate root was accepted" >&2
+              exit 1
+            fi
+            test "$(cat target.err)" = "Cargo cache subvolume is not provisioned: /fixture-realm/state/cache/cargo"
             touch "$out"
           '';
 

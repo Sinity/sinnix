@@ -43,6 +43,11 @@ mkFeatureModule {
     }:
     let
       scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+      cargoCacheRoot = "${config.sinnix.paths.realmRoot}/state/cache/cargo";
+      cargoTarget = pkgs.writeShellScriptBin "sinnix-cargo-target" ''
+        export SINNIX_CARGO_CACHE_ROOT=${lib.escapeShellArg cargoCacheRoot}
+        exec ${scriptPkgs.sinnix-cargo-target}/bin/sinnix-cargo-target "$@"
+      '';
     in
     lib.mkMerge [
       {
@@ -58,7 +63,7 @@ mkFeatureModule {
             pkgs.coreutils
           ];
           environment = {
-            CARGO_CACHE_ROOT = "${config.sinnix.paths.realmRoot}/state/cache/cargo";
+            CARGO_CACHE_ROOT = cargoCacheRoot;
             CARGO_CACHE_USER = user;
           };
           serviceConfig = {
@@ -83,7 +88,7 @@ mkFeatureModule {
             chmod 0700 "$CARGO_CACHE_ROOT"
           '';
         };
-        home-manager.users.${user}.home.packages = [ scriptPkgs.sinnix-cargo-target ];
+        home-manager.users.${user}.home.packages = [ cargoTarget ];
       }
 
       # Nix tooling
