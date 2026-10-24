@@ -21,9 +21,17 @@ class CargoCache(unittest.TestCase):
         self.bin.mkdir()
         (self.bin / "btrfs").write_text(
             f'#!{shutil.which("bash")}\nset -eu\n'
-            'if [ "$2" = show ]; then test -f "$3/.subvolume"; '
+            'if [ "$2" = show ]; then test "${DENY_TREE_SEARCH:-0}" != 1; test -f "$3/.subvolume"; '
             'elif [ "$2" = create ]; then mkdir "$3"; touch "$3/.subvolume"; '
             'else exit 9; fi\n'
+        )
+        (self.bin / "stat").write_text(
+            f'#!{shutil.which("bash")}\nset -eu\n'
+            'if [ "$1" = -f ] && [ "$3" = %T ]; then '
+            'printf "%s\\n" "${FIXTURE_FILESYSTEM:-btrfs}"; '
+            'elif [ "$1" = -c ] && [ "$2" = %i ] && [ -f "$3/.subvolume" ]; then '
+            'printf "%s\\n" "${FIXTURE_INODE:-256}"; '
+            f'else exec "{shutil.which("stat")}" "$@"; fi\n'
         )
         # Provisioning may change only the new cache root, never its contents.
         (self.bin / "chown").write_text(f'#!{shutil.which("bash")}\nexit 0\n')
@@ -92,6 +100,20 @@ class CargoCache(unittest.TestCase):
         explicit = dict(self.env, CARGO_TARGET_DIR=str(self.root / "leased"))
         self.assertEqual(self.select(env=explicit).stdout.strip(), explicit["CARGO_TARGET_DIR"])
         self.assertFalse(Path(explicit["CARGO_TARGET_DIR"]).exists())
+
+    def test_selection_needs_no_privileged_tree_search(self):
+        self.provision()
+        env = dict(self.env, DENY_TREE_SEARCH="1")
+        denied = self.run_bash('btrfs subvolume show "$SINNIX_CARGO_CACHE_ROOT"',
+                               env=env, check=False)
+        self.assertNotEqual(denied.returncode, 0)
+        self.assertTrue(Path(self.select(env=env).stdout.strip()).is_dir())
+
+    def test_only_a_real_subvolume_root_is_selected(self):
+        self.provision()
+        for fields in [dict(FIXTURE_FILESYSTEM="tmpfs"), dict(FIXTURE_INODE="257")]:
+            self.assertNotEqual(self.select(env=dict(self.env, **fields),
+                                            check=False).returncode, 0)
 
     def test_direnv_selects_for_both_projects_and_sinex_keeps_other_owners(self):
         self.provision()

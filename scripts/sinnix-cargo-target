@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Select an isolated compiler target in the provisioned Realm cache subvolume
-# runtimeInputs: bash coreutils git btrfs-progs
+# runtimeInputs: bash coreutils git
 set -euo pipefail
 
 if [ -n "${CARGO_TARGET_DIR:-}" ]; then
@@ -10,7 +10,11 @@ if [ -n "${CARGO_TARGET_DIR:-}" ]; then
 fi
 
 cache_root="${SINNIX_CARGO_CACHE_ROOT:-/realm/state/cache/cargo}"
-if [ -L "$cache_root" ] || ! btrfs subvolume show "$cache_root" >/dev/null 2>&1; then
+# Btrfs subvolume roots have inode 256. `subvolume show` also searches trees
+# that require privileges unavailable to the developer process.
+if [ -L "$cache_root" ] || [ ! -d "$cache_root" ] \
+  || [ "$(stat -f -c %T "$cache_root")" != btrfs ] \
+  || [ "$(stat -c %i "$cache_root")" != 256 ]; then
   echo "Cargo cache subvolume is not provisioned: $cache_root" >&2
   exit 1
 fi
