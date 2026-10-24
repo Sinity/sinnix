@@ -81,6 +81,10 @@ as missing data. If the check fails, the snapshot stays and the job fails,
 which keeps local snapshots piling up rather than losing data. Backup failures
 are therefore also disk-space problems on `/realm`.
 
+The newest admitted source cut remains until a successor is admitted, so an
+independent audit has an immutable source. The Borg drain owns releases from
+these handoff queues.
+
 Polylogue hooks are read directly from a verified read-only Btrfs cut through
 a private temporary path view that preserves `realm/state/polylogue/hooks` in
 the archive. No hook cache is copied or synced. The cut is deleted only after
