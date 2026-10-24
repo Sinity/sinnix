@@ -16,15 +16,32 @@ GIB = 1024**3
 
 
 def trend(history, current):
+    # A large one-off cleanup must not hide subsequent growth for eight days.
+    # Routine daily compaction remains part of the net trend.
+    series = []
+    recovered = False
+    for row in sorted([*history, current], key=lambda item: item["epoch"]):
+        if row["filesystem_uuid"] != current["filesystem_uuid"]:
+            continue
+        if not 0 <= current["epoch"] - row["epoch"] <= 8 * 86400:
+            continue
+        if (
+            series
+            and row["available_bytes"] - series[-1]["available_bytes"] >= 100 * GIB
+        ):
+            series = []
+            recovered = True
+        series.append(row)
     comparable = [
         row
-        for row in history
+        for row in series
         if row["filesystem_uuid"] == current["filesystem_uuid"]
         and 86400 <= current["epoch"] - row["epoch"] <= 8 * 86400
     ]
     if not comparable:
         return {
             "status": "insufficient_history",
+            "after_large_reclamation": recovered,
             "net_bytes_per_day": None,
             "days_remaining": None,
         }

@@ -30,7 +30,9 @@ sizes and filesystem free bytes in `/persist/root/.cache/borg-drain/capacity.jso
 It alerts below 600 GiB free or less than 14 projected days remaining. Its
 advisory projection uses net free-space consumption over up to eight days,
 requires at least 24 hours of observations, and resets comparisons when the
-filesystem UUID changes. Cleanup and workload changes affect this estimate.
+filesystem UUID changes or an observation gains at least 100 GiB of headroom.
+That large-reclamation reset prevents cleanup from hiding later growth; normal
+daily compaction remains part of the net trend. Workload changes affect this estimate.
 `agentctl job start sinnix backup_capacity` measures immediately. A low-headroom
 exit still records the measurement; the unit's failure notification carries it.
 

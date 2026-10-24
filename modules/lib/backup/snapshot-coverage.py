@@ -195,10 +195,6 @@ def queued_snapshots(directory, glob, marker, prefix, replacement_suffix):
     ]
 
 
-def within_fresh_window(now):
-    return now.hour in (0, 6, 12, 18) and 5 <= now.minute <= 25
-
-
 def verified_prune_plan(directory, glob, marker, prefix, replacement_suffix):
     latest = verified_acknowledgement(
         directory, glob, marker, prefix, replacement_suffix
@@ -1534,7 +1530,6 @@ def main():
     prune.add_argument("marker")
     prune.add_argument("prefix")
     prune.add_argument("replacement_suffix")
-    sub.add_parser("fresh-window")
     freshness = sub.add_parser("freshness")
     freshness.add_argument("latest_marker")
     freshness.add_argument("freshness_budget", type=int)
@@ -1598,9 +1593,6 @@ def main():
             args.replacement_suffix,
         ):
             print(f"{name}\t{uuid}\t{generation}\t{subvolume_id}")
-    elif args.command == "fresh-window":
-        if not within_fresh_window(datetime.now()):
-            return 1
     elif args.command == "freshness":
         epoch = read_latest_epoch(args.latest_marker)
         if epoch is None:

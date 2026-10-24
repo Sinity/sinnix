@@ -472,12 +472,6 @@ class CoverageFixture(unittest.TestCase):
                     queue, "realm.*", marker, "realm", "-coverage-v3"
                 )
 
-    def test_archive_admission_window_is_bounded(self):
-        self.assertTrue(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 6, 5)))
-        self.assertTrue(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 6, 25)))
-        self.assertFalse(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 6, 26)))
-        self.assertFalse(COVERAGE.within_fresh_window(datetime(2026, 4, 2, 7, 5)))
-
     def test_missing_cutoff_cannot_prune_or_suppress_new_archival(self):
         queue = self.root / "replacement-queue"
         queue.mkdir()

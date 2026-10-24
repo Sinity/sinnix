@@ -235,10 +235,6 @@ assert lib.assertMsg (
         rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.script
           [
             {
-              from = "${pkgs.python3}/bin/python3 ${../../modules/lib/backup/snapshot-coverage.py} fresh-window";
-              to = "true";
-            }
-            {
               from = "systemctl stop";
               to = "$TMPDIR/mock-bin/systemctl stop";
             }

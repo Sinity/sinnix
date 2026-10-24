@@ -161,10 +161,7 @@ in
     };
     path = [ pkgs.systemd ];
     script = ''
-      if ! ${snapshotCoverage} fresh-window; then
-        echo "Fresh snapshot admission window closed"
-        exit 0
-      fi
+      # The timer owns retry cadence; explicit native drains can run anytime.
       # Partial repository checks can resume at a later window. Independent
       # full comparisons retain their lock and snapshot until they finish;
       # lock-busy drains keep snapshots queued without acknowledging them.

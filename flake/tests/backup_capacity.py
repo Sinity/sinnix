@@ -15,4 +15,10 @@ assert (
 )
 assert trend([dict(old, epoch=86401)], current)["status"] == "insufficient_history"
 assert trend([dict(old, available_bytes=700)], current)["days_remaining"] is None
+gib = 1024**3
+before = dict(old, available_bytes=800 * gib)
+recovered = dict(old, epoch=86400, available_bytes=1000 * gib)
+after = dict(current, epoch=3 * 86400, available_bytes=900 * gib)
+assert trend([before, recovered], after)["net_bytes_per_day"] == 50 * gib
+assert trend([before], recovered)["after_large_reclamation"]
 print("capacity growth, cleanup, destination identity and minimum history passed")
