@@ -18,7 +18,6 @@ import tracemalloc
 import unittest
 import uuid
 from contextlib import redirect_stdout
-from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
