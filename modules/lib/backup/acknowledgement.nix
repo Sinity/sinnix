@@ -173,7 +173,7 @@ in
       # lock-busy drains keep snapshots queued without acknowledging them.
       needs_archival() {
         local queued
-        if ! queued="$(${snapshotCoverage} queue "$@")"; then
+        if ! queued="$(${snapshotCoverage} queue -- "$@")"; then
           # Unavailable queue evidence needs the native child's validation.
           echo "Queue unavailable; requesting native drain validation" >&2
           return 0
