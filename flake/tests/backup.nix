@@ -100,7 +100,8 @@ assert lib.assertMsg (
                 writerText =
                   name:
                   let
-                    script = config.systemd.services.${name}.script or "";
+                    service = config.systemd.services.${name};
+                    script = (service.script or "") + (service.serviceConfig.ExecStart or "");
                     invoked = lib.filter (scriptName: lib.hasInfix "/bin/${scriptName}" script) packagedScriptNames;
                   in
                   script
@@ -663,6 +664,8 @@ assert lib.assertMsg (
             pkgs.util-linux
           ];
           script = ''
+            ${pkgs.python3}/bin/python3 ${./backup_retention.py} ${pkgs.writeText "backup-maintenance-fixture.sh" deadHolderLockScript}
+            ${pkgs.python3}/bin/python3 ${./backup_capacity.py} ${../../scripts/sinnix-backup-capacity}
             ${pkgs.python3}/bin/python3 ${./backup_native_restore_test.py} ${./backup_native_restore.py}
             ${pkgs.python3}/bin/python3 ${./borg-check-arguments.py} ${../../scripts/sinnix-borg-check}
             ${pkgs.python3}/bin/python3 ${./backup_snapshot_coverage.py} \

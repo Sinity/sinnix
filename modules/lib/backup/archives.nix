@@ -29,6 +29,93 @@
   borgStaleLockRecovery,
   mkBorgCommonScript,
 }:
+let
+  maintenanceJob = {
+    description = "Prune and compact Borg backup repositories";
+    unit = {
+      after = [ outerRealmMountUnit ];
+      requires = [ outerRealmMountUnit ];
+    };
+    serviceConfig = {
+      TimeoutStartSec = "8h";
+      TimeoutStopSec = "15s";
+    };
+    environment = {
+      BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
+      BORG_CACHE_DIR = borgCacheDir;
+    };
+    path = with pkgs; [
+      borgbackup
+      coreutils
+      findutils
+      gnugrep
+      util-linux
+    ];
+    script = ''
+      set -euo pipefail
+      umask 077
+      export BORG_CACHE_DIR=${lib.escapeShellArg borgCacheDir}
+      dry_run="''${SINNIX_BORG_MAINTENANCE_DRY_RUN:-0}"
+      marker=${lib.escapeShellArg "${borgDrainStateRoot}/maintenance.last-success"}
+      now=$(date +%s)
+      # Hourly attempts retry contention; a completed pass is due after 20h.
+      if [ "$dry_run" = 0 ] && [ -f "$marker" ] && [ $((now - $(cat "$marker"))) -lt 72000 ]; then
+        exit 0
+      fi
+      exec 9>${lib.escapeShellArg borgGlobalLock}
+      if ! flock -n 9; then
+        echo "status=deferred reason=borg-lock-contention remains_due=true"
+        exit 0
+      fi
+      export SINNIX_BORG_GLOBAL_LOCK_HELD=1
+      with_borg_lock() { "$@"; }
+      ${borgStaleLockRecovery}
+      run_dir=${lib.escapeShellArg "${borgDrainStateRoot}/retention"}/$(date -u +%Y%m%dT%H%M%SZ)-$$
+      install -d -m 0700 "$run_dir"
+      if [ "$dry_run" = 1 ]; then
+        prune_options=(--dry-run)
+      else
+        prune_options=(--stats)
+      fi
+      maintain_repo() {
+        repo="$1"
+        active="$2"
+        shift 2
+        if [ ! -e "''${repo#file://}/config" ]; then
+          echo "Skipping uninitialized repo $repo"
+          return
+        fi
+        if [ "$dry_run" = 0 ]; then recover_stale_borg_locks "$repo"; fi
+        name=$(basename "''${repo#file://}")
+        borg list --json --lock-wait ${toString borgLockWaitSec} "$repo" > "$run_dir/$name.before.json"
+        borg prune --lock-wait ${toString borgLockWaitSec} --list "''${prune_options[@]}" \
+          --glob-archives "$active" \
+          --keep-within 2d --keep-daily 14 --keep-weekly 8 --keep-monthly 12 "$repo"
+        for series in "$@"; do
+          # Explicit expiry makes even a stopped series eventually disappear.
+          expire_options=()
+          if [ "$dry_run" = 1 ]; then expire_options=(--dry-run); fi
+          ${scriptPkgs.sinnix-borg-expire}/bin/sinnix-borg-expire "$repo" "$series" "''${expire_options[@]}"
+          borg prune --lock-wait ${toString borgLockWaitSec} --list "''${prune_options[@]}" \
+            --glob-archives "$series" --keep-monthly 6 "$repo"
+        done
+        if [ "$dry_run" = 0 ]; then
+          borg compact --lock-wait ${toString borgLockWaitSec} --progress "$repo"
+          borg list --json --lock-wait ${toString borgLockWaitSec} "$repo" > "$run_dir/$name.after.json"
+        fi
+      }
+      maintain_repo ${lib.escapeShellArg borgRepoPersist} 'persist-*' 'sinnix-prime-persist-*'
+      maintain_repo ${lib.escapeShellArg borgRepoRealm} 'realm-*' 'sinnix-prime-realm-*' 'machine-telemetry-dumps-*'
+      maintain_repo ${lib.escapeShellArg borgRepoSinexBlobs} 'sinex-blobs-*'
+      maintain_repo ${lib.escapeShellArg borgRepoRootSnapshots} 'root-*'
+      maintain_repo ${lib.escapeShellArg borgRepoPolylogueState} 'polylogue-state-*'
+      if [ "$dry_run" = 0 ]; then
+        date +%s > "$marker.tmp"
+        mv "$marker.tmp" "$marker"
+      fi
+    '';
+  };
+in
 [
   # ─── Sinex blob-repository Borg job ───
   # A CAS lives outside the /realm snapshot stream, so Borg reads the live
@@ -229,92 +316,38 @@
     '';
   })
 
-  # Retention thins each archive series to: everything from the last 7 days,
-  # then one archive per day for 30 days, per week for 26 weeks and per month
-  # for 24 months. A file version that existed only between kept archives is
-  # gone after the prune. Each series is pruned on its own, because Borg
-  # treats every archive matched by one glob as a single timeline; repos hold
-  # older series under retired names.
-  (mkBackupJob "borgbackup-maintenance" {
-    description = "Prune and compact Borg backup repositories";
+  # Active series retain frequent recent cuts; retired series retain monthly
+  # milestones for at most a year, rather than an immortal independent quota.
+  (mkBackupJob "borgbackup-maintenance" (
+    maintenanceJob
+    // {
+      timer = {
+        onCalendar = "*-*-* *:50:00";
+        persistent = true;
+        randomizedDelaySec = "5min";
+      };
+    }
+  ))
+  (mkBackupJob "borgbackup-retention-plan" (
+    maintenanceJob
+    // {
+      description = "Preview Borg retention changes without deleting archives";
+      environment = maintenanceJob.environment // {
+        SINNIX_BORG_MAINTENANCE_DRY_RUN = "1";
+      };
+    }
+  ))
+  (mkBackupJob "borgbackup-capacity" {
+    description = "Record backup capacity and alert on shrinking headroom";
     unit = {
-      after = [
-        outerRealmMountUnit
-      ];
-      requires = [
-        outerRealmMountUnit
-      ];
+      after = [ outerRealmMountUnit ];
+      requires = [ outerRealmMountUnit ];
     };
-    serviceConfig.TimeoutStopSec = "15s";
-    environment = {
-      BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
-      BORG_CACHE_DIR = borgCacheDir;
-    };
-    path = with pkgs; [
-      borgbackup
-      coreutils
-      findutils
-      gnugrep
-      util-linux
-    ];
+    serviceConfig.TimeoutStartSec = "30min";
     timer = {
-      onCalendar = "*-*-* 04:50:00";
-      persistent = false;
-      randomizedDelaySec = "45min";
+      onCalendar = "*-*-* 0/6:45:00";
+      persistent = true;
     };
-    script = ''
-      set -euo pipefail
-
-      export BORG_CACHE_DIR=${lib.escapeShellArg borgCacheDir}
-
-      with_borg_lock() {
-        if [ "''${SINNIX_BORG_GLOBAL_LOCK_HELD:-0}" = 1 ]; then
-          "$@"
-        else
-          flock ${lib.escapeShellArg borgGlobalLock} "$@"
-        fi
-      }
-
-      acquire_borg_global_lock_or_skip() {
-        if [ "''${SINNIX_BORG_GLOBAL_LOCK_HELD:-0}" = 1 ]; then
-          return
-        fi
-        reason="$1"
-        exec 9>${lib.escapeShellArg borgGlobalLock}
-        if ! flock -n 9; then
-          echo "Another Borg operation is active; skipping $reason"
-          exit 0
-        fi
-        export SINNIX_BORG_GLOBAL_LOCK_HELD=1
-      }
-
-      ${borgStaleLockRecovery}
-
-      maintain_repo() {
-        repo="$1"
-        shift
-        if [ ! -e "''${repo#file://}/config" ]; then
-          echo "Skipping uninitialized repo $repo"
-          return
-        fi
-
-        acquire_borg_global_lock_or_skip "Borg maintenance"
-        recover_stale_borg_locks "$repo"
-        for series in "$@"; do
-          with_borg_lock borg prune --lock-wait ${toString borgLockWaitSec} --list \
-            --glob-archives "$series" \
-            --keep-within 7d --keep-daily 30 --keep-weekly 26 --keep-monthly 24 \
-            "$repo"
-        done
-        with_borg_lock borg compact --lock-wait ${toString borgLockWaitSec} "$repo"
-      }
-
-      maintain_repo ${lib.escapeShellArg borgRepoPersist} 'persist-*' 'sinnix-prime-persist-*'
-      maintain_repo ${lib.escapeShellArg borgRepoRealm} 'realm-*' 'sinnix-prime-realm-*' 'machine-telemetry-dumps-*'
-      maintain_repo ${lib.escapeShellArg borgRepoSinexBlobs} 'sinex-blobs-*'
-      maintain_repo ${lib.escapeShellArg borgRepoRootSnapshots} 'root-*'
-      maintain_repo ${lib.escapeShellArg borgRepoPolylogueState} 'polylogue-state-*'
-    '';
+    execStart = "${scriptPkgs.sinnix-backup-capacity}/bin/sinnix-backup-capacity --root ${lib.escapeShellArg (builtins.dirOf (builtins.dirOf borgRepoRealmPath))} --state ${lib.escapeShellArg "${borgDrainStateRoot}/capacity.json"}";
   })
-
 ]

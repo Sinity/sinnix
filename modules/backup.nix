@@ -1225,6 +1225,32 @@ in
               resourceClass = "backup";
               notifyOnFailure = true;
               operatorRestart = false;
+              captures = [
+                {
+                  name = "backup-maintenance";
+                  path = "${borgDrainStateRoot}/maintenance.last-success";
+                  eventDriven = true;
+                  staleAfterSeconds = 172800;
+                }
+              ];
+            };
+            borgbackup-retention-plan = {
+              unit = "borgbackup-retention-plan.service";
+              resourceClass = "backup";
+              operatorRestart = false;
+            };
+            borgbackup-capacity = {
+              unit = "borgbackup-capacity.service";
+              resourceClass = "backup";
+              notifyOnFailure = true;
+              captures = [
+                {
+                  name = "backup-capacity";
+                  path = "${borgDrainStateRoot}/capacity.json";
+                  eventDriven = true;
+                  staleAfterSeconds = 86400;
+                }
+              ];
             };
             borgbackup-root-snapshots = {
               unit = "borgbackup-root-snapshots.service";

@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Expire retired Borg series by archive age under the caller's Borg lock
+# runtimeInputs: borgbackup
+"""The caller holds the shared Borg lock throughout inventory and deletion."""
+
+import argparse
+import datetime as dt
+import json
+import subprocess
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("repository")
+    parser.add_argument(
+        "series",
+        choices=[
+            "sinnix-prime-realm-*",
+            "sinnix-prime-persist-*",
+            "machine-telemetry-dumps-*",
+        ],
+    )
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args()
+    inventory = json.loads(
+        subprocess.check_output(
+            ["borg", "list", "--json", "--glob-archives", args.series, args.repository],
+            text=True,
+        )
+    )
+    cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=365)
+    for archive in inventory["archives"]:
+        if (
+            dt.datetime.fromisoformat(archive["time"]).astimezone(dt.timezone.utc)
+            < cutoff
+        ):
+            print(
+                json.dumps(
+                    {
+                        "expiry": archive["name"],
+                        "id": archive["id"],
+                        "cutoff": cutoff.isoformat(),
+                        "dry_run": args.dry_run,
+                    }
+                ),
+                flush=True,
+            )
+            if not args.dry_run:
+                subprocess.run(
+                    [
+                        "borg",
+                        "delete",
+                        "--lock-wait",
+                        "60",
+                        f"{args.repository}::{archive['name']}",
+                    ],
+                    check=True,
+                )
+
+
+if __name__ == "__main__":
+    main()

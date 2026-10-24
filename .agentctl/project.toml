@@ -366,3 +366,27 @@ pool = "bulk"
 result = "exit"
 cache = "none"
 timeout_seconds = 3600
+
+[operations.backup_retention_plan]
+description = "Preview installed Borg retention without deleting archives"
+exec = ["sudo", "-n", "systemctl", "start", "borgbackup-retention-plan.service"]
+pool = "bulk"
+result = "exit"
+cache = "none"
+timeout_seconds = 28800
+
+[operations.backup_maintenance]
+description = "Run due installed Borg pruning and compaction"
+exec = ["sudo", "-n", "systemctl", "start", "borgbackup-maintenance.service"]
+pool = "bulk"
+result = "exit"
+cache = "none"
+timeout_seconds = 28800
+
+[operations.backup_capacity]
+description = "Measure installed backup headroom and repository sizes"
+exec = ["sudo", "-n", "systemctl", "start", "borgbackup-capacity.service"]
+pool = "normal"
+result = "exit"
+cache = "none"
+timeout_seconds = 1800

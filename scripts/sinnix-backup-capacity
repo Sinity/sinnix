@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Record backup repository sizes and alert on headroom and recent net growth
+# runtimeInputs: coreutils util-linux
+"""Track the existing destination. Positive net consumption predicts days remaining."""
+
+import argparse
+import datetime as dt
+import fcntl
+import json
+import os
+import subprocess
+from pathlib import Path
+
+GIB = 1024**3
+
+
+def trend(history, current):
+    comparable = [
+        row
+        for row in history
+        if row["filesystem_uuid"] == current["filesystem_uuid"]
+        and 86400 <= current["epoch"] - row["epoch"] <= 8 * 86400
+    ]
+    if not comparable:
+        return {
+            "status": "insufficient_history",
+            "net_bytes_per_day": None,
+            "days_remaining": None,
+        }
+    oldest = min(comparable, key=lambda row: row["epoch"])
+    rate = (
+        (oldest["available_bytes"] - current["available_bytes"])
+        * 86400
+        / (current["epoch"] - oldest["epoch"])
+    )
+    repository_rates = {
+        name: (size - oldest.get("repository_allocated_bytes", {}).get(name, size))
+        * 86400
+        / (current["epoch"] - oldest["epoch"])
+        for name, size in current.get("repository_allocated_bytes", {}).items()
+        if name in oldest.get("repository_allocated_bytes", {})
+    }
+    return {
+        "status": "observed",
+        "repository_net_bytes_per_day": repository_rates,
+        "span_days": (current["epoch"] - oldest["epoch"]) / 86400,
+        "net_bytes_per_day": rate,
+        "days_remaining": current["available_bytes"] / rate if rate > 0 else None,
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", required=True, type=Path)
+    parser.add_argument("--state", required=True, type=Path)
+    args = parser.parse_args()
+    if not os.path.ismount(args.root):
+        raise SystemExit(f"backup destination is not mounted: {args.root}")
+    uuid = subprocess.check_output(
+        ["findmnt", "-n", "-o", "UUID", "--mountpoint", str(args.root)], text=True
+    ).strip()
+    if not uuid:
+        raise SystemExit("backup destination UUID is unavailable")
+    args.state.parent.mkdir(parents=True, exist_ok=True)
+    lock = args.state.with_suffix(".lock").open("w")
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    now = dt.datetime.now(dt.timezone.utc)
+    history = json.loads(args.state.read_text()) if args.state.exists() else []
+    history = [row for row in history if row["epoch"] >= now.timestamp() - 8 * 86400]
+    sizes = {}
+    for repo in sorted((args.root / "backup").iterdir()):
+        if repo.is_dir():
+            result = subprocess.run(
+                ["du", "-sx", "-B1", "--", str(repo)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            sizes[repo.name] = int(result.stdout.split()[0])
+    if (
+        not os.path.ismount(args.root)
+        or subprocess.check_output(
+            ["findmnt", "-n", "-o", "UUID", "--mountpoint", str(args.root)], text=True
+        ).strip()
+        != uuid
+    ):
+        raise SystemExit("backup destination changed during measurement")
+    fs = os.statvfs(args.root)
+    current = {
+        "epoch": now.timestamp(),
+        "observed_at": now.isoformat(),
+        "filesystem_uuid": uuid,
+        "available_bytes": fs.f_bavail * fs.f_frsize,
+        "repository_allocated_bytes": sizes,
+    }
+    current["trend"] = trend(history, current)
+    days = current["trend"]["days_remaining"]
+    current["alert"] = current["available_bytes"] < 600 * GIB or (
+        days is not None and days < 14
+    )
+    args.state.parent.mkdir(parents=True, exist_ok=True)
+    temporary = args.state.with_suffix(".tmp")
+    temporary.write_text(json.dumps([*history, current], indent=2) + "\n")
+    temporary.replace(args.state)
+    print(json.dumps(current), flush=True)
+    if current["alert"]:
+        raise SystemExit(
+            "Backup headroom below 600 GiB or projected exhaustion within 14 days"
+        )
+
+
+if __name__ == "__main__":
+    main()
