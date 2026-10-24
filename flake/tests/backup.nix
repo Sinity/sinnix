@@ -235,6 +235,18 @@ assert lib.assertMsg (
         rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.script
           [
             {
+              from = "/realm/.btrfs/snapshot";
+              to = "$TMPDIR/realm-snapshots";
+            }
+            {
+              from = "/persist/.btrfs/snapshot";
+              to = "$TMPDIR/persist-snapshots";
+            }
+            {
+              from = "/persist/root/.cache/borg-drain";
+              to = "$TMPDIR/state/borg-drain";
+            }
+            {
               from = "systemctl stop";
               to = "$TMPDIR/mock-bin/systemctl stop";
             }

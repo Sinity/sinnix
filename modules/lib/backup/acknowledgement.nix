@@ -16,6 +16,7 @@
   outerRealmMountUnit,
   borgLockWaitSec,
   borgCacheDir,
+  borgDrainStateRoot,
   mkBackupJob,
   mkBorgCommonScript,
   mkSnapshotDrainScript,
@@ -159,13 +160,32 @@ in
       TimeoutStartSec = "28h15m";
       TimeoutStopSec = "15s";
     };
-    path = [ pkgs.systemd ];
+    path = with pkgs; [
+      systemd
+      btrfs-progs
+      util-linux
+      coreutils
+    ];
     script = ''
       # The timer owns retry cadence; explicit native drains can run anytime.
       # Partial repository checks can resume at a later window. Independent
       # full comparisons retain their lock and snapshot until they finish;
       # lock-busy drains keep snapshots queued without acknowledging them.
-      systemctl stop borgbackup-verify.service
+      needs_archival() {
+        local queued
+        if ! queued="$(${snapshotCoverage} queue "$@")"; then
+          # Unavailable queue evidence needs the native child's validation.
+          echo "Queue unavailable; requesting native drain validation" >&2
+          return 0
+        fi
+        [ -n "$queued" ]
+      }
+      if needs_archival ${lib.escapeShellArg realmSnapshots} 'realm.*' \
+          ${lib.escapeShellArg "${borgDrainStateRoot}/realm.latest-archived"} realm '-coverage-v3' || \
+        needs_archival ${lib.escapeShellArg persistSnapshots} 'persist.*' \
+          ${lib.escapeShellArg "${borgDrainStateRoot}/persist.latest-archived"} persist '-coverage-v2'; then
+        systemctl stop borgbackup-verify.service
+      fi
       failed=0
       if ! systemctl start borgbackup-job-realm.service; then
         echo "Realm snapshot drain failed; continuing to persist" >&2

@@ -1352,6 +1352,7 @@ in
           outerRealmMountUnit
           borgLockWaitSec
           borgCacheDir
+          borgDrainStateRoot
           mkBackupJob
           mkBorgCommonScript
           mkSnapshotDrainScript

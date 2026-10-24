@@ -2748,6 +2748,36 @@ else: sys.exit(1)
             run("coordinator")
             self.assertTrue(queued_persist.exists())
 
+            empty = root / "empty-coordinator"
+            (empty / "mock-bin").mkdir(parents=True)
+            (empty / "realm-snapshots").mkdir()
+            (empty / "persist-snapshots").mkdir()
+            control = empty / "mock-bin/systemctl"
+            control.write_text(
+                f"#!{sys.executable}\nimport json, os, sys\n"
+                "with open(os.environ['TMPDIR']+'/commands', 'a') as log:\n"
+                " log.write(json.dumps(sys.argv[1:])+'\\n')\n"
+            )
+            control.chmod(0o755)
+            result = subprocess.run(
+                ["bash", str(root / "coordinator.sh")],
+                env=dict(env, TMPDIR=str(empty)),
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(
+                [
+                    json.loads(line)
+                    for line in (empty / "commands").read_text().splitlines()
+                ],
+                [
+                    ["start", "borgbackup-job-realm.service"],
+                    ["start", "borgbackup-job-persist.service"],
+                ],
+                "empty retries must leave an ongoing integrity check alone",
+            )
+
 
 if __name__ == "__main__":
     os.environ.setdefault("BORG_HOST_ID", "backup-fixture@stable")

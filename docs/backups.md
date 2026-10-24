@@ -68,7 +68,9 @@ filesystem (`rootSnapshotExcludes` in `modules/lib/backup/acknowledgement.nix`).
 The drain checks hourly at :05 and :25 while source acquisition remains every
 six hours. A long maintenance pass can hold the Borg lock across both attempts
 in an acquisition hour; hourly retries prevent a six-hour wait after it releases.
-When no new cuts are queued, the drain only validates its existing acknowledgements.
+When no new cuts are queued, the drain validates its existing acknowledgements
+and leaves an ongoing repository integrity check running. Pending or unavailable
+queue evidence requests native drain validation and can preempt a resumable check.
 
 ### Snapshots are kept until their archive is checked
 
