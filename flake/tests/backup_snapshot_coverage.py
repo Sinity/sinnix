@@ -2776,6 +2776,36 @@ else: sys.exit(1)
                 ],
                 "empty retries must leave an ongoing integrity check alone",
             )
+            # A local receipt routes scheduling without repository credentials.
+            # The real children, tested above, still qualify their archives.
+            admitted = "realm.20260403T070000+0000"
+            (empty / "realm-snapshots" / admitted).mkdir()
+            state = empty / "state/borg-drain"
+            state.mkdir(parents=True)
+            latest = state / "realm.latest-archived"
+            latest.write_text(f"snapshot={admitted}\n")
+            receipts = Path(str(latest) + ".by-snapshot")
+            receipts.mkdir()
+            (receipts / admitted).write_bytes(latest.read_bytes())
+            (empty / "commands").unlink()
+            result = subprocess.run(
+                ["bash", str(root / "coordinator.sh")],
+                env=dict(env, TMPDIR=str(empty)),
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(
+                [
+                    json.loads(line)
+                    for line in (empty / "commands").read_text().splitlines()
+                ],
+                [
+                    ["start", "borgbackup-job-realm.service"],
+                    ["start", "borgbackup-job-persist.service"],
+                ],
+                "acknowledged cuts must not preempt checks or open Borg from the coordinator",
+            )
 
 
 if __name__ == "__main__":

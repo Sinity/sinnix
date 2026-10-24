@@ -173,17 +173,17 @@ in
       # lock-busy drains keep snapshots queued without acknowledging them.
       needs_archival() {
         local queued
-        if ! queued="$(${snapshotCoverage} queue -- "$@")"; then
+        if ! queued="$(${snapshotCoverage} pending-hint -- "$@")"; then
           # Unavailable queue evidence needs the native child's validation.
           echo "Queue unavailable; requesting native drain validation" >&2
           return 0
         fi
-        [ -n "$queued" ]
+        [ "$queued" = yes ]
       }
       if needs_archival ${lib.escapeShellArg realmSnapshots} 'realm.*' \
-          ${lib.escapeShellArg "${borgDrainStateRoot}/realm.latest-archived"} realm '-coverage-v3' || \
+          ${lib.escapeShellArg "${borgDrainStateRoot}/realm.latest-archived"} || \
         needs_archival ${lib.escapeShellArg persistSnapshots} 'persist.*' \
-          ${lib.escapeShellArg "${borgDrainStateRoot}/persist.latest-archived"} persist '-coverage-v2'; then
+          ${lib.escapeShellArg "${borgDrainStateRoot}/persist.latest-archived"}; then
         systemctl stop borgbackup-verify.service
       fi
       failed=0

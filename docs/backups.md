@@ -70,7 +70,9 @@ six hours. A long maintenance pass can hold the Borg lock across both attempts
 in an acquisition hour; hourly retries prevent a six-hour wait after it releases.
 When no new cuts are queued, the drain validates its existing acknowledgements
 and leaves an ongoing repository integrity check running. Pending or unavailable
-queue evidence requests native drain validation and can preempt a resumable check.
+local handoff evidence requests native drain validation and can preempt a resumable
+check. The coordinator uses local receipts for this scheduling hint; the native
+children qualify archives under the Borg lock with their own credentials.
 
 ### Snapshots are kept until their archive is checked
 

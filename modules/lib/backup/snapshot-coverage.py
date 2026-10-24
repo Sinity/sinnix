@@ -195,6 +195,28 @@ def queued_snapshots(directory, glob, marker, prefix, replacement_suffix):
     ]
 
 
+def pending_snapshot_hint(directory, glob, marker):
+    """Route check preemption from local receipts, never qualify an archive.
+
+    Native children always validate under the Borg lock. The coordinator must
+    not open repositories or require their credentials before taking that gate.
+    """
+    receipts = acknowledgement_directory(marker)
+    if receipts.is_symlink():
+        raise ValueError("snapshot acknowledgement directory is a symlink")
+    latest = read_marker_fields(marker)
+    for name in snapshot_names(directory, glob):
+        receipt = receipts / name
+        if receipt.is_symlink():
+            raise ValueError("snapshot acknowledgement is a symlink")
+        fields = read_marker_fields(receipt)
+        if fields is None or fields.get("snapshot") != name:
+            return True
+        if fields != latest and should_advance_marker(directory, marker, name):
+            return True
+    return False
+
+
 def verified_prune_plan(directory, glob, marker, prefix, replacement_suffix):
     latest = verified_acknowledgement(
         directory, glob, marker, prefix, replacement_suffix
@@ -1524,6 +1546,10 @@ def main():
     queue.add_argument("latest_marker")
     queue.add_argument("prefix")
     queue.add_argument("replacement_suffix")
+    hint = sub.add_parser("pending-hint")
+    hint.add_argument("directory")
+    hint.add_argument("glob")
+    hint.add_argument("latest_marker")
     prune = sub.add_parser("prune-plan")
     prune.add_argument("directory")
     prune.add_argument("glob")
@@ -1593,6 +1619,12 @@ def main():
             args.replacement_suffix,
         ):
             print(f"{name}\t{uuid}\t{generation}\t{subvolume_id}")
+    elif args.command == "pending-hint":
+        print(
+            "yes"
+            if pending_snapshot_hint(args.directory, args.glob, args.latest_marker)
+            else "no"
+        )
     elif args.command == "freshness":
         epoch = read_latest_epoch(args.latest_marker)
         if epoch is None:
