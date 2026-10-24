@@ -108,9 +108,8 @@ let
     "pypi-recovery-codes".exportEnv = false;
     # Exporting this to every shell silently overrides Claude Code's
     # subscription auth for every `claude`/`claude -p` invocation on the host.
-    # Nothing here reads ANTHROPIC_API_KEY from the environment; it remains
-    # readable at /run/agenix/anthropic-api-key for anything that wants it.
-    "anthropic-api-key".exportEnv = false;
+    # API consumers can explicitly opt in using this alternate variable.
+    "anthropic-api-key".envName = "ANTHROPIC_API_KEY_MANUAL";
     # An account password with no consumer here; it stays out of login
     # shells until the operator retires it.
     "mail-app-password".exportEnv = false;
@@ -145,7 +144,9 @@ let
   mkSecretExport =
     secretName:
     let
-      envName = lib.toUpper (lib.replaceStrings [ "-" "." ] [ "_" "_" ] secretName);
+      envName = (secretMeta.${secretName} or { }).envName or (
+        lib.toUpper (lib.replaceStrings [ "-" "." ] [ "_" "_" ] secretName)
+      );
       exportEnv = (secretMeta.${secretName} or { }).exportEnv or true;
     in
     lib.optionalString exportEnv ''
