@@ -1753,18 +1753,30 @@ def test_real_retained_orphan_is_released_by_the_next_multi_slot_admission(
     assert set(fake_pueue.running_tasks("fixture")) == {task_id, next_task}
     next_unit = unit_for(next_launch, "fixture")
     original = run_module._wait_for_unit
+    original_ctl = run_module._systemctl
+    control_lost = False
 
     class LostObserver(RuntimeError):
         pass
 
     def lose_observer(*args: Any, **kwargs: Any) -> Any:
+        nonlocal control_lost
         properties = original(*args, **kwargs)
         assert properties is not None and properties["SubState"] == "exited"
+        control_lost = True
         raise LostObserver
+
+    def lose_control(*args: str) -> str | None:
+        if control_lost and args[0] in {"stop", "show"} and args[-1] == first_unit:
+            return None
+        return original_ctl(*args)
 
     try:
         with monkeypatch.context() as fault:
             fault.setattr(run_module, "_wait_for_unit", lose_observer)
+            # An ordinary exception now cleans up. An unavailable controller
+            # still leaves a real retained unit for the next admission to settle.
+            fault.setattr(run_module, "_systemctl", lose_control)
             with pytest.raises(LostObserver):
                 main([str(first)])
         assert run_module.unit_properties(first_unit)["SubState"] == "exited"

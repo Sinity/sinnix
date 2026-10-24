@@ -436,6 +436,39 @@ def remove_scratch(path: Path | None) -> str | None:
     return None
 
 
+class _Scratch:
+    """One attempt's files may be removed only after its native unit stops."""
+
+    def __init__(self) -> None:
+        self.path: Path | None = None
+        self.unit: str | None = None
+        self.cleaned = False
+
+    def release_unit(self) -> str | None:
+        if self.unit is None:
+            return None
+        if _systemctl("stop", self.unit) is None:
+            observed = _unit_snapshot(self.unit)
+            if observed is None or (
+                observed.get("LoadState") != "not-found"
+                and not _unit_is_terminal(observed)
+            ):
+                return "unit termination unconfirmed; cleanup deferred"
+        _systemctl("reset-failed", self.unit)
+        self.unit = None
+        return None
+
+    def cleanup(self) -> str | None:
+        if self.cleaned:
+            return None
+        self.cleaned = True
+        error = self.release_unit()
+        if error is not None:
+            return error
+        path, self.path = self.path, None
+        return remove_scratch(path)
+
+
 def scratch_footprint(path: Path) -> dict[str, Any]:
     """What the job left in its scratch: bytes and files, bounded by entry count.
 
@@ -769,6 +802,21 @@ def _mask_logs(paths: Sequence[Path], values: tuple[bytes, ...]) -> None:
 
 def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
     """Run one queued command, retaining complete output for this invocation."""
+    scratch_owner = _Scratch()
+    try:
+        return _run(launch, launch_input=launch_input, scratch_owner=scratch_owner)
+    finally:
+        error = scratch_owner.cleanup()
+        if error is not None:
+            print(
+                f"agentctl: {error}; unit={scratch_owner.unit} scratch={scratch_owner.path}",
+                file=sys.stderr,
+            )
+
+
+def _run(
+    launch: Mapping[str, Any], *, launch_input: str, scratch_owner: _Scratch
+) -> int:
     declared_log_path = Path(launch["log_path"])
     marker = cancel_marker_for(declared_log_path)
     launch = artifacts.begin(launch, launch_input)
@@ -826,11 +874,16 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             "exit_code": REFUSED_EXIT_CODE,
             "attempt": launch["attempt"],
         }
+        if scratch_owner.unit is not None:
+            record["unit"] = scratch_owner.unit
         if scratch_error is not None:
-            record["scratch"] = {
-                "path": str(scratch_dir),
-                "cleanup_error": scratch_error,
-            }
+            if scratch_dir is None:
+                record["unit_error"] = scratch_error
+            else:
+                record["scratch"] = {
+                    "path": str(scratch_dir),
+                    "cleanup_error": scratch_error,
+                }
         request = artifacts.cancellation(declared_log_path, launch["attempt"])
         if request:
             record["cancellation"] = request
@@ -854,6 +907,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             # Existing material has not been created by this attempt. Never
             # adopt it, follow its link, or later remove it as owned scratch.
             scratch_dir.mkdir(mode=0o700)
+            scratch_owner.path = scratch_dir
         except OSError as error:
             log_path.write_text(f"could not create the scratch directory: {error}\n")
             return refused()
@@ -936,7 +990,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
                 log.write(
                     f"could not start the command: {argv[0]} not found\n".encode()
                 )
-                return refused(scratch_error=remove_scratch(scratch_dir))
+                return refused(scratch_error=scratch_owner.cleanup())
             argv[0] = executable
             try:
                 if unit is None or pool is None:
@@ -962,6 +1016,8 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
                             stdout=stdout_path,
                             log_path=log_path,
                         )
+                        # Acceptance can precede a lost startup acknowledgement.
+                        scratch_owner.unit = unit
                         client = _start_service(command, marker, launch["attempt"], log)
                         if client is None:
                             outcome, status = Outcome.CANCELLED, CANCELLED_EXIT_CODE
@@ -989,15 +1045,18 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
                             )
                             # Capture terminal status before releasing this unit.
                             # Stop also settles retained verifier descendants.
-                            _systemctl("stop", unit)
-                            _systemctl("reset-failed", unit)
+                            release_error = scratch_owner.release_unit()
+                            if release_error is not None:
+                                log.write((release_error + "\n").encode())
+                                outcome, status = Outcome.VANISHED, VANISHED_EXIT_CODE
                             if outcome is Outcome.VANISHED:
                                 log.write(
                                     f"unit {unit} vanished (rc {return_code})\n".encode()
                                 )
             except OSError as error:
-                log.write(f"could not start the command: {error}\n".encode())
-                return refused(scratch_error=remove_scratch(scratch_dir))
+                action = "control" if scratch_owner.unit is not None else "start"
+                log.write(f"could not {action} the command: {error}\n".encode())
+                return refused(scratch_error=scratch_owner.cleanup())
             if outcome is Outcome.TIMEOUT:
                 log.write(
                     f"timed out after {launch['timeout_seconds']} seconds\n".encode()
@@ -1057,7 +1116,7 @@ def run(launch: Mapping[str, Any], *, launch_input: str) -> int:
             "path": str(scratch_dir),
             **scratch_footprint(scratch_dir),
         }
-        cleanup_error = remove_scratch(scratch_dir)
+        cleanup_error = scratch_owner.cleanup()
         if cleanup_error is not None:
             record["scratch"]["cleanup_error"] = cleanup_error
     publish_outcome(record)

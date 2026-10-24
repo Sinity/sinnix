@@ -113,7 +113,12 @@ An operation with `scratch = "tmpfs"` or `"nvme"` gets one job-owned directory,
 exported as `AGENTCTL_SCRATCH` and `TMPDIR`. After the unit exits, agentctl
 records its size in the outcome and deletes it. If deletion fails, the outcome
 records `scratch.cleanup_error` and the command's exit status is unchanged.
-An existing path is never reused or removed.
+An existing path is never reused or removed. Cleanup also runs if result
+bookkeeping fails after the command ends. If a unit's observation fails,
+agentctl stops that unit before removing its scratch. When termination cannot
+be confirmed, the outcome names the unit and records `scratch.cleanup_error`;
+the scratch remains available to that unit. Retained results belong outside
+the disposable scratch directory.
 
 ## Pools and admission
 
