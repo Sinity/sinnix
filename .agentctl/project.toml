@@ -359,6 +359,15 @@ result = "json"
 cache = "none"
 timeout_seconds = 7200
 
+[operations.filesystem_usage]
+description = "Measure allocated directory bytes on explicit paths with idle I/O priority"
+exec = ["sudo", "-n", "ionice", "-c", "3", "nice", "-n", "15", "du", "-x", "-B1", "--max-depth=2", "--"]
+arguments = "required"
+pool = "bulk"
+result = "exit"
+cache = "none"
+timeout_seconds = 7200
+
 [operations.filesystem_store_gc_plan]
 description = "List native unreachable Nix store paths without deleting roots or payloads"
 exec = ["nix-store", "--store", "daemon", "--gc", "--print-dead"]

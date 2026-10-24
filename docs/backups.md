@@ -43,6 +43,14 @@ make these different from reclaimable physical bytes. Native verification can
 request a new cut with `backup_snapshot`, then archive it with `backup_drain`;
 inspect both native units and their admitted snapshot markers afterwards.
 
+For local cleanup candidates, `agentctl job start sinnix filesystem_usage --
+<absolute-path> ...` measures allocated directory bytes to depth two, without
+crossing filesystem boundaries, at idle I/O priority. The filesystem index can
+suggest roots, but its dated observations need a fresh measurement. Directory
+totals include shared extents and do not predict reclaimed filesystem space;
+`filesystem_accounting` provides compression and sharing details for explicit
+paths. Neither measurement establishes that a directory is disposable.
+
 ## What is backed up
 
 | Source                   | How                                                                    | When                                           | Repository                |
