@@ -390,3 +390,30 @@ pool = "normal"
 result = "exit"
 cache = "none"
 timeout_seconds = 1800
+
+[operations.backup_archive_inventory]
+description = "Measure logical file-size prefixes in one explicit Borg archive without restoring contents"
+exec = ["python3", "flake/tests/backup_archive_inventory.py"]
+arguments = "required"
+pool = "bulk"
+result = "exit"
+cache = "none"
+scratch = "nvme"
+timeout_seconds = 1800
+admission = { memory_mib = 4096 }
+
+[operations.backup_snapshot]
+description = "Take native btrbk source snapshots for backup verification"
+exec = ["sudo", "-n", "systemctl", "start", "btrbk.service"]
+pool = "bulk"
+result = "exit"
+cache = "none"
+timeout_seconds = 1800
+
+[operations.backup_drain]
+description = "Archive and verify pending native source snapshots"
+exec = ["sudo", "-n", "systemctl", "start", "borgbackup-drain-coordinator.service"]
+pool = "bulk"
+result = "exit"
+cache = "none"
+timeout_seconds = 28800

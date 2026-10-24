@@ -34,6 +34,13 @@ filesystem UUID changes. Cleanup and workload changes affect this estimate.
 `agentctl job start sinnix backup_capacity` measures immediately. A low-headroom
 exit still records the measurement; the unit's failure notification carries it.
 
+For archive-level size diagnosis, `agentctl job start sinnix
+backup_archive_inventory -- --repository <repository> --archive <archive>` reads
+one archive's metadata and reports logical bytes by path prefix. Shared chunks
+make these different from reclaimable physical bytes. Native verification can
+request a new cut with `backup_snapshot`, then archive it with `backup_drain`;
+inspect both native units and their admitted snapshot markers afterwards.
+
 ## What is backed up
 
 | Source                   | How                                                                    | When                                           | Repository                |
