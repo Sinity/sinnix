@@ -93,7 +93,7 @@ running agents in parallel.
 - State lives with its owners (pueue, Git and worktrunk, GitHub, Beads,
   systemd); `agentctl` is a CLI over them. Reconcile those sources rather than
   keeping another ledger.
-- Short foreground checks run directly. Queued, heavy, detached, or shared work
+- Short foreground commands run directly. Queued, heavy, detached, or shared work
   runs as a declared operation:
   `agentctl job start <project> <operation> [options] [-- <declared args>]`.
   Take syntax from `agentctl <verb> --help` and

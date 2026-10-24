@@ -166,6 +166,37 @@ repository's `index.lock`. Listing takes no lock and runs with
 `GIT_OPTIONAL_LOCKS=0`, as do agentctl's other Git reads and every queued
 command.
 
+Retire a completed checkout after publication, using its exact path:
+
+```sh
+agentctl worktree clean polylogue --path /realm/worktree/finished-change --json
+```
+
+Omit `--path` for a project-wide pass. Recorded job ownership and terminal
+outcomes select candidates. An explicit path also identifies the author's
+completed registered checkout when only foreground checks were needed; it
+never overrides a known active job or unavailable terminal evidence. Git ancestry, matching published trees or an exact
+merged PR head establish publication; the PR's merge must be reachable from
+the fetched default branch. Optional local merge checks have a shared time and
+size budget. Unproved changes stay with a reason.
+
+Cleanup preserves declared artifacts, nextest reports and Git recovery refs
+before removing source and qualified compiler outputs. It checks working bytes,
+Git locks, queued target aliases and process cwd/exe/fd/mappings, refreshing the
+shared holder census after preservation. Tagged Cargo targets and the compiler
+selector's exact per-checkout external cache retire together with the checkout.
+The cache tag is removed last, so interrupted removal can be retried. Unknown
+nonempty directories stay; empty directory leftovers do not block retirement.
+
+Keep a functional checkout reserved between jobs with Git's existing lock:
+`git worktree lock --reason "owner and purpose" /realm/worktree/retained-checkout`.
+Release it with `git worktree unlock` when ownership ends. Cleanup also preserves
+pre-rewrite branches and active target aliases.
+
+The existing daily maintenance runs `job clean --all-terminal --worktrees`.
+Queue results and worktree outcomes are reported separately, including kept
+paths and failures. Without `--worktrees`, job-clean JSON remains unchanged.
+
 agentctl's own index-writing Git calls are refused in a main checkout. A timed-out Git call
 gets SIGTERM, then SIGKILL after ten seconds. An `index.lock` stranded by a
 failed call is removed only from a worktree agentctl owns. Elsewhere it is
@@ -183,9 +214,9 @@ New work uses native agents, Git worktrees and selected declared operations.
 Batch start, landing, result filing, resumption, task compilation and abandonment
 commands are retired. An unfinished historical record is inspection-only.
 
-`worktree clean` uses terminal recorded ownership, process/queue holders, hidden
-file checks, artifact verification and recovery refs. It keeps any checkout
-whose evidence or working bytes cannot be preserved.
+The [worktree cleanup](#worktrees) command also reads retained invocation
+ownership after finished jobs leave the queue. Historical manifests and their
+original evidence remain readable.
 
 ### Refusals
 

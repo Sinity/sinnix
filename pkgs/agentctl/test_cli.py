@@ -1024,3 +1024,41 @@ def test_retired_mutation_commands_are_not_admitted(args):
     with pytest.raises(SystemExit) as failure:
         cli.parser().parse_args(args)
     assert failure.value.code == cli.EXIT_USAGE
+
+
+def test_worktree_cleanup_can_target_one_completed_checkout(
+    cli_config, monkeypatch, capsys, tmp_path
+):
+    calls = []
+
+    def clean(config, project, *, paths):
+        calls.append((project.project_id, paths))
+        return {"project": project.project_id, "removed": [], "kept": []}
+
+    monkeypatch.setattr(cli.worktree_cleanup, "clean", clean)
+    target = tmp_path / "completed"
+    assert (
+        cli.main(["worktree", "clean", "fixture", "--path", str(target), "--json"])
+        == cli.EXIT_OK
+    )
+    assert calls == [("fixture", [target])]
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_queue_maintenance_reports_worktree_outcome_separately(
+    cli_config, monkeypatch, capsys, failure
+):
+    jobs = [{"task_id": 17, "state": "cleaned"}]
+    monkeypatch.setattr(cli.launch, "clean_terminal", lambda _: jobs)
+    result = (
+        [{"project": "fixture", "error": "holder census unavailable"}]
+        if failure
+        else [{"project": "fixture", "removed": ["candidate"], "kept": []}]
+    )
+    monkeypatch.setattr(cli.worktree_cleanup, "clean_published", lambda _: result)
+    code = cli.main(["job", "clean", "--all-terminal", "--worktrees", "--json"])
+    observed = json.loads(capsys.readouterr().out)
+    assert observed["jobs"] == jobs and observed["queue_cleanup"] == "completed"
+    assert observed["worktrees"] == result
+    assert observed["worktree_cleanup"] == ("failed" if failure else "completed")
+    assert code == (cli.EXIT_REFUSED if failure else cli.EXIT_OK)

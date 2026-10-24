@@ -73,6 +73,7 @@ class Worktree:
     branch: str | None
     path: Path | None
     main: bool = False
+    locked: bool = False
 
 
 def _run(root: Path, arguments: Sequence[str]) -> str:
@@ -197,6 +198,7 @@ def _entry(fields: Mapping[str, str], *, main: bool) -> Worktree:
         branch=branch.removeprefix("refs/heads/") if branch else None,
         path=Path(path) if path else None,
         main=main,
+        locked="locked" in fields,
     )
 
 

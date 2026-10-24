@@ -148,6 +148,12 @@ def parser() -> argparse.ArgumentParser:
         "clean", help="remove terminal owned checkouts, retaining unpreserved work"
     )
     clean.add_argument("selector", nargs="?", metavar="project", help=PROJECT_HELP)
+    clean.add_argument(
+        "--path",
+        action="append",
+        type=Path,
+        help="retire only this completed checkout (repeatable)",
+    )
     _project_option(clean)
     _output_arguments(clean)
 
@@ -231,6 +237,11 @@ def parser() -> argparse.ArgumentParser:
     clean.add_argument("task_id", type=int, nargs="?")
     _job_id_option(clean)
     clean.add_argument("--all-terminal", action="store_true")
+    clean.add_argument(
+        "--worktrees",
+        action="store_true",
+        help="also retire published checkouts after queue cleanup",
+    )
     _output_arguments(clean)
     wait = job_verbs.add_parser("wait")
     wait.add_argument("task_id", type=int)
@@ -441,8 +452,29 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
         out.write(job, f"{out.job_line(job)}; {job['state']}")
         return EXIT_REFUSED if job["state"] == "failed" else EXIT_OK
     if verb == "clean":
+        if arguments.worktrees and not arguments.all_terminal:
+            raise JobError("--worktrees requires --all-terminal")
         if arguments.all_terminal:
             rows = launch.clean_terminal(config)
+            if arguments.worktrees:
+                print(
+                    f"cleaned {len(rows)} terminal queue task(s); checking completed worktrees",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                worktrees = worktree_cleanup.clean_published(config)
+                failed = any("error" in row for row in worktrees)
+                out.write(
+                    {
+                        "jobs": rows,
+                        "queue_cleanup": "completed",
+                        "worktrees": worktrees,
+                        "worktree_cleanup": "failed" if failed else "completed",
+                    },
+                    f"cleaned {len(rows)} terminal task(s); worktree cleanup "
+                    + ("has failures" if failed else "completed"),
+                )
+                return EXIT_REFUSED if failed else EXIT_OK
             out.write(rows, f"cleaned {len(rows)} terminal task(s)")
             return EXIT_OK
         if arguments.task_id is None:
@@ -742,9 +774,11 @@ def _project(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                     row["name"],
                     row["pool"],
                     row["result"],
-                    f"{row['timeout_seconds']}s"
-                    if row["timeout_seconds"]
-                    else "until cancelled",
+                    (
+                        f"{row['timeout_seconds']}s"
+                        if row["timeout_seconds"]
+                        else "until cancelled"
+                    ),
                     row["description"],
                 )
                 for row in rows
@@ -763,7 +797,11 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
     if verb == "worktree":
         if arguments.worktree_verb == "clean":
             project = _select_project(config, arguments.project, arguments.selector)
-            cleaned = worktree_cleanup.clean(config, project)
+            cleaned = (
+                worktree_cleanup.clean(config, project, paths=arguments.path)
+                if arguments.path
+                else worktree_cleanup.clean(config, project)
+            )
             kept = [f"{row['branch']}: {row['reason']}" for row in cleaned["kept"]]
             out.write(
                 cleaned,

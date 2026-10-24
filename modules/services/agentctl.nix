@@ -189,7 +189,7 @@ mkServiceModule {
         {
           inherit config;
           unitName = "agentctl-clean";
-          description = "Remove finished queue tasks, keeping their results";
+          description = "Remove finished queue tasks and completed worktrees";
         }
         {
           manager = "user";
@@ -197,14 +197,14 @@ mkServiceModule {
           # pueued keeps every finished task in memory until it is cleaned;
           # nothing cleaned them, and the daemon grew to 1.2 GB over 3.7 days.
           # Results and receipts stay readable through agentctl afterwards.
-          execStart = "${scriptPkgs.agentctl}/bin/agentctl job clean --all-terminal";
+          execStart = "${scriptPkgs.agentctl}/bin/agentctl job clean --all-terminal --worktrees";
           serviceConfig = {
             TimeoutStartSec = "5min";
           };
           timer = {
             onCalendar = "*-*-* 05:10:00";
             persistent = true;
-            description = "Daily removal of finished queue tasks";
+            description = "Daily cleanup of finished jobs and completed worktrees";
           };
         }
       )

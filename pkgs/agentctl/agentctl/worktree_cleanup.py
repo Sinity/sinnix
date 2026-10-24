@@ -11,6 +11,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Sequence
@@ -94,6 +95,131 @@ def _dirty_paths(path: Path) -> list[str]:
         for line in _git(path, "status", "--porcelain=v1").splitlines()
         if not (line.startswith("??") and line[3:].startswith(f"{WORKTREE_STATE_DIR}/"))
     ]
+
+
+def _empty_tree(path: Path) -> bool:
+    pending, visited = [path], 0
+    try:
+        while pending:
+            directory = pending.pop()
+            visited += 1
+            if visited > 256:
+                return False
+            for child in directory.iterdir():
+                if child.is_symlink() or not child.is_dir():
+                    return False
+                pending.append(child)
+    except OSError:
+        return False
+    return True
+
+
+def _cargo_cache(path: Path, *, registered: bool) -> Path | None:
+    target = path / "target"
+    tag = target / "CACHEDIR.TAG"
+    if target.is_symlink() or tag.is_symlink() or not target.is_dir():
+        return None
+    try:
+        tagged = (
+            tag.is_file()
+            and tag.read_bytes().splitlines()[0]
+            == b"Signature: 8a477f597d28d172789f06886806bc55"
+        )
+    except (OSError, IndexError):
+        tagged = False
+    if not tagged and not _empty_tree(target):
+        return None
+    if registered:
+        if _git(path, "ls-files", "--", "target"):
+            return None
+        ignored = gitcmd.git(
+            path, "check-ignore", "target", ok_statuses=(0, 1), error=CleanupError
+        )
+        if not ignored:
+            return None
+    return target
+
+
+def _bytecode_cache(path: Path) -> bool:
+    if path.name != "__pycache__" or path.is_symlink() or not path.is_dir():
+        return False
+    try:
+        for child in path.iterdir():
+            if child.is_symlink() or not child.is_file() or child.suffix != ".pyc":
+                return False
+            with child.open("rb") as handle:
+                header = handle.read(16)
+                if len(header) != 16 or header[2:4] != b"\r\n":
+                    return False
+    except OSError:
+        return False
+    return True
+
+
+def _tagged_cache(path: Path) -> bool:
+    tag = path / "CACHEDIR.TAG"
+    if path.is_symlink() or not path.is_dir() or tag.is_symlink():
+        return False
+    try:
+        return (
+            tag.is_file()
+            and tag.read_bytes().splitlines()[0]
+            == b"Signature: 8a477f597d28d172789f06886806bc55"
+        )
+    except (OSError, IndexError):
+        return False
+
+
+def _ignored_caches(path: Path) -> tuple[Path, ...]:
+    names = _git(
+        path,
+        "ls-files",
+        "--others",
+        "--ignored",
+        "--exclude-standard",
+        "--directory",
+        "-z",
+    )
+    return tuple(
+        path / name
+        for name in names.split("\0")
+        if name
+        and path / name != path / "target"
+        and (_bytecode_cache(path / name) or _tagged_cache(path / name))
+    )
+
+
+def _remove_cache(target: Path) -> None:
+    """Retain the cache tag until a partial deletion is safely retryable."""
+    tag = target / "CACHEDIR.TAG"
+    for child in target.iterdir():
+        if child == tag:
+            continue
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+    tag.unlink(missing_ok=True)
+    target.rmdir()
+
+
+def _external_cache(path: Path) -> Path | None:
+    """Only the compiler selector's exact per-checkout cache, never a scan."""
+    root = Path(os.environ.get("SINNIX_CARGO_CACHE_ROOT", "/realm/state/cache/cargo"))
+    key = hashlib.sha256(str(path.resolve()).encode()).hexdigest()[:32]
+    parent = root / str(os.getuid()) / key
+    target = parent / "target"
+    if not _path_entry_exists(parent):
+        return None
+    if any(
+        candidate.is_symlink() for candidate in (root, parent.parent, parent, target)
+    ):
+        raise CleanupError(f"compiler cache is symlinked; inspect {target}")
+    if any(entry.name != "target" for entry in parent.iterdir()):
+        raise CleanupError(f"compiler cache contains other evidence; inspect {parent}")
+    if _cargo_cache(parent, registered=False) != target:
+        raise CleanupError(f"compiler cache is not tagged or empty; inspect {target}")
+    return target
 
 
 def _under(path: Path, root: Path) -> bool:
@@ -349,6 +475,7 @@ def _preserve_artifacts(
 ) -> dict[str, str]:
     patterns = (
         f"{WORKTREE_STATE_DIR}/**/*",
+        "target/nextest/**/*",
         *(project.workspace.retain_artifacts if project.workspace else ()),
     )
     replacements: dict[str, str] = {}
@@ -408,7 +535,10 @@ def _recovery_ref(root: Path, run_id: str | None, path: Path, head: str) -> str:
 
 
 def _cleanup_obstacle(
-    project: ProjectAdapter, path: Path, preserved: Mapping[str, str] | None = None
+    project: ProjectAdapter,
+    path: Path,
+    preserved: Mapping[str, str] | None = None,
+    disposable: Sequence[Path] = (),
 ) -> str | None:
     """Git status alone cannot prove that checkout-only bytes are retained."""
     common = ("rev-parse", "--path-format=absolute", "--git-common-dir")
@@ -454,8 +584,12 @@ def _cleanup_obstacle(
         pending.extend((path / name, kind) for name in listing.split("\0") if name)
     while pending:
         candidate, kind = pending.pop()
+        if candidate in disposable:
+            continue
         mode = candidate.lstat().st_mode
         if stat.S_ISDIR(mode):
+            if candidate not in covered_dirs and _empty_tree(candidate):
+                continue
             if candidate not in covered_dirs:
                 return f"worktree kept; {kind} directory is not preserved: {str(candidate)!r}"
             with os.scandir(candidate) as children:
@@ -491,6 +625,11 @@ def _drop_branch(
     run_id: str | None = None,
     artifacts: list[dict[str, str]] | None = None,
     delete_branch: bool = False,
+    registry: Sequence[worktrunk.Worktree] | None = None,
+    process_users: Callable[[Path], list[str]] | None = None,
+    disposable: Sequence[Path] = (),
+    expected_head: str | None = None,
+    preserved_artifacts: Mapping[str, str] | None = None,
 ) -> str | None:
     """Release one terminal checkout while retaining its Git history.
 
@@ -508,11 +647,20 @@ def _drop_branch(
             error=CleanupError,
         )
         if head:
+            if expected_head is not None and head != expected_head:
+                raise CleanupError("branch moved after publication proof")
             _recovery_ref(project.root, run_id, recorded_path or project.root, head)
             _git(project.root, "update-ref", "-d", f"refs/heads/{branch}", head)
 
-    registry = worktrunk.worktrunk_list(project.root)
-    tree = worktrunk.worktrunk_find(project.root, branch)
+    registry = (
+        registry if registry is not None else worktrunk.worktrunk_list(project.root)
+    )
+    tree = next((tree for tree in registry if tree.branch == branch), None)
+    if tree is None and recorded_path is None:
+        tree = worktrunk.worktrunk_find(project.root, branch)
+    process_users = process_users or _process_users
+    if tree is not None and tree.locked:
+        return "worktree kept; explicitly locked"
     path = tree.path if tree is not None else None
     removal_target = branch
     detached = False
@@ -565,7 +713,7 @@ def _drop_branch(
             if obstacle:
                 return obstacle
             dirty = _dirty_paths(path)
-            users = [*_task_users(path), *_process_users(path)]
+            users = [*_task_users(path), *process_users(path)]
         except (CleanupError, OSError) as error:
             return f"worktree kept; {error}"
         if dirty:
@@ -574,6 +722,8 @@ def _drop_branch(
             return f"worktree kept; active user: {users[0]}"
         try:
             head = _git(path, "rev-parse", "HEAD")
+            if expected_head is not None and head != expected_head:
+                return "worktree kept; HEAD changed after publication proof"
             branch_head = gitcmd.git(
                 project.root,
                 "rev-parse",
@@ -587,12 +737,16 @@ def _drop_branch(
                 _recovery_ref(project.root, run_id, path, head)
             if not detached and branch_head != head:
                 return "worktree kept; branch no longer names checkout HEAD"
-            copied = _preserve_artifacts(
-                config,
-                project,
-                run_id,
-                path,
-                artifacts=artifacts if artifacts is not None else [],
+            copied = (
+                dict(preserved_artifacts)
+                if preserved_artifacts is not None
+                else _preserve_artifacts(
+                    config,
+                    project,
+                    run_id,
+                    path,
+                    artifacts=artifacts if artifacts is not None else [],
+                )
             )
             if copied and run_id is not None:
 
@@ -623,7 +777,7 @@ def _drop_branch(
                     ]
 
                 _update_custody(config, run_id, retain)
-            obstacle = _cleanup_obstacle(project, path, copied)
+            obstacle = _cleanup_obstacle(project, path, copied, disposable)
             if obstacle:
                 return obstacle
             if _dirty_paths(path):
@@ -640,18 +794,37 @@ def _drop_branch(
                     ok_statuses=(0, 1),
                     error=CleanupError,
                 )
-                if branch_head != _git(path, "rev-parse", "HEAD"):
+                if branch_head != head or branch_head != _git(
+                    path, "rev-parse", "HEAD"
+                ):
                     return "worktree kept; branch no longer names checkout HEAD"
-            users = [*_task_users(path), *_process_users(path)]
+            users = [*_task_users(path), *process_users(path)]
             if users:
                 return f"worktree kept; active user: {users[0]}"
         except (CleanupError, OSError) as error:
             return f"worktree kept; {error}"
     try:
+        for output in disposable:
+            if (
+                output.is_relative_to(path)
+                and output != path / "target"
+                and (_bytecode_cache(output) or _tagged_cache(output))
+            ):
+                _remove_cache(output)
+                continue
+            local = output.parent == path
+            if (not local and _external_cache(path) != output) or _cargo_cache(
+                output.parent, registered=local
+            ) != output:
+                raise CleanupError(f"build output changed before removal: {output}")
+            print(f"removing build output {output}", file=sys.stderr, flush=True)
+            _remove_cache(output)
+            if not local:
+                output.parent.rmdir()
         worktrunk.worktrunk_remove(
             project.root, removal_target, keep_branch=True, reap=False
         )
-    except WorktrunkError as error:
+    except (WorktrunkError, CleanupError, OSError) as error:
         return str(error)
     try:
         if _path_entry_exists(path):
@@ -734,7 +907,9 @@ def _branch_reachable_from(root: Path, branch: str, base: str) -> bool:
     return True
 
 
-def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
+def clean(
+    config: Config, project: ProjectAdapter, *, paths: Sequence[Path] | None = None
+) -> dict[str, Any]:
     """Remove the worktrees of runs that are over. Run state, never age.
 
     A worktree is a candidate only when its branch names a batch run of this
@@ -747,14 +922,17 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
             project.root,
             "rev-parse",
             "--verify",
-            f"{project.workspace.default_base}^{{commit}}"
-            if project.workspace
-            else "refs/remotes/origin/HEAD^{commit}",
+            (
+                f"{project.workspace.default_base}^{{commit}}"
+                if project.workspace
+                else "refs/remotes/origin/HEAD^{commit}"
+            ),
         )
     except CleanupError:
         # Without a base every commit is judged by the refs that hold it,
         # which is the check that decides preservation anyway.
         default_base = ""
+    selected = {path.absolute() for path in paths} if paths is not None else None
     removed: list[str] = []
     absent: list[str] = []
     kept: list[dict[str, str]] = []
@@ -794,6 +972,17 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
             targets.append((str(tree.branch), owner, None))
         seen: set[tuple[str, Path | None]] = set()
         for branch, owner, recorded_path in targets:
+            if selected is not None:
+                target = recorded_path or next(
+                    (
+                        tree.path
+                        for tree in worktrunk.worktrunk_list(project.root)
+                        if tree.branch == branch
+                    ),
+                    None,
+                )
+                if target not in selected:
+                    continue
             key = (branch, recorded_path)
             if key in seen:
                 continue
@@ -884,6 +1073,12 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
             else:
                 removed.append(branch)
             retained_artifacts.extend(copied)
+    from .native_worktrees import clean_native
+
+    native = clean_native(config, project, selected)
+    removed.extend(native["removed"])
+    kept.extend(native["kept"])
+    retained_artifacts.extend(native["artifacts"])
     return {
         "project": project.project_id,
         "removed": removed,
@@ -891,3 +1086,22 @@ def clean(config: Config, project: ProjectAdapter) -> dict[str, Any]:
         "kept": kept,
         "artifacts": retained_artifacts,
     }
+
+
+def clean_published(config: Config) -> list[dict[str, Any]]:
+    """The existing queue maintenance also closes completed native checkouts."""
+    from .native_worktrees import clean_native
+
+    catalog = config.catalog()
+    outcomes = []
+    for row in catalog.list():
+        project = catalog.get(row["id"])
+        if next(config.inputs_dir.glob(project.project_id + "-*.json"), None) is None:
+            continue
+        try:
+            outcomes.append(
+                {"project": project.project_id, **clean_native(config, project)}
+            )
+        except (CleanupError, WorktrunkError, PueueError, OSError, ValueError) as error:
+            outcomes.append({"project": project.project_id, "error": str(error)})
+    return outcomes
