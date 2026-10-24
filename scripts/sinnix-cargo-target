@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Select an isolated compiler target in the provisioned Realm cache subvolume
+# runtimeInputs: bash coreutils git btrfs-progs
+set -euo pipefail
+
+if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+  printf '%s\n' "$CARGO_TARGET_DIR"
+  exit 0
+fi
+
+cache_root="${SINNIX_CARGO_CACHE_ROOT:-/realm/state/cache/cargo}"
+if [ -L "$cache_root" ] || ! btrfs subvolume show "$cache_root" >/dev/null 2>&1; then
+  echo "Cargo cache subvolume is not provisioned: $cache_root" >&2
+  exit 1
+fi
+checkout="$(git rev-parse --show-toplevel)"
+checkout="$(realpath "$checkout")"
+# Different checkouts keep independent writable targets, even on one branch.
+key="$(printf '%s' "$checkout" | sha256sum | cut -c1-32)"
+target="$cache_root/$(id -u)/$key/target"
+mkdir -p "$target"
+printf '%s\n' "$target"

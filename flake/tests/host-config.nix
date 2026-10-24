@@ -8,13 +8,39 @@
 { inputs, ... }:
 {
   perSystem =
-    { pkgs, ... }:
+    { pkgs, sinnixScriptRegistry, ... }:
     let
       host = inputs.self.nixosConfigurations.sinnix-prime.config;
       failures = builtins.filter (entry: !entry.assertion) host.assertions;
       journalSource = host.systemd.services.ensure-journal-source;
     in
     {
+      checks.cargo-cache =
+        let
+          unit = host.systemd.services.sinnix-cargo-cache;
+        in
+        assert unit.environment.CARGO_CACHE_ROOT == "/realm/state/cache/cargo";
+        assert unit.serviceConfig.Type == "oneshot";
+        assert builtins.elem "/realm" unit.unitConfig.RequiresMountsFor;
+        pkgs.runCommand "cargo-cache-check"
+          {
+            nativeBuildInputs = [
+              pkgs.python3
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.git
+              sinnixScriptRegistry.packageSet.sinnix-cargo-target
+            ];
+            provision = pkgs.writeText "cargo-cache-provision" unit.script;
+          }
+          ''
+            python ${./cargo_cache.py} "$provision" ${../../scripts/sinnix-cargo-target} ${../../scripts/sinnix-direnvrc}
+            explicit="$TMPDIR/explicit-target"
+            test "$(CARGO_TARGET_DIR="$explicit" sinnix-cargo-target)" = "$explicit"
+            test ! -e "$explicit"
+            touch "$out"
+          '';
+
       checks.transmission-sparsify =
         let
           unit = host.systemd.services.transmission-sparsify;

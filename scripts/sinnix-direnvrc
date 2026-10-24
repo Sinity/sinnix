@@ -86,7 +86,7 @@ _sinnix_setup_sinex_dev_cache() {
   if [ "${SINEX_DEV_CACHE_ROOT:-$project_root/.sinex/cache}" = "$project_root/.sinex/cache" ]; then
     export SINEX_DEV_CACHE_ROOT="$sinex_cache_base"
     export SINEX_CACHE_DIR="$SINEX_DEV_CACHE_ROOT"
-    export CARGO_TARGET_DIR="$SINEX_DEV_CACHE_ROOT/target"
+    export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$SINEX_DEV_CACHE_ROOT/target}"
     export SINEX_TEST_RESULTS_DIR="$SINEX_CACHE_DIR/test-results"
     mkdir -p "$SINEX_DEV_CACHE_ROOT" "$CARGO_TARGET_DIR" "$SINEX_TEST_RESULTS_DIR"
   fi
@@ -115,6 +115,16 @@ _sinnix_project_environment_setup() {
   local project_root
   project_root="$(_sinnix_project_root)" || return 0
 
+  case "$project_kind" in
+    sinex|polylogue)
+      if [ -z "${CARGO_TARGET_DIR:-}" ] && command -v sinnix-cargo-target >/dev/null 2>&1; then
+        local cargo_target
+        if cargo_target="$(sinnix-cargo-target)"; then
+          export CARGO_TARGET_DIR="$cargo_target"
+        fi
+      fi
+      ;;
+  esac
   case "$project_kind" in
     sinex)
       _sinnix_setup_sinex_dev_cache "$project_root"

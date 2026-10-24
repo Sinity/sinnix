@@ -38,9 +38,54 @@ mkFeatureModule {
       lib,
       cfg,
       user,
+      helpers,
       ...
     }:
+    let
+      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+    in
     lib.mkMerge [
+      {
+        # A nested subvolume keeps compiler outputs out of the Realm snapshot.
+        # Never turn an existing directory into an unbacked cache implicitly.
+        systemd.services.sinnix-cargo-cache = {
+          description = "Provision the regenerable Cargo cache subvolume";
+          wantedBy = [ "multi-user.target" ];
+          unitConfig.RequiresMountsFor = [ config.sinnix.paths.realmRoot ];
+          after = [ "systemd-tmpfiles-setup.service" ];
+          path = [
+            pkgs.btrfs-progs
+            pkgs.coreutils
+          ];
+          environment = {
+            CARGO_CACHE_ROOT = "${config.sinnix.paths.realmRoot}/state/cache/cargo";
+            CARGO_CACHE_USER = user;
+          };
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+          };
+          script = ''
+            set -euo pipefail
+            if [ -L "$CARGO_CACHE_ROOT" ]; then
+              echo "Cargo cache root is a symlink: $CARGO_CACHE_ROOT" >&2
+              exit 1
+            fi
+            if [ -e "$CARGO_CACHE_ROOT" ]; then
+              if ! btrfs subvolume show "$CARGO_CACHE_ROOT" >/dev/null 2>&1; then
+                echo "Cargo cache root already exists as an ordinary path; preserve it for reconciliation: $CARGO_CACHE_ROOT" >&2
+                exit 1
+              fi
+            else
+              btrfs subvolume create "$CARGO_CACHE_ROOT"
+            fi
+            chown "$CARGO_CACHE_USER:users" "$CARGO_CACHE_ROOT"
+            chmod 0700 "$CARGO_CACHE_ROOT"
+          '';
+        };
+        home-manager.users.${user}.home.packages = [ scriptPkgs.sinnix-cargo-target ];
+      }
+
       # Nix tooling
       (lib.mkIf cfg.nix.enable {
         # nixd (not nil): both editors' Nix LSP. Mason cannot provide a working

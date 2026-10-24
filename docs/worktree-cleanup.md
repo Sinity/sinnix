@@ -11,3 +11,26 @@ Directories under `/realm/worktree` without `.git` are reported and retained wit
 Failures are printed to the service journal and produce a nonzero exit status. Retained checkouts whose top-level directory is older than fourteen days are also reported for inspection; directory age alone does not establish inactivity or integration.
 
 Run the isolated fixtures with `python3 scripts/tests/test_worktree_reap.py`, or use the `worktree-reap` flake check. The fixtures cover integration, retained files and locks, fresh process checks, unknown directories and visible command failure. They never invoke production cleanup.
+
+## Compiler targets
+
+The host's `sinnix-cargo-cache.service` provisions `/realm/state/cache/cargo`
+as a nested Btrfs subvolume. It refuses an existing ordinary path or symlink;
+activation must reconcile that path separately rather than convert or delete it.
+Parent Realm snapshots retain worktree source and WIP without retaining this
+subvolume's compiler outputs. Borg's existing whole-worktree exclusion remains
+separate from local snapshot coverage.
+
+`sinnix-cargo-target` selects a stable per-checkout target there. Polylogue and
+Sinex devshells use it when installed; other hosts retain the ordinary `target/`
+fallback. Explicit `CARGO_TARGET_DIR` values keep their existing lease. Direnv
+uses the same selection for both projects, and AgentCTL forwards their declared
+inherited target through `nix develop --command`. Devkit resolves Cargo's actual
+target for test/report handling. Durable run history, Sinex service/test state
+and independently retained historical binaries keep their current owners.
+
+Provisioning and target selection do not migrate warm targets or release old
+snapshot references. Before activating a new cache root, inspect its existing
+contents and target holders, preserve needed artifacts, then verify the installed
+unit and effective target from a real declared job. Existing target leases remain
+explicit until their owners release them.
