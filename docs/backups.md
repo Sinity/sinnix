@@ -45,7 +45,7 @@ inspect both native units and their admitted snapshot markers afterwards.
 
 | Source                   | How                                                                    | When                                           | Repository                |
 | ------------------------ | ---------------------------------------------------------------------- | ---------------------------------------------- | ------------------------- |
-| `/realm`                 | btrbk read-only snapshot, archived by the Borg job                     | snapshots 00/06/12/18:00, drain at :05 and :25 | `borg-realm-v2`           |
+| `/realm`                 | btrbk read-only snapshot, archived by the Borg job                     | snapshots 00/06/12/18:00, drain hourly at :05 and :25 | `borg-realm-v2`           |
 | `/persist`               | btrbk read-only snapshot, archived by the Borg job                     | same as `/realm`                               | `borg-persist-v1`         |
 | The ephemeral root       | snapshot the initrd takes before each wipe                             | daily                                          | `borg-root-snapshots-v1`  |
 | Sinex blob store         | direct                                                                 | daily 05:40                                    | `borg-sinex-blobs-v1`     |
@@ -62,6 +62,11 @@ also listed for the coverage check; `--exclude-caches` and globs are not used,
 because coverage cannot waive what they drop. Root snapshots leave out
 `~/.cache`, `/root/.cache`, `/var/cache`, `/tmp` and every other mounted
 filesystem (`rootSnapshotExcludes` in `modules/lib/backup/acknowledgement.nix`).
+
+The drain checks hourly at :05 and :25 while source acquisition remains every
+six hours. A long maintenance pass can hold the Borg lock across both attempts
+in an acquisition hour; hourly retries prevent a six-hour wait after it releases.
+When no new cuts are queued, the drain only validates its existing acknowledgements.
 
 ### Snapshots are kept until their archive is checked
 

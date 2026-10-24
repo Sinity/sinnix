@@ -181,7 +181,7 @@ in
       exit "$failed"
     '';
     timer = {
-      onCalendar = "*-*-* 00,06,12,18:05,25:00";
+      onCalendar = "*-*-* *:05,25:00";
       persistent = false;
     };
   })
