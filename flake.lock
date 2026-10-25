@@ -1328,17 +1328,17 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1792960701,
-        "narHash": "sha256-isNTmGoxCN3ZgJn1Ot32li0Mx/at6dnxMbStrlDIb+E=",
+        "lastModified": 1792963516,
+        "narHash": "sha256-DPPlXxv/CkjT56v0X5wsP/ZXixmZ3UB8vUAEr1+Tq9o=",
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "fd2786b83ead305c545923c31c1dffb7c5a375df",
+        "rev": "d0130d15edf77d5c22dff08fa8bfc306f61eb035",
         "type": "github"
       },
       "original": {
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "fd2786b83ead305c545923c31c1dffb7c5a375df",
+        "rev": "d0130d15edf77d5c22dff08fa8bfc306f61eb035",
         "type": "github"
       }
     },
