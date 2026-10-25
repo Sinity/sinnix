@@ -313,6 +313,12 @@ assert lib.assertMsg (
           }
         ];
       realmBorgDrainScript = realmBorgDrainScriptFor "borgbackup-job-realm";
+      localDumpsScript = rewriteBackupHook (realmBorgDrainScriptFor "borgbackup-local-dumps") [
+        {
+          from = "/realm/state/db-dumps";
+          to = "$TMPDIR/live-dumps";
+        }
+      ];
       persistBorgDrainScriptFor =
         name:
         rewriteBackupHook backupRuntimeEval.config.systemd.services.${name}.script [
@@ -682,6 +688,7 @@ assert lib.assertMsg (
                 pkgs.writeText "backup-fixture-scripts.json" (
                   builtins.toJSON {
                     realm = realmBorgDrainScript;
+                    localDumps = localDumpsScript;
                     persist = persistBorgDrainScript;
                     coordinator = coordinatorScript;
                     missing = missingRealmBorgDrainScript;

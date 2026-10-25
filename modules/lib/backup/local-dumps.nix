@@ -41,7 +41,7 @@
       marker=${lib.escapeShellArg "${borgDrainStateRoot}/realm.latest-archived"}
       # The admitted immutable source must still qualify under current policy.
       ${snapshotCoverage} acknowledged --policy ${realmCoveragePolicy} -- \
-        ${lib.escapeShellArg realmSnapshots} 'realm.*' "$marker" 'realm-' ${lib.escapeShellArg ""} >/dev/null
+        ${lib.escapeShellArg realmSnapshots} 'realm.*' "$marker" realm -coverage-v3 >/dev/null
       archive="$(sed -n 's/^archive=//p' "$marker")"
       proof="$(sed -n 's/^coverage=//p' "$marker")"
       ${scriptPkgs.sinnix-borg-prune-dumps}/bin/sinnix-borg-prune-dumps \

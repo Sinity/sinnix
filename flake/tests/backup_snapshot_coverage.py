@@ -1805,6 +1805,10 @@ class DrainFixture(unittest.TestCase):
                 scripts[lane] = scripts[lane].replace(
                     match.group(), str(fixture_policy)
                 )
+                if lane == "realm":
+                    scripts["localDumps"] = scripts["localDumps"].replace(
+                        match.group(), str(fixture_policy)
+                    )
             for path in (
                 "mock-bin",
                 "logs",
@@ -1815,6 +1819,7 @@ class DrainFixture(unittest.TestCase):
                 "realm-snapshots",
                 "persist-snapshots",
                 "realm-empty",
+                "live-dumps",
                 "polylogue-stage-root",
             ):
                 (root / path).mkdir(parents=True, exist_ok=True)
@@ -2032,6 +2037,11 @@ else: sys.exit(1)
             self.assertEqual(first_proof["proof_mode"], "created")
             self.assertEqual(first_proof["source_hashed_bytes"], 0)
             self.assertTrue(first_proof["create_receipt_sha256"])
+            # Exercise the rendered local-expiry caller against the actual
+            # admitted receipt, not merely its standalone restore helper.
+            local_expiry = run("localDumps")
+            self.assertIn('"outcome": "ok"', local_expiry.stdout)
+            self.assertIn('"removed_logical_bytes": 0', local_expiry.stdout)
             self.assertIn(
                 "realm-" + old.name,
                 subprocess.check_output(
