@@ -48,4 +48,12 @@ if [ ! -e "$target" ] && [ -n "$seed_checkout" ] && [ -d "$seed_checkout" ]; the
   fi
 fi
 mkdir -p "$target"
+# Cargo tags only a target directory it creates itself, and this one exists
+# before Cargo runs. Worktree cleanup retires only a tagged target.
+if [ ! -e "$target/CACHEDIR.TAG" ]; then
+  printf '%s\n' 'Signature: 8a477f597d28d172789f06886806bc55' \
+    '# A Cargo target selected by sinnix-cargo-target.' \
+    '# For information about cache directory tags see https://bford.info/cachedir/' \
+    >"$target/CACHEDIR.TAG"
+fi
 printf '%s\n' "$target"

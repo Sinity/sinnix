@@ -35,7 +35,9 @@ master-baseline checkout (Git config `sinnix.baselineCheckout`, which
 `sinnix-master-baseline` sets): a reflink copy taken while holding Cargo's
 build lock on the source, so it shares extents and Cargo reuses the
 dependency artifacts. Without reflinks, a baseline target, or the lock within
-five minutes, the target starts empty.
+five minutes, the target starts empty. The selector writes the target's
+`CACHEDIR.TAG` (Cargo tags only a target directory it creates, and this one
+exists first), so worktree cleanup can retire it with its checkout.
 
 Provisioning and target selection do not migrate warm targets or release old
 snapshot references. Before activating a new cache root, inspect its existing

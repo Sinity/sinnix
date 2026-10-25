@@ -88,6 +88,9 @@ class CargoCache(unittest.TestCase):
         self.provision()
         first = Path(self.select().stdout.strip())
         self.assertTrue(first.is_dir())
+        # Worktree cleanup retires only a tagged target.
+        self.assertTrue((first / "CACHEDIR.TAG").read_text().startswith(
+            "Signature: 8a477f597d28d172789f06886806bc55\n"))
         self.assertTrue(first.is_relative_to(self.cache))
         self.assertEqual(self.select().stdout.strip(), str(first))
         second = self.root / "second"
