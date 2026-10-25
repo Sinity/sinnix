@@ -254,12 +254,17 @@ def filesystem_identity(source):
     mounts = json.loads(
         run("findmnt", "--json", "--output", "TARGET,FSTYPE", "--target", str(source))
     ).get("filesystems", [])
+    # findmnt includes the autofs trigger alongside its mounted filesystem.
+    # Ignore only that same-target trigger, retaining ambiguity checks.
+    backing = [mount for mount in mounts if mount.get("fstype") != "autofs"]
     if (
-        len(mounts) != 1
-        or mounts[0].get("fstype") != "btrfs"
-        or not mounts[0].get("target")
+        len(backing) != 1
+        or backing[0].get("fstype") != "btrfs"
+        or not backing[0].get("target")
+        or any(mount.get("target") != backing[0]["target"] for mount in mounts)
     ):
         raise ValueError(f"cannot identify one Btrfs mount: {source}")
+    mounts = backing
     # btrfs filesystem show accepts a mount point, not an arbitrary child.
     output = run("btrfs", "filesystem", "show", "--raw", mounts[0]["target"])
     identities = re.findall(

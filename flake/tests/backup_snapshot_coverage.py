@@ -146,6 +146,30 @@ class FilesystemIdentityFixture(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "identify one Btrfs mount"):
                     COVERAGE.filesystem_identity("/synthetic/nested/snapshot")
 
+    def test_automount_trigger_does_not_hide_backing_filesystem(self):
+        backing = {"target": "/synthetic", "fstype": "btrfs"}
+        trigger = {"target": "/synthetic", "fstype": "autofs"}
+        with patch.object(
+            COVERAGE,
+            "run",
+            side_effect=[
+                json.dumps({"filesystems": [trigger, backing]}),
+                f"Label: 'fixture'  uuid: {FS_UUID}\n",
+            ],
+        ):
+            self.assertEqual(COVERAGE.filesystem_identity("/synthetic/cut"), FS_UUID)
+        for mounts in (
+            [trigger],
+            [trigger, backing, backing],
+            [backing, trigger | {"target": "/other"}],
+            [backing, trigger | {"fstype": "ext4"}],
+        ):
+            with patch.object(
+                COVERAGE, "run", return_value=json.dumps({"filesystems": mounts})
+            ):
+                with self.assertRaisesRegex(ValueError, "identify one Btrfs mount"):
+                    COVERAGE.filesystem_identity("/synthetic/cut")
+
 
 class CoverageMemoryFixture(unittest.TestCase):
     def test_streamed_large_inventory_stays_below_memory_budget(self):
@@ -2691,38 +2715,59 @@ else: sys.exit(1)
             )
             # A separate HDD source shares the repository's data chunks but
             # owns its own receipts and immutable source lifetime.
-            genome_old = snapshot("genome.20260401T010000+0000", {
-                "genotype/original": "supplied input",
-                "outputs/analysis": "historical result",
-                "cache/reference": "downloaded cache",
-                "cache/personal-derived": "retained private derived data",
-                ".direnv/environment": "rebuildable environment",
-            }, lane="genome")
+            genome_old = snapshot(
+                "genome.20260401T010000+0000",
+                {
+                    "genotype/original": "supplied input",
+                    "outputs/analysis": "historical result",
+                    "cache/reference": "downloaded cache",
+                    "cache/personal-derived": "retained private derived data",
+                    ".direnv/environment": "rebuildable environment",
+                },
+                lane="genome",
+            )
             run("genome")
-            genome_new = snapshot("genome.20260402T010000+0000", {
-                "genotype/original": "supplied input",
-                "outputs/analysis": "updated result",
-                "vendor/report": "irreplaceable report",
-                "unfetchable/retained": "unavailable upstream",
-            }, lane="genome")
+            genome_new = snapshot(
+                "genome.20260402T010000+0000",
+                {
+                    "genotype/original": "supplied input",
+                    "outputs/analysis": "updated result",
+                    "vendor/report": "irreplaceable report",
+                    "unfetchable/retained": "unavailable upstream",
+                },
+                lane="genome",
+            )
             run("genome")
             self.assertFalse(genome_old.exists())
             self.assertTrue(genome_new.exists())
             repo = str(root / "repos/borg-realm-v2")
-            for cut, expected in [(genome_old, "historical result"), (genome_new, "updated result")]:
+            for cut, expected in [
+                (genome_old, "historical result"),
+                (genome_new, "updated result"),
+            ]:
                 archive = repo + "::genome-" + cut.name
-                self.assertEqual(subprocess.check_output(
-                    ["borg", "extract", "--stdout", archive, "outputs/analysis"], env=env, text=True
-                ), expected)
+                self.assertEqual(
+                    subprocess.check_output(
+                        ["borg", "extract", "--stdout", archive, "outputs/analysis"],
+                        env=env,
+                        text=True,
+                    ),
+                    expected,
+                )
             members = subprocess.check_output(
-                ["borg", "list", "--short", repo + "::genome-" + genome_old.name], env=env, text=True
+                ["borg", "list", "--short", repo + "::genome-" + genome_old.name],
+                env=env,
+                text=True,
             ).splitlines()
             self.assertIn("genotype/original", members)
             self.assertIn("cache/personal-derived", members)
             self.assertNotIn("cache/reference", members)
             self.assertFalse(any(x.startswith(".direnv/") for x in members))
             run("genome")
-            self.assertTrue(genome_new.exists(), "latest HDD audit source must survive no-work retries")
+            self.assertTrue(
+                genome_new.exists(),
+                "latest HDD audit source must survive no-work retries",
+            )
             for directory in (
                 "live-holder/snapshots",
                 "live-holder/repo",
@@ -2876,7 +2921,10 @@ else: sys.exit(1)
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(
-                [json.loads(line) for line in (empty / "commands").read_text().splitlines()],
+                [
+                    json.loads(line)
+                    for line in (empty / "commands").read_text().splitlines()
+                ],
                 [
                     ["stop", "borgbackup-verify.service"],
                     ["start", "borgbackup-job-realm.service"],
