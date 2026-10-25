@@ -119,6 +119,11 @@ mkServiceModule {
       # yield the disk to builds and interactive work; its slice carries the
       # lowest I/O weight in the job plane.
       background.parallel = 2;
+      # Benchmarks and measurements, and full system builds: long jobs that
+      # held bulk slots while the checks gating merges queued behind them.
+      # A slot each, outside bulk, so a check never waits behind them.
+      measure.parallel = 1;
+      system-build.parallel = 1;
     };
     description = "Each pueue group's width and cross-pool admission policy.";
   };

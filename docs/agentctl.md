@@ -171,7 +171,9 @@ minute.
 - **I/O pressure** is reported, but it neither closes nor delays admission.
   An operation declaring `max_io_pressure` refuses to start above it, and
   long copies and offloads belong in the `background` pool, whose slice has
-  the plane's lowest I/O weight.
+  the plane's lowest I/O weight. Benchmarks and measurements run in the
+  one-slot `measure` pool and full system builds in the one-slot
+  `system-build` pool, so neither holds a `bulk` slot a check is waiting for.
 
 ## Worktrees
 

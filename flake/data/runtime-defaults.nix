@@ -583,6 +583,27 @@ rec {
         MemoryMax = "6G";
         MemorySwapMax = "512M";
       };
+      # One benchmark or measurement at a time. Its numbers are only valid on
+      # a quiet host, so it runs throttled by nothing but its own ceiling: no
+      # pressure kill, ordinary weights.
+      agentctl-measure = {
+        IOAccounting = true;
+        CPUWeight = 100;
+        IOWeight = 100;
+        MemoryHigh = "12G";
+        MemoryMax = "14G";
+        MemorySwapMax = "2G";
+      };
+      # One full workstation build (`sinnix:build_system`); evaluation runs
+      # here, the derivations in the Nix daemon.
+      agentctl-system-build = {
+        IOAccounting = true;
+        CPUWeight = 20;
+        IOWeight = 10;
+        MemoryHigh = "8G";
+        MemoryMax = "10G";
+        MemorySwapMax = "2G";
+      };
       # The switch commands place their evaluation scope here.
       nix-build = buildSlicePolicy;
     };

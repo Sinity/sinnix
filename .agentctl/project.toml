@@ -251,7 +251,7 @@ timeout_seconds = 1800
 [operations.build_system]
 description = "Build the declared workstation configuration without activation"
 exec = ["env", "SINNIX_SECRET_DECLARATIONS=/realm/state/secrets/sinnix/runtime.nix", "nix", "build", "--impure", "--no-link", ".#nixosConfigurations.sinnix-prime.config.system.build.toplevel"]
-pool = "bulk"
+pool = "system-build"
 result = "exit"
 timeout_seconds = 14400
 

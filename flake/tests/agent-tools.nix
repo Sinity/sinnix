@@ -394,6 +394,8 @@ in
             "agentctl-shell-quick"
             "agentctl-shell-long"
             "agentctl-background"
+            "agentctl-measure"
+            "agentctl-system-build"
           ] (name: userSlices.${name});
           forbiddenAvoidTokens = [
             "bash"
@@ -420,6 +422,10 @@ in
         assert lib.assertMsg (
           declaredPools ? background && poolSlices ? agentctl-background
         ) "the offload pool must be declared with its low-weight slice";
+        # Benchmarks and system builds never occupy the bulk slots checks use.
+        assert lib.assertMsg (
+          declaredPools.measure.parallel == 1 && declaredPools.system-build.parallel == 1
+        ) "measurements and system builds each run in a one-slot pool of their own";
         assert lib.assertMsg (lib.all (token: !(lib.hasInfix token avoidPattern))
           forbiddenAvoidTokens
         ) "the earlyoom fallback must not exempt agents, browsers, runtimes, or generic shells";
