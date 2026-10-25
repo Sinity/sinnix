@@ -98,7 +98,10 @@ mkServiceModule {
           slice = "agentctl-pytest-quick.slice";
         };
       };
-      bulk.parallel = 2;
+      # Three, not two: the cargo cap bounds concurrent builds across pools,
+      # and at two, long measurement and copy jobs held every bulk slot while
+      # checks queued behind them for an hour (2026-10-25).
+      bulk.parallel = 3;
       # Three Polylogue verify_quick runs fit the 9G normal slice now that one
       # peaks under 1 GiB (polylogue #5754); at 3.3 GiB each they had held it
       # at ~70% full memory pressure.

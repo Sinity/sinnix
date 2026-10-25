@@ -511,9 +511,10 @@ rec {
       # and swaps its own pages before the hard cap; equal limits with no swap
       # made bulk drop and re-read its page cache instead (4.86 TiB of
       # refaults in one uptime), and an 80M read cap made each re-read slow.
-      # Two Cargo builds (the bulk width) peak at 5-8 GiB each, so the slice
-      # holds both: at 8G/10G two concurrent checks reclaimed against each
-      # other until oomd killed one after 53 minutes (2026-10-25).
+      # Cargo builds peak at 5-8 GiB each and the cargo cap admits three
+      # across pools, so the slice holds two beside other bulk work: at
+      # 8G/10G two concurrent checks reclaimed against each other until oomd
+      # killed one after 53 minutes (2026-10-25).
       agentctl-bulk = {
         IOAccounting = true;
         CPUWeight = 20;
