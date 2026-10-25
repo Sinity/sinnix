@@ -511,12 +511,15 @@ rec {
       # and swaps its own pages before the hard cap; equal limits with no swap
       # made bulk drop and re-read its page cache instead (4.86 TiB of
       # refaults in one uptime), and an 80M read cap made each re-read slow.
+      # Two Cargo builds (the bulk width) peak at 5-8 GiB each, so the slice
+      # holds both: at 8G/10G two concurrent checks reclaimed against each
+      # other until oomd killed one after 53 minutes (2026-10-25).
       agentctl-bulk = {
         IOAccounting = true;
         CPUWeight = 20;
         IOWeight = 10;
-        MemoryHigh = "8G";
-        MemoryMax = "10G";
+        MemoryHigh = "16G";
+        MemoryMax = "18G";
         MemorySwapMax = "2G";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
@@ -526,11 +529,10 @@ rec {
         IOAccounting = true;
         CPUWeight = 50;
         IOWeight = 50;
-        # Three concurrent Polylogue verify_quick jobs (parallel gates, ~2-2.6G
-        # each) held the old 5G line on 2026-09-28 at 88% full memory
-        # pressure, so each ran slower than two unthrottled ones would.
-        MemoryHigh = "9G";
-        MemoryMax = "10G";
+        # Focused Cargo test builds peak at 2-6 GiB each and the pool runs
+        # three; the plane's own ceiling bounds normal and bulk together.
+        MemoryHigh = "14G";
+        MemoryMax = "16G";
         MemorySwapMax = "2G";
       };
       agentctl-interactive = {
@@ -569,6 +571,16 @@ rec {
         IOWeight = 100;
         MemoryHigh = "10G";
         MemorySwapMax = "2G";
+      };
+      # Offloads and copies: the lowest I/O weight in the plane, so builds
+      # and interactive reads keep the disk while a copy runs.
+      agentctl-background = {
+        IOAccounting = true;
+        CPUWeight = 10;
+        IOWeight = 5;
+        MemoryHigh = "4G";
+        MemoryMax = "6G";
+        MemorySwapMax = "512M";
       };
       # The switch commands place their evaluation scope here.
       nix-build = buildSlicePolicy;

@@ -43,6 +43,7 @@
               pkgs.bash
               pkgs.coreutils
               pkgs.git
+              pkgs.util-linux
               (selectorFor host)
             ];
             provision = pkgs.writeText "cargo-cache-provision" unit.script;

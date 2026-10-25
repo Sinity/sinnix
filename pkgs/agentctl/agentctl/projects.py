@@ -19,7 +19,7 @@ from typing import Any, Iterable, Mapping, Sequence
 import tomllib
 
 from .environment import build_environment
-from .launch_input import supported_unit_property
+from .launch_input import CAP_NAME, supported_unit_property
 from .limits import (
     DECLARABLE_RESULT_KINDS,
     DEFAULT_TIMEOUT_SECONDS,
@@ -79,6 +79,8 @@ _OPERATION_FIELDS = frozenset(
         "arguments",
         "admission",
         "unit_properties",
+        "cap",
+        "max_io_pressure",
     }
 )
 
@@ -211,6 +213,12 @@ class ProjectOperation:
     arguments: str = "none"
     admission: AdmissionEnvelope | None = None
     unit_properties: tuple[str, ...] = ()
+    # A host-declared cap shared across pools: at most that many jobs naming
+    # it run at once, whichever pools they queue in.
+    cap: str | None = None
+    # Refuse to start while host I/O `full avg60` exceeds this percentage,
+    # for measurements whose numbers would be invalid under load.
+    max_io_pressure: float | None = None
 
     def catalog_row(self) -> dict[str, Any]:
         return {
@@ -226,6 +234,8 @@ class ProjectOperation:
             "arguments": self.arguments,
             "admission": self.admission.catalog_row() if self.admission else None,
             "unit_properties": list(self.unit_properties),
+            "cap": self.cap,
+            "max_io_pressure": self.max_io_pressure,
         }
 
 
@@ -442,6 +452,22 @@ def _operation(name: str, definition: Any, descriptor: Path) -> ProjectOperation
         if definition["arguments"] not in ARGUMENTS_KINDS:
             raise ProjectConfigError(f"operations.{name}.arguments is invalid")
         fields["arguments"] = definition["arguments"]
+    if "cap" in definition:
+        cap = definition["cap"]
+        if not isinstance(cap, str) or not CAP_NAME.fullmatch(cap):
+            raise ProjectConfigError(f"operations.{name}.cap is invalid")
+        fields["cap"] = cap
+    if "max_io_pressure" in definition:
+        limit = definition["max_io_pressure"]
+        if (
+            not isinstance(limit, (int, float))
+            or isinstance(limit, bool)
+            or not 0 <= limit <= 100
+        ):
+            raise ProjectConfigError(
+                f"operations.{name}.max_io_pressure must be a percentage between 0 and 100"
+            )
+        fields["max_io_pressure"] = float(limit)
     return ProjectOperation(
         name=name,
         description=description,

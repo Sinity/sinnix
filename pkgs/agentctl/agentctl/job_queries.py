@@ -781,6 +781,40 @@ def task_logs(config: Config, task: Task, *, attempt: int | None = None) -> str:
     return text
 
 
+# Lines that say why a build or test command failed: nextest's per-test
+# verdicts, compiler errors, panics, the runner's own refusals and the devkit
+# history pointer ("recorded as run N; details: xtask history failures N").
+FAILURE_LINE = re.compile(
+    r"^\s*(FAIL|TIMEOUT|SIGSEGV|SIGABRT|SIGKILL|SIGBUS|LEAK-FAIL)\s+\["
+    r"|^(error|warning: build failed)(\[E\d+\])?:"
+    r"|panicked at "
+    r"|^\s*recorded as run \d+"
+    r"|^(refused|timed out after|could not (start|control) the command)"
+)
+FAILURE_EXCERPT_LINES = 40
+FAILURE_TAIL_LINES = 8
+
+
+def failure_excerpt(config: Config, task: Task) -> list[str]:
+    """What a person needs from a failed job's log without paging it: the
+    matching failure lines, then the log's last lines, each kept once."""
+    lines = task_logs(config, task).splitlines()
+    tail = lines[-FAILURE_TAIL_LINES:]
+    matched: list[str] = []
+    for index, line in enumerate(lines[: len(lines) - len(tail)]):
+        if FAILURE_LINE.search(line):
+            matched.append(line)
+            # A panic's message is the line after its location.
+            if "panicked at " in line and index + 1 < len(lines) - len(tail):
+                matched.append(lines[index + 1])
+    room = FAILURE_EXCERPT_LINES - len(tail)
+    if len(matched) > room:
+        matched = [
+            f"... {len(matched) - room} earlier failure line(s) omitted"
+        ] + matched[-room:]
+    return [*matched, *tail]
+
+
 def logs(
     config: Config,
     task_id: int,

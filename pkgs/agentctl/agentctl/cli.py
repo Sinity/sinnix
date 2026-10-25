@@ -344,6 +344,22 @@ def _operation(project: ProjectAdapter, name: str) -> ProjectOperation:
         raise JobError(str(error.args[0])) from error
 
 
+def _report_failure(config: Config, job: Mapping[str, Any]) -> None:
+    """After a wait, a job that ended without success gets its failure lines
+    and log tail on stderr, so the caller needs no second read."""
+    if not job.get("terminal") or job.get("phase") == "succeeded":
+        return
+    try:
+        task = job_queries.read_task(config, job["task_id"], job.get("job_id"))
+        lines = job_queries.failure_excerpt(config, task)
+    except (JobError, PueueError) as error:
+        print(f"(log unavailable: {error})", file=sys.stderr)
+        return
+    for line in lines:
+        print(f"  {line}", file=sys.stderr)
+    print(f"  full log: agentctl job logs {job['task_id']}", file=sys.stderr)
+
+
 def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     verb = arguments.job_verb
     if verb == "start":
@@ -377,6 +393,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
                 config=config,
             )
         out.write(started, out.job_line(started))
+        _report_failure(config, started)
         if started.get("terminal") or started.get("wait_timed_out"):
             return (
                 EXIT_OK
@@ -498,6 +515,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             out.job_line(waited)
             + (" (wait timed out)" if waited.get("wait_timed_out") else ""),
         )
+        _report_failure(config, waited)
         return EXIT_OK if waited.get("phase") == "succeeded" else EXIT_JOB_NOT_SUCCEEDED
     raise AssertionError(verb)
 

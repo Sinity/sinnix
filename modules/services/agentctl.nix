@@ -112,8 +112,32 @@ mkServiceModule {
       # ChatGPT sessions launch 10-60 min `claude -p` workers here
       # (2026-09-29); four at once is what the old shared pool held.
       shell-long.parallel = 4;
+      # Long I/O-heavy maintenance (copies between disks, offloads) that must
+      # yield the disk to builds and interactive work; its slice carries the
+      # lowest I/O weight in the job plane.
+      background.parallel = 2;
     };
     description = "Each pueue group's width and cross-pool admission policy.";
+  };
+
+  extraOptions.caps = lib.mkOption {
+    type = lib.types.attrsOf lib.types.ints.positive;
+    default = {
+      # Cargo builds across every pool. Five concurrent -j16 builds on this
+      # 16-core, 31 GiB host (2026-10-25) ran into memory pressure; oomd
+      # killed checks after 21-54 minutes and others hit their timeouts.
+      cargo = 3;
+    };
+    description = "Cross-pool caps: how many jobs whose operation names each cap run at once, whichever pools they queue in.";
+  };
+
+  extraOptions.masterBaselines = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [
+      "polylogue"
+      "sinex"
+    ];
+    description = "Projects whose `baseline` operation runs on each new default-branch head, in a reserved checkout whose target also seeds new checkouts' Cargo targets.";
   };
 
   # No runtime surface: the job plane is pueued (declared by the CLI feature)
@@ -143,6 +167,7 @@ mkServiceModule {
           private_project_catalog = config.sinnix.projects.privateCatalogFile;
           event_spool = eventSpool;
           agentctl = "${scriptPkgs.agentctl}/bin/agentctl";
+          inherit (cfg) caps;
           pools = lib.mapAttrs (
             _name: pool:
             {
@@ -238,6 +263,43 @@ mkServiceModule {
           };
         }
       )
+      {
+        # The project list is configuration, so the units merge below the
+        # top-level `systemd` attribute rather than as list items.
+        systemd = lib.mkMerge (
+          map (
+            project:
+            (lib.sinnix.mkScheduledJob
+              {
+                inherit config;
+                unitName = "agentctl-baseline-${project}";
+                description = "Queue the ${project} baseline on a new default-branch head";
+              }
+              {
+                manager = "user";
+                resourceClass = "background";
+                execStart = "${scriptPkgs.sinnix-master-baseline}/bin/sinnix-master-baseline ${project}";
+                # The queued job inherits this PATH: Nix, the system tools and the
+                # user profile's sinnix-cargo-target, as in a login shell.
+                path = [
+                  "/run/wrappers"
+                  "/etc/profiles/per-user/${userName}"
+                  "/run/current-system/sw"
+                ];
+                serviceConfig = {
+                  # Fetch and enqueue only; the operation owns the build's timeout.
+                  TimeoutStartSec = "5min";
+                };
+                timer = {
+                  intervalSec = 600;
+                  onBootSec = 600;
+                  description = "Queue the ${project} baseline on a new default-branch head";
+                };
+              }
+            ).systemd
+          ) cfg.masterBaselines
+        );
+      }
       {
         environment.etc."sinnix/agentctl.json".source = configFile;
         # Queued commands and the timers run with the system PATH, not an

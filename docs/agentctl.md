@@ -39,7 +39,10 @@ never cancels a job, and a queue cleanup retains its historical artifacts.
 | `pools apply`                                                        | write the declared pool widths into the running pueued                                                                                               |
 | `pressure tick`                                                      | one pass pausing or reopening groups against memory pressure                                                                                         |
 
-`job start` and `job wait` take `--timeout-seconds` for the wait.
+`job start` and `job wait` take `--timeout-seconds` for the wait. When the
+waited job ends without success, both print its failure lines (nextest
+verdicts, compiler errors, panics with their message, refusals and the
+`recorded as run N` history pointer) and the log's last lines to stderr.
 The project is `--project`, a leading positional naming a project or checkout
 path, or the checkout around the working directory. A run is named by its full
 id or its 8-character suffix.
@@ -143,6 +146,15 @@ A single-slot pool checks its slice before starting: a unit left by a dead
 wrapper whose task is terminal is stopped; a live one ends the run as
 `slot_occupied`.
 
+**Caps.** `sinnix.services.agentctl.caps` declares cross-pool caps, rendered
+as `caps` in the configuration; `cargo = 3` bounds Cargo builds across
+`normal` and `bulk`. An operation naming a cap waits, after it leaves the
+queue and before its unit starts, for one of the cap's places (a lock under
+`<state_dir>/caps/<name>/`); the wait holds the job's pool slot, does not count
+against its timeout, is logged once, and is recorded in the outcome as `cap`.
+`job start` refuses a cap the host does not declare. The width is read when
+the job starts, so a changed declaration applies to queued jobs.
+
 **Pressure pauses.** `agentctl-pressure.timer` runs `pressure tick` every
 minute.
 
@@ -157,6 +169,9 @@ minute.
   event, is never resumed. Re-pausing a group agentctl already paused does not
   transfer ownership; resume such a group by hand.
 - **I/O pressure** is reported, but it neither closes nor delays admission.
+  An operation declaring `max_io_pressure` refuses to start above it, and
+  long copies and offloads belong in the `background` pool, whose slice has
+  the plane's lowest I/O weight.
 
 ## Worktrees
 
@@ -326,6 +341,8 @@ admission = { memory_mib = 12288 }
 | `checkout`            | `any` (the caller's `--workspace` or the project root) or `default` (the project root only)              |
 | `cache`               | `none`, or `tree+environment` to reuse a matching active or completed job                                |
 | `scratch`             | `none`, `tmpfs` or `nvme`                                                                                |
+| `cap`                 | a host-declared cross-pool cap (`caps`) the job holds a place under while its unit runs                  |
+| `max_io_pressure`     | refuse to start (exit 125) while host I/O `full avg60` exceeds this percentage; for measurements         |
 | `admission`           | `{ memory_mib }`: the expected footprint, exported as `AGENTCTL_ADMISSION_MEMORY_MIB`. It is not a limit |
 | `unit_properties`     | resource limits for the unit, e.g. `["MemoryMax=3G", "IOReadBandwidthMax=/realm 20M"]`                   |
 
@@ -375,6 +392,13 @@ with each pool as `{parallel, ...}`. It installs `agentctl`, `wt`, `pueue` and
 - `agentctl-clean` (daily: removes finished queue tasks, keeping results).
 - `agentctl-pools`, which reapplies pool widths whenever pueued starts or the
   configuration changes.
+- `agentctl-baseline-<project>` (every ten minutes, for each of
+  `masterBaselines`): `sinnix-master-baseline` fetches the default branch and,
+  when its head is new and no baseline job is active, moves the reserved
+  detached checkout `<workspace root>/<project>-master` there and queues the
+  project's `baseline` operation in it. Lanes read the newest
+  `<project>:baseline` job to learn whether a failure is already on master;
+  its warm target seeds new checkouts' targets (`docs/worktree-cleanup.md`).
 
 pueued and the pool slices come from `modules/features/cli/core.nix` and
 `flake/data/runtime-defaults.nix`. The package's test suite drives a private

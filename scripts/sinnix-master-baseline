@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Queue a project's baseline operation on each new default-branch head, in a reserved checkout
+# runtimeInputs: bash coreutils git jq
+set -euo pipefail
+
+# The baseline answers "does this already fail on master?" for every lane,
+# and its warm target seeds new checkouts (sinnix-cargo-target). It runs in
+# <workspace root>/<project>-master, a detached worktree this script alone
+# moves, and only while no baseline job is queued or running there.
+project="${1:?usage: sinnix-master-baseline <project>}"
+agentctl="${AGENTCTL:-agentctl}"
+
+descriptor="$("$agentctl" project get "$project" --json)"
+root="$(jq -r '.root' <<<"$descriptor")"
+workspace_root="$(jq -r '.workspace.root // "/realm/worktree"' <<<"$descriptor")"
+base="$(jq -r '.workspace.default_base // "origin/master"' <<<"$descriptor")"
+checkout="$workspace_root/$project-master"
+if ! jq -e '.operations | any(.name == "baseline")' <<<"$descriptor" >/dev/null; then
+  echo "$project declares no baseline operation; nothing to queue"
+  exit 0
+fi
+
+active="$("$agentctl" job list --project "$project" --active --json \
+  | jq --arg label "$project:baseline" '[.[] | select(.label == $label)] | length')"
+if [ "$active" -ne 0 ]; then
+  exit 0
+fi
+
+git -C "$root" fetch --quiet "${base%%/*}" "${base#*/}"
+head="$(git -C "$root" rev-parse --verify "$base^{commit}")"
+if [ ! -e "$checkout" ]; then
+  git -C "$root" worktree add --quiet --detach "$checkout" "$head"
+  # Worktree cleanup keeps a locked checkout.
+  git -C "$root" worktree lock --reason "master baseline (sinnix-master-baseline)" "$checkout"
+fi
+git -C "$root" config sinnix.baselineCheckout "$checkout"
+
+stamp="$(git -C "$checkout" rev-parse --path-format=absolute --git-path baseline-head)"
+if [ "$(cat "$stamp" 2>/dev/null || true)" = "$head" ]; then
+  exit 0
+fi
+git -C "$checkout" checkout --quiet --detach "$head"
+"$agentctl" job start "$project" baseline --workspace "$checkout" >/dev/null
+printf '%s\n' "$head" >"$stamp"
+echo "queued $project baseline at $head"

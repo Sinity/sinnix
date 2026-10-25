@@ -240,6 +240,8 @@ def enqueue(
     after: Sequence[int] = (),
     stashed: bool = False,
     unit_properties: Sequence[str] = (),
+    cap: str | None = None,
+    max_io_pressure: float | None = None,
     tree_receipt: Mapping[str, Any] | None = None,
     environment_receipt: Mapping[str, str] | None = None,
     binding: Mapping[str, Any] | None = None,
@@ -285,6 +287,15 @@ def enqueue(
         launch["request_digest"] = request_digest
     if unit_properties:
         launch["unit_properties"] = list(unit_properties)
+    if cap is not None:
+        if cap not in config.caps:
+            raise job_queries.JobError(
+                f"{label} names cap {cap!r}, which the host does not declare "
+                f"(declared: {', '.join(sorted(config.caps)) or 'none'})"
+            )
+        launch["cap"] = cap
+    if max_io_pressure is not None:
+        launch["max_io_pressure"] = max_io_pressure
     if admission is not None:
         # The declared envelope, recorded on the job and exported to the
         # command so a workload's own sizing receipt has a declared number to
@@ -702,6 +713,8 @@ def _start_operation(
         scratch=operation.scratch,
         admission=operation.admission,
         unit_properties=operation.unit_properties,
+        cap=operation.cap,
+        max_io_pressure=operation.max_io_pressure,
         job_id=job_id,
         idempotency_key=idempotency_key,
         request_digest=request_digest,

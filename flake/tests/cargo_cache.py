@@ -101,6 +101,46 @@ class CargoCache(unittest.TestCase):
         self.assertEqual(self.select(env=explicit).stdout.strip(), explicit["CARGO_TARGET_DIR"])
         self.assertFalse(Path(explicit["CARGO_TARGET_DIR"]).exists())
 
+    def test_a_new_checkout_is_seeded_from_the_baseline_target(self):
+        self.provision()
+        # The sandbox filesystem has no reflinks; the copy itself is what
+        # matters here.
+        (self.bin / "cp").write_text(
+            f'#!{shutil.which("bash")}\nargs=()\nfor a in "$@"; do '
+            '[ "$a" = --reflink=always ] || args+=("$a"); done\n'
+            f'exec "{shutil.which("cp")}" "${{args[@]}}"\n'
+        )
+        (self.bin / "cp").chmod(0o755)
+        subprocess.run(["git", "-C", str(self.checkout), "-c", "user.name=Fixture", "-c",
+                        "user.email=fixture@example.invalid", "commit", "-qm", "fixture",
+                        "--allow-empty"], check=True)
+
+        def worktree(name):
+            path = self.root / name
+            subprocess.run(["git", "-C", str(self.checkout), "worktree", "add", "-q",
+                            "--detach", str(path)], check=True)
+            return path
+
+        def select_in(path):
+            return Path(subprocess.check_output(["bash", str(SELECTOR)], cwd=path,
+                                                env=self.env, text=True).strip())
+
+        baseline = worktree("baseline")
+        seed = select_in(baseline)
+        (seed / "debug" / "deps").mkdir(parents=True)
+        (seed / "debug" / "deps" / "libdep.rlib").write_bytes(b"compiled")
+        subprocess.run(["git", "-C", str(self.checkout), "config", "sinnix.baselineCheckout",
+                        str(baseline)], check=True)
+
+        target = select_in(worktree("lane"))
+        self.assertNotEqual(target, seed)
+        self.assertEqual((target / "debug" / "deps" / "libdep.rlib").read_bytes(), b"compiled")
+        self.assertEqual([p.name for p in target.parent.iterdir()], ["target"])
+        # An existing target is never replaced.
+        (target / "debug" / "deps" / "libdep.rlib").write_bytes(b"rebuilt")
+        self.assertEqual(select_in(self.root / "lane"), target)
+        self.assertEqual((target / "debug" / "deps" / "libdep.rlib").read_bytes(), b"rebuilt")
+
     def test_selection_needs_no_privileged_tree_search(self):
         self.provision()
         env = dict(self.env, DENY_TREE_SEARCH="1")

@@ -15,7 +15,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping
 
-from .launch_input import POOL_NAME
+from .launch_input import CAP_NAME, POOL_NAME
 from .projects import (
     ProjectAdapter,
     ProjectCatalog,
@@ -57,6 +57,9 @@ class Config:
     # Each pueue group's declared width. `pools apply` writes it into the
     # running daemon, whose queue remains the admission authority.
     pools: Mapping[str, PoolPolicy] = field(default_factory=dict)
+    # Cross-pool caps: how many jobs naming each cap may run at once. A job
+    # waits for a free place after leaving its queue, before its unit starts.
+    caps: Mapping[str, int] = field(default_factory=dict)
     # The file this configuration was read from. Every task agentctl queues
     # carries it as AGENTCTL_CONFIG, so the agentctl calls inside a task read
     # the same projects, state directory and event spool as the one that
@@ -184,6 +187,21 @@ def _pools(value: Any) -> dict[str, PoolPolicy]:
     return parsed
 
 
+def _caps(value: Any) -> dict[str, int]:
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ConfigError("caps must map a cap name to how many jobs may hold it")
+    parsed: dict[str, int] = {}
+    for name, limit in value.items():
+        if not isinstance(name, str) or CAP_NAME.fullmatch(name) is None:
+            raise ConfigError(f"caps has an invalid name: {name!r}")
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            raise ConfigError(f"caps.{name} must admit at least one job")
+        parsed[name] = limit
+    return parsed
+
+
 def _path(value: Any, field: str, fallback: Path) -> Path:
     if value is None:
         return fallback
@@ -270,6 +288,7 @@ def load_config(path: Path | None = None) -> Config:
         agentctl_executable=str(raw.get("agentctl") or config.agentctl_executable),
         private_project_catalog=private_catalog_path,
         pools=_pools(raw.get("pools")),
+        caps=_caps(raw.get("caps")),
         inherited_environment=dict(inherited_environment),
     )
 

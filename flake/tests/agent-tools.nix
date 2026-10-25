@@ -393,6 +393,7 @@ in
             "agentctl-shell"
             "agentctl-shell-quick"
             "agentctl-shell-long"
+            "agentctl-background"
           ] (name: userSlices.${name});
           forbiddenAvoidTokens = [
             "bash"
@@ -416,6 +417,9 @@ in
           && poolSlices ? agentctl-shell-quick
           && poolSlices ? agentctl-shell-long
         ) "the gateway shell.run groups must be declared agentctl pools with slices";
+        assert lib.assertMsg (
+          declaredPools ? background && poolSlices ? agentctl-background
+        ) "the offload pool must be declared with its low-weight slice";
         assert lib.assertMsg (lib.all (token: !(lib.hasInfix token avoidPattern))
           forbiddenAvoidTokens
         ) "the earlyoom fallback must not exempt agents, browsers, runtimes, or generic shells";
@@ -488,6 +492,10 @@ in
             && poolSlices.agentctl-bulk.ManagedOOMMemoryPressure == "kill"
             && poolSlices.agentctl-bulk.CPUWeight == 20
             && poolSlices.agentctl-bulk.IOWeight == 10
+            # Offloads yield the disk to every other job pool.
+            && lib.all (slice: poolSlices.agentctl-background.IOWeight < slice.IOWeight) (
+              lib.attrValues (removeAttrs poolSlices [ "agentctl-background" ])
+            )
             && lib.all (slice: slice.IOAccounting == true) (lib.attrValues poolSlices)
           )
           "agentctl coordinator work must yield to protected interactive slices; pool slices own fixed caps";

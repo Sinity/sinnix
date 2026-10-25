@@ -31,6 +31,8 @@ REQUIRED_FIELDS = (
 )
 # Safe group names include underscores used by project identifiers and landing pools.
 POOL_NAME = re.compile(r"[a-z][a-z0-9_-]{0,63}\Z")
+# The name of a host-declared cross-pool cap (config `caps`).
+CAP_NAME = re.compile(r"[a-z][a-z0-9-]{0,63}\Z")
 # The unit settings agentctl passes through to `systemd-run -p`. Each one only
 # bounds what the workload may consume or reach, so a launch input can limit
 # its own task and nothing else: no capability, no credential, no execution
@@ -271,6 +273,18 @@ def read_input(path: Path) -> dict[str, Any]:
             "launch input unit_properties must be "
             f"{'/'.join(sorted(UNIT_PROPERTIES | UNIT_PATH_PROPERTIES | UNIT_BANDWIDTH_PROPERTIES))} settings"
         )
+    cap = value.get("cap")
+    if cap is not None and (
+        not isinstance(cap, str) or CAP_NAME.fullmatch(cap) is None
+    ):
+        raise QueueInputError("launch input cap must be a cap name")
+    limit = value.get("max_io_pressure")
+    if limit is not None and (
+        not isinstance(limit, (int, float))
+        or isinstance(limit, bool)
+        or not 0 <= limit <= 100
+    ):
+        raise QueueInputError("launch input max_io_pressure must be a percentage")
     scratch = value.get("scratch")
     if scratch is not None:
         if not isinstance(scratch, dict):

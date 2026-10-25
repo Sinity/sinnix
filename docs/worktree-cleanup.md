@@ -30,6 +30,13 @@ inherited target through `nix develop --command`. Devkit resolves Cargo's actual
 target for test/report handling. Durable run history, Sinex service/test state
 and independently retained historical binaries keep their current owners.
 
+A checkout's first selection seeds its new target from the repository's
+master-baseline checkout (Git config `sinnix.baselineCheckout`, which
+`sinnix-master-baseline` sets): a reflink copy taken while holding Cargo's
+build lock on the source, so it shares extents and Cargo reuses the
+dependency artifacts. Without reflinks, a baseline target, or the lock within
+five minutes, the target starts empty.
+
 Provisioning and target selection do not migrate warm targets or release old
 snapshot references. Before activating a new cache root, inspect its existing
 contents and target holders, preserve needed artifacts, then verify the installed

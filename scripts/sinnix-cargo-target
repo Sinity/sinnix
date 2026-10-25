@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Select an isolated compiler target in the provisioned Realm cache subvolume
-# runtimeInputs: bash coreutils git
+# runtimeInputs: bash coreutils git util-linux
 set -euo pipefail
 
 if [ -n "${CARGO_TARGET_DIR:-}" ]; then
@@ -18,10 +18,34 @@ if [ -L "$cache_root" ] || [ ! -d "$cache_root" ] \
   echo "Cargo cache subvolume is not provisioned: $cache_root" >&2
   exit 1
 fi
+target_of() {
+  printf '%s/%s/%s/target' "$cache_root" "$(id -u)" \
+    "$(printf '%s' "$1" | sha256sum | cut -c1-32)"
+}
+
 checkout="$(git rev-parse --show-toplevel)"
 checkout="$(realpath "$checkout")"
 # Different checkouts keep independent writable targets, even on one branch.
-key="$(printf '%s' "$checkout" | sha256sum | cut -c1-32)"
-target="$cache_root/$(id -u)/$key/target"
+target="$(target_of "$checkout")"
+
+# A new target starts as a copy of the repository's master-baseline target
+# (`sinnix.baselineCheckout`, set by sinnix-master-baseline). Reflinks share
+# the extents, and Cargo reuses dependency artifacts across checkout paths.
+# Cargo's build lock on the source is held for the copy, so no build writes
+# it meanwhile; without reflinks or the lock, the target starts empty.
+seed_checkout="$(git config --get sinnix.baselineCheckout || true)"
+if [ ! -e "$target" ] && [ -n "$seed_checkout" ] && [ -d "$seed_checkout" ]; then
+  seed="$(target_of "$(realpath "$seed_checkout")")"
+  if [ "$seed" != "$target" ] && [ -d "$seed/debug" ]; then
+    mkdir -p "$(dirname "$target")"
+    staging="$(mktemp -d "$target.seed.XXXXXX")"
+    trap 'rm -rf -- "$staging"' EXIT
+    if flock --wait 300 "$seed/debug/.cargo-lock" \
+      cp -a --reflink=always "$seed/." "$staging/" 2>/dev/null \
+      && mv -T "$staging" "$target" 2>/dev/null; then
+      echo "sinnix-cargo-target: seeded $target from $seed_checkout" >&2
+    fi
+  fi
+fi
 mkdir -p "$target"
 printf '%s\n' "$target"
