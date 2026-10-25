@@ -1234,6 +1234,12 @@ in
                 }
               ];
             };
+            borgbackup-local-dumps = {
+              unit = "borgbackup-local-dumps.service";
+              resourceClass = "backup";
+              notifyOnFailure = true;
+              operatorRestart = false;
+            };
             borgbackup-retention-plan = {
               unit = "borgbackup-retention-plan.service";
               resourceClass = "backup";
@@ -1362,6 +1368,22 @@ in
           persistNoncanonical
           realmNoncanonical
           username
+          ;
+      })
+      ++ (import ./lib/backup/local-dumps.nix {
+        inherit
+          pkgs
+          lib
+          realmRoot
+          realmSnapshots
+          realmCoveragePolicy
+          snapshotCoverage
+          borgDrainStateRoot
+          borgRepoRealm
+          outerRealmMountUnit
+          scriptPkgs
+          mkBackupJob
+          mkBorgCommonScript
           ;
       })
       ++ (import ./lib/backup/verification.nix {

@@ -105,6 +105,18 @@ is archived as empty, while unavailable roots and nested subvolumes fail.
 
 ### Telemetry
 
+The hourly `borgbackup-local-dumps` job keeps at least the seven newest daily
+dumps in each telemetry or PostgreSQL environment stream. Additional dumps
+must be older than seven days by both filename timestamp and modification time.
+Before deleting each local file, the job restores its entire archived copy and
+compares SHA-256 and length, checking the admitted archive ID and source UUID
+before and after. A missing, changed or unreadable archive leaves the local file.
+Partial files, unknown names and sealed legacy artifacts are retained. The job
+shares Borg's global lock and skips contention; it does not delay admission or
+make a new dump depend on the backup disk. Run it through the declared
+`backup_local_dumps` operation. Released bytes can remain pinned by the latest
+source snapshot until its normal successor is admitted.
+
 The collector writes `/realm/state/machine-telemetry/telemetry.sqlite`. Every
 Sunday `machine-telemetry-seal` closes that file, makes it immutable under a
 dated name, and starts a new one; `telemetry.sqlite.segments.json` lists the

@@ -67,6 +67,12 @@
     in
     {
       checks = {
+        borg-local-dumps-suite = mkScriptSuite {
+          name = "sinnix-borg-prune-dumps";
+          suiteDir = ../../pkgs/sinnix-borg-prune-dumps/tests;
+          scripts = [ "sinnix-borg-prune-dumps" ];
+          nativeBuildInputs = [ pkgs.borgbackup ];
+        };
         claude-hang-capture-suite = mkScriptSuite {
           name = "claude-hang-capture";
           suiteDir = ../../pkgs/claude-hang-capture/tests;

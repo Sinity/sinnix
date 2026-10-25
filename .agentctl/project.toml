@@ -400,6 +400,14 @@ result = "exit"
 cache = "none"
 timeout_seconds = 1800
 
+[operations.backup_local_dumps]
+description = "Expire older local daily dumps after matching complete Borg restores"
+exec = ["sudo", "-n", "systemctl", "start", "borgbackup-local-dumps.service"]
+pool = "bulk"
+result = "exit"
+cache = "none"
+timeout_seconds = 7500
+
 [operations.backup_archive_inventory]
 description = "Measure logical file-size prefixes in one explicit Borg archive without restoring contents"
 exec = ["python3", "flake/tests/backup_archive_inventory.py"]

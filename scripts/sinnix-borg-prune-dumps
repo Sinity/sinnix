@@ -1,0 +1,169 @@
+#!/usr/bin/env python3
+# @sinnix-package
+# description: Expire local daily dumps only after a complete Borg restore matches
+# runtimeInputs: python3 borgbackup coreutils
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import re
+import stat
+import subprocess
+import sys
+import time
+from glob import escape
+from pathlib import Path
+
+
+STREAMS = {
+    "machine-telemetry": re.compile(r"(telemetry)-(\d{8}T\d{6}Z)\.sqlite\.zst"),
+    "sinex-postgres": re.compile(r"(sinex_[a-z0-9_]+)-(\d{8}T\d{6}Z)\.dump"),
+}
+KEEP = 7
+MIN_AGE = 7 * 86400
+
+
+def identity(info):
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def candidates(directory, pattern, now):
+    groups = {}
+    for name in os.listdir(directory):
+        match = pattern.fullmatch(name)
+        info = os.stat(name, dir_fd=directory, follow_symlinks=False)
+        if not match or not stat.S_ISREG(info.st_mode) or not info.st_size:
+            continue
+        try:
+            stamp = dt.datetime.strptime(match[2], "%Y%m%dT%H%M%SZ").replace(
+                tzinfo=dt.timezone.utc
+            ).timestamp()
+        except ValueError:
+            continue
+        groups.setdefault(match[1], []).append((stamp, name, info))
+    result = []
+    for rows in groups.values():
+        for stamp, name, info in sorted(rows, reverse=True)[KEEP:]:
+            if max(stamp, info.st_mtime) < now - MIN_AGE:
+                result.append((name, identity(info)))
+    return sorted(result)
+
+
+def archive_identity(archive, archive_id, snapshot_uuid):
+    payload = json.loads(
+        subprocess.check_output(
+            ["borg", "list", "--json", "--format", "{comment}", "--glob-archives", escape(archive)],
+            timeout=120,
+        )
+    )
+    rows = [x for x in payload["archives"] if x.get("archive", x.get("name")) == archive]
+    if (
+        len(rows) != 1
+        or rows[0].get("id") != archive_id
+        or rows[0].get("comment") != "sinnix-snapshot-v1:" + snapshot_uuid
+    ):
+        raise ValueError("archive identity differs from the admitted source receipt")
+
+
+def restored_digest(archive, relative, expected_size):
+    # Stream restored bytes; never write a second large dump or hold it in RAM.
+    command = ["timeout", "--kill-after=10s", "30m", "borg", "extract", "--stdout", "--", "::" + archive, relative]
+    process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE)
+    digest, size = hashlib.sha256(), 0
+    try:
+        while block := process.stdout.read(1024 * 1024):
+            size += len(block)
+            if size > expected_size:
+                raise ValueError("restored dump exceeds the local file length")
+            digest.update(block)
+        if process.wait() != 0 or size != expected_size:
+            raise ValueError("Borg did not restore the complete dump successfully")
+        return digest.hexdigest()
+    finally:
+        process.stdout.close()
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+
+
+def expire(directory, name, expected, restore, check_archive, apply):
+    descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    with os.fdopen(descriptor, "rb") as source:
+        if not stat.S_ISREG(os.fstat(source.fileno()).st_mode) or identity(os.fstat(source.fileno())) != expected:
+            raise ValueError("local dump changed after selection")
+        digest = hashlib.file_digest(source, "sha256").hexdigest()
+        if restore(expected[2]) != digest:
+            raise ValueError("restored dump differs from the complete local digest")
+        check_archive()
+        if (
+            identity(os.fstat(source.fileno())) != expected
+            or identity(os.stat(name, dir_fd=directory, follow_symlinks=False)) != expected
+        ):
+            raise ValueError("local dump changed during its restore proof")
+        if apply:
+            os.unlink(name, dir_fd=directory)
+            os.fsync(directory)
+        return {"file": name, "bytes": expected[2], "sha256": digest, "removed": apply}
+
+
+def run(root, archive, archive_id, snapshot_uuid, apply):
+    if root.resolve() != root:
+        raise ValueError("dump root must be a physical absolute path")
+    if os.environ.get("SINNIX_BORG_GLOBAL_LOCK_HELD") != "1":
+        raise ValueError("the backup owner must hold its global Borg lock")
+    if not re.fullmatch(r"realm-realm\.\d{8}T\d{6}[+-]\d{4}(?:-(?:coverage|producer)-v[1-9][0-9]*)?", archive):
+        raise ValueError("not a Realm snapshot archive")
+    if not re.fullmatch(r"[0-9a-f]{64}", archive_id) or not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", snapshot_uuid):
+        raise ValueError("complete archive and source identities are required")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    root_fd = os.open(root, flags)
+    total = 0
+    try:
+        for stream, pattern in STREAMS.items():
+            try:
+                directory = os.open(stream, flags, dir_fd=root_fd)
+            except FileNotFoundError:
+                continue
+            try:
+                for name, expected in candidates(directory, pattern, time.time()):
+                    check = lambda: archive_identity(archive, archive_id, snapshot_uuid)
+                    check()
+                    relative = "state/db-dumps/" + stream + "/" + name
+                    row = expire(
+                        directory, name, expected,
+                        lambda size: restored_digest(archive, relative, size),
+                        check, apply,
+                    )
+                    total += row["bytes"] if apply else 0
+                    print(json.dumps({"stream": stream, "archive_id": archive_id, **row}), flush=True)
+            finally:
+                os.close(directory)
+    finally:
+        os.close(root_fd)
+    print(json.dumps({"outcome": "ok", "removed_logical_bytes": total, "apply": apply}), flush=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--archive", required=True)
+    parser.add_argument("--archive-id", required=True)
+    parser.add_argument("--snapshot-uuid", required=True)
+    parser.add_argument("--apply", action="store_true")
+    args = parser.parse_args()
+    try:
+        run(args.root, args.archive, args.archive_id, args.snapshot_uuid, args.apply)
+        return 0
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
+        print(json.dumps({"outcome": "error", "diagnostic": str(error)}), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
