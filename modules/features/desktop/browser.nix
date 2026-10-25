@@ -1,5 +1,6 @@
 {
   mkFeatureModule,
+  lib,
   pkgs,
   helpers,
   ...
@@ -10,6 +11,17 @@ mkFeatureModule {
     "browser"
   ];
   description = "Qutebrowser + Chrome stack";
+  extraOptions = {
+    chromeUserDataDir = lib.mkOption {
+      type = lib.types.str;
+      default = ".config/chrome-ws";
+      readOnly = true;
+      description = ''
+        Chrome's profile directory, relative to the home directory. Native
+        messaging host manifests go in its `NativeMessagingHosts`.
+      '';
+    };
+  };
   meta.dotfiles = {
     configFile = {
       "qutebrowser/config.py" = "qutebrowser/config.py";
@@ -153,7 +165,7 @@ mkFeatureModule {
           # https://developer.chrome.com/blog/remote-debugging-port
           # Side effect: loopback-only debug port allows local processes to
           # read cookies via CDP. Acceptable on this single-user machine.
-          chromeUserDataDir = "${config.home.homeDirectory}/.config/chrome-ws";
+          chromeUserDataDir = "${config.home.homeDirectory}/${nixosConfig.sinnix.features.desktop.browser.chromeUserDataDir}";
           chromeArgs = lib.concatStringsSep " " (
             [
               "--disable-features=WaylandWpColorManagerV1"

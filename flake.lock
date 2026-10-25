@@ -1171,6 +1171,22 @@
     },
     "nixpkgs_2": {
       "locked": {
+        "lastModified": 1792773339,
+        "narHash": "sha256-rZLrzrC6i+jnTAlvPZHogKDulY7WWDEv9hJeHieO7Zw=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "3ec636362e1816bc2f0888fa0fa2c69f1bc9e504",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_3": {
+      "locked": {
         "lastModified": 1781074563,
         "narHash": "sha256-md8WlXOlfnIeHeOScMTTHFyf2d6iaTwPl2apR5EQ3P4=",
         "owner": "NixOS",
@@ -1307,6 +1323,25 @@
         "type": "github"
       }
     },
+    "polylogue-rewrite": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_2"
+      },
+      "locked": {
+        "lastModified": 1792948837,
+        "narHash": "sha256-aJuOfpo/GgCtSeA9ym8U9bXYlrItAM1RAKteHOb2OE4=",
+        "owner": "Sinity",
+        "repo": "polylogue",
+        "rev": "b35e5ed8f3a80bd9e49e352b06d20e03ce7d1a94",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Sinity",
+        "repo": "polylogue",
+        "rev": "b35e5ed8f3a80bd9e49e352b06d20e03ce7d1a94",
+        "type": "github"
+      }
+    },
     "pre-commit": {
       "inputs": {
         "flake-compat": "flake-compat_2",
@@ -1351,6 +1386,7 @@
         "noctalia": "noctalia",
         "phone-app": "phone-app",
         "polylogue": "polylogue",
+        "polylogue-rewrite": "polylogue-rewrite",
         "scribe-tap": "scribe-tap",
         "sinex": "sinex",
         "stylix": "stylix",
@@ -1483,7 +1519,7 @@
         "crane": "crane_2",
         "fenix": "fenix",
         "flake-utils": "flake-utils_3",
-        "nixpkgs": "nixpkgs_2"
+        "nixpkgs": "nixpkgs_3"
       },
       "locked": {
         "lastModified": 1791930321,

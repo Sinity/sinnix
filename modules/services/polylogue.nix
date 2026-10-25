@@ -1,11 +1,16 @@
-# Polylogue — AI conversation archive daemon (user-mode)
+# Polylogue: the Rust rewrite's daemon, its CLI and its browser capture.
 #
-# Thin wrapper over polylogue's upstream Home Manager module
-# (inputs.polylogue.homeManagerModules.default), which defines
-# programs.polylogued.*, renders polylogue.toml, and creates the polylogued
-# user unit. This module adds the sinnix-specific wiring upstream cannot
-# know about: option surface, package pinning, and runtime-surface
-# registration. Everything else is delegated to upstream.
+# The rewrite (input `polylogue-rewrite`) runs live as polylogue-live.service
+# over its own archive under `liveRoot`. The retained Python stack keeps only
+# its CLI, MCP and hook packages (modules/features/cli/polylogue.nix) and the
+# polylogue.toml they read; its daemon unit is gone. The Python archive at
+# `dataDir` is left as it is.
+#
+# The rewrite locates everything from the environment: the archive is
+# `$XDG_DATA_HOME/polylogue` and its spools are under `$XDG_STATE_HOME/polylogue`.
+# One wrapper, `polylogue-live`, sets both and is the daemon's command, the
+# operator's CLI and the browser extension's native messaging host, so all
+# three always agree on the archive.
 {
   mkServiceModule,
   lib,
@@ -18,111 +23,28 @@
 let
   userName = config.sinnix.user.name;
   homeDir = config.users.users.${userName}.home;
-
-  # Defaults matching what polylogue's runtime discovery picks up.
-  defaultDataDir = "${homeDir}/.local/share/polylogue";
 in
 mkServiceModule {
   name = "polylogue";
-  description = "Polylogue AI conversation archive daemon (user-mode via home-manager)";
+  description = "Polylogue: the rewrite's live daemon, CLI and browser capture";
   extraOptions = {
     dataDir = lib.mkOption {
       type = lib.types.str;
-      default = defaultDataDir;
+      default = "${homeDir}/.local/share/polylogue";
       description = ''
-        Path to the Polylogue archive root. Mapped to
-        ``programs.polylogued.settings.archive.root`` and persisted to
-        the generated ``polylogue.toml``.
-
-        Default: ``~/.local/share/polylogue``.
+        The Python predecessor's archive root, read by the retained Python
+        CLI and MCP tools and written to their ``polylogue.toml``.
       '';
     };
 
-    memoryBudgetGiB = lib.mkOption {
-      type = lib.types.ints.positive;
-      default = 16;
+    liveRoot = lib.mkOption {
+      type = lib.types.str;
+      default = "${config.sinnix.paths.stateRoot}/polylogue-live";
       description = ''
-        Polylogued's cgroup memory budget in GiB. MemoryHigh is derived as
-        7/8 of this budget, leaving 1/8 for pre-limit throttling headroom;
-        MemoryMax is derived as 9/8, leaving another 1/8 for transient
-        bursts above the throttle. The value must be divisible by 8 so both
-        derived limits remain whole GiB values.
+        Everything the rewrite keeps: ``data/polylogue`` is the archive,
+        ``state/polylogue`` its spools, ``extension`` the unpacked browser
+        extension Chrome loads.
       '';
-    };
-
-    daemon = {
-      host = lib.mkOption {
-        type = lib.types.str;
-        default = "127.0.0.1";
-        description = ''
-          Host for the daemon's HTTP API and browser-capture receiver.
-          Mapped to the daemon API and browser-capture listen hosts.
-        '';
-      };
-
-      browserCapturePort = lib.mkOption {
-        type = lib.types.port;
-        default = helpers.data.ports.polylogue.browserCapture;
-        description = ''
-          Port for the browser-capture receiver. Passed as `--port` to
-          `polylogued run` and written to
-          `programs.polylogued.settings.browser-capture.port` in the TOML.
-        '';
-      };
-
-      apiPort = lib.mkOption {
-        type = lib.types.port;
-        default = helpers.data.ports.polylogue.api;
-        description = ''
-          Port for the daemon HTTP API. Mapped to
-          ``programs.polylogued.settings.daemon.port``.
-        '';
-      };
-
-      autoStart = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        description = ''
-          Start the polylogued user systemd unit at login
-          (``WantedBy = default.target``). Mapped to
-          ``programs.polylogued.autoStart``.
-
-          Defaults to false so updating the Polylogue package/MCP/runtime
-          surface does not implicitly start archive convergence; operators can
-          enable daemon ingestion deliberately per host.
-        '';
-      };
-    };
-
-    embedding = {
-      enable = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        description = ''
-          Enable Polylogue's daemon-side embedding stage. The Voyage API key is
-          expected to come from the user manager environment; this option does
-          not render secrets into the generated polylogue.toml.
-        '';
-      };
-
-      model = lib.mkOption {
-        type = lib.types.str;
-        # Model used if embedding generation is explicitly enabled.
-        default = "voyage-4";
-        description = "Voyage embedding model for Polylogue.";
-      };
-
-      dimension = lib.mkOption {
-        type = lib.types.ints.unsigned;
-        default = 1024;
-        description = "Embedding vector dimension for the configured model.";
-      };
-
-      maxCostUsd = lib.mkOption {
-        type = lib.types.number;
-        default = 1000.0;
-        description = "Polylogue embedding cost cap in USD; 0 means unlimited upstream.";
-      };
     };
   };
   configFn =
@@ -134,124 +56,120 @@ mkServiceModule {
       ...
     }:
     let
-      polyloguePkg = pkgs.polylogue;
-      # One source of truth for the daemon's memory ceiling, derived from a
-      # single budget knob and used both for upstream's own service.memory*
-      # options and for the runtime surface declaration, so the inventory
-      # cannot claim a limit the unit does not actually carry. MemoryHigh at
-      # 7/8 leaves throttling headroom below the ceiling; MemoryMax at 9/8
-      # leaves room for transient bursts above the throttle.
-      memoryBudgetBytes = cfg.memoryBudgetGiB * 1024 * 1024 * 1024;
-      polyloguedMemoryHigh = "${toString (cfg.memoryBudgetGiB * 7 / 8)}G";
-      polyloguedMemoryMax = "${toString (cfg.memoryBudgetGiB * 9 / 8)}G";
+      system = pkgs.stdenv.hostPlatform.system;
+      rewriteSource = inputs.polylogue-rewrite;
+      rewritePackage = inputs.polylogue-rewrite.packages.${system}.polylogue;
+      ports = helpers.data.ports.polylogue;
+
+      cli = pkgs.writeShellScriptBin "polylogue-live" ''
+        export XDG_DATA_HOME=${lib.escapeShellArg "${cfg.liveRoot}/data"}
+        export XDG_STATE_HOME=${lib.escapeShellArg "${cfg.liveRoot}/state"}
+        exec ${rewritePackage}/bin/polylogue "$@"
+      '';
+
+      # The unpacked extension is its manifest and sources; its third-party
+      # code is vendored under src/.
+      extensionFiles = pkgs.runCommand "polylogue-browser-extension" { } ''
+        mkdir -p "$out"
+        cp -R ${rewriteSource}/extension/manifest.json ${rewriteSource}/extension/src "$out/"
+      '';
+      extensionDir = "${cfg.liveRoot}/extension";
+      browser = config.sinnix.features.desktop.browser;
+      hostName = "com.polylogue.browser_capture";
+      # Chrome names an unpacked extension after its directory: the first
+      # 32 hex digits of the path's SHA-256, each mapped 0-f to a-p. A fixed
+      # real directory keeps the ID, and the host manifest below, stable
+      # across rebuilds; a store path would change it with every build.
+      extensionId =
+        let
+          digits = lib.stringToCharacters "0123456789abcdef";
+          letters = lib.stringToCharacters "abcdefghijklmnop";
+          letterOf = lib.listToAttrs (lib.zipListsWith lib.nameValuePair digits letters);
+        in
+        lib.concatMapStrings (d: letterOf.${d}) (
+          lib.stringToCharacters (builtins.substring 0 32 (builtins.hashString "sha256" extensionDir))
+        );
+
+      # The retained Python CLI reads this file; the values are those its
+      # removed Home Manager module rendered.
+      pythonSettings = (pkgs.formats.toml { }).generate "polylogue.toml" {
+        archive.root = cfg.dataDir;
+        daemon = {
+          api = {
+            host = "127.0.0.1";
+            port = ports.api;
+          };
+          browser_capture = {
+            host = "127.0.0.1";
+            port = ports.browserCapture;
+          };
+        };
+        embedding = {
+          enabled = false;
+          model = "voyage-4";
+          dimension = 1024;
+          max_cost_usd = 1000.0;
+        };
+      };
     in
     {
-      assertions = [
-        {
-          assertion = cfg.memoryBudgetGiB / 8 * 8 == cfg.memoryBudgetGiB;
-          message = "sinnix.services.polylogue.memoryBudgetGiB must be divisible by 8";
-        }
-      ];
-
-      # The inbox is where `polylogue import <path>` stages account exports.
-      # Exports are imported deliberately, never watched in place.
       systemd.tmpfiles.rules = [
         "d ${cfg.dataDir} 0700 ${userName} ${config.users.users.${userName}.group} -"
         "d ${cfg.dataDir}/inbox 0700 ${userName} users -"
+        "d ${cfg.liveRoot} 0700 ${userName} ${config.users.users.${userName}.group} -"
       ];
 
-      # ── Import the upstream Home Manager module ────────────────────
-      home-manager.users.${userName} = {
-        imports = [ inputs.polylogue.homeManagerModules.default ];
-        systemd.user.startServices = lib.mkForce "sd-switch";
+      home-manager.users.${userName} =
+        { lib, ... }:
+        {
+          systemd.user.startServices = lib.mkForce "sd-switch";
 
-        # Keep the unit outside default.target's startup cycle. Auto-start
-        # remains disabled; the archive handoff starts it deliberately.
-        systemd.user.services.polylogued.Unit = {
-          After = lib.mkForce [ ];
-        };
+          home.packages = [ cli ];
 
-        programs.polylogued = {
-          enable = true;
-          package = polyloguePkg;
+          xdg.configFile."polylogue/polylogue.toml".source = pythonSettings;
 
-          # Must be set through upstream's OWN options, not only via
-          # mkRuntimeServiceConfig below: upstream assigns MemoryMax as a plain
-          # value (default "2G") while mkRuntimeServiceConfig returns
-          # mkDefault, and plain beats mkDefault. polylogued self-terminates
-          # once its mmap budget reaches the cgroup limit, so losing to 2G
-          # turns into a silent ~90s start/self-terminate/restart loop that
-          # ingests nothing.
-          service = {
-            memoryHigh = polyloguedMemoryHigh;
-            memoryMax = polyloguedMemoryMax;
+          # Replaces the file the Python stack's installer wrote by hand.
+          home.file = lib.optionalAttrs browser.enable {
+            "${browser.chromeUserDataDir}/NativeMessagingHosts/${hostName}.json" = {
+              force = true;
+              text = builtins.toJSON {
+                name = hostName;
+                description = "Polylogue browser capture host";
+                path = "${cli}/bin/polylogue-live";
+                type = "stdio";
+                allowed_origins = [ "chrome-extension://${extensionId}/" ];
+              };
+            };
           };
-          # Install the package through the shared package declaration to
-          # avoid a second bin/polylogue entry in the home profile.
-          installPackage = false;
-          autoStart = cfg.daemon.autoStart;
 
-          settings = {
-            archive.root = cfg.dataDir;
+          # Chrome loads the extension from this directory once
+          # (`sinnix-chrome-control load-extension --path <dir>`) and picks up
+          # new files when the extension reloads.
+          home.activation.polylogueBrowserExtension = lib.mkIf browser.enable (
+            lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+              run mkdir -p ${lib.escapeShellArg extensionDir}
+              run ${pkgs.rsync}/bin/rsync -rL --delete --chmod=Du=rwx,Dgo=rx,Fu=rw,Fgo=r \
+                ${extensionFiles}/ ${lib.escapeShellArg extensionDir}/
+            ''
+          );
 
-            daemon-api = {
-              host = cfg.daemon.host;
-              port = cfg.daemon.apiPort;
+          systemd.user.services.polylogue-live = {
+            Unit.Description = "Polylogue daemon over the live archive";
+            Service = {
+              ExecStart = "${cli}/bin/polylogue-live daemon";
+              Restart = "on-failure";
+              RestartSec = "5s";
             };
-
-            browser-capture = {
-              host = cfg.daemon.host;
-              port = cfg.daemon.browserCapturePort;
-            };
-
-            embedding = {
-              enabled = cfg.embedding.enable;
-              model = cfg.embedding.model;
-              dimension = cfg.embedding.dimension;
-              max-cost-usd = cfg.embedding.maxCostUsd;
-            };
+            Install.WantedBy = [ "default.target" ];
           };
         };
 
-        systemd.user.services.polylogued.Service =
-          (lib.sinnix.mkRuntimeServiceConfig {
-            runtimeInventory = config.sinnix.runtime.inventory;
-            unit = "polylogued.service";
-            manager = "user";
-          })
-          // {
-            # The daemon encodes handled SIGTERM as exit 128 + 15.
-            SuccessExitStatus = [ 143 ];
-            # The upstream unit does not pass its rendered TOML path to the
-            # daemon process. Keep the service's startup-bound archive root
-            # aligned with the generated user configuration.
-            Environment = [
-              "POLYLOGUE_ARCHIVE_ROOT=${cfg.dataDir}"
-              "POLYLOGUE_MEMORY_BUDGET_BYTES=${toString memoryBudgetBytes}"
-            ];
-          };
-
-      };
-
-      # ── Runtime-surface registration (sinnix-specific) ─────────────
-      # A direct attrset rather than the single-surface `surface` factory
-      # argument: the unit name differs from the "polylogue" service name.
-      sinnix.runtime.units = {
-        polylogued = {
-          unit = "polylogued.service";
-          manager = "user";
-          resourceClass = "capture";
-          resources = {
-            MemoryHigh = polyloguedMemoryHigh;
-            MemoryMax = polyloguedMemoryMax;
-          };
-          notifyOnFailure = true;
-          operatorRestart = true;
-          # Archive availability is owned by the reindex campaign, not by this
-          # package's activation. The owning task records
-          # restart authorization; installing a new reader does not grant it.
-          expectedDown = "Daemon autostart is disabled; archive deployment follows the Polylogue reindex campaign rather than package activation (polylogue-reindex-2026.1, since 2026-08-14)";
-        };
+      sinnix.runtime.units.polylogue-live = {
+        unit = "polylogue-live.service";
+        manager = "user";
+        resourceClass = "capture";
+        notifyOnFailure = true;
+        operatorRestart = true;
       };
     };
 } args

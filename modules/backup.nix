@@ -40,10 +40,8 @@ let
   # nodatacow SQLite files on their next write. The fix is the same shape
   # sinex-postgres-dump and machine-telemetry-sqlite-backup already use: a
   # logical dump/direct-path copy on a timer, landing in a plain directory
-  # that IS covered by ordinary realm snapshot+borg. polylogued is currently
-  # parked (expectedDown in modules/services/polylogue.nix) so these
-  # jobs run against a quiescent tree today; both are written to work
-  # unattended whenever ingestion resumes.
+  # that IS covered by ordinary realm snapshot+borg. No daemon writes this
+  # Python archive any more, so these jobs run against a quiescent tree.
   polylogueStateRoot = config.sinnix.services.polylogue.dataDir;
   polylogueBackupRoot = "${realmRoot}/state/db-dumps/polylogue";
   # The daemon's live SQLite databases at the top level of the state root.

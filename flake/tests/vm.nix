@@ -1,4 +1,4 @@
-# QEMU NixOS VM integration checks (below, polylogue daemon, transmission).
+# QEMU NixOS VM integration checks (below, polylogue-live daemon, transmission).
 # agentctl has no unit of its own to probe: the queue is pueued (the CLI
 # feature) and the package suite drives a private pueued end to end.
 { inputs, ... }:
@@ -36,7 +36,6 @@ in
               environment.systemPackages = [
                 pkgs.jq
                 pkgs.coreutils
-                pkgs.polylogue
               ];
               sinnix.features.desktop = {
                 activitywatch.enable = false;
@@ -60,10 +59,7 @@ in
                 agentTools.enable = false;
                 mcp-servers.enable = false;
               };
-              sinnix.services.polylogue = {
-                enable = true;
-                daemon.autoStart = true;
-              };
+              sinnix.services.polylogue.enable = true;
             };
           testScript = ''
             start_all()
@@ -75,25 +71,15 @@ in
 
             machine.succeed("loginctl enable-linger sinity")
             machine.wait_for_unit(f"user@{uid}.service")
-            machine.wait_for_unit("polylogued.service", "sinity")
-
-            machine.succeed(f"{as_user} systemctl --user is-active --quiet polylogued.service")
-            machine.fail(
-                f"{as_user} journalctl --user -u polylogued.service --no-pager | grep -F UnknownServiceError"
+            machine.wait_for_unit("polylogue-live.service", "sinity")
+            machine.succeed(f"{as_user} systemctl --user is-active --quiet polylogue-live.service")
+            # The CLI exits 6 until the daemon answers on its socket.
+            machine.wait_until_succeeds(
+                f"{as_user} sh -c '/etc/profiles/per-user/sinity/bin/polylogue-live status --json > /tmp/polylogue-status.json'",
+                timeout=120,
             )
-            # A fresh archive can report ok=false; the bead requires a status
-            # document, not a healthy verdict. timeout covers a hang; test -s
-            # accepts a JSON write even when polylogued exits 1.
-            status_command = (
-                f"{as_user} sh -c 'timeout 30 polylogued status --format json "
-                "> /tmp/polylogued-status.json; test -s /tmp/polylogued-status.json'"
-            )
-            machine.wait_until_succeeds(status_command, timeout=120)
-            machine.succeed(
-                "jq -e '.daemon == \"polylogued\" and (.live.source_count >= 0)' "
-                "/tmp/polylogued-status.json >/dev/null"
-            )
-            print(machine.succeed("jq -c '{daemon, live}' /tmp/polylogued-status.json"))
+            machine.succeed("jq -e 'type == \"object\"' /tmp/polylogue-status.json >/dev/null")
+            machine.succeed("test -S /realm/state/polylogue-live/data/polylogue/daemon.sock")
           '';
         };
         transmission-vm = mkVmCheck system {

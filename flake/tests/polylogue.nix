@@ -1,14 +1,12 @@
 # Polylogue service module evaluation checks.
 #
-# The memory-budget check proves that one declared budget drives MemoryHigh,
-# MemoryMax, and the daemon's byte-valued environment export together. It uses
-# an explicitly overridden budget rather than the module default: pinning the
-# default's derived values here would only force a two-place edit whenever the
-# default moves, without testing anything the override does not.
+# The live wrapper is the daemon's command and the browser host, so both must
+# name the same archive; the host manifest must allow the ID Chrome derives
+# from the extension directory.
 #
-# Provably fails when: the module stops deriving any of the three outputs from
-# memoryBudgetGiB (verified by changing the MemoryHigh factor in
-# modules/services/polylogue.nix).
+# Provably fails when: the unit's ExecStart or the host manifest stops going
+# through the polylogue-live wrapper, or the extension ID derivation changes
+# (checked against an ID Chrome assigned to a known path).
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -28,84 +26,55 @@ in
         mkServiceTest
         ;
 
-      mkMemoryBudgetCheck =
-        {
-          name,
-          spec,
-          expectedHigh,
-          expectedMax,
-          expectedBudgetBytes,
-        }:
-        let
-          evaluated = evalTestSpec system spec;
-          service = (hmFor evaluated.config).systemd.user.services.polylogued.Service;
-          budgetEnvironment = lib.findFirst (
-            entry: lib.hasPrefix "POLYLOGUE_MEMORY_BUDGET_BYTES=" entry
-          ) "" service.Environment;
-        in
-        pkgs.runCommand "sinnix-${name}"
-          {
-            inherit expectedHigh expectedMax expectedBudgetBytes;
-            actualHigh = service.MemoryHigh;
-            actualMax = service.MemoryMax;
-            actualBudgetEnvironment = budgetEnvironment;
-          }
-          ''
-            test "$actualHigh" = "$expectedHigh"
-            test "$actualMax" = "$expectedMax"
-            test "$actualBudgetEnvironment" = "POLYLOGUE_MEMORY_BUDGET_BYTES=$expectedBudgetBytes"
-            touch "$out"
-          '';
-
       sentinelDataDir = "/tmp/sinnix-polylogue-service-sentinel";
-      archiveRootSpec = mkServiceTest {
-        name = "polylogue-archive-root";
+      liveRoot = "/tmp/sinnix-polylogue-live-sentinel";
+      liveSpec = mkServiceTest {
+        name = "polylogue-live";
         service = "polylogue";
         extraModules = [
           (_: {
             sinnix.services.polylogue.dataDir = sentinelDataDir;
-          })
-        ];
-        assertions =
-          config:
-          let
-            service = (hmFor config).systemd.user.services.polylogued.Service;
-          in
-          [
-            {
-              assertion = (service.SuccessExitStatus or [ ]) == [ 143 ];
-              message = "Polylogue must treat its handled SIGTERM exit 143 as successful termination.";
-            }
-            {
-              assertion = service.Restart == "on-failure";
-              message = "Polylogue must retain restarts for actual failures.";
-            }
-          ];
-      };
-      archiveRootEvaluated = evalTestSpec system archiveRootSpec;
-      polylogueTmpfiles = archiveRootEvaluated.config.systemd.tmpfiles.rules;
-      archiveInventory = archiveRootEvaluated.config.sinnix.runtime.inventory.polylogue;
-
-      overriddenSpec = mkServiceTest {
-        name = "polylogue-memory-budget";
-        service = "polylogue";
-        extraModules = [
-          (_: {
-            sinnix.services.polylogue.memoryBudgetGiB = 24;
+            sinnix.services.polylogue.liveRoot = liveRoot;
+            sinnix.features.desktop.browser.enable = true;
           })
         ];
         assertions = _config: [ ];
       };
+      liveEvaluated = evalTestSpec system liveSpec;
+      hm = hmFor liveEvaluated.config;
+      liveService = hm.systemd.user.services.polylogue-live;
+      hostManifest =
+        hm.home.file.".config/chrome-ws/NativeMessagingHosts/com.polylogue.browser_capture.json".text;
+      polylogueTmpfiles = liveEvaluated.config.systemd.tmpfiles.rules;
+      archiveInventory = liveEvaluated.config.sinnix.runtime.inventory.polylogue;
     in
     {
       checks = {
-        polylogue-memory-budget = mkMemoryBudgetCheck {
-          name = "polylogue-memory-budget-check";
-          spec = overriddenSpec;
-          expectedHigh = "21G";
-          expectedMax = "27G";
-          expectedBudgetBytes = "25769803776";
-        };
+        polylogue-live =
+          pkgs.runCommand "sinnix-polylogue-live-check"
+            {
+              nativeBuildInputs = [ pkgs.jq ];
+              execStart = liveService.Service.ExecStart;
+              wantedBy = builtins.toJSON liveService.Install.WantedBy;
+              inherit hostManifest liveRoot;
+            }
+            ''
+              set -eu
+              chrome_id() { printf %s "$1" | sha256sum | cut -c1-32 | tr 0-9a-f a-p; }
+              # Chrome assigned this ID to an unpacked extension at this path.
+              test "$(chrome_id /realm/worktree/polylogue-installed-candidate-d97162b/browser-extension)" \
+                = pllhcjjmdhchcbobnkdegdnjhkciojkp
+              id="$(chrome_id "$liveRoot/extension")"
+              wrapper="''${execStart% daemon}"
+              test "$execStart" = "$wrapper daemon"
+              case "$wrapper" in */bin/polylogue-live) ;; *) exit 1 ;; esac
+              jq -e 'index("default.target") != null' <<<"$wantedBy" >/dev/null
+              jq -e --arg wrapper "$wrapper" --arg id "$id" '
+                .path == $wrapper and
+                .allowed_origins == ["chrome-extension://\($id)/"]
+              ' <<<"$hostManifest" >/dev/null
+              touch "$out"
+            '';
         polylogue-archive-root =
           pkgs.runCommand "sinnix-polylogue-archive-root-check"
             {

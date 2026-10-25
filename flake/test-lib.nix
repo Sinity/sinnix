@@ -30,6 +30,7 @@ let
       lynchpin
       sinex
       polylogue
+      polylogue-rewrite
       ;
     inherit (inputs)
       scribe-tap
