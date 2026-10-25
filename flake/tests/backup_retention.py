@@ -29,15 +29,23 @@ with tempfile.TemporaryDirectory() as temporary:
     for name, age in [
         ("realm-current", 0),
         ("realm-old", 400),
+        ("realm-day-a", 30),
+        ("realm-day-b", 30),
+        ("genome-genome.current", 0),
+        ("genome-genome.old", 400),
+        ("genome-genome.day-a", 30),
+        ("genome-genome.day-b", 30),
+        ("genome-unrelated", 400),
         ("sinnix-prime-realm-expired", 400),
         ("sinnix-prime-realm-a", 100),
         ("sinnix-prime-realm-b", 99),
         ("sinnix-prime-realm-c", 98),
         ("unrelated", 400),
     ]:
-        stamp = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=age)).strftime(
-            "%Y-%m-%dT%H:%M:%S"
-        )
+        moment = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=age)
+        if "day-" in name:
+            moment = moment.replace(hour=12, minute=10 if name.endswith("-a") else 20, second=0)
+        stamp = moment.strftime("%Y-%m-%dT%H:%M:%S")
         run(
             ["borg", "create", "--timestamp", stamp, f"{repo}::{name}", "payload"],
             cwd=root,
@@ -62,6 +70,11 @@ with tempfile.TemporaryDirectory() as temporary:
     assert archives() == {
         "realm-current",
         "realm-old",
+        "realm-day-b",
+        "genome-genome.current",
+        "genome-genome.old",
+        "genome-genome.day-b",
+        "genome-unrelated",
         "sinnix-prime-realm-a",
         "sinnix-prime-realm-c",
         "unrelated",

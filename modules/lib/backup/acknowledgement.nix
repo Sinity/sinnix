@@ -26,6 +26,8 @@
   persistNoncanonical,
   realmNoncanonical,
   username,
+  genomeRoot,
+  genomeSnapshots,
 }:
 let
   # Root snapshot paths left out of the archive. One list feeds both the
@@ -145,19 +147,20 @@ in
     };
   })
 
-  # One timer gives both fresh lanes an attempt in each cycle. Archive /realm
+  # One timer gives every fresh lane an attempt in each cycle. Archive /realm
   # first so a long /persist full verification cannot delay its space-critical
   # snapshot drain. A realm failure must still start persist.
   # This unit never takes the Borg lock. The children own the archive gate.
   (mkBackupJob "borgbackup-drain-coordinator" {
-    description = "Run realm and persist snapshot drains in sequence";
+    description = "Run fresh snapshot drains in sequence";
     unit.unitConfig.PropagatesStopTo = [
       "borgbackup-job-persist.service"
       "borgbackup-job-realm.service"
-    ];
+    ]
+    ++ lib.optional (genomeRoot != null) "borgbackup-job-genome.service";
     serviceConfig = {
-      # Cover the Realm and persist budgets plus coordination overhead.
-      TimeoutStartSec = "28h15m";
+      # Cover each lane's budget plus coordination overhead.
+      TimeoutStartSec = if genomeRoot == null then "28h15m" else "52h15m";
       TimeoutStopSec = "15s";
     };
     path = with pkgs; [
@@ -183,7 +186,12 @@ in
       if needs_archival ${lib.escapeShellArg realmSnapshots} 'realm.*' \
           ${lib.escapeShellArg "${borgDrainStateRoot}/realm.latest-archived"} || \
         needs_archival ${lib.escapeShellArg persistSnapshots} 'persist.*' \
-          ${lib.escapeShellArg "${borgDrainStateRoot}/persist.latest-archived"}; then
+          ${lib.escapeShellArg "${borgDrainStateRoot}/persist.latest-archived"} ${
+            lib.optionalString (genomeRoot != null) ''
+              || \
+                      needs_archival ${lib.escapeShellArg genomeSnapshots} 'genome.*' \
+                        ${lib.escapeShellArg "${borgDrainStateRoot}/genome.latest-archived"}''
+          }; then
         systemctl stop borgbackup-verify.service
       fi
       failed=0
@@ -191,6 +199,12 @@ in
         echo "Realm snapshot drain failed; continuing to persist" >&2
         failed=1
       fi
+      ${lib.optionalString (genomeRoot != null) ''
+        if ! systemctl start borgbackup-job-genome.service; then
+          echo "Genome snapshot drain failed; continuing to persist" >&2
+          failed=1
+        fi
+      ''}
       if ! systemctl start borgbackup-job-persist.service; then
         echo "Persist snapshot drain failed" >&2
         failed=1

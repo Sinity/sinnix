@@ -59,6 +59,7 @@ assert lib.assertMsg (
           (_: {
             networking.hostName = "backup-runtime";
             sinnix.backup.enable = true;
+            sinnix.backup.genomeRoot = "/neo-outer-realm/content/genome";
             sinnix.services = {
               "machine-telemetry".enable = true;
               polylogue.enable = true;
@@ -235,6 +236,10 @@ assert lib.assertMsg (
         rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.script
           [
             {
+              from = "/neo-outer-realm/.btrfs/genome-snapshots";
+              to = "$TMPDIR/genome-snapshots";
+            }
+            {
               from = "/realm/.btrfs/snapshot";
               to = "$TMPDIR/realm-snapshots";
             }
@@ -313,6 +318,20 @@ assert lib.assertMsg (
           }
         ];
       realmBorgDrainScript = realmBorgDrainScriptFor "borgbackup-job-realm";
+      genomeBorgDrainScript = rewriteBackupHook (realmBorgDrainScriptFor "borgbackup-job-genome") [
+        {
+          from = "/neo-outer-realm/.btrfs/genome-snapshots";
+          to = "$TMPDIR/genome-snapshots";
+        }
+        {
+          from = "/run/borgbackup-snapshot-inputs/genome";
+          to = "$TMPDIR/bind/genome";
+        }
+        {
+          from = "run/borgbackup-snapshot-inputs/genome";
+          to = "$TMPDIR/bind/genome";
+        }
+      ];
       localDumpsScript = rewriteBackupHook (realmBorgDrainScriptFor "borgbackup-local-dumps") [
         {
           from = "/realm/state/db-dumps";
@@ -632,7 +651,7 @@ assert lib.assertMsg (
         ) "Snapshot backlog drains must have a finite per-wake deadline";
         assert lib.assertMsg (
           backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.serviceConfig.TimeoutStartSec
-          == "28h15m"
+          == "52h15m"
           &&
             backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.TimeoutStartSec
             == "24h"
@@ -641,10 +660,12 @@ assert lib.assertMsg (
             == [
               "borgbackup-job-persist.service"
               "borgbackup-job-realm.service"
+              "borgbackup-job-genome.service"
             ]
           && !(lib.hasInfix "stop borgbackup-verify.service borgbackup-coverage-audit-realm.service" backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.script)
           && !(builtins.hasAttr "borgbackup-job-persist" backupRuntimeEval.config.systemd.timers)
           && !(builtins.hasAttr "borgbackup-job-realm" backupRuntimeEval.config.systemd.timers)
+          && !(builtins.hasAttr "borgbackup-job-genome" backupRuntimeEval.config.systemd.timers)
           && builtins.hasAttr "borgbackup-drain-coordinator" backupRuntimeEval.config.systemd.timers
           &&
             backupRuntimeEval.config.systemd.timers.borgbackup-drain-coordinator.timerConfig.OnCalendar
@@ -688,6 +709,7 @@ assert lib.assertMsg (
                 pkgs.writeText "backup-fixture-scripts.json" (
                   builtins.toJSON {
                     realm = realmBorgDrainScript;
+                    genome = genomeBorgDrainScript;
                     localDumps = localDumpsScript;
                     persist = persistBorgDrainScript;
                     coordinator = coordinatorScript;

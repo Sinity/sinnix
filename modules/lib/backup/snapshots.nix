@@ -18,6 +18,8 @@
   borgCacheDir,
   borgGlobalLock,
   mkBackupJob,
+  genomeRoot,
+  genomeSnapshots,
 }:
 [
   {
@@ -59,12 +61,20 @@
   # HDD (slow spin-up) with nofail — without this, btrbk races the mount on boot.
   (mkBackupJob "btrbk" {
     description = "btrbk btrfs snapshot";
-    unit.after = [
-      "persist.mount"
-      "realm.mount"
-    ];
+    unit = {
+      after = [
+        "persist.mount"
+        "realm.mount"
+      ];
+      unitConfig.RequiresMountsFor = lib.optional (genomeRoot != null) genomeRoot;
+    };
     execStart = "${pkgs.btrbk}/bin/btrbk --quiet --preserve-snapshots run";
-    serviceConfig.TimeoutStopSec = "15s";
+    serviceConfig = {
+      TimeoutStopSec = "15s";
+      ExecStartPre = lib.optional (
+        genomeRoot != null
+      ) "${pkgs.coreutils}/bin/install -d -m 0750 ${genomeSnapshots}";
+    };
     timer = {
       # Create one restore point per Borg drain window. Half-hourly snapshots
       # accumulated without bound when archive verification could not finish.

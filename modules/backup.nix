@@ -30,6 +30,7 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   username = config.sinnix.user.name;
   backupCfg = config.sinnix.backup;
+  genomeSnapshots = "${config.sinnix.paths.neoOuterRealm}/.btrfs/genome-snapshots";
 
   # state/polylogue is a nested btrfs subvolume (sinnix-3pvd): btrbk snapshots
   # `subvolume .` of /realm, which does not cross subvolume boundaries, so
@@ -369,6 +370,7 @@ let
       bindTarget,
       exclude,
       noncanonical,
+      producerProof ? label == "realm",
     }:
     pkgs.writeText "${label}-snapshot-coverage.json" (
       builtins.toJSON (
@@ -377,7 +379,7 @@ let
           chrome_extension_caches = label == "persist";
           borg_excludes = borgExcludePatterns bindTarget exclude;
         }
-        // lib.optionalAttrs (label == "realm") {
+        // lib.optionalAttrs producerProof {
           producer_contract = "realm-borg-create-v2";
         }
       )
@@ -402,6 +404,7 @@ let
       replacementSuffix ? "",
       exclude,
       noncanonical,
+      producerProof ? label == "realm",
     }:
     let
       coveragePolicy = mkCoveragePolicy {
@@ -410,6 +413,7 @@ let
           bindTarget
           exclude
           noncanonical
+          producerProof
           ;
       };
     in
@@ -516,7 +520,7 @@ let
             echo "borg create returned invalid stats; retaining ${label} snapshot $snapshot" >&2
             return 1
           fi
-          if [ ${lib.escapeShellArg label} = realm ]; then
+          if [ ${lib.boolToString producerProof} = true ]; then
             if ! created_receipt="$(printf '%s' "$create_stats" | ${snapshotCoverage} record-create \
               ${lib.escapeShellArg bindTarget} "$archive_name" ${coveragePolicy} | ${pkgs.jq}/bin/jq -c \
               --argjson seconds "$create_seconds" '. + {create_seconds:$seconds}')"; then
@@ -531,7 +535,7 @@ let
           archive_created=1
           echo "backup_phase=create label=${label} archive=$archive_name elapsed_seconds=$create_seconds original_bytes=$create_original_bytes"
         }
-        if [ ${lib.escapeShellArg label} = realm ] && [ -f "$pending_receipt" ]; then
+        if [ ${lib.boolToString producerProof} = true ] && [ -f "$pending_receipt" ]; then
           if receipt_archive="$(${pkgs.jq}/bin/jq -er '.archive' "$pending_receipt" 2>/dev/null)" \
             && [[ "$receipt_archive" == "$original_archive_name" || "$receipt_archive" == "$original_archive_name"-* ]] \
             && printf '%s\n' "$archives" | grep -Fxq "$receipt_archive" \
@@ -540,7 +544,7 @@ let
             archive_name="$receipt_archive"
           fi
         fi
-        if [ ${lib.escapeShellArg label} = realm ] && [ -z "$producer_proof" ] \
+        if [ ${lib.boolToString producerProof} = true ] && [ -z "$producer_proof" ] \
           && printf '%s\n' "$archives" | grep -Fxq "$archive_name"; then
           if ! producer_proof="$(${snapshotCoverage} verify-created ${lib.escapeShellArg bindTarget} \
             "$archive_name" "$snapshot_uuid" ${coveragePolicy} "$pending_receipt" 2>/dev/null)"; then
@@ -560,11 +564,11 @@ let
             exit 1
           fi
         fi
-        # Realm accepts only the observed zero-warning create or its matching
+        # These lanes accept only the observed zero-warning create or its matching
         # durable receipt; its independent full comparison has its own job.
         # Persist keeps its first/policy-change/weekly full comparison and
         # uses a producer proof on fresh creates between those checks.
-        if [ ${lib.escapeShellArg label} = realm ]; then
+        if [ ${lib.boolToString producerProof} = true ]; then
           proof_mode=created
           if [ -n "$producer_proof" ]; then
             proof="$producer_proof"
@@ -1045,12 +1049,27 @@ let
     # a separate borg job (borgbackup-root-snapshots) that picks them up,
     # backs them up, and deletes the subvolume.
 
+  ''
+  + lib.optionalString (backupCfg.genomeRoot != null) ''
+    volume ${config.sinnix.paths.neoOuterRealm}
+      snapshot_dir .btrfs/genome-snapshots
+      subvolume ${lib.removePrefix "${config.sinnix.paths.neoOuterRealm}/" (toString backupCfg.genomeRoot)}
+          snapshot_name genome
+        snapshot_create always
+        snapshot_preserve_min all
   '';
 
 in
 {
-  options.sinnix.backup.enable = (lib.mkEnableOption "workstation snapshot and archive backups") // {
-    default = config.sinnix.machine.isDesktop;
+  options.sinnix.backup = {
+    enable = (lib.mkEnableOption "workstation snapshot and archive backups") // {
+      default = config.sinnix.machine.isDesktop;
+    };
+    genomeRoot = lib.mkOption {
+      type = lib.types.nullOr lib.types.path;
+      default = null;
+      description = "Optional HDD-backed genome subvolume with its own snapshot and Borg coverage.";
+    };
   };
 
   config = lib.mkIf backupCfg.enable (
@@ -1119,6 +1138,28 @@ in
                   eventDriven = true;
                   livenessProbe = {
                     command = "${snapshotCoverage} freshness ${borgDrainStateRoot}/realm.latest-archived ${toString borgDataFreshnessMaxAgeSec}";
+                    timeoutSeconds = 15;
+                  };
+                }
+              ];
+            };
+            borgbackup-job-genome = lib.mkIf (backupCfg.genomeRoot != null) {
+              unit = "borgbackup-job-genome.service";
+              resourceClass = "backup";
+              resources = {
+                Slice = "borgdrain.slice";
+                MemoryHigh = "6G";
+                MemoryMax = "6G";
+              };
+              notifyOnFailure = true;
+              operatorRestart = false;
+              captures = [
+                {
+                  name = "borg-genome-archive";
+                  path = "${borgDrainStateRoot}/genome.latest-archived";
+                  eventDriven = true;
+                  livenessProbe = {
+                    command = "${snapshotCoverage} freshness ${borgDrainStateRoot}/genome.latest-archived ${toString borgDataFreshnessMaxAgeSec}";
                     timeoutSeconds = 15;
                   };
                 }
@@ -1306,7 +1347,9 @@ in
           borgCacheDir
           borgGlobalLock
           mkBackupJob
+          genomeSnapshots
           ;
+        genomeRoot = backupCfg.genomeRoot;
       })
       ++ (import ./lib/backup/archives.nix {
         inherit
@@ -1368,7 +1411,23 @@ in
           persistNoncanonical
           realmNoncanonical
           username
+          genomeSnapshots
           ;
+        genomeRoot = backupCfg.genomeRoot;
+      })
+      ++ (import ./lib/backup/genome.nix {
+        inherit
+          pkgs
+          lib
+          genomeSnapshots
+          borgRepoRealm
+          borgRepoRealmPath
+          outerRealmMountUnit
+          mkBackupJob
+          mkSnapshotDrainScript
+          ;
+        genomeRoot = backupCfg.genomeRoot;
+        neoOuterRealm = config.sinnix.paths.neoOuterRealm;
       })
       ++ (import ./lib/backup/local-dumps.nix {
         inherit

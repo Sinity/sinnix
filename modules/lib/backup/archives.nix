@@ -88,9 +88,12 @@ let
         if [ "$dry_run" = 0 ]; then recover_stale_borg_locks "$repo"; fi
         name=$(basename "''${repo#file://}")
         borg list --json --lock-wait ${toString borgLockWaitSec} "$repo" > "$run_dir/$name.before.json"
-        borg prune --lock-wait ${toString borgLockWaitSec} --list "''${prune_options[@]}" \
-          --glob-archives "$active" \
-          --keep-within 2d --keep-daily 14 --keep-weekly 8 --keep-monthly 12 "$repo"
+        IFS=' ' read -r -a active_series <<< "$active"
+        for active_series_name in "''${active_series[@]}"; do
+          borg prune --lock-wait ${toString borgLockWaitSec} --list "''${prune_options[@]}" \
+            --glob-archives "$active_series_name" \
+            --keep-within 2d --keep-daily 14 --keep-weekly 8 --keep-monthly 12 "$repo"
+        done
         for series in "$@"; do
           # Explicit expiry makes even a stopped series eventually disappear.
           expire_options=()
@@ -105,7 +108,7 @@ let
         fi
       }
       maintain_repo ${lib.escapeShellArg borgRepoPersist} 'persist-*' 'sinnix-prime-persist-*'
-      maintain_repo ${lib.escapeShellArg borgRepoRealm} 'realm-*' 'sinnix-prime-realm-*' 'machine-telemetry-dumps-*'
+      maintain_repo ${lib.escapeShellArg borgRepoRealm} 'realm-* genome-genome.*' 'sinnix-prime-realm-*' 'machine-telemetry-dumps-*'
       maintain_repo ${lib.escapeShellArg borgRepoSinexBlobs} 'sinex-blobs-*'
       maintain_repo ${lib.escapeShellArg borgRepoRootSnapshots} 'root-*'
       maintain_repo ${lib.escapeShellArg borgRepoPolylogueState} 'polylogue-state-*'

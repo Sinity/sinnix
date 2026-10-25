@@ -1781,7 +1781,7 @@ class DrainFixture(unittest.TestCase):
                 "BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK": "yes",
             }
             fixture_policies = {}
-            for lane in ("realm", "persist"):
+            for lane in ("realm", "persist", "genome"):
                 # The rendered shell script is relocated to this synthetic
                 # tree. Its Nix-store policy is a separate file, so relocate
                 # the effective Borg exclusions in that policy as well.
@@ -1818,6 +1818,7 @@ class DrainFixture(unittest.TestCase):
                 "state/borg-drain",
                 "realm-snapshots",
                 "persist-snapshots",
+                "genome-snapshots",
                 "realm-empty",
                 "live-dumps",
                 "polylogue-stage-root",
@@ -1842,8 +1843,9 @@ if command=='borg':
     os.execv(REAL_BORG, [REAL_BORG,*args])
 if command=='systemctl':
     if args[0]=='stop': sys.exit(0)
-    lane={'borgbackup-job-persist.service':'persist', 'borgbackup-job-realm.service':'realm'}[args[-1]]
+    lane={'borgbackup-job-persist.service':'persist', 'borgbackup-job-realm.service':'realm', 'borgbackup-job-genome.service':'genome'}[args[-1]]
     if lane=='persist' and (root/'fail-persist-unit').exists(): sys.exit(1)
+    if lane=='genome' and (root/'fail-genome-unit').exists(): sys.exit(1)
     sys.exit(subprocess.run(['bash',str(root/(lane+'.sh'))],env=os.environ).returncode)
 if command=='findmnt':
     print(json.dumps({'filesystems':[{'target':args[-1],'fstype':'btrfs'}]})); sys.exit(0)
@@ -2687,6 +2689,40 @@ else: sys.exit(1)
             self.assertEqual(
                 sorted((root / "realm-snapshots").iterdir()), snapshots_before
             )
+            # A separate HDD source shares the repository's data chunks but
+            # owns its own receipts and immutable source lifetime.
+            genome_old = snapshot("genome.20260401T010000+0000", {
+                "genotype/original": "supplied input",
+                "outputs/analysis": "historical result",
+                "cache/reference": "downloaded cache",
+                "cache/personal-derived": "retained private derived data",
+                ".direnv/environment": "rebuildable environment",
+            }, lane="genome")
+            run("genome")
+            genome_new = snapshot("genome.20260402T010000+0000", {
+                "genotype/original": "supplied input",
+                "outputs/analysis": "updated result",
+                "vendor/report": "irreplaceable report",
+                "unfetchable/retained": "unavailable upstream",
+            }, lane="genome")
+            run("genome")
+            self.assertFalse(genome_old.exists())
+            self.assertTrue(genome_new.exists())
+            repo = str(root / "repos/borg-realm-v2")
+            for cut, expected in [(genome_old, "historical result"), (genome_new, "updated result")]:
+                archive = repo + "::genome-" + cut.name
+                self.assertEqual(subprocess.check_output(
+                    ["borg", "extract", "--stdout", archive, "outputs/analysis"], env=env, text=True
+                ), expected)
+            members = subprocess.check_output(
+                ["borg", "list", "--short", repo + "::genome-" + genome_old.name], env=env, text=True
+            ).splitlines()
+            self.assertIn("genotype/original", members)
+            self.assertIn("cache/personal-derived", members)
+            self.assertNotIn("cache/reference", members)
+            self.assertFalse(any(x.startswith(".direnv/") for x in members))
+            run("genome")
+            self.assertTrue(genome_new.exists(), "latest HDD audit source must survive no-work retries")
             for directory in (
                 "live-holder/snapshots",
                 "live-holder/repo",
@@ -2727,24 +2763,32 @@ else: sys.exit(1)
                 "realm.20260407T010000+0000",
                 {"unique": "realm after persist failure"},
             )
+            queued_genome = snapshot(
+                "genome.20260407T010000+0000",
+                {"outputs/retained": "genome after retry"},
+                lane="genome",
+            )
+            (root / "fail-genome-unit").touch()
             (root / "fail-persist-unit").touch()
             run("coordinator", ok=False)
             self.assertTrue(queued_persist.exists())
             self.assertTrue(queued_realm.exists())
+            self.assertTrue(queued_genome.exists())
             calls = [
                 json.loads(line)
                 for line in (root / "logs/commands").read_text().splitlines()
                 if '"systemctl"' in line
             ]
             self.assertEqual(
-                calls[-2:],
+                calls[-3:],
                 [
                     ["systemctl", "start", "borgbackup-job-realm.service"],
+                    ["systemctl", "start", "borgbackup-job-genome.service"],
                     ["systemctl", "start", "borgbackup-job-persist.service"],
                 ],
             )
             self.assertEqual(
-                calls[-3], ["systemctl", "stop", "borgbackup-verify.service"]
+                calls[-4], ["systemctl", "stop", "borgbackup-verify.service"]
             )
             self.assertFalse(
                 any(
@@ -2754,6 +2798,7 @@ else: sys.exit(1)
                 )
             )
             (root / "fail-persist-unit").unlink()
+            (root / "fail-genome-unit").unlink()
             run("coordinator")
             self.assertTrue(queued_persist.exists())
 
@@ -2761,6 +2806,7 @@ else: sys.exit(1)
             (empty / "mock-bin").mkdir(parents=True)
             (empty / "realm-snapshots").mkdir()
             (empty / "persist-snapshots").mkdir()
+            (empty / "genome-snapshots").mkdir()
             control = empty / "mock-bin/systemctl"
             control.write_text(
                 f"#!{sys.executable}\nimport json, os, sys\n"
@@ -2782,6 +2828,7 @@ else: sys.exit(1)
                 ],
                 [
                     ["start", "borgbackup-job-realm.service"],
+                    ["start", "borgbackup-job-genome.service"],
                     ["start", "borgbackup-job-persist.service"],
                 ],
                 "empty retries must leave an ongoing integrity check alone",
@@ -2812,9 +2859,30 @@ else: sys.exit(1)
                 ],
                 [
                     ["start", "borgbackup-job-realm.service"],
+                    ["start", "borgbackup-job-genome.service"],
                     ["start", "borgbackup-job-persist.service"],
                 ],
                 "acknowledged cuts must not preempt checks or open Borg from the coordinator",
+            )
+            # A pending HDD cut alone must preempt the resumable integrity
+            # check and receive an attempt in the same coordinator cycle.
+            (empty / "genome-snapshots/genome.20260404T070000+0000").mkdir()
+            (empty / "commands").unlink()
+            result = subprocess.run(
+                ["bash", str(root / "coordinator.sh")],
+                env=dict(env, TMPDIR=str(empty)),
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(
+                [json.loads(line) for line in (empty / "commands").read_text().splitlines()],
+                [
+                    ["stop", "borgbackup-verify.service"],
+                    ["start", "borgbackup-job-realm.service"],
+                    ["start", "borgbackup-job-genome.service"],
+                    ["start", "borgbackup-job-persist.service"],
+                ],
             )
 
 

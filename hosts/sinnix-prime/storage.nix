@@ -135,6 +135,7 @@ let
       };
 in
 {
+  sinnix.backup.genomeRoot = "${neoOuterRealm}/content/genome";
   services = {
     # Keep online discard disabled on this host; run batched trim from a
     # low-priority timer instead. Do not use the stock all-filesystems fstrim
@@ -165,6 +166,21 @@ in
   };
 
   fileSystems = {
+    # Keep the workspace namespace stable while its large data tree lives on
+    # the HDD. The automount fails access when that disk is unavailable rather
+    # than letting callers populate the underlying NVMe mountpoint.
+    "${realmRoot}/health/genome" = {
+      device = "${neoOuterRealm}/content/genome";
+      fsType = "none";
+      depends = [ neoOuterRealm ];
+      options = [
+        "bind"
+        "nofail"
+        "x-systemd.automount"
+        "x-systemd.idle-timeout=10min"
+        "x-systemd.mount-timeout=60s"
+      ];
+    };
     "/" = {
       device = "/dev/disk/by-uuid/f4782d9f-aabe-408e-b18b-2f2baa9e9a02";
       fsType = "btrfs";

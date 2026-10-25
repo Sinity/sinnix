@@ -57,6 +57,7 @@ paths. Neither measurement establishes that a directory is disposable.
 | ------------------------ | ---------------------------------------------------------------------- | ---------------------------------------------- | ------------------------- |
 | `/realm`                 | btrbk read-only snapshot, archived by the Borg job                     | snapshots 00/06/12/18:00, drain hourly at :05 and :25 | `borg-realm-v2`           |
 | `/persist`               | btrbk read-only snapshot, archived by the Borg job                     | same as `/realm`                               | `borg-persist-v1`         |
+| HDD genome workspace     | dedicated btrbk cut, archived independently of `/realm`              | six-hour cuts, coordinated retries at :05 and :25 | `borg-realm-v2`, `genome-*` series |
 | The ephemeral root       | snapshot the initrd takes before each wipe                             | daily                                          | `borg-root-snapshots-v1`  |
 | Sinex blob store         | direct                                                                 | daily 05:40                                    | `borg-sinex-blobs-v1`     |
 | Polylogue state          | hooks archived directly from a read-only snapshot of its subvolume     | daily 04:15                                    | `borg-polylogue-state-v1` |
@@ -94,6 +95,19 @@ are therefore also disk-space problems on `/realm`.
 The newest admitted source cut remains until a successor is admitted, so an
 independent audit has an immutable source. The Borg drain owns releases from
 these handoff queues.
+
+The genome workspace can live at `sinnix.backup.genomeRoot` on the HDD while a
+declared mount preserves `/realm/health/genome` for its callers. A Realm
+snapshot does not cross that mount. The genome subvolume therefore has its
+own immutable cuts, archive receipts and freshness check. Its `genome-*`
+archives (`genome-genome.*`) share the Realm repository for deduplication and have independent
+retention, so a Realm recovery point cannot displace a genome recovery point
+from the same day. Raw reads, supplied alignments, vendor files, manifests,
+source/WIP and analysis results stay covered. Exclusions name the public
+reference/catalogue caches, downloaded tools and dependency environments;
+unclassified cache children remain covered.
+
+`/neo-outer-realm/inbox/p2` is unbacked bulk intake by operator choice.
 
 Polylogue hooks are read directly from a verified read-only Btrfs cut through
 a private temporary path view that preserves `realm/state/polylogue/hooks` in
