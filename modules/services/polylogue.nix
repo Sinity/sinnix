@@ -159,6 +159,9 @@ mkServiceModule {
               ExecStart = "${cli}/bin/polylogue-live daemon";
               Restart = "on-failure";
               RestartSec = "5s";
+              # The daemon exits 78 when it refuses the archive (a schema it
+              # cannot migrate); restarting cannot change that.
+              RestartPreventExitStatus = 78;
             };
             Install.WantedBy = [ "default.target" ];
           };
