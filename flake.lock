@@ -1171,11 +1171,11 @@
     },
     "nixpkgs_2": {
       "locked": {
-        "lastModified": 1792773339,
-        "narHash": "sha256-rZLrzrC6i+jnTAlvPZHogKDulY7WWDEv9hJeHieO7Zw=",
+        "lastModified": 1791594108,
+        "narHash": "sha256-XK4KceonkwD8LuMAt/vNrz982mXJM5jeHAxMwsUXXAQ=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "3ec636362e1816bc2f0888fa0fa2c69f1bc9e504",
+        "rev": "6510408d147d8c5e6d76043e899e9251756f6a75",
         "type": "github"
       },
       "original": {
@@ -1328,17 +1328,17 @@
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1792948837,
-        "narHash": "sha256-aJuOfpo/GgCtSeA9ym8U9bXYlrItAM1RAKteHOb2OE4=",
+        "lastModified": 1792960701,
+        "narHash": "sha256-isNTmGoxCN3ZgJn1Ot32li0Mx/at6dnxMbStrlDIb+E=",
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "b35e5ed8f3a80bd9e49e352b06d20e03ce7d1a94",
+        "rev": "fd2786b83ead305c545923c31c1dffb7c5a375df",
         "type": "github"
       },
       "original": {
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "b35e5ed8f3a80bd9e49e352b06d20e03ce7d1a94",
+        "rev": "fd2786b83ead305c545923c31c1dffb7c5a375df",
         "type": "github"
       }
     },
