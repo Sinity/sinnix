@@ -255,10 +255,10 @@ _HW_WIDTH = 20 + 1 + 32 + 1
 def _range_start(path: Path, since: float) -> int:
     """Offset past every record the high-water sidecar proves is before ``since``.
 
-    Checkpoint ``i`` holds the end offset of record ``i`` and the largest ts of
-    records ``0..i``; both only grow, so the last checkpoint whose high water
-    is below ``since`` bounds a prefix no in-window record can be in. A file
-    without a usable sidecar is read from its start.
+    Checkpoint ``i`` holds the end offset of the ``i``-th appended batch and the
+    largest ts of every record up to it; both only grow, so the last checkpoint
+    whose high water is below ``since`` bounds a prefix no in-window record can
+    be in. A file without a usable sidecar is read from its start.
     """
     sidecar = path.with_name(path.name + ".hw")
     try:

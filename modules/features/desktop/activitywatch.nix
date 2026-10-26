@@ -133,6 +133,12 @@ mkFeatureModule {
             Install.WantedBy = lib.mkIf (!cfg.autoStart) (lib.mkForce [ ]);
           };
 
+          # aw-server rewrites its SQLite pages in place; a database created
+          # here inherits No_COW instead of fragmenting under copy-on-write.
+          systemd.user.tmpfiles.rules = [
+            "h %h/.local/share/activitywatch/aw-server-rust - - - - +C"
+          ];
+
           systemd.user.services.activitywatch-watcher-awatcher = {
             Unit = baseGraphicalUnit // {
               Requisite = [ graphicalTarget ];

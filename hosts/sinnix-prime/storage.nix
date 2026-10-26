@@ -137,6 +137,15 @@ in
 {
   sinnix.backup.genomeRoot = "${neoOuterRealm}/content/genome";
   services = {
+    # The /realm QLC NVMe gets its own dirty-page budget (a quarter of the
+    # global limit in modules/profiles/workstation.nix), and strict_limit
+    # holds its writers to it. Without it a backlog on this slow drive used up
+    # the global limit and paused writers to every other disk, the desktop's
+    # root SSD included, in balance_dirty_pages.
+    udev.extraRules = ''
+      ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="nvme*n*", ENV{DEVTYPE}=="disk", ATTRS{model}=="CT4000P3SSD8*", ATTR{bdi/strict_limit}="1", ATTR{bdi/max_ratio}="25"
+    '';
+
     # Keep online discard disabled on this host; run batched trim from a
     # low-priority timer instead. Do not use the stock all-filesystems fstrim
     # unit: this host has many Btrfs bind mounts and snapshot mounts, and the
@@ -392,6 +401,11 @@ in
         # run (idempotent; ownership matches modules/services/sinex/bridge.nix).
         install -d -o postgres -g postgres -m 0700 "$root/postgresql"
         install -d -o sinex -g sinex -m 0750 "$root/daemon"
+        # Postgres rewrites pages in place; under copy-on-write each rewrite
+        # becomes a new extent (a 1 GB relation reached 49k). Files and
+        # directories created inside inherit the attribute; files that exist
+        # before it is set keep copy-on-write until copied.
+        chattr +C "$root/postgresql"
       '';
     };
 
@@ -469,6 +483,8 @@ in
       # regenerable-cache root that modules/core.nix declares. Excluded from
       # btrbk→borg — never persist-grade data.
       "d ${realmRoot}/state/cache/sinex 0775 ${username} users -"
+      # Stash's SQLite database is rewritten in place; new files inherit No_COW.
+      "h ${realmRoot}/state/stashbox - - - - +C"
     ];
 
     # XDG consumers use the same archive as the configured daemon and MCP.

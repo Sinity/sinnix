@@ -10,7 +10,8 @@
 # (hosts/sinnix-prime/storage.nix), outside the realm snapshots:
 #   daemon/      API tokens, NATS JetStream, capture spools, and the content
 #                store (daemon/store)
-#   postgresql/  the PostgreSQL cluster
+#   postgresql/  the PostgreSQL cluster, No_COW (hosts/sinnix-prime/storage.nix
+#                sets the attribute so every file the cluster creates inherits it)
 # State of earlier deployments stays beside them under dated names.
 #
 # Backups: the content store is archived by the sinex-blobs Borg job
@@ -85,6 +86,23 @@ in
         # Empty while no source is sealed.
         keysDir = "${dumpRoot}/sinex-keys";
       };
+    };
+
+    # Sized for the QLC /realm NVMe, where writes are what stall the desktop.
+    # At the stock 128MB buffers, 1GB WAL and 5min checkpoints, every
+    # checkpoint made the next write to each page log the whole page again:
+    # 8.8M full-page images in 73 GB of WAL over 18 hours, with 61 of 252
+    # checkpoints forced by WAL size during a catch-up. Sorts spilled 2.4 TB
+    # to temp files at 4MB work_mem. Spills of 16MB and more are logged so
+    # the next one names its statement.
+    services.postgresql.settings = {
+      shared_buffers = "4GB";
+      effective_cache_size = "12GB";
+      work_mem = "64MB";
+      maintenance_work_mem = "512MB";
+      max_wal_size = "16GB";
+      checkpoint_timeout = "30min";
+      log_temp_files = "16MB";
     };
 
     systemd.tmpfiles.rules = sqliteIndexRules;

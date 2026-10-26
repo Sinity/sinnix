@@ -220,12 +220,13 @@ in
           "vm.vfs_cache_pressure" = 100;
           "vm.min_free_kbytes" = 262144;
           "vm.watermark_scale_factor" = 50;
-          # Keep Btrfs/NVMe writeback from accumulating multi-GiB dirty bursts:
-          # the Crucial P3 /realm drive shows 30s NVMe command timeouts under
-          # mixed build/database writeback, and bounded dirty bytes push back
-          # earlier, making stalls shorter and more attributable.
-          "vm.dirty_background_bytes" = 64 * 1024 * 1024;
-          "vm.dirty_bytes" = 256 * 1024 * 1024;
+          # Keep Btrfs writeback from accumulating multi-GiB dirty bursts. The
+          # slow drive is bounded on its own (a per-device limit in the host's
+          # storage configuration); this global limit is the sum every disk
+          # shares, so it is set high enough that one drive's backlog does not
+          # pause writers to the others.
+          "vm.dirty_background_bytes" = 128 * 1024 * 1024;
+          "vm.dirty_bytes" = 1024 * 1024 * 1024;
 
           # Rebuild and Home Manager activation reload a large user unit/D-Bus
           # surface in bursts. Keep inotify capacity high enough that the bus daemon
