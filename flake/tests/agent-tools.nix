@@ -836,7 +836,7 @@ in
               ([.hooks.SessionStart[].hooks[].command]
                 | any(contains("sessionstart-sinex-recall.sh"))) and
               ([.hooks.Stop[].hooks[].command]
-                | any(. == "polylogue-hook Stop --provider claude-code"))
+                | any(. == "polylogue-live hook Stop"))
             ' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
 
             # Rendered profile configs must match the registry's own computed
@@ -914,7 +914,7 @@ in
 
             jq -e '
               [.hooks.Stop[].hooks[].command]
-              | any(. == "polylogue-hook Stop --provider codex")
+              | any(. == "polylogue-live hook Stop --harness codex")
             ' "$HOME/.codex/hooks.json" >/dev/null
             jq -e '
               [.hooks.SessionStart[].hooks[].command] | any(contains("sessionstart-sinex-recall.sh"))

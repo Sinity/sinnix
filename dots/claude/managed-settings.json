@@ -59,7 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "polylogue-hook PreToolUse --provider claude-code",
+            "command": "polylogue-live hook PreToolUse",
             "timeout": 5
           }
         ]
@@ -70,7 +70,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "polylogue-hook PostToolUse --provider claude-code",
+            "command": "polylogue-live hook PostToolUse",
             "timeout": 5
           }
         ]
@@ -94,7 +94,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "polylogue-hook Stop --provider claude-code",
+            "command": "polylogue-live hook Stop",
             "timeout": 5
           }
         ]
@@ -115,8 +115,8 @@
           },
           {
             "type": "command",
-            "command": "polylogue-hook SessionStart --provider claude-code",
-            "timeout": 5
+            "command": "polylogue-live hook SessionStart",
+            "timeout": 10
           }
         ]
       }
@@ -126,8 +126,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "polylogue-hook UserPromptSubmit --provider claude-code",
-            "timeout": 5
+            "command": "polylogue-live hook UserPromptSubmit",
+            "timeout": 10
           }
         ]
       }

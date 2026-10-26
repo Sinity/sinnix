@@ -122,6 +122,16 @@ mkFeatureModule {
             ];
           };
           plugins.enabled = [ "observability/nemo_relay" ];
+          # Polylogue's session-start brief comes with the first turn, and a
+          # pasted session ID brings its takeover context. The hook is ours,
+          # so it is accepted without the first-use prompt.
+          hooks.pre_llm_call = [
+            {
+              command = "polylogue-live hook pre_llm_call --harness hermes";
+              timeout = 10;
+            }
+          ];
+          hooks_auto_accept = true;
           delegation = {
             max_iterations = 100;
             max_concurrent_children = 3;

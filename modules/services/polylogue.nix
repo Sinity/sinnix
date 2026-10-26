@@ -126,6 +126,12 @@ mkServiceModule {
 
           home.packages = [ cli ];
 
+          # Completion asks the daemon for a query's fields, values seen and
+          # recent session IDs while one is typed.
+          programs.zsh.initContent = lib.mkAfter ''
+            source <(${cli}/bin/polylogue-live completions zsh --program polylogue-live)
+          '';
+
           xdg.configFile."polylogue/polylogue.toml".source = pythonSettings;
 
           # Replaces the file the Python stack's installer wrote by hand.

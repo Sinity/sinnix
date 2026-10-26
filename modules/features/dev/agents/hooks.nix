@@ -1,8 +1,9 @@
 # Codex session-lifecycle hooks (SessionStart/UserPromptSubmit/Stop):
-# Session recall and Polylogue capture. Plain helper (not a NixOS module)
-# imported directly by mcp.nix's
-# configFn; the generated file is exposed via the mcp-servers.codexHooksSource
-# option for tests.
+# session recall, and Polylogue's live hooks (`polylogue-live hook`): its
+# session-start brief, takeovers of pasted session IDs and live state.
+# Plain helper (not a NixOS module) imported directly by mcp.nix's configFn;
+# the generated file is exposed via the mcp-servers.codexHooksSource option
+# for tests.
 { pkgs, dotsRoot }:
 let
   jsonFormat = pkgs.formats.json { };
@@ -19,7 +20,7 @@ jsonFormat.generate "codex-hooks.json" {
           }
           {
             type = "command";
-            command = "polylogue-hook SessionStart --provider codex";
+            command = "polylogue-live hook SessionStart --harness codex";
           }
         ];
       }
@@ -29,7 +30,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue-hook UserPromptSubmit --provider codex";
+            command = "polylogue-live hook UserPromptSubmit --harness codex";
           }
         ];
       }
@@ -49,7 +50,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue-hook PreToolUse --provider codex";
+            command = "polylogue-live hook PreToolUse --harness codex";
           }
         ];
       }
@@ -59,7 +60,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue-hook PostToolUse --provider codex";
+            command = "polylogue-live hook PostToolUse --harness codex";
           }
         ];
       }
@@ -69,7 +70,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue-hook Stop --provider codex";
+            command = "polylogue-live hook Stop --harness codex";
           }
         ];
       }

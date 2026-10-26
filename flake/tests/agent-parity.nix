@@ -1,15 +1,16 @@
 # Claude/Codex hook parity: the hooks both clients must run are checked
 # against the two real hook sources (dots/claude/managed-settings.json and the
 # generated Codex hooks), not restated as a list of expected names here.
-# Both clients invoke the installed upstream `polylogue-hook`; its archive
-# root comes from generated `polylogue.toml`.
+# Both clients invoke the live rewrite's hook (`polylogue-live hook EVENT`,
+# with `--harness codex` for Codex), which writes the hook spool of the live
+# archive and brings the session-start brief.
 #
-# Provably fails when: a `polylogue-hook <Event>` lane present in Claude's
-# settings is dropped from the generated Codex hooks, when a writer bakes a
-# sidecar path, when generated archive.root stops following dataDir, when a
-# hook invocation stops appending a carrier envelope naming its provider and
-# event, or when either client loses the pre-compaction handoff or shared
-# hook coverage.
+# Provably fails when: a `polylogue-live hook <Event>` lane present in
+# Claude's settings is dropped from the generated Codex hooks, when a writer
+# bakes a sidecar path, when the retained Python CLI's generated archive.root
+# stops following dataDir, when a hook invocation stops appending a spool line
+# naming its harness, event and session, or when either client loses the
+# pre-compaction handoff or shared hook coverage.
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -26,7 +27,7 @@ in
         dotsRoot = inputs.self + "/dots";
       };
       claudeHooks = ../../dots/claude/managed-settings.json;
-      polylogueHook = inputs.polylogue.packages.${system}.default;
+      polylogueHook = inputs.polylogue-rewrite.packages.${system}.polylogue;
       testLib = import ../test-lib.nix { inherit inputs lib; };
       inherit (testLib)
         evalTestSpec
@@ -64,7 +65,6 @@ in
               pkgs.gnugrep
               pkgs.jq
               pkgs.ripgrep
-              pkgs.strace
             ];
           }
           ''
@@ -100,8 +100,8 @@ in
               fi
             }
 
-            test -x "$polylogueHook/bin/polylogue-hook" || {
-              echo "upstream polylogue-hook is not an executable in $polylogueHook" >&2
+            test -x "$polylogueHook/bin/polylogue" || {
+              echo "polylogue is not an executable in $polylogueHook" >&2
               exit 1
             }
 
@@ -115,7 +115,7 @@ in
                 | to_entries
                 | map(select(
                     .key as $event
-                    | any(.value[]?.hooks[]?.command; startswith("polylogue-hook " + $event))
+                    | any(.value[]?.hooks[]?.command; startswith("polylogue-live hook " + $event))
                   ))
                 | map(.key)
                 | sort[]
@@ -124,7 +124,7 @@ in
             lanes "$claudeHooks" > claude-lanes
             lanes "$codexHooks" > codex-lanes
             test -s claude-lanes || {
-              echo "Claude settings declare no polylogue-hook capture lane at all" >&2
+              echo "Claude settings declare no polylogue-live hook lane at all" >&2
               exit 1
             }
             missing="$(comm -23 claude-lanes codex-lanes)"
@@ -133,28 +133,30 @@ in
               exit 1
             fi
 
-            # Every actual Polylogue writer declaration must use the upstream
-            # executable with event/provider arguments only. In particular,
-            # the anchored provider capture rejects any trailing sidecar flag.
+            # Every Polylogue hook declaration names its event and, for a
+            # harness other than Claude Code, `--harness NAME`, and nothing
+            # else: the anchored capture rejects any trailing flag.
             writer_rows() {
               jq -r '
                 .hooks
                 | to_entries[]
                 | .key as $event
                 | .value[]?.hooks[]?.command
-                | select(type == "string" and startswith("polylogue-hook "))
-                | [$event, (capture(" --provider (?<provider>[^ ]+)$").provider)]
+                | select(type == "string" and startswith("polylogue-live hook "))
+                | capture("^polylogue-live hook (?<event>[^ ]+)( --harness (?<harness>[^ ]+))?$")
+                | select(.event == $event)
+                | [$event, (.harness // "claude-code")]
                 | @tsv
               ' "$1"
             }
             writer_rows "$claudeHooks" | sort > claude-writers
             writer_rows "$codexHooks" | sort > codex-writers
             test -s claude-writers || {
-              echo "Claude settings declare no polylogue-hook writer row" >&2
+              echo "Claude settings declare no polylogue-live hook row" >&2
               exit 1
             }
             test -s codex-writers || {
-              echo "generated Codex hooks declare no polylogue-hook writer row" >&2
+              echo "generated Codex hooks declare no polylogue-live hook row" >&2
               exit 1
             }
             cut -f1 claude-writers > claude-writer-lanes
@@ -196,68 +198,42 @@ in
               exit 1
             fi
 
-            # The managed Claude file is an out-of-store dots symlink. It and
-            # generated Codex config both retain the continuously installed
-            # upstream command name, so landing cannot create an activation
-            # interval where the named executable is absent.
-            require_text 'polylogue-hook Stop --provider claude-code' "$claudeHooks" claude-command-name
-            require_text 'polylogue-hook Stop --provider codex' "$codexHooks" codex-command-name
+            require_text 'polylogue-live hook Stop' "$claudeHooks" claude-command-name
+            require_text 'polylogue-live hook Stop --harness codex' "$codexHooks" codex-command-name
 
-            # Fresh-writer smoke: install the generated TOML at the same XDG
-            # path Home Manager uses in production, leave POLYLOGUE_ARCHIVE_ROOT
-            # unset, and execute the actual upstream hook for both providers.
-            # HOME, XDG data/state, and the absent archive-root environment are
-            # decoys. Only the configured archive root may receive sidecars.
+            # Hook smoke: run the rewrite's hook for both harnesses with no
+            # daemon. It fails open (no context) and appends one spool line
+            # per event under XDG_STATE_HOME, naming the harness's origin,
+            # the event and the session.
             smoke_root="$TMPDIR/polylogue-hook-smoke"
-            primary="$sentinelDataDir/hooks"
-            config_home="$smoke_root/config"
-            archive_decoy="$smoke_root/archive-decoy"
-            mkdir -p "$smoke_root/home" "$config_home/polylogue" "$smoke_root/xdg-data" "$smoke_root/xdg-state" "$archive_decoy"
-            cp "$polylogueConfigSource" "$config_home/polylogue/polylogue.toml"
-            trace="$smoke_root/access.trace"
-            printf '%s' '{"session_id":"parity-codex","source":"codex","turn_id":"turn-1"}' \
-              | env -u POLYLOGUE_ARCHIVE_ROOT -u POLYLOGUE_CONFIG \
-                HOME="$smoke_root/home" \
-                XDG_CONFIG_HOME="$config_home" \
-                XDG_DATA_HOME="$smoke_root/xdg-data" \
-                XDG_STATE_HOME="$smoke_root/xdg-state" \
-                strace -f -e trace=file -o "$trace" \
-                "$polylogueHook/bin/polylogue-hook" UserPromptSubmit \
-                  --provider codex
-            printf '%s' '{"session_id":"parity-claude","source":"claude","turn_id":"turn-2"}' \
-              | env -u POLYLOGUE_ARCHIVE_ROOT -u POLYLOGUE_CONFIG \
-                HOME="$smoke_root/home" \
-                XDG_CONFIG_HOME="$config_home" \
-                XDG_DATA_HOME="$smoke_root/xdg-data" \
-                XDG_STATE_HOME="$smoke_root/xdg-state" \
-                strace -f -e trace=file -o "$smoke_root/claude.trace" \
-                "$polylogueHook/bin/polylogue-hook" Stop \
-                  --provider claude-code
-            # The hook's observable output is the carrier spool
-            # (`carriers/<provider>/<UTC day>/<pid>.ndjson`)
-            # under the configured root: one envelope per invocation, carrying
-            # the provider and event it was invoked with. Assert the envelope
-            # bodies rather than file names, which encode neither.
-            envelopes="$(find "$primary/carriers" -type f -name '*.ndjson' 2>/dev/null)"
-            require_envelope() {
-              provider="$1"
-              event="$2"
-              session="$3"
-              if [ -z "$envelopes" ] || ! jq -se \
-                --arg p "$provider" --arg e "$event" --arg s "$session" \
-                'any(.[]; .provider == $p and .event_type == $e and .session_id == $s)' \
-                $envelopes >/dev/null; then
-                echo "no carrier hook envelope for $provider/$event/$session under $primary/carriers" >&2
-                find "$primary" -type f -print -exec cat {} \; >&2
+            mkdir -p "$smoke_root/home" "$smoke_root/xdg-data" "$smoke_root/xdg-state"
+            for call in "UserPromptSubmit codex parity-codex" "Stop claude-code parity-claude"; do
+              set -- $call
+              printf '{"session_id":"%s","cwd":"/nonexistent","prompt":"hello"}' "$3" \
+                | env HOME="$smoke_root/home" \
+                  XDG_DATA_HOME="$smoke_root/xdg-data" \
+                  XDG_STATE_HOME="$smoke_root/xdg-state" \
+                  "$polylogueHook/bin/polylogue" hook "$1" --harness "$2" > "$smoke_root/$1.out"
+              test ! -s "$smoke_root/$1.out" || {
+                echo "the $1 hook answered without a daemon" >&2
+                cat "$smoke_root/$1.out" >&2
+                exit 1
+              }
+            done
+            lines="$(find "$smoke_root/xdg-state/polylogue/hooks" -type f -name '*.ndjson' 2>/dev/null)"
+            require_line() {
+              if [ -z "$lines" ] || ! jq -se --arg p "$1" --arg e "$2" --arg s "$3" \
+                'any(.[]; .provider == $p and .event == $e and .session_id == $s)' \
+                $lines >/dev/null; then
+                echo "no hook spool line for $1/$2/$3" >&2
+                find "$smoke_root" -type f -print -exec cat {} \; >&2
                 exit 1
               fi
             }
-            require_envelope codex UserPromptSubmit parity-codex
-            require_envelope claude-code Stop parity-claude
-            test -z "$(find "$archive_decoy" "$smoke_root/home" "$smoke_root/xdg-data" "$smoke_root/xdg-state" -mindepth 1 -print -quit)" \
-              || { echo 'isolated Polylogue hook smoke wrote a decoy root' >&2; exit 1; }
-            reject_text '/realm/state/polylogue' "$trace" live-hook-root
-            reject_text '/realm/state/polylogue' "$smoke_root/claude.trace" claude-live-hook-root
+            require_line codex UserPromptSubmit parity-codex
+            require_line claude-code Stop parity-claude
+            test -z "$(find "$smoke_root/home" "$smoke_root/xdg-data" -mindepth 1 -print -quit)" \
+              || { echo 'the hook wrote outside its spool' >&2; exit 1; }
 
             # The shared context handoff is configured independently for both
             # clients, so this verifies the intended cross-client agreement.
