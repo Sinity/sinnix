@@ -133,7 +133,11 @@ in
       };
       sinexd = {
         unitConfig.RequiresMountsFor = [ root ];
-        serviceConfig = runtimeServiceConfig "sinexd.service";
+        serviceConfig = runtimeServiceConfig "sinexd.service" // {
+          # A runaway sinexd is killed inside its own unit rather than
+          # pushing the workstation into swap.
+          MemorySwapMax = "2G";
+        };
       };
       sinex-nats = {
         unitConfig.RequiresMountsFor = [ root ];

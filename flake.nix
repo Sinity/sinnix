@@ -110,7 +110,7 @@
     # `switch` publishes the Sinex closure after a successful activation
     # (sinexCachePush in flake/command-registry.nix), and the
     # sinex-cache-prebuild timer builds a newly pinned revision ahead of it.
-    sinex.url = "git+https://github.com/Sinity/sinex?ref=master&rev=f3e24ee1bc609e6005491f58a366cceea553c457";
+    sinex.url = "git+https://github.com/Sinity/sinex?ref=master&rev=f1c9a5171e036da74ca7f8ba267961ea0b28b3d5";
 
     # BTRFS rollback impermanence (see modules/persistence.nix)
     impermanence = {
