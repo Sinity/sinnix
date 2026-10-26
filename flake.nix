@@ -75,7 +75,7 @@
     # The Rust rewrite, run live beside the retained Python stack by
     # modules/services/polylogue.nix until consumers cut over. It keeps its
     # own nixpkgs: its shared crates need a newer rustc than Sinnix's.
-    polylogue-rewrite.url = "github:Sinity/polylogue/fc7659d03832e93cc621243e1bec17ce5c6789e2";
+    polylogue-rewrite.url = "github:Sinity/polylogue/bf685712852fb7c702fc7fe6245b39d299f812b9";
 
     # Private repo — fetch via HTTPS through the local gh/git credential helper.
     yt-polisher = {
