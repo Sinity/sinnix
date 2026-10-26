@@ -32,11 +32,11 @@ let
   secrets = config.sinnix.secrets.paths;
   root = "/var/lib/sinex";
   dumpRoot = "${config.sinnix.paths.realmRoot}/state/db-dumps";
-  # SQLite databases in WAL mode are read through their -shm index, which
-  # even a read-only reader maps writable; readAnyFile reads files but cannot
-  # write. The sinex user gets write access to the index of each database a
-  # SQLite source reads, and, by default ACL, to the index the program creates
-  # next. It gets no write access to the directory, so sinexd never creates a
+  # SQLite opens a WAL-mode database's -shm index and -wal log writable even
+  # for a read-only connection, which never writes the database; readAnyFile
+  # reads files but cannot write them. The sinex user gets write access to
+  # both of each database a SQLite source reads, and, by default ACL, to those
+  # the program creates next (the default mask must not cut that entry down). It gets no write access to the directory, so sinexd never creates a
   # file there; while the program is closed and its index absent, the source
   # reports the database unavailable.
   sqlitePaths = lib.concatMap (
@@ -49,8 +49,9 @@ let
   # `-`: an index that does not exist yet (a database not in WAL mode, or a
   # program not running) is not an activation failure.
   sqliteIndexRules = lib.concatMap (path: [
-    "a+- ${dirOf path} - - - - d:u:${config.services.sinex.user}:rw"
+    "a+- ${dirOf path} - - - - d:u:${config.services.sinex.user}:rw,d:m::rwx"
     "a+- ${path}-shm - - - - u:${config.services.sinex.user}:rw"
+    "a+- ${path}-wal - - - - u:${config.services.sinex.user}:rw"
   ]) sqlitePaths;
   runtimeServiceConfig =
     unit:
