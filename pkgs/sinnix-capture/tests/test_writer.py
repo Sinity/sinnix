@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from sinnix_capture.envelope import SCHEMA, SCHEMA_VERSION, build_envelope
-from sinnix_capture.writer import HW_WIDTH, CaptureWriter, _max_ts
+from sinnix_capture.writer import RECOVERY_CHUNK, HW_WIDTH, CaptureWriter, _max_ts
 from sinnix_lib import ledger
 from sinnix_lib.atomic import atomic_publish
 
@@ -174,15 +174,15 @@ def test_payload_failure_keeps_allocated_sequence_and_index_behind(
     tmp_path: Path, monkeypatch
 ) -> None:
     writer = CaptureWriter(tmp_path, "lane-f")
-    original = ledger.append_jsonl
+    original = ledger.append_jsonl_records
 
-    def fail_payload(path, record, **kwargs):
+    def fail_payload(path, records, **kwargs):
         if Path(path).name.startswith("lane-f-2"):
             raise OSError("synthetic payload failure")
-        return original(path, record, **kwargs)
+        return original(path, records, **kwargs)
 
     with monkeypatch.context() as patch:
-        patch.setattr(ledger, "append_jsonl", fail_payload)
+        patch.setattr(ledger, "append_jsonl_records", fail_payload)
         with pytest.raises(OSError, match="payload failure"):
             writer.write({"n": 1}, ts=1_700_000_000.0)
     assert (tmp_path / "lane-f" / "lane-f.seq").read_text() == "1\n"
@@ -197,15 +197,15 @@ def test_index_failure_recovers_retained_payload_before_retry(
     tmp_path: Path, monkeypatch
 ) -> None:
     writer = CaptureWriter(tmp_path, "lane-i")
-    original = ledger.append_jsonl
+    original = ledger.append_jsonl_records
 
-    def fail_index(path, record, **kwargs):
+    def fail_index(path, records, **kwargs):
         if Path(path) == writer._index_path:
             raise OSError("synthetic index failure")
-        return original(path, record, **kwargs)
+        return original(path, records, **kwargs)
 
     with monkeypatch.context() as patch:
-        patch.setattr(ledger, "append_jsonl", fail_index)
+        patch.setattr(ledger, "append_jsonl_records", fail_index)
         with pytest.raises(OSError, match="index failure"):
             writer.write({"n": 1}, ts=1_700_000_000.0)
     second = CaptureWriter(tmp_path, "lane-i").write({"n": 2}, ts=1_700_000_001.0)
@@ -289,7 +289,7 @@ def test_bounded_writer_cost_fixture_reports_old_and_new_protocol(
 
     monkeypatch.setattr(os, "fsync", measured_fsync)
 
-    def run(label: str, old: bool):
+    def run(label: str, old: bool, batch: bool = False):
         nonlocal syncs, synced_sizes, sync_ns
         root = tmp_path / label
         writer = CaptureWriter(root, "lane", host="fixture-host")
@@ -311,14 +311,16 @@ def test_bounded_writer_cost_fixture_reports_old_and_new_protocol(
                     raw_ref=None,
                 )
                 path = writer._record_path(ts + n)
-                writer._append_with_high_water(path, record, ts + n)
+                writer._append_with_high_water(path, [record])
                 ledger.append_jsonl(
                     writer._index_path,
                     {"ts": ts + n, "seq": n, "file": path.name},
                     fsync=True,
                 )
-            else:
+            elif not batch:
                 writer.write(payload, ts=ts + n)
+        if batch:
+            writer.write_batch([(p, ts + n) for n, p in enumerate(corpus, 1)])
         elapsed = time.perf_counter_ns() - begin
         index_bytes = writer._index_path.stat().st_size
         rows = list(ledger.iter_jsonl(writer._record_path(ts + 1)))
@@ -339,12 +341,14 @@ def test_bounded_writer_cost_fixture_reports_old_and_new_protocol(
 
     before = run("before", True)
     after = run("after", False)
+    batched = run("batched", False, batch=True)
     print(
-        f"fixture=10 fixed events; host_pressure=not measured; old={before}; new={after}; fields=(syncs,synced_size_sum,sync_latency_ns,append_latency_ns,index_bytes,logical_bytes); divide by 10 for per_event"
+        f"fixture=10 fixed events; host_pressure=not measured; old={before}; new={after}; batched={batched}; fields=(syncs,synced_size_sum,sync_latency_ns,append_latency_ns,index_bytes,logical_bytes); divide by 10 for per_event"
     )
     assert before[0] == 50  # Four prior syncs plus the high-water checkpoint.
     assert after[0] == 41  # First counter publication costs two, then one.
-    assert after[4] == before[4]
+    assert batched[0] == 5  # The same files, each synced once for all ten.
+    assert after[4] == before[4] == batched[4]
 
 
 def test_recovery_tail_memory_does_not_grow_with_record_count(tmp_path: Path) -> None:
@@ -378,15 +382,19 @@ def test_pending_index_recovery_has_bounded_memory_and_sequence_order(
         ),
     )
     seen = 0
+    appends = 0
 
-    def append(path, entry, *, fsync, mode):
-        nonlocal seen
-        seen += 1
-        assert entry == {"seq": seen, "ts": seen, "file": "day.jsonl"}
+    def append(path, entries, *, fsync, mode):
+        nonlocal seen, appends
+        appends += 1
+        assert 0 < len(entries) <= RECOVERY_CHUNK
+        for entry in entries:
+            seen += 1
+            assert entry == {"seq": seen, "ts": seen, "file": "day.jsonl"}
         assert fsync
         assert mode == 0o600
 
-    monkeypatch.setattr(ledger, "append_jsonl", append)
+    monkeypatch.setattr(ledger, "append_jsonl_records", append)
     tracemalloc.start()
     try:
         writer._recover_unindexed()
@@ -394,6 +402,7 @@ def test_pending_index_recovery_has_bounded_memory_and_sequence_order(
     finally:
         tracemalloc.stop()
     assert seen == count
+    assert appends == -(-count // RECOVERY_CHUNK)  # One sync per chunk.
     assert peak < 4 * 1024 * 1024, f"pending index recovery allocated {peak} bytes"
 
 
@@ -467,3 +476,117 @@ def test_recovery_refuses_unreadable_lane_without_modifying_payloads(
     assert [
         json.loads(line)["seq"] for line in writer._index_path.read_text().splitlines()
     ] == [1, 2]
+
+
+def _index_seqs(writer: CaptureWriter) -> list[int]:
+    return [row["seq"] for row in ledger.iter_jsonl(writer._index_path)]
+
+
+def test_batch_reserves_a_contiguous_range_and_continues_across_instances(
+    tmp_path: Path,
+) -> None:
+    writer = CaptureWriter(tmp_path, "lane", host="h")
+    first = writer.write_batch([({"n": n}, 1_700_000_000.0 + n) for n in range(3)])
+    assert [e["seq"] for e in first] == [1, 2, 3]
+    assert writer._seq_path.read_text() == "3\n"
+    assert writer.write({"n": 3})["seq"] == 4
+    later = CaptureWriter(tmp_path, "lane", host="h").write_batch(
+        [({"n": 4}, None), ({"n": 5}, None)]
+    )
+    assert [e["seq"] for e in later] == [5, 6]
+    assert later[0]["ts"] == later[1]["ts"]  # One call time for unstamped records.
+    assert _index_seqs(writer) == [1, 2, 3, 4, 5, 6]
+    assert writer.write_batch([]) == []
+    assert _index_seqs(writer) == [1, 2, 3, 4, 5, 6]
+
+
+def test_batch_spanning_days_checkpoints_each_file_once(tmp_path: Path) -> None:
+    writer = CaptureWriter(tmp_path, "lane", host="h")
+    base = 1_700_000_000.0
+    stamps = [base + 30, base + 86_400, base + 10, base + 86_410]
+    envelopes = writer.write_batch([({"n": n}, ts) for n, ts in enumerate(stamps)])
+    day_one, day_two = writer._record_path(base), writer._record_path(base + 86_400)
+    assert [r["seq"] for r in ledger.iter_jsonl(day_one)] == [1, 3]
+    assert [r["seq"] for r in ledger.iter_jsonl(day_two)] == [2, 4]
+    assert _checkpoints(day_one) == [(day_one.stat().st_size, base + 30)]
+    assert _checkpoints(day_two) == [(day_two.stat().st_size, base + 86_410)]
+    index = list(ledger.iter_jsonl(writer._index_path))
+    assert [(row["seq"], row["file"]) for row in index] == [
+        (1, day_one.name),
+        (2, day_two.name),
+        (3, day_one.name),
+        (4, day_two.name),
+    ]
+    assert [row["ts"] for row in index] == [e["ts"] for e in envelopes]
+
+
+def test_batch_index_failure_is_recovered_whole_before_the_next_batch(
+    tmp_path: Path, monkeypatch
+) -> None:
+    writer = CaptureWriter(tmp_path, "lane", host="h")
+    writer.write({"n": 0}, ts=1_700_000_000.0)
+    original = ledger.append_jsonl_records
+
+    def fail_index(path, records, **kwargs):
+        if Path(path) == writer._index_path:
+            raise OSError("synthetic index failure")
+        return original(path, records, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ledger, "append_jsonl_records", fail_index)
+        with pytest.raises(OSError, match="index failure"):
+            writer.write_batch([({"n": n}, 1_700_000_000.0 + n) for n in (1, 2, 3)])
+    assert _index_seqs(writer) == [1]
+    after = CaptureWriter(tmp_path, "lane", host="h").write_batch(
+        [({"n": 4}, 1_700_000_004.0)]
+    )
+    assert after[0]["seq"] == 5
+    assert _index_seqs(writer) == [1, 2, 3, 4, 5]
+
+
+def test_batch_failure_on_its_second_day_keeps_the_first_and_leaves_a_gap(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Fails if a partly written batch loses landed records or reuses numbers."""
+    writer = CaptureWriter(tmp_path, "lane", host="h")
+    base = 1_700_000_000.0
+    day_two = writer._record_path(base + 86_400)
+    original = ledger.append_jsonl_records
+
+    def fail_day_two(path, records, **kwargs):
+        if Path(path) == day_two:
+            raise OSError("synthetic payload failure")
+        return original(path, records, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(ledger, "append_jsonl_records", fail_day_two)
+        with pytest.raises(OSError, match="payload failure"):
+            writer.write_batch(
+                [({"n": 1}, base), ({"n": 2}, base + 86_400), ({"n": 3}, base + 1)]
+            )
+    assert writer.write({"n": 4}, ts=base + 2)["seq"] == 4
+    assert _index_seqs(writer) == [1, 3, 4]  # Seq 2 never landed: a gap.
+    assert not day_two.exists()
+
+
+def test_crash_mid_batch_recovers_complete_lines_and_drops_the_torn_one(
+    tmp_path: Path,
+) -> None:
+    """A batch killed while appending: counter synced, payload partly written."""
+    writer = CaptureWriter(tmp_path, "lane", host="h")
+    base = 1_700_000_000.0
+    writer.write({"n": 0}, ts=base)
+    path = writer._record_path(base)
+    assert writer._reserve_seq(3) == 4
+    with path.open("ab") as handle:
+        for seq, ts in ((2, base + 500), (3, base + 1)):
+            handle.write(json.dumps({"seq": seq, "ts": ts, "payload": {}}).encode())
+            handle.write(b"\n")
+        handle.write(b'{"seq": 4, "ts": ')
+    after = writer.write({"n": 5}, ts=base + 2)
+    assert after["seq"] == 5
+    assert _index_seqs(writer) == [1, 2, 3, 5]
+    assert [r["seq"] for r in ledger.iter_jsonl(path)] == [1, 2, 3, 5]
+    assert path.read_bytes().endswith(b"\n")
+    # The recovered records' ts is folded into the next checkpoint.
+    assert _checkpoints(path)[-1] == (path.stat().st_size, base + 500)

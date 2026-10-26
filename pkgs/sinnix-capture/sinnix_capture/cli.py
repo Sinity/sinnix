@@ -3,13 +3,58 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
+import select
 import sys
+import time
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .query import query as query_lanes
 from .selection import capture_selection
 from .writer import CaptureWriter
+
+# A stream batch is written when its oldest line has waited this long, when
+# it holds this many lines, or at end of input. Each batch costs one sync per
+# lane file, so on a steady trickle this bounds syncs to a few per second.
+STREAM_BATCH_SECONDS = 1.0
+STREAM_BATCH_RECORDS = 1000
+
+
+def stream_batches(
+    fd: int,
+    *,
+    max_seconds: float = STREAM_BATCH_SECONDS,
+    max_records: int = STREAM_BATCH_RECORDS,
+) -> Iterator[list[tuple[str, float]]]:
+    """Group the lines read from ``fd`` into ``(line, arrival ts)`` batches."""
+    pending: list[tuple[str, float]] = []
+    partial = b""
+    deadline: float | None = None
+    while True:
+        timeout = None if deadline is None else max(0.0, deadline - time.monotonic())
+        ready, _, _ = select.select([fd], [], [], timeout)
+        if not ready:
+            yield pending
+            pending, deadline = [], None
+            continue
+        chunk = os.read(fd, 65536)
+        if not chunk:
+            if partial:
+                pending.append((partial.decode("utf-8", "replace"), time.time()))
+            if pending:
+                yield pending
+            return
+        arrived = time.time()
+        *lines, partial = (partial + chunk).split(b"\n")
+        for line in lines:
+            pending.append((line.decode("utf-8", "replace"), arrived))
+            if len(pending) >= max_records:
+                yield pending
+                pending, deadline = [], None
+        if pending and deadline is None:
+            deadline = time.monotonic() + max_seconds
 
 
 def _cmd_write(args: argparse.Namespace) -> int:
@@ -25,10 +70,10 @@ def _cmd_write(args: argparse.Namespace) -> int:
             return 2
     writer = CaptureWriter(args.capture_root, args.lane)
 
-    def emit(payload: dict) -> None:
-        envelope = writer.write(payload, raw_ref=args.raw_ref, ts=args.ts)
+    def emit(envelopes: list[dict]) -> None:
         if args.print_envelope:
-            print(json.dumps(envelope, sort_keys=True))
+            for envelope in envelopes:
+                print(json.dumps(envelope, sort_keys=True), flush=True)
 
     if args.stream:
         if args.ts is not None:
@@ -38,20 +83,25 @@ def _cmd_write(args: argparse.Namespace) -> int:
             print("--stream and --payload are mutually exclusive", file=sys.stderr)
             return 2
         # One long-lived writer draining NDJSON, so a high-rate lane pays one
-        # process start rather than one per record. A malformed line must not
-        # take the stream down with it -- report it and keep draining, the
-        # same contract the per-record callers have.
-        for line in sys.stdin:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                emit(json.loads(line))
-            except (json.JSONDecodeError, TypeError, ValueError) as exc:
-                print(f"sinnix-capture: dropped a record: {exc}", file=sys.stderr)
+        # process start rather than one per record, and one set of syncs per
+        # batch rather than per record. A malformed line must not take the
+        # stream down with it -- report it and keep draining, the same
+        # contract the per-record callers have.
+        for batch in stream_batches(sys.stdin.fileno()):
+            records = []
+            for line, arrived in batch:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append((json.loads(line), arrived))
+                except ValueError as exc:
+                    print(f"sinnix-capture: dropped a record: {exc}", file=sys.stderr)
+            emit(writer.write_batch(records, raw_ref=args.raw_ref))
         return 0
 
-    emit(json.loads(args.payload) if args.payload is not None else json.load(sys.stdin))
+    payload = json.loads(args.payload) if args.payload is not None else json.load(sys.stdin)
+    emit([writer.write(payload, raw_ref=args.raw_ref, ts=args.ts)])
     return 0
 
 

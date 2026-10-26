@@ -4,17 +4,24 @@ Layout under ``{capture_root}/{lane}/``:
 
 - ``{lane}-{YYYYMMDD}.jsonl`` -- one daily-rotated file of full envelopes.
 - ``{lane}-index.jsonl`` -- sidecar index, one small ``{ts, seq, file}``
-  record per write, read by the query surface (query.py) so lane-delta
+  record per record, read by the query surface (query.py) so lane-delta
   queries never have to scan the (potentially large) payload files.
 - ``{lane}.seq`` -- persisted monotonic sequence counter, guarded by
   ``{lane}.seq.lock`` so restarts don't reuse a seq number. Its first write
-  publishes the name durably; later reservations append and sync one line.
+  publishes the name durably; each later batch appends and syncs one line,
+  the last number it reserved.
 - ``{lane}-{YYYYMMDD}.jsonl.hw`` -- high-water sidecar of a daily file: one
-  fixed-width ``HW_FORMAT`` line per record, holding the byte offset where
-  that record ends and the largest ``ts`` of every record up to it. ``ts``
-  is caller-supplied and need not be ordered, but the high water is, so a
-  reader binary-searches it to skip a prefix that cannot hold its window.
-  A daily file that predates its sidecar never gets one.
+  fixed-width ``HW_FORMAT`` line per batch appended to the file, holding the
+  byte offset where the batch ends and the largest ``ts`` of every record up
+  to it. ``ts`` is caller-supplied and need not be ordered, but the high
+  water is, so a reader binary-searches it to skip a prefix that cannot hold
+  its window. A daily file that predates its sidecar never gets one.
+
+A batch (``write_batch``) costs one sync per file it touches: the counter,
+each daily file and its sidecar, and the index. That order is the crash
+contract: a reserved number may never be used (a gap), a payload may land
+without its checkpoint (folded in by the next append) or without its index
+entry (republished by ``_recover_unindexed`` before the next batch).
 """
 
 from __future__ import annotations
@@ -24,7 +31,9 @@ import os
 import socket
 import sqlite3
 import time
+from collections.abc import Sequence
 from contextlib import closing
+from itertools import islice
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -38,6 +47,9 @@ from .envelope import build_envelope
 # Readers (the gateway's activity query) parse this exact width; keep in step.
 HW_FORMAT = "{:020d} {:032.9f}\n"
 HW_WIDTH = len(HW_FORMAT.format(0, 0.0))
+
+# Index entries republished per sync when recovering an interrupted batch.
+RECOVERY_CHUNK = 1000
 
 
 def _last_high_water(sidecar: Path) -> tuple[int, float] | None:
@@ -188,8 +200,9 @@ class CaptureWriter:
                     break
                 yield json.loads(line)
 
-    def _next_seq(self) -> int:
-        seq = self._read_seq() + 1
+    def _reserve_seq(self, count: int) -> int:
+        """Reserve ``count`` numbers durably; returns the last one."""
+        seq = self._read_seq() + count
         try:
             with self._seq_path.open("rb") as handle:
                 end = handle.seek(0, 2)
@@ -201,7 +214,7 @@ class CaptureWriter:
             atomic_publish(self._seq_path, f"{seq}\n".encode(), fsync=True, mode=0o600)
         else:
             # The counter name is already durable. One append sync reserves
-            # the number before payload work; a later failure leaves a gap.
+            # the range before payload work; a later failure leaves a gap.
             fd = os.open(self._seq_path, os.O_WRONLY | os.O_APPEND)
             try:
                 data = f"{seq}\n".encode()
@@ -266,9 +279,13 @@ class CaptureWriter:
                             )
                 # Finish reading and validating inputs before modifying the
                 # index. Duplicate sequences refuse ambiguous recovery.
-                for (entry,) in db.execute("SELECT entry FROM pending ORDER BY seq"):
-                    ledger.append_jsonl(
-                        self._index_path, json.loads(entry), fsync=True, mode=0o600
+                rows = db.execute("SELECT entry FROM pending ORDER BY seq")
+                while chunk := list(islice(rows, RECOVERY_CHUNK)):
+                    ledger.append_jsonl_records(
+                        self._index_path,
+                        [json.loads(entry) for (entry,) in chunk],
+                        fsync=True,
+                        mode=0o600,
                     )
 
     def _record_path(self, ts: float) -> Path:
@@ -278,25 +295,59 @@ class CaptureWriter:
     def write(
         self, payload: dict, raw_ref: str | None = None, ts: float | None = None
     ) -> dict:
-        ts = time.time() if ts is None else ts
+        return self.write_batch([(payload, ts)], raw_ref=raw_ref)[0]
+
+    def write_batch(
+        self,
+        records: Sequence[tuple[dict, float | None]],
+        raw_ref: str | None = None,
+    ) -> list[dict]:
+        """Append ``(payload, ts)`` records in order; returns their envelopes.
+
+        A ``None`` ts is the time of the call.
+        """
+        if not records:
+            return []
+        now = time.time()
+        stamped = [(payload, now if ts is None else ts) for payload, ts in records]
         with flock(self._seq_lock_path):
             self._recover_unindexed()
-            seq = self._next_seq()
-            envelope = build_envelope(
-                lane=self.lane,
-                ts=ts,
-                host=self.host,
-                seq=seq,
-                payload=payload,
-                raw_ref=raw_ref,
+            first = self._reserve_seq(len(stamped)) - len(stamped) + 1
+            envelopes = [
+                build_envelope(
+                    lane=self.lane,
+                    ts=ts,
+                    host=self.host,
+                    seq=first + n,
+                    payload=payload,
+                    raw_ref=raw_ref,
+                )
+                for n, (payload, ts) in enumerate(stamped)
+            ]
+            # Timestamps choose the daily file, so one batch can span days.
+            by_day: dict[Path, list[dict]] = {}
+            for envelope in envelopes:
+                by_day.setdefault(self._record_path(envelope["ts"]), []).append(
+                    envelope
+                )
+            for path, day_envelopes in by_day.items():
+                self._append_with_high_water(path, day_envelopes)
+            ledger.append_jsonl_records(
+                self._index_path,
+                [
+                    {
+                        "ts": envelope["ts"],
+                        "seq": envelope["seq"],
+                        "file": self._record_path(envelope["ts"]).name,
+                    }
+                    for envelope in envelopes
+                ],
+                fsync=True,
+                mode=0o600,
             )
-            record_path = self._record_path(ts)
-            self._append_with_high_water(record_path, envelope, ts)
-            index_entry = {"ts": ts, "seq": seq, "file": record_path.name}
-            ledger.append_jsonl(self._index_path, index_entry, fsync=True, mode=0o600)
-            return envelope
+            return envelopes
 
-    def _append_with_high_water(self, path: Path, envelope: dict, ts: float) -> None:
+    def _append_with_high_water(self, path: Path, envelopes: list[dict]) -> None:
         sidecar = path.with_name(path.name + ".hw")
         with flock(self._append_lock_path):
             try:
@@ -307,18 +358,19 @@ class CaptureWriter:
             if last is None and before:
                 # The file predates its sidecar: an index starting here would
                 # misstate the unindexed prefix, so this day stays unindexed.
-                ledger.append_jsonl(path, envelope, fsync=True, mode=0o600)
+                ledger.append_jsonl_records(path, envelopes, fsync=True, mode=0o600)
                 return
             offset, high = last if last is not None else (0, float("-inf"))
             if offset < before:
                 # A record landed without its checkpoint (a crash between the
                 # two appends); fold its ts in before indexing past it.
                 high = max(high, _max_ts(path, offset, before))
-            ledger.append_jsonl(path, envelope, fsync=True, mode=0o600)
+            ledger.append_jsonl_records(path, envelopes, fsync=True, mode=0o600)
             end = path.stat().st_size
+            high = max(high, *(float(envelope["ts"]) for envelope in envelopes))
             fd = os.open(sidecar, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
             try:
-                checkpoint = HW_FORMAT.format(end, max(high, ts)).encode()
+                checkpoint = HW_FORMAT.format(end, high).encode()
                 written = 0
                 while written < len(checkpoint):
                     count = os.write(fd, checkpoint[written:])

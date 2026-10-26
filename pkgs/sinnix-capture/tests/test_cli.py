@@ -1,8 +1,20 @@
 import json
+import os
+import threading
+import time
 from pathlib import Path
 
 import pytest
-from sinnix_capture.cli import main
+from sinnix_capture.cli import main, stream_batches
+
+
+def _pipe_stdin(monkeypatch: pytest.MonkeyPatch, text: str) -> None:
+    """Feed ``text`` through a real pipe; the stream batcher selects on it."""
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, text.encode())
+    os.close(write_fd)
+    stdin = os.fdopen(read_fd)
+    monkeypatch.setattr("sys.stdin", stdin)
 
 
 def _records(capture_root: Path, lane: str) -> list[dict]:
@@ -51,9 +63,7 @@ def test_print_envelope_opts_back_in(tmp_path: Path, capsys) -> None:
 def test_stream_writes_one_record_per_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import io
-
-    monkeypatch.setattr("sys.stdin", io.StringIO('{"n": 1}\n\n{"n": 2}\n{"n": 3}\n'))
+    _pipe_stdin(monkeypatch, '{"n": 1}\n\n{"n": 2}\n{"n": 3}\n')
     rc = main(
         ["write", "--capture-root", str(tmp_path), "--lane", "stream-lane", "--stream"]
     )
@@ -67,9 +77,7 @@ def test_stream_writes_one_record_per_line(
 def test_stream_survives_a_malformed_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
-    import io
-
-    monkeypatch.setattr("sys.stdin", io.StringIO('{"n": 1}\nnot json\n{"n": 2}\n'))
+    _pipe_stdin(monkeypatch, '{"n": 1}\nnot json\n{"n": 2}\n')
     rc = main(
         ["write", "--capture-root", str(tmp_path), "--lane", "torn-lane", "--stream"]
     )
@@ -142,3 +150,67 @@ def test_invalid_queued_timestamp_refuses_before_reserving(tmp_path, ts):
         == 2
     )
     assert not list(tmp_path.rglob("*.seq"))
+
+
+def test_stream_batches_split_at_the_record_cap_and_keep_an_unterminated_tail() -> None:
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b"a\nb\nc\nd\ne")
+    os.close(write_fd)
+    try:
+        batches = list(stream_batches(read_fd, max_seconds=60, max_records=2))
+    finally:
+        os.close(read_fd)
+    assert [[line for line, _ in batch] for batch in batches] == [
+        ["a", "b"],
+        ["c", "d"],
+        ["e"],
+    ]
+
+
+def test_stream_batch_is_written_after_its_wait_while_input_stays_open() -> None:
+    """Fails if a quiet stream holds a record until more input or EOF."""
+    read_fd, write_fd = os.pipe()
+    batches = stream_batches(read_fd, max_seconds=0.05, max_records=1000)
+    os.write(write_fd, b"first\nsecond\n")
+    began = time.monotonic()
+    try:
+        first = next(batches)
+        waited = time.monotonic() - began
+        later = threading.Timer(0.1, lambda: os.write(write_fd, b"third\n"))
+        later.start()
+        second = next(batches)
+        later.join()
+    finally:
+        os.close(write_fd)
+    assert list(batches) == []
+    os.close(read_fd)
+    assert [line for line, _ in first] == ["first", "second"]
+    assert [line for line, _ in second] == ["third"]
+    assert 0.04 <= waited < 5
+    assert second[0][1] > first[0][1]  # Each line keeps its own arrival time.
+
+
+def test_stream_writes_one_batch_with_arrival_timestamps(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _pipe_stdin(monkeypatch, "".join(f'{{"n": {n}}}\n' for n in range(5)))
+    syncs = 0
+    real_fsync = os.fsync
+
+    def counted(fd):
+        nonlocal syncs
+        syncs += 1
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", counted)
+    before = time.time()
+    assert (
+        main(["write", "--capture-root", str(tmp_path), "--lane", "b", "--stream"])
+        == 0
+    )
+    records = _records(tmp_path, "b")
+    assert [r["seq"] for r in records] == [1, 2, 3, 4, 5]
+    assert all(before <= r["ts"] <= time.time() for r in records)
+    # One batch: counter publication (file and directory), the daily file,
+    # its high-water sidecar and the index -- not four syncs per record.
+    assert syncs == 5

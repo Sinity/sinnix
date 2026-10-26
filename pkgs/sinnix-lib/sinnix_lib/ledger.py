@@ -37,17 +37,45 @@ def append_jsonl(
     """Append *record* as one compact JSON line, creating parents.
 
     ``fsync=True`` forces the line to disk before returning, for lanes where
-    losing an unflushed append to a crash is not acceptable (the capture
-    writer fsyncs every record and index line for exactly this reason).
+    losing an unflushed append to a crash is not acceptable.
+    """
+    append_jsonl_records(
+        path,
+        (record,),
+        mode=mode,
+        fsync=fsync,
+        separators=separators,
+        ensure_ascii=ensure_ascii,
+    )
+
+
+def append_jsonl_records(
+    path: Path | str,
+    records: Iterable[Mapping[str, Any]],
+    *,
+    mode: int = 0o644,
+    fsync: bool = False,
+    separators: tuple[str, str] = (",", ":"),
+    ensure_ascii: bool = True,
+) -> None:
+    """Append *records* as compact JSON lines under one lock and one sync.
+
+    A crash can leave any prefix of the lines, with at most the last one
+    torn; the next append drops that torn tail. ``fsync=True`` syncs once
+    after the last line, which is what makes batching cheaper than one
+    append per record on a copy-on-write filesystem.
     """
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    line = (
+    payload = "".join(
         json.dumps(
             record, sort_keys=True, separators=separators, ensure_ascii=ensure_ascii
         )
         + "\n"
-    )
+        for record in records
+    ).encode("utf-8")
+    if not payload:
+        return
     with flock(p.with_name(p.name + ".lock")):
         fd = os.open(p, os.O_RDWR | os.O_CREAT | os.O_APPEND, mode)
         try:
@@ -66,7 +94,6 @@ def append_jsonl(
                     cursor = start
                 else:
                     os.ftruncate(fd, 0)
-            payload = line.encode("utf-8")
             offset = 0
             while offset < len(payload):
                 written = os.write(fd, payload[offset:])
