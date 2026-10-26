@@ -11,6 +11,15 @@
 # One wrapper, `polylogue-live`, sets both and is the daemon's command, the
 # operator's CLI and the browser extension's native messaging host, so all
 # three always agree on the archive.
+#
+# `sinex.mode` chooses where the archive lives. Standalone keeps it under
+# `liveRoot/data`. Primary stores it in the host's Sinex as the `polylogue`
+# producer, over a separate, initially empty archive under `liveRoot/sinex-data`,
+# so the standalone archive stays as it was. Moving to primary follows
+# "Moving to primary mode" in the rewrite's docs/architecture.md; the switch is
+# the operator's call. The operator's systemd user manager needs the sinex
+# group (granted by the Sinex session), so it must have started after that
+# grant.
 {
   mkServiceModule,
   lib,
@@ -28,6 +37,22 @@ mkServiceModule {
   name = "polylogue";
   description = "Polylogue: the rewrite's live daemon, CLI and browser capture";
   extraOptions = {
+    sinex = {
+      mode = lib.mkOption {
+        type = lib.types.enum [
+          "standalone"
+          "primary"
+        ];
+        default = "standalone";
+        description = "Whether the live archive is Polylogue's own (standalone) or held by this host's Sinex (primary).";
+      };
+      passwordFile = lib.mkOption {
+        type = lib.types.str;
+        default = config.sinnix.secrets.paths.sinex-nats-polylogue;
+        description = "The `polylogue` producer's NATS password, readable by the operator.";
+      };
+    };
+
     dataDir = lib.mkOption {
       type = lib.types.str;
       default = "${homeDir}/.local/share/polylogue";
@@ -61,8 +86,21 @@ mkServiceModule {
       rewritePackage = inputs.polylogue-rewrite.packages.${system}.polylogue;
       ports = helpers.data.ports.polylogue;
 
+      primary = cfg.sinex.mode == "primary";
+      sinex = config.services.sinex;
+      # Read by every polylogue-live command. Polylogue reads the password
+      # from the file when it connects; it is never in this one.
+      sinexSettings = (pkgs.formats.toml { }).generate "sinex.toml" {
+        inherit (cfg.sinex) mode;
+        nats = "nats://${sinex.nats.address}:${toString sinex.nats.port}";
+        password_file = cfg.sinex.passwordFile;
+        subject_root = sinex.nats.subjectRoot;
+        store = sinex.storeDir;
+      };
+      dataHome = if primary then "${cfg.liveRoot}/sinex-data" else "${cfg.liveRoot}/data";
+
       cli = pkgs.writeShellScriptBin "polylogue-live" ''
-        export XDG_DATA_HOME=${lib.escapeShellArg "${cfg.liveRoot}/data"}
+        export XDG_DATA_HOME=${lib.escapeShellArg dataHome}
         export XDG_STATE_HOME=${lib.escapeShellArg "${cfg.liveRoot}/state"}
         exec ${rewritePackage}/bin/polylogue "$@"
       '';
@@ -133,6 +171,8 @@ mkServiceModule {
           '';
 
           xdg.configFile."polylogue/polylogue.toml".source = pythonSettings;
+          # Without this file the archive is standalone.
+          xdg.configFile."polylogue/sinex.toml" = lib.mkIf primary { source = sinexSettings; };
 
           # Replaces the file the Python stack's installer wrote by hand.
           home.file = lib.optionalAttrs browser.enable {
@@ -172,6 +212,13 @@ mkServiceModule {
             Install.WantedBy = [ "default.target" ];
           };
         };
+
+      assertions = [
+        {
+          assertion = !primary || (config.services ? sinex && config.services.sinex.enable);
+          message = "sinnix.services.polylogue.sinex.mode = \"primary\" needs this host's Sinex";
+        }
+      ];
 
       sinnix.runtime.units.polylogue-live = {
         unit = "polylogue-live.service";
