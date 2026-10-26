@@ -92,6 +92,7 @@ for payload in \
   "$(jq -n '{tool_input: {command: "until test -s out; do sleep 5; done", run_in_background: true}}')" \
   "$(jq -n '{tool_input: {command: "# poll-ok: socket appears within seconds\nuntil test -S sock; do sleep 1; done"}}')" \
   "$(jq -n '{tool_input: {command: "while read -r line; do echo \"$line\"; done < list"}}')" \
+  "$(jq -n '{tool_input: {command: "for j in 1 2; do agentctl job cancel $j; done; sleep 5; free -g"}}')" \
   "$(jq -n '{tool_input: {command: "git commit -F - <<EOF\nuntil x; do sleep 30; done\nEOF"}}')"; do
   test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$payload")"
 done
