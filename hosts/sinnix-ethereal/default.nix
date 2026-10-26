@@ -1,8 +1,4 @@
-{
-  inputs,
-  lib,
-  ...
-}:
+{ ... }:
 {
   imports = [
     ./hardware-configuration.nix
@@ -10,11 +6,6 @@
     ./networking.nix
     ./storage.nix
     ./disko.nix
-    # Pull in the sinex module graph so deploymentRole = replica can take
-    # effect; the bridge translates sinnix options into upstream
-    # services.sinex toggles.
-    inputs.sinex.nixosModules.default
-    ../../modules/services/sinex/bridge.nix
   ];
 
   networking.hostName = "sinnix-ethereal";
@@ -27,16 +18,6 @@
     enable = true;
     tags = [ "tag:infra" ];
     useRoutingFeatures = "client";
-  };
-
-  sinnix.services.sinex = {
-    enable = true;
-    prepareHost = true;
-    provisionDatabase = true;
-    activationProfile = "foundation";
-    deploymentRole = "replica";
-    environment = "prod";
-    autoStart = true;
   };
 
   # Allow root login via SSH for break-glass / nixos-anywhere rebuilds.

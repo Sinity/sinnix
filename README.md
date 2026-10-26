@@ -8,17 +8,17 @@ these sources before using them elsewhere.
 
 ## Hosts and capabilities
 
-| Host              | Role                                                                                   |
-| ----------------- | -------------------------------------------------------------------------------------- |
-| `sinnix-prime`    | Hyprland and Noctalia desktop, development, capture, local AI, storage, and backups    |
-| `sinnix-ethereal` | Headless NixOS replica with declarative storage, Tailscale, and the replica Sinex role |
-| `sinnix-gw`       | OpenWrt router with generated UCI configuration, deployment, and health checks         |
+| Host              | Role                                                                                |
+| ----------------- | ----------------------------------------------------------------------------------- |
+| `sinnix-prime`    | Hyprland and Noctalia desktop, development, capture, local AI, storage, and backups |
+| `sinnix-ethereal` | Headless NixOS server with declarative storage and Tailscale                        |
+| `sinnix-gw`       | OpenWrt router with generated UCI configuration, deployment, and health checks      |
 
 The workstation includes NVIDIA and Intel GPU modes, audio and media tools,
 terminal recording, and browser and desktop control. Home Manager out-of-store
 links make user configuration edits available without a rebuild.
 
-Sinnix deploys the host-facing parts of **Sinex** (event capture and processing),
+Sinnix deploys **Sinex** (event capture and processing) on the workstation,
 **Polylogue** (AI conversation archives), and **Lynchpin** (cross-source analysis).
 ActivityWatch, telemetry, shell history, and terminal recording supply additional
 host context. Each data project owns its databases, provenance, and product

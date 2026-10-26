@@ -3,7 +3,7 @@
   pkgs,
   lib,
   config,
-  sinexBlobRepositoryPath,
+  sinexStorePaths,
   scriptPkgs,
   borgDrainStateRoot,
   borgIntegrityReceipt,
@@ -27,9 +27,11 @@
 [
   {
     assertions =
-      lib.optional (sinexBlobRepositoryPath != "") {
-        assertion = lib.hasInfix sinexBlobRepositoryPath config.systemd.services.borgbackup-job-sinex-blobs.script;
-        message = "Sinex CAS Borg backup must archive services.sinex.storage.blob.repositoryPath";
+      lib.optional (sinexStorePaths != [ ]) {
+        assertion = lib.all (
+          path: lib.hasInfix path config.systemd.services.borgbackup-job-sinex-blobs.script
+        ) sinexStorePaths;
+        message = "The sinex-blobs Borg job must archive every Sinex content store (services.sinex.storeDir and sinnix.services.sinex.retainedStores)";
       }
       ++ [
         {

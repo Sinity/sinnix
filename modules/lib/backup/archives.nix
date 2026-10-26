@@ -3,7 +3,7 @@
   pkgs,
   lib,
   realmRoot,
-  sinexBlobRepositoryPath,
+  sinexStorePaths,
   scriptPkgs,
   username,
   polylogueStateRoot,
@@ -120,15 +120,15 @@ let
   };
 in
 [
-  # ─── Sinex blob-repository Borg job ───
-  # A CAS lives outside the /realm snapshot stream, so Borg reads the live
-  # evaluated content-store path. Immutable objects make this safe without a
-  # snapshot; `RequiresMountsFor` keeps the source mount authoritative. The
-  # guard covers service AND timer: a timer whose service does not exist is
-  # a failed start, not a backup.
-  (lib.mkIf (sinexBlobRepositoryPath != "") (
+  # ─── Sinex content-store Borg job ───
+  # The content stores live outside the /realm snapshot stream, so Borg reads
+  # them in place. Stored files are never rewritten, which makes this safe
+  # without a snapshot; `RequiresMountsFor` keeps the source mount
+  # authoritative. The guard covers service AND timer: a timer whose service
+  # does not exist is a failed start, not a backup.
+  (lib.mkIf (sinexStorePaths != [ ]) (
     mkBackupJob "borgbackup-job-sinex-blobs" {
-      description = "Back up sinex blob repository into Borg";
+      description = "Back up the Sinex content stores into Borg";
       unit = {
         after = [
           "persist.mount"
@@ -138,7 +138,7 @@ in
           "persist.mount"
           outerRealmMountUnit
         ];
-        unitConfig.RequiresMountsFor = [ sinexBlobRepositoryPath ];
+        unitConfig.RequiresMountsFor = sinexStorePaths;
       };
       serviceConfig.TimeoutStopSec = "15s";
       path = with pkgs; [
@@ -168,7 +168,7 @@ in
           --compression auto,zstd,1 \
           --lock-wait ${toString borgLockWaitSec} \
           "::$archive_name" \
-          ${lib.escapeShellArg sinexBlobRepositoryPath}
+          ${lib.escapeShellArgs sinexStorePaths}
         echo "sinex blob backup complete: $archive_name"
 
         # The borg-sinex-blobs-archive capture lane (this surface's
@@ -188,9 +188,9 @@ in
 
   # ─── Polylogue nested-subvolume coverage (sinnix-3pvd) ───
   #
-  # Two jobs cover state/polylogue, split the same way sinex is split
-  # between sinex-postgres-dump (logical dump of the live DB) and
-  # borgbackup-job-sinex-blobs (direct-path borg of the immutable CAS):
+  # Two jobs cover state/polylogue, split the same way Sinex is split
+  # between sinex-dump (logical dump of the live database) and
+  # borgbackup-job-sinex-blobs (direct-path Borg of the content stores):
   # sqlite-safe dumps for the live databases, and a direct-path borg job
   # for everything else (blob/ CAS, hooks/, browser-capture/, inbox/, and
   # the retired/historical db siblings that are no longer written).

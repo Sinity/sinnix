@@ -312,7 +312,7 @@ def test_below_offline_reports_gap() -> None:
 
 
 def test_joins_classifiers() -> None:
-    assert joins.project_for_unit("sinex-runtime.target") == "sinex"
+    assert joins.project_for_unit("sinex-nats.service") == "sinex"
     assert joins.project_for_unit("polylogued.service") == "polylogue"
     assert joins.project_for_unit("btrbk.service") == "backup"
     assert joins.project_for_unit("unknown.service") is None

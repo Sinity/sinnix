@@ -53,15 +53,16 @@ paths. Neither measurement establishes that a directory is disposable.
 
 ## What is backed up
 
-| Source                   | How                                                                    | When                                           | Repository                |
-| ------------------------ | ---------------------------------------------------------------------- | ---------------------------------------------- | ------------------------- |
-| `/realm`                 | btrbk read-only snapshot, archived by the Borg job                     | snapshots 00/06/12/18:00, drain hourly at :05 and :25 | `borg-realm-v2`           |
-| `/persist`               | btrbk read-only snapshot, archived by the Borg job                     | same as `/realm`                               | `borg-persist-v1`         |
-| HDD genome workspace     | dedicated btrbk cut, archived independently of `/realm`              | six-hour cuts, coordinated retries at :05 and :25 | `borg-realm-v2`, `genome-*` series |
-| The ephemeral root       | snapshot the initrd takes before each wipe                             | daily                                          | `borg-root-snapshots-v1`  |
-| Sinex blob store         | direct                                                                 | daily 05:40                                    | `borg-sinex-blobs-v1`     |
-| Polylogue state          | hooks archived directly from a read-only snapshot of its subvolume     | daily 04:15                                    | `borg-polylogue-state-v1` |
-| Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm` | dumps 03:42, seal Sunday                       | `borg-realm-v2`           |
+| Source                   | How                                                                    | When                                                  | Repository                         |
+| ------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------- |
+| `/realm`                 | btrbk read-only snapshot, archived by the Borg job                     | snapshots 00/06/12/18:00, drain hourly at :05 and :25 | `borg-realm-v2`                    |
+| `/persist`               | btrbk read-only snapshot, archived by the Borg job                     | same as `/realm`                                      | `borg-persist-v1`                  |
+| HDD genome workspace     | dedicated btrbk cut, archived independently of `/realm`                | six-hour cuts, coordinated retries at :05 and :25     | `borg-realm-v2`, `genome-*` series |
+| The ephemeral root       | snapshot the initrd takes before each wipe                             | daily                                                 | `borg-root-snapshots-v1`           |
+| Sinex content stores     | read in place: the running store and the dated earlier one             | daily 05:40                                           | `borg-sinex-blobs-v1`              |
+| Sinex database dump      | `pg_dump` into `state/db-dumps/sinex`, archived with `/realm`          | dump daily at midnight                                | `borg-realm-v2`                    |
+| Polylogue state          | hooks archived directly from a read-only snapshot of its subvolume     | daily 04:15                                           | `borg-polylogue-state-v1`          |
+| Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm` | dumps 03:42, seal Sunday                              | `borg-realm-v2`                    |
 
 Left out of the `/realm` archive (`realmExcludes` in `modules/backup.nix`):
 downloaded model weights (including embeddings), Steam libraries and runtimes,

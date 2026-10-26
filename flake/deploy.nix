@@ -21,9 +21,7 @@
 #   2. Generate a Tailscale auth key in the admin console with
 #      tag:infra preauthorized.
 #   3. `agenix -e secret/tailscale-authkey.age` with that key.
-#   4. `agenix -e secret/sinex-remote-db.age` once postgres credentials are
-#      decided.
-#   5. `agenix -e secret/borg-storagebox-ssh.age` once the StorageBox is up.
+#   4. `agenix -e secret/borg-storagebox-ssh.age` once the StorageBox is up.
 { inputs, ... }:
 let
   # Same host module lists + specialArgs that flake/nixos.nix builds

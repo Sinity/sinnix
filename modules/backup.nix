@@ -19,13 +19,12 @@
 }:
 let
   inherit (config.sinnix.paths) realmRoot;
-  # Sinex publishes this path into every generated runtime/maintenance unit as
-  # SINEX_CONTENT_STORE_PATH. Borg must consume the same evaluated topology,
-  # rather than reconstructing a backing-subvolume path that can drift after a
-  # storage move.
-  sinexBlobRepositoryPath = lib.optionalString (
-    options.services ? sinex
-  ) config.services.sinex.storage.blob.repositoryPath;
+  # Sinex's content stores: the running one, read from its evaluated
+  # configuration so a storage move cannot leave Borg reading an old path, and
+  # those of earlier deployments kept under dated names. Empty without Sinex.
+  sinexStorePaths = lib.optionals (options.services ? sinex && config.services.sinex.enable) (
+    [ config.services.sinex.storeDir ] ++ config.sinnix.services.sinex.retainedStores
+  );
   borgRepoRoot = "${config.sinnix.paths.outerRealm}/backup";
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   username = config.sinnix.user.name;
@@ -38,7 +37,7 @@ let
   # Pulling it into btrbk directly was tried and reverted (commits 9c2c068d,
   # a99f2f7b) because a snapshot forces copy-on-write on the daemon's
   # nodatacow SQLite files on their next write. The fix is the same shape
-  # sinex-postgres-dump and machine-telemetry-sqlite-backup already use: a
+  # sinex-dump and machine-telemetry-sqlite-backup already use: a
   # logical dump/direct-path copy on a timer, landing in a plain directory
   # that IS covered by ordinary realm snapshot+borg. No daemon writes this
   # Python archive any more, so these jobs run against a quiescent tree.
@@ -1166,7 +1165,7 @@ in
             # Declared only when the job exists: archives.nix builds this job
             # under the same predicate, and a surface whose unit is never
             # configured advertises an envelope nothing applies.
-            borgbackup-job-sinex-blobs = lib.mkIf (sinexBlobRepositoryPath != "") {
+            borgbackup-job-sinex-blobs = lib.mkIf (sinexStorePaths != [ ]) {
               unit = "borgbackup-job-sinex-blobs.service";
               resourceClass = "backup";
               notifyOnFailure = true;
@@ -1354,7 +1353,7 @@ in
           pkgs
           lib
           realmRoot
-          sinexBlobRepositoryPath
+          sinexStorePaths
           scriptPkgs
           username
           polylogueStateRoot
@@ -1448,7 +1447,7 @@ in
           pkgs
           lib
           config
-          sinexBlobRepositoryPath
+          sinexStorePaths
           scriptPkgs
           borgDrainStateRoot
           borgIntegrityReceipt

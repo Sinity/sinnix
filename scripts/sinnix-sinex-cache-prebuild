@@ -84,7 +84,7 @@ echo "sinnix-sinex-cache-prebuild: sinex input moved ${last_rev:-<none>} -> ${lo
 # byte-identical results with whatever `switch` will eventually need.
 sinex_flake_ref="git+${locked_url}?rev=${locked_rev}"
 
-built_output=$(nix build "${sinex_flake_ref}#packages.${system}.sinex" --no-link --print-out-paths)
+built_output=$(nix build "${sinex_flake_ref}#packages.${system}.default" --no-link --print-out-paths)
 built_paths=()
 if [[ -n "$built_output" ]]; then
   mapfile -t built_paths <<< "$built_output"

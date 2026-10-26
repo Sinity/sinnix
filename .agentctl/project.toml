@@ -178,6 +178,17 @@ pool = "bulk"
 result = "exit"
 timeout_seconds = 7200
 
+[operations.sinex_backfill]
+description = "Run one declared Sinex backfill; sinexd stops for it and starts after"
+exec = ["sinnix-sinex-backfill"]
+arguments = "required"
+pool = "bulk"
+result = "exit"
+cache = "none"
+# A Takeout import can outlast any fixed deadline; `systemctl stop
+# sinex-backfill-NAME` stops one, and sinexd starts again.
+timeout_seconds = 0
+
 [operations.transcribe]
 description = "Transcribe selected audio files with the local speech engine"
 exec = ["sinnix-stt", "transcribe"]

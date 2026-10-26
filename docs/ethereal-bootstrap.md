@@ -5,8 +5,7 @@ installation uses nixos-anywhere and Disko; subsequent deployments use the
 same flake through the Colmena wrapper.
 
 The host definition lives under `hosts/sinnix-ethereal/` and composes the
-cloud profile, declarative storage, Tailscale connectivity, and the replica
-Sinex role.
+cloud profile, declarative storage, and Tailscale connectivity.
 
 ## Prerequisites
 
@@ -70,10 +69,9 @@ is not applied accidentally.
 
 ## Relevant source
 
-| Path                                | Role                                                               |
-| ----------------------------------- | ------------------------------------------------------------------ |
-| `hosts/sinnix-ethereal/`            | Host composition, hardware, storage, boot, and networking.         |
-| `modules/profiles/cloud.nix`        | Headless defaults and remote-access settings.                      |
-| `modules/services/tailscale.nix`    | Tailnet service and enrollment contract.                           |
-| `modules/services/sinex/bridge.nix` | Translation from Sinnix role options to the upstream Sinex module. |
-| `flake/deploy.nix`                  | `deploy-ethereal` and `apply-all` command implementations.         |
+| Path                             | Role                                                       |
+| -------------------------------- | ---------------------------------------------------------- |
+| `hosts/sinnix-ethereal/`         | Host composition, hardware, storage, boot, and networking. |
+| `modules/profiles/cloud.nix`     | Headless defaults and remote-access settings.              |
+| `modules/services/tailscale.nix` | Tailnet service and enrollment contract.                   |
+| `flake/deploy.nix`               | `deploy-ethereal` and `apply-all` command implementations. |

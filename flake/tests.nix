@@ -70,9 +70,6 @@ in
     ./tests/hyprland-rules.nix
     ./tests/hyprland-lua-tools.nix
     ./tests/machine-telemetry-cgroups.nix
-    ./tests/sinex-nats-security.nix
-    ./tests/sinex-postgres-dump.nix
-    ./tests/sinex-user-mile.nix
     ./tests/dots-shell.nix
     ./tests/earlyoom.nix
     ./tests/tmp-sweep.nix

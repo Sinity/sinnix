@@ -18,10 +18,8 @@ SYSTEM_UNITS=(
   "borgbackup-job-realm.service"
   "btrbk.service"
   "btrbk.timer"
-  "sinex-runtime.timer"
-  "sinex-runtime.target"
-  "nats.service"
-  "postgresql.service"
+  # A Sinex import; sinexd starts again when it stops. Live capture is not shed.
+  "sinex-backfill-*.service"
 )
 
 USER_UNITS=(
@@ -46,7 +44,6 @@ LSP_PROCS=(
 
 BACKGROUND_PROCS=(
   "borg" "borgmatic" "btrbk"
-  "sinex-ingestd" "sinex-preflight" "sinex-gateway"
   "polylogued" "polylogue" ".polylogue-wrap"
 )
 
@@ -83,17 +80,6 @@ stop_units() {
   timeout 2s "${systemctl_cmd[@]}" kill --kill-who=all --signal=KILL "${units[@]}" 2>/dev/null || true
 }
 
-rearm_sinex_runtime_timer() {
-  if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-    return
-  fi
-
-  # Emergency shedding should pause Sinex runtime work, not leave capture
-  # permanently manual. Re-arm the existing delayed timer so recovery follows
-  # the normal startup path instead of immediately restarting the target.
-  timeout 2s systemctl start sinex-runtime.timer 2>/dev/null || true
-}
-
 notify() {
   if command -v notify-send >/dev/null 2>&1; then
     notify-send "$@" 2>/dev/null || true
@@ -105,7 +91,6 @@ echo "Emergency load shedding..."
 stop_units user "${USER_UNITS[@]}"
 if [ "${EUID:-$(id -u)}" -eq 0 ]; then
   stop_units system "${SYSTEM_UNITS[@]}"
-  rearm_sinex_runtime_timer
 fi
 
 killed=0

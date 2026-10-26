@@ -220,10 +220,9 @@ in
 
     # Dedicated /state/sinex subvolume on /realm NVMe, not the ephemeral @ root, so
     # Postgres data survives rollback. Per-file chattr +C (inherited, not a
-    # whole-mount nodatacow) keeps DB writes in-place while the append-only
-    # blob store still gets zstd:3. Excluded from btrbk (unsafe to
-    # block-snapshot a live DB); disaster recovery is the logical pg_dump in
-    # modules/services/sinex/bridge.nix, staged under the btrbk->borg path.
+    # whole-mount nodatacow) keeps database writes in place. Excluded from
+    # btrbk (unsafe to block-snapshot a live database); recovery is the daily
+    # dump and the content-store Borg job (modules/services/sinex/bridge.nix).
     "/var/lib/sinex" = {
       device = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
       fsType = "btrfs";
@@ -233,18 +232,6 @@ in
         "noatime"
         "nofail"
       ];
-    };
-
-    # NATS JetStream state lives on the realm state volume, not the /persist
-    # impermanence tree.
-    "/var/lib/nats" = {
-      device = "${realmRoot}/state/nats";
-      fsType = "none";
-      options = [
-        "bind"
-        "nofail"
-      ];
-      depends = [ realmRoot ];
     };
 
     # Sinex devshell build caches (CARGO_TARGET_DIR + per-checkout dev-state;
@@ -401,17 +388,10 @@ in
           btrfs subvolume create "$root"
           chattr +C "$root" || true
         fi
-        # Pre-create the directory skeleton the sinex services' systemd mount
-        # namespacing (ReadWritePaths) requires to PRE-EXIST. The bridge's
-        # tmpfiles run before this mount, so they must be created here directly
-        # on the @sinex subvol (idempotent; ownership matches
-        # modules/services/sinex).
-        install -d -o postgres -g postgres -m 0750 "$root/postgresql" "$root/postgresql/18"
-        install -d -o sinex -g sinex -m 0711 "$root/home"
-        install -d -o sinex -g sinex -m 0700 "$root/state" "$root/state/tls"
-        install -d -o sinex -g sinex -m 0750 \
-          "$root/state/run" "$root/state/logs" "$root/state/blob-repository" \
-          "$root/state/spool" "$root/state/spool/event_engine"
+        # The roots the Sinex units need before their own tmpfiles rules
+        # run (idempotent; ownership matches modules/services/sinex/bridge.nix).
+        install -d -o postgres -g postgres -m 0700 "$root/postgresql"
+        install -d -o sinex -g sinex -m 0750 "$root/daemon"
       '';
     };
 
@@ -489,8 +469,6 @@ in
       # regenerable-cache root that modules/core.nix declares. Excluded from
       # btrbk→borg — never persist-grade data.
       "d ${realmRoot}/state/cache/sinex 0775 ${username} users -"
-      # NATS JetStream state, backed up with the realm volume.
-      "d ${realmRoot}/state/nats 0755 nats nats -"
     ];
 
     # XDG consumers use the same archive as the configured daemon and MCP.

@@ -99,24 +99,18 @@
       flake = false;
     };
 
-    # Retain the existing package and service interfaces until a separate cutover.
-    # The immutable revision also protects consumers during input updates.
+    # Sinex: its package and NixOS module (modules/services/sinex/bridge.nix).
+    # Pinned to a master revision; a bump is a deploy, and sinexd is restarted
+    # by hand afterwards.
     #
-    # nixpkgs is deliberately NOT `follows`. Sinex is a large Rust workspace
-    # built from source by crane; following sinnix's nixpkgs would rehash its
-    # buildInputs on every `nix flake update` and force a full recompile (peak
-    # ~11.5 GiB rustc RSS). Its OWN locked nixpkgs keeps the derivation hash
-    # stable across sinnix nixpkgs bumps, so a sinex rev is compiled at most
-    # once and substituted from sinity.cachix.org thereafter. That cache is
-    # populated by the desktop, not CI: `switch` publishes the sinex closure
-    # after a successful activation (sinexCachePush in
-    # flake/command-registry.nix). Cost: some store duplication (sinex's
-    # glibc/openssl/systemd vs the system's). Bump sinex's nixpkgs deliberately
-    # upstream, not implicitly through sinnix.
-    sinex = {
-      url = "git+https://github.com/Sinity/sinex?ref=master&rev=dd21293728a9222d77bf53307844ddef9783c040";
-      inputs.agenix.follows = "agenix";
-    };
+    # nixpkgs is deliberately NOT `follows`: Sinex builds against its own
+    # locked nixpkgs and Rust toolchain, so a Sinnix nixpkgs bump does not
+    # rebuild it, and a Sinex revision is compiled at most once and substituted
+    # from sinity.cachix.org thereafter. The desktop populates that cache:
+    # `switch` publishes the Sinex closure after a successful activation
+    # (sinexCachePush in flake/command-registry.nix), and the
+    # sinex-cache-prebuild timer builds a newly pinned revision ahead of it.
+    sinex.url = "git+https://github.com/Sinity/sinex?ref=master&rev=65c513d323c83a9cdf86a044800df15cad89d76b";
 
     # BTRFS rollback impermanence (see modules/persistence.nix)
     impermanence = {

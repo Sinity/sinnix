@@ -10,7 +10,7 @@ from .util import normalize_timestamp
 
 
 def project_for_unit(unit: str) -> str | None:
-    if unit.startswith("sinex") or unit in {"nats.service", "postgresql.service"}:
+    if unit.startswith("sinex") or unit == "postgresql.service":
         return "sinex"
     if unit.startswith("polylogue") or unit.startswith("polylogued"):
         return "polylogue"

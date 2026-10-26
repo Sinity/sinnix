@@ -125,22 +125,11 @@
       storeDir = "/realm/state/below";
     };
     sinex = {
-      prepareHost = true;
       enable = true;
-      # Start through the delayed `sinex-runtime.target`, not during the
-      # graphical boot transaction.
-      autoStart = false;
-      provisionDatabase = true;
-      # A bounded daily-use trial: Atuin terminal history reaches
-      # sinex_search_events without enabling the full workstation capture and
-      # automata graph. The delayed timer stays inert until this loop has
-      # survived its one-week observation window.
-      activationProfile = "user-mile";
-      environment = "prod";
-      filesystem.watchPaths = [
-        "/realm/project"
-        "/realm/inbox/download"
-      ];
+      # The deployment before the rewrite, kept whole under a dated name:
+      # its PostgreSQL cluster (postgresql/18), its content store and its
+      # runtime state. Its store stays in the sinex-blobs Borg archives.
+      retainedStores = [ "/var/lib/sinex/old-2026-10-26/state/blob-repository" ];
     };
     polylogue = {
       enable = true;
@@ -180,14 +169,102 @@
     stt.enable = true; # speech-to-text :8090 — Parakeet TDT, CPU-only, on-demand
   };
 
-  # Hard memory ceiling for the collapsed sinexd daemon (event_engine + API +
-  # automata + hosted source bindings all run in one systemd unit, governed by
-  # exactly this resource block per nixos/modules/sources.nix). Upstream sets
-  # only a soft MemoryHigh=8G throttle and leaves memoryMax null, so without
-  # this a leak or bulk-import backlog competes with Postgres for all 32G until
-  # host earlyoom fires instead of a clean systemd-scoped restart. 14G leaves
-  # headroom for Postgres/NATS and the rest of the stack on this 32G host.
-  services.sinex.core.api.resources.memoryMax = "14G";
+  # The sources Sinex reads on this host. Sinnix capture keeps writing its
+  # lanes; Sinex reads them beside its own live capture, so the overlap is
+  # intended. Exports are read by declared backfills, started by hand
+  # (`agentctl job start sinnix sinex_backfill -- NAME`), never at activation.
+  services.sinex =
+    let
+      home = config.users.users.${config.sinnix.user.name}.home;
+      realm = config.sinnix.paths.realmRoot;
+      lake = {
+        enable = true;
+        format = "sinnix-lake";
+        paths = [ realm ];
+      };
+    in
+    {
+      session = {
+        hyprland = true;
+        notifications = true;
+        players = true;
+        clipboard = true;
+        watch = [
+          "${realm}/personal"
+          "${realm}/project"
+        ];
+      };
+      sources = {
+        "terminal.atuin-history" = {
+          enable = true;
+          paths = [ "${home}/.local/share/atuin/history.db" ];
+        };
+        "terminal.zsh-history" = {
+          enable = true;
+          paths = [ "${realm}/activity/terminal/shell/zsh/history" ];
+        };
+        # The shell events beside each terminal recording; the recordings
+        # themselves (310 GB) are not read live.
+        "terminal.capture-events" = {
+          enable = true;
+          paths = [ "${realm}/activity/terminal/asciinema" ];
+        };
+        "desktop.activitywatch" = {
+          enable = true;
+          paths = [ "${home}/.local/share/activitywatch/aw-server-rust/sqlite.db" ];
+        };
+        "machine.journald".enable = true;
+        "knowledge.notes-vault" = {
+          enable = true;
+          paths = [ "${realm}/personal" ];
+        };
+        "operator.raw-log" = {
+          enable = true;
+          paths = [ "${realm}/personal/journal/raw-log.md" ];
+        };
+        "operator.steering" = {
+          enable = true;
+          paths = [ "${realm}/project/steering/repo/steering.sqlite" ];
+        };
+        "code.git" = {
+          enable = true;
+          paths = map (project: "${realm}/project/${project}/repo") [
+            "polylogue"
+            "polylogue-sinex-common"
+            "sinex"
+            "sinity-lynchpin"
+            "sinnix"
+            "steering"
+          ];
+        };
+        # Sinnix capture lanes. The accessibility and network-flow lanes hold
+        # 13.5 GB and 10 GB of history; they are read by the `lake` backfill
+        # below before they are read live.
+        "desktop.clipboard" = lake;
+        "desktop.notifications" = lake;
+        "desktop.media" = lake;
+        "desktop.idle-inhibitor" = lake;
+        "media.screen" = lake;
+        "media.audio" = lake;
+        "browser.navigation" = lake;
+        "reading.stack" = lake;
+        "desktop.display" = lake;
+        "machine.peripheral" = lake;
+        "environment.awair" = lake;
+      };
+      backfills = {
+        lake = [ "sinnix-lake=${realm}" ];
+        # Every Takeout archive, Google's own sources and the Chrome history in
+        # one pass over each archive.
+        takeout = [
+          "takeout=${realm}/account/google/raw/takeout"
+          "takeout-chrome=${realm}/account/google/raw/takeout"
+        ];
+        spotify = [ "spotify=${realm}/account/spotify/raw/2025-12-31" ];
+        goodreads = [ "goodreads=${realm}/account/goodreads/raw/library_export.csv" ];
+        raindrop = [ "raindrop=${realm}/account/raindrop/raw/2026-10-11-api-export" ];
+      };
+    };
 
   # CUDA builds (ollama-cuda and llama-cpp-cuda) are served
   # by this cache; without it they compile locally. Trusted at switch time.

@@ -237,7 +237,7 @@ let
       );
 
       # A service's units are not reliably named after it: `polylogue` owns
-      # `polylogue-live`, `tailscale` owns `tailscaled`, sinex's bridge owns eight.
+      # `polylogue-live`, `tailscale` owns `tailscaled`, sinex's bridge owns five.
       # Prefer the same-named surface, then the surfaces the same module file
       # declared -- which the module system already records, so this is a
       # lookup and not a naming convention.

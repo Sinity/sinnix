@@ -12,7 +12,6 @@
 }:
 let
   username = config.sinnix.user.name;
-  primaryGroupName = config.users.users.${username}.group or username;
   userPasswordSecret = "${username}-password";
   cfg = config.sinnix.secrets;
 
@@ -30,11 +29,6 @@ let
     "openai-tunnel-runtime-key"
     "phone-authorized-key"
     "private-project-catalog"
-    "sinex-api-admin-token"
-    "sinex-nats-ca"
-    "sinex-nats-client-nkey"
-    "sinex-nats-server-cert"
-    "sinex-nats-server-key"
   ];
 
   # Declarative per-secret overrides. Any secret NOT listed here falls back to
@@ -50,37 +44,16 @@ let
       group = "nixbld";
       mode = "0440";
     };
-    "sinex-local-db" = {
-      group = if config.users.groups ? postgres then "postgres" else primaryGroupName;
-      mode = "0440";
-    };
-    # NATS reads its listener key directly; Sinexd reads the client seed and
-    # trust anchor. Keep each runtime credential available only to its owning
-    # service account and never export it into login shells.
-    "sinex-nats-server-cert" = {
-      owner = "nats";
-      group = "nats";
-      mode = "0440";
+    # Sinex's NATS users. systemd hands the daemon's password to sinex-nats
+    # and sinexd as a credential, so root reads it; the session service and
+    # Polylogue run as the operator.
+    "sinex-nats-daemon" = {
+      owner = "root";
+      group = "root";
       exportEnv = false;
     };
-    "sinex-nats-server-key" = {
-      owner = "nats";
-      group = "nats";
-      mode = "0400";
-      exportEnv = false;
-    };
-    "sinex-nats-ca" = {
-      owner = "sinex";
-      group = "sinex";
-      mode = "0440";
-      exportEnv = false;
-    };
-    "sinex-nats-client-nkey" = {
-      owner = "sinex";
-      group = "sinex";
-      mode = "0400";
-      exportEnv = false;
-    };
+    "sinex-nats-session".exportEnv = false;
+    "sinex-nats-polylogue".exportEnv = false;
     ${userPasswordSecret} = {
       owner = "root";
       group = "root";
@@ -144,9 +117,9 @@ let
   mkSecretExport =
     secretName:
     let
-      envName = (secretMeta.${secretName} or { }).envName or (
-        lib.toUpper (lib.replaceStrings [ "-" "." ] [ "_" "_" ] secretName)
-      );
+      envName =
+        (secretMeta.${secretName} or { }).envName
+          or (lib.toUpper (lib.replaceStrings [ "-" "." ] [ "_" "_" ] secretName));
       exportEnv = (secretMeta.${secretName} or { }).exportEnv or true;
     in
     lib.optionalString exportEnv ''

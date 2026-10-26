@@ -63,11 +63,11 @@ assert lib.assertMsg (
             sinnix.services = {
               "machine-telemetry".enable = true;
               polylogue.enable = true;
-              sinex.prepareHost = true;
             };
             services.sinex = {
-              stateRoot = "/var/lib/sinex/state";
-              storage.blob.repositoryPath = "/var/lib/sinex/state/blob-repository";
+              enable = true;
+              storeDir = "/var/lib/sinex/daemon/store";
+              nats.daemonPasswordFile = "/run/agenix/sinex-nats-daemon";
             };
             sinnix.services.polylogue.dataDir = "/tmp/sentinel-polylogue-root";
           })
@@ -82,8 +82,8 @@ assert lib.assertMsg (
             message = "Telemetry sealing must not restart on activation, and each sealed file's one structural check must run to completion.";
           }
           {
-            assertion = lib.hasInfix config.services.sinex.storage.blob.repositoryPath config.systemd.services.borgbackup-job-sinex-blobs.script;
-            message = "Sinex blob Borg job must use the evaluated CAS repository path";
+            assertion = lib.hasInfix config.services.sinex.storeDir config.systemd.services.borgbackup-job-sinex-blobs.script;
+            message = "The sinex-blobs Borg job must archive the evaluated content store";
           }
           {
             # Every backup job's freshness marker is watched by the sentinel
@@ -148,11 +148,11 @@ assert lib.assertMsg (
             sinnix.services = {
               "machine-telemetry".enable = true;
               polylogue.enable = true;
-              sinex.prepareHost = true;
             };
             services.sinex = {
-              stateRoot = "/var/lib/sinex/state";
-              storage.blob.repositoryPath = "/var/lib/sinex/state/blob-repository";
+              enable = true;
+              storeDir = "/var/lib/sinex/daemon/store";
+              nats.daemonPasswordFile = "/run/agenix/sinex-nats-daemon";
             };
             sinnix.services.polylogue.dataDir = "/tmp/sentinel-polylogue-root";
             sinnix.projects.entries.sinex.taskAuthority = {
@@ -172,7 +172,6 @@ assert lib.assertMsg (
           ({ ... }: {
             networking.hostName = "backup-headless";
             sinnix.machine.isDesktop = false;
-            services.sinex.storage.blob.repositoryPath = "/var/lib/sinex/state/blob-repository";
           })
         ];
         assertions = _: [ ];
@@ -464,7 +463,7 @@ assert lib.assertMsg (
               to = "install -d -m 0755";
             }
             {
-              from = "/var/lib/sinex/state/blob-repository";
+              from = "/var/lib/sinex/daemon/store";
               to = "$TMPDIR/live-cas";
             }
           ];

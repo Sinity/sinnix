@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Run one declared Sinex backfill (services.sinex.backfills) and wait for it
+# runtimeInputs: bash coreutils systemd
+#
+# A backfill stops sinexd, reads its inputs read-only to their end and starts
+# sinexd again (Sinex's NixOS module); this only names the unit and waits.
+set -euo pipefail
+
+if [[ $# -ne 1 || ! "$1" =~ ^[a-z0-9-]+$ ]]; then
+  echo "usage: sinnix-sinex-backfill NAME (a services.sinex.backfills entry)" >&2
+  exit 64
+fi
+unit="sinex-backfill-$1.service"
+if ! systemctl cat "$unit" >/dev/null 2>&1; then
+  echo "sinnix-sinex-backfill: no $unit; the declared backfills are:" >&2
+  systemctl list-unit-files 'sinex-backfill-*' --no-legend >&2 || true
+  exit 64
+fi
+exec /run/wrappers/bin/sudo -n systemctl start "$unit"
