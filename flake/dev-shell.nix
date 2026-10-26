@@ -187,6 +187,7 @@
           # Declared AgentCTL operation body. It is intentionally available
           # by name in the project environment, never as a command shim.
           scriptPkgs.sinnix-sinex-cache-prebuild
+          scriptPkgs.sinnix-sinex-backfill
           scriptPkgs.sinnix-rank
           scriptPkgs.sinnix-fs
           scriptPkgs.sinnix-url-ledger
