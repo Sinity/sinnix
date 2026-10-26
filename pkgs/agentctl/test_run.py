@@ -428,7 +428,7 @@ def test_a_declared_pool_runs_the_child_as_a_service(
     unit = unit_for(launch, "pytest")
     assert unit.endswith(".service")
     assert f"--unit={unit}" in argv
-    assert "--slice=agentctl-pytest.slice" in argv
+    assert "--slice=agent-ctl-pytest.slice" in argv
     assert "--collect" not in argv
     for setting in (
         "ExitType=cgroup",
@@ -478,7 +478,7 @@ def test_the_start_event_records_the_group_the_task_actually_ran_in(
     assert main([str(launch)]) == 0
 
     assert [event["pool"] for event in events(tmp_path)] == ["bulk", "bulk"]
-    assert "--slice=agentctl-bulk.slice" in fake_systemd.run_argv()
+    assert "--slice=agent-ctl-bulk.slice" in fake_systemd.run_argv()
 
 
 def test_units_stay_distinct_when_their_launch_inputs_share_a_name() -> None:
@@ -1171,10 +1171,10 @@ def test_a_pool_without_a_slice_policy_runs_under_the_normal_slice(
     assert main([str(launch)]) == 0
 
     argv = fake_systemd.run_argv()
-    assert "--slice=agentctl-normal.slice" in argv
+    assert "--slice=agent-ctl-normal.slice" in argv
     assert f"--unit={unit_for(launch, 'fixture-land')}" in argv
     assert (
-        any(argument == "--slice=agentctl-pytest.slice" for argument in argv) is False
+        any(argument == "--slice=agent-ctl-pytest.slice" for argument in argv) is False
     )
 
 

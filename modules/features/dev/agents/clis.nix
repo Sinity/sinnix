@@ -509,7 +509,7 @@ mkFeatureModule {
 
                 # Vendor-managed CLIs self-update in place. Keep their canonical
                 # binaries untouched and route use through distinct Nix-managed
-                # wrappers so launches share agent.slice containment.
+                # wrappers so launches share agent-cli.slice containment.
                 ".local/bin/grok-sinnix" = mkGrokWrapper;
                 ".local/bin/agy-sinnix" = mkAntigravityWrapper;
 

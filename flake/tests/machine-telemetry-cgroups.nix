@@ -4,11 +4,11 @@
 # MemoryHigh values were the thing gating test parallelism, and the bug was a
 # hand-kept second copy of the pool list inside the telemetry module.
 #
-# Provably fails when: a slice declared in runtime-defaults' agentctl-* family
+# Provably fails when: a slice declared in runtime-defaults' agent-ctl-* family
 # stops reaching the collector's --cgroups argument (verified by dropping
-# agentctl-pytest-heavy from the derived list), when a pool's cgroup path stops
+# agent-ctl-pytest-heavy from the derived list), when a pool's cgroup path stops
 # nesting under its parent slice, or when the desktop-reservation slices the
-# job plane is sized against fall out of the sampled set.
+# agent budget is sized against fall out of the sampled set.
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -24,7 +24,7 @@ in
       runtimeDefaults = import ../data/runtime-defaults.nix { inherit lib; };
       # Read the expectation from the slice registry, not from a list restated
       # here: a new pool must fail this check until it is sampled.
-      poolSliceNames = lib.filter (name: lib.hasPrefix "agentctl-" name) (
+      poolSliceNames = lib.filter (name: lib.hasPrefix "agent-ctl-" name) (
         lib.attrNames runtimeDefaults.slices.user
       );
       userSliceRoot = "/user.slice/user-1000.slice/user@1000.service";
@@ -39,11 +39,13 @@ in
         }";
       expectedSpecs =
         map (
-          name: "user.agentctl-pool-${lib.removePrefix "agentctl-" name}|user|${expectedPoolPath name}"
+          name: "user.agentctl-pool-${lib.removePrefix "agent-ctl-" name}|user|${expectedPoolPath name}"
         ) poolSliceNames
         ++ [
-          "user.agenttool|user|${userSliceRoot}/agenttool.slice"
-          "user.agentctl-work|user|${userSliceRoot}/agentctl.slice"
+          "user.agent-budget|user|${userSliceRoot}/agent.slice"
+          "user.agent|user|${userSliceRoot}/agent.slice/agent-cli.slice"
+          "user.agenttool|user|${userSliceRoot}/agent.slice/agent-tool.slice"
+          "user.agentctl-work|user|${userSliceRoot}/agent.slice/agent-ctl.slice"
           "user.app|user|${userSliceRoot}/app.slice"
           "user.session|user|${userSliceRoot}/session.slice"
           "user.desktop-shell|user|${userSliceRoot}/desktop.slice/desktop-shell.slice"

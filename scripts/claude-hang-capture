@@ -86,7 +86,7 @@ capture() {
   fi
   # A limit on an ancestor slice throttles every process below it while the
   # scope's own memory.high is unlimited and its events stay at zero; on
-  # 2026-09-28 the binding MemoryHigh was agent.slice's. Record the chain.
+  # 2026-09-28 the binding MemoryHigh was the agent CLI slice's. Record the chain.
   local cg
   cg="/sys/fs/cgroup$(cut -d: -f3 "/proc/$pid/cgroup")"
   while [ "$cg" != /sys/fs/cgroup ] && [ -d "$cg" ]; do

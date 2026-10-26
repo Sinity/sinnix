@@ -71,7 +71,7 @@ a replay reuses the accepted launch, and an unprovable submission raises
 instead of resubmitting.
 
 `agentctl-run` runs the argv as a transient unit
-`agentctl-<group>-<stem>-<digest>.service` in `agentctl-<group>.slice`
+`agentctl-<group>-<stem>-<digest>.service` in `agent-ctl-<group>.slice`
 (`ExitType=cgroup`, `KillMode=control-group`, `RuntimeMaxSec=<timeout>`). The
 job ends when the unit's cgroup is empty, so a surviving descendant still holds
 the pool slot. The unit environment carries `AGENTCTL_JOB_ID`, the project,
@@ -129,8 +129,10 @@ Pools are pueue groups declared by `sinnix.services.agentctl.pools` and
 rendered into `/etc/sinnix/agentctl.json` (`agentctl pools apply --json` shows
 the live widths). `pools apply` creates missing groups and resizes drifted ones
 in the running daemon, keeping every task and pause; restarting pueued instead
-would mark running tasks killed. Each pool has a slice `agentctl-<pool>.slice`
-whose resource budget comes from `flake/data/runtime-defaults.nix`.
+would mark running tasks killed. Each pool has a slice `agent-ctl-<pool>.slice`
+whose resource budget comes from `flake/data/runtime-defaults.nix`. Every pool
+slice sits under `agent-ctl.slice`, inside the host's agent budget
+(`agent.slice`), which it shares with interactive agents and their tools.
 
 A pool declaration may also set:
 

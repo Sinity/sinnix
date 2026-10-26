@@ -2,7 +2,7 @@
 # Re-enter the same shell with its original argv in a sibling scope before
 # executing any command. Interactive shells and queued job lanes stay put.
 if [[ ! -o interactive && -r /proc/$$/cgroup &&
-      "$(</proc/$$/cgroup)" == */agent.slice/* &&
+      "$(</proc/$$/cgroup)" == */agent-cli.slice/* &&
       -S ${XDG_RUNTIME_DIR:-/run/user/$UID}/systemd/private ]]; then
   () {
     local -a shell_argv
@@ -11,6 +11,6 @@ if [[ ! -o interactive && -r /proc/$$/cgroup &&
     [[ ${shell_argv[-1]} == '' ]] && shell_argv[-1]=()
     exec /run/current-system/sw/bin/systemd-run --user --scope --quiet --collect \
       --expand-environment=no \
-      --unit="agent-tool-$$" --slice=agenttool.slice -- "${shell_argv[@]}"
+      --unit="agent-tool-$$" --slice=agent-tool.slice -- "${shell_argv[@]}"
   }
 fi

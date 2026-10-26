@@ -1,6 +1,6 @@
 # Clodex
 
-`claude-clodex` runs the standard Sinnix Claude Code harness through Clodex's local selective proxy. It retains the full MCP profile, managed hooks, `CLAUDE.md`, scratch placement, and `agent.slice` containment. It uses the operator's ChatGPT or Codex subscription through device-code OAuth. No OpenAI API key is configured or required.
+`claude-clodex` runs the standard Sinnix Claude Code harness through Clodex's local selective proxy. It retains the full MCP profile, managed hooks, `CLAUDE.md`, scratch placement, and `agent-cli.slice` containment. It uses the operator's ChatGPT or Codex subscription through device-code OAuth. No OpenAI API key is configured or required.
 
 In proxy mode, native Claude model requests pass through to Anthropic unchanged. Only a Clodex model selected by alias is routed to OpenAI. This permits a session to switch between the two providers with `/model`.
 

@@ -78,12 +78,12 @@ let
       ${runtimeDefaults.agentContainedCasePattern}) ;;
       *)
         exec ${pkgs.systemd}/bin/systemd-run --user --scope --quiet \
-          --slice=agent.slice -- "$0" "$@"
+          --slice=agent-cli.slice -- "$0" "$@"
         ;;
     esac
     # Build tools default to one job per core. Agents shell out to source
     # builds (a `uv sync` without a wheel, cargo, cmake) from inside
-    # agent.slice; a bounded default keeps one such build from filling the
+    # agent-cli.slice; a bounded default keeps one such build from filling the
     # slice. An explicit caller setting still wins.
     export CMAKE_BUILD_PARALLEL_LEVEL="''${CMAKE_BUILD_PARALLEL_LEVEL:-4}"
     export MAKEFLAGS="''${MAKEFLAGS:--j4}"
@@ -190,7 +190,7 @@ let
 
       export SINNIX_CLAUDE_PROFILE=${lib.escapeShellArg profile}
       # Tool commands and MCP servers get their own memory budget in
-      # agenttool.slice, so a wave of heavy tool runs cannot throttle the
+      # agent-tool.slice, so a wave of heavy tool runs cannot throttle the
       # Claude process that supervises them.
       export CLAUDE_CODE_SHELL_PREFIX=${lib.escapeShellArg "${scriptPkgs.claude-tool-scope}/bin/claude-tool-scope"}
     '';

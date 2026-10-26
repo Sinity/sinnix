@@ -774,7 +774,7 @@ def test_process_stop_refuses_a_start_ticks_mismatch_or_a_dead_pid(
         if pid == 200:
             # Live, but a DIFFERENT start_ticks than the caller observed --
             # the pid was reused by an unrelated process.
-            return (999999, "run-rother.scope", "agent.slice")
+            return (999999, "run-rother.scope", "agent-cli.slice")
         return None  # pid 300: no such process at all
 
     actions = make_process_actions(tmp_path, prober)
@@ -800,7 +800,7 @@ def test_process_stop_refuses_a_start_ticks_mismatch_or_a_dead_pid(
 def test_process_stop_admission_is_by_cgroup_membership_not_name(
     tmp_path: Path,
 ) -> None:
-    """Every non-negotiable in the design: agent.slice and agenttool.slice admit
+    """Every non-negotiable in the design: agent-cli.slice and agent-tool.slice admit
     unconditionally, a slice the inventory marks sacrificial (background,
     here) admits too, an unrelated slice (gpu-runtime, present in the
     inventory but never marked sacrificial) is refused, a process with no
@@ -812,12 +812,12 @@ def test_process_stop_admission_is_by_cgroup_membership_not_name(
     self-pid check and the hub server could target itself.
     """
     slice_by_pid = {
-        401: "agent.slice",
-        402: "agenttool.slice",
+        401: "agent-cli.slice",
+        402: "agent-tool.slice",
         403: "background.slice",  # sacrificial per inventory_with_sacrificial_slice
         404: "gpu-runtime.slice",  # in the inventory, never marked sacrificial
         405: "",  # PID 1 direct child: no slice segment at all
-        406: "agent.slice",  # would admit, but this pid IS the hub server itself
+        406: "agent-cli.slice",  # would admit, but this pid IS the hub server itself
     }
 
     def prober(pid: int):
@@ -833,10 +833,10 @@ def test_process_stop_admission_is_by_cgroup_membership_not_name(
         )
 
     assert stop(401, "agent")["preconditions"]["resolved"]["slice_unit"] == (
-        "agent.slice"
+        "agent-cli.slice"
     )
     assert stop(402, "agenttool")["preconditions"]["resolved"]["slice_unit"] == (
-        "agenttool.slice"
+        "agent-tool.slice"
     )
     assert stop(403, "sacrificial")["preconditions"]["resolved"]["slice_unit"] == (
         "background.slice"
@@ -862,8 +862,8 @@ def test_process_admitted_slices_matches_the_action_services_own_admission(
     inventory_with_sacrificial_slice(inventory_path)
     inventory = json.loads(inventory_path.read_text())
     assert process_admitted_slices(inventory) == {
-        "agent.slice",
-        "agenttool.slice",
+        "agent-cli.slice",
+        "agent-tool.slice",
         "background.slice",
     }
 
@@ -889,7 +889,7 @@ def test_process_stop_sends_sigterm_then_escalates_to_sigkill_after_grace(
 
     def prober(pid: int):
         calls["n"] += 1
-        return (55, "unit.scope", "agent.slice")
+        return (55, "unit.scope", "agent-cli.slice")
 
     def signaler(pid: int, sig: int) -> None:
         signals.append((pid, sig))
@@ -932,7 +932,7 @@ def test_process_stop_does_not_escalate_once_the_process_exits(
     def prober(pid: int):
         if not state["alive"]:
             return None
-        return (55, "unit.scope", "agent.slice")
+        return (55, "unit.scope", "agent-cli.slice")
 
     def signaler(pid: int, sig: int) -> None:
         signals.append((pid, sig))
@@ -1114,7 +1114,7 @@ def test_uncertain_adapter_is_never_replayed_as_success(tmp_path):
 
 def test_process_replaced_between_resolution_and_dispatch_is_not_signalled(tmp_path):
     identities = iter(
-        [(55, "fixture.scope", "agent.slice"), (56, "fixture.scope", "agent.slice")]
+        [(55, "fixture.scope", "agent-cli.slice"), (56, "fixture.scope", "agent-cli.slice")]
     )
     signals = []
     actions = make_process_actions(

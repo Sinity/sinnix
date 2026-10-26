@@ -247,7 +247,7 @@ sinnix.services.agent-gateway = {
 `~/.local/state/sinnix/agent-gateway/operator`, and serves tunnel health on port 3088. The tunnel client also starts a
 `codex app-server`, so ChatGPT can reach the local Codex.
 
-- **MCP unit:** runs in `agenttool.slice` with `MemoryHigh=4G` and
+- **MCP unit:** runs in `agent-tool.slice` with `MemoryHigh=4G` and
   `MemoryMax=6G`. On SIGTERM it drains for 5 s and exits by 8 s.
 - **Restarts:** activation restarts the tunnel only when its own inputs change.
   Gateway code changes restart only the MCP unit, and the tunnel reconnects.

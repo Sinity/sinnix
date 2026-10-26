@@ -134,6 +134,7 @@ def systemd_snapshot(
         "IOWeight",
         "MemoryHigh",
         "MemoryMax",
+        "MemoryMin",
         "MemoryLow",
         "ManagedOOMMemoryPressure",
     ]
@@ -167,6 +168,7 @@ def compare_slices(
         "IOWeight",
         "MemoryHigh",
         "MemoryMax",
+        "MemoryMin",
         "MemoryLow",
         "ManagedOOMMemoryPressure",
     ]
@@ -187,7 +189,7 @@ def compare_slices(
 
             def normalized_expected_value(key: str, value: str) -> str:
                 expected_value = expected[key]
-                if key in {"MemoryHigh", "MemoryMax", "MemoryLow"}:
+                if key in {"MemoryHigh", "MemoryMax", "MemoryMin", "MemoryLow"}:
                     suffixes = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
                     if expected_value[-1:] in suffixes:
                         return str(int(expected_value[:-1]) * suffixes[expected_value[-1]])

@@ -196,7 +196,7 @@ mkServiceModule {
           # The server runs a remote agent's tools in process: git and
           # content reads over checkouts, owner subprocesses, and the
           # brokered MCP children. That is agent tool work, so it shares
-          # agenttool.slice's budget instead of running unbounded in
+          # agent-tool.slice's budget instead of running unbounded in
           # app.slice, and MemoryHigh throttles this unit first. Page cache
           # from checkout reads is what reclaim takes: one night of
           # all-worktree content hashing charged 9.4G here.
@@ -205,7 +205,7 @@ mkServiceModule {
           # the kernel ends it here instead of in the operator's session.
           # TimeoutStopSec covers the server's own 8 s drain deadline.
           resources = {
-            Slice = "agenttool.slice";
+            Slice = "agent-tool.slice";
             MemoryHigh = "4G";
             MemoryMax = "6G";
             TimeoutStopSec = "10s";
@@ -259,7 +259,7 @@ mkServiceModule {
               # No gateway PATH or typelib path. The client does start
               # `codex app-server` (from the user manager's PATH) to serve
               # Codex over the tunnel; the codex wrapper scopes it under
-              # agent.slice. Every input of this unit must be the tunnel's own, since
+              # agent-cli.slice. Every input of this unit must be the tunnel's own, since
               # Home Manager restarts a unit whose file changed and a
               # tunnel restart drops every in-flight call. A restart of the
               # server alone does not: the client reconnects to its socket.

@@ -35,14 +35,15 @@ PROCESS_ACTIONS = {"stop"}
 
 # A `{"process": {"pid": N, "start_ticks": M}}` target is admitted for
 # `stop` only when the live cgroup it currently belongs to is one of these.
-# `agent.slice` / `agenttool.slice` are named explicitly (not derived from the
-# inventory's ManagedOOMMemoryPressure marker) because an interactive agent
-# process is eligible for this bounded action even though agent.slice is
-# deliberately left uncapped and unmarked. A shared ceiling would throttle a
-# healthy agent behind a busy one, so the slice would not appear in the
-# sacrificial set below despite containing processes this verb may reach.
-# agenttool.slice is where Claude's tool commands (rg, bd, git) run.
-PROCESS_ADMITTED_BASE_SLICES = frozenset({"agent.slice", "agenttool.slice"})
+# `agent-cli.slice` / `agent-tool.slice` are named explicitly (not derived
+# from the inventory's ManagedOOMMemoryPressure marker) because an
+# interactive agent process is eligible for this bounded action even though
+# agent-cli.slice deliberately carries no pressure kill: one would take a
+# healthy coordinator down with its runaway child, so the slice does not
+# appear in the sacrificial set below despite containing processes this verb
+# may reach.
+# agent-tool.slice is where Claude's tool commands (rg, bd, git) run.
+PROCESS_ADMITTED_BASE_SLICES = frozenset({"agent-cli.slice", "agent-tool.slice"})
 
 # SIGTERM first, escalate to SIGKILL only if the same process (same
 # start_ticks) is still alive after this many seconds. Short and bounded on
@@ -98,8 +99,8 @@ def sacrificial_slices(inventory: dict[str, Any] | None) -> set[str]:
 
 
 def process_admitted_slices(inventory: dict[str, Any] | None) -> set[str]:
-    """The full admitted set for a process-stop target: agent.slice and
-    agenttool.slice unconditionally, plus whatever the live inventory currently
+    """The full admitted set for a process-stop target: agent-cli.slice and
+    agent-tool.slice unconditionally, plus whatever the live inventory currently
     marks sacrificial."""
     return PROCESS_ADMITTED_BASE_SLICES | sacrificial_slices(inventory)
 
@@ -406,7 +407,7 @@ class ActionService:
         Admission is by live cgroup membership, not by process name or
         command-line heuristics: a name list is not a containment boundary
         (the taxonomy this verb was designed against is explicit about
-        that). Only `agent.slice` / `agenttool.slice` and slices the inventory
+        that). Only `agent-cli.slice` / `agent-tool.slice` and slices the inventory
         itself marks sacrificial admit a stop. A process with no slice segment at
         all (a PID 1 direct child, e.g. `init.scope`) falls out of this
         check the same way anything else outside the admitted set does --
@@ -427,8 +428,8 @@ class ActionService:
         admitted = process_admitted_slices(self._inventory())
         if slice_unit not in admitted:
             raise ActionError(
-                "process is not in an admitted cgroup (must be agent.slice, "
-                "agenttool.slice, or a slice the runtime inventory marks "
+                "process is not in an admitted cgroup (must be agent-cli.slice, "
+                "agent-tool.slice, or a slice the runtime inventory marks "
                 f"sacrificial; this process is in {slice_unit or '(no slice)'})",
                 403,
             )

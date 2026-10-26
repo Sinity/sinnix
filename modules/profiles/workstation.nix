@@ -16,6 +16,9 @@
 let
   runtimeInventory = config.sinnix.runtime.inventory;
   primaryUserUid = toString config.users.users.${config.sinnix.user.name}.uid;
+  # The desktop's guarantee is only as large as every ancestor's, so the
+  # user slice's values are repeated on the per-user slice and manager.
+  interactiveMemoryMin = runtimeInventory.slices.system.user.MemoryMin;
   interactiveMemoryLow = runtimeInventory.slices.system.user.MemoryLow;
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   userTmpRoot = "/realm/tmp/work";
@@ -352,7 +355,10 @@ in
             inherit sliceConfig;
           }) runtimeInventory.slices.system)
           // {
-            "user-${primaryUserUid}".sliceConfig.MemoryLow = interactiveMemoryLow;
+            "user-${primaryUserUid}".sliceConfig = {
+              MemoryMin = interactiveMemoryMin;
+              MemoryLow = interactiveMemoryLow;
+            };
           };
 
         # This native systemd instance owns the whole desktop and job plane.
@@ -364,6 +370,7 @@ in
           # drop-in sets only resource policy and activation flags.
           text = ''
             [Service]
+            MemoryMin=${interactiveMemoryMin}
             MemoryLow=${interactiveMemoryLow}
             X-RestartIfChanged=false
             X-StopIfChanged=false

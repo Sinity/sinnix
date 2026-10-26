@@ -115,17 +115,21 @@ in
           # the compositor's environment. Hyprland is the parent of every
           # process the user then starts from the session, so those variables
           # are inherited by terminals, agents, and anything they spawn --
-          # processes that live in agent.slice or agentctl.slice and have no
+          # processes that live in agent.slice and have no
           # relationship to the compositor's cgroup. A child that honours the
           # protocol would watch a cgroup it is not a member of, on a "some
           # 200000 2000000" threshold that ordinary page-cache reclaim meets.
           # The protocol is per-service by design and Hyprland does not
           # implement it, so turning the export off here loses nothing and
           # stops the leak at its only source.
+          # MemoryMin claims the compositor's part of session.slice's hard
+          # guarantee: on 2026-10-27 Hyprland's 0.6 GiB was mostly swapped
+          # out under agent load, and every frame waited on swap-in.
           + lib.optionalString (name == "wayland-wm@.service") ''
 
             [Service]
             MemoryPressureWatch=off
+            MemoryMin=${toString helpers.data.runtimeDefaults.desktopMemory.compositorMin}M
           ''
         );
       });

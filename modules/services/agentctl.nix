@@ -74,7 +74,7 @@ mkServiceModule {
     );
     default = {
       # Claude workers that run focused tests in their own process reach
-      # 2-3 GiB each; twelve, then eight, held the 8G agentctl-agent slice at
+      # 2-3 GiB each; twelve, then eight, held the 8G agent-ctl-agent slice at
       # 80-95% full memory pressure (2026-09-28), which also paused the pytest
       # pools through pressure pauses. Six fit.
       agent.parallel = 6;
@@ -95,12 +95,12 @@ mkServiceModule {
         adaptive = {
           floor = 1;
           jobMemoryBytes = 1073741824;
-          slice = "agentctl-pytest-quick.slice";
+          slice = "agent-ctl-pytest-quick.slice";
         };
       };
-      # Three, not two: the cargo cap bounds concurrent builds across pools,
-      # and at two, long measurement and copy jobs held every bulk slot while
-      # checks queued behind them for an hour (2026-10-25).
+      # Three: the cargo cap bounds concurrent builds across pools, and at
+      # two, long measurement and copy jobs held every bulk slot while checks
+      # queued behind them for an hour (2026-10-25).
       bulk.parallel = 3;
       # Three Polylogue verify_quick runs fit the 9G normal slice now that one
       # peaks under 1 GiB (polylogue #5754); at 3.3 GiB each they had held it
@@ -132,9 +132,10 @@ mkServiceModule {
     type = lib.types.attrsOf lib.types.ints.positive;
     default = {
       # Cargo builds across every pool. Five concurrent -j16 builds on this
-      # 16-core, 31 GiB host (2026-10-25) ran into memory pressure; oomd
-      # killed checks after 21-54 minutes and others hit their timeouts.
-      cargo = 3;
+      # 31 GiB host (2026-10-25) ran into memory pressure; oomd killed checks
+      # after 21-54 minutes and others hit their timeouts. Two at 5-8 GiB
+      # each fit the job plane's 12G inside the host's agent budget.
+      cargo = 2;
     };
     description = "Cross-pool caps: how many jobs whose operation names each cap run at once, whichever pools they queue in.";
   };
@@ -149,7 +150,7 @@ mkServiceModule {
   };
 
   # No runtime surface: the job plane is pueued (declared by the CLI feature)
-  # inside the agentctl slice hierarchy; the units here drive it.
+  # inside the agent-ctl slice hierarchy; the units here drive it.
   configFn =
     { cfg, ... }:
     let

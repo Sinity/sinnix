@@ -381,21 +381,22 @@ in
                 .${unit};
             in
             number * scale;
-          managedWork = userSlices.agentctl;
+          budget = userSlices.agent;
+          managedWork = userSlices.agent-ctl;
           poolSlices = lib.genAttrs [
-            "agentctl-agent"
-            "agentctl-pytest"
-            "agentctl-pytest-heavy"
-            "agentctl-pytest-quick"
-            "agentctl-bulk"
-            "agentctl-normal"
-            "agentctl-interactive"
-            "agentctl-shell"
-            "agentctl-shell-quick"
-            "agentctl-shell-long"
-            "agentctl-background"
-            "agentctl-measure"
-            "agentctl-system-build"
+            "agent-ctl-agent"
+            "agent-ctl-pytest"
+            "agent-ctl-pytest-heavy"
+            "agent-ctl-pytest-quick"
+            "agent-ctl-bulk"
+            "agent-ctl-normal"
+            "agent-ctl-interactive"
+            "agent-ctl-shell"
+            "agent-ctl-shell-quick"
+            "agent-ctl-shell-long"
+            "agent-ctl-background"
+            "agent-ctl-measure"
+            "agent-ctl-system-build"
           ] (name: userSlices.${name});
           forbiddenAvoidTokens = [
             "bash"
@@ -416,11 +417,11 @@ in
         assert lib.assertMsg (
           declaredPools ? shell-quick
           && declaredPools ? shell-long
-          && poolSlices ? agentctl-shell-quick
-          && poolSlices ? agentctl-shell-long
+          && poolSlices ? agent-ctl-shell-quick
+          && poolSlices ? agent-ctl-shell-long
         ) "the gateway shell.run groups must be declared agentctl pools with slices";
         assert lib.assertMsg (
-          declaredPools ? background && poolSlices ? agentctl-background
+          declaredPools ? background && poolSlices ? agent-ctl-background
         ) "the offload pool must be declared with its low-weight slice";
         # Benchmarks and system builds never occupy the bulk slots checks use.
         assert lib.assertMsg (
@@ -431,76 +432,99 @@ in
         ) "the earlyoom fallback must not exempt agents, browsers, runtimes, or generic shells";
         assert lib.assertMsg
           (
-            managedWork.CPUWeight < userSlices.app.CPUWeight
-            && managedWork.IOWeight < userSlices.app.IOWeight
+            # One budget holds every kind of agent work, and it fits beside the
+            # desktop's hard guarantee in the host's 31 GiB; with the system
+            # services and the kernel this leaves no room to oversubscribe.
+            lib.all (name: userSlices ? ${name}) [
+              "agent-cli"
+              "agent-tool"
+              "agent-ctl"
+            ]
+            && budget.CPUWeight < userSlices.app.CPUWeight
+            && budget.IOWeight * 10 <= userSlices.app.IOWeight
+            && budget ? CPUQuota
+            && sliceBytes budget.MemoryHigh < sliceBytes budget.MemoryMax
+            && budget ? MemorySwapMax
+            && budget ? TasksMax
+            && !(budget ? ManagedOOMMemoryPressure)
+            &&
+              sliceBytes budget.MemoryMax
+              + sliceBytes userSlices.app.MemoryMin
+              + sliceBytes userSlices.session.MemoryMin
+              + sliceBytes userSlices.desktop-shell.MemoryMin <= 24 * 1024 * 1024 * 1024
+            # The desktop's guarantee is hard, and every ancestor carries it.
+            && userSlices.desktop.MemoryMin == userSlices.desktop-shell.MemoryMin
+            &&
+              sliceBytes runtimeDefaults.slices.system.user.MemoryMin == sliceBytes userSlices.app.MemoryMin
+              + sliceBytes userSlices.session.MemoryMin
+              + sliceBytes userSlices.desktop.MemoryMin
+            && managedWork.CPUWeight < userSlices.app.CPUWeight
             && sliceBytes managedWork.MemoryHigh < sliceBytes managedWork.MemoryMax
-            && managedWork ? MemorySwapMax
+            && sliceBytes managedWork.MemoryMax <= sliceBytes budget.MemoryMax
+            && sliceBytes managedWork.MemorySwapMax <= sliceBytes budget.MemorySwapMax
             && !(managedWork ? ManagedOOMSwap)
             && !(managedWork ? ManagedOOMMemoryPressure)
-            && userSlices.app.MemoryLow == "8G"
-            && userSlices.session.MemoryLow == "5G"
             # Interactive agents and whatever they shell out to are bounded:
-            # they yield CPU to the desktop, throttle before swapping, and
-            # never carry a pressure kill that would take the coordinator.
-            && userSlices.agent.CPUWeight < userSlices.app.CPUWeight
-            && userSlices.agent ? CPUQuota
-            && userSlices.agent ? MemoryHigh
-            && userSlices.agent ? MemoryMax
-            && userSlices.agent ? MemorySwapMax
-            && userSlices.agent ? TasksMax
-            && !(userSlices.agent ? ManagedOOMMemoryPressure)
-            && !(poolSlices.agentctl-agent ? MemoryMax)
-            && !(poolSlices.agentctl-agent ? ManagedOOMPreference)
-            && !(poolSlices.agentctl-agent ? ManagedOOMMemoryPressure)
-            && !(poolSlices.agentctl-agent ? ManagedOOMSwap)
-            && poolSlices.agentctl-agent ? MemoryHigh
+            # they throttle before swapping, and never carry a pressure kill
+            # that would take the coordinator.
+            && userSlices.agent-cli ? MemoryLow
+            && userSlices.agent-cli ? MemoryHigh
+            && userSlices.agent-cli ? MemoryMax
+            && !(userSlices.agent-cli ? ManagedOOMMemoryPressure)
+            && userSlices.agent-cli.CPUWeight > userSlices.agent-tool.CPUWeight
+            && !(poolSlices.agent-ctl-agent ? MemoryMax)
+            && !(poolSlices.agent-ctl-agent ? ManagedOOMPreference)
+            && !(poolSlices.agent-ctl-agent ? ManagedOOMMemoryPressure)
+            && !(poolSlices.agent-ctl-agent ? ManagedOOMSwap)
+            && poolSlices.agent-ctl-agent ? MemoryHigh
             # The parent of the pytest leaves carries no pressure kill: its PSI
             # is their aggregate, so a busy sibling would kill the corpus.
-            && !(poolSlices.agentctl-pytest ? ManagedOOMMemoryPressure)
-            && poolSlices.agentctl-pytest.CPUWeight == 200
-            && poolSlices.agentctl-pytest.IOWeight == 200
+            && !(poolSlices.agent-ctl-pytest ? ManagedOOMMemoryPressure)
+            && poolSlices.agent-ctl-pytest.CPUWeight == 200
+            && poolSlices.agent-ctl-pytest.IOWeight == 200
             # The structural invariant the 2026-09-14 corpus OOM exposed: a
             # child slice's ceiling is meaningless above its parent's, so the
             # parent must never bind below the widest leaf beneath it.
-            # Provably fails when: agentctl-pytest.MemoryHigh is lowered below
-            # agentctl-pytest-heavy.MemoryHigh (verified by restoring "6G").
+            # Provably fails when: agent-ctl-pytest.MemoryHigh is lowered below
+            # agent-ctl-pytest-heavy.MemoryHigh (verified by restoring "6G").
             &&
-              sliceBytes poolSlices.agentctl-pytest.MemoryHigh
-              >= sliceBytes poolSlices.agentctl-pytest-heavy.MemoryHigh
+              sliceBytes poolSlices.agent-ctl-pytest.MemoryHigh
+              >= sliceBytes poolSlices.agent-ctl-pytest-heavy.MemoryHigh
             &&
-              sliceBytes poolSlices.agentctl-pytest.MemoryHigh
-              >= sliceBytes poolSlices.agentctl-pytest-quick.MemoryHigh
+              sliceBytes poolSlices.agent-ctl-pytest.MemoryHigh
+              >= sliceBytes poolSlices.agent-ctl-pytest-quick.MemoryHigh
             # The shell lanes' parent must not bind below either lane.
             &&
-              sliceBytes poolSlices.agentctl-shell.MemoryHigh
-              >= sliceBytes poolSlices.agentctl-shell-long.MemoryHigh
+              sliceBytes poolSlices.agent-ctl-shell.MemoryHigh
+              >= sliceBytes poolSlices.agent-ctl-shell-long.MemoryHigh
             &&
-              sliceBytes poolSlices.agentctl-shell.MemoryHigh
-              >= sliceBytes poolSlices.agentctl-shell-quick.MemoryHigh
+              sliceBytes poolSlices.agent-ctl-shell.MemoryHigh
+              >= sliceBytes poolSlices.agent-ctl-shell-quick.MemoryHigh
             # The corpus at its sized width (four 2263 MiB workers plus the
-            # master, ~10.05 GiB) must fit beside a saturated agent pool inside
-            # the plane's own ceiling.
-            &&
-              sliceBytes poolSlices.agentctl-pytest-heavy.MemoryHigh
-              + sliceBytes poolSlices.agentctl-agent.MemoryHigh <= sliceBytes managedWork.MemoryHigh
-            && sliceBytes poolSlices.agentctl-pytest-heavy.MemoryHigh >= 12 * 1024 * 1024 * 1024
-            && poolSlices.agentctl-pytest-heavy.MemoryMax == "14G"
-            && poolSlices.agentctl-pytest-heavy.ManagedOOMMemoryPressure == "kill"
-            && poolSlices.agentctl-pytest-heavy.CPUWeight == 200
-            && poolSlices.agentctl-pytest-heavy.IOWeight == 200
+            # master, ~10.05 GiB) fits inside the plane's own ceiling, and no
+            # pool's ceiling is larger than the plane's.
+            && sliceBytes poolSlices.agent-ctl-pytest-heavy.MemoryHigh <= sliceBytes managedWork.MemoryHigh
+            && lib.all (slice: sliceBytes slice.MemoryHigh <= sliceBytes managedWork.MemoryHigh) (
+              lib.attrValues poolSlices
+            )
+            && sliceBytes poolSlices.agent-ctl-pytest-heavy.MemoryHigh >= 12 * 1024 * 1024 * 1024
+            && poolSlices.agent-ctl-pytest-heavy.MemoryMax == "14G"
+            && poolSlices.agent-ctl-pytest-heavy.ManagedOOMMemoryPressure == "kill"
+            && poolSlices.agent-ctl-pytest-heavy.CPUWeight == 200
+            && poolSlices.agent-ctl-pytest-heavy.IOWeight == 200
             # Bulk reclaims and swaps its own pages before its hard cap.
-            && sliceBytes poolSlices.agentctl-bulk.MemoryHigh < sliceBytes poolSlices.agentctl-bulk.MemoryMax
-            && !(poolSlices.agentctl-bulk ? IOReadBandwidthMax)
+            && sliceBytes poolSlices.agent-ctl-bulk.MemoryHigh < sliceBytes poolSlices.agent-ctl-bulk.MemoryMax
+            && !(poolSlices.agent-ctl-bulk ? IOReadBandwidthMax)
             # Every pool's swap fits inside the plane's.
             && lib.all (slice: sliceBytes slice.MemorySwapMax <= sliceBytes managedWork.MemorySwapMax) (
               lib.attrValues poolSlices
             )
-            && poolSlices.agentctl-bulk.ManagedOOMMemoryPressure == "kill"
-            && poolSlices.agentctl-bulk.CPUWeight == 20
-            && poolSlices.agentctl-bulk.IOWeight == 10
+            && poolSlices.agent-ctl-bulk.ManagedOOMMemoryPressure == "kill"
+            && poolSlices.agent-ctl-bulk.CPUWeight == 20
+            && poolSlices.agent-ctl-bulk.IOWeight == 10
             # Offloads yield the disk to every other job pool.
-            && lib.all (slice: poolSlices.agentctl-background.IOWeight < slice.IOWeight) (
-              lib.attrValues (removeAttrs poolSlices [ "agentctl-background" ])
+            && lib.all (slice: poolSlices.agent-ctl-background.IOWeight < slice.IOWeight) (
+              lib.attrValues (removeAttrs poolSlices [ "agent-ctl-background" ])
             )
             && lib.all (slice: slice.IOAccounting == true) (lib.attrValues poolSlices)
           )
@@ -945,7 +969,7 @@ in
             grep -Fq 'CLODEX_CREDENTIAL_HELPER=' "$HOME/.local/bin/sinnix-clodex-server"
             jq -e '(.env | has("CLAUDE_CODE_PROCESS_WRAPPER") | not) and (.env | has("CLAUDE_CODE_FORK_SUBAGENT") | not)' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
 
-            # Every outer agent wrapper must enter agent.slice before its
+            # Every outer agent wrapper must enter agent-cli.slice before its
             # bootstrap runs. A missing scope launch leaves npm/bootstrap work
             # in the terminal session and makes the cgroup regression invisible
             # to admission. The containment pattern is asserted verbatim so
@@ -959,7 +983,7 @@ in
               grep -Fq 'npm/bin/' "$wrapper"
               grep -Fq 'exec "$STATE/npm/bin/' "$wrapper"
               grep -Fq '/proc/self/cgroup' "$wrapper"
-              grep -Fq -- '--slice=agent.slice' "$wrapper"
+              grep -Fq -- '--slice=agent-cli.slice' "$wrapper"
               grep -Fq -- '${runtimeDefaults.agentContainedCasePattern}' "$wrapper"
             done
             if grep -R 'MemoryHigh\|MemoryMax\|MemorySwapMax' "$HOME/.local/bin/claude" "$HOME/.local/bin/codex" "$HOME/.local/bin/gemini" "$HOME/.local/bin/pi"; then
@@ -1109,13 +1133,16 @@ in
             user=/user.slice/user-1000.slice/user@1000.service
 
             # A lane's queued task: the service that owns its MemoryMax.
-            expect contained "0::$user/agentctl.slice/agentctl-agent.slice/agentctl-agent-sinnix-lane-sinnix-5ntw-9b15d371.service"
+            ctl=$user/agent.slice/agent-ctl.slice
+            expect contained "0::$ctl/agent-ctl-agent.slice/agentctl-agent-sinnix-lane-sinnix-5ntw-9b15d371.service"
             # A pool scope systemd named, rather than one named for a launch input.
-            expect contained "0::$user/agentctl.slice/agentctl-agent.slice/run-p988139-i193814380.scope"
+            expect contained "0::$ctl/agent-ctl-agent.slice/run-p988139-i193814380.scope"
             # A pool other than agent still bounds what it launches.
-            expect contained "0::$user/agentctl.slice/agentctl-normal.slice/run-p491309-i193318106.scope"
-            expect contained "0::$user/agentctl.slice/agentctl-work.slice/pueued.service"
-            expect contained "0::$user/agent.slice/run-p1088598-i193914838.scope"
+            expect contained "0::$ctl/agent-ctl-normal.slice/run-p491309-i193318106.scope"
+            expect contained "0::$ctl/agent-ctl-work.slice/pueued.service"
+            expect contained "0::$user/agent.slice/agent-cli.slice/run-p1088598-i193914838.scope"
+            # An agent started by a tool command joins the CLI slice.
+            expect reexec "0::$user/agent.slice/agent-tool.slice/agent-tool-1449245.scope"
 
             # An interactive launch from a terminal has no boundary yet.
             expect reexec "0::$user/session.slice/kitty-52885-22.scope"
@@ -1125,6 +1152,7 @@ in
             # is a different slice with a different budget.
             expect reexec "0::$user/app.slice/app-agent.slice/app-agent-stub.scope"
             expect reexec "0::$user/app.slice/app-agentctl.slice/app-agentctl-stub.scope"
+            expect reexec "0::$user/app.slice/app-agent-cli.slice/app-agent-cli-stub.scope"
 
             touch "$out"
           '';

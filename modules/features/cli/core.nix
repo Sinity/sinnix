@@ -149,7 +149,7 @@ mkFeatureModule {
               # The daemon is only the queue coordinator. Each task's
               # `agentctl-run` child enters the slice named by its declared
               # pool, so pool concurrency and cgroup budgets remain separate.
-              Service.Slice = "agentctl-work.slice";
+              Service.Slice = "agent-ctl-work.slice";
               # state.json carries every task's full client environment; an
               # interactive `pueue add` writes the shell's API keys into it.
               Service.UMask = "0077";

@@ -33,7 +33,7 @@ itself runs no commands. The API only accepts:
   `/etc/sinnix/runtime-inventory.json` that declares `operatorRestart`;
 - `interrupt` on a queued or running agentctl job;
 - `stop` on one process, identified by PID and start time, and only inside
-  `agent.slice`, `build.slice` or a slice the inventory marks as killable
+  `agent-cli.slice`, `agent-tool.slice` or a slice the inventory marks as killable
   (SIGTERM, then SIGKILL after 3 s);
 - `park` (freeze a unit with a required thaw time) and
   `set_policy`/`reset_policy` (runtime-only changes to the resource limits a

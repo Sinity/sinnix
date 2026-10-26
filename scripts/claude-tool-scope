@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 # @sinnix-package
-# description: Run one Claude Code tool, hook or MCP command in its own scope under agenttool.slice
+# description: Run one Claude Code tool, hook or MCP command in its own scope under agent-tool.slice
 # runtimeInputs: coreutils systemd
 #
 # Claude Code's CLAUDE_CODE_SHELL_PREFIX: every Bash tool command, hook and
 # stdio MCP server is launched as `claude-tool-scope '<command string>'`.
 # Without this, those processes are children of the Claude process in its
-# agent.slice scope and share its MemoryHigh. On 2026-09-28 a coordinator's
+# agent-cli.slice scope and share its MemoryHigh. On 2026-09-28 a coordinator's
 # subagents ran a dozen 0.5-0.9 GB verification gates at once, the slice sat
 # at MemoryHigh, and the kernel throttled the Claude process itself in
 # mem_cgroup_handle_over_high for hours (sinnix-6to8). A separate slice lets
 # the tools throttle each other while the process supervising them stays
 # responsive.
 #
-# Only a command started from agent.slice moves. A Claude worker inside an
+# Only a command started from agent-cli.slice moves. A Claude worker inside an
 # agentctl lane keeps its tools in the lane's scope, which carries the lane's
 # MemoryMax and its cancellation reap.
 set -uo pipefail
@@ -27,7 +27,7 @@ else
 fi
 
 case "$(< /proc/self/cgroup)" in
-  */agent.slice/*) ;;
+  */agent-cli.slice/*) ;;
   *) exec "${cmd[@]}" ;;
 esac
 
@@ -42,6 +42,6 @@ esac
 if [ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/systemd/private" ]; then
   exec systemd-run --user --scope --quiet --collect \
     --expand-environment=no \
-    --slice=agenttool.slice -- "${cmd[@]}"
+    --slice=agent-tool.slice -- "${cmd[@]}"
 fi
 exec "${cmd[@]}"

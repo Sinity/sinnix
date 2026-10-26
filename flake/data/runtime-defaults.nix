@@ -16,14 +16,42 @@ let
   # sized for two parallel jobs on a 32 GB host, and no pressure kill. On
   # 2026-10-18 oomd killed nix-daemon itself, with every connected client,
   # at 50% pressure under the then 10G/12G ceiling. A build that outgrows
-  # MemoryMax loses its largest process to the kernel instead.
+  # MemoryMax loses its largest process to the kernel instead. The daemon
+  # is a system service, so its builds cannot join the user manager's agent
+  # budget (below) and keep a budget of their own: 12G/16G with unbounded
+  # swap let builds and agents together exceed RAM by half. Two parallel
+  # builds at four cores each fit 10G; the swap allowance keeps them from
+  # filling the swap the agent budget is sized against.
   buildSlicePolicy = {
     IOAccounting = true;
     CPUWeight = 20;
     IOWeight = 20;
-    MemoryHigh = "12G";
-    MemoryMax = "16G";
+    MemoryHigh = "10G";
+    MemoryMax = "12G";
+    MemorySwapMax = "4G";
   };
+
+  # The desktop's memory, in MiB, measured 2026-10-27 under agent load
+  # (resident plus swapped): Chrome 4.3 GiB (6.6 GiB with many tabs on
+  # 2026-10-19), Hyprland 0.6 GiB, the noctalia shell 1.0 GiB, kitty,
+  # PipeWire and the portals 0.3 GiB. That night all of it was swapped out
+  # behind MemoryLow alone: low is best effort, and once the agents'
+  # ceilings together exceeded RAM nothing unprotected was left to reclaim.
+  # The `Min` values are a hard guarantee, never reclaimed; `Low` covers the
+  # larger working set as long as anything unprotected remains.
+  desktopMemory = rec {
+    chromeMin = 3072;
+    appMin = 4096;
+    appLow = 8192;
+    compositorMin = 768;
+    sessionMin = 1536;
+    sessionLow = 3072;
+    shellMin = 1024;
+    shellLow = 1024;
+    totalMin = appMin + sessionMin + shellMin;
+    totalLow = appLow + sessionLow + shellLow;
+  };
+  mib = value: "${toString value}M";
 
   surfaceType = surface: if surface.manager == "user" then "user" else surface.kind;
 
@@ -140,6 +168,10 @@ let
       );
 in
 rec {
+  # Read by the Chrome launcher and the Hyprland unit, which claim their
+  # share of the desktop guarantee on their own units.
+  inherit desktopMemory;
+
   # Global earlyoom is only the last-resort floor. Per-scope cgroups own
   # workload containment; this process-name fallback protects only surfaces
   # needed to keep or recover the graphical/login session. Agents, language
@@ -224,13 +256,20 @@ rec {
         IOAccounting = true;
         IODeviceLatencyTargetSec = interactiveIoLatency;
       };
-      # memory.low protection is limited by every ancestor. This carries the
-      # user-manager app/session/shell allocations to the root hierarchy.
+      # memory.min and memory.low are limited by every ancestor. This
+      # carries the desktop's guarantee (app, session and shell slices) to
+      # the root hierarchy; workstation.nix repeats it on user-<uid>.slice
+      # and user@<uid>.service.
       user = {
         IOAccounting = true;
         IODeviceLatencyTargetSec = interactiveIoLatency;
-        # app 8G + session 5G + desktop shell 512M.
-        MemoryLow = "13824M";
+        # The desktop lives here, and the agents inside it carry their own
+        # low weight one level down. With the default 100 the user slice
+        # shared a saturated disk evenly with system services and builds,
+        # and Chrome waited in iocost throttling (ioc_rqos_throttle).
+        IOWeight = 400;
+        MemoryMin = mib desktopMemory.totalMin;
+        MemoryLow = mib desktopMemory.totalLow;
       };
       # Low weights, and per-unit memory limits from each unit's class. A
       # shared 2G ceiling here made every scheduled job reclaim against the
@@ -239,12 +278,14 @@ rec {
         CPUWeight = 20;
         IOWeight = 20;
       };
-      # The daemon answers every store query, devshell and switch, not only
-      # builds, so its reads share the desktop's latency target at the root
-      # level instead of being throttled behind user.slice.
+      # The daemon and every build it runs live here (nix-build.slice is
+      # its only child), so this weight is the builds' share at the root
+      # level. It used to carry the desktop's latency target so store
+      # queries were never throttled, but that also put builds level with
+      # the desktop. Builds and devshells are agent work and yield to it.
       nix = {
         IOAccounting = true;
-        IODeviceLatencyTargetSec = interactiveIoLatency;
+        IOWeight = 25;
       };
       nix-build = buildSlicePolicy;
       system-critical = {
@@ -254,68 +295,87 @@ rec {
         IOWeight = 300;
         MemoryLow = "2G";
       };
-      # System-manager counterparts of the user-side job plane below, for
-      # system units that participate in it. The memory ceiling stays on the
-      # user side alone: their heavy phases execute as pueue tasks there, and
-      # a second MemoryHigh here would double the plane's declared budget.
-      agentctl = {
-        IOAccounting = true;
-        CPUWeight = 10;
-        IOWeight = 10;
-      };
-      agentctl-work = {
-        IOAccounting = true;
-        CPUWeight = 100;
-        IOWeight = 100;
-      };
     };
     user = {
+      # The agent budget. Every kind of agent work runs below this one
+      # slice: interactive CLIs (agent-cli), their tool commands, MCP servers
+      # and the devkit test PostgreSQL (agent-tool), and the agentctl job
+      # plane with every pool (agent-ctl). Slice names encode hierarchy, so
+      # an agent-* slice is a child of this one.
+      #
+      # Until 2026-10-27 the three were siblings of the desktop with ceilings
+      # of their own (10G, 12G and 20G high), together a third more than the
+      # host's RAM, and the desktop's best-effort MemoryLow was all that stood
+      # between them and Chrome. That night they held 18 GiB resident and
+      # 5 GiB of swap, memory pressure stalled every task 18% of the time,
+      # and Chrome, Hyprland and the shell were swapped out.
+      #
+      # Sized so the desktop and the live services always fit beside it on
+      # this 31 GiB host: desktop guarantee 6.5 (desktopMemory.totalMin) +
+      # system services ~6 (Sinex PostgreSQL's 4G buffers, sinexd, the
+      # critical slice) + kernel and compressed swap ~2.5 + MemoryMax 16.
+      # MemoryHigh throttles the agents 2G before that. The swap allowance
+      # lets cold agent pages go to zram rather than making agents re-read
+      # page cache, and it is all the swap agent work can take.
+      agent = {
+        IOAccounting = true;
+        # Below app and session (100) and the shell (400). The quota keeps a
+        # third of the 24 threads out of reach whatever the weights say,
+        # since an idle desktop's share is otherwise lent away.
+        CPUWeight = 60;
+        CPUQuota = "1600%";
+        # iocost lends an idle sibling's share, so a low weight costs agents
+        # nothing while the desktop is quiet and gives the desktop ~97% of
+        # the disk when it is not. At 90-100 per agent slice, three of them
+        # held as much weight as the whole desktop.
+        IOWeight = 25;
+        MemoryHigh = "14G";
+        MemoryMax = "16G";
+        MemorySwapMax = "6G";
+        TasksMax = 16384;
+      };
       # Interactive agent CLIs and their in-process subagents. Claude's Bash
-      # tools, MCP servers and ad-hoc builds run in agenttool.slice; heavy
-      # declared work belongs to agentctl.slice and keeps its own budget.
+      # tools, MCP servers and ad-hoc builds run in agent-tool.slice; heavy
+      # declared work belongs to agent-ctl.slice.
       # 2026-09-27 an agent's `uv sync` source-built a C++ wheel here with ~25
       # parallel cc1plus at ~800 MB each; with no ceiling and CPUWeight 400
       # this slice outranked the desktop and took the host to load 74, RAM
       # exhausted and 14 GB of swap.
-      agent = {
+      agent-cli = {
         IOAccounting = true;
-        # Below app/session (100) so the desktop wins contention, above the
-        # agentctl job plane (90) so a coordinator stays responsive during a
-        # wave. The quota keeps 8 of 24 cores out of reach whatever the
-        # weights say, since an idle desktop's share is otherwise lent away.
-        CPUWeight = 95;
-        CPUQuota = "1600%";
+        # Above the tools and the job plane, so a coordinator stays
+        # responsive during a wave.
+        CPUWeight = 100;
         IOWeight = 100;
-        # The agent processes themselves stay resident (measured ~0.6 GB for
-        # a coordinator with twenty forks).
-        MemoryLow = "3G";
+        # The agent processes themselves stay resident while tools and jobs
+        # fill the budget (~0.6 GB for a coordinator with twenty forks; all
+        # sessions together 1.9 GB on 2026-10-27).
+        MemoryLow = "2G";
         # Throttle, never kill: every in-process subagent shell is a child of
         # the coordinator's Claude process in the same scope, so an oomd
         # policy here would take the session down with its runaway child.
-        # 10G leaves the desktop reservation (app 8G + session 5G +
-        # desktop-shell 512M) and the job plane room on a 31 GB host.
-        MemoryHigh = "10G";
+        MemoryHigh = "6G";
         # Hard backstop only if throttling cannot hold: the kernel's
         # cgroup-local OOM then picks the largest single process, which for
         # a runaway build is the build, not a ~1 GB agent process.
-        MemoryMax = "14G";
+        MemoryMax = "8G";
         MemorySwapMax = "2G";
         TasksMax = 8192;
       };
       # What interactive agents run: Bash tool commands, stdio MCP servers
       # and their subprocesses, moved here by claude-tool-scope (Claude
-      # Code's CLAUDE_CODE_SHELL_PREFIX). A sibling of agent.slice, not a
+      # Code's CLAUDE_CODE_SHELL_PREFIX). A sibling of agent-cli.slice, not a
       # child, so tool memory never counts toward the agent processes'
       # MemoryHigh: on 2026-09-28 a dozen parallel verification gates held
-      # agent.slice at its MemoryHigh and the kernel throttled the
+      # the agent slice at its MemoryHigh and the kernel throttled the
       # coordinator itself for hours (sinnix-6to8). Here the tools throttle
-      # each other and the supervising process stays responsive.
-      agenttool = {
+      # each other and the supervising process stays responsive until the
+      # whole budget is full.
+      agent-tool = {
         IOAccounting = true;
-        # Just below agent.slice, so the coordinator wins CPU contention
+        # Just below agent-cli.slice, so the coordinator wins CPU contention
         # against its own tools.
         CPUWeight = 90;
-        CPUQuota = "1600%";
         IOWeight = 90;
         # Kill, not throttle, once the tools as a whole thrash. A killed tool
         # is a failed command the agent can retry; throttling at MemoryHigh
@@ -326,9 +386,9 @@ rec {
         # command its own. There is no per-command ceiling: a big command on
         # a quiet host is fine, and only contention that actually stalls the
         # slice is acted on. MemoryMax and the small swap allowance end a
-        # single runaway inside this slice instead of across the host.
-        MemoryHigh = "12G";
-        MemoryMax = "16G";
+        # single runaway inside this slice instead of across the budget.
+        MemoryHigh = "8G";
+        MemoryMax = "10G";
         MemorySwapMax = "2G";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
@@ -343,24 +403,25 @@ rec {
         # target throttles batch whenever the desktop's own requests wait,
         # which is what swap-in feels like under six lanes.
         IODeviceLatencyTargetSec = interactiveIoLatency;
-        # Batch under agentctl.slice grows into swap; the desktop's working
-        # set must not be what gets reclaimed to make room for it. Chrome
-        # alone measured 6.6G on 2026-10-19, when 6G let it be swapped out
-        # (3 GB) and video stuttered.
-        MemoryLow = "8G";
+        # Chrome alone measured 6.6G on 2026-10-19, when 6G of MemoryLow let
+        # it be swapped out (3 GB) and video stuttered. The guarantee covers
+        # Chrome's resident core (the launcher claims desktopMemory.chromeMin
+        # of it for the browser unit); Low covers the rest while the agents
+        # still hold anything reclaimable.
+        MemoryMin = mib desktopMemory.appMin;
+        MemoryLow = mib desktopMemory.appLow;
       };
       session = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 300;
-        # Weights share bandwidth only while both sides issue IO; a latency
-        # target throttles batch whenever the desktop's own requests wait,
-        # which is what swap-in feels like under six lanes.
         IODeviceLatencyTargetSec = interactiveIoLatency;
-        # The interactive part of session.slice, measured 2026-09-02 21:30 at
-        # 7 GB current. Its 23 GB peak is Claude-session subagents running
-        # pytest, which belong in the work slice, not behind this guarantee.
-        MemoryLow = "5G";
+        # Hyprland (its unit claims desktopMemory.compositorMin), kitty,
+        # PipeWire and the portals: 0.9 GiB together on 2026-10-27, when
+        # Hyprland's 0.6 GiB was mostly swapped out. The 2026-09 figure of
+        # 7 GB included agent sessions that now start in agent-cli.slice.
+        MemoryMin = mib desktopMemory.sessionMin;
+        MemoryLow = mib desktopMemory.sessionLow;
       };
       # systemd creates this dash-hierarchy parent for desktop-shell.slice.
       # Carry the shell policy to its competition with the other user slices.
@@ -369,14 +430,17 @@ rec {
         IODeviceLatencyTargetSec = interactiveIoLatency;
         CPUWeight = 400;
         IOWeight = 300;
-        MemoryLow = "512M";
+        MemoryMin = mib desktopMemory.shellMin;
+        MemoryLow = mib desktopMemory.shellLow;
       };
+      # The noctalia shell: 1.0 GiB on 2026-10-27, 0.7 GiB of it swapped out.
       desktop-shell = {
         IOAccounting = true;
         IODeviceLatencyTargetSec = interactiveIoLatency;
         CPUWeight = 400;
         IOWeight = 300;
-        MemoryLow = "512M";
+        MemoryMin = mib desktopMemory.shellMin;
+        MemoryLow = mib desktopMemory.shellLow;
       };
       backup = {
         IOAccounting = true;
@@ -390,52 +454,48 @@ rec {
         CPUWeight = 20;
         IOWeight = 20;
       };
-      # Slice names encode hierarchy. This outer slice is the direct sibling
-      # of app.slice and session.slice, so its weights govern host contention.
-      agentctl = {
+      # The agentctl job plane: pueued (agent-ctl-work.slice) and every pool
+      # slice below it. Its own ceiling leaves the agent CLIs' and tools'
+      # share of the budget; the budget, not this slice, bounds it against
+      # the desktop.
+      agent-ctl = {
         IOAccounting = true;
-        # The job plane is the machine's main workload during a wave; at 10 it
+        # The job plane is the agents' main workload during a wave; at 10 it
         # starved behind an idle desktop and the coordinator's own polls.
         CPUWeight = 90;
         IOWeight = 100;
-        # Bound the aggregate job plane, not only its individual pools.
-        # Desktop reservations are reclaim protection, not a substitute for
-        # a hard limit on background allocations.
-        MemoryHigh = "20G";
-        MemoryMax = "22G";
+        MemoryHigh = "12G";
+        MemoryMax = "14G";
         # Bounded swap for the plane as a whole. With none, a job at its
         # ceiling could only drop page cache (6 TiB of re-reads over one
-        # 11-day uptime), and global pressure from it swapped out the
-        # desktop instead: the browser held 5.9 GiB of swap. A job's own
-        # cold pages are the cheaper thing to page.
-        MemorySwapMax = "6G";
+        # 11-day uptime). A job's own cold pages are the cheaper thing to
+        # page.
+        MemorySwapMax = "5G";
       };
-      agentctl-work = {
+      agent-ctl-work = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
       };
       # Each pueue task is a transient service in one of these slices. The
-      # outer agentctl.slice and the agent pool are never oomd victims; the
-      # pytest leaf pools and bulk are killed at their own pressure. The
-      # reservations are fixed against the workstation's 32 GiB physical
-      # memory: app 8 GiB, session 5 GiB, desktop shell 512 MiB, and the
-      # remaining job plane is admitted by pool rather than free-RAM probes.
-      # Each pool may swap a little of its own memory; MemoryMax still ends a
-      # runaway, and the plane's MemorySwapMax bounds the total.
-      agentctl-agent = {
+      # plane and the agent pool are never oomd victims; the pytest leaf
+      # pools and bulk are killed at their own pressure. Pools are admitted
+      # by width and adaptive headroom (which reads every ancestor's limits,
+      # the budget's included), not by free-RAM probes. Each pool may swap a
+      # little of its own memory; MemoryMax still ends a runaway, and the
+      # plane's MemorySwapMax bounds the total.
+      agent-ctl-agent = {
         IOAccounting = true;
         CPUWeight = 400;
         IOWeight = 300;
-        # Held at 8G: with pytest-heavy's 12G it fills the 20G work plane
-        # (flake/tests/agent-tools.nix). Worker count, not this ceiling, is
-        # the lever: see agent.parallel in modules/services/agentctl.nix.
+        # Worker count, not this ceiling, is the lever: see agent.parallel in
+        # modules/services/agentctl.nix.
         MemoryHigh = "8G";
         MemorySwapMax = "1G";
       };
 
       # Slice names encode hierarchy, so this is not just the `pytest` pool: it
-      # is also the PARENT of agentctl-pytest-heavy and agentctl-pytest-quick.
+      # is also the PARENT of agent-ctl-pytest-heavy and agent-ctl-pytest-quick.
       # Its ceiling is what the three pools share, and it is the only one that
       # binds them collectively -- raising a child alone changes nothing.
       #
@@ -448,12 +508,8 @@ rec {
       # under a 22G ceiling (1.18x) took zero high events. 10.05 GiB * 1.2 is
       # 12.1 GiB, so 12G high / 14G max, and the corpus is sized for four
       # workers -- 4 of 24 cores, because this corpus is memory-bound, not
-      # core-bound.
-      #
-      # 12G is also exactly what the plane can give beside a saturated agent
-      # pool: 12G + 8G = the plane's own 20G MemoryHigh. A concurrent quick run
-      # therefore pushes this slice past its ceiling on purpose, and the
-      # corpus, as the critical path, is what the throttle protects.
+      # core-bound. 12G is the whole plane: a corpus run beside a busy agent
+      # pool is throttled by the plane, not given more of the host.
       #
       # No ManagedOOMMemoryPressure here, unlike the leaves. A parent's memory
       # PSI is the AGGREGATE of its children, so pressure generated by a busy
@@ -462,7 +518,7 @@ rec {
       # pool was live (2026-09-14). The correct response to sibling
       # oversubscription is throttling; a genuine runaway is still bounded by
       # MemoryMax and by each leaf's own pressure policy.
-      agentctl-pytest = {
+      agent-ctl-pytest = {
         IOAccounting = true;
         # Tests are the wave's critical path; agent processes mostly wait on
         # the API, so the test pools outrank them.
@@ -478,7 +534,7 @@ rec {
       # A scope whose ceiling exceeds its working set by 1.2x does not reclaim,
       # so it does not generate sustained memory PSI; the previous kill was a
       # 6G ceiling under a 10 GiB working set, not a policy that is too eager.
-      agentctl-pytest-heavy = {
+      agent-ctl-pytest-heavy = {
         IOAccounting = true;
         CPUWeight = 200;
         IOWeight = 200;
@@ -495,7 +551,7 @@ rec {
       # measured combined peak so memory.high does not create sustained reclaim
       # that triggers oomd for healthy focused runs. The 12G parent arbitrates
       # this pool against concurrent heavy tests.
-      agentctl-pytest-quick = {
+      agent-ctl-pytest-quick = {
         IOAccounting = true;
         CPUWeight = 200;
         IOWeight = 200;
@@ -511,32 +567,32 @@ rec {
       # and swaps its own pages before the hard cap; equal limits with no swap
       # made bulk drop and re-read its page cache instead (4.86 TiB of
       # refaults in one uptime), and an 80M read cap made each re-read slow.
-      # Cargo builds peak at 5-8 GiB each and the cargo cap admits three
-      # across pools, so the slice holds two beside other bulk work: at
-      # 8G/10G two concurrent checks reclaimed against each other until oomd
-      # killed one after 53 minutes (2026-10-25).
-      agentctl-bulk = {
+      # Cargo builds peak at 5-8 GiB each; the cargo cap admits two across
+      # pools, and this slice holds them up to the plane's ceiling. At 8G/10G
+      # two concurrent checks reclaimed against each other until oomd killed
+      # one after 53 minutes (2026-10-25).
+      agent-ctl-bulk = {
         IOAccounting = true;
         CPUWeight = 20;
         IOWeight = 10;
-        MemoryHigh = "16G";
-        MemoryMax = "18G";
+        MemoryHigh = "12G";
+        MemoryMax = "14G";
         MemorySwapMax = "2G";
         ManagedOOMMemoryPressure = "kill";
         ManagedOOMMemoryPressureLimit = "50%";
         ManagedOOMMemoryPressureDurationSec = "30s";
       };
-      agentctl-normal = {
+      agent-ctl-normal = {
         IOAccounting = true;
         CPUWeight = 50;
         IOWeight = 50;
         # Focused Cargo test builds peak at 2-6 GiB each and the pool runs
         # three; the plane's own ceiling bounds normal and bulk together.
-        MemoryHigh = "14G";
-        MemoryMax = "16G";
+        MemoryHigh = "12G";
+        MemoryMax = "14G";
         MemorySwapMax = "2G";
       };
-      agentctl-interactive = {
+      agent-ctl-interactive = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
@@ -547,7 +603,7 @@ rec {
       # The gateway's shell lanes share this parent by slice-name hierarchy.
       # It hosts no pool; it measures both lanes and stays above the wider
       # child so it never binds either alone.
-      agentctl-shell = {
+      agent-ctl-shell = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
@@ -556,7 +612,7 @@ rec {
       };
       # Quick reads (rg, sed, git status) come first for CPU and IO; a runaway
       # one is killed at its own ceiling, never paging the desktop.
-      agentctl-shell-quick = {
+      agent-ctl-shell-quick = {
         IOAccounting = true;
         CPUWeight = 200;
         IOWeight = 200;
@@ -564,9 +620,9 @@ rec {
         MemoryMax = "4G";
         MemorySwapMax = "512M";
       };
-      # Agent CLIs launched from ChatGPT: 2-3 GiB each, like agentctl-agent
+      # Agent CLIs launched from ChatGPT: 2-3 GiB each, like agent-ctl-agent
       # workers, and like them throttled rather than killed.
-      agentctl-shell-long = {
+      agent-ctl-shell-long = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
@@ -575,7 +631,7 @@ rec {
       };
       # Offloads and copies: the lowest I/O weight in the plane, so builds
       # and interactive reads keep the disk while a copy runs.
-      agentctl-background = {
+      agent-ctl-background = {
         IOAccounting = true;
         CPUWeight = 10;
         IOWeight = 5;
@@ -586,7 +642,7 @@ rec {
       # One benchmark or measurement at a time. Its numbers are only valid on
       # a quiet host, so it runs throttled by nothing but its own ceiling: no
       # pressure kill, ordinary weights.
-      agentctl-measure = {
+      agent-ctl-measure = {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 100;
@@ -596,7 +652,7 @@ rec {
       };
       # One full workstation build (`sinnix:build_system`); evaluation runs
       # here, the derivations in the Nix daemon.
-      agentctl-system-build = {
+      agent-ctl-system-build = {
         IOAccounting = true;
         CPUWeight = 20;
         IOWeight = 10;
@@ -609,20 +665,22 @@ rec {
     };
   };
 
-  # An agent CLI puts its outermost process in agent.slice unless it is
+  # An agent CLI puts its outermost process in agent-cli.slice unless it is
   # already inside a declared accounting boundary. These are those
-  # boundaries: agent.slice is the interactive plane, and agentctl.slice is the
-  # whole job plane — the coordinator, every pool slice, and the per-task
-  # scope that carries a lane's MemoryMax and its cancellation reap. Naming
-  # the outer slice rather than each pool keeps a new pool from launching an
-  # agent that escapes its own budget.
+  # boundaries: agent-cli.slice is the interactive plane, and agent-ctl.slice
+  # is the whole job plane — the coordinator, every pool slice, and the
+  # per-task scope that carries a lane's MemoryMax and its cancellation reap.
+  # Naming the outer slice rather than each pool keeps a new pool from
+  # launching an agent that escapes its own budget. An agent started from a
+  # tool command (agent-tool.slice) moves to agent-cli.slice like one started
+  # from a terminal.
   agentContainedSlices = [
-    "agent.slice"
-    "agentctl.slice"
+    "agent-cli.slice"
+    "agent-ctl.slice"
   ];
   # Shell `case` pattern matched against /proc/self/cgroup. The separators
-  # are load-bearing: "agentctl-agent.slice" ends in "agent.slice"
-  # without being it.
+  # are load-bearing: "agent-ctl-agent.slice" begins with "agent-ctl"
+  # without being agent-ctl.slice.
   agentContainedCasePattern = lib.concatMapStringsSep "|" (
     slice: ''*"/${slice}/"*''
   ) agentContainedSlices;

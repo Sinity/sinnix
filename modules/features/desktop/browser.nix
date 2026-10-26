@@ -190,7 +190,9 @@ mkFeatureModule {
             commandLineArgs = chromeArgs;
           };
           # Launch Chrome through a transient user service so browser children
-          # stay in one cgroup for accounting and interactive policy.
+          # stay in one cgroup for accounting and interactive policy. The
+          # unit claims its part of app.slice's hard memory guarantee, so
+          # the browser's resident core is never reclaimed for agent work.
           chromeLauncher = pkgs.writeShellApplication {
             name = "sinnix-chrome";
             runtimeInputs = [
@@ -215,6 +217,7 @@ mkFeatureModule {
                   --slice=app.slice
                   --same-dir
                   --property=ExitType=cgroup
+                  --property=MemoryMin=${toString helpers.data.runtimeDefaults.desktopMemory.chromeMin}M
                   --setenv=SINNIX_CHROME_SCOPED=1
                 )
 

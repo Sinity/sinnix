@@ -94,8 +94,8 @@ mkServiceModule {
       unitArgs = lib.concatStringsSep "," (lib.unique surfaceUnitIdentities);
       userUid = "1000";
       userSliceRoot = "/user.slice/user-${userUid}.slice/user@${userUid}.service";
-      # Slice names encode hierarchy: "agentctl-pytest.slice" is a child of
-      # "agentctl.slice". Derive the pool paths from the declared slice
+      # Slice names encode hierarchy: "agent-ctl-pytest.slice" is a child of
+      # "agent-ctl.slice", itself a child of "agent.slice". Derive the pool paths from the declared slice
       # registry rather than keeping a second copy of the pool list here --
       # the pools whose MemoryHigh gates test parallelism were invisible for
       # exactly as long as that list was maintained by hand.
@@ -108,11 +108,11 @@ mkServiceModule {
             ) (lib.splitString "-" name)
           )
         }";
-      agentctlPoolSliceNames = lib.filter (name: lib.hasPrefix "agentctl-" name) (
+      agentctlPoolSliceNames = lib.filter (name: lib.hasPrefix "agent-ctl-" name) (
         lib.attrNames config.sinnix.runtime.inventory.slices.user
       );
       agentctlPoolCgroups = map (name: {
-        label = "user.agentctl-pool-${lib.removePrefix "agentctl-" name}";
+        label = "user.agentctl-pool-${lib.removePrefix "agent-ctl-" name}";
         scope = "user";
         path = userSliceCgroupPath name;
       }) agentctlPoolSliceNames;
@@ -132,24 +132,32 @@ mkServiceModule {
           scope = "system";
           path = "/nix.slice/nix-build.slice";
         }
+        # The whole agent budget; the three below are its children.
+        {
+          label = "user.agent-budget";
+          scope = "user";
+          path = userSliceCgroupPath "agent";
+        }
+        # Historical labels from before the budget nested these slices
+        # (2026-10-27), kept so the existing series stay comparable:
+        # user.agent is the CLI slice, user.agenttool the tool slice, and
+        # user.agentctl-work the job plane ROOT (agent-ctl.slice), not the
+        # agent-ctl-work.slice inside it. The per-pool children arrive below
+        # as user.agentctl-pool-<pool>.
         {
           label = "user.agent";
           scope = "user";
-          path = "${userSliceRoot}/agent.slice";
+          path = userSliceCgroupPath "agent-cli";
         }
         {
           label = "user.agenttool";
           scope = "user";
-          path = "${userSliceRoot}/agenttool.slice";
+          path = userSliceCgroupPath "agent-tool";
         }
-        # Historical label: this samples the job plane ROOT (agentctl.slice),
-        # not the agentctl-work.slice nested inside it. The name predates the
-        # inner slice and is kept so the existing series stays comparable; the
-        # per-pool children arrive below as user.agentctl-pool-<pool>.
         {
           label = "user.agentctl-work";
           scope = "user";
-          path = "${userSliceRoot}/agentctl.slice";
+          path = userSliceCgroupPath "agent-ctl";
         }
         {
           label = "user.background";
@@ -166,10 +174,10 @@ mkServiceModule {
           scope = "user";
           path = "${userSliceRoot}/backup.slice";
         }
-        # The desktop-side slices the job plane's MemoryHigh is sized
-        # against. Their MemoryLow reservations rest on a one-off 2026-09-02
-        # reading; without a series there is no way to tell whether the
-        # reservation is still the right size.
+        # The desktop-side slices the agent budget is sized against. Their
+        # MemoryMin and MemoryLow rest on one-off readings (2026-10-27);
+        # without a series there is no way to tell whether the guarantee is
+        # still the right size.
         {
           label = "user.app";
           scope = "user";

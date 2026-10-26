@@ -96,7 +96,11 @@ class Outcome(str, Enum):
     SLOT_OCCUPIED = "slot_occupied"
 
 
-POOL_SLICE_PREFIX = "agentctl"
+# Pool slices sit under agent-ctl.slice, inside the host's agent budget
+# (agent.slice); slice names encode that hierarchy. Unit names keep their
+# own prefix.
+POOL_SLICE_PREFIX = "agent-ctl"
+UNIT_PREFIX = "agentctl"
 # The pools with a declared slice policy. Any other pueue group (a project's
 # landing group, a fixture) runs under the normal slice.
 POLICY_POOLS = frozenset(
@@ -159,7 +163,7 @@ def unit_for(launch_input: object, pool: str) -> str:
     digest = hashlib.sha256(text.encode()).hexdigest()[:12]
     stem = re.sub(r"[^A-Za-z0-9_.-]", "-", PurePosixPath(text).stem).strip("-.")
     stem = stem[:UNIT_STEM_BYTES] or "job"
-    return f"{POOL_SLICE_PREFIX}-{pool}-{stem}-{digest}.service"
+    return f"{UNIT_PREFIX}-{pool}-{stem}-{digest}.service"
 
 
 def _sibling(log_path: object, suffix: str) -> Path:
@@ -631,7 +635,7 @@ def active_units(daemon: str, pool: str) -> dict[str, int | None]:
         "--plain",
         "--no-legend",
         "--state=active,activating,deactivating",
-        f"{POOL_SLICE_PREFIX}-{pool}-*",
+        f"{UNIT_PREFIX}-{pool}-*",
     )
     prefix = unit_description(daemon, pool, "")
     units: dict[str, int | None] = {}

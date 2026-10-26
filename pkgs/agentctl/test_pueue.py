@@ -431,7 +431,7 @@ def test_a_private_pueue_task_places_its_child_in_the_declared_pool_scope(
     assert finished.succeeded, pueue.log(task_id)
     cgroup = log_path.read_text()
     assert f"/{unit_for(launch_path, 'pytest')}" in cgroup
-    assert "/agentctl-pytest.slice/" in cgroup
+    assert "/agent-ctl-pytest.slice/" in cgroup
 
 
 def test_a_waiting_caller_keeps_its_job_when_the_operator_reorders_the_queue(
