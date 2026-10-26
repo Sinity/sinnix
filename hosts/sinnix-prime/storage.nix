@@ -368,6 +368,10 @@ in
       description = "Ensure dedicated sinex nodatacow subvolume exists on the /realm NVMe";
       requiredBy = [ "var-lib-sinex.mount" ];
       before = [ "var-lib-sinex.mount" ];
+      # Provisioning, needed before the mount, not a service of the running
+      # host: restarting it at switch stops the mount and with it Postgres
+      # and sinexd. An edited script takes effect at the next boot.
+      restartIfChanged = false;
       after = [ "local-fs-pre.target" ];
       unitConfig.DefaultDependencies = false;
       path = [
@@ -385,7 +389,9 @@ in
         tmp=$(mktemp -d)
         cleanup() {
           if mountpoint -q "$tmp"; then
-            umount -- "$tmp"
+            # Something walking /tmp can hold the mount for a moment; a
+            # failed cleanup must not fail the unit and stop Postgres.
+            umount -- "$tmp" || umount --lazy -- "$tmp"
           fi
           rmdir -- "$tmp"
         }
