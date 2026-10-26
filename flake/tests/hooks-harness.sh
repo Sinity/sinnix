@@ -81,6 +81,20 @@ store_after_heredoc=$(printf 'cat <<%sEOF%s\ntext\nEOF\nls /nix/store/*\n' "'" "
 store_after_payload=$(jq -n --arg c "$store_after_heredoc" '{tool_input:{command:$c}}')
 store_after_deny=$(run_hook "$hooks_dir/pretooluse-bash.sh" "$store_after_payload")
 printf '%s' "$store_after_deny" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+for command in \
+  'until agentctl job result 559 | grep -q done; do sleep 30; done' \
+  "timeout 590 bash -c 'until [ \"\$(gh pr view 2900 --json state -q .state)\" != OPEN ]; do sleep 30; done'" \
+  'for i in $(seq 1 60); do gh pr checks 1 && break; sleep 10; done'; do
+  payload=$(jq -n --arg command "$command" '{tool_input: {command: $command}}')
+  run_hook "$hooks_dir/pretooluse-bash.sh" "$payload" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+done
+for payload in \
+  "$(jq -n '{tool_input: {command: "until test -s out; do sleep 5; done", run_in_background: true}}')" \
+  "$(jq -n '{tool_input: {command: "# poll-ok: socket appears within seconds\nuntil test -S sock; do sleep 1; done"}}')" \
+  "$(jq -n '{tool_input: {command: "while read -r line; do echo \"$line\"; done < list"}}')" \
+  "$(jq -n '{tool_input: {command: "git commit -F - <<EOF\nuntil x; do sleep 30; done\nEOF"}}')"; do
+  test -z "$(run_hook "$hooks_dir/pretooluse-bash.sh" "$payload")"
+done
 
 test -z "$(PATH="$test_root/bin" run_hook "$hooks_dir/sessionstart-sinex-recall.sh" '{}')"
 

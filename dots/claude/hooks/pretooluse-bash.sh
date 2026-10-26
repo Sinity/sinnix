@@ -224,6 +224,24 @@ if [[ -n $git_guard_reason ]]; then
   exit 0
 fi
 
+# Block foreground polling loops.
+#
+# A loop that sleeps until a job, file or PR changes holds the agent for up to
+# ten minutes. Then it re-issues the loop, and every round re-reads the
+# whole context. Across lanes on 2026-10-24..26 that was 2,462 requests and
+# about 1.07 billion cached input tokens. Wait in the background instead:
+# `agentctl job wait <id>` with run_in_background, or a Monitor; the harness
+# wakes the agent when it finishes. A background loop is allowed, and so is a
+# foreground one that carries `# poll-ok: <reason>` for a short, bounded poll
+# with no completion event to wait on.
+RUN_IN_BACKGROUND=$(echo "$INPUT" | jq -r '.tool_input.run_in_background // false')
+if [[ $RUN_IN_BACKGROUND != true ]] && ! echo "$CMD" | grep -qE '#[[:space:]]*poll-ok:[[:space:]]*[^[:space:]]'; then
+  if printf '%s' "$CMD_NO_HEREDOC" | tr '\n' ' ' | grep -qE '(^|[;&|({[:space:]'"'"'"])(until|while|for)[[:space:]].*[;[:space:]]do[[:space:]].*\bsleep[[:space:]]+[0-9]'; then
+    emit_deny "Foreground polling loop blocked: every round re-reads the whole context. Run 'agentctl job wait <id>' (or the command you are waiting on) with run_in_background, or use Monitor, and do other work or end the turn until the notification arrives. If a short, bounded foreground poll is genuinely needed, add a comment '# poll-ok: <reason>' to the command."
+    exit 0
+  fi
+fi
+
 if echo "$CMD_NO_HEREDOC" | grep -qE "(^|[^'\"])/nix/store/[^[:space:]'\"]*[*?]"; then
   emit_deny "Shell glob over /nix/store blocked: ~219k entries make the shell stat the whole store before your command runs (this has OOMed the host twice). Use 'find /nix/store -maxdepth 1 -name PATTERN' which streams, or resolve the one store path first (nix eval --raw, readlink, nix-locate) and search under that."
   exit 0
