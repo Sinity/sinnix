@@ -4,10 +4,10 @@
 # runtimeInputs: bash
 #
 # sinexctl comes from the installed Sinex package. MCP clients may start this
-# without a login shell, so the daemon's socket and the agent token are named
+# without a login shell, so the daemon's loopback API and the agent token are named
 # here when the environment does not name them.
 set -euo pipefail
 
-export SINEX_ENDPOINT="${SINEX_ENDPOINT:-unix:/run/sinex/sinexd.sock}"
+export SINEX_ENDPOINT="${SINEX_ENDPOINT:-http://127.0.0.1:7171}"
 export SINEX_TOKEN_FILE="${SINEX_TOKEN_FILE:-/var/lib/sinex/daemon/tokens/agent.token}"
 exec /run/current-system/sw/bin/sinexctl mcp "$@"
