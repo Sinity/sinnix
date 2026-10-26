@@ -1461,17 +1461,17 @@
         "rust-nixpkgs": "rust-nixpkgs"
       },
       "locked": {
-        "lastModified": 1792993098,
-        "narHash": "sha256-xt4tlkrIu1nZYs+IfhbhSKogJcPNjPV5XVPNt9c/ZWk=",
+        "lastModified": 1792996732,
+        "narHash": "sha256-V1+0iFcwTeiROOb8gkt4PN1+nfH99/pGBMs/oTa52OM=",
         "ref": "master",
-        "rev": "39e0ab6d1b2d4a3c7495c03b3eaa36025e95cb9b",
-        "revCount": 2716,
+        "rev": "5731fded2c5840e3a5509fd12adc501495193420",
+        "revCount": 2718,
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       },
       "original": {
         "ref": "master",
-        "rev": "39e0ab6d1b2d4a3c7495c03b3eaa36025e95cb9b",
+        "rev": "5731fded2c5840e3a5509fd12adc501495193420",
         "type": "git",
         "url": "https://github.com/Sinity/sinex"
       }
