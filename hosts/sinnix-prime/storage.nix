@@ -269,19 +269,27 @@ in
     timers.sinnix-fstrim = fstrimJob.systemd.timers.sinnix-fstrim;
 
     # Ensure the dedicated sinex subvolume exists on the /realm NVMe (not the
-    # MX500) before /var/lib/sinex is mounted. The btrfs top level
-    # (subvolid=5) isn't normally mounted, so mount it transiently to create
-    # the child subvol with nodatacow; idempotent, so this is a no-op on an
-    # already-provisioned host and only matters for a fresh install/restore.
+    # MX500) before /var/lib/sinex is mounted, creating it nodatacow;
+    # idempotent, so this is a no-op on an already-provisioned host and only
+    # matters for a fresh install/restore. /realm is the filesystem's top
+    # level (subvol=/), so it works there. It used to mount subvolid=5 itself
+    # with no other options; when that won the race against realm.mount it
+    # was the filesystem's first mount, and btrfs kept its options for every
+    # mount: no compression and async discard instead of /realm's declared
+    # compress=zstd and nodiscard (observed through 2026-10-27).
     services.ensure-sinex-subvol = {
       description = "Ensure dedicated sinex nodatacow subvolume exists on the /realm NVMe";
+      requires = [ "realm.mount" ];
       requiredBy = [ "var-lib-sinex.mount" ];
       before = [ "var-lib-sinex.mount" ];
       # Provisioning, needed before the mount, not a service of the running
       # host: restarting it at switch stops the mount and with it Postgres
       # and sinexd. An edited script takes effect at the next boot.
       restartIfChanged = false;
-      after = [ "local-fs-pre.target" ];
+      after = [
+        "local-fs-pre.target"
+        "realm.mount"
+      ];
       unitConfig.DefaultDependencies = false;
       path = [
         pkgs.btrfs-progs
@@ -294,20 +302,8 @@ in
         RemainAfterExit = true;
       };
       script = ''
-        dev=/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a
-        tmp=$(mktemp -d)
-        cleanup() {
-          if mountpoint -q "$tmp"; then
-            # Something walking /tmp can hold the mount for a moment; a
-            # failed cleanup must not fail the unit and stop Postgres.
-            umount -- "$tmp" || umount --lazy -- "$tmp"
-          fi
-          rmdir -- "$tmp"
-        }
-        trap cleanup EXIT
-        mount -o subvolid=5 "$dev" "$tmp"
-        install -d "$tmp/state"
-        root="$tmp/state/sinex"
+        install -d ${realmRoot}/state
+        root=${realmRoot}/state/sinex
         if ! btrfs subvolume show "$root" >/dev/null 2>&1; then
           btrfs subvolume create "$root"
           chattr +C "$root" || true
