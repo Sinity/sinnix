@@ -96,3 +96,52 @@ with tempfile.TemporaryDirectory(prefix="noctalia-ordering-") as directory:
     path = Path(directory) / "bridge.luau"
     path.write_text(setup + plugin.joinpath("service.luau").read_text() + checks)
     subprocess.run(["luau", str(path)], check=True)
+
+panel_setup = r"""
+local tree
+local requests = {}
+local function widget(options, children) return {options = options, children = children} end
+ui = {label = widget, button = widget, row = widget, column = widget}
+panel = {render = function(value) tree = value end}
+noctalia = {
+  getConfig = function() return nil end,
+  getenv = function() return "/neutral-runtime" end,
+  expandPath = function(value) return value end,
+  readFile = function() return "fixture-token" end,
+  state = {get = function() return nil end, watch = function() end},
+  json = {decode = function(value) return value end, encode = function(value) return value end},
+  http = function(options, callback) table.insert(requests, {options, callback}) end,
+  notifyError = function() end,
+}
+local function find(node, label)
+  if node.options.text == label then return node.options end
+  for _, child in ipairs(node.children or {}) do
+    local found = find(child, label)
+    if found then return found end
+  end
+end
+"""
+panel_checks = r"""
+onOpen({})
+onOpen({})
+assert(#requests == 1, "panel refresh must coalesce")
+local oldPin = {kind = "conversation", epoch = "old", id = "7", url = "https://chatgpt.com/c/one"}
+requests[1][2]({ok = true, status = 200, body = {rows = {{name = "fixture", state = "place", pin = oldPin}}, gaps = {}}})
+find(tree, "Refresh destinations").onClick()
+local newPin = {kind = "conversation", epoch = "new", id = "7", url = "https://chatgpt.com/c/two"}
+requests[2][2]({ok = true, status = 200, body = {rows = {{name = "replacement", state = "place", pin = newPin}}, gaps = {}}})
+assert(find(tree, "fixture · place"), "refresh replaced the saved pin")
+assert(find(tree, "Rebind to current"), "owner change must offer explicit rebind")
+find(tree, "Focus exact pin").onClick()
+assert(requests[3][1].body.pin == oldPin, "focus silently retargeted the old pin")
+find(tree, "Rebind to current").onClick()
+find(tree, "Focus exact pin").onClick()
+assert(requests[4][1].body.pin == newPin)
+print("Noctalia panel coalescing and explicit pin rebind passed")
+"""
+with tempfile.TemporaryDirectory(prefix="noctalia-panel-") as directory:
+    path = Path(directory) / "panel.luau"
+    path.write_text(
+        panel_setup + plugin.joinpath("panel.luau").read_text() + panel_checks
+    )
+    subprocess.run(["luau", str(path)], check=True)

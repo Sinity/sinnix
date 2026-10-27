@@ -117,7 +117,7 @@ local function agentLines()
   for index = 1, math.min(#jobs, 4) do
     local job = jobs[index]
     if type(job) == "table" then
-      table.insert(lines, "  " .. text(job.label) .. ": " .. text(job.phase))
+      table.insert(lines, "  " .. text(job.label) .. ": " .. text(job.phase) .. " · job " .. text(job.job_id) .. " · attempt " .. text(job.attempt))
     end
   end
   return lines
@@ -187,7 +187,82 @@ local function hubButton(label, path, tooltip)
   })
 end
 
-local function render()
+-- Pins live only for this panel process. Refresh never replaces a saved pin.
+local work = { rows = {}, gaps = { "Work destinations not read yet" } }
+local pins = {}
+local workRequest = 0
+local workBusy = false
+local render
+
+local function workHttp(path, pin, callback)
+  local runtime = noctalia.getenv("XDG_RUNTIME_DIR") or ""
+  local tokenPath = noctalia.getConfig("token_path") or "$XDG_RUNTIME_DIR/sinnix/hub.token"
+  local token = noctalia.readFile(noctalia.expandPath(tokenPath:gsub("%$XDG_RUNTIME_DIR", runtime)))
+  if token == nil then callback(nil); return end
+  local options = {
+    url = (noctalia.getConfig("endpoint") or "http://127.0.0.1:3090") .. path,
+    headers = { "Authorization: Bearer " .. token:gsub("%s+$", ""), "Content-Type: application/json" },
+  }
+  if pin ~= nil then options.method = "POST"; options.body = noctalia.json.encode({ pin = pin }) end
+  local admitted = noctalia.http(options, function(response)
+    local ok, value = pcall(noctalia.json.decode, response.body or "")
+    callback(response.ok and response.status == 200 and ok and value or nil)
+  end)
+  if admitted == false then callback(nil) end
+end
+
+local function refreshWork()
+  if workBusy then return end
+  workBusy = true
+  workRequest = workRequest + 1
+  local request = workRequest
+  workHttp("/v1/work", nil, function(value)
+    if request ~= workRequest then return end
+    workBusy = false
+    work = type(value) == "table" and value or { rows = {}, gaps = { "Work source unavailable; saved pins unverified" } }
+    render()
+  end)
+end
+
+local function pinKey(pin)
+  return pin.kind .. ":" .. (pin.endpoint or "") .. ":" .. pin.id
+end
+
+local function workSection()
+  local children = { ui.label({ text = "Work", fontWeight = "bold", color = "primary" }) }
+  local current = {}
+  for _, row in ipairs(work.rows or {}) do
+    local key = pinKey(row.pin)
+    current[key] = row
+    if pins[key] == nil then pins[key] = row end
+  end
+  for key, saved in pairs(pins) do
+    local row = current[key]
+    local same = row ~= nil and (row.pin.epoch == saved.pin.epoch and row.pin.url == saved.pin.url)
+    if same then saved = row end
+    local pin = saved.pin
+    table.insert(children, ui.label({ text = saved.name .. " · " .. saved.state, color = "on_surface" }))
+    table.insert(children, ui.label({ text = (saved.detail or "") .. " · pin " .. pin.id .. " · " .. (same and "observed" or "stale/unverified; rebind required"), color = "on_surface_variant" }))
+    local buttons = {
+      ui.button({ text = "Focus exact pin", variant = "outline", controlSize = "sm", onClick = function()
+        workHttp("/v1/work/focus", pin, function(value)
+          if value == nil then noctalia.notifyError("Destination stale/unverified or focus failed. Refresh and rebind explicitly.") end
+        end)
+      end }),
+    }
+    if row ~= nil and not same then
+      local replacement = row
+      table.insert(buttons, ui.button({ text = "Rebind to current", variant = "outline", controlSize = "sm", onClick = function() pins[key] = replacement; render() end }))
+    end
+    table.insert(children, ui.row({ gap = 6 }, buttons))
+  end
+  for _, gap in ipairs(work.gaps or {}) do table.insert(children, ui.label({ text = gap, color = "on_surface_variant" })) end
+  if (work.omitted or 0) > 0 then table.insert(children, ui.label({ text = tostring(work.omitted) .. " destinations omitted" })) end
+  table.insert(children, ui.button({ text = "Refresh destinations", onClick = refreshWork }))
+  return ui.column({ gap = 4, padding = 8, fill = "surface_variant/0.25", radius = 6 }, children)
+end
+
+render = function()
   local rows = {
     ui.label({ text = "Sinnix operations", fontSize = 18, fontWeight = "bold", color = "primary" }),
     ui.label({
@@ -205,6 +280,7 @@ local function render()
   local agents = {}
   for _, line in ipairs(agentLines()) do table.insert(agents, line) end
   table.insert(rows, infoSection("Agents", agents))
+  table.insert(rows, workSection())
   local signals = ambientLines()
   table.insert(signals, anchorText())
   table.insert(signals, receiptText())
@@ -223,5 +299,6 @@ noctalia.state.watch("sinity-hub.view", function(value)
 end)
 
 function onOpen(_context)
+  refreshWork()
   render()
 end

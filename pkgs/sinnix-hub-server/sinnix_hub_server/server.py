@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import secrets
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -271,6 +272,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._write(HTTPStatus.BAD_REQUEST, {"error": str(error)})
             except Exception as error:
                 self._write(HTTPStatus.SERVICE_UNAVAILABLE, {"error": str(error)[:240]})
+        elif self.path == "/v1/work":
+            from .work import destinations
+
+            self._write(HTTPStatus.OK, destinations())
         elif self.path == "/v1/health":
             self._write(HTTPStatus.OK, self.builder.health())
         elif self.path == "/v1/health/lanes":
@@ -383,6 +388,7 @@ class Handler(BaseHTTPRequestHandler):
             FAILURE_PATH,
             "/v1/actions",
             "/v1/actions/prepare",
+            "/v1/work/focus",
         }
         if json_route:
             content_types = self.headers.get_all("Content-Type", [])
@@ -401,6 +407,16 @@ class Handler(BaseHTTPRequestHandler):
                     {"error": "one application/json Content-Type is required"},
                 )
                 return
+        if self.path == "/v1/work/focus":
+            from .work import focus
+
+            try:
+                payload = read_json_object(self.headers, self.rfile, max_bytes=4096)
+                focus(payload.get("pin"))
+                self._write(HTTPStatus.OK, {"status": "focused"})
+            except (RequestBodyError, ValueError, OSError, subprocess.SubprocessError) as error:
+                self._write(HTTPStatus.CONFLICT, {"error": str(error)[:240]})
+            return
         if self.path == FEEDBACK_PATH:
             self._spool_feedback()
             return
