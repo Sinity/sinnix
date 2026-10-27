@@ -71,6 +71,13 @@ mkServiceModule {
         # not armed at all. A oneshot spends its whole life "starting", and
         # TimeoutStartSec is the bound that applies there.
         TimeoutStartSec = cfg.maxSecondsPerRun + 900;
+        # The resolve pass holds state for every distinct URL (576,934 on
+        # 2026-10-26). Under the background class's 1G MemoryHigh each run sat
+        # at exactly 1G with 2G swapped for its whole two hours, refaulting
+        # 7.5-8.9 GB from disk per run: about 3G of working set (1G resident
+        # plus 2G swapped), so the bounds sit above it.
+        MemoryHigh = "4G";
+        MemoryMax = "5G";
       };
       timer = {
         onCalendar = "daily";
