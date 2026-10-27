@@ -300,12 +300,13 @@ in
           # Last resort when swap is nearly full AND the host stalls. MemAvailable
           # includes reclaimable cache, so -m3 could veto kills with RAM and zram
           # full while memory.high held jobs in reclaim below every hard limit.
-          # -m100 deliberately removes that low-available-memory veto: -s10 and
+          # -m99 (earlyoom rejects values above 99) effectively removes that
+          # low-available-memory veto: -s10 and
           # --mem-psi-min 10 are the meaningful conjunction. Cold swapped pages
           # alone do not cause kills; zram reclaim stalls register as memory PSI.
           # Scoped oomd targets job/tool descendants; this global fallback
           # also covers pressure outside those trees and swap-ineligible jobs.
-          freeMemThreshold = 100;
+          freeMemThreshold = 99;
           # SIGTERM below 10% free swap (~1.2 GiB of 12 GiB zram), SIGKILL
           # below the default half (5%) if SIGTERM cannot recover the host.
           freeSwapThreshold = 10;
