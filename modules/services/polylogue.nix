@@ -130,19 +130,22 @@ mkServiceModule {
 
       # The retained Python CLI reads this file; the values are those its
       # removed Home Manager module rendered.
-      # The capture class's CPU and IO yielding. Its memory bounds are left
-      # off: the daemon peaked at 15.6 GB on 2026-10-27 and a 6G MemoryHigh
-      # would throttle a real anonymous spike into a stall instead of
-      # explaining it. Without this the Home Manager unit ran in app.slice
-      # with the desktop's IOWeight while reading ~5 MB/s around the clock.
+      # The capture class's CPU and IO yielding (without it the Home Manager
+      # unit ran in app.slice with the desktop's IOWeight), with its own
+      # memory bounds instead of the class's: start-up peaked at 15.6 GB on
+      # 2026-10-27, and at 16:09 that day host OOM pressure killed it.
+      # 6G high / 9G max / 2G swap trades slower start-up under reclaim for a
+      # host that stays up, until Polylogue's ingest bounds memory by work in
+      # flight (its owner's redesign).
       liveServiceClass = lib.sinnix.mkRuntimeServiceConfig {
         runtimeInventory = config.sinnix.runtime.inventory;
         unit = "polylogue-live.service";
         manager = "user";
-        omit = [
-          "MemoryHigh"
-          "MemoryMax"
-        ];
+        overrides = {
+          MemoryHigh = "6G";
+          MemoryMax = "9G";
+          MemorySwapMax = "2G";
+        };
       };
       pythonSettings = (pkgs.formats.toml { }).generate "polylogue.toml" {
         archive.root = cfg.dataDir;
@@ -217,7 +220,9 @@ mkServiceModule {
             Unit.Description = "Polylogue daemon over the live archive";
             Service = liveServiceClass // {
               ExecStart = "${cli}/bin/polylogue-live daemon";
-              Restart = "on-failure";
+              # always, not on-failure: a SIGTERM from the OOM response counts
+              # as a clean stop, and on 2026-10-27 that left the daemon down.
+              Restart = "always";
               RestartSec = "5s";
               # The daemon exits 78 when it refuses the archive (a schema it
               # cannot migrate); restarting cannot change that.
