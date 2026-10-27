@@ -61,13 +61,12 @@ let
     text = ''
       set -eu
 
-      # io.cost makes IOWeight declarations in the cgroup hierarchy actually
-      # effective on NVMe drives. Without it, the kernel ignores IOWeight for
-      # any device running the 'none' (passthrough) scheduler — which is the
-      # NVMe default — so every IOWeight config in the slice tree is silently
-      # discarded. Setting the scheduler to mq-deadline lets the block layer
-      # mediate between cgroups, and ctrl=auto calibrates the cost model from
-      # the device's actual latency characteristics.
+      # io.cost implements proportional cgroup IOWeight independently of the
+      # request scheduler. mq-deadline also orders requests within the device.
+      # ctrl=auto selects the kernel's device cost model; its default QoS has
+      # rpct=wpct=0, so completion latency does not signal saturation. Weights
+      # alone therefore do not bound latency on the QLC NVMe. agent.slice's
+      # io.max limits in runtime-defaults bound agent load before submission.
       for dev_path in /sys/block/*/; do
         dev=$(basename "$dev_path")
         echo "$dev" | grep -q "^loop" && continue
@@ -80,8 +79,7 @@ let
           echo "mq-deadline" > "$dev_path/queue/scheduler" || true
         fi
 
-        # Auto-calibrate the cost model from device latency, making IOWeight
-        # proportional and work-conserving rather than nominal.
+        # Enable work-conserving proportional IO accounting and throttling.
         printf '%s enable=1 ctrl=auto\n' "$major_minor" > /sys/fs/cgroup/io.cost.qos || true
       done
     '';

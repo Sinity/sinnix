@@ -186,6 +186,51 @@ whose resource budget comes from `flake/data/runtime-defaults.nix`. Every pool
 slice sits under `agent-ctl.slice`, inside the host's agent budget
 (`agent.slice`), which it shares with interactive agents and their tools.
 
+The shared `agent.slice` limits aggregate I/O on the device backing `/realm`
+to 32 MiB/s and 500 read IOPS, and 4 MiB/s and 200 write IOPS. These limits
+cover the CLI, tool and job branches together. Adding pools does not increase
+the allowance. Nix daemon builds have a separate system slice. Weights and
+desktop latency targets still apply, but they cannot prioritize a terminal
+recorder waiting on Btrfs extent locks or folio writeback before block I/O
+submission. The device cap limits the agent traffic feeding those waits.
+
+After activation, verify the installed unit with
+`systemctl --user cat agent.slice`, then measure a 60-second window while
+agent jobs generate I/O and a captured terminal is active:
+
+```sh
+python3 - <<'PY'
+import os
+from pathlib import Path
+import time
+
+user = Path(f"/sys/fs/cgroup/user.slice/user-{os.getuid()}.slice/user@{os.getuid()}.service")
+groups = {"session": user / "session.slice", "agent": user / "agent.slice"}
+print("agent io.max:", (groups["agent"] / "io.max").read_text())
+
+def totals(group):
+    return {line.split()[0]: int(line.split("total=")[1])
+            for line in (group / "io.pressure").read_text().splitlines()}
+
+before = {name: totals(group) for name, group in groups.items()}
+start = time.monotonic()
+time.sleep(60)
+elapsed = time.monotonic() - start
+for name, group in groups.items():
+    after = totals(group)
+    print(name, {key: round((after[key] - value) / elapsed / 10000, 2)
+                 for key, value in before[name].items()}, "percent IO stall")
+    print((group / "io.stat").read_text())
+PY
+```
+
+On sinnix-prime the NVMe entry must show `rbps=33554432 wbps=4194304
+riops=500 wiops=200`. Compare session full-stall against an uncapped window
+with similar terminal activity and agent load. A quiet terminal alone does
+not prove responsiveness. Btrfs metadata work can be charged outside the
+originating agent cgroup, so a bandwidth limit is not a terminal latency
+guarantee; sustained loaded measurements remain the acceptance check.
+
 A pool declaration may also set:
 
 - `exclusive_with`: cross-pool exclusion. `pytest-heavy` excludes `agent`, so a
