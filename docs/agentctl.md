@@ -154,8 +154,15 @@ as `caps` in the configuration; `cargo = 3` bounds Cargo builds across
 queue and before its unit starts, for one of the cap's places (a lock under
 `<state_dir>/caps/<name>/`); the wait holds the job's pool slot, does not count
 against its timeout, is logged once, and is recorded in the outcome as `cap`.
+Waiters receive increasing tickets under a shared lock. With k free places,
+only the k oldest live tickets may acquire a place; later polling cannot
+overtake them. Each ticket holds the wrapper's pid and is removed on admission,
+cancellation, or an exception. Admission checks remove tickets whose pids no
+longer exist. The numbered place locks are released by the kernel on exit.
 `job start` refuses a cap the host does not declare. The width is read when
-the job starts, so a changed declaration applies to queued jobs.
+the job starts and on each admission check, so a changed declaration applies
+to queued and waiting jobs. A reduction leaves existing holders running and
+counts their places until they finish, including places above the new width.
 
 **Pressure pauses.** `agentctl-pressure.timer` runs `pressure tick` every
 minute.

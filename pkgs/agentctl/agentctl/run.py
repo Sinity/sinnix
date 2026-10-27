@@ -45,7 +45,7 @@ import tempfile
 import time
 from enum import Enum
 from pathlib import Path, PurePosixPath
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.ledger import append_jsonl
@@ -829,32 +829,95 @@ def _cap_limit(launch: Mapping[str, Any], log: Any) -> tuple[Path, int] | None:
     return config.state_dir / "caps" / name, limit
 
 
-def hold_cap_place(
-    directory: Path, limit: int, *, cancelled: Any, log: Any
-) -> Any | None:
-    """Take one of ``limit`` numbered locks under ``directory``; wait while all
-    are held. The open file is the place: the kernel releases it when this
-    wrapper exits, however it exits. None means the job was cancelled."""
-    directory.mkdir(parents=True, exist_ok=True)
-    announced = False
-    while True:
-        for index in range(limit):
+def _cap_place(directory: Path, limit: int, ticket: Path) -> Any | None:
+    """Check tickets and places while the caller holds the counter lock."""
+    tickets = []
+    for path in directory.glob("*.ticket"):
+        pid = int(path.read_text())
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            path.unlink()
+            continue
+        except PermissionError:
+            pass
+        tickets.append(path)
+    tickets.sort(key=lambda path: int(path.stem))
+
+    # Places above a reduced width still count until their holders leave.
+    indices = set(range(limit))
+    indices.update(
+        int(path.stem)
+        for path in directory.glob("*.lock")
+        if path.stem.isdecimal()
+    )
+    available = []
+    occupied = 0
+    try:
+        for index in sorted(indices):
             handle = (directory / f"{index}.lock").open("a")
             try:
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 handle.close()
-                continue
-            return handle
-        if cancelled():
-            return None
-        if not announced:
-            log.write(
-                f"waiting for one of the {limit} places of cap {directory.name!r}\n".encode()
-            )
-            log.flush()
-            announced = True
-        time.sleep(CAP_POLL_SECONDS)
+                occupied += 1
+            except BaseException:
+                handle.close()
+                raise
+            else:
+                available.append((index, handle))
+        if tickets.index(ticket) < max(0, limit - occupied):
+            for position, (index, handle) in enumerate(available):
+                if index < limit:
+                    ticket.unlink()
+                    available.pop(position)
+                    return handle
+        return None
+    finally:
+        for _, handle in available:
+            handle.close()
+
+
+def hold_cap_place(
+    directory: Path, limit: int | Callable[[], int], *, cancelled: Any, log: Any
+) -> Any | None:
+    """Admit the oldest live tickets for the free places. The open place lock
+    is released by the kernel on exit. None means the wait was cancelled."""
+    directory.mkdir(parents=True, exist_ok=True)
+    ticket = None
+    with (directory / "queue.lock").open("a") as counter:
+        try:
+            fcntl.flock(counter, fcntl.LOCK_EX)
+            count_path = directory / "counter"
+            number = int(count_path.read_text()) + 1 if count_path.exists() else 1
+            atomic_publish(count_path, str(number).encode(), fsync=False, mode=0o600)
+            ticket = directory / f"{number}.ticket"
+            atomic_publish(ticket, str(os.getpid()).encode(), fsync=False, mode=0o600)
+            fcntl.flock(counter, fcntl.LOCK_UN)
+            announced = False
+            while True:
+                if cancelled():
+                    return None
+                width = limit() if callable(limit) else limit
+                fcntl.flock(counter, fcntl.LOCK_EX)
+                try:
+                    place = _cap_place(directory, width, ticket)
+                finally:
+                    fcntl.flock(counter, fcntl.LOCK_UN)
+                if place is not None:
+                    return place
+                if not announced:
+                    log.write(
+                        f"waiting for one of the {width} places of cap {directory.name!r}\n".encode()
+                    )
+                    log.flush()
+                    announced = True
+                time.sleep(CAP_POLL_SECONDS)
+        finally:
+            if ticket is not None:
+                # Serialize removal with ticket scans by the other waiters.
+                fcntl.flock(counter, fcntl.LOCK_EX)
+                ticket.unlink(missing_ok=True)
 
 
 def _take_cap(
@@ -866,10 +929,18 @@ def _take_cap(
     if cap is None:
         return None, None
     directory, limit = cap
+
+    def current_limit() -> int:
+        nonlocal limit
+        current = _cap_limit(launch, log)
+        if current is not None and current[0] == directory:
+            limit = current[1]
+        return limit
+
     waited_from = time.monotonic()
     place = hold_cap_place(
         directory,
-        limit,
+        current_limit,
         cancelled=lambda: _marker_targets(marker, launch["attempt"]),
         log=log,
     )

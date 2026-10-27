@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import multiprocessing
 from dataclasses import replace
 from pathlib import Path
 
@@ -86,9 +87,187 @@ def test_a_cap_admits_its_width_and_the_next_job_waits(
     assert b"waiting for one of the 1 places of cap 'cargo'" in log.getvalue()
 
     first.close()
-    second = run.hold_cap_place(directory, 1, cancelled=lambda: True, log=log)
+    second = run.hold_cap_place(directory, 1, cancelled=lambda: False, log=log)
     assert second is not None
     second.close()
+
+
+def _cap_waiter(directory, connection, width):
+    """Let the parent choose polling order independently of ticket order."""
+    cancelled = False
+
+    def wait(_):
+        nonlocal cancelled
+        connection.send("waiting")
+        cancelled = connection.recv() == "cancel"
+
+    run.time.sleep = wait
+    place = run.hold_cap_place(
+        Path(directory), width, cancelled=lambda: cancelled, log=io.BytesIO()
+    )
+    connection.send("cancelled" if place is None else "acquired")
+    if place is not None:
+        connection.recv()
+        place.close()
+
+
+@pytest.fixture
+def cap_waiters():
+    context = multiprocessing.get_context("spawn")
+    workers = []
+
+    def start(directory, width=1):
+        parent, child = context.Pipe()
+        process = context.Process(target=_cap_waiter, args=(directory, child, width))
+        process.start()
+        child.close()
+        workers.append((process, parent))
+        assert parent.poll(10), "waiter did not register its ticket"
+        assert parent.recv() == "waiting"
+        return process, parent
+
+    yield start
+    for process, connection in workers:
+        if process.is_alive():
+            process.terminate()
+        process.join(10)
+        assert not process.is_alive()
+        connection.close()
+
+
+def _poll_waiter(connection, expected):
+    connection.send("poll")
+    assert connection.poll(10), "waiter did not finish its admission check"
+    assert connection.recv() == expected
+
+
+def test_cap_tickets_keep_fifo_order_when_later_waiters_poll_first(tmp_path, cap_waiters):
+    held = run.hold_cap_place(tmp_path, 1, cancelled=lambda: False, log=io.BytesIO())
+    workers = [cap_waiters(tmp_path) for _ in range(4)]
+    try:
+        held.close()
+        for index, (process, connection) in enumerate(workers):
+            for _, later in reversed(workers[index + 1 :]):
+                _poll_waiter(later, "waiting")
+            _poll_waiter(connection, "acquired")
+            connection.send("release")
+            process.join(10)
+            assert process.exitcode == 0
+        assert not list(tmp_path.glob("*.ticket"))
+        assert (tmp_path / "counter").read_text() == "5"
+    finally:
+        held.close()
+
+
+def test_only_the_oldest_waiters_for_free_places_can_proceed(tmp_path, cap_waiters):
+    held = [
+        run.hold_cap_place(tmp_path, 3, cancelled=lambda: False, log=io.BytesIO())
+        for _ in range(3)
+    ]
+    try:
+        workers = [cap_waiters(tmp_path, 3) for _ in range(3)]
+        held[0].close()
+        held[1].close()
+        _poll_waiter(workers[2][1], "waiting")
+        # Either of the oldest two can take one of the two available places.
+        _poll_waiter(workers[1][1], "acquired")
+        _poll_waiter(workers[2][1], "waiting")
+        _poll_waiter(workers[0][1], "acquired")
+    finally:
+        for place in held:
+            place.close()
+
+
+@pytest.mark.parametrize("dead", [False, True])
+def test_cancelled_or_dead_waiter_does_not_block_the_next(tmp_path, cap_waiters, dead):
+    held = run.hold_cap_place(tmp_path, 1, cancelled=lambda: False, log=io.BytesIO())
+    try:
+        first, connection = cap_waiters(tmp_path)
+        _, next_connection = cap_waiters(tmp_path)
+        if dead:
+            first.kill()
+        else:
+            connection.send("cancel")
+            assert connection.poll(10)
+            assert connection.recv() == "cancelled"
+        first.join(10)
+        assert not first.is_alive()
+        if not dead:
+            assert len(list(tmp_path.glob("*.ticket"))) == 1
+        held.close()
+        _poll_waiter(next_connection, "acquired")
+        assert not list(tmp_path.glob("*.ticket"))
+    finally:
+        held.close()
+
+
+def test_ticket_is_removed_when_waiting_raises(tmp_path, monkeypatch):
+    held = run.hold_cap_place(tmp_path, 1, cancelled=lambda: False, log=io.BytesIO())
+
+    def interrupted(_):
+        raise InterruptedError("interrupted wait")
+
+    monkeypatch.setattr(run.time, "sleep", interrupted)
+    try:
+        with pytest.raises(InterruptedError, match="interrupted wait"):
+            run.hold_cap_place(tmp_path, 1, cancelled=lambda: False, log=io.BytesIO())
+        assert not list(tmp_path.glob("*.ticket"))
+    finally:
+        held.close()
+
+
+def test_width_changes_while_waiting_count_holders_above_the_new_width(
+    tmp_path, monkeypatch
+):
+    config_path = tmp_path / "config.json"
+    directory = tmp_path / "caps" / "cargo"
+
+    def configure(width):
+        config_path.write_text(
+            json.dumps({"state_dir": str(tmp_path), "caps": {"cargo": width}})
+        )
+
+    configure(2)
+    held = [
+        run.hold_cap_place(directory, 2, cancelled=lambda: False, log=io.BytesIO())
+        for _ in range(2)
+    ]
+    polls = []
+
+    def wait(_):
+        polls.append(1)
+        if len(polls) == 1:
+            configure(1)
+            held[0].close()
+        elif len(polls) == 2:
+            # The holder of 1.lock still fills the reduced cap, even though
+            # 0.lock is free. Growing the width now admits the waiter.
+            configure(3)
+        else:
+            pytest.fail("waiter did not observe the increased width")
+
+    monkeypatch.setattr(run.time, "sleep", wait)
+    place = None
+    try:
+        record, place = run._take_cap(
+            {
+                "cap": "cargo",
+                "environment": {"AGENTCTL_CONFIG": str(config_path)},
+                "attempt": 1,
+            },
+            tmp_path / "cancel",
+            io.BytesIO(),
+        )
+        assert len(polls) == 2
+        assert place is not None
+        assert record["limit"] == 3
+        assert isinstance(record["waited_seconds"], float)
+        assert not list(directory.glob("*.ticket"))
+    finally:
+        if place is not None:
+            place.close()
+        for handle in held:
+            handle.close()
 
 
 def test_a_measurement_refuses_to_start_under_io_pressure(tmp_path: Path) -> None:
