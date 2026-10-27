@@ -1,4 +1,4 @@
-# Check desktop latency protection and the aggregate agent device limits.
+# Check the rendered policy at both hierarchy levels and on both SSDs.
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -28,9 +28,8 @@ in
                   "desktop"
                   "desktop-shell"
                 ]);
-              agentUnit = config.systemd.user.units."agent.slice".text;
             in
-            (map (policy: {
+            map (policy: {
               assertion =
                 policy.IOAccounting
                 && builtins.all (target: builtins.elem target policy.IODeviceLatencyTargetSec) [
@@ -38,19 +37,7 @@ in
                   "/realm 20ms"
                 ];
               message = "Interactive disk latency protection must reach both SSDs, the shell, and root peer slices including the input ancestor";
-            }) protected)
-            ++ [
-              {
-                assertion = builtins.all (line: lib.hasInfix line agentUnit) [
-                  "IOAccounting=true"
-                  "IOReadBandwidthMax=/realm 32M"
-                  "IOReadIOPSMax=/realm 500"
-                  "IOWriteBandwidthMax=/realm 4M"
-                  "IOWriteIOPSMax=/realm 200"
-                ];
-                message = "The rendered agent parent must cap aggregate Realm reads and writes across CLI, tool and job slices";
-              }
-            ];
+            }) protected;
         }
       );
     in

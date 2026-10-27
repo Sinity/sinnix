@@ -331,24 +331,11 @@ rec {
         # since an idle desktop's share is otherwise lent away.
         CPUWeight = 60;
         CPUQuota = "1600%";
-        # Weights arbitrate submitted block IO, not Btrfs extent locks or
-        # writeback waits before submission. Keep the relative priority, but
-        # bound the aggregate agent load even when the desktop issues no IO.
+        # iocost lends an idle sibling's share, so a low weight costs agents
+        # nothing while the desktop is quiet and gives the desktop ~97% of
+        # the disk when it is not. At 90-100 per agent slice, three of them
+        # held as much weight as the whole desktop.
         IOWeight = 25;
-        # 2026-10-27, /realm QLC NVMe, 60s windows: asciinema's file writer
-        # waited in btrfs_buffered_write (folio writeback/ordered extents).
-        # Initial session IO-full was 7.20%; combined-cap windows measured
-        # 0.07% and 1.07% while agents waited 91.65% and 97.39%. A sequential
-        # before/capped/after comparison measured session 1.35%/0.28%/2.34%,
-        # agent 37.54%/49.65%/6.78%. Workload varied; no latency guarantee.
-        # Write limits alone left session IO-full at 4.57%, a 100ms agent
-        # latency target at 3.02%. Shared Btrfs metadata can bypass the cap.
-        # Put the cap above CLI, tool and job slices so pool count cannot
-        # multiply it. Paths let systemd resolve the backing device at start.
-        IOReadBandwidthMax = [ "/realm 32M" ];
-        IOReadIOPSMax = [ "/realm 500" ];
-        IOWriteBandwidthMax = [ "/realm 4M" ];
-        IOWriteIOPSMax = [ "/realm 200" ];
         # Raised from 14G/16G on 2026-10-27 for a wide Codex fleet (workers
         # measured ~136 MB resident each); the desktop's MemoryMin, not this
         # ceiling, is what protects the desktop. Swap stays small: agents are
