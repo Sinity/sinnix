@@ -8,6 +8,7 @@
   curl,
   util-linux,
   coreutils,
+  systemd,
   writeShellApplication,
   symlinkJoin,
   runCommand,
@@ -69,6 +70,7 @@ let
       dpkg
       util-linux
       coreutils
+      systemd
     ];
     text = ''
       export NIX_LD=${pkgs.stdenv.cc.bintools.dynamicLinker}
@@ -138,7 +140,14 @@ let
       # Electron's default profile, ~/.config/Codex, sits on the ephemeral root
       # SSD: it is lost at every boot, and the app wrote ~40 MB/s into it.
       mkdir -p "$state/profile"
-      exec "$state/current/ChatGPT" --ozone-platform=wayland --user-data-dir="$state/profile" "''${proxy_args[@]}" "$@"
+      # Release 26.1013 wrote 38-42 MB/s for 2.3 days (2026-10-20..22) for a
+      # reason its logs never recorded; 26.1021 settles near 0 after its
+      # runtime install. This closed binary gets its own scope, so its IO is
+      # attributed by name, and a write ceiling on the QLC /realm drive far
+      # above its steady state but below what stalls the desktop.
+      exec systemd-run --user --scope --quiet --collect --unit="app-chatgpt-$$" \
+        --property=IOWriteBandwidthMax="$state 30M" \
+        "$state/current/ChatGPT" --ozone-platform=wayland --user-data-dir="$state/profile" "''${proxy_args[@]}" "$@"
     '';
   };
   desktop = runCommand "chatgpt-desktop" { } ''
