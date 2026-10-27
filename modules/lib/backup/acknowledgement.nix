@@ -216,7 +216,7 @@ in
     # 20-minute cadence ran each lane ~120 times in 8 days and kept the
     # genome HDD from ever spinning down.
     timer = {
-      onCalendar = "*-*-* 03:05,03:25:00";
+      onCalendar = "*-*-* 03:05,25:00";
       persistent = true;
     };
   })
