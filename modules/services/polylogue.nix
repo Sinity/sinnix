@@ -130,6 +130,20 @@ mkServiceModule {
 
       # The retained Python CLI reads this file; the values are those its
       # removed Home Manager module rendered.
+      # The capture class's CPU and IO yielding. Its memory bounds are left
+      # off: the daemon peaked at 15.6 GB on 2026-10-27 and a 6G MemoryHigh
+      # would throttle a real anonymous spike into a stall instead of
+      # explaining it. Without this the Home Manager unit ran in app.slice
+      # with the desktop's IOWeight while reading ~5 MB/s around the clock.
+      liveServiceClass = lib.sinnix.mkRuntimeServiceConfig {
+        runtimeInventory = config.sinnix.runtime.inventory;
+        unit = "polylogue-live.service";
+        manager = "user";
+        omit = [
+          "MemoryHigh"
+          "MemoryMax"
+        ];
+      };
       pythonSettings = (pkgs.formats.toml { }).generate "polylogue.toml" {
         archive.root = cfg.dataDir;
         daemon = {
@@ -201,7 +215,7 @@ mkServiceModule {
 
           systemd.user.services.polylogue-live = {
             Unit.Description = "Polylogue daemon over the live archive";
-            Service = {
+            Service = liveServiceClass // {
               ExecStart = "${cli}/bin/polylogue-live daemon";
               Restart = "on-failure";
               RestartSec = "5s";

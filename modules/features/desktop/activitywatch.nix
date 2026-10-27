@@ -144,10 +144,16 @@ mkFeatureModule {
               Requisite = [ graphicalTarget ];
               PartOf = [ graphicalTarget ];
             };
-            Service = {
-              Restart = "on-failure";
-              RestartSec = 5;
-            };
+            Service =
+              lib.sinnix.mkRuntimeServiceConfig {
+                runtimeInventory = nixosConfig.sinnix.runtime.inventory;
+                unit = "activitywatch-watcher-awatcher.service";
+                manager = "user";
+              }
+              // {
+                Restart = "on-failure";
+                RestartSec = 5;
+              };
             Install.WantedBy = lib.mkForce (lib.optionals cfg.autoStart [ graphicalTarget ]);
           };
 

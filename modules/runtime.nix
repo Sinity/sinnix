@@ -471,7 +471,22 @@ in
               name: surface:
               let
                 unitName = lib.removeSuffix ".service" surface.unit;
-                applied = config.systemd.services.${unitName}.serviceConfig or { };
+                system = (surface.manager or "system") == "system";
+                # A user unit comes from either the NixOS user manager or Home
+                # Manager; polylogue-live declared `capture` from Home Manager
+                # and ran unclassed in app.slice until 2026-10-27.
+                homeUnits = config.home-manager.users.${cfg.user.name}.systemd.user.services or { };
+                exists =
+                  if system then
+                    config.systemd.services ? "${unitName}"
+                  else
+                    config.systemd.user.services ? "${unitName}" || homeUnits ? "${unitName}";
+                applied =
+                  if system then
+                    config.systemd.services.${unitName}.serviceConfig or { }
+                  else
+                    (config.systemd.user.services.${unitName}.serviceConfig or { })
+                    // (homeUnits.${unitName}.Service or { });
                 # Some classes place the unit in a slice that carries the
                 # weights; others put them on the unit itself. Either way the
                 # keys the class declares are the evidence that it arrived.
@@ -485,12 +500,11 @@ in
                 arrived = lib.filter (key: applied ? "${key}") declared;
               in
               if
-                (surface.manager or "system") == "system"
-                && surface.kind == "service"
+                surface.kind == "service"
                 && surface.resourceClass != "ordinary"
                 # A configuration that never builds the unit has nothing to
                 # govern; the defect is a unit that exists and runs ungoverned.
-                && config.systemd.services ? "${unitName}"
+                && exists
                 && declared != [ ]
                 && arrived == [ ]
               then

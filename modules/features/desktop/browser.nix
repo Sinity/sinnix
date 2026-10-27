@@ -295,16 +295,22 @@ mkFeatureModule {
                 After = [ "graphical-session-pre.target" ];
                 PartOf = [ "graphical-session.target" ];
               };
-              Service = {
-                UMask = "0077";
-                ExecStart = "${scriptPkgs.sinnix-capture-browser-nav}/bin/sinnix-capture-browser-nav";
-                Environment = [
-                  "SINNIX_NAV_CAPTURE_PORT=${toString navigationPort}"
-                  "SINNIX_NAV_CAPTURE_EXTENSION_ID_FILE=${navCaptureExtension}/extension-id"
-                  "SINNIX_CAPTURE_ROOT=${activityRoot}"
-                ];
-                Restart = "on-failure";
-              };
+              Service =
+                lib.sinnix.mkRuntimeServiceConfig {
+                  runtimeInventory = nixosConfig.sinnix.runtime.inventory;
+                  unit = "sinnix-capture-browser-nav.service";
+                  manager = "user";
+                }
+                // {
+                  UMask = "0077";
+                  ExecStart = "${scriptPkgs.sinnix-capture-browser-nav}/bin/sinnix-capture-browser-nav";
+                  Environment = [
+                    "SINNIX_NAV_CAPTURE_PORT=${toString navigationPort}"
+                    "SINNIX_NAV_CAPTURE_EXTENSION_ID_FILE=${navCaptureExtension}/extension-id"
+                    "SINNIX_CAPTURE_ROOT=${activityRoot}"
+                  ];
+                  Restart = "on-failure";
+                };
               Install.WantedBy = [ "graphical-session.target" ];
             };
           };
