@@ -144,7 +144,13 @@ mkServiceModule {
         lynchpin-keylog-materialize = {
           description = "Refresh Lynchpin keylog analysis";
           operation = "refresh_keylog";
-          timeoutStartSec = "10min";
+          # The unit waits for the queued job, so its deadline covers the
+          # queue as well as the job's own 30 min budget. At 10 min it failed
+          # (and notified) whenever builds held the normal pool: on 2026-10-27
+          # refreshes doing 2-21 s of work waited 9-17 min to start and later
+          # succeeded. --if-idle keeps a long wait from stacking duplicates,
+          # and the timer cannot refire while the unit is still waiting.
+          timeoutStartSec = "1h";
           rationale = "Quarter-hourly keylog analysis refresh over already-captured input.";
           timer = {
             description = "Quarter-hour Lynchpin keylog analysis refresh";
