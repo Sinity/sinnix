@@ -2,7 +2,7 @@
 
 `sinnix fs` (package `sinnix-fs`) keeps an inventory of directories, bounded
 content fingerprints, and views of the authored file judgments. It does not own
-any storage and never deletes or deduplicates anything. The weekly
+payload storage and never deletes or deduplicates indexed files. The weekly
 `sinnix-fs-index.service` runs `sinnix fs scan --out-dir /realm/state/fs-index`.
 
 ## Commands
@@ -20,12 +20,44 @@ sinnix fs layout --refs            # literal /realm paths in source must exist
 ## Generations
 
 Each `scan` or `refresh` builds a complete generation in a private directory,
-reopens and validates every database and Parquet file, then switches one
+reopens and validates every relation in `inventory.duckdb`, then switches one
 `current` pointer. A failed attempt leaves the previous generation in place and
 keeps its own candidate for inspection; `status` lists such leftovers and says
-whether a writer is still active. Older generations are kept until reviewed.
+whether a writer is still active. After a successful pointer commit, the writer
+removes superseded generations and abandoned candidates under its publication
+lock. One complete generation remains. Authored judgments stay outside this
+cache and are preserved.
 `refresh --retained-inputs PATH` rebuilds from a retained scan and records that
 the scan was not fresh.
+
+Scan rows stream over inherited pipes into one DuckDB transaction. That
+transaction checkpoints at commit (`wal_autocheckpoint=0B`) so the new tables
+are written directly instead of being journaled and then checkpointed again. `nodes` and `files` each have one
+stored representation. `inventory` and content comparison views query those
+tables; the derived `all_paths` table groups paths once for classification. JSONL and Parquet scan copies are no longer published.
+`query` uses `inventory.duckdb` for content and directory relations. Refreshing
+a legacy generation imports its content table once into the unified database.
+
+Consumer census (2026-10-27): searches for `fs-index`, `files.jsonl`,
+`nodes.jsonl`, `inventory.duckdb`, `content.duckdb`, `files.parquet` and
+`nodes.parquet` across Sinnix `scripts/`, `pkgs/`, `modules/` (including
+`pkgs/sinnix-agent-gateway/`) and `/realm/project/sinity-lynchpin/repo` found:
+
+- `sinnix_fs/inventory.py`: publisher, refresh, status validation, coverage
+  and read-only query. All now read the unified database.
+- `pkgs/sinnix-fs/tests/test_integrity.py` and `test_materialization.py`:
+  synthetic scanner inputs and database readers, updated with the publisher.
+- `modules/services/fs-index.nix`: invokes the scan command and registers
+  its state directory; it reads no table format.
+- No gateway or Lynchpin fs-index table reader. Lynchpin's Chisel
+  `metrics/files.jsonl` and `structure/graph_nodes.jsonl` are separate outputs.
+  `/realm/project/lynchpin/repo` is absent on this host.
+
+A synthetic test compares streamed tables with file-fed scans and sums Linux
+`/proc/self/io` `write_bytes` for the publisher and reaped DuckDB children.
+This is a local regression check; the scheduled service's systemd accounting
+on a full scan remains the operational acceptance check (target <=1.5 times
+the resulting generation size).
 
 DuckDB sessions use a 512 MiB buffer and two workers and spill to disk beside
 the database. Read-only queries run in DuckDB's safe mode and cannot write

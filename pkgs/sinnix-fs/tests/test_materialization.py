@@ -13,61 +13,10 @@ SCRIPT = Path(__import__("sinnix_fs.inventory", fromlist=["__file__"]).__file__)
 
 
 def load_script():
-    return SourceFileLoader("sinnix_inventory", str(SCRIPT)).load_module()
-
-
-def test_failed_materialization_keeps_the_previous_complete_pair(tmp_path, monkeypatch):
-    """A DuckDB failure preserves both existing artifacts inside staging.
-
-    Mutation: restore either old ``db.unlink()`` or direct final-Parquet COPY
-    and the corresponding old artifact disappears or is overwritten before
-    this assertion.
-    """
-    fs = load_script()
-    db = tmp_path / "inventory.duckdb"
-    parquet = tmp_path / "nodes.parquet"
-    db.write_text("old database")
-    parquet.write_text("old parquet")
-    observed = []
-
-    def fail(staged_db, _sql, _name):
-        observed.append((staged_db, db.read_text(), parquet.read_text()))
-        return SimpleNamespace(returncode=1, stdout="", stderr="forced failure")
-
-    monkeypatch.setattr(fs, "run_duckdb_file", fail)
-    with pytest.raises(SystemExit, match="duckdb failed"):
-        fs.materialize_pair(db, parquet, lambda _path: "SELECT 1", "inventory")
-
-    assert observed[0][0].parent != tmp_path
-    assert observed[0][1:] == ("old database", "old parquet")
-    assert db.read_text() == "old database"
-    assert parquet.read_text() == "old parquet"
-    assert list(tmp_path.iterdir()) == [db, parquet]
-
-
-def test_validated_staged_pair_replaces_both_public_artifacts(tmp_path, monkeypatch):
-    fs = load_script()
-    db = tmp_path / "content.duckdb"
-    parquet = tmp_path / "files.parquet"
-    db.write_text("old database")
-    parquet.write_text("old parquet")
-
-    def build(staged_db, sql, _name):
-        staged_db.write_text("new database")
-        staged_parquet = Path(sql.removeprefix("COPY "))
-        staged_parquet.write_text("new parquet")
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    def query(_db, _sql):
-        return SimpleNamespace(returncode=0, stdout="1\n", stderr="")
-
-    monkeypatch.setattr(fs, "run_duckdb_file", build)
-    monkeypatch.setattr(fs, "duckdb_query", query)
-    fs.materialize_pair(db, parquet, lambda path: f"COPY {path}", "files")
-
-    assert db.read_text() == "new database"
-    assert parquet.read_text() == "new parquet"
-    assert list(tmp_path.iterdir()) == [db, parquet]
+    module = SourceFileLoader("sinnix_inventory", str(SCRIPT)).load_module()
+    # Synthetic fixtures must behave the same in Nix and AgentCTL scratch.
+    module.CONTENT_COLLECTION_BOUNDARIES = {}
+    return module
 
 
 def test_ledger_view_normalizes_role_without_changing_raw_evidence(tmp_path):
@@ -80,7 +29,7 @@ def test_ledger_view_normalizes_role_without_changing_raw_evidence(tmp_path):
         "fixture",
     )
     fs.run_duckdb_file(
-        tmp_path / "content.duckdb",
+        tmp_path / "inventory.duckdb",
         "CREATE TABLE files(schema VARCHAR, path VARCHAR, bytes BIGINT, sha256 VARCHAR, error VARCHAR);",
         "fixture",
     )
@@ -119,7 +68,7 @@ def test_coverage_counts_locations_once_and_preserves_content_identity(tmp_path)
         "fixture",
     )
     fs.run_duckdb_file(
-        tmp_path / "content.duckdb",
+        tmp_path / "inventory.duckdb",
         "CREATE TABLE files(schema VARCHAR, path VARCHAR, bytes BIGINT, sha256 VARCHAR, fingerprint_kind VARCHAR, error VARCHAR); INSERT INTO files VALUES ('sinnix-fs-content-v2', '/scope/boundary', NULL, NULL, NULL, NULL), ('sinnix-fs-content-v2', '/scope/file', 4, repeat('a', 64), 'sha256-full', NULL);",
         "fixture",
     )
@@ -144,7 +93,7 @@ def test_coverage_counts_locations_once_and_preserves_content_identity(tmp_path)
     assert result.returncode == 0, result.stderr
     assert result.stdout.splitlines() == ["3", "3", '"exact"', "2"]
     fs.run_duckdb_file(
-        tmp_path / "content.duckdb",
+        tmp_path / "inventory.duckdb",
         "INSERT INTO files VALUES ('sinnix-fs-content-v2', '/scope/file', 4, repeat('b', 64), 'sha256-full', NULL);",
         "fixture",
     )
@@ -268,7 +217,7 @@ def test_sql_and_direct_resolution_share_time_ambiguity_unknown_and_invalid(tmp_
         "fixture",
     )
     fs.run_duckdb_file(
-        tmp_path / "content.duckdb",
+        tmp_path / "inventory.duckdb",
         "CREATE TABLE files(schema VARCHAR, path VARCHAR, bytes BIGINT, sha256 VARCHAR, error VARCHAR);",
         "fixture",
     )
@@ -383,7 +332,7 @@ def test_generation_and_status_include_content_failures(
         assert fs.publish_generation(index, roots=[str(root)]) == 0
         generation = fs.resolve_generation(index)
         observed = fs.duckdb_query(
-            generation / "content.duckdb",
+            generation / "inventory.duckdb",
             "SELECT count(*) FROM files WHERE error IS NOT NULL",
         )
         assert observed.returncode == 0 and int(observed.stdout.strip()) == int(
@@ -420,7 +369,9 @@ def test_legacy_content_without_boundary_records_reports_unknown_coverage(tmp_pa
     )
     assert (
         fs.run_duckdb_file(
-            tmp_path / "content.duckdb", "CREATE TABLE files(error VARCHAR)", "fixture"
+            tmp_path / "inventory.duckdb",
+            "CREATE TABLE files(error VARCHAR)",
+            "fixture",
         ).returncode
         == 0
     )
@@ -749,7 +700,7 @@ def test_index_input_failures_keep_their_reason(
 
     fs = load_script()
     target = tmp_path / (
-        "content.duckdb" if operation == "content-views" else "judgments.jsonl"
+        "inventory.duckdb" if operation == "content-views" else "judgments.jsonl"
     )
     if failure == "directory":
         target.mkdir()
@@ -794,3 +745,161 @@ def test_index_input_failures_keep_their_reason(
     else:
         assert "missing" in error or "absent" in error
     assert not (tmp_path / ".effective.jsonl").exists()
+
+
+def test_streamed_scan_matches_file_fed_tables_and_bounds_writes(tmp_path, monkeypatch):
+    """Account completed child IO as well as Python writes on a synthetic tree."""
+    fs = load_script()
+    monkeypatch.setattr(fs, "CONTENT_COLLECTION_BOUNDARIES", {})
+    root = tmp_path / "tree"
+    root.mkdir()
+    # Distinct names and payloads exercise hashes, extension histograms, rollups
+    # and content views without relying on the operator's filesystem.
+    for i in range(6000):
+        directory = root / f"group-{i % 20}"
+        directory.mkdir(exist_ok=True)
+        (directory / f"note-{i:05d}.txt").write_text(f"Synthetic note {i}\n")
+    expected = tmp_path / "expected"
+    expected.mkdir()
+    nodes = expected / "nodes.jsonl"
+    files = expected / "files.jsonl"
+    fs.inventory_scan([str(root)], -1, nodes, 0)
+    fs.content_walk([str(root)], files, 0)
+    expected_db = expected / "inventory.duckdb"
+    fs.inventory_materialize(nodes, expected_db)
+    fs.content_materialize(files, expected_db)
+    index = tmp_path / "index"
+    index.mkdir()
+    (index / "judgments.jsonl").write_text("")
+
+    def written_bytes():
+        return int(
+            dict(
+                line.split(":", 1)
+                for line in Path("/proc/self/io").read_text().splitlines()
+            )["write_bytes"]
+        )
+
+    before = written_bytes()
+    assert fs.publish_generation(index, roots=[str(root)]) == 0
+    written = written_bytes() - before
+    generation = fs.resolve_generation(index)
+    size = sum(path.stat().st_size for path in generation.iterdir())
+    assert written <= size * 1.5, (written, size, written / size)
+    print(
+        f"synthetic scan: {written} written bytes / {size} generation bytes = {written / size:.3f}x"
+    )
+    assert {path.name for path in generation.iterdir()} == {
+        "inventory.duckdb",
+        "manifest.json",
+    }
+    # atime can change during fingerprinting, so compare stable scan facts.
+    for relation, columns in [
+        ("nodes", "path,parent,direct_bytes,direct_files,error,prune_reason"),
+        ("inventory", "path,total_bytes,subtree_dirs,subtree_complete"),
+        ("files", "path,bytes,sha256,sample_sha256,fingerprint_kind,error"),
+        ("population", "*"),
+        ("duplicates", "*"),
+    ]:
+        query = f"SELECT {columns} FROM {relation} ORDER BY 1"
+        observed = fs.duckdb_query(generation / "inventory.duckdb", query)
+        expected_rows = fs.duckdb_query(expected_db, query)
+        assert observed.returncode == expected_rows.returncode == 0
+        assert observed.stdout == expected_rows.stdout
+    abandoned = index / "generations/.building-dead"
+    abandoned.mkdir()
+    (abandoned / "partial").write_text("partial")
+    assert fs.publish_generation(index) == 0
+    assert not generation.exists() and not abandoned.exists()
+    assert list((index / "generations").iterdir()) == [fs.resolve_generation(index)]
+
+
+def test_failed_materialization_rolls_back_existing_table(tmp_path):
+    fs = load_script()
+    db = tmp_path / "inventory.duckdb"
+    assert (
+        fs.run_duckdb_file(
+            db, "CREATE TABLE files AS SELECT 1 AS value", "fixture"
+        ).returncode
+        == 0
+    )
+    with pytest.raises(SystemExit, match="duckdb failed"):
+        fs.materialize_database(
+            db,
+            "DROP TABLE files; CREATE TABLE files AS SELECT * FROM missing_source;",
+            "files",
+        )
+    result = fs.duckdb_query(db, "SELECT * FROM files")
+    assert result.returncode == 0 and result.stdout.strip() == "1"
+
+
+def test_refresh_imports_legacy_split_database_without_rescanning(
+    tmp_path, monkeypatch
+):
+    import json
+    import shutil
+
+    fs = load_script()
+    monkeypatch.setattr(fs, "CONTENT_COLLECTION_BOUNDARIES", {})
+    root = tmp_path / "tree"
+    root.mkdir()
+    (root / "note.txt").write_text("synthetic")
+    index = tmp_path / "index"
+    index.mkdir()
+    ledger = index / "judgments.jsonl"
+    ledger.write_text("")
+    assert fs.publish_generation(index, roots=[str(root)]) == 0
+    previous = fs.resolve_generation(index)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    shutil.copyfile(previous / "inventory.duckdb", legacy / "inventory.duckdb")
+    shutil.copyfile(previous / "inventory.duckdb", legacy / "content.duckdb")
+    shutil.copyfile(previous / "manifest.json", legacy / "manifest.json")
+    result = fs.run_duckdb_file(
+        legacy / "inventory.duckdb",
+        """
+CREATE TEMP TABLE projection AS SELECT path,sha256 FROM files;
+DROP TABLE files;
+CREATE TABLE files AS SELECT * FROM projection;
+""",
+        "fixture",
+    )
+    assert result.returncode == 0, result.stderr
+    monkeypatch.setattr(
+        fs, "content_walk", lambda *args: pytest.fail("refresh must reuse scans")
+    )
+    assert fs.publish_generation(index, retained_inputs=legacy) == 0
+    generation = fs.resolve_generation(index)
+    assert fs.validate_generation(generation)
+    result = fs.duckdb_query(generation / "inventory.duckdb", "SELECT name FROM files")
+    assert result.returncode == 0 and result.stdout.strip() == "note.txt"
+    assert (
+        json.loads((generation / "manifest.json").read_text())["scan"]
+        == json.loads((legacy / "manifest.json").read_text())["scan"]
+    )
+    assert ledger.read_text() == ""
+
+
+def test_failed_stream_producer_preserves_current_without_leaking_pipes(
+    tmp_path, monkeypatch
+):
+    fs = load_script()
+    root = tmp_path / "tree"
+    root.mkdir()
+    (root / "note.txt").write_text("synthetic")
+    index = tmp_path / "index"
+    index.mkdir()
+    (index / "judgments.jsonl").write_text("")
+    assert fs.publish_generation(index, roots=[str(root)]) == 0
+    previous = fs.resolve_generation(index)
+    descriptors = set(Path("/proc/self/fd").iterdir())
+
+    def fail(*_args):
+        raise RuntimeError("synthetic scan producer failure")
+
+    monkeypatch.setattr(fs, "content_walk", fail)
+    with pytest.raises(RuntimeError, match="synthetic scan producer failure"):
+        fs.publish_generation(index, roots=[str(root)])
+    assert set(Path("/proc/self/fd").iterdir()) == descriptors
+    assert fs.resolve_generation(index) == previous
+    assert fs.validate_generation(previous)

@@ -3,8 +3,8 @@
 """Publish coherent filesystem inventories and judgment materializations.
 
 `run` scans into a private generation. `ledger` reuses retained scans and
-refreshes classifications. One atomic pointer publishes databases, Parquet
-files and a validated manifest. Authored ledgers remain outside generations.
+refreshes classifications. One atomic pointer publishes a database and a validated manifest.
+Authored ledgers remain outside generations.
 `status` and `query` inspect one reopened generation; judgments actions read
 or append authored definitions directly without scanning payloads.
 """
@@ -28,6 +28,7 @@ import tempfile
 import time
 import uuid
 from collections import Counter, deque
+from contextlib import nullcontext
 from pathlib import Path
 
 from sinnix_lib.atomic import atomic_text_writer
@@ -73,7 +74,7 @@ DUCKDB_SETTINGS = (
 
 
 def run_duckdb_file(
-    db: Path, sql: str, script_name: str
+    db: Path, sql: str, script_name: str, producer=None, pass_fds=()
 ) -> subprocess.CompletedProcess:
     """Execute SQL through a private scratch file beside its staged database."""
     db.parent.mkdir(parents=True, exist_ok=True)
@@ -88,12 +89,28 @@ def run_duckdb_file(
         script = Path(handle.name)
         handle.write(DUCKDB_SETTINGS + "\n" + sql)
     try:
-        return subprocess.run(
-            ["duckdb", "-no-init", str(db), "-f", str(script)],
+        command = ["duckdb", "-bail", "-no-init", str(db), "-f", str(script)]
+        if producer is None:
+            return subprocess.run(command, text=True, capture_output=True, check=False)
+        # SQL comes from -f; inherited pipe descriptors carry the scan rows.
+        # Keep diagnostics in memory, never a second copy of the scan on disk.
+        with subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            capture_output=True,
-            check=False,
-        )
+            pass_fds=pass_fds,
+        ) as process:
+            try:
+                producer()
+                stdout, stderr = process.communicate()
+            except BaseException:
+                process.kill()
+                process.communicate()
+                raise
+            return subprocess.CompletedProcess(
+                command, process.returncode, stdout, stderr
+            )
     finally:
         script.unlink(missing_ok=True)
 
@@ -124,65 +141,15 @@ def _fsync_file(path: Path) -> None:
         os.close(descriptor)
 
 
-def materialize_pair(
-    db: Path,
-    parquet: Path,
-    sql_for_parquet,
-    table: str,
-) -> str:
-    """Build and validate a database/Parquet pair before replacing either output.
-
-    This helper operates inside a private unpublished generation. The owner
-    exposes all validated artifacts together through its generation pointer.
-    """
-    db.parent.mkdir(parents=True, exist_ok=True)
-    if db.parent != parquet.parent:
-        raise ValueError("database and parquet must share a publication directory")
-    with tempfile.TemporaryDirectory(
-        prefix=f".{db.stem}.materialize-", dir=db.parent
-    ) as staging:
-        stage = Path(staging)
-        staged_db = stage / db.name
-        staged_parquet = stage / parquet.name
-        proc = run_duckdb_file(
-            staged_db, sql_for_parquet(staged_parquet), "materialize"
-        )
-        if proc.returncode != 0:
-            print(proc.stdout, file=sys.stderr)
-            print(proc.stderr, file=sys.stderr)
-            raise SystemExit(f"duckdb failed ({proc.returncode})")
-
-        check = duckdb_query(staged_db, f"SELECT count(*) FROM {table}")
-        rows = check.stdout.strip()
-        if check.returncode != 0 or not rows.isdigit():
-            raise SystemExit(
-                f"materialize row-count validation failed (duckdb said: {rows!r} "
-                f"{check.stderr.strip()})"
-            )
-        parquet_check = duckdb_query(
-            staged_db,
-            f"SELECT count(*) FROM read_parquet({sql_string(staged_parquet)})",
-        )
-        if parquet_check.returncode != 0 or parquet_check.stdout.strip() != rows:
-            raise SystemExit(
-                f"parquet validation failed for {staged_parquet}: "
-                f"{parquet_check.stderr.strip()}"
-            )
-
-        # DuckDB has closed its writers; make both completed files durable
-        # before either public name moves.  os.replace is same-directory here.
-        _fsync_file(staged_db)
-        _fsync_file(staged_parquet)
-        os.replace(staged_db, db)
-        os.replace(staged_parquet, parquet)
-        directory = os.open(
-            db.parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0)
-        )
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-        return rows
+def materialize_database(db: Path, sql: str, table: str) -> str:
+    """Write inside the unpublished generation, in one transaction."""
+    proc = run_duckdb_file(db, "BEGIN;\n" + sql + "\nCOMMIT;", "materialize")
+    if proc.returncode:
+        raise SystemExit(f"duckdb failed ({proc.returncode}): {proc.stderr}")
+    check = duckdb_query(db, f"SELECT count(*) FROM {table}")
+    if check.returncode or not check.stdout.strip().isdigit():
+        raise ValueError(f"materialize validation failed: {check.stderr}")
+    return check.stdout.strip()
 
 
 # =====================================================================
@@ -209,9 +176,8 @@ Keeping those apart is the whole design. A scan must be free to re-run nightly;
 a judgement about what a directory is for costs real attention and must
 survive. They join on the path.
 
-Storage follows the url-ledger precedent: JSONL is the append-only source of
-truth (diffable, re-ingestable, survives a DuckDB version bump) and DuckDB +
-Parquet are the materialisation you query.
+Scan rows stream into one DuckDB database. Only authored judgments are
+retained as JSONL; derived scan tables are regenerable caches.
 
 Directories are the unit. A file-level index of this system would be tens of
 millions of rows to answer questions that are all really about directories;
@@ -287,11 +253,16 @@ def inventory_scan(
     structure completely -- the part a reader needs first -- instead of one
     deep spur and nothing else.
     """
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(out_path, Path):
+        out_path.parent.mkdir(parents=True, exist_ok=True)
     written = 0
     started = time.monotonic()
 
-    with atomic_text_writer(out_path, fsync=True, mode=0o600) as out:
+    with (
+        atomic_text_writer(out_path, fsync=True, mode=0o600)
+        if isinstance(out_path, Path)
+        else nullcontext(out_path)
+    ) as out:
         root_paths: set[str] = set()
         queue = deque((str(Path(r).absolute()), 0) for r in roots)
         while queue:
@@ -482,8 +453,8 @@ def inventory_scan(
     return written
 
 
-def inventory_materialize(jsonl: Path, db: Path, parquet: Path) -> None:
-    """JSONL -> DuckDB + Parquet, with the rolled-up subtree sizes.
+def inventory_materialize(jsonl: Path, db: Path, *, sql_only=False):
+    """Scan stream -> DuckDB, with the rolled-up subtree sizes.
 
     direct_bytes is what a directory holds itself; total_bytes is it plus
     everything under it. The rollup is done here rather than during the walk
@@ -492,7 +463,7 @@ def inventory_materialize(jsonl: Path, db: Path, parquet: Path) -> None:
     """
     sql = f"""
 DROP TABLE IF EXISTS nodes;
-CREATE TABLE nodes AS SELECT * FROM read_json_auto({sql_string(jsonl)}, ignore_errors=false);
+CREATE TABLE nodes AS SELECT * FROM read_json_auto({sql_string(jsonl)}, format='newline_delimited', ignore_errors=false);
 
 -- Recursive rollup: every node accumulates its own bytes plus its descendants'.
 --
@@ -531,17 +502,11 @@ CREATE VIEW inventory AS
 SELECT n.*, r.total_bytes, r.subtree_dirs, r.subtree_complete, r.incomplete_reason
 FROM nodes n LEFT JOIN rollup r USING (path);
 
-COPY (SELECT * FROM inventory) TO {sql_string(parquet)} (FORMAT PARQUET);
 """
-    rows = materialize_pair(
-        db,
-        parquet,
-        lambda staged_parquet: sql.replace(
-            sql_string(parquet), sql_string(staged_parquet)
-        ),
-        "inventory",
-    )
-    print(f"sinnix-fs inventory: materialized {rows} rows -> {db}, {parquet}")
+    if sql_only:
+        return sql
+    rows = materialize_database(db, sql, "inventory")
+    print(f"sinnix-fs inventory: materialized {rows} rows -> {db}")
 
 
 # =====================================================================
@@ -956,12 +921,17 @@ def content_fingerprint(
 
 
 def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(out_path, Path):
+        out_path.parent.mkdir(parents=True, exist_ok=True)
     written = 0
     errored = 0
     skipped = 0
     started = time.monotonic()
-    with atomic_text_writer(out_path, fsync=True, mode=0o600) as out:
+    with (
+        atomic_text_writer(out_path, fsync=True, mode=0o600)
+        if isinstance(out_path, Path)
+        else nullcontext(out_path)
+    ) as out:
 
         def boundary_error(path, reason):
             nonlocal written, errored
@@ -1195,7 +1165,7 @@ def content_walk(roots: list[str], out_path: Path, progress_every: int) -> int:
     return written
 
 
-def content_materialize(jsonl: Path, db: Path, parquet: Path) -> None:
+def content_materialize(jsonl: Path, db: Path, *, sql_only=False):
     columns = (
         "{"
         + ", ".join(
@@ -1243,17 +1213,11 @@ SELECT CASE WHEN document_like THEN 'document'
        count(*) AS files, sum(bytes) AS bytes
 FROM files GROUP BY 1;
 
-COPY (SELECT * FROM files) TO {sql_string(parquet)} (FORMAT PARQUET);
 """
-    rows = materialize_pair(
-        db,
-        parquet,
-        lambda staged_parquet: sql.replace(
-            sql_string(parquet), sql_string(staged_parquet)
-        ),
-        "files",
-    )
-    print(f"sinnix-fs content: materialized {rows} rows -> {db}, {parquet}")
+    if sql_only:
+        return sql
+    rows = materialize_database(db, sql, "files")
+    print(f"sinnix-fs content: materialized {rows} rows -> {db}")
 
 
 # =====================================================================
@@ -1266,7 +1230,7 @@ Authored judgments remain unchanged. Shared validation and ranking govern direct
 lookup and SQL: operator precedence, timestamp ordering, explicit conflicting
 ties, component-aware prefixes and full-digest-only joins. Invalid historical
 definitions remain in the raw ledger and are excluded from effective results.
-The validated databases, Parquet and manifest publish through one atomic pointer.
+The validated database and manifest publish through one atomic pointer.
 """
 
 
@@ -1294,8 +1258,7 @@ SELECT target, field, value, confidence, observation, method, evidence, ts,
 FROM resolved_judgments
 WHERE target LIKE 'prefix:%';
 
--- Published relations are local tables. Every reopened reader uses the same
--- generation without depending on the writer's temporary content attachment.
+-- All relations resolve against local tables in the published database.
 DROP TABLE IF EXISTS all_paths;
 CREATE TABLE all_paths AS
 -- Directory boundaries and failed directory reads also occur in files.
@@ -1306,7 +1269,8 @@ SELECT path,
 FROM (
     SELECT path, NULL AS sha256 FROM nodes
     UNION ALL
-    SELECT path, sha256 FROM files
+    SELECT path, CASE WHEN error IS NULL AND {exact_clause}
+    AND regexp_full_match(sha256, '[0-9a-fA-F]{{64}}') THEN lower(sha256) END AS sha256 FROM files
 ) GROUP BY path;
 
 -- Only paths that DO match something appear here (an inner join, not a
@@ -1369,7 +1333,6 @@ FROM subject_state GROUP BY state ORDER BY paths DESC;
 LEDGER_OBJECT_KIND = {
     "resolved_judgments": "VIEW",
     "prefix_judgments": "VIEW",
-    "files": "TABLE",
     "effective_judgments": "TABLE",
     "all_paths": "TABLE",
     "inherited_judgments": "TABLE",
@@ -1377,11 +1340,10 @@ LEDGER_OBJECT_KIND = {
 }
 
 
-def ledger_run(index_dir: Path, judgments_path: Path | None = None) -> int:
+def ledger_run(index_dir: Path, judgments_path: Path | None = None, *, sql_only=False):
     judgments = judgments_path or index_dir / "judgments.jsonl"
     inv_db = index_dir / "inventory.duckdb"
-    content_db = index_dir / "content.duckdb"
-    for p in (judgments, inv_db, content_db):
+    for p in (judgments,) if sql_only else (judgments, inv_db):
         if not require_regular_index_input(p, "ledger"):
             return 1
 
@@ -1393,77 +1355,74 @@ def ledger_run(index_dir: Path, judgments_path: Path | None = None) -> int:
     with atomic_text_writer(effective, fsync=False, mode=0o600) as handle:
         for record in effective_target_judgments(ledger):
             handle.write(json.dumps(record) + "\n")
-    sql = LEDGER_SQL.format(
-        judgments_jsonl=sql_string(judgments), ledger_columns=columns
-    )
     # A prior run may have left an object with the same name as a different
     # kind (view vs table) -- DROP ... IF EXISTS does not suppress a type
     # mismatch, only a missing name, so a plain drop-then-create can fail
     # against the catalog's actual current state. Query it and drop each
     # target object precisely as whatever it currently is, before running the
     # real script.
-    catalog_probe = (
-        "SELECT table_name, 'TABLE' FROM duckdb_tables() "
-        "UNION ALL SELECT view_name, 'VIEW' FROM duckdb_views();"
-    )
-    probe = subprocess.run(
-        [
-            "duckdb",
-            str(inv_db),
-            "-csv",
-            "-no-init",
-            "-c",
-            DUCKDB_SETTINGS + "\n" + catalog_probe,
-        ],
-        text=True,
-        capture_output=True,
-    )
     existing = {}
-    if probe.returncode == 0:
-        for line in probe.stdout.splitlines()[1:]:
-            if "," not in line:
-                continue
-            n, kind = line.rsplit(",", 1)
-            existing[n.strip('"')] = kind
+    if not sql_only:
+        catalog_probe = (
+            "SELECT table_name, 'TABLE' FROM duckdb_tables() "
+            "UNION ALL SELECT view_name, 'VIEW' FROM duckdb_views();"
+        )
+        probe = subprocess.run(
+            [
+                "duckdb",
+                str(inv_db),
+                "-csv",
+                "-no-init",
+                "-c",
+                DUCKDB_SETTINGS + "\n" + catalog_probe,
+            ],
+            text=True,
+            capture_output=True,
+        )
+        if probe.returncode == 0:
+            for line in probe.stdout.splitlines()[1:]:
+                if "," not in line:
+                    continue
+                n, kind = line.rsplit(",", 1)
+                existing[n.strip('"')] = kind
     precise_drops = "\n".join(
         f"DROP {existing[name]} IF EXISTS {name};"
         for name in LEDGER_OBJECT_KIND
         if name in existing and existing[name] != LEDGER_OBJECT_KIND[name]
     )
 
-    columns_probe = duckdb_query(
-        content_db,
-        "SELECT column_name FROM information_schema.columns WHERE table_name='files'",
-    )
-    if columns_probe.returncode:
-        print(columns_probe.stderr, file=sys.stderr)
-        return 1
-    typed = "fingerprint_kind" in columns_probe.stdout.splitlines()
+    typed = True
+    if not sql_only:
+        columns_probe = duckdb_query(
+            inv_db,
+            "SELECT column_name FROM information_schema.columns WHERE table_name='files'",
+        )
+        if columns_probe.returncode:
+            print(columns_probe.stderr, file=sys.stderr)
+            return 1
+        typed = "fingerprint_kind" in columns_probe.stdout.splitlines()
     exact_clause = (
         "fingerprint_kind = 'sha256-full'"
         if typed
         else "schema = 'sinnix-fs-content-v1' AND bytes BETWEEN 0 AND 8388608"
     )
 
-    # inventory.duckdb is opened directly (it already has nodes/rollup); only
-    # content.duckdb needs ATTACHing, as a view rather than a copy, so a
-    # re-run of either scanner remains the only place that table is written.
-    full_sql = f"""
-ATTACH {sql_string(content_db)} AS ctn (READ_ONLY);
-BEGIN TRANSACTION;
+    sql = LEDGER_SQL.format(
+        judgments_jsonl=sql_string(judgments),
+        ledger_columns=columns,
+        exact_clause=exact_clause,
+    )
+    statements = f"""
 {precise_drops}
-DROP TABLE IF EXISTS files;
-CREATE TABLE files AS
-SELECT path, CASE WHEN error IS NULL AND {exact_clause}
-  AND regexp_full_match(sha256, '[0-9a-fA-F]{{64}}')
-  THEN lower(sha256) ELSE NULL END AS sha256 FROM ctn.files;
 CREATE OR REPLACE TABLE effective_judgments AS
 SELECT * FROM read_json({sql_string(effective)}, columns={columns}, ignore_errors=false);
 {sql}
-COMMIT;
-.print
-SELECT * FROM coverage;
 """
+    if sql_only:
+        return statements
+    full_sql = (
+        "BEGIN TRANSACTION;\n" + statements + "\nCOMMIT;\nSELECT * FROM coverage;"
+    )
     try:
         proc = run_duckdb_file(inv_db, full_sql, ".ledger.sql")
     finally:
@@ -1480,33 +1439,23 @@ SELECT * FROM coverage;
     return 0
 
 
-DERIVED_FILES = (
-    "nodes.jsonl",
-    "files.jsonl",
-    "inventory.duckdb",
-    "content.duckdb",
-    "nodes.parquet",
-    "files.parquet",
-)
+DERIVED_FILES = ("inventory.duckdb",)
 RELATIONS = {
     "inventory.duckdb": (
         "nodes",
         "rollup",
         "inventory",
         "files",
+        "duplicates",
+        "sampled_duplicate_candidates",
+        "scattered_names",
+        "population",
         "judgments",
         "resolved_judgments",
         "prefix_judgments",
         "all_paths",
         "inherited_judgments",
         "coverage",
-    ),
-    "content.duckdb": (
-        "files",
-        "duplicates",
-        "sampled_duplicate_candidates",
-        "scattered_names",
-        "population",
     ),
 }
 
@@ -1550,18 +1499,6 @@ def validate_generation(stage: Path) -> dict:
                     f"reopened {database}.{relation} failed: {result.stderr}"
                 )
             counts[database + "." + relation] = int(result.stdout.strip())
-    for database, parquet, relation in (
-        ("inventory.duckdb", "nodes.parquet", "nodes"),
-        ("content.duckdb", "files.parquet", "files"),
-    ):
-        result = duckdb_query(
-            stage / database,
-            f"SELECT count(*) FROM read_parquet({sql_string(stage / parquet)})",
-        )
-        if result.returncode or result.stdout.strip() != str(
-            counts[database + "." + relation]
-        ):
-            raise ValueError(f"Parquet mismatch: {parquet}")
     return counts
 
 
@@ -1586,7 +1523,7 @@ def generation_coverage(path: Path) -> dict:
         raise ValueError(f"coverage check failed: {result.stderr}")
     errors, pruned = map(int, result.stdout.strip().split(","))
     columns = duckdb_query(
-        path / "content.duckdb",
+        path / "inventory.duckdb",
         "SELECT column_name FROM information_schema.columns WHERE table_name='files'",
     )
     if columns.returncode:
@@ -1600,7 +1537,7 @@ def generation_coverage(path: Path) -> dict:
     # Alias targets are deliberately not traversed. Keep their coverage gap
     # visible without diagnosing an intentional boundary as a read failure.
     content = duckdb_query(
-        path / "content.duckdb",
+        path / "inventory.duckdb",
         f"SELECT count(*) FILTER (WHERE error IS NOT NULL AND error != 'alias not traversed'), {boundary_count}, count(*) FILTER (WHERE error = 'alias not traversed') FROM files",
     )
     if content.returncode:
@@ -1629,6 +1566,57 @@ def generation_coverage(path: Path) -> dict:
     }
 
 
+def scan_generation(stage: Path, roots: list[str], judgments: Path) -> None:
+    """Stream both scans and classifications through one DuckDB transaction.
+
+    Checkpoint at commit instead of journaling the same new tables first.
+    Separate inherited pipe descriptors let SQL consume scans sequentially
+    without ever spooling the rows to a filesystem intermediate.
+    """
+    pipes = []
+    owned = set()
+    database = stage / "inventory.duckdb"
+    try:
+        for _ in range(2):
+            pair = os.pipe()
+            pipes.append(pair)
+            owned.update(pair)
+        sql = "SET wal_autocheckpoint='0B'; BEGIN TRANSACTION;\n"
+        sql += inventory_materialize(
+            Path(f"/dev/fd/{pipes[0][0]}"), database, sql_only=True
+        )
+        sql += content_materialize(
+            Path(f"/dev/fd/{pipes[1][0]}"), database, sql_only=True
+        )
+        sql += ledger_run(stage, judgments, sql_only=True)
+        sql += "\nCOMMIT;"
+
+        def produce():
+            for reader, _writer in pipes:
+                os.close(reader)
+                owned.remove(reader)
+            with os.fdopen(pipes[0][1], "w", encoding="utf-8") as stream:
+                owned.remove(pipes[0][1])
+                inventory_scan(roots, -1, stream, 2000)
+            with os.fdopen(pipes[1][1], "w", encoding="utf-8") as stream:
+                owned.remove(pipes[1][1])
+                content_walk(roots, stream, 5000)
+
+        result = run_duckdb_file(
+            database,
+            sql,
+            "scan",
+            produce,
+            pass_fds=tuple(reader for reader, _writer in pipes),
+        )
+        if result.returncode:
+            raise ValueError(f"scan materialization failed: {result.stderr}")
+    finally:
+        for descriptor in owned:
+            os.close(descriptor)
+        (stage / ".effective.jsonl").unlink(missing_ok=True)
+
+
 def publish_generation(
     index_dir: Path, *, roots=None, retained_inputs: Path | None = None
 ) -> int:
@@ -1647,6 +1635,11 @@ def publish_generation(
         stage.mkdir(mode=0o700)
         try:
             ledger = read_judgments(index_dir / "judgments.jsonl")
+            # Freeze the exact reviewed ledger for this build without making it authored state.
+            ledger_copy = stage / ".judgments-input.jsonl"
+            shutil.copyfile(index_dir / "judgments.jsonl", ledger_copy)
+            if read_judgments(ledger_copy)["sha256"] != ledger["sha256"]:
+                raise ValueError("judgment ledger changed before build")
             if roots is None:
                 previous = retained_inputs or resolve_generation(index_dir)
                 for filename in DERIVED_FILES:
@@ -1664,6 +1657,20 @@ def publish_generation(
                     )
                     if result.returncode:
                         raise ValueError(f"cannot preserve {source}")
+                if (previous / "content.duckdb").is_file():
+                    migration = run_duckdb_file(
+                        stage / "inventory.duckdb",
+                        f"""
+ATTACH {sql_string(previous / "content.duckdb")} AS legacy (READ_ONLY);
+DROP TABLE IF EXISTS files;
+CREATE TABLE files AS SELECT * FROM legacy.files;
+CREATE OR REPLACE VIEW scattered_names AS SELECT name, count(*) AS copies, count(DISTINCT dir) AS dirs, list(DISTINCT dir) AS where_ FROM files GROUP BY name HAVING count(DISTINCT dir) > 2 ORDER BY count(DISTINCT dir) DESC;
+CREATE OR REPLACE VIEW population AS SELECT CASE WHEN document_like THEN 'document' WHEN data_like THEN 'tabular' ELSE 'structured-data' END AS population, count(*) AS files, sum(bytes) AS bytes FROM files GROUP BY 1;
+""",
+                        "legacy-import",
+                    )
+                    if migration.returncode:
+                        raise ValueError(migration.stderr)
                 prior_manifest = previous / "manifest.json"
                 scan = (
                     read_json_metadata(prior_manifest)["scan"]
@@ -1672,8 +1679,7 @@ def publish_generation(
                         "kind": "retained-inputs",
                         "fresh": False,
                         "inputs": [
-                            source_identity(previous / n)
-                            for n in ("nodes.jsonl", "files.jsonl")
+                            source_identity(previous / n) for n in DERIVED_FILES
                         ],
                         "exclusions": "historical exclusions were not recorded; no fresh coverage claim",
                     }
@@ -1681,18 +1687,7 @@ def publish_generation(
             else:
                 roots = [str(Path(root).absolute()) for root in roots]
                 started = dt.datetime.now(dt.timezone.utc).isoformat()
-                inventory_scan(roots, -1, stage / "nodes.jsonl", 2000)
-                inventory_materialize(
-                    stage / "nodes.jsonl",
-                    stage / "inventory.duckdb",
-                    stage / "nodes.parquet",
-                )
-                content_walk(roots, stage / "files.jsonl", 5000)
-                content_materialize(
-                    stage / "files.jsonl",
-                    stage / "content.duckdb",
-                    stage / "files.parquet",
-                )
+                scan_generation(stage, roots, ledger_copy)
                 scan = {
                     "kind": "fresh",
                     "started_at": started,
@@ -1704,14 +1699,9 @@ def publish_generation(
                     ),
                     "excluded_components": sorted(CONTENT_EXCLUDE_DIR_PARTS),
                 }
-            if content_views_refresh(stage / "content.duckdb"):
+            if roots is None and content_views_refresh(stage / "inventory.duckdb"):
                 raise ValueError("content comparison view refresh failed")
-            # Freeze the exact reviewed ledger for this build without making it authored state.
-            ledger_copy = stage / ".judgments-input.jsonl"
-            shutil.copyfile(index_dir / "judgments.jsonl", ledger_copy)
-            if read_judgments(ledger_copy)["sha256"] != ledger["sha256"]:
-                raise ValueError("judgment ledger changed before build")
-            if ledger_run(stage, ledger_copy):
+            if roots is None and ledger_run(stage, ledger_copy):
                 raise ValueError("ledger construction failed")
             ledger_copy.unlink()
             counts = validate_generation(stage)
@@ -1761,6 +1751,14 @@ def publish_generation(
                 index_dir / "last-attempt.json", fsync=True, mode=0o600
             ) as handle:
                 json.dump({"status": "published", "generation": name}, handle)
+            # The writer lock excludes live candidates. Derived caches are regenerable.
+            for candidate in generations.iterdir():
+                if (
+                    candidate != final
+                    and candidate.is_dir()
+                    and not candidate.is_symlink()
+                ):
+                    shutil.rmtree(candidate)
             print(json.dumps(manifest))
             return 0
         except (Exception, SystemExit, KeyboardInterrupt) as exc:

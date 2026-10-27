@@ -1093,6 +1093,13 @@ def _sync_directory(path: Path) -> None:
 
 
 def cmd_build(args: argparse.Namespace) -> int:
+    """Publish validated products, then retain one generation under .build.lock.
+
+    Superseded generations and abandoned .building-* directories are derived
+    caches. Source state and preserved legacy flat preimages remain separate.
+    Readers should resolve the pointer for each operation; old paths expire
+    when a newer complete generation commits.
+    """
     root = Path(args.derived_root)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     generations = root / "generations"
@@ -1157,10 +1164,17 @@ def cmd_build(args: argparse.Namespace) -> int:
                     os.replace(source, history / source.name)
                 _sync_directory(history)
                 _sync_directory(root)
+            # All builders hold .build.lock for their entire lifetime, so every
+            # other staging directory is abandoned. Prune only after commit.
+            for candidate in generations.iterdir():
+                if candidate != final and candidate.is_dir() and not candidate.is_symlink():
+                    if candidate.name.startswith(".building-") or re.fullmatch(r"[0-9a-f]{32}", candidate.name):
+                        shutil.rmtree(candidate)
+            _sync_directory(generations)
             print(f"sinnix-url-ledger published: {name}, {rows} URLs")
             return 0
         except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
-            outcome = "publication committed; predecessor preservation failed" if committed else "build refused"
+            outcome = "publication committed; cache cleanup failed" if committed else "build refused"
             print(f"sinnix-url-ledger {outcome}: {error}", file=sys.stderr)
             return 1
         finally:

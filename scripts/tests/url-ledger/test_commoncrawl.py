@@ -114,7 +114,7 @@ def test_failed_build_preserves_complete_previous_publication(
     assert (derived / "current.json").read_bytes() == pointer
 
 
-def test_selected_generation_survives_replacement_and_flat_preimages_remain(tmp_path):
+def test_superseded_generation_is_pruned_and_flat_preimages_remain(tmp_path):
     derived = tmp_path / "derived"
     state = derived / "state"
     state.mkdir(parents=True)
@@ -145,12 +145,18 @@ def test_selected_generation_survives_replacement_and_flat_preimages_remain(tmp_
             list((derived / "history").glob(f"flat-*/{name}"))[0].read_bytes()
             == flat[name]
         )
+    abandoned = derived / "generations/.building-dead"
+    abandoned.mkdir()
+    (abandoned / "partial").write_text("incomplete")
     write("https://example.invalid/second")
     authored = inputs.read_bytes()
     assert ledger.cmd_build(args) == 0
     second = ledger.published_generation(derived)
     assert first != second
-    for path, expected in [(first, "first"), (second, "second")]:
+    assert not abandoned.exists()
+    assert not first.exists()
+    assert list((derived / "generations").iterdir()) == [second]
+    for path, expected in [(second, "second")]:
         rows = ledger._query_json(
             args.duckdb_bin,
             path / "url_ledger.duckdb",
@@ -196,7 +202,6 @@ def test_post_commit_durability_failure_keeps_complete_generation(
     )
     assert ledger.cmd_build(args) == 0
     previous = ledger.published_generation(root)
-    before = {p.name: p.read_bytes() for p in previous.iterdir()}
     original = ledger.atomic_publish
 
     def committed_then_failed(path, *args, **kwargs):
@@ -210,7 +215,7 @@ def test_post_commit_durability_failure_keeps_complete_generation(
     current = ledger.published_generation(root)
     assert current != previous
     assert ledger._validate_products(current, args.duckdb_bin) == 1
-    assert {p.name: p.read_bytes() for p in previous.iterdir()} == before
+    assert not previous.exists()
     assert (
         "publication committed; durability confirmation failed"
         in capsys.readouterr().err

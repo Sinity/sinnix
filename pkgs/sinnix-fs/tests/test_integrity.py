@@ -61,8 +61,8 @@ def row(path, size=4, digest=None, **extra):
 def materialize(fs, root, rows):
     source = root / "files.jsonl"
     source.write_text("".join(json.dumps(r) + "\n" for r in rows))
-    fs.content_materialize(source, root / "content.duckdb", root / "files.parquet")
-    return root / "content.duckdb"
+    fs.content_materialize(source, root / "inventory.duckdb")
+    return root / "inventory.duckdb"
 
 
 def test_full_digest_is_hash_of_all_bytes_and_empty_files_are_kept(tmp_path):
@@ -145,7 +145,7 @@ def test_unknown_schema_and_errored_records_do_not_become_content_identity(tmp_p
 
 def test_legacy_view_repair_changes_no_source_rows_and_is_repeatable(tmp_path):
     fs = load()
-    db = tmp_path / "content.duckdb"
+    db = tmp_path / "inventory.duckdb"
     digest = "a" * 64
     sql(
         db,
@@ -168,13 +168,11 @@ def test_broken_json_never_replaces_previous_materializations(tmp_path):
     fs = load()
     source = tmp_path / "bad.jsonl"
     source.write_text("{not json}\n")
-    db = tmp_path / "content.duckdb"
-    pq = tmp_path / "files.parquet"
+    db = tmp_path / "inventory.duckdb"
     db.write_bytes(b"old database")
-    pq.write_bytes(b"old parquet")
     with pytest.raises(SystemExit):
-        fs.content_materialize(source, db, pq)
-    assert db.read_bytes() == b"old database" and pq.read_bytes() == b"old parquet"
+        fs.content_materialize(source, db)
+    assert db.read_bytes() == b"old database"
 
 
 def test_aliases_and_special_files_are_not_opened_as_payloads(tmp_path, monkeypatch):
@@ -246,7 +244,7 @@ def test_component_prefix_and_legacy_sha_judgments_are_not_overextended(
     assert not home.exists()
     fs = load()
     db = tmp_path / "inventory.duckdb"
-    ctn = tmp_path / "content.duckdb"
+    ctn = tmp_path / "inventory.duckdb"
     sql(
         db,
         "CREATE TABLE nodes(path VARCHAR); INSERT INTO nodes VALUES ('/foo'),('/foo/child'),('/foobar'),('/slash'),('/slash/child'),('/slashish');",
@@ -291,7 +289,7 @@ def test_component_prefix_and_legacy_sha_judgments_are_not_overextended(
 def test_nested_prefix_ledger_completes_with_a_bounded_buffer(tmp_path, monkeypatch):
     fs = load()
     db = tmp_path / "inventory.duckdb"
-    ctn = tmp_path / "content.duckdb"
+    ctn = tmp_path / "inventory.duckdb"
     sql(
         db,
         "CREATE TABLE nodes AS SELECT '/scope/' || repeat('branch/', 8) "
@@ -407,8 +405,8 @@ def test_native_collection_boundary_does_not_read_or_enumerate_its_payloads(
     assert rows[str(native)]["exclusion_reason"] == "native owner"
     assert rows[str(native)]["sha256"] is None and rows[str(native)]["error"] is None
     assert str(native / "must-not-read.md") not in rows
-    db = tmp_path / "content.duckdb"
-    fs.content_materialize(out, db, tmp_path / "files.parquet")
+    db = tmp_path / "inventory.duckdb"
+    fs.content_materialize(out, db)
     assert sql(
         db,
         "SELECT count(*) AS n FROM files WHERE kind='collection_boundary' AND exclusion_reason='native owner'",
@@ -691,7 +689,7 @@ def test_inventory_entry_errors_make_ancestor_totals_incomplete(
     assert failure.__name__ in nodes[str(child)]["error"]
     assert nodes[str(child)]["direct_bytes"] == 4
     db = tmp_path / "inventory.duckdb"
-    fs.inventory_materialize(source, db, tmp_path / "nodes.parquet")
+    fs.inventory_materialize(source, db)
     rows = sql(
         db,
         "SELECT total_bytes::BIGINT AS total_bytes, subtree_complete FROM inventory ORDER BY depth",
