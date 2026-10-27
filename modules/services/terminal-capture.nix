@@ -1,7 +1,7 @@
 # Integrated Terminal Capture and Session Telemetry
 #
 # Provides:
-# - Automatic shell recording via asciinema
+# - Automatic shell recording via asciinema and a bounded asynchronous writer
 # - Shell-native session and command metadata
 # - Unified directory management for terminal artifacts
 {
@@ -23,10 +23,8 @@ mkServiceModule {
   configFn =
     { pkgs, ... }:
     {
-      # A lane, not a surface. The writer is sinnix-captured-shell, a script
-      # the terminal launches -- there is no unit here to own a surface, and
-      # declaring one meant putting a script's name in a field typed "systemd
-      # unit name".
+      # Session writers use transient user services rather than a fixed unit.
+      # The capture registry describes the lane independently of each session.
       sinnix.runtime.captures = [
         {
           name = "asciinema";
@@ -40,6 +38,7 @@ mkServiceModule {
 
       environment.systemPackages = [
         pkgs.asciinema
+        pkgs.python3
         pkgs.jq
       ];
 

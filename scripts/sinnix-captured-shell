@@ -415,15 +415,14 @@ trap 'handle_supervisor_signal "launcher_interrupted" 130' INT
 trap 'handle_supervisor_signal "launcher_terminated" 143' TERM
 trap 'handle_supervisor_exit "$?"' EXIT
 
-# Record the shell's PTY to the capture lane.
-asciinema rec \
+# The transport owns a pipe and drains its independent writer before exit.
+python3 "$(dirname "$(readlink -f "$0")")/sinnix-terminal-capture-writer" record "$cast_path" asciinema rec \
   --stdin \
   --quiet \
   --return \
   --output-format asciicast-v3 \
   --capture-env SHELL,TERM,SINNIX_CAPTURE_SESSION_ID,SINNIX_CAPTURE_HOST,SINNIX_CAPTURE_USER,SINNIX_CAPTURE_TTY,SINNIX_CAPTURE_TERMINAL,SINNIX_CAPTURE_START_CWD,SINNIX_CAPTURE_START_REPO_ROOT,SINNIX_CAPTURE_START_REPO_BRANCH,SINNIX_CAPTURE_START_REPO_COMMIT,SINNIX_CAPTURE_START_REPO_DIRTY,SINNIX_CAPTURE_PROJECT_ROOT \
-  --command "umask $shell_umask; exec \"\$SINNIX_CAPTURE_SHELL\"" \
-  "$cast_path" &
+  --command "umask $shell_umask; exec \"\$SINNIX_CAPTURE_SHELL\"" &
 recorder_pid=$!
 
 wait_for_recorder

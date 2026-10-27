@@ -20,6 +20,7 @@ in
         pkgs.runCommand "sinnix-terminal-capture-runtime-check"
           {
             nativeBuildInputs = [
+              pkgs.python3
               pkgs.asciinema
               pkgs.coreutils
               pkgs.findutils
@@ -33,6 +34,7 @@ in
             export HOME="$TMPDIR/home"
             export PATH="${
               lib.makeBinPath [
+                pkgs.python3
                 pkgs.asciinema
                 pkgs.coreutils
                 pkgs.findutils
@@ -84,7 +86,7 @@ in
               SINNIX_CAPTURE_SESSION_ID='poison-session' \
               TERM='xterm-kitty' \
               USER='$capture_user' \
-              ${pkgs.bash}/bin/bash ${../../scripts/sinnix-captured-shell}" "$transcript"
+              ${pkgs.bash}/bin/bash ${../../scripts}/sinnix-captured-shell" "$transcript"
 
             if test -e "$TMPDIR/retired-captures"; then
               echo "Recorder used the inherited retired capture root" >&2
@@ -168,6 +170,7 @@ in
         pkgs.runCommand "sinnix-terminal-capture-runtime-failure-check"
           {
             nativeBuildInputs = [
+              pkgs.python3
               pkgs.asciinema
               pkgs.coreutils
               pkgs.findutils
@@ -232,6 +235,7 @@ in
 
             export PATH="$TMPDIR/bin:${
               lib.makeBinPath [
+                pkgs.python3
                 pkgs.coreutils
                 pkgs.findutils
                 pkgs.gnugrep
@@ -253,7 +257,7 @@ in
               SINNIX_CAPTURE_ROOT='$TMPDIR/captures' \
               TERM='xterm-kitty' \
               USER='tester' \
-              ${pkgs.bash}/bin/bash ${../../scripts/sinnix-captured-shell}" "$transcript"
+              ${pkgs.bash}/bin/bash ${../../scripts}/sinnix-captured-shell" "$transcript"
             status=$?
             set -e
 
@@ -293,6 +297,15 @@ in
     in
     {
       checks = {
+        terminal-capture-buffered-writer = pkgs.runCommand "terminal-capture-buffered-writer"
+          { nativeBuildInputs = [ pkgs.python3 pkgs.asciinema pkgs.util-linux ]; }
+          ''
+            export HOME="$TMPDIR/home"
+            mkdir -p "$HOME"
+            python3 ${../../pkgs/sinnix-terminal-capture/tests/stalled-writer.py} \
+              ${../../scripts/sinnix-terminal-capture-writer}
+            touch "$out"
+          '';
         terminal-capture-runtime = terminalCaptureRuntime;
         terminal-capture-runtime-failure = terminalCaptureRuntimeFailure;
       };

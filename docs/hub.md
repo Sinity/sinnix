@@ -27,7 +27,15 @@ a sub-path).
 Terminal capture runs independently of the hub. `sinnix-captured-shell` uses
 `asciinema rec` to write `session.cast` alongside session and command metadata
 under `/realm/activity/terminal/asciinema/YYYY/MM/DD/<session-id>/`. It records
-input and output to disk; it opens no browser stream or listening port.
+input and output through an anonymous pipe to a separate writer with a bounded
+256 MiB memory queue. Disk writes run in a transient user service in `app.slice`,
+outside the Kitty scope, at ordinary CPU and IO priority. Disk stalls do not
+backpressure the recorder until the queue fills; exhaustion logs a warning and
+blocks without dropping bytes. Session exit waits for the queue to drain, and
+writer failures propagate as a nonzero launcher status. The cast format and
+metadata environment are unchanged. The queue is volatile: a machine crash or
+forced writer kill can lose queued bytes, as with unflushed filesystem buffers.
+It opens no browser stream or listening port.
 
 ## Actions
 

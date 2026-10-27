@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+# @sinnix-package: skip
+"""Bounded, lossless asciicast transport and recorder supervision."""
+
+import os
+from pathlib import Path
+from collections import deque
+import signal
+import subprocess
+import sys
+import threading
+
+CHUNK = 64 * 1024
+BUFFER = 256 * 1024 * 1024
+
+
+def write_capture(destination):
+    # The consumer may block even opening a FIFO. Keep reading independently.
+    pending = deque()
+    capacity = threading.Condition()
+    buffered = 0
+
+    def receive():
+        nonlocal buffered
+        try:
+            while chunk := os.read(0, CHUNK):
+                with capacity:
+                    if buffered + len(chunk) > BUFFER:
+                        print("terminal capture: 256 MiB buffer exhausted; blocking without dropping data",
+                              file=sys.stderr, flush=True)
+                    capacity.wait_for(lambda: buffered + len(chunk) <= BUFFER)
+                    buffered += len(chunk)
+                    pending.append(chunk)
+                    capacity.notify_all()
+            with capacity:
+                pending.append(None)
+                capacity.notify_all()
+        except BaseException as error:
+            print(f"terminal capture reader failed: {error}", file=sys.stderr, flush=True)
+            os._exit(1)
+
+    threading.Thread(target=receive, daemon=True).start()
+    try:
+        fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb", buffering=0) as output:
+            while True:
+                with capacity:
+                    capacity.wait_for(lambda: bool(pending))
+                    chunk = pending.popleft()
+                if chunk is None:
+                    break
+                view = memoryview(chunk)
+                while view:
+                    written = output.write(view)
+                    if not written:
+                        raise OSError("capture write made no progress")
+                    view = view[written:]
+                with capacity:
+                    buffered -= len(chunk)
+                    capacity.notify_all()
+    except BaseException as error:
+        print(f"terminal capture writer failed: {error}", file=sys.stderr, flush=True)
+        return 1
+    return 0
+
+
+def record(destination, command):
+    read_fd, write_fd = os.pipe()
+    writer_command = [sys.executable, str(Path(__file__).resolve()), "write", destination]
+    # A user service owns disk IO independently of Kitty's scope. Build checks
+    # have no user manager and exercise the same transport as a child process.
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime and Path(runtime, "systemd/private").exists():
+        writer_command = [
+            "systemd-run", "--user", "--quiet", "--wait", "--collect", "--pipe",
+            "--service-type=exec", "--slice=app.slice", "--property=Nice=0",
+            "--property=IOSchedulingClass=best-effort", "--property=IOSchedulingPriority=4",
+            "--property=UMask=0077", "--", *writer_command,
+        ]
+    writer = subprocess.Popen(writer_command, stdin=read_fd, start_new_session=True)
+    os.close(read_fd)
+    try:
+        recorder = subprocess.Popen(
+            [command[0], command[1], "--overwrite", *command[2:], f"/proc/self/fd/{write_fd}"], pass_fds=(write_fd,)
+        )
+    finally:
+        os.close(write_fd)
+
+    def forward(signum, _frame):
+        if recorder.poll() is None:
+            recorder.send_signal(signum)
+
+    for signum in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+        signal.signal(signum, forward)
+
+    def watch_writer():
+        if writer.wait() != 0 and recorder.poll() is None:
+            recorder.terminate()
+
+    watcher = threading.Thread(target=watch_writer)
+    watcher.start()
+    status = recorder.wait()
+    watcher.join()  # EOF drains all queued bytes before reporting success.
+    writer_status = writer.returncode
+    if writer_status:
+        print(f"terminal capture: writer exited with status {writer_status}", file=sys.stderr)
+    result = writer_status or status
+    return 128 - result if result < 0 else result
+
+
+if __name__ == "__main__":
+    if sys.argv[1] == "write":
+        sys.exit(write_capture(sys.argv[2]))
+    sys.exit(record(sys.argv[2], sys.argv[3:]))
