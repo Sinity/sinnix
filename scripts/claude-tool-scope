@@ -34,7 +34,7 @@ esac
 # Hooks run on every tool call and hold no meaningful memory; a scope per
 # hook would only add a D-Bus round trip to each call.
 case "${cmd[-1]}" in
-  */dots/claude/hooks/* | polylogue-hook\ *) exec "${cmd[@]}" ;;
+  */dots/claude/hooks/* | polylogue\ hook\ *) exec "${cmd[@]}" ;;
 esac
 
 # The scope keeps this PID, stdio and signals, so Claude's timeouts and

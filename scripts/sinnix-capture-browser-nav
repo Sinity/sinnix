@@ -22,7 +22,7 @@ POSTs to. Two routes:
 
 Binds the configured loopback port only (never 0.0.0.0) -- this is a same-machine
 extension<->daemon channel, not a network service. Port chosen to sit next
-to polylogue's browser-extension receiver (127.0.0.1:8765) without
+to Polylogue's web reader (127.0.0.1:8765) without
 colliding.
 
 Host must identify the loopback listener. Browser Origin must match the

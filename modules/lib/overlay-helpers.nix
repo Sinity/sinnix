@@ -6,13 +6,13 @@
 # All helpers return overlay functions: final -> prev -> { ... }
 #
 # Usage in flake/overlay/package/*.nix:
-#   { inputs }: inputs.self.lib.overlay.mkInputOverlay "polylogue" inputs.polylogue.packages
+#   { inputs }: inputs.self.lib.overlay.mkInputOverlay "sinex" inputs.sinex.packages
 #   OR for helpers that don't need inputs:
 #   _: _final: prev: { ... }  # continue with standard overlay
 { lib }:
 rec {
   # Re-export a package from a flake input
-  # Example: mkInputOverlay "polylogue" inputs.polylogue.packages
+  # Example: mkInputOverlay "sinex" inputs.sinex.packages
   mkInputOverlay = name: packages: _final: _prev: {
     ${name} = packages.${_final.stdenv.hostPlatform.system}.default;
   };

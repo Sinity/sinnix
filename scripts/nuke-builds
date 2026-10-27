@@ -23,8 +23,7 @@ SYSTEM_UNITS=(
 )
 
 USER_UNITS=(
-  "polylogued.service"
-  "polylogue-browser-capture.service"
+  "polylogue-live.service"
 )
 
 # Build tools and compilers (exact process names)
@@ -44,7 +43,7 @@ LSP_PROCS=(
 
 BACKGROUND_PROCS=(
   "borg" "borgmatic" "btrbk"
-  "polylogued" "polylogue" ".polylogue-wrap"
+  "polylogue"
 )
 
 ALL_PROCS=("${BUILD_PROCS[@]}" "${LSP_PROCS[@]}" "${BACKGROUND_PROCS[@]}")

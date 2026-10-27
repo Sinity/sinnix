@@ -127,7 +127,7 @@ mkFeatureModule {
           # so it is accepted without the first-use prompt.
           hooks.pre_llm_call = [
             {
-              command = "polylogue-live hook pre_llm_call --harness hermes";
+              command = "polylogue hook pre_llm_call --harness hermes";
               timeout = 10;
             }
           ];

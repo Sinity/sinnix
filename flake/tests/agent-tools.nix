@@ -108,7 +108,7 @@ in
             sinnix.features.dev.shell.enable = true;
             sinnix.features.dev.mcp-servers.enable = true;
             sinnix.services.clodex.enable = true;
-            sinnix.services.polylogue.dataDir = polylogueSentinelDataDir;
+            sinnix.services.polylogue.liveRoot = polylogueSentinelDataDir;
           })
         ];
         assertions =
@@ -863,7 +863,7 @@ in
               ([.hooks.SessionStart[].hooks[].command]
                 | any(contains("sessionstart-sinex-recall.sh"))) and
               ([.hooks.Stop[].hooks[].command]
-                | any(. == "polylogue-live hook Stop"))
+                | any(. == "polylogue hook Stop"))
             ' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
 
             # Rendered profile configs must match the registry's own computed
@@ -941,7 +941,7 @@ in
 
             jq -e '
               [.hooks.Stop[].hooks[].command]
-              | any(. == "polylogue-live hook Stop --harness codex")
+              | any(. == "polylogue hook Stop --harness codex")
             ' "$HOME/.codex/hooks.json" >/dev/null
             jq -e '
               [.hooks.SessionStart[].hooks[].command] | any(contains("sessionstart-sinex-recall.sh"))
@@ -1036,7 +1036,8 @@ in
             ! codex_uses_profile -C /realm/project/sinnix/repo --profile local exec
             codex_uses_profile -c 'prompt=--profile' exec
 
-            "$HOME/.local/bin/mcp-polylogue" --help | grep -q 'Start the Polylogue MCP stdio bridge'
+            "$HOME/.local/bin/mcp-polylogue" --help > mcp-polylogue-help
+            grep -q 'MCP' mcp-polylogue-help
             grep -Fq 'sinnix-mcp-sinex-script' "$(readlink -f "$HOME/.local/bin/mcp-sinex")"
             for helper in \
               "$HOME/.local/bin/sinnix-chrome-control" \

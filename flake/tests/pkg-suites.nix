@@ -62,7 +62,7 @@
             cp runtime-import-before.json runtime-import-after.json "$out/"
             printf '%s\n' "$RUNTIME_PACKAGE" > "$out/runtime"
           '';
-      polylogueContracts = lib.sources.sourceByRegex inputs.polylogue [
+      polylogueContracts = lib.sources.sourceByRegex inputs.lynchpin-polylogue [
         "polylogue"
         "polylogue/(operations|core|archive)"
         "polylogue/archive/query"
