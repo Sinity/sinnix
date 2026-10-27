@@ -231,6 +231,33 @@ mkServiceModule {
       (lib.sinnix.mkScheduledJob
         {
           inherit config;
+          unitName = "agentctl-clean-queue";
+          description = "Remove finished queue tasks";
+        }
+        {
+          manager = "user";
+          resourceClass = "background";
+          # Every `pueue status --json` serialises all retained tasks, and the
+          # pressure tick, the hub and agentctl ask many times a minute; the
+          # daemon's memory follows the largest response. Daily cleaning let
+          # ~900 finished tasks a day pile up (349 MB on 2026-10-27, 1.2 GB
+          # over 3.7 days before any cleaning), and freed tasks do not return
+          # the allocator's high-water mark, so clean often enough that the
+          # queue never grows large. Worktree retirement stays daily below.
+          execStart = "${scriptPkgs.agentctl}/bin/agentctl job clean --all-terminal";
+          serviceConfig = {
+            TimeoutStartSec = "5min";
+          };
+          timer = {
+            onCalendar = "hourly";
+            persistent = true;
+            description = "Hourly cleanup of finished queue tasks";
+          };
+        }
+      )
+      (lib.sinnix.mkScheduledJob
+        {
+          inherit config;
           unitName = "agentctl-clean";
           description = "Remove finished queue tasks and completed worktrees";
         }
