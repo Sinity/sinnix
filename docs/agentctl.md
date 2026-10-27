@@ -170,6 +170,11 @@ minute.
 - **Operator pauses:** a group paused by the operator, with no agentctl `closed`
   event, is never resumed. Re-pausing a group agentctl already paused does not
   transfer ownership; resume such a group by hand.
+- **Holding running work:** a paused group admits nothing new, but jobs
+  already running keep running in their own units. To take the disk or memory
+  back now (for example while PostgreSQL finishes a checkpoint), freeze them:
+  `systemctl --user freeze agent-ctl.slice`, and `thaw` it afterwards. Each
+  unit shows `FreezerState=frozen-by-parent` while held.
 - **I/O pressure** is reported, but it neither closes nor delays admission.
   An operation declaring `max_io_pressure` refuses to start above it, and
   long copies and offloads belong in the `background` pool, whose slice has
