@@ -67,16 +67,9 @@ def write_capture(destination):
 def record(destination, command):
     read_fd, write_fd = os.pipe()
     writer_command = [sys.executable, str(Path(__file__).resolve()), "write", destination]
-    # A user service owns disk IO independently of Kitty's scope. Build checks
-    # have no user manager and exercise the same transport as a child process.
-    runtime = os.environ.get("XDG_RUNTIME_DIR")
-    if runtime and Path(runtime, "systemd/private").exists():
-        writer_command = [
-            "systemd-run", "--user", "--quiet", "--wait", "--collect", "--pipe",
-            "--service-type=exec", "--slice=app.slice", "--property=Nice=0",
-            "--property=IOSchedulingClass=best-effort", "--property=IOSchedulingPriority=4",
-            "--property=UMask=0077", "--", *writer_command,
-        ]
+    # A direct child in its own session: the in-memory buffer is what keeps
+    # the PTY off the disk path, and a transient user service would add a
+    # startup dependency on the user manager exactly when the host is loaded.
     writer = subprocess.Popen(writer_command, stdin=read_fd, start_new_session=True)
     os.close(read_fd)
     try:

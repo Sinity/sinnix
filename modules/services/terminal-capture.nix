@@ -23,7 +23,7 @@ mkServiceModule {
   configFn =
     { pkgs, ... }:
     {
-      # Session writers use transient user services rather than a fixed unit.
+      # Each session's cast writer is a child of sinnix-captured-shell, not a unit.
       # The capture registry describes the lane independently of each session.
       sinnix.runtime.captures = [
         {
