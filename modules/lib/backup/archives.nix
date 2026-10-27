@@ -62,6 +62,15 @@ let
       if [ "$dry_run" = 0 ] && [ -f "$marker" ] && [ $((now - $(cat "$marker"))) -lt 72000 ]; then
         exit 0
       fi
+      # Prune applies retention daily; compaction only returns freed space,
+      # and at borg's 10% threshold it rewrote segments on every pass (1.17 TB
+      # read and 320 GB written by 16 passes over 2026-10-18..10-27). Compact
+      # weekly instead.
+      compact_marker=${lib.escapeShellArg "${borgDrainStateRoot}/compact.last-success"}
+      compact_due=1
+      if [ -f "$compact_marker" ] && [ $((now - $(cat "$compact_marker"))) -lt 561600 ]; then
+        compact_due=0
+      fi
       exec 9>${lib.escapeShellArg borgGlobalLock}
       if ! flock -n 9; then
         echo "status=deferred reason=borg-lock-contention remains_due=true"
@@ -103,7 +112,9 @@ let
             --glob-archives "$series" --keep-monthly 6 "$repo"
         done
         if [ "$dry_run" = 0 ]; then
-          borg compact --lock-wait ${toString borgLockWaitSec} --progress "$repo"
+          if [ "$compact_due" = 1 ]; then
+            borg compact --lock-wait ${toString borgLockWaitSec} --progress "$repo"
+          fi
           borg list --json --lock-wait ${toString borgLockWaitSec} "$repo" > "$run_dir/$name.after.json"
         fi
       }
@@ -115,6 +126,10 @@ let
       if [ "$dry_run" = 0 ]; then
         date +%s > "$marker.tmp"
         mv "$marker.tmp" "$marker"
+        if [ "$compact_due" = 1 ]; then
+          date +%s > "$compact_marker.tmp"
+          mv "$compact_marker.tmp" "$compact_marker"
+        fi
       fi
     '';
   };

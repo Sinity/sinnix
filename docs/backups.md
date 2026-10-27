@@ -18,9 +18,10 @@ milestones; archives older than 365 days expire even when the series has stopped
 A version present only in a removed recovery point is no longer recoverable.
 
 Each pass records archive names and IDs before and after pruning under
-`/persist/root/.cache/borg-drain/retention/`, and compacts the repositories to
-release unreferenced chunks. Shared chunks remain until their last reference
-is removed. `agentctl job start sinnix backup_retention_plan` previews the
+`/persist/root/.cache/borg-drain/retention/`. Compaction, which releases
+unreferenced chunks, runs on the first pass at least 6.5 days after the last
+one: at every pass it rewrote hundreds of gigabytes of segments a week to
+return space. Shared chunks remain until their last reference is removed. `agentctl job start sinnix backup_retention_plan` previews the
 installed policy; `agentctl job start sinnix backup_maintenance` runs it when due.
 Both execute the native systemd service, so inspect its journal for archive
 selection and statistics. A deferred run does not mean pruning completed.
@@ -32,7 +33,7 @@ advisory projection uses net free-space consumption over up to eight days,
 requires at least 24 hours of observations, and resets comparisons when the
 filesystem UUID changes or an observation gains at least 100 GiB of headroom.
 That large-reclamation reset prevents cleanup from hiding later growth; normal
-daily compaction remains part of the net trend. Workload changes affect this estimate.
+weekly compaction remains part of the net trend. Workload changes affect this estimate.
 `agentctl job start sinnix backup_capacity` measures immediately. A low-headroom
 exit still records the measurement; the unit's failure notification carries it.
 
