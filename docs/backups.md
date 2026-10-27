@@ -57,7 +57,7 @@ paths. Neither measurement establishes that a directory is disposable.
 | ------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------- |
 | `/realm`                 | btrbk read-only snapshot, archived by the Borg job                     | snapshots 00/06/12/18:00, drain nightly 03:05         | `borg-realm-v2`                    |
 | `/persist`               | btrbk read-only snapshot, archived by the Borg job                     | same as `/realm`                                      | `borg-persist-v1`                  |
-| HDD genome workspace     | dedicated btrbk cut, archived independently of `/realm`                | six-hour cuts, drained nightly with `/realm`          | `borg-realm-v2`, `genome-*` series |
+| HDD genome workspace     | dedicated btrbk cut, archived independently of `/realm`                | six-hour cuts only when changed, drained nightly      | `borg-realm-v2`, `genome-*` series |
 | The ephemeral root       | snapshot the initrd takes before each wipe                             | daily                                                 | `borg-root-snapshots-v1`           |
 | Sinex content stores     | read in place: the running store and the dated earlier one             | daily 05:40                                           | `borg-sinex-blobs-v1`              |
 | Sinex database dump      | `pg_dump` into `state/db-dumps/sinex`, archived with `/realm`          | dump daily at midnight                                | `borg-realm-v2`                    |

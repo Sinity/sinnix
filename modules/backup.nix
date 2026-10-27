@@ -1052,7 +1052,6 @@ let
       snapshot_dir .btrfs/genome-snapshots
       subvolume ${lib.removePrefix "${config.sinnix.paths.neoOuterRealm}/" (toString backupCfg.genomeRoot)}
           snapshot_name genome
-        snapshot_create always
         snapshot_preserve_min all
   '';
 
