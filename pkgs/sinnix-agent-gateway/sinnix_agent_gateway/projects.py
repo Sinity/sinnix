@@ -33,6 +33,18 @@ class ProjectPreconditionError(ProjectError):
     pass
 
 
+class ProjectExportSizeError(ProjectError):
+    def __init__(self, size: int, count: int, max_bytes: int, max_files: int):
+        self.details = {
+            "measured_bytes": size,
+            "file_count": count,
+            "max_bytes": max_bytes,
+            "max_files": max_files,
+            "available_modes": ["tracked", "tracked+untracked", "full"],
+        }
+        super().__init__("checkout export exceeds its byte or file bound")
+
+
 SENSITIVE_PARTS = frozenset(
     {
         ".git",
@@ -795,158 +807,295 @@ class ProjectService:
         self,
         project_id: str,
         checkout_id: str | None = None,
-        max_files: int | None = None,
-        max_bytes: int | None = None,
-        start_after: str | None = None,
-        expected_revision: str | None = None,
+        max_files: int = 20_000,
+        max_bytes: int = 64_000_000,
+        mode: str = "tracked",
+        extra_paths: list[str] | None = None,
+        exclude_paths: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Stream the Git source set into a policy-filtered ZIP artifact."""
+        """Keep HEAD, its binary working patch and selected extras distinguishable."""
         project = self.code_checkout(
             project_id, checkout_id, write=False, require_explicit=False
         )
-        if (start_after is None) != (expected_revision is None):
+        if mode not in {"tracked", "tracked+untracked", "full"}:
+            raise ProjectError("unknown export mode")
+        if max_files < 1 or max_bytes < 1:
+            raise ProjectError("export bounds must be positive")
+        for value in [*(extra_paths or []), *(exclude_paths or [])]:
+            path = Path(value)
+            if path.is_absolute() or ".." in path.parts or not path.parts:
+                raise ProjectError("export paths must be relative nonempty paths")
+        if mode == "tracked" and (extra_paths or exclude_paths):
             raise ProjectError(
-                "start_after and expected_revision must be supplied together"
+                "extra path selection requires tracked+untracked or full"
             )
-        if max_files is not None and max_files < 1:
-            raise ProjectError("max_files must be positive")
-        if max_bytes is not None and max_bytes < 1:
-            raise ProjectError("max_bytes must be positive")
-        paths = self._export_paths(project)
-        before = self._export_revision(project.path, paths)
-        if expected_revision is not None and expected_revision != before:
-            raise ProjectPreconditionError(
-                "project changed since the previous export page"
+
+        def git(*args: str) -> str:
+            return self._run_spooled(["git", *args], project.path)
+
+        def extras() -> list[Path]:
+            if mode == "tracked":
+                return []
+            args = ["ls-files", "--others", "-z"]
+            if mode == "tracked+untracked":
+                args.append("--exclude-standard")
+            names = git(*args).split("\0")
+            return sorted(
+                {
+                    Path(name)
+                    for name in names
+                    if name
+                    and ".git" not in Path(name).parts
+                    and (
+                        not extra_paths
+                        or any(Path(name).is_relative_to(p) for p in extra_paths)
+                    )
+                    and not any(
+                        Path(name).is_relative_to(p) for p in (exclude_paths or [])
+                    )
+                },
+                key=lambda p: p.as_posix(),
             )
-        if start_after is not None:
-            cursor = Path(start_after)
-            if cursor not in paths:
-                raise ProjectError("start_after does not identify an exported file")
-            paths = paths[paths.index(cursor) + 1 :]
-        selected: list[Path] = []
-        total = 0
-        for relative in paths:
+
+        checkout = self.checkout(project_id, checkout_id or "default")["checkout"]
+        head = checkout["head"]
+        if not head:
+            raise ProjectError("checkout export requires a committed HEAD")
+        # ls-tree/cat-file export the exact committed blobs, including files
+        # marked export-ignore/export-subst in .gitattributes.
+        entries = []
+        for record in git("ls-tree", "-r", "-l", "-z", head).split("\0"):
+            if not record:
+                continue
+            metadata, name = record.split("\t", 1)
+            unix_mode, kind, oid, size = metadata.split()
+            if kind != "blob":
+                raise ProjectError(f"submodule export is unsupported: {name} at {oid}")
+            entries.append((name, int(unix_mode, 8), oid, int(size)))
+        selected = extras()
+        before = self._export_revision(project.path, selected)
+        total = sum(entry[3] for entry in entries)
+        for relative in selected:
             with _source_path(project.path, relative) as path:
-                size = (
+                info = path.lstat()
+                if not (stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)):
+                    raise ProjectError(f"unsupported export file type: {relative}")
+                total += (
                     len(os.fsencode(os.readlink(path)))
-                    if path.is_symlink()
-                    else path.lstat().st_size
+                    if stat.S_ISLNK(info.st_mode)
+                    else info.st_size
                 )
-                if max_files is not None and len(selected) >= max_files:
-                    break
-                if max_bytes is not None and total + size > max_bytes:
-                    if not selected:
-                        raise ProjectError(
-                            f"file {relative.as_posix()} is {size} bytes; increase max_bytes"
-                        )
-                    break
-                selected.append(relative)
-                total += size
-        truncated = len(selected) < len(paths)
+        patch_args = [
+            "git",
+            "diff",
+            "--binary",
+            "--full-index",
+            "--no-color",
+            "--no-renames",
+            "--src-prefix=a/",
+            "--dst-prefix=b/",
+            "--no-ext-diff",
+            "--no-textconv",
+            head,
+            "--",
+        ]
         capture = self.config.state_dir / "captures" / uuid.uuid4().hex
         capture.mkdir(mode=0o700, parents=True)
-        archive = capture / "project-export.zip"
-        manifest_name = "MANIFEST.json"
-        suffix = 1
-        selected_names = {path.as_posix() for path in selected}
-        while manifest_name in selected_names:
-            manifest_name = f"MANIFEST.{suffix}.json"
-            suffix += 1
         try:
+            patch = capture / "working-tree.patch"
+            with self._spooled_output(patch_args, project.path) as output:
+                with patch.open("wb") as target:
+                    shutil.copyfileobj(output.buffer, target)
+            total += patch.stat().st_size
+            count = len(entries) + len(selected)
+            if total > max_bytes or count > max_files:
+                raise ProjectExportSizeError(total, count, max_bytes, max_files)
             rows = []
-            with zipfile.ZipFile(
-                archive, "w", compression=zipfile.ZIP_DEFLATED
-            ) as bundle:
-                for relative in selected:
-                    with _source_path(project.path, relative) as path:
-                        digest = hashlib.sha256()
-                        size = 0
-                        info = zipfile.ZipInfo(relative.as_posix())
-                        info.create_system = 3
-                        mode = stat.S_IMODE(path.lstat().st_mode)
-                        is_link = path.is_symlink()
-                        info.external_attr = (
-                            (stat.S_IFLNK if is_link else stat.S_IFREG) | mode
-                        ) << 16
-                        info.compress_type = (
-                            zipfile.ZIP_STORED if is_link else zipfile.ZIP_DEFLATED
+
+            written = patch.stat().st_size
+            captured_extras = hashlib.sha256()
+
+            def add(
+                bundle: zipfile.ZipFile,
+                name: str,
+                mode: int,
+                source: BinaryIO,
+                component: str,
+                expected_size: int | None = None,
+            ) -> None:
+                nonlocal written
+                info = zipfile.ZipInfo(name)
+                info.create_system = 3
+                info.external_attr = mode << 16
+                info.compress_type = zipfile.ZIP_DEFLATED
+                digest = hashlib.sha256()
+                size = 0
+                if component == "extras.zip":
+                    encoded_name = name.encode()
+                    captured_extras.update(len(encoded_name).to_bytes(8, "big"))
+                    captured_extras.update(encoded_name)
+                    captured_extras.update(stat.S_IMODE(mode).to_bytes(4, "big"))
+                    if stat.S_ISLNK(mode):
+                        captured_extras.update(b"symlink\0")
+                        link_size = source.seek(0, os.SEEK_END)
+                        source.seek(0)
+                        captured_extras.update(link_size.to_bytes(8, "big"))
+                    else:
+                        captured_extras.update(b"file\0")
+                with bundle.open(info, "w") as target:
+                    while expected_size is None or size < expected_size:
+                        chunk = source.read(
+                            min(1_048_576, expected_size - size)
+                            if expected_size is not None
+                            else 1_048_576
                         )
-                        source = (
-                            io.BytesIO(os.fsencode(os.readlink(path)))
-                            if is_link
-                            else _open_source_file(path)
-                        )
-                        with source, bundle.open(info, "w") as target:
-                            if is_link:
-                                link_bytes = os.fsencode(os.readlink(path))
-                                target.write(link_bytes)
-                                digest.update(link_bytes)
-                                size += len(link_bytes)
-                            else:
-                                while chunk := source.read(1_048_576):
-                                    size += len(chunk)
-                                    digest.update(chunk)
-                                    target.write(chunk)
-                        rows.append(
-                            {
-                                "path": relative.as_posix(),
-                                "bytes": size,
-                                "sha256": digest.hexdigest(),
-                                "mode": mode,
-                                "kind": "symlink" if is_link else "file",
-                            }
-                        )
-                after_paths = self._export_paths(project)
-                after = self._export_revision(project.path, after_paths)
-                if before != after:
-                    raise ProjectPreconditionError(
-                        "project changed while export was collected"
-                    )
-                manifest = {
-                    "schema": "sinnix.project-export.v1",
-                    "project_id": project_id,
-                    "checkout_id": checkout_id or "default",
-                    "checkout_revision": before,
-                    "files": rows,
-                    "file_count": len(rows),
-                    "bytes": sum(row["bytes"] for row in rows),
-                    "truncated": truncated,
-                    "start_after": start_after,
-                    "next_start_after": rows[-1]["path"] if truncated else None,
-                    "manifest_path": manifest_name,
-                }
+                        if not chunk:
+                            break
+                        size += len(chunk)
+                        written += len(chunk)
+                        if written > max_bytes:
+                            raise ProjectExportSizeError(
+                                written, count, max_bytes, max_files
+                            )
+                        digest.update(chunk)
+                        if component == "extras.zip":
+                            captured_extras.update(chunk)
+                        target.write(chunk)
+                if expected_size is not None and size != expected_size:
+                    raise ProjectError("incomplete HEAD blob in export")
+                rows.append(
+                    {
+                        "component": component,
+                        "path": name,
+                        "bytes": size,
+                        "sha256": digest.hexdigest(),
+                        "mode": stat.S_IMODE(mode),
+                        "kind": "symlink" if stat.S_ISLNK(mode) else "file",
+                    }
+                )
+
+            head_archive = capture / "HEAD.zip"
+            # One owner process streams all selected blobs. Repository-sized
+            # exports must not launch a subprocess for every source file.
+            with (
+                self._spooled_output(
+                    ["git", "cat-file", "--batch"],
+                    project.path,
+                    stdin_bytes="".join(f"{entry[2]}\n" for entry in entries).encode(),
+                ) as output,
+                zipfile.ZipFile(head_archive, "w") as bundle,
+            ):
+                for name, unix_mode, oid, size in entries:
+                    if output.buffer.readline(256) != f"{oid} blob {size}\n".encode():
+                        raise ProjectError("HEAD blob identity changed during export")
+                    add(bundle, name, unix_mode, output.buffer, "HEAD.zip", size)
+                    if output.buffer.read(1) != b"\n":
+                        raise ProjectError("invalid HEAD blob framing")
+            components = [head_archive, patch]
+            if mode != "tracked":
+                extra_archive = capture / "extras.zip"
+                with zipfile.ZipFile(extra_archive, "w") as bundle:
+                    for relative in selected:
+                        with _source_path(project.path, relative) as path:
+                            unix_mode = path.lstat().st_mode
+                            source = (
+                                io.BytesIO(os.fsencode(os.readlink(path)))
+                                if stat.S_ISLNK(unix_mode)
+                                else _open_source_file(path)
+                            )
+                            with source:
+                                add(
+                                    bundle,
+                                    relative.as_posix(),
+                                    unix_mode,
+                                    source,
+                                    "extras.zip",
+                                )
+                components.append(extra_archive)
+            with self._spooled_output(patch_args, project.path) as output:
+                patch_after = hashlib.file_digest(output.buffer, "sha256").hexdigest()
+            after_checkout = self.checkout(project_id, checkout_id or "default")[
+                "checkout"
+            ]
+            if (
+                any(
+                    after_checkout.get(key) != checkout.get(key)
+                    for key in ("head", "branch", "dirty_sha256")
+                )
+                or git("rev-parse", "HEAD").strip() != head
+                or selected != extras()
+                or before != self._export_revision(project.path, selected)
+                or before != captured_extras.hexdigest()
+                or patch_after != _file_sha256(patch)
+            ):
+                raise ProjectPreconditionError(
+                    "project changed while export was collected"
+                )
+            policy = {
+                "mode": mode,
+                "extra_paths": extra_paths or [],
+                "exclude_paths": exclude_paths or [],
+                "omissions": [
+                    "Git administration (.git)",
+                    "submodule contents (refused)",
+                ]
+                + (["all untracked and ignored files"] if mode == "tracked" else [])
+                + (["ignored files"] if mode == "tracked+untracked" else [])
+                + (["extras outside extra_paths"] if extra_paths else []),
+            }
+            revision = hashlib.sha256(
+                json.dumps(
+                    {
+                        "head": head,
+                        "patch": patch_after,
+                        "extras": before,
+                        "policy": policy,
+                    },
+                    sort_keys=True,
+                ).encode()
+            ).hexdigest()
+            manifest = {
+                "schema": "sinnix.project-export.v2",
+                "project_id": project_id,
+                "checkout_id": checkout_id or "default",
+                "project_ref": f"sinnix://projects/{project_id}",
+                "checkout_ref": f"sinnix://projects/{project_id}/checkouts/{checkout_id or 'default'}",
+                "head": head,
+                "branch": checkout.get("branch"),
+                "dirty_sha256": checkout["dirty_sha256"],
+                "checkout_revision": revision,
+                "mode": mode,
+                "path_policy": policy,
+                "files": rows,
+                "file_count": count,
+                "bytes": total,
+                "components": [
+                    {
+                        "path": p.name,
+                        "bytes": p.stat().st_size,
+                        "sha256": _file_sha256(p),
+                    }
+                    for p in components
+                ],
+                "truncated": False,
+                "manifest_path": "MANIFEST.json",
+            }
+            archive = capture / "project-export.zip"
+            with zipfile.ZipFile(archive, "w") as bundle:
+                for component in components:
+                    with component.open("rb") as source:
+                        info = zipfile.ZipInfo(component.name)
+                        info.compress_type = zipfile.ZIP_STORED
+                        with bundle.open(info, "w") as target:
+                            shutil.copyfileobj(source, target)
                 bundle.writestr(
-                    manifest_name, json.dumps(manifest, sort_keys=True, indent=2) + "\n"
+                    "MANIFEST.json",
+                    json.dumps(manifest, sort_keys=True, indent=2) + "\n",
                 )
         except Exception:
             shutil.rmtree(capture)
             raise
         return {"directory": capture, "archive": archive, "manifest": manifest}
-
-    def _export_paths(self, project: ProjectConfig) -> list[Path]:
-        """Include tracked and nonignored untracked files, subject to project policy."""
-        output = self._run_spooled(
-            ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-            project.path,
-        )
-        paths = set()
-        for name in output.split("\0"):
-            if not name:
-                continue
-            relative = Path(name)
-            if (
-                relative.is_absolute()
-                or ".." in relative.parts
-                or _is_excluded(relative)
-            ):
-                continue
-            try:
-                with _source_path(project.path, relative) as path:
-                    if path.is_symlink() or path.is_file():
-                        paths.add(relative)
-            except FileNotFoundError:
-                continue
-        return sorted(paths, key=lambda path: path.as_posix())
 
     @staticmethod
     def _export_revision(root: Path, paths: list[Path]) -> str:
@@ -977,7 +1126,12 @@ class ProjectService:
 
     @contextmanager
     def _spooled_output(
-        self, command: list[str], cwd: Path, timeout: int = 15
+        self,
+        command: list[str],
+        cwd: Path,
+        timeout: int = 15,
+        *,
+        stdin_bytes: bytes | None = None,
     ) -> Iterator[TextIO]:
         """Keep owner output on disk until consumers select the requested rows."""
         if command and command[0] == "git":
@@ -1003,6 +1157,7 @@ class ProjectService:
                     ExecutionProfile(
                         route=OwnerRoute("project-read"),
                         cwd=cwd,
+                        stdin_bytes=stdin_bytes,
                         timeout_seconds=timeout,
                         max_stdout_bytes=self.config.max_result_bytes,
                         max_stderr_bytes=self.config.max_result_bytes,

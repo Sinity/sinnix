@@ -25,7 +25,7 @@ from ..locators import (
     ResolvedCheckout,
     project_ref,
 )
-from ..projects import ProjectError, ProjectPreconditionError
+from ..projects import ProjectError, ProjectExportSizeError, ProjectPreconditionError
 from ..results import ProtocolError, ResultError
 from ..schemas import GatewayModel
 from .contexts import ComposedContext
@@ -41,6 +41,8 @@ def owner(fn: Any, *args: Any, **kwargs: Any) -> Any:
     """Call a project owner method, typing its ``ProjectError`` at the boundary."""
     try:
         return fn(*args, **kwargs)
+    except ProjectExportSizeError as exc:
+        raise ProtocolError("response_bound", str(exc), details=exc.details) from exc
     except ProjectPreconditionError as exc:
         raise ProtocolError("precondition_failed", str(exc)) from exc
     except ProjectError as exc:
@@ -330,10 +332,11 @@ def _read_many(runtime: Runtime, inp: ReadManyInput) -> ReadMany:
 
 class ExportInput(RequestControls):
     target: CheckoutLocator
-    max_files: int | None = Field(default=None, ge=1)
-    max_bytes: int | None = Field(default=None, ge=1)
-    start_after: str | None = None
-    expected_revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    mode: Literal["tracked", "tracked+untracked", "full"] = "tracked"
+    max_files: int = Field(default=20_000, ge=1)
+    max_bytes: int = Field(default=64_000_000, ge=1)
+    extra_paths: list[str] = Field(default_factory=list, max_length=128)
+    exclude_paths: list[str] = Field(default_factory=list, max_length=128)
 
 
 class ProjectExport(Identity):
@@ -350,8 +353,9 @@ def _export(runtime: Runtime, inp: ExportInput) -> ActionResult:
         resolved.checkout_id,
         inp.max_files,
         inp.max_bytes,
-        inp.start_after,
-        inp.expected_revision,
+        inp.mode,
+        inp.extra_paths,
+        inp.exclude_paths,
     )
     archive = result["archive"]
     receipt = runtime.artifacts.attest_capture(
@@ -493,7 +497,13 @@ class WriteOp(GatewayModel):
         return self
 
 
+class Verification(GatewayModel):
+    operation: str = Field(min_length=1, max_length=128)
+    operation_args: list[str] = Field(default_factory=list, max_length=32)
+
+
 class ApplyPatchOp(GatewayModel):
+    verification: Verification | None = None
     operation: Literal["apply_patch"] = "apply_patch"
     patch: str | None = Field(
         default=None,
@@ -535,6 +545,10 @@ class ChangeInput(MutationControls):
 
 
 class ChangeResult(Identity):
+    verification: dict[str, Any] | None = None
+    verification_error: dict[str, Any] | None = None
+    diff: str | None = None
+    diff_truncated: bool = False
     operation: Literal["write", "apply_patch"]
     path: str | None = None
     bytes: int | None = None
@@ -623,7 +637,39 @@ def _change(runtime: Runtime, inp: ChangeInput) -> ChangeResult:
     after = owner(runtime.projects.checkout, resolved.project_id, checkout_id)[
         "checkout"
     ]
+    verification = None
+    verification_error = None
+    diff = None
+    if isinstance(op, ApplyPatchOp):
+        diff = owner(runtime.projects.diff, resolved.project_id, "HEAD", checkout_id)
+        if op.verification is not None:
+            from .jobs import OperationRunInput, _run_operation
+
+            try:
+                verification = _run_operation(
+                    runtime,
+                    OperationRunInput(
+                        checkout=CheckoutLocator(ref=resolved.checkout_ref),
+                        operation=op.verification.operation,
+                        operation_args=op.verification.operation_args,
+                        idempotency_key=runtime.launch_idempotency_key(
+                            "projects.change.verification", inp.idempotency_key
+                        ),
+                    ),
+                ).model_dump(mode="json")
+            except ProtocolError as exc:
+                # The patch is committed to the worktree. A launch refusal must
+                # not turn it into a failed mutation that a caller might replay.
+                verification_error = {
+                    "code": exc.code,
+                    "message": str(exc),
+                    "details": exc.details,
+                }
     return ChangeResult(
+        verification=verification,
+        verification_error=verification_error,
+        diff=diff["diff"] if diff else None,
+        diff_truncated=diff["truncated"] if diff else False,
         **_identity(resolved),
         operation=op.operation,
         path=result.get("path"),
@@ -791,14 +837,14 @@ ACTIONS: tuple[Action, ...] = (
         name="projects.export",
         family=VerbFamily.QUERY,
         owner="projects",
-        summary="Create a policy-filtered ZIP snapshot of the Git source set.",
+        summary="Export clean HEAD, working-tree.patch and explicitly selected extras.",
         Input=ExportInput,
         Output=ProjectExport,
         handler=_export,
         resource_kinds=_KINDS,
         next_actions=("projects.get", "projects.read"),
         aliases=("snapshot", "bundle", "download project", "portable export"),
-        documentation="Exports tracked and nonignored untracked files, excluding sensitive and local-only paths. Symlink entries retain their link targets; symlinked parent directories are refused. Optional file and byte bounds return next_start_after; pass it with checkout_revision as expected_revision to continue. Fetch the ZIP through its artifact ref; its manifest_path holds the complete per-file manifest.",
+        documentation="A deterministic ZIP contains HEAD.zip, working-tree.patch, optional extras.zip and MANIFEST.json. tracked is the default; tracked+untracked includes nonignored extras; full includes ignored extras too. extra_paths and exclude_paths select extras only. No sensitive-file classifier filters export. Git administration is omitted and submodules are refused. File/byte bounds refuse the complete export with measured sizes; they never truncate. Fetch through the artifact ref.",
         examples=(
             Example(
                 title="Export a bounded checkout",
@@ -854,7 +900,7 @@ ACTIONS: tuple[Action, ...] = (
         next_actions=("projects.diff", "projects.read", "projects.get"),
         aliases=("write file", "edit", "apply patch", "save"),
         supports_precondition=True,
-        documentation="Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read. Supply inline content/patch or a source artifact locator; artifact bytes are verified and streamed without a file-size ceiling from the response budget.",
+        documentation="Paths stay project-relative and policy-excluded paths (.git, secrets, local-only agent state) are refused. Take expected_dirty_sha256 or expected_head from projects.get, or expected_file_sha256 from projects.read. Supply inline content/patch or a source artifact locator; artifact bytes are verified and streamed without a file-size ceiling from the response budget. apply_patch may include verification with a declared operation and operation_args; its job identity is returned separately from the applied checkout and diff. A verification_error means the patch remains applied; do not replay it.",
         examples=(
             Example(
                 title="Write a file",

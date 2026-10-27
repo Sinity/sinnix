@@ -34,38 +34,6 @@ if TYPE_CHECKING:
     from ..runtime import Runtime
 
 
-class ServerRow(GatewayModel):
-    name: str
-    description: str | None = None
-    transport: str | None = None
-    tier: str | None = None
-    brokered: bool
-    session_policy: Literal["per-call", "stateless"] = "per-call"
-    availability: Literal["available", "unavailable"]
-    failure_class: str | None = None
-    reason: str | None = None
-    tool_count: int | None = None
-    read_only_tool_count: int | None = None
-    latency_ms: int | None = Field(
-        default=None, description="Wall time of initialize + tools/list."
-    )
-    probed_at: str | None = None
-    last_successful_probe: str | None = Field(
-        default=None,
-        description="Observation time of the last complete schema discovery.",
-    )
-    schema_complete: bool = False
-    schema_stale: bool = False
-    schema_observed_at: str | None = None
-    owner_contract_digest: str | None = None
-    schema_storage_error: str | None = None
-    diagnostic_artifact_ref: str | None = Field(
-        default=None,
-        description="Captured upstream stderr when the probe failed or timed out.",
-    )
-    tools_truncated: bool = False
-
-
 class ServersInput(RequestControls):
     servers: list[str] = Field(
         default_factory=list,
@@ -75,41 +43,8 @@ class ServersInput(RequestControls):
 
 
 class Servers(GatewayModel):
-    servers: list[ServerRow]
+    servers: list[dict[str, Any]]
     next_actions: list[str] = Field(default_factory=list)
-
-
-def _server_row(
-    name: str, probe: dict[str, Any], latency_ms: int | None, probed_at: str
-) -> ServerRow:
-    artifact_id = probe.get("diagnostic_artifact_id")
-    return ServerRow(
-        name=name,
-        description=probe.get("description"),
-        transport=probe.get("transport"),
-        tier=probe.get("tier"),
-        brokered=bool(probe.get("brokered")),
-        session_policy=probe.get("session_policy", "per-call"),
-        availability=probe.get("availability", "unavailable"),
-        failure_class=probe.get("failure_class"),
-        reason=probe.get("reason"),
-        tool_count=probe.get("tool_count"),
-        read_only_tool_count=probe.get("read_only_tool_count"),
-        latency_ms=latency_ms,
-        probed_at=probed_at,
-        last_successful_probe=probe.get("schema_observed_at"),
-        schema_complete=bool(probe.get("schema_complete")),
-        schema_stale=bool(probe.get("schema_stale")),
-        schema_observed_at=probe.get("schema_observed_at"),
-        owner_contract_digest=probe.get("owner_contract_digest"),
-        schema_storage_error=probe.get("schema_storage_error"),
-        diagnostic_artifact_ref=(
-            f"{ARTIFACT_REF_PREFIX}{artifact_id}"
-            if isinstance(artifact_id, str)
-            else None
-        ),
-        tools_truncated=bool(probe.get("tools_truncated")),
-    )
 
 
 async def _servers(runtime: Runtime, inp: ServersInput) -> Servers:
@@ -121,7 +56,7 @@ async def _servers(runtime: Runtime, inp: ServersInput) -> Servers:
         )
     names = sorted(inp.servers or configured)
 
-    async def timed(name: str) -> ServerRow:
+    async def timed(name: str) -> dict[str, Any]:
         started = time.monotonic()
         probed_at = datetime.now(tz=timezone.utc).isoformat()
         row = configured[name]
@@ -130,12 +65,19 @@ async def _servers(runtime: Runtime, inp: ServersInput) -> Servers:
             if isinstance(row, dict)
             else {"availability": "unavailable", "reason": "malformed configuration"}
         )
-        return _server_row(
-            name,
-            probe,
-            int((time.monotonic() - started) * 1000) if probe.get("brokered") else None,
-            probed_at,
-        )
+        artifact_id = probe.get("diagnostic_artifact_id")
+        return {
+            **probe,
+            "name": name,
+            "latency_ms": int((time.monotonic() - started) * 1000)
+            if probe.get("brokered")
+            else None,
+            "probed_at": probed_at,
+            "last_successful_probe": probe.get("schema_observed_at"),
+            "diagnostic_artifact_ref": f"{ARTIFACT_REF_PREFIX}{artifact_id}"
+            if isinstance(artifact_id, str)
+            else None,
+        }
 
     rows = await asyncio.gather(*(timed(name) for name in names))
     return Servers(

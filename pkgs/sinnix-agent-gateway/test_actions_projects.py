@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import io
 import json
 import os
 import shutil
@@ -145,71 +147,157 @@ def test_project_reads_reuse_verified_hashes_and_invalidate_changed_files(
     assert projects_module._cached_file_sha256.cache_info().misses == cold_misses + 1
 
 
-def test_export_covers_source_and_continues_explicit_pages(tmp_path: Path) -> None:
+def test_export_modes_keep_head_patch_and_extras_separate(tmp_path: Path) -> None:
     config, project, _ = fixture(tmp_path)
     (project / ".gitignore").write_text(".venv/\n")
+    (project / ".gitattributes").write_text("README.md export-ignore\n")
+    (project / "binary.bin").write_bytes(bytes(range(256)))
+    git(project, "add", ".")
+    git(project, "commit", "-qm", "tracked export fixtures")
+    (project / "README.md").write_text("working change\n")
+    (project / "binary.bin").write_bytes(b"\x00changed\xff")
+    git(project, "add", "binary.bin")
+    (project / "src/main.py").unlink()
     (project / ".venv").mkdir()
-    (project / ".venv" / "generated.bin").write_bytes(b"x" * 100_000)
-    (project / "large.txt").write_bytes(b"source" * 10_000)
+    (project / ".venv/generated.bin").write_bytes(b"ignored")
     executable = project / "run.sh"
     executable.write_text("#!/bin/sh\nexit 0\n")
     executable.chmod(0o755)
     (project / "run-link").symlink_to("run.sh")
     (project / "MANIFEST.json").write_text("source manifest\n")
+    git(project, "config", "color.ui", "always")
+    git(project, "config", "diff.noprefix", "true")
     runtime = create_server(config)._sinnix_revision_publisher.runtime
 
-    whole = runtime.projects.export("fixture")
-    assert whole["manifest"]["truncated"] is False
-    with zipfile.ZipFile(whole["archive"]) as bundle:
-        names = set(bundle.namelist())
-        assert "large.txt" in names
-        assert ".venv/generated.bin" not in names
-        assert ".env" not in names
-        assert ".git/config" not in names
-        assert bundle.read("large.txt") == b"source" * 10_000
-        assert bundle.read("MANIFEST.json") == b"source manifest\n"
-        assert bundle.read(whole["manifest"]["manifest_path"])
-        assert bundle.getinfo("run.sh").external_attr >> 16 & 0o777 == 0o755
-        link_info = bundle.getinfo("run-link")
-        assert link_info.external_attr >> 16 & 0o170000 == 0o120000
-        assert bundle.read("run-link") == b"run.sh"
-        entries = {row["path"]: row for row in whole["manifest"]["files"]}
-        assert entries["run.sh"]["mode"] == 0o755
-        assert entries["run-link"]["kind"] == "symlink"
+    tracked = runtime.projects.export("fixture")
+    repeated = runtime.projects.export("fixture")
+    assert tracked["archive"].read_bytes() == repeated["archive"].read_bytes()
+    with zipfile.ZipFile(tracked["archive"]) as bundle:
+        assert set(bundle.namelist()) == {
+            "HEAD.zip",
+            "working-tree.patch",
+            "MANIFEST.json",
+        }
+        clean = tmp_path / "clean"
+        with zipfile.ZipFile(io.BytesIO(bundle.read("HEAD.zip"))) as head:
+            assert head.read("README.md").startswith(b"fixture")
+            assert head.read("binary.bin") == bytes(range(256))
+            assert head.read(".env") == b"SECRET=1\n"
+            assert "src/main.py" in head.namelist()
+            head.extractall(clean)
+        patch = bundle.read("working-tree.patch")
+        subprocess.run(
+            ["git", "apply", "--binary", "-"], input=patch, cwd=clean, check=True
+        )
+        assert (clean / "README.md").read_text() == "working change\n"
+        assert (clean / "binary.bin").read_bytes() == b"\x00changed\xff"
+        assert not (clean / "src/main.py").exists()
 
-    first = runtime.projects.export("fixture", max_files=2)
-    assert first["manifest"]["truncated"] is True
-    second = runtime.projects.export(
+    untracked = runtime.projects.export("fixture", mode="tracked+untracked")
+    full = runtime.projects.export("fixture", mode="full")
+    with zipfile.ZipFile(untracked["archive"]) as bundle:
+        with zipfile.ZipFile(io.BytesIO(bundle.read("extras.zip"))) as extras:
+            assert ".venv/generated.bin" not in extras.namelist()
+            assert extras.read("MANIFEST.json") == b"source manifest\n"
+            assert extras.getinfo("run.sh").external_attr >> 16 & 0o777 == 0o755
+            assert extras.getinfo("run-link").external_attr >> 16 & 0o170000 == 0o120000
+            assert extras.read("run-link") == b"run.sh"
+    with zipfile.ZipFile(full["archive"]) as bundle:
+        with zipfile.ZipFile(io.BytesIO(bundle.read("extras.zip"))) as extras:
+            assert extras.read(".venv/generated.bin") == b"ignored"
+            assert not any(".git" in Path(n).parts for n in extras.namelist())
+        manifest = json.loads(bundle.read("MANIFEST.json"))
+        for component in manifest["components"]:
+            assert (
+                hashlib.sha256(bundle.read(component["path"])).hexdigest()
+                == component["sha256"]
+            )
+        assert manifest["head"] == git(project, "rev-parse", "HEAD")
+        assert manifest["mode"] == "full"
+        assert manifest["truncated"] is False
+    selected = runtime.projects.export(
         "fixture",
-        max_files=2,
-        start_after=first["manifest"]["next_start_after"],
-        expected_revision=first["manifest"]["checkout_revision"],
+        mode="full",
+        extra_paths=[".venv"],
+        exclude_paths=[".venv/generated.bin"],
     )
-    first_paths = {row["path"] for row in first["manifest"]["files"]}
-    second_paths = {row["path"] for row in second["manifest"]["files"]}
-    assert first_paths.isdisjoint(second_paths)
-    page_paths = first_paths | second_paths
-    cursor = second["manifest"]["next_start_after"]
-    while cursor is not None:
-        page = runtime.projects.export(
-            "fixture",
-            max_files=2,
-            start_after=cursor,
-            expected_revision=first["manifest"]["checkout_revision"],
-        )
-        page_paths.update(row["path"] for row in page["manifest"]["files"])
-        cursor = page["manifest"]["next_start_after"]
-    assert page_paths == {row["path"] for row in whole["manifest"]["files"]}
-    with pytest.raises(ProjectError, match="increase max_bytes"):
+    assert all(row["component"] == "HEAD.zip" for row in selected["manifest"]["files"])
+    assert selected["manifest"]["path_policy"]["exclude_paths"] == [
+        ".venv/generated.bin"
+    ]
+    (project / ".venv/generated.bin").write_bytes(b"new ignored state")
+    assert (
+        runtime.projects.export("fixture", mode="full")["archive"].read_bytes()
+        != full["archive"].read_bytes()
+    )
+    with pytest.raises(projects_module.ProjectExportSizeError) as exc:
         runtime.projects.export("fixture", max_bytes=1)
-    (project / "README.md").write_text("changed\n")
-    with pytest.raises(ProjectPreconditionError, match="previous export page"):
-        runtime.projects.export(
-            "fixture",
-            max_files=2,
-            start_after=first["manifest"]["next_start_after"],
-            expected_revision=first["manifest"]["checkout_revision"],
-        )
+    assert exc.value.details["measured_bytes"] > 1
+    with pytest.raises(projects_module.ProjectExportSizeError):
+        runtime.projects.export("fixture", max_files=1)
+    server = create_server(config)
+    refusal = call(
+        server, "projects.export", {"target": {"project": "fixture"}, "max_bytes": 1}
+    )
+    assert refusal["error"]["code"] == "response_bound"
+    assert refusal["error"]["details"]["available_modes"] == [
+        "tracked",
+        "tracked+untracked",
+        "full",
+    ]
+
+
+def test_export_refuses_submodules_and_concurrent_source_change(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config, project, _ = fixture(tmp_path)
+    runtime = create_server(config)._sinnix_revision_publisher.runtime
+    oid = git(project, "rev-parse", "HEAD")
+    git(project, "update-index", "--add", "--cacheinfo", f"160000,{oid},submodule")
+    git(project, "commit", "-qm", "gitlink")
+    with pytest.raises(ProjectError, match="submodule export is unsupported"):
+        runtime.projects.export("fixture")
+    git(project, "reset", "--hard", "HEAD~1")
+    original = runtime.projects._export_revision
+    calls = 0
+
+    def revision(root, paths):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            (project / "extra.txt").write_text("concurrent edit")
+        return original(root, paths)
+
+    (project / "extra.txt").write_text("original")
+    monkeypatch.setattr(runtime.projects, "_export_revision", revision)
+    with pytest.raises(ProjectPreconditionError, match="changed while export"):
+        runtime.projects.export("fixture", mode="full")
+
+
+def test_export_detects_ignored_file_changing_and_returning_during_capture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config, project, _ = fixture(tmp_path)
+    (project / ".gitignore").write_text("ignored.bin\n")
+    ignored = project / "ignored.bin"
+    ignored.write_bytes(b"original")
+    runtime = create_server(config)._sinnix_revision_publisher.runtime
+    original = runtime.projects._export_revision
+    calls = 0
+
+    def revision(root, paths):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            ignored.write_bytes(b"original")
+        digest = original(root, paths)
+        if calls == 1:
+            ignored.write_bytes(b"transient")
+        return digest
+
+    monkeypatch.setattr(runtime.projects, "_export_revision", revision)
+    with pytest.raises(ProjectPreconditionError, match="changed while export"):
+        runtime.projects.export("fixture", mode="full")
 
 
 def fixture(tmp_path: Path) -> tuple[GatewayConfig, Path, Path]:
@@ -1215,3 +1303,77 @@ def test_project_read_bounds_giant_lines_before_slicing(
     assert result["bytes"] == len(expected.encode("utf-8"))
     assert result["truncated"] is truncated
     assert calls
+
+
+def test_patch_optional_verification_uses_declared_operation_and_retains_applied_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sinnix_agent_gateway.results import ProtocolError
+
+    config, project, _ = fixture(tmp_path)
+    runtime = create_server(config)._sinnix_revision_publisher.runtime
+    launched = []
+
+    def launch(**kwargs):
+        launched.append(kwargs)
+        assert (project / "README.md").read_text().startswith("patched")
+        return {
+            "task_id": "42",
+            "job_id": "fixture-verification",
+            "project_id": "fixture",
+            "operation": "check",
+            "checkout_path": str(project),
+            "artifacts": {"receipt": "fixture-receipt", "result": "fixture-result"},
+        }
+
+    monkeypatch.setattr(runtime, "run_declared_operation", launch)
+    checkout = runtime.projects.checkout("fixture", "default")["checkout"]
+    patch = "--- a/README.md\n+++ b/README.md\n@@ -1,3 +1,3 @@\n-fixture\n+patched\n line two\n line three\n"
+    inp = projects.ChangeInput(
+        target={"project": "fixture"},
+        change={
+            "operation": "apply_patch",
+            "patch": patch,
+            "verification": {"operation": "check", "operation_args": ["contract"]},
+        },
+        expected_head=checkout["head"],
+        expected_dirty_sha256=checkout["dirty_sha256"],
+        idempotency_key="patch-with-verification",
+    )
+    result = projects._change(runtime, inp)
+    assert result.applied and result.verification_error is None
+    assert result.verification["job_id"] == "fixture-verification"
+    assert result.verification["ref"] == "sinnix://jobs/42"
+    assert result.verification["artifacts"]["receipt"] == "fixture-receipt"
+    assert result.diff and "+patched" in result.diff
+    assert launched[0]["workspace_id"] == str(project)
+    assert launched[0]["operation"] == "check"
+    assert launched[0]["parameters"] == {"argv": ["contract"]}
+    assert launched[0]["idempotency_key"]
+    with pytest.raises(ProtocolError, match="no longer matches"):
+        projects._change(runtime, inp)
+    assert len(launched) == 1
+
+    def refuse(**_kwargs):
+        raise ProtocolError("invalid_request", "unknown declared operation")
+
+    monkeypatch.setattr(runtime, "run_declared_operation", refuse)
+    after = result.checkout
+    reverse = patch.replace("-fixture\n+patched", "-patched\n+fixture")
+    failed_launch = projects._change(
+        runtime,
+        projects.ChangeInput(
+            target=inp.target,
+            change={
+                "operation": "apply_patch",
+                "patch": reverse,
+                "verification": {"operation": "missing"},
+            },
+            expected_head=after["head"],
+            expected_dirty_sha256=after["dirty_sha256"],
+            idempotency_key="patch-verification-refused",
+        ),
+    )
+    assert failed_launch.applied and failed_launch.verification is None
+    assert failed_launch.verification_error["code"] == "invalid_request"
+    assert (project / "README.md").read_text().startswith("fixture")

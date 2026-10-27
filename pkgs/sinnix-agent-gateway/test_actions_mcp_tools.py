@@ -297,3 +297,64 @@ def test_self_broker_routes_direct_read_with_content_blocks(
     assert isinstance(result, mcp_tools.ActionResult)
     assert result.data.response["media_type"] == "image/png"
     assert isinstance(result.blocks[0], ImageContent)
+
+
+def test_breaking_input_schema_refreshes_live_and_persisted_catalogs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    version = 1
+
+    class MigratingSession(FakeSession):
+        async def list_tools(self, *, params=None):
+            result = await super().list_tools(params=params)
+            tool = result.tools[0]
+            if version == 2:
+                tool.description = "Lookup v2 requires an explicit resource identity"
+                tool.inputSchema = {
+                    "type": "object",
+                    "properties": {"resource_id": {"type": "integer"}},
+                    "required": ["resource_id"],
+                    "additionalProperties": False,
+                }
+            return result
+
+    rt = runtime(tmp_path, monkeypatch, session=MigratingSession)
+    old = call(rt, "mcp.tools", {}, BY_NAME)["data"]["tools"][0]
+    assert "query" in old["input_schema"]["properties"]
+    version = 2
+    migrated = call(rt, "mcp.tools", {}, BY_NAME)["data"]["tools"][0]
+    assert migrated["input_schema"]["required"] == ["resource_id"]
+    assert "query" not in migrated["input_schema"]["properties"]
+    assert migrated["description"].startswith("Lookup v2")
+    assert not migrated["schema_stale"]
+
+    # A second broker reads the same persisted catalog; its offline fallback
+    # must contain the new required input, never the pre-migration schema.
+    restarted = runtime(tmp_path, monkeypatch, session=MigratingSession)
+
+    async def offline(*_args):
+        return {"availability": "unavailable", "reason": "offline fixture"}
+
+    monkeypatch.setattr(restarted.mcp_broker, "_probe", offline)
+    retained = call(restarted, "mcp.tools", {}, BY_NAME)["data"]["tools"][0]
+    assert retained["schema_stale"]
+    assert retained["input_schema"] == migrated["input_schema"]
+    restarted.config.mcp_broker_servers["fixture"]["brokered"] = False
+    restarted.config.mcp_broker_servers["fixture"]["reason"] = "caller visibility"
+    hidden = call(restarted, "mcp.tools", {}, BY_NAME)["data"]
+    assert hidden["tools"] == []
+    assert hidden["servers_unavailable"]["fixture"] == "caller visibility"
+
+
+def test_server_catalog_preserves_native_owner_metadata(tmp_path, monkeypatch):
+    rt = runtime(tmp_path, monkeypatch)
+    original = rt.mcp_broker._catalog_server
+
+    async def catalog(name, row):
+        result = await original(name, row)
+        return {**result, "owner_extension": {"protocol": "fixture-v2"}}
+
+    monkeypatch.setattr(rt.mcp_broker, "_catalog_server", catalog)
+    result = call(rt, "mcp.servers", {"servers": ["fixture"]}, BY_NAME)["data"]
+    assert result["servers"][0]["owner_extension"] == {"protocol": "fixture-v2"}
+    assert result["servers"][0]["session_policy"] == "per-call"

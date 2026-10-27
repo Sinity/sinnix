@@ -152,9 +152,40 @@ otherwise reads name a checkout id from `projects.list`.
   unchanged before and after reading.
 - `projects.search` streams ripgrep matches; its cursor reads the same retained
   matches after later edits.
-- `projects.export` streams tracked and non-ignored files to a ZIP artifact,
-  excluding sensitive paths. Page with `start_after`, passing the page's
-  `checkout_revision` as `expected_revision`.
+- `projects.export` returns a deterministic ZIP artifact containing `HEAD.zip`
+  (the exact committed blobs and modes), `working-tree.patch` (binary-capable
+  tracked changes against HEAD), optional `extras.zip`, and `MANIFEST.json`.
+  The manifest records checkout refs, branch, HEAD, dirty hash, export revision,
+  path policy, omissions, counts, bytes and per-file/component hashes.
+  `mode: tracked` is the default; `tracked+untracked` adds nonignored extras;
+  `full` adds ignored extras too. `extra_paths` selects extra files by relative
+  path/prefix and `exclude_paths` omits selected extra paths/prefixes. These
+  never filter HEAD or its patch. Git administration (`.git`) is always omitted;
+  submodules are explicitly refused. Export applies no private/secret classifier.
+  `max_files` (default 20,000) and `max_bytes` (default 64,000,000, counting
+  uncompressed source plus patch bytes) refuse the complete export with
+  `response_bound`, measured sizes and available modes. They never paginate or
+  truncate it. Repeated unchanged exports produce identical ZIP bytes.
+- `projects.change` with `change.operation: apply_patch` can include
+  `change.verification: {operation, operation_args}` to enqueue a declared
+  operation through the same owner as `operations.run`. The result includes
+  the applied checkout identity, diff, and verification job identity/artifact
+  references; use `jobs.get`/`jobs.wait` for completion evidence and retained result/receipt references.
+  A launch refusal is returned as `verification_error` with `applied: true`;
+  the patch remains applied and must not be replayed. HEAD and dirty-hash
+  preconditions should both come from the exported manifest.
+
+Use focused gateway source reads and diffs for local questions. Choose checkout
+export for broad static analysis or cross-file edits in a tool sandbox. Extract
+`HEAD.zip`, apply `working-tree.patch`, then extract selected `extras.zip` when
+reconstructing the exported working tree. Live tests and runtime investigation
+remain host-side through declared operations. Chisel is optional enrichment for
+analytical projections combining code with history and other evidence.
+
+`mcp.servers` preserves the broker's native catalog rows and adds probe timing
+and diagnostic artifact references. The gateway does not maintain a second
+server-row model or converter. Tool schema discovery refreshes live contracts;
+last-good persisted contracts are explicitly stale when an owner is offline.
 
 ## Jobs and batches
 
