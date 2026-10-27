@@ -393,7 +393,7 @@ close_generated_viewer() {
   evaluate "$1" '(() => { document.querySelector("button[aria-label=\"Close viewer\"]")?.click(); return true; })()' >/dev/null
 }
 
-download_generated() {
+download_generated() (
   local page_id="$1" name="$2" occurrence="$3" directory workspace before after changes opened clicked candidate deadline record
   local timeout_sec="${SINNIX_CHATGPT_DOWNLOAD_TIMEOUT_SEC:-120}"
   [[ $timeout_sec =~ ^[1-9][0-9]*$ ]] || { printf 'SINNIX_CHATGPT_DOWNLOAD_TIMEOUT_SEC must be a positive integer\n' >&2; exit 2; }
@@ -413,11 +413,15 @@ download_generated() {
   [[ $occurrence -lt $count ]] || { printf 'occurrence %s exceeds %s controls\n' "$occurrence" "$count" >&2; exit 2; }
   directory=$(xdg-user-dir DOWNLOAD)
   [[ -d $directory ]] || { printf 'Downloads directory unavailable: %s\n' "$directory" >&2; exit 1; }
-  workspace=$(mktemp -d "${TMPDIR:-/realm/tmp/work}/sinnix-chatgpt-download.XXXXXX")
+  local scratch_pid=$BASHPID
+  workspace=$(mktemp -d "${TMPDIR:-/realm/tmp/work}/sinnix-chatgpt-download.${scratch_pid}.XXXXXX")
   before="$workspace/before"
   after="$workspace/after"
   changes="$workspace/changes"
-  trap '[[ ${opened:-false} != true ]] || close_generated_viewer "$page_id" || true; rm -f -- "$before" "$after" "$changes"; rmdir -- "$workspace"; trap - RETURN EXIT' RETURN EXIT
+  trap '[[ ${opened:-false} != true ]] || close_generated_viewer "$page_id" || true; rm -rf -- "$workspace"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   find "$directory" -maxdepth 1 -type f -printf '%i %f\0' | sort -z >"$before"
   local quoted
   quoted=$(jq -Rn --arg value "$name" '$value')
@@ -474,7 +478,7 @@ download_generated() {
   done
   printf 'generated download did not finish within %s seconds\n' "$timeout_sec" >&2
   exit 1
-}
+)
 
 summary() {
   local page_id="$1" base
@@ -516,9 +520,14 @@ read_full_transcript() {
 
 read_full_native_chunked() (
   local page_id="$1" target="$2" chunk_size=900000 start=0 part total next_start chunk
-  local assembled
-  assembled=$(mktemp /realm/tmp/work/sinnix-chatgpt-native.XXXXXX.json)
-  trap 'rm -f -- "$assembled" "$assembled.checked"' EXIT
+  local workspace assembled
+  local scratch_pid=$BASHPID
+  workspace=$(mktemp -d "${TMPDIR:-/realm/tmp/work}/sinnix-chatgpt-native.${scratch_pid}.XXXXXX")
+  trap 'rm -rf -- "$workspace"' EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  assembled="$workspace/transcript.json"
   : >"$assembled"
   evaluate "$page_id" '(() => { delete window.__sinnixNativeTranscriptV3; return true; })()' >/dev/null
   while :; do

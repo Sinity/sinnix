@@ -20,10 +20,12 @@ class PeriodCapture(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.tools = self.root / "bin"
         self.tools.mkdir()
+        (self.root / "scratch").mkdir()
         self.env = dict(
             os.environ,
             PATH=str(self.tools) + ":" + os.environ["PATH"],
             FIXTURE_ROOT=str(self.root),
+            TMPDIR=str(self.root / "scratch"),
         )
         self.executable(
             "nlbw",
@@ -134,6 +136,27 @@ with (Path(os.environ['FIXTURE_ROOT'])/'captured.jsonl').open('a') as out:
             text=True,
             timeout=15,
         )
+
+    def test_scratch_is_one_allocation_and_removed_on_transport_failure(self):
+        self.prepare_receiver()
+        self.executable("ssh", "import sys; sys.exit(37)\n")
+        result = self.poll("rows")
+        self.assertEqual(result.returncode, 37, result.stderr)
+        self.assertEqual(list((self.root / "scratch").iterdir()), [])
+
+    def test_scratch_is_removed_on_sigterm(self):
+        self.prepare_receiver()
+        self.executable(
+            "ssh",
+            """import os,signal
+from pathlib import Path
+for path in Path(os.environ['TMPDIR']).glob('sinnix-router-poll.*'):
+ os.kill(int(path.name.split('.')[1]), signal.SIGTERM)
+""",
+        )
+        result = self.poll("rows")
+        self.assertEqual(result.returncode, 143, result.stderr)
+        self.assertEqual(list((self.root / "scratch").iterdir()), [])
 
     def months(self):
         path = self.root / "captured.jsonl"

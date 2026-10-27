@@ -120,7 +120,7 @@ in
         {
           inherit config;
           unitName = "sinnix-tmp-sweep";
-          description = "Remove unheld Nix devshell scratch directories";
+          description = "Remove unheld recognized scratch directories";
         }
         {
           # Root can observe non-dumpable holders. The program drops to the
@@ -148,14 +148,13 @@ in
             ];
           };
           timer = {
-            # Cadence, not retention: the sweeper's only criterion is whether a
-            # live process holds the directory, so a shorter interval reclaims
-            # sooner and a longer one never spares a leaked tree.
+            # Nix scratch uses holder checks; PID-qualified producer scratch
+            # also requires a dead allocator and a 24-hour age floor.
             #
             # Persistent catches an elapse missed while logged out.
             intervalSec = 900;
             persistent = true;
-            description = "Periodic devshell scratch sweep";
+            description = "Periodic owned scratch sweep";
           };
         }
       )

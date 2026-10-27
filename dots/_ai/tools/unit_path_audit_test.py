@@ -42,30 +42,30 @@ borg check --repository-only /repo
 
 
 def main() -> int:
-    tmp = tempfile.mkdtemp()
-    script = os.path.join(tmp, "unit-script-fixture-start")
-    with open(script, "w", encoding="utf-8") as handle:
-        handle.write(FIXTURE)
-    binaries = os.path.join(tmp, "bin")
-    os.makedirs(binaries)
-    open(os.path.join(binaries, "borg"), "w", encoding="utf-8").close()
+    with tempfile.TemporaryDirectory(prefix="sinnix-unit-path-audit-") as tmp:
+        script = os.path.join(tmp, "unit-script-fixture-start")
+        with open(script, "w", encoding="utf-8") as handle:
+            handle.write(FIXTURE)
+        binaries = os.path.join(tmp, "bin")
+        os.makedirs(binaries)
+        open(os.path.join(binaries, "borg"), "w", encoding="utf-8").close()
 
-    audit.unit_property = lambda unit, prop, user=False: (
-        script if prop == "ExecStart" else f"PATH={binaries}"
-    )
-    hits = audit.scan_unit("fixture.service", False)
-
-    if not any("jq" in hit for hit in hits):
-        print(f"FAIL: auditor missed the jq gap. hits={hits}", file=sys.stderr)
-        return 1
-    if any("borg" in hit for hit in hits):
-        print(
-            f"FAIL: false positive on a binary that IS present. hits={hits}",
-            file=sys.stderr,
+        audit.unit_property = lambda unit, prop, user=False: (
+            script if prop == "ExecStart" else f"PATH={binaries}"
         )
-        return 1
-    print("PASS: catches the real defect, no false positive on a present binary")
-    return 0
+        hits = audit.scan_unit("fixture.service", False)
+
+        if not any("jq" in hit for hit in hits):
+            print(f"FAIL: auditor missed the jq gap. hits={hits}", file=sys.stderr)
+            return 1
+        if any("borg" in hit for hit in hits):
+            print(
+                f"FAIL: false positive on a binary that IS present. hits={hits}",
+                file=sys.stderr,
+            )
+            return 1
+        print("PASS: catches the real defect, no false positive on a present binary")
+        return 0
 
 
 if __name__ == "__main__":

@@ -7,6 +7,8 @@ import os
 import pwd
 import runpy
 import stat
+import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -50,6 +52,93 @@ class SweepTest(unittest.TestCase):
                 set(),
             )
 
+    def test_only_old_dead_pid_scratch_is_selected(self):
+        with tempfile.TemporaryDirectory() as root:
+            names = [
+                "sinnix-chatgpt-native.999999999.ABC123",
+                "sinnix-chatgpt-download.999999999.ABC123",
+                "sinnix-router-poll.999999999.ABC123",
+                f"sinnix-chatgpt-native.{os.getpid()}.ABC123",
+                "sinnix-chatgpt-native.999999999.NEW123",
+                "sinnix-chatgpt-native.legacy.json",
+                "sinnix-notes.999999999.ABC123",
+                "codex",
+                "claude-old",
+                "polylogue-old",
+                "wave-old",
+            ]
+            old = time.time() - 2 * 86400
+            for name in names:
+                path = Path(root, name)
+                path.mkdir()
+                os.utime(path, (old, old))
+            os.utime(Path(root, names[4]), None)
+            Path(root, "sinnix-router-poll.999999999.LINK12").symlink_to(
+                Path(root, names[0]), target_is_directory=True
+            )
+            candidates, _ = MODULE["collect_candidates"](root, os.getuid())
+            self.assertEqual(set(candidates), {str(Path(root, n)) for n in names[:3]})
+
+    def test_allocator_visibility_failure_refuses_selection(self):
+        with patch("os.stat", side_effect=PermissionError(errno.EACCES, "denied")):
+            with self.assertRaises(PermissionError):
+                MODULE["owned_scratch_ready"](
+                    "sinnix-router-poll.999999999.ABC123", time.time() - 2 * 86400
+                )
+
+    @unittest.skipIf(os.getuid() == 0, "removal requires a non-root fixture owner")
+    def test_sweep_removes_only_abandoned_owned_scratch(self):
+        with tempfile.TemporaryDirectory() as root:
+            dead = Path(root, "sinnix-router-poll.999999999.ABC123")
+            held = Path(root, "sinnix-chatgpt-native.999999999.ABC123")
+            live = Path(root, f"sinnix-chatgpt-download.{os.getpid()}.ABC123")
+            protected = Path(root, "claude-recovery")
+            for path in (dead, held, live, protected):
+                path.mkdir()
+                (path / "payload").write_text("fixture")
+                os.utime(path, (1, 1))
+            with (
+                patch.dict(
+                    MODULE["main"].__globals__,
+                    {
+                        "roots": lambda: [root],
+                        "held_directories": lambda *_: {str(held)},
+                    },
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(MODULE["main"](["sweep"]), 0)
+            self.assertFalse(dead.exists())
+            for path in (held, live, protected):
+                self.assertEqual((path / "payload").read_text(), "fixture")
+
+    @unittest.skipIf(os.getuid() == 0, "removal requires a non-root fixture owner")
+    def test_allocator_is_rechecked_after_holder_scan(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root, "sinnix-router-poll.999999999.ABC123")
+            path.mkdir()
+            os.utime(path, (1, 1))
+            with (
+                patch.dict(
+                    MODULE["main"].__globals__,
+                    {
+                        "roots": lambda: [root],
+                        "held_directories": lambda *_: set(),
+                    },
+                ),
+                patch.dict(
+                    MODULE["main"].__globals__,
+                    {
+                        "owned_scratch_ready": unittest.mock.Mock(
+                            side_effect=[True, False]
+                        ),
+                    },
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(MODULE["main"](["sweep"]), 0)
+            self.assertTrue(path.exists())
+
     def run_main(
         self,
         *,
@@ -70,6 +159,7 @@ class SweepTest(unittest.TestCase):
             st_dev=1,
             st_ino=3 if changed else 2,
             st_uid=1000,
+            st_mtime=0,
         )
 
         def scan(*_):

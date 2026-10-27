@@ -136,10 +136,31 @@ cat >"$fixture/bin/chrome" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 expression="$4"
-if [[ $expression == *'schema: "sinnix-chatgpt-generated-artifacts-v1"'* ]]; then
+if [[ $expression == *'delete window.__sinnixNativeTranscriptV3'* ]]; then
+  printf '%s\n' true
+elif [[ $expression == *'return { total: serialized.length'* ]]; then
+  case "$FIXTURE_SCENARIO" in
+    native-fail) exit 37 ;;
+    native-term)
+      # The native reader is inside a command substitution. The directory
+      # records the allocating subshell rather than this transport's parent.
+      for entry in "$TMPDIR"/sinnix-chatgpt-native.*; do
+        owner=${entry##*/sinnix-chatgpt-native.}; owner=${owner%%.*}
+        kill -TERM "$owner"
+      done
+      exit 0 ;;
+  esac
+  jq -nc --arg chunk '{"messages":[],"title":"fixture"}' '{total:1,next_start:1,chunk:$chunk}'
+elif [[ $expression == *'schema: "sinnix-chatgpt-generated-artifacts-v1"'* ]]; then
   jq -nc --arg name "$FIXTURE_NAME" '{files: [{name: $name}]}'
 elif [[ $expression == *'const buttons ='* ]]; then
-  if [[ $FIXTURE_SCENARIO == direct ]]; then
+  if [[ $FIXTURE_SCENARIO == download-term ]]; then
+    for entry in "$TMPDIR"/sinnix-chatgpt-download.*; do
+      owner=${entry##*/sinnix-chatgpt-download.}; owner=${owner%%.*}
+      kill -TERM "$owner"
+    done
+    exit 0
+  elif [[ $FIXTURE_SCENARIO == direct ]]; then
     printf '%s' expected >"$FIXTURE_DOWNLOADS/$FIXTURE_NAME"
     printf '%s\n' download
   else
@@ -217,6 +238,27 @@ run_download_case empty empty.txt empty.txt
 run_download_case newline $'report\npart.txt' $'report\npart.txt'
 run_download_case direct bundle.zip bundle.zip
 test ! -e "$fixture/downloads/direct.viewer"
+
+# Exercise assembly success, transport failure, and catchable cancellation.
+for scenario in native-ok native-fail native-term; do
+  status=0
+  env TMPDIR="$fixture/work" SINNIX_CHROME_CONTROL="$fixture/bin/chrome" \
+    FIXTURE_SCENARIO="$scenario" bash "$helper" full synthetic-page \
+    >"$fixture/$scenario.json" 2>"$fixture/$scenario.err" || status=$?
+  case "$scenario" in
+    native-ok) test "$status" -eq 0; jq -e '.page_id == "synthetic-page"' "$fixture/$scenario.json" ;;
+    native-fail) test "$status" -eq 37 ;;
+    native-term) test "$status" -eq 143 ;;
+  esac
+  test -z "$(find "$fixture/work" -mindepth 1 -print -quit)"
+done
+status=0
+env PATH="$fixture/bin:$PATH" TMPDIR="$fixture/work" \
+  SINNIX_CHROME_CONTROL="$fixture/bin/chrome" FIXTURE_SCENARIO=download-term \
+  FIXTURE_NAME=cancel.txt FIXTURE_DOWNLOADS="$fixture/downloads" \
+  bash "$helper" download synthetic-page cancel.txt >"$fixture/cancel.out" 2>"$fixture/cancel.err" || status=$?
+test "$status" -eq 143
+test -z "$(find "$fixture/work" -mindepth 1 -print -quit)"
 
 mkdir -p "$fixture/locate"
 printf '%s' original >"$fixture/locate/report.txt"

@@ -52,9 +52,14 @@ ssh_opts=(
   -o "User=${ROUTER_USER:-root}"
 )
 
-out_file="$(mktemp)"
-err_file="$(mktemp)"
-trap 'rm -f "$out_file" "$err_file"' EXIT
+scratch_pid=$BASHPID
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/sinnix-router-poll.${scratch_pid}.XXXXXX")"
+trap 'rm -rf -- "$scratch"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+out_file="$scratch/out"
+err_file="$scratch/err"
 
 # shellcheck disable=SC2029  # client-side expansion is intended: the
 # remote command is built here and the args are single-quote escaped above.

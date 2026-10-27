@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Remove unheld Nix devshell scratch directories from TMPDIR and /tmp
+# description: Remove unheld recognized scratch directories from TMPDIR and /tmp
 # runtimeInputs: coreutils
 # pythonPackages: @sinnix-lib
-"""Reclaim leaked devshell scratch trees.
+"""Reclaim leaked devshell and PID-qualified producer scratch trees.
 
 Nix creates `nix-shell.*` and `nix-develop-*` directories. Some `nix develop`
 paths leave them behind even on normal exit. The sweeper removes owned,
@@ -29,8 +29,9 @@ from __future__ import annotations
 import errno
 import os
 import pwd
-import stat
+import re
 import shutil
+import stat
 import sys
 import time
 
@@ -39,15 +40,23 @@ from sinnix_lib.procfs import held_paths
 HOLDER_VARS = (b"TMPDIR=", b"TMP=", b"TEMP=", b"NIX_BUILD_TOP=")
 PREFIXES = ("nix-shell.", "nix-develop-")
 DEVELOP_MIN_AGE_SECONDS = 10 * 60
+OWNED_MIN_AGE_SECONDS = 24 * 60 * 60
+# These producers allocate a private directory with their actual shell PID.
+# Historical names without a PID remain outside this ownership contract.
+OWNED_SCRATCH = re.compile(
+    r"sinnix-(?:chatgpt-(?:native|download)|router-poll)\.([1-9][0-9]*)\.[A-Za-z0-9]{6}\Z"
+)
 
 USAGE = """usage: sinnix-tmp-sweep [--dry-run] [--owner USER]
 
-Remove Nix devshell scratch directories that no live process holds, from
+Remove recognized scratch directories that no live process holds, from
 $TMPDIR and from /tmp. Only directories owned by the selected owner (by
 default, the invoking user) are considered; anything else is counted as skipped.
 A privileged scheduled scan
 uses --owner, then irreversibly drops to that user before deletion. Incomplete
-process visibility refuses deletion.
+process visibility refuses deletion. PID-qualified ChatGPT and router scratch
+must also be at least 24 hours old and its allocating process must be dead.
+Unrecognized names, codex, and claude-* are never candidates.
 """
 
 
@@ -89,8 +98,22 @@ def roots() -> list[str]:
     return found
 
 
+def owned_scratch_ready(name: str, modified: float) -> bool:
+    """An explicit allocator PID must be absent, even after the holder scan."""
+    owned = OWNED_SCRATCH.fullmatch(name)
+    if owned is None:
+        return True  # Nix scratch has its existing holder-based policy.
+    if time.time() - modified < OWNED_MIN_AGE_SECONDS:
+        return False
+    try:
+        os.stat("/proc/" + owned[1])
+    except FileNotFoundError:
+        return True
+    return False  # Includes PID reuse; permission errors propagate.
+
+
 def collect_candidates(root: str, uid: int) -> tuple[dict[str, tuple[int, int, int]], int]:
-    """Owned Nix devshell directories directly under root, plus a skip count."""
+    """Recognized owned scratch directly under root, plus a skip count."""
     candidates: dict[str, tuple[int, int, int]] = {}
     skipped = 0
     try:
@@ -100,7 +123,8 @@ def collect_candidates(root: str, uid: int) -> tuple[dict[str, tuple[int, int, i
         return candidates, skipped
     now = time.time()
     for entry in entries:
-        if not entry.name.startswith(PREFIXES):
+        owned = OWNED_SCRATCH.fullmatch(entry.name)
+        if not entry.name.startswith(PREFIXES) and owned is None:
             continue
         try:
             if not entry.is_dir(follow_symlinks=False):
@@ -108,6 +132,8 @@ def collect_candidates(root: str, uid: int) -> tuple[dict[str, tuple[int, int, i
             observed = entry.stat(follow_symlinks=False)
             if observed.st_uid != uid:
                 skipped += 1
+                continue
+            if not owned_scratch_ready(entry.name, observed.st_mtime):
                 continue
             if entry.name.startswith("nix-develop-") and now - observed.st_mtime < DEVELOP_MIN_AGE_SECONDS:
                 continue
@@ -227,12 +253,20 @@ def main(argv: list[str]) -> int:
                 print(f"sinnix-tmp-sweep: could not recheck {path}: {error}", file=sys.stderr)
                 failed = True
                 continue
+            try:
+                if not owned_scratch_ready(os.path.basename(path), observed.st_mtime):
+                    kept += 1
+                    continue
+            except OSError as error:
+                print(f"sinnix-tmp-sweep: could not recheck owner of {path}: {error}", file=sys.stderr)
+                failed = True
+                continue
             if dry_run:
                 print(f"sinnix-tmp-sweep: would remove {path}")
             else:
                 errors: list[BaseException] = []
                 try:
-                    shutil.rmtree(path, onerror=lambda _f, _p, info: errors.append(info[1]))
+                    shutil.rmtree(path, onerror=lambda _f, _p, info, errors=errors: errors.append(info[1]))
                 except OSError as error:
                     errors.append(error)
                 if errors:
