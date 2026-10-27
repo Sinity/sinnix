@@ -74,8 +74,12 @@ in
     # holds its writers to it. Without it a backlog on this slow drive used up
     # the global limit and paused writers to every other disk, the desktop's
     # root SSD included, in balance_dirty_pages.
+    # The 12 TB genome HDD is idle apart from snapshot cuts and the nightly
+    # drain; it parks after 10 idle minutes instead of spinning (and
+    # vibrating) all day. hdparm -S is a drive setting lost at power-off.
     udev.extraRules = ''
       ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="nvme*n*", ENV{DEVTYPE}=="disk", ATTRS{model}=="CT4000P3SSD8*", ATTR{bdi/strict_limit}="1", ATTR{bdi/max_ratio}="25"
+      ACTION=="add", SUBSYSTEM=="block", KERNEL=="sd*", ENV{DEVTYPE}=="disk", ENV{ID_SERIAL}=="OOS14000G_00064481", RUN+="${pkgs.hdparm}/bin/hdparm -S 120 /dev/%k"
     '';
 
     # Keep online discard disabled on this host; run batched trim from a
