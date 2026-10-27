@@ -78,6 +78,9 @@ mkServiceModule {
       # 80-95% full memory pressure (2026-09-28), which also paused the pytest
       # pools through pressure pauses. Six fit.
       agent.parallel = 6;
+      # Codex workers: light, mostly waiting on capped builds elsewhere, so
+      # the fleet is sized by available work, not by cores (2026-10-27).
+      codex.parallel = 28;
       pytest.parallel = 2;
       pytest-heavy = {
         parallel = 1;

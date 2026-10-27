@@ -310,13 +310,12 @@ rec {
       # 5 GiB of swap, memory pressure stalled every task 18% of the time,
       # and Chrome, Hyprland and the shell were swapped out.
       #
-      # Sized so the desktop and the live services always fit beside it on
-      # this 31 GiB host: desktop guarantee 6.5 (desktopMemory.totalMin) +
-      # system services ~6 (Sinex PostgreSQL's 4G buffers, sinexd, the
-      # critical slice) + kernel and compressed swap ~2.5 + MemoryMax 16.
-      # MemoryHigh throttles the agents 2G before that. The swap allowance
-      # lets cold agent pages go to zram rather than making agents re-read
-      # page cache, and it is all the swap agent work can take.
+      # The desktop is protected by its MemoryMin (desktopMemory.totalMin),
+      # which reclaim cannot take; this ceiling bounds agents against the
+      # live services (Sinex PostgreSQL, sinexd, polylogue-live) and the
+      # kernel. MemoryHigh throttles the agents 2G before MemoryMax. The small
+      # swap allowance lets cold agent pages go to zram; agents are reclaimed
+      # or killed rather than paged to disk.
       agent = {
         IOAccounting = true;
         # Below app and session (100) and the shell (400). The quota keeps a
@@ -329,9 +328,13 @@ rec {
         # the disk when it is not. At 90-100 per agent slice, three of them
         # held as much weight as the whole desktop.
         IOWeight = 25;
-        MemoryHigh = "14G";
-        MemoryMax = "16G";
-        MemorySwapMax = "6G";
+        # Raised from 14G/16G on 2026-10-27 for a wide Codex fleet (workers
+        # measured ~136 MB resident each); the desktop's MemoryMin, not this
+        # ceiling, is what protects the desktop. Swap stays small: agents are
+        # reclaimed or killed, never paged to the QLC NVMe.
+        MemoryHigh = "20G";
+        MemoryMax = "22G";
+        MemorySwapMax = "2G";
         TasksMax = 16384;
       };
       # Interactive agent CLIs and their in-process subagents. Claude's Bash
@@ -464,13 +467,14 @@ rec {
         # starved behind an idle desktop and the coordinator's own polls.
         CPUWeight = 90;
         IOWeight = 100;
-        MemoryHigh = "12G";
-        MemoryMax = "14G";
+        # Builds (two at 5-8 GiB under the cargo cap) plus the codex pool.
+        MemoryHigh = "17G";
+        MemoryMax = "19G";
         # Bounded swap for the plane as a whole. With none, a job at its
         # ceiling could only drop page cache (6 TiB of re-reads over one
         # 11-day uptime). A job's own cold pages are the cheaper thing to
-        # page.
-        MemorySwapMax = "5G";
+        # page. Within the budget's own 2G.
+        MemorySwapMax = "2G";
       };
       agent-ctl-work = {
         IOAccounting = true;
@@ -491,6 +495,18 @@ rec {
         # Worker count, not this ceiling, is the lever: see agent.parallel in
         # modules/services/agentctl.nix.
         MemoryHigh = "8G";
+        MemorySwapMax = "1G";
+      };
+
+      # Codex workers (`codex` operation): many light processes, ~136 MB
+      # resident each, that spend most of their time waiting on builds in
+      # other pools. Width, not this ceiling, is the lever.
+      agent-ctl-codex = {
+        IOAccounting = true;
+        CPUWeight = 100;
+        IOWeight = 100;
+        MemoryHigh = "8G";
+        MemoryMax = "10G";
         MemorySwapMax = "1G";
       };
 

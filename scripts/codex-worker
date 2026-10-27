@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# @sinnix-package
+# description: Run one non-interactive Codex worker in the current checkout, logging to an output directory
+# runtimeInputs: coreutils
+# Usage: codex-worker <effort> <prompt-file> <output-schema> <output-dir> [model]
+# Declared as each project's AgentCTL `codex` operation, so workers queue in
+# the codex pool and run inside its slice; the coordinator prepares the
+# worktree (passed as --workspace) and the prompt.
+set -euo pipefail
+if [ $# -lt 4 ]; then
+  echo "usage: codex-worker <effort> <prompt-file> <output-schema> <output-dir> [model]" >&2
+  exit 2
+fi
+effort=$1 prompt=$2 schema=$3 out=$4 model=${5:-gpt-6.1-sol}
+mkdir -p "$out"
+date -Is >"$out/started"
+set +e
+codex exec -C "$PWD" -m "$model" -c model_reasoning_effort="$effort" \
+  --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check \
+  --json -o "$out/final.md" --output-schema "$schema" - \
+  <"$prompt" >"$out/events.jsonl" 2>"$out/stderr.log"
+rc=$?
+set -e
+date -Is >"$out/finished"
+cat "$out/final.md" 2>/dev/null || tail -20 "$out/stderr.log"
+exit "$rc"

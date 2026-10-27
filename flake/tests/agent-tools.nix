@@ -397,6 +397,7 @@ in
             "agent-ctl-background"
             "agent-ctl-measure"
             "agent-ctl-system-build"
+            "agent-ctl-codex"
           ] (name: userSlices.${name});
           forbiddenAvoidTokens = [
             "bash"
@@ -432,9 +433,11 @@ in
         ) "the earlyoom fallback must not exempt agents, browsers, runtimes, or generic shells";
         assert lib.assertMsg
           (
-            # One budget holds every kind of agent work, and it fits beside the
-            # desktop's hard guarantee in the host's 31 GiB; with the system
-            # services and the kernel this leaves no room to oversubscribe.
+            # One budget holds every kind of agent work beside the desktop's
+            # hard guarantee in the host's 31 GiB. The guarantee, not the
+            # budget, protects the desktop; the budget's ceiling leaves the
+            # kernel and system services the remainder, and agents throttle at
+            # MemoryHigh 2G before it (raised for the Codex fleet, 2026-10-27).
             lib.all (name: userSlices ? ${name}) [
               "agent-cli"
               "agent-tool"
@@ -451,7 +454,7 @@ in
               sliceBytes budget.MemoryMax
               + sliceBytes userSlices.app.MemoryMin
               + sliceBytes userSlices.session.MemoryMin
-              + sliceBytes userSlices.desktop-shell.MemoryMin <= 24 * 1024 * 1024 * 1024
+              + sliceBytes userSlices.desktop-shell.MemoryMin <= 29 * 1024 * 1024 * 1024
             # The desktop's guarantee is hard, and every ancestor carries it.
             && userSlices.desktop.MemoryMin == userSlices.desktop-shell.MemoryMin
             &&

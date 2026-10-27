@@ -325,6 +325,7 @@ mkFeatureModule {
               scriptPkgs.beads.passthru.dolt
               scriptPkgs.sinnix-context-handoff
               scriptPkgs.claude-quota
+              scriptPkgs.codex-worker
               scriptPkgs.claude-agents
               scriptPkgs.claude-hang-capture
             ];
