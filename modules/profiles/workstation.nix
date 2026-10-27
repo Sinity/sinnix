@@ -173,10 +173,11 @@ in
           }
         ];
 
-        # Tiered swap: zram is the fast first tier absorbing bursts at
-        # RAM speed; the NVMe swapfile (hosts/sinnix-prime/storage.nix, priority
-        # 10) is the overflow tier for sustained pressure. Telemetry samples
-        # zram/PSI/refaults so a thrash regression stays visible.
+        # zram is the only swap. An NVMe swapfile overflow tier was removed on
+        # 2026-10-27: on 10-27 00:05 agent work filled zram plus 4 GiB of it on
+        # the QLC /realm drive, and paging there held IO-full PSI at 74% for
+        # the whole host. Overcommit beyond zram is killed, not paged to disk.
+        # Telemetry samples zram/PSI/refaults so a thrash regression stays visible.
         zramSwap = {
           enable = true;
           algorithm = "zstd";
@@ -305,7 +306,7 @@ in
           # pressure first. As first responder earlyoom produces kill storms.
           freeMemThreshold = 3;
           # Free-swap minimum: fire only once swap is genuinely nearly exhausted
-          # (<10% free ≈ 2 GiB of 20 GiB). The former 50 never bound — swap sits
+          # (<10% free ≈ 1.2 GiB of 12 GiB zram). The former 50 never bound — swap sits
           # above 50% used for most of any active day, so the intended
           # memory-AND-swap conjunction had collapsed to a bare free-memory
           # trigger (2026-08-18 incident taxonomy; 98-day record).

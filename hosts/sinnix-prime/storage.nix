@@ -3,7 +3,6 @@
   lib,
   pkgs,
   config,
-  utils,
   ...
 }:
 let
@@ -23,73 +22,6 @@ let
   polylogueDbRoot = config.sinnix.services.polylogue.dataDir;
   polylogueShareMount = "/home/${username}/.local/share/polylogue";
 
-  swapFile = "${realmRoot}/state/swap/swapfile";
-  # The generated unit name follows the swapfile PATH (systemd path escaping),
-  # so derive it rather than hardcoding: a change of swapFile would otherwise
-  # silently orphan the prepare/drain unit wiring below.
-  swapUnit = "${utils.escapeSystemdPath swapFile}.swap";
-  swapSizeGiB = 8;
-  swapPriority = 10;
-
-  # Overflow tier of the tiered swap setup: zram (priority 100,
-  # modules/profiles/workstation.nix) absorbs bursts at RAM speed; this NVMe
-  # file (priority 10) takes sustained overflow so cold anon leaves RAM
-  # entirely. Lives on /realm NVMe, not the wear-limited root SATA SSD, so
-  # swap I/O does not share the root device with Postgres/nix-store writes.
-  # Leave cold pages swapped until demanded. Periodic swapoff forces them
-  # into RAM even while other workloads are reclaiming memory.
-  prepareSwapfile = pkgs.writeShellApplication {
-    name = "sinnix-prime-prepare-swapfile";
-    runtimeInputs = [
-      pkgs.btrfs-progs
-      pkgs.coreutils
-      pkgs.e2fsprogs
-      pkgs.gnugrep
-      pkgs.util-linux
-    ];
-    text = ''
-      set -euo pipefail
-
-      swap_dir="$(dirname ${swapFile})"
-      desired_size=$(( ${toString swapSizeGiB} * 1024 * 1024 * 1024 ))
-
-      # The swap dir must be its own btrfs subvolume, not a plain directory:
-      # an active swapfile pins its extents, so `btrfs subvolume snapshot`
-      # of the containing subvolume fails with ETXTBSY. Nested subvolumes
-      # are excluded from parent snapshots, which also keeps swap contents
-      # out of backups.
-      if [ -d "$swap_dir" ] && [ "$(stat --format=%i "$swap_dir")" != "256" ]; then
-        if swapon --noheadings --raw --show=NAME | grep -qxF "${swapFile}"; then
-          swapoff "${swapFile}"
-        fi
-        rm -f "${swapFile}"
-        rmdir "$swap_dir"
-      fi
-
-      if [ ! -d "$swap_dir" ]; then
-        btrfs subvolume create "$swap_dir" >/dev/null
-        chattr +C "$swap_dir" 2>/dev/null || true
-      fi
-      chmod 700 "$swap_dir"
-
-      current_size=0
-      if [ -f "${swapFile}" ]; then
-        current_size=$(stat --printf=%s "${swapFile}" 2>/dev/null || echo 0)
-      fi
-
-      if [ "$current_size" -ne "$desired_size" ]; then
-        swapoff "${swapFile}" >/dev/null 2>&1 || true
-        rm -f "${swapFile}"
-        touch "${swapFile}"
-        chattr +C "${swapFile}" 2>/dev/null || true
-        fallocate -l ${toString swapSizeGiB}G "${swapFile}"
-        chmod 600 "${swapFile}"
-        mkswap "${swapFile}" >/dev/null
-      else
-        chmod 600 "${swapFile}"
-      fi
-    '';
-  };
   realmFsDevice = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
 
   # Initrd scaffold: early-boot placeholders derived from persistence config
@@ -318,34 +250,7 @@ in
 
   };
 
-  swapDevices = [
-    {
-      device = swapFile;
-      priority = swapPriority;
-    }
-  ];
-
   systemd = {
-    services.prepare-swapfile = {
-      description = "Create and maintain the bounded sinnix-prime swapfile";
-      requiredBy = [ swapUnit ];
-      before = [ swapUnit ];
-      after = [
-        "systemd-remount-fs.service"
-      ];
-      unitConfig = {
-        DefaultDependencies = false;
-        # The swap directory lives on /realm. Without this the unit races the
-        # mount at boot, runs against the empty stub directory on the root
-        # subvolume and fails, leaving the file swap inactive.
-        RequiresMountsFor = [ (builtins.dirOf swapFile) ];
-      };
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${prepareSwapfile}/bin/sinnix-prime-prepare-swapfile";
-      };
-    };
-
     services.sinnix-fstrim = fstrimJob.systemd.services.sinnix-fstrim;
 
     # One scrub a week rather than all three on the 1st at midnight, where they
