@@ -633,7 +633,7 @@ assert lib.assertMsg (
             && lib.hasInfix "file:///outer-realm/backup/borg-realm-v2" checkScript
             && lib.hasInfix "borg check --repository-only --max-duration \"$MAX_DURATION\" \"$repo\"" checkScript
             && audit.serviceConfig.TimeoutStartSec == "2h"
-            && auditTimer.timerConfig.OnCalendar == "*-*-* *:35:00"
+            && auditTimer.timerConfig.OnCalendar == "*-*-* 04,05:35:00"
             && lib.hasInfix "status=deferred reason=borg-lock-contention remains_due=true" audit.script
             && lib.hasInfix "flock -n -s 8" audit.script
             && lib.hasInfix "exec 9>&-" audit.script

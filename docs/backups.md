@@ -5,8 +5,9 @@ Everything is backed up locally to Borg repositories on the HDD at
 
 ## Retention
 
-`borgbackup-maintenance` checks hourly at :50 (with up to five minutes of
-jitter). A completed pass is due again after 20 hours. Lock contention leaves
+`borgbackup-maintenance` runs after the nightly drain at 03:50, retrying at
+04:50 (each with up to five minutes of jitter). A completed pass is due again
+after 20 hours. Lock contention leaves
 it due for the next attempt; missed timer events are caught up after boot.
 A completion older than 48 hours is unhealthy.
 
@@ -122,7 +123,7 @@ is archived as empty, while unavailable roots and nested subvolumes fail.
 
 ### Telemetry
 
-The hourly `borgbackup-local-dumps` job keeps at least the seven newest daily
+The nightly (04:40) `borgbackup-local-dumps` job keeps at least the seven newest daily
 dumps in each telemetry or PostgreSQL environment stream. Additional dumps
 must be older than seven days by both filename timestamp and modification time.
 Before deleting each local file, the job restores its entire archived copy and
@@ -172,7 +173,7 @@ the comparison. This checks a tree copy, not a Borg archive.
 | Check                    | Unit                              | When                             | What it shows                                                                   |
 | ------------------------ | --------------------------------- | -------------------------------- | ------------------------------------------------------------------------------- |
 | Repository integrity     | `borgbackup-verify`               | Sunday 13:00                     | Borg's segment CRCs, advanced in time-limited partial passes                    |
-| `/realm` coverage sample | `borgbackup-coverage-audit-realm` | hourly while due, at most weekly | all paths and metadata match, plus up to 128 files / 1 GiB of contents compared |
+| `/realm` coverage sample | `borgbackup-coverage-audit-realm` | nightly when due, at most weekly | all paths and metadata match, plus up to 128 files / 1 GiB of contents compared |
 | Beads restore check      | `sinnix-borg-beads-check`         | Thursday 05:00                   | a real restore of the Beads database from the latest archive                    |
 | Sealed telemetry         | `machine-telemetry-seal`          | Sunday 04:30                     | each sealed SQLite file passes a structural check once                          |
 

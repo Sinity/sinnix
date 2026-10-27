@@ -22,7 +22,8 @@
     };
     serviceConfig.TimeoutStartSec = "2h";
     timer = {
-      onCalendar = "*-*-* *:40:00";
+      # Dumps only become expirable after the nightly drain archives them.
+      onCalendar = "*-*-* 04:40:00";
       persistent = true;
       randomizedDelaySec = "5min";
     };

@@ -121,7 +121,7 @@
       # verifies segments for at most the budget and records progress in
       # the repo, so successive weekly runs cycle through the full
       # repository without ever monopolizing the repo lock for a whole day
-      # and starving the hourly drains.
+      # and starving the nightly drain.
       ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 1800 ${borgRepoPersist}
       ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 7200 ${borgRepoRealm}
       ${pkgs.borgbackup}/bin/borg check --repository-only --max-duration 1800 ${borgRepoSinexBlobs}
@@ -170,8 +170,9 @@
       TimeoutStopSec = "15s";
     };
     timer = {
-      # Retry only while due; a successful coverage receipt lasts seven days.
-      onCalendar = "*-*-* *:35:00";
+      # After the nightly drain, with one retry; it no-ops unless due, and a
+      # successful coverage receipt lasts seven days.
+      onCalendar = "*-*-* 04,05:35:00";
       persistent = false;
     };
     path = with pkgs; [

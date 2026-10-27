@@ -340,7 +340,9 @@ in
     maintenanceJob
     // {
       timer = {
-        onCalendar = "*-*-* *:50:00";
+        # After the nightly drain, with one retry for lock contention; a pass
+        # is due every 20 hours, so the second attempt no-ops after a success.
+        onCalendar = "*-*-* 03,04:50:00";
         persistent = true;
         randomizedDelaySec = "5min";
       };
