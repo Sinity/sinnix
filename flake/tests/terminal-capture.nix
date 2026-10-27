@@ -100,6 +100,10 @@ in
             test -n "$session_json"
             test -n "$events_json"
             test -n "$cast_file"
+            jq -s -e '
+              .[0].version == 3 and
+              any(.[1:][]; .[1] == "o" and (.[2] | contains("terminal-capture-ready")))
+            ' "$cast_file" >/dev/null
             test "$(stat -c %a "$TMPDIR/user-created-file")" = 666
             test "$(stat -c %a "$TMPDIR/fresh-events.jsonl")" = 600
             test "$(stat -c %a "$TMPDIR/captures")" = 700
@@ -191,10 +195,6 @@ in
                   ;;
                 --command)
                   command_path="$2"
-                  shift 2
-                  ;;
-                --output-file)
-                  output_path="$2"
                   shift 2
                   ;;
                 --*)

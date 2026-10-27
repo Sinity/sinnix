@@ -24,6 +24,11 @@ a sub-path).
 | `/ops/v1/*`  | The hub-server's read and action API                           |
 | `/feedback`  | Write-only inbox for report annotations                        |
 
+Terminal capture runs independently of the hub. `sinnix-captured-shell` uses
+`asciinema rec` to write `session.cast` alongside session and command metadata
+under `/realm/activity/terminal/asciinema/YYYY/MM/DD/<session-id>/`. It records
+input and output to disk; it opens no browser stream or listening port.
+
 ## Actions
 
 Every button posts to `/ops/v1/actions`, the hub-server's action API; the hub
