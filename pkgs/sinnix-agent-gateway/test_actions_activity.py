@@ -1,4 +1,4 @@
-"""Typed captures, activity, sessions, memory and timeline actions."""
+"""Typed capture and activity actions."""
 
 from __future__ import annotations
 

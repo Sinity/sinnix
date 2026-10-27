@@ -6,7 +6,7 @@ from pathlib import Path
 import anyio
 import pytest
 from sinnix_agent_gateway import server as server_module
-from sinnix_agent_gateway.actions import activity, batches, contexts, jobs, products
+from sinnix_agent_gateway.actions import batches, contexts, jobs, products
 from sinnix_agent_gateway.app import create_server
 from sinnix_agent_gateway.execution import job_payload, worker_payload
 from sinnix_agent_gateway.mcp_broker import McpBrokerError
@@ -43,11 +43,11 @@ def test_owner_string_return_is_decoded_from_sdk_structured_wrapper(
     _, runtime, _ = make_server(tmp_path, monkeypatch)
     runtime.mcp_broker = Broker({"result": json.dumps(owner_data)})
     result = anyio.run(
-        products._orchestration,
+        products._campaign,
         runtime,
-        products.OrchestrationInput(session_refs=["session:a"]),
+        products.CampaignInput(project={"project": "fixture"}, roots=["fixture-1"]),
     )
-    product = result.sessions[0]
+    product = result.product
     assert product.data == owner_data
     assert product.availability == (
         "unavailable" if owner_data.get("ok") is False else "available"
@@ -96,26 +96,6 @@ def test_runtime_projection_keeps_requested_and_observed_evidence_separate():
     assert job.binding.attempt == 2
 
 
-def test_orchestration_preserves_unknown_usage_and_deduplicates(tmp_path, monkeypatch):
-    _, runtime, _ = make_server(tmp_path, monkeypatch)
-    broker = Broker()
-    runtime.mcp_broker = broker
-    result = anyio.run(
-        products._orchestration,
-        runtime,
-        products.OrchestrationInput(session_refs=["session:a", "session:a"]),
-    )
-    assert len(result.sessions) == 1
-    assert result.sessions[0].data["usage"]["tokens"] is None
-    assert broker.calls[0][2] == {
-        "projection": "session-operations",
-        "session_operation": {
-            "operation": "sessions.orchestration",
-            "ref": "session:a",
-        },
-    }
-
-
 def test_mcp_product_response_is_a_principal_scoped_immutable_result(
     tmp_path, monkeypatch
 ):
@@ -123,14 +103,18 @@ def test_mcp_product_response_is_a_principal_scoped_immutable_result(
     runtime.mcp_broker = Broker()
     monkeypatch.setattr(server_module, "ALL_ACTIONS", products.ACTIONS)
     server = create_server(runtime.config)
-    response = call(server, "sessions.orchestration", {"session_refs": ["session:a"]})
+    response = call(
+        server,
+        "campaign.progress",
+        {"project": {"project": "fixture"}, "roots": ["fixture-1"]},
+    )
     assert response["result"]["outcome"] == "ok", response
     assert response["result"]["principal"] == "operator"
     snapshot = runtime.results.read(response["result"]["result_id"])
     assert snapshot["data"] == response["data"]
     runtime.mcp_broker.data["usage"]["tokens"] = 500
     assert (
-        runtime.results.read(response["result"]["result_id"])["data"]["sessions"][0][
+        runtime.results.read(response["result"]["result_id"])["data"]["product"][
             "data"
         ]["usage"]["tokens"]
         is None
@@ -151,12 +135,12 @@ def test_owner_refusal_is_unavailable(tmp_path, monkeypatch, data):
     _, runtime, _ = make_server(tmp_path, monkeypatch)
     runtime.mcp_broker = Broker(data)
     result = anyio.run(
-        products._orchestration,
+        products._campaign,
         runtime,
-        products.OrchestrationInput(session_refs=["session:a"]),
+        products.CampaignInput(project={"project": "fixture"}, roots=["fixture-1"]),
     )
-    assert result.sessions[0].availability == "unavailable"
-    assert result.sessions[0].data == data
+    assert result.product.availability == "unavailable"
+    assert result.product.data == data
 
 
 def test_campaign_owner_acquires_history_and_preserves_incomplete_scope(
@@ -198,26 +182,6 @@ def test_campaign_owner_acquires_history_and_preserves_incomplete_scope(
         "max_depth": 50,
     }
     assert len(runtime.mcp_broker.calls) == 1
-
-
-def test_structured_sessions_use_native_owner_pagination(tmp_path, monkeypatch):
-    _, runtime, _ = make_server(tmp_path, monkeypatch)
-    runtime.mcp_broker = Broker(
-        {"items": [], "continuation": "owner-next", "coverage": {"complete": False}}
-    )
-    action = next(
-        action for action in activity.ACTIONS if action.name == "sessions.search"
-    )
-    result = anyio.run(
-        action.handler,
-        runtime,
-        action.Input(expression="late match", limit=3),
-    )
-    assert result.data.owner_product.data["continuation"] == "owner-next"
-    sent = runtime.mcp_broker.calls[0][2]["session_operation"]
-    assert sent["operation"] == "sessions.search"
-    assert sent["expression"] == "late match"
-    assert sent["limit"] == 3
 
 
 def test_context_owner_failure_is_persisted_as_unavailable(tmp_path, monkeypatch):
@@ -378,11 +342,11 @@ def test_an_owner_terminal_outcome_survives_the_gateway(
         }
     )
     result = anyio.run(
-        products._orchestration,
+        products._campaign,
         runtime,
-        products.OrchestrationInput(session_refs=["session:a"]),
+        products.CampaignInput(project={"project": "fixture"}, roots=["fixture-1"]),
     )
-    product = result.sessions[0]
+    product = result.product
     assert product.availability == expected
     if expected != "available":
         assert product.reason == "retained history is incomplete"
@@ -398,11 +362,11 @@ def test_zero_rows_without_a_declared_outcome_are_not_inferred_empty(
     _, runtime, _ = make_server(tmp_path, monkeypatch)
     runtime.mcp_broker = Broker({"sessions": [], "coverage": {"complete": True}})
     result = anyio.run(
-        products._orchestration,
+        products._campaign,
         runtime,
-        products.OrchestrationInput(session_refs=["session:a"]),
+        products.CampaignInput(project={"project": "fixture"}, roots=["fixture-1"]),
     )
-    assert result.sessions[0].availability == "available"
+    assert result.product.availability == "available"
 
 
 def test_component_failures_are_carried_and_make_the_answer_degraded(
@@ -418,35 +382,14 @@ def test_component_failures_are_carried_and_make_the_answer_degraded(
         {"recent_related_sessions": [], "component_failures": failures}
     )
     result = anyio.run(
-        products._orchestration,
+        products._campaign,
         runtime,
-        products.OrchestrationInput(session_refs=["session:a"]),
+        products.CampaignInput(project={"project": "fixture"}, roots=["fixture-1"]),
     )
-    product = result.sessions[0]
+    product = result.product
     assert product.availability == "degraded"
     assert product.component_failures == failures
     assert "session_lineage" in (product.reason or "")
-
-
-@pytest.mark.parametrize(
-    ("parts", "expected"),
-    [
-        ((), "empty"),
-        (("available", "available"), "available"),
-        (("empty", "empty"), "empty"),
-        (("available", "empty"), "available"),
-        (("available", "degraded"), "degraded"),
-        (("empty", "degraded"), "degraded"),
-        (("available", "unavailable"), "degraded"),
-        (("empty", "unavailable"), "degraded"),
-        (("unavailable", "unavailable"), "unavailable"),
-    ],
-)
-def test_a_composite_keeps_its_worst_part(parts, expected):
-    """A composite is only as honest as its worst part. Breaks if composition
-    goes back to `any(part == "available")`, which reports a whole context as
-    available on the strength of one part that answered."""
-    assert products.combine_availability(list(parts)) == expected
 
 
 def test_a_composed_context_carries_the_owner_state_and_its_failures(
@@ -464,9 +407,9 @@ def test_a_composed_context_carries_the_owner_state_and_its_failures(
         contexts._compose,
         runtime,
         contexts.ComposeInput(
-            intent="session.orchestration",
+            intent="campaign.progress",
             project={"project": "fixture"},
-            session_refs=["session:a"],
+            roots=["fixture-1"],
         ),
     )
     component = result.components[0]
@@ -488,9 +431,9 @@ def test_a_composed_context_is_held_to_the_budget_it_declares(tmp_path, monkeypa
         contexts._compose,
         runtime,
         contexts.ComposeInput(
-            intent="session.orchestration",
+            intent="campaign.progress",
             project={"project": "fixture"},
-            session_refs=["session:a"],
+            roots=["fixture-1"],
         ),
     )
     assert result.total_budget_bytes == 4_096
@@ -500,7 +443,4 @@ def test_a_composed_context_is_held_to_the_budget_it_declares(tmp_path, monkeypa
     # The complete observation is still readable at the snapshot ref: bounding
     # the in-band copy must not lose the evidence.
     snapshot = runtime.results.read(result.snapshot_ref.rsplit("/", 1)[1])
-    assert (
-        snapshot["rows"][0]["components"][0]["data"]["data"]["sessions"][0]["data"]
-        == payload
-    )
+    assert snapshot["rows"][0]["components"][0]["data"]["data"] == payload

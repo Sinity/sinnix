@@ -65,17 +65,15 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Retain the Python API, service modules and gateway contracts until cutover.
-    # Lynchpin follows this same predecessor source below.
-    polylogue = {
+    # Lynchpin still imports this Python library privately. It supplies no commands.
+    lynchpin-polylogue = {
       url = "github:Sinity/polylogue/3ee97894b0fed6d614fcb658e823da77c1255639";
-      inputs.nixpkgs.follows = "nixpkgs";
+      flake = false;
     };
 
-    # The Rust rewrite, run live beside the retained Python stack by
-    # modules/services/polylogue.nix until consumers cut over. It keeps its
+    # The live application, CLI and MCP server. It keeps its
     # own nixpkgs: its shared crates need a newer rustc than Sinnix's.
-    polylogue-rewrite.url = "github:Sinity/polylogue/bf685712852fb7c702fc7fe6245b39d299f812b9";
+    polylogue-rewrite.url = "github:Sinity/polylogue/5cc347e17c9b462ad76160dd5879d4003bd67658";
 
     # Private repo — fetch via HTTPS through the local gh/git credential helper.
     yt-polisher = {
@@ -84,9 +82,9 @@
     };
 
     lynchpin = {
-      url = "git+https://github.com/Sinity/sinity-lynchpin.git?ref=master";
+      url = "git+https://github.com/Sinity/sinity-lynchpin.git?ref=refs/pull/9/head&rev=f002946b96ba4bdaab3ce9687e394969833abf8f";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.polylogueSrc.follows = "polylogue";
+      inputs.polylogueSrc.follows = "lynchpin-polylogue";
       inputs.nixpkgsRepomix.follows = "nixpkgs";
     };
 

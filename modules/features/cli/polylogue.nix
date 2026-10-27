@@ -9,24 +9,28 @@ mkFeatureModule {
     "cli"
     "polylogue"
   ];
-  description = "Packaged Polylogue operator commands";
+  description = "Polylogue commands over the live archive";
   configFn =
     {
       user,
+      lib,
       pkgs,
-      helpers,
+      inputs,
+      config,
       ...
     }:
     let
-      scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+      cli = import ../../lib/polylogue-cli.nix {
+        inherit
+          lib
+          pkgs
+          inputs
+          config
+          ;
+      };
     in
     {
-      home-manager.users.${user} = _: {
-        home.packages = [
-          scriptPkgs.polylogue-cli
-          scriptPkgs.polylogue-python
-          scriptPkgs.polylogued
-        ];
-      };
+      system.build.polylogueCli = cli;
+      home-manager.users.${user}.home.packages = [ cli ];
     };
 } args

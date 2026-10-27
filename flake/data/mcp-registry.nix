@@ -134,46 +134,14 @@ let
       transport = "stdio";
       tier = "recall";
       command = "mcp-polylogue";
-      # polylogue-mcp is read-only by default and omits MCP tool annotations.
-      gatewayReadOnlyTools = [
-        "query"
-        "read"
-        "get"
-        "explain"
-        "context"
-        "status"
-      ];
-      # These owner-declared read projections currently omit MCP tool annotations.
-      gatewayReadOnlyRoutes = [
-        {
-          tool = "query";
-          arguments.projection = "sessions";
-        }
-        {
-          tool = "query";
-          arguments.projection = "session-operations";
-        }
-        {
-          tool = "get";
-          arguments.projection = "orchestration";
-        }
-      ];
-      # polylogue-mcp is read-only by default and has no role flag; write
-      # dispatchers are an environment opt-in.
-      profiles =
-        let
-          write.env.POLYLOGUE_MCP_WRITE_ENABLED = "1";
-        in
-        {
-          full = write;
-          evidence = write;
-          browser = write;
-          antigravity = write;
-          default = { };
-        };
-      # Not attached to any agent client: during active Polylogue development the
-      # archive is being rebuilt and agents recall history through the CLI when
-      # needed, so a resident server per agent session (~250 MB each) buys nothing.
+      profiles = {
+        full = { };
+        evidence = { };
+        browser = { };
+        antigravity = { };
+        default = { };
+      };
+      # Agent clients use the CLI for recall; the gateway opens MCP on demand.
       clients = [ ];
     };
 

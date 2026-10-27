@@ -1,4 +1,4 @@
-"""Capture lanes, normalised activity events, coding sessions, memory and timeline."""
+"""Capture lanes and normalised activity events."""
 
 from __future__ import annotations
 
@@ -10,10 +10,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
 
-from .. import generated_polylogue_inputs as session_owner
 from ..action import (
     Action,
-    ActionResult,
     Example,
     RequestControls,
 )
@@ -22,7 +20,6 @@ from ..catalog import search_rows
 from ..contracts import VerbFamily
 from ..results import ProtocolError
 from ..schemas import GatewayModel
-from .products import OwnerProduct, owner_product
 
 if TYPE_CHECKING:
     from ..runtime import Runtime
@@ -408,141 +405,7 @@ def _activity(runtime: Runtime, inp: ActivityInput) -> Activity:
         ],
         lanes_unavailable=[row.lane for row in coverage if not row.available],
         coverage=coverage,
-        next_actions=["captures.query", "sessions.list", "timeline.query"],
-    )
-
-
-# Session parsing, scan cursors and cross-source ordering are Polylogue products.
-
-
-class SessionsResult(GatewayModel):
-    operation: str
-    owner_product: OwnerProduct
-    next_actions: list[str] = Field(
-        default_factory=lambda: ["sessions.read", "sessions.search", "timeline.query"]
-    )
-
-
-async def _session_operation(runtime: Runtime, inp: RequestControls) -> ActionResult:
-    product = await owner_product(
-        runtime,
-        "polylogue",
-        "query",
-        {
-            "projection": "session-operations",
-            "session_operation": inp.model_dump(
-                mode="json", exclude=set(RequestControls.model_fields)
-            ),
-        },
-        deadline_at=inp.deadline_at,
-    )
-    return ActionResult(SessionsResult(operation=inp.operation, owner_product=product))
-
-
-_SESSION_EXAMPLES: dict[str, Example] = {
-    "timeline.query": Example(
-        title="Indexed session events in a time window",
-        input={
-            "origin": "codex-session",
-            "since": "2026-09-01T00:00:00Z",
-            "until": "2026-09-02T00:00:00Z",
-            "limit": 50,
-        },
-    ),
-    "sessions.list": Example(
-        title="Recent indexed project sessions",
-        input={"repo": "sinnix", "sort": "date", "limit": 20},
-    ),
-    "sessions.search": Example(
-        title="Find sessions discussing pagination",
-        input={"expression": "pagination", "repo": "sinnix", "limit": 20},
-    ),
-    "sessions.read": Example(
-        title="Read an indexed session message page",
-        input={"ref": "session:example-session", "offset": 0, "limit": 25},
-    ),
-    "sessions.raw.list": Example(
-        title="List original Codex session sources",
-        input={"origin": "codex-session", "limit": 20},
-    ),
-    "sessions.raw.search": Example(
-        title="Search original Claude Code transcripts",
-        input={
-            "origin": "claude-code-session",
-            "query": "pagination",
-            "limit": 20,
-            "scan_bytes": 1048576,
-        },
-    ),
-    "sessions.raw.read": Example(
-        title="Read a bounded original transcript page",
-        input={
-            "reference": "codex:2026/09/01/example-session.jsonl",
-            "offset": 0,
-            "max_bytes": 16000,
-        },
-    ),
-    "sessions.raw.timeline": Example(
-        title="Original sources modified in a time window",
-        input={
-            "origins": ["claude-code-session", "codex-session"],
-            "since": "2026-09-01T00:00:00Z",
-            "until": "2026-09-02T00:00:00Z",
-            "limit": 20,
-        },
-    ),
-    "memory.raw.get": Example(
-        title="Read one original memory source",
-        input={
-            "reference": "claude-code:example-project/example-session.jsonl",
-            "offset": 0,
-            "max_bytes": 16000,
-        },
-    ),
-    "memory.raw.search": Example(
-        title="Find pagination notes across original sources",
-        input={
-            "query": "pagination",
-            "origins": ["claude-code-session", "codex-session"],
-            "limit": 20,
-        },
-    ),
-    "sessions.resume": Example(
-        title="Resume work in a checkout",
-        input={
-            "repo_path": "/realm/project/sinnix/repo",
-            "recent_files": ["README.md"],
-            "related_limit": 3,
-        },
-    ),
-}
-
-
-def _session_action(name: str, model: type, summary: str) -> Action:
-    """Bind one declared owner model to one discoverable action."""
-    from pydantic import create_model
-
-    selector = {
-        "timeline.query": "sessions.timeline",
-        "sessions.resume": "context.resume",
-    }.get(name, name)
-    Input = create_model(
-        name.replace(".", "_") + "Input",
-        __base__=(RequestControls, model),
-        operation=(Literal[selector], selector),
-    )
-    return Action(
-        name=name,
-        family=VerbFamily.QUERY,
-        owner="polylogue",
-        summary=summary,
-        Input=Input,
-        Output=SessionsResult,
-        handler=_session_operation,
-        resource_kinds=(),
-        next_actions=("sessions.read", "sessions.search", "timeline.query"),
-        examples=(_SESSION_EXAMPLES[name],),
-        documentation="Input fields are generated from the Polylogue operation contract. Owner coverage, native references, pagination and errors are retained in owner_product.",
+        next_actions=["captures.query", "mcp.tools", "mcp.call"],
     )
 
 
@@ -581,7 +444,7 @@ ACTIONS: tuple[Action, ...] = (
         Output=Activity,
         handler=_activity,
         resource_kinds=("capture_lane",),
-        next_actions=("captures.query", "sessions.list", "timeline.query"),
+        next_actions=("captures.query", "mcp.tools", "mcp.call"),
         aliases=(
             "what was I doing",
             "recent activity",
@@ -596,60 +459,5 @@ ACTIONS: tuple[Action, ...] = (
                 input={"kinds": ["clipboard", "notifications"], "limit": 50},
             ),
         ),
-    ),
-    _session_action(
-        "timeline.query",
-        session_owner.SessionTimeline,
-        "Read the indexed session event timeline from Polylogue.",
-    ),
-    _session_action(
-        "sessions.list",
-        session_owner.SessionList,
-        "Page indexed session summaries with native archive filters.",
-    ),
-    _session_action(
-        "sessions.search",
-        session_owner.SessionSearch,
-        "Search indexed sessions with native archive ranking and pagination.",
-    ),
-    _session_action(
-        "sessions.read",
-        session_owner.SessionRead,
-        "Read a page of messages from one canonical session reference.",
-    ),
-    _session_action(
-        "sessions.raw.list",
-        session_owner.RawList,
-        "List original session files through the archive owner's explicit fallback.",
-    ),
-    _session_action(
-        "sessions.raw.search",
-        session_owner.RawSearch,
-        "Search original session transcripts with source-bound continuations.",
-    ),
-    _session_action(
-        "sessions.raw.read",
-        session_owner.RawRead,
-        "Read an original session transcript byte page.",
-    ),
-    _session_action(
-        "sessions.raw.timeline",
-        session_owner.RawTimeline,
-        "Read original session evidence ordered by file modification time.",
-    ),
-    _session_action(
-        "memory.raw.get",
-        session_owner.RawRead,
-        "Read one original memory source object by native reference.",
-    ),
-    _session_action(
-        "memory.raw.search",
-        session_owner.RawMemorySearch,
-        "Search across original session sources with independent coverage.",
-    ),
-    _session_action(
-        "sessions.resume",
-        session_owner.ResumeContext,
-        "Read the archive owner's resume context for a session or checkout.",
     ),
 )

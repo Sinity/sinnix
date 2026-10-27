@@ -714,22 +714,40 @@
           "nixpkgs"
         ],
         "polylogueSrc": [
-          "polylogue"
+          "lynchpin-polylogue"
         ]
       },
       "locked": {
-        "lastModified": 1792507967,
-        "narHash": "sha256-27YajtDngEbJKY6F22Jc41Jh1ESFGEEEkhcVbTtQ9EQ=",
-        "ref": "master",
-        "rev": "6ea25dcc257b90a467e70ea5e94ec505e32e000b",
-        "revCount": 807,
+        "lastModified": 1793143191,
+        "narHash": "sha256-AJ8R+dizBzE62wt1mRBnofx7iPki7OzmQDE/WObOztk=",
+        "ref": "refs/pull/9/head",
+        "rev": "f002946b96ba4bdaab3ce9687e394969833abf8f",
+        "revCount": 815,
         "type": "git",
         "url": "https://github.com/Sinity/sinity-lynchpin.git"
       },
       "original": {
-        "ref": "master",
+        "ref": "refs/pull/9/head",
+        "rev": "f002946b96ba4bdaab3ce9687e394969833abf8f",
         "type": "git",
         "url": "https://github.com/Sinity/sinity-lynchpin.git"
+      }
+    },
+    "lynchpin-polylogue": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791670091,
+        "narHash": "sha256-I7TW3WiLiCXir/VvV+cn23AuMz/EGrXWjYWI5C4EdZs=",
+        "owner": "Sinity",
+        "repo": "polylogue",
+        "rev": "3ee97894b0fed6d614fcb658e823da77c1255639",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Sinity",
+        "repo": "polylogue",
+        "rev": "3ee97894b0fed6d614fcb658e823da77c1255639",
+        "type": "github"
       }
     },
     "mk-shell-bin": {
@@ -1247,43 +1265,22 @@
         "type": "github"
       }
     },
-    "polylogue": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1791670091,
-        "narHash": "sha256-I7TW3WiLiCXir/VvV+cn23AuMz/EGrXWjYWI5C4EdZs=",
-        "owner": "Sinity",
-        "repo": "polylogue",
-        "rev": "3ee97894b0fed6d614fcb658e823da77c1255639",
-        "type": "github"
-      },
-      "original": {
-        "owner": "Sinity",
-        "repo": "polylogue",
-        "rev": "3ee97894b0fed6d614fcb658e823da77c1255639",
-        "type": "github"
-      }
-    },
     "polylogue-rewrite": {
       "inputs": {
         "nixpkgs": "nixpkgs_2"
       },
       "locked": {
-        "lastModified": 1793023318,
-        "narHash": "sha256-KbfTO0/IkVIlWbQR6C5qsslcEU5MOZBeMcpeK2yBlD4=",
+        "lastModified": 1793139235,
+        "narHash": "sha256-+zT9iP6mQbbyNY93Ah+mRnzUvBpnmZYCW+7KBqEA4Rc=",
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "bf685712852fb7c702fc7fe6245b39d299f812b9",
+        "rev": "5cc347e17c9b462ad76160dd5879d4003bd67658",
         "type": "github"
       },
       "original": {
         "owner": "Sinity",
         "repo": "polylogue",
-        "rev": "bf685712852fb7c702fc7fe6245b39d299f812b9",
+        "rev": "5cc347e17c9b462ad76160dd5879d4003bd67658",
         "type": "github"
       }
     },
@@ -1322,6 +1319,7 @@
         "intercept-bounce": "intercept-bounce",
         "lanzaboote": "lanzaboote",
         "lynchpin": "lynchpin",
+        "lynchpin-polylogue": "lynchpin-polylogue",
         "nix-android": "nix-android",
         "nix-on-droid": "nix-on-droid",
         "nix-vscode-extensions": "nix-vscode-extensions",
@@ -1330,7 +1328,6 @@
         "nixpkgs-ai": "nixpkgs-ai",
         "noctalia": "noctalia",
         "phone-app": "phone-app",
-        "polylogue": "polylogue",
         "polylogue-rewrite": "polylogue-rewrite",
         "scribe-tap": "scribe-tap",
         "sinex": "sinex",

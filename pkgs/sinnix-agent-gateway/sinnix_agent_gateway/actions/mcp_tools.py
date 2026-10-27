@@ -435,7 +435,7 @@ ACTIONS: tuple[Action, ...] = (
             Example(
                 title="Call by server and tool",
                 input={
-                    "target": {"server": "polylogue", "tool": "search"},
+                    "target": {"server": "polylogue", "tool": "query"},
                     "arguments": {"query": "gateway"},
                 },
             ),

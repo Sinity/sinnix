@@ -62,18 +62,32 @@
             cp runtime-import-before.json runtime-import-after.json "$out/"
             printf '%s\n' "$RUNTIME_PACKAGE" > "$out/runtime"
           '';
-      polylogueContracts = lib.sources.sourceByRegex inputs.polylogue [
-        "polylogue"
-        "polylogue/(operations|core|archive)"
-        "polylogue/archive/query"
-        "polylogue/operations/session_contracts[.]py"
-        "polylogue/core/enums[.]py"
-        "polylogue/archive/query/spec[.]py"
-      ];
       lynchpinContract = builtins.path {
         path = "${inputs.lynchpin}/lynchpin/mcp/project_contracts.py";
         name = "lynchpin-project-contracts.py";
       };
+      gatewaySuite =
+        pytestArgs:
+        pythonSuite {
+          name = "sinnix-agent-gateway";
+          inherit pytestArgs;
+          extraInputs = [
+            pkgs.fd
+            pkgs.file
+            pkgs.git
+            pkgs.ripgrep
+          ];
+          beforeTests = ''
+            export SINNIX_CAPTURE_TEST_EXECUTABLE="${sinnixScriptRegistry.packageSet.sinnix-capture}/bin/sinnix-capture"
+            export SINNIX_POLYLOGUE_TEST_EXECUTABLE="${
+              inputs.polylogue-rewrite.packages.${pkgs.stdenv.hostPlatform.system}.polylogue
+            }/bin/polylogue"
+            export SINNIX_GATEWAY_TEST_EXECUTABLE="${sinnixScriptRegistry.packageSet.sinnix-agent-gateway}/bin/sinnix-agent-gateway"
+            python generate_owner_inputs.py --lynchpin ${lynchpinContract} --check
+            ${sinnixScriptRegistry.packageSet.beads}/bin/bd owner schema --json > "$TMPDIR/beads-owner-schema.json"
+            python generate_beads_inputs.py "$TMPDIR/beads-owner-schema.json" --check
+          '';
+        };
       # Exercise the real registry entries and renderer without realizing
       # unrelated commands (including their unfree runtime dependencies).
       xiaomiDispatcher = import ../cli-dispatcher.nix {
@@ -122,22 +136,7 @@
         # resolved.parents` -> `False`) in projects.py -- caught by
         # test_project_tree_and_read_reject_symlink_escape ("DID NOT RAISE
         # ProjectError"; 1 failed, 23 passed); reverted after confirming red.
-        sinnix-agent-gateway-suite = pythonSuite {
-          name = "sinnix-agent-gateway";
-          extraInputs = [
-            pkgs.fd
-            pkgs.file
-            pkgs.git
-            pkgs.ripgrep
-          ];
-          beforeTests = ''
-            export SINNIX_CAPTURE_TEST_EXECUTABLE="${sinnixScriptRegistry.packageSet.sinnix-capture}/bin/sinnix-capture"
-            export SINNIX_GATEWAY_TEST_EXECUTABLE="${sinnixScriptRegistry.packageSet.sinnix-agent-gateway}/bin/sinnix-agent-gateway"
-            python generate_owner_inputs.py --polylogue ${polylogueContracts} --lynchpin ${lynchpinContract} --check
-            ${sinnixScriptRegistry.packageSet.beads}/bin/bd owner schema --json > "$TMPDIR/beads-owner-schema.json"
-            python generate_beads_inputs.py "$TMPDIR/beads-owner-schema.json" --check
-          '';
-        };
+        sinnix-agent-gateway-suite = gatewaySuite "";
         machine-telemetry-suite = pythonSuite {
           name = "machine-telemetry";
           testSource = lib.fileset.toSource {
@@ -247,5 +246,17 @@
           ) sinnixScriptRegistry.packageSet.agentctl.runtimeDependencies;
         };
       };
+
+      heavyChecks.polylogue-gateway = gatewaySuite (
+        lib.escapeShellArgs [
+          "test_actions_activity.py"
+          "test_actions_products.py"
+          "test_actions_contexts.py"
+          "test_actions_mcp_tools.py"
+          "test_polylogue_mcp.py"
+          "test_gateway_resilience.py"
+          "test_gateway_codegen.py"
+        ]
+      );
     };
 }

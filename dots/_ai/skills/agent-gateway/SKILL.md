@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 1b9f617f48319514b55b213ce699740eb5f2c5aefbf18e2f5600ef5ebb7f4110 -->
+<!-- gateway-catalog-sha256: 1eefbc81e9c50e9c2016baec783b63bd280f1098a80e6d06e4285229c0309a7c -->
 
 # Agent Gateway
 
@@ -13,7 +13,7 @@ Every gateway action is one MCP tool named after the action; its input schema in
 
 ## Orientation
 
-For machine, project, work, agent, status, continue or what-next requests, discover enabled Sinnix actions with gateway.catalog and inspect schemas. Use context.compose for the intent and sessions.orchestration to find current work without remembered IDs; follow refs with campaign.progress and events.tail as relevant. Verify a harmless direct read before proposing another executor or reconnecting. Separate session activity, runtime jobs, task ownership, delivery and verification.
+For machine, project, work, agent, status, continue or what-next requests, discover enabled Sinnix actions with gateway.catalog and inspect schemas. Use context.compose for the intent and mcp.tools with server=polylogue to discover session query, read and status tools; follow refs with campaign.progress and events.tail as relevant. Verify a harmless direct read before proposing another executor or reconnecting. Separate session activity, runtime jobs, task ownership, delivery and verification.
 
 Separate observation time from source data dates and index watermarks. Distinguish empty data, missing coverage, policy denial and transport failure. For degraded composition or stale indexes, follow source refs and read the owner directly. If typed tools are missing, discover exact actions and use gateway.read, gateway.change or gateway.run with the action name and ordinary input in arguments. Use a local executor only for the exact missing direct capability; respect denials.
 
@@ -45,4 +45,4 @@ The live catalog owns action names, schemas, examples and follow-up actions. `si
 
 `gateway.status` compares live, packaged and last-recorded connector hashes. The saved connector snapshot does not prove which tools the current client loaded. After a refresh, inspect the client's actual schema before recording its observed hash. A numeric `job_id` schema is stale: the current contract uses a string and a separate numeric `task_id`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `1b9f617f48319514b55b213ce699740eb5f2c5aefbf18e2f5600ef5ebb7f4110`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `1eefbc81e9c50e9c2016baec783b63bd280f1098a80e6d06e4285229c0309a7c`.

@@ -352,7 +352,7 @@ mkServiceModule {
         # system packages.
         environment.systemPackages = [
           scriptPkgs.agentctl
-          scriptPkgs.polylogue-cli
+          config.system.build.polylogueCli
           pkgs.worktrunk
           pkgs.pueue
           pkgs.gh
