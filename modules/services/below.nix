@@ -30,10 +30,17 @@ mkServiceModule {
     operatorRestart = true;
   };
   extraOptions = {
+    # Keep this at 1. The operator wants full-fidelity history and has
+    # rejected coarser sampling more than once: do not raise it to save disk,
+    # CPU or IO, or to "tune" telemetry. One-second samples are what let a
+    # stall, a short OOM spiral or a single runaway job be attributed after
+    # the fact (on 2026-10-27 they located a 40 MB/s writer, a swap thrash
+    # and an OOM victim to the second). If below costs too much, fix how it
+    # writes, never how often it samples.
     collectIntervalSec = lib.mkOption {
       type = lib.types.int;
       default = 1;
-      description = "Collection interval in seconds.";
+      description = "Collection interval in seconds. Must stay 1: the operator requires full-fidelity history (see comment).";
     };
     storeDir = lib.mkOption {
       type = lib.types.path;
