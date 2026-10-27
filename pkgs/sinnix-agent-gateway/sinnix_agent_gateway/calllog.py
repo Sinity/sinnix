@@ -14,8 +14,10 @@ the full request and response stay in the audit and result stores.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping
 
@@ -40,6 +42,29 @@ class HttpRequest:
     received: float | None
     request_id: str | None
     session_id: str | None
+
+
+RUN_ID: ContextVar[str | None] = ContextVar("gateway_run_id", default=None)
+
+
+def run_id(request: HttpRequest | None) -> str | None:
+    """Extract a bounded run label from the tunnel header, never client controls."""
+    value = request.request_id if request else None
+    match = re.match(r"^(wfr_[A-Za-z0-9_-]+)(?:/|$)", value or "")
+    return match[1] if match else None
+
+
+def run_actor() -> str:
+    suffix = RUN_ID.get()
+    return "sinnix-gateway:operator" + (f":{suffix}" if suffix else "")
+
+
+def run_binding() -> dict[str, str]:
+    value = RUN_ID.get()
+    binding = {"actor": run_actor()}
+    if value:
+        binding["remote_run_id"] = value
+    return binding
 
 
 # The ASGI scope key under which the middleware stamps a request's arrival.

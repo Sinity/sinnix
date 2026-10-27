@@ -95,7 +95,10 @@ def test_job_start_launches_the_declared_operation(
     """Red if job.start stops reaching the launch route or drops its job identity."""
     seen: dict[str, Any] = {}
 
-    def fake_start(config, project, operation, *, workspace=None, extra_argv=()):
+    def fake_start(
+        config, project, operation, *, workspace=None, extra_argv=(), binding=None
+    ):
+        seen["binding"] = binding
         seen["project_id"] = project.project_id
         seen["operation"] = operation.name
         seen["workspace"] = workspace
@@ -109,6 +112,7 @@ def test_job_start_launches_the_declared_operation(
         "project_id": "fixture",
         "operation": "verify",
         "workspace": None,
+        "binding": {"actor": "sinnix-gateway:operator"},
     }
     assert payload["task_id"] == "41"
     assert payload["kind"] == "declared-operation"
@@ -126,7 +130,9 @@ def test_job_start_forwards_declared_operation_arguments(
 ) -> None:
     seen: dict[str, Any] = {}
 
-    def fake_start(config, project, operation, *, workspace=None, extra_argv=()):
+    def fake_start(
+        config, project, operation, *, workspace=None, extra_argv=(), binding=None
+    ):
         seen["extra_argv"] = extra_argv
         return JOB_ROW
 
@@ -194,7 +200,7 @@ def test_shell_start_queues_the_argv_inside_the_checkout(
             },
         )
     assert escaped.value.code == "policy_denied"
-    assert len(seen) == 9
+    assert len(seen) == 10
 
     long = _call(
         adapter,
@@ -548,3 +554,29 @@ def test_history_identity_refusals_keep_their_typed_code(adapter, monkeypatch, c
         adapter.batch_status(run_id="not-an-executor")
     assert failure.value.details == {"refusal": code}
     assert failure.value.code == "invalid_request"
+
+
+@pytest.mark.parametrize("shell", [False, True])
+def test_remote_run_binding_reaches_job_owner(adapter, monkeypatch, shell):
+    from sinnix_agent_gateway.calllog import RUN_ID
+
+    seen = {}
+
+    def capture(*args, **kwargs):
+        seen.update(kwargs)
+        return JOB_ROW
+
+    monkeypatch.setattr(launch, "enqueue", capture)
+    monkeypatch.setattr(launch, "start_operation", capture)
+    token = RUN_ID.set("wfr_fixture")
+    try:
+        if shell:
+            adapter.shell_start(project_id="fixture", argv=["true"], group="shell-quick")
+        else:
+            adapter.start(project_id="fixture", operation="verify")
+    finally:
+        RUN_ID.reset(token)
+    assert seen["binding"] == {
+        "actor": "sinnix-gateway:operator:wfr_fixture",
+        "remote_run_id": "wfr_fixture",
+    }

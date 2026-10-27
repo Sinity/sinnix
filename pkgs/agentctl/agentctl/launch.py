@@ -567,6 +567,7 @@ def start_operation(
     *,
     workspace: Path | None = None,
     extra_argv: Sequence[str] = (),
+    binding: Mapping[str, Any] | None = None,
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     """Launch an operation; an idempotency key makes a repeated launch return the same job."""
@@ -577,6 +578,7 @@ def start_operation(
             operation,
             workspace=workspace,
             extra_argv=extra_argv,
+            binding=binding,
         )
     job_id = _idempotent_job_id(idempotency_key)
     config.inputs_dir.mkdir(parents=True, exist_ok=True)
@@ -619,6 +621,7 @@ def start_operation(
             operation,
             workspace=workspace,
             extra_argv=extra_argv,
+            binding=binding,
             idempotency_key=idempotency_key,
             request_digest=fingerprint,
         )
@@ -648,6 +651,7 @@ def _start_operation(
     *,
     workspace: Path | None,
     extra_argv: Sequence[str],
+    binding: Mapping[str, Any] | None = None,
     idempotency_key: str | None = None,
     request_digest: str | None = None,
 ) -> dict[str, Any]:
@@ -718,6 +722,7 @@ def _start_operation(
         cap=operation.cap,
         max_io_pressure=operation.max_io_pressure,
         job_id=job_id,
+        binding=binding,
         idempotency_key=idempotency_key,
         request_digest=request_digest,
         tree_receipt=tree_receipt,

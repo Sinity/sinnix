@@ -21,6 +21,21 @@ job controller. Local agents use the agentctl CLI directly. Machine actions use 
 `sinnix-runtime` socket client, which delegates to the existing hub action
 owner; remote and local clients do not create additional action writers.
 
+## Remote orientation and ChatGPT Custom Instructions
+
+The MCP instructions, gateway skill and block below render from
+`sinnix_agent_gateway/orientation.py`. Regenerate with the `gateway_codegen`
+operation. In ChatGPT, open Settings > Personalization > Custom Instructions,
+paste the block below and save. Account settings require this operator action.
+
+<!-- orientation:start -->
+For machine, project, work, agent, status, continue or what-next requests, discover enabled Sinnix actions with gateway.catalog and inspect schemas. Use context.compose for the intent and sessions.orchestration to find current work without remembered IDs; follow refs with campaign.progress and events.tail as relevant. Verify a harmless direct read before proposing another executor or reconnecting. Separate session activity, runtime jobs, task ownership, delivery and verification.
+
+Separate observation time from source data dates and index watermarks. Distinguish empty data, missing coverage, policy denial and transport failure. For degraded composition or stale indexes, follow source refs and read the owner directly. If typed tools are missing, discover exact actions and use gateway.read, gateway.change or gateway.run with the action name and ordinary input in arguments. Use a local executor only for the exact missing direct capability; respect denials.
+
+Status requests authorize reads: do not launch builds, refresh the estate, change runtime state or start paid workers. Unrelated questions need no private project orientation. Qualify scheduled ChatGPT access separately; interactive success proves neither scheduled access nor model/quota routing. Preserve refs and continuations; inspect owner receipts before retrying effects.
+<!-- orientation:end -->
+
 ## Authority
 
 The gateway is single-user. It serves the operator's ChatGPT with the
@@ -32,6 +47,13 @@ Remote shells and jobs run in the operator's environment, including API keys
 and tokens. Those values stay on the host: agentctl keeps them out of launch
 inputs and masks them in logs, the gateway redacts them from audit rows and call
 logs, job state is mode 0700, and launch inputs are excluded from backups.
+
+The tunnel request header supplies the `wfr_...` run label. Bead actors use
+`sinnix-gateway:operator:<run>`; declared and shell jobs retain `actor` and
+`remote_run_id` in their launch binding. Calls without that header retain
+`sinnix-gateway:operator` and do not invent a remote run. These labels provide
+correlation, not authenticated identity. Idempotent replay retains the original
+job binding.
 
 Host-file actions take absolute paths. Project actions take relative paths and
 reject absolute paths, parent traversal, sensitive components and symlink

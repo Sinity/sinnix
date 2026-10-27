@@ -770,3 +770,36 @@ def test_a_catalog_call_does_not_stall_the_event_loop(
 
     anyio.run(scenario)
     assert stalls == []
+
+
+@pytest.mark.parametrize("core", [False, True])
+def test_tool_dispatch_scopes_http_run_identity(tmp_path, monkeypatch, core):
+    server, runtime, jobs = make_server(tmp_path, monkeypatch)
+    jobs.responses["job.list"] = EMPTY_PAGE
+    if core:
+        from sinnix_agent_gateway import server as server_module
+        from sinnix_agent_gateway.actions import BY_NAME
+        from sinnix_agent_gateway.app import create_server
+        monkeypatch.setattr(server_module, "ALL_ACTIONS", (*server_module.ALL_ACTIONS, BY_NAME["gateway.read"]))
+        server = create_server(runtime.config)
+    seen = []
+    original = calllog.run_id
+
+    def observe(request):
+        return original(calllog.HttpRequest(None, "wfr_dispatch/command", None))
+
+    monkeypatch.setattr(calllog, "run_id", observe)
+    original_method = jobs.list
+
+    def capture(**arguments):
+        seen.append(calllog.run_actor())
+        return original_method(**arguments)
+
+    jobs.list = capture
+    if core:
+        response = call(server, "gateway.read", {"action": "jobs.list", "arguments": {}})
+    else:
+        response = call(server, "jobs.list", {})
+    assert response["result"]["outcome"] == "ok"
+    assert seen == ["sinnix-gateway:operator:wfr_dispatch"]
+    assert calllog.run_actor() == "sinnix-gateway:operator"

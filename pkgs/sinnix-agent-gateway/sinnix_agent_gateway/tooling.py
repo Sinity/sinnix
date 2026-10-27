@@ -118,6 +118,7 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
             kwargs = _clamp_remote_wait(action, kwargs, record)
             if action.effect is EffectMode.READ:
                 record.budget_seconds = REMOTE_READ_BUDGET_SECONDS
+        token = calllog.RUN_ID.set(calllog.run_id(record.http))
         try:
             response, blocks = await _execute(kwargs, record)
         except BaseException as exc:
@@ -127,6 +128,8 @@ def build_tool(action: Action, runtime: Runtime) -> Tool:
                     record.finish(outcome="cancelled" if cancelled else "failed")
                 )
             raise
+        finally:
+            calllog.RUN_ID.reset(token)
         if remote:
             calllog.emit(
                 record.finish(

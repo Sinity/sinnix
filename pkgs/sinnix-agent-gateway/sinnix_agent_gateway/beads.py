@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 import hashlib
 import json
 import os
@@ -14,6 +15,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .config import GatewayConfig, ProjectConfig, TaskAuthorityConfig
+from .calllog import run_actor
 from .contracts import PRINCIPAL
 from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
 from .results import ProtocolError, ResultError, ResultService
@@ -161,7 +163,7 @@ class BeadsService:
                 "HOME": str(Path.home()),
                 "LANG": os.environ.get("LANG", "C.UTF-8"),
                 "PATH": os.environ.get("PATH", "/run/current-system/sw/bin"),
-                "BEADS_ACTOR": f"sinnix-gateway:{PRINCIPAL}",
+                "BEADS_ACTOR": run_actor(),
             },
         )
         # Owner output size is not a client-envelope limit or a transaction

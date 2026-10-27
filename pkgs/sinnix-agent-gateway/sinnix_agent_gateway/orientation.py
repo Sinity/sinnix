@@ -1,0 +1,7 @@
+"""Canonical standing guidance shared by MCP, documentation and client skill."""
+
+ORIENTATION = """For machine, project, work, agent, status, continue or what-next requests, discover enabled Sinnix actions with gateway.catalog and inspect schemas. Use context.compose for the intent and sessions.orchestration to find current work without remembered IDs; follow refs with campaign.progress and events.tail as relevant. Verify a harmless direct read before proposing another executor or reconnecting. Separate session activity, runtime jobs, task ownership, delivery and verification.
+
+Separate observation time from source data dates and index watermarks. Distinguish empty data, missing coverage, policy denial and transport failure. For degraded composition or stale indexes, follow source refs and read the owner directly. If typed tools are missing, discover exact actions and use gateway.read, gateway.change or gateway.run with the action name and ordinary input in arguments. Use a local executor only for the exact missing direct capability; respect denials.
+
+Status requests authorize reads: do not launch builds, refresh the estate, change runtime state or start paid workers. Unrelated questions need no private project orientation. Qualify scheduled ChatGPT access separately; interactive success proves neither scheduled access nor model/quota routing. Preserve refs and continuations; inspect owner receipts before retrying effects."""

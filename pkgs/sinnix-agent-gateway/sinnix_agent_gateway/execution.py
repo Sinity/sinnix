@@ -20,6 +20,7 @@ from agentctl.task_reads import TaskReadError
 from agentctl.worktrunk import WorktrunkError
 
 from . import shell_pools
+from .calllog import run_binding
 from .schemas import ErrorCode
 
 OWNER = "systemd-jobs"
@@ -407,6 +408,7 @@ class LocalJobs:
             operation,
             workspace=workspace,
             extra_argv=extra_argv,
+            binding=run_binding(),
             **(
                 {"idempotency_key": arguments["idempotency_key"]}
                 if arguments.get("idempotency_key") is not None
@@ -666,6 +668,7 @@ class LocalJobs:
             "timeout_seconds": timeout_seconds,
             "result_kind": "exit",
             "environment": project.environment.values(),
+            "binding": run_binding(),
         }
         if idempotency_key is not None:
             job = launch.enqueue_request(

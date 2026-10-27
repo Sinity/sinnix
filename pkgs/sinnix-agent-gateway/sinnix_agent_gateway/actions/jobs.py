@@ -57,6 +57,8 @@ class JobBinding(GatewayModel):
     beads: list[str] = Field(default_factory=list)
     bead_refs: list[str] = Field(default_factory=list)
     run_id: str | None = None
+    remote_run_id: str | None = None
+    actor: str | None = None
     worker_id: str | None = None
     execution: str | None = None
     requested: dict[str, Any] | None = None
@@ -220,13 +222,15 @@ def _binding(payload: Mapping[str, Any]) -> JobBinding | None:
     raw = payload.get("binding") if isinstance(payload.get("binding"), Mapping) else {}
     beads = [str(bead) for bead in raw.get("beads") or []]
     run_id = raw.get("run_id")
-    if not beads and not run_id:
+    if not beads and not run_id and not raw.get("actor") and not raw.get("remote_run_id"):
         return None
     project_id = payload.get("project_id")
     return JobBinding(
         beads=beads,
         bead_refs=[bead_ref(project_id, bead) for bead in beads] if project_id else [],
         run_id=str(run_id) if run_id else None,
+        remote_run_id=raw.get("remote_run_id"),
+        actor=raw.get("actor"),
         worker_id=str(raw["worker"]) if raw.get("worker") else None,
         execution=raw.get("execution"),
         requested=raw.get("requested"),

@@ -2078,3 +2078,25 @@ def test_native_cleanup_retains_incomplete_job_after_queue_removal(
     assert native_worktrees._owners(config, project, {})[workspace]["terminal"] is False
     members.write_text("")
     assert native_worktrees._owners(config, project, {})[workspace]["terminal"] is True
+
+
+
+
+@pytest.mark.parametrize("key", [None, "fixture-remote-launch"])
+def test_operation_binding_persists_original_run_on_replay(
+    fake_pueue: FakePueue, config: Config, project_root: Path, key
+) -> None:
+    project = load_project_adapter(project_root)
+    binding = {"remote_run_id": "wfr_fixture", "actor": "sinnix-gateway:operator:wfr_fixture"}
+    started = launch.start_operation(
+        config, project, project.operation("verify"), binding=binding, idempotency_key=key
+    )
+    written = read_launch(config, fake_pueue.task(started["task_id"]))
+    assert written["binding"] == binding
+    if key:
+        replay = launch.start_operation(
+            config, project, project.operation("verify"),
+            binding={"remote_run_id": "wfr_other"}, idempotency_key=key,
+        )
+        assert replay["job_id"] == started["job_id"]
+        assert read_launch(config, fake_pueue.task(started["task_id"]))["binding"] == binding

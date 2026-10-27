@@ -23,6 +23,7 @@ from . import calllog
 from .actions import ALL_ACTIONS
 from .config import GatewayConfig
 from .contracts import PRINCIPAL
+from .orientation import ORIENTATION
 from .prompts import PROMPT_SPECS, PromptGenerator
 from .registry import REGISTRY
 from .results import ProtocolError, derive_cursor_key
@@ -96,10 +97,7 @@ def create_server(config: GatewayConfig, transport: str = "stdio") -> MCPServer:
         tools=[build_tool(action, runtime) for action in ALL_ACTIONS],
         title="Sinnix Agent Gateway",
         description="Project, machine, and job control plane.",
-        instructions=(
-            "Start with catalog, then use canonical refs. "
-            "All outputs are bounded; unavailable evidence is reported explicitly."
-        ),
+        instructions=ORIENTATION,
         version="0.3.0",
         subscriptions=subscription_bus,
         lifespan=gateway_lifespan,
@@ -114,10 +112,7 @@ def create_server(config: GatewayConfig, transport: str = "stdio") -> MCPServer:
 
     @mcp.resource("sinnix://gateway/instructions")
     def gateway_instructions() -> str:
-        return (
-            "Projects are allowlisted. Paths are project-relative. "
-            "Job IDs and artifact IDs are the only accepted control identities."
-        )
+        return ORIENTATION
 
     def _catalog_rows() -> dict[str, Any]:
         rows = []

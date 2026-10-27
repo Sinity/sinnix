@@ -74,3 +74,11 @@ def test_catalog_digest_reuses_startup_result(monkeypatch: pytest.MonkeyPatch) -
         assert action_set.catalog_hash() == expected
     finally:
         action_set.catalog_hash.cache_clear()
+
+
+def test_orientation_shared_with_generated_surfaces():
+    from sinnix_agent_gateway.orientation import ORIENTATION
+
+    assert ORIENTATION in render_skill()
+    if ROOT is not None:
+        assert ORIENTATION in (ROOT / "docs/agent-gateway.md").read_text()

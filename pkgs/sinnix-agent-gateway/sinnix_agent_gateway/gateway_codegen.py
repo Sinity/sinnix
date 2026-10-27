@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from . import actions as action_set
+from .orientation import ORIENTATION
 
 SKILL_PATH = Path("dots/_ai/skills/agent-gateway/SKILL.md")
 
@@ -176,6 +177,10 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 Every gateway action is one MCP tool named after the action; its input schema in `tools/list` is the contract and its output envelope schema is the `sinnix://gateway/actions/<name>` resource. Paths, ids, titles and unit names are accepted where a canonical `sinnix://` ref is; responses return the canonical ref and `next_actions` naming the next actions. Images arrive as image content blocks, other binary as resource blocks.
 
+## Orientation
+
+{ORIENTATION}
+
 ## Invocation
 
 - MCP: call the tool by action name with the fields of its input schema.
@@ -207,9 +212,16 @@ Catalog revision: `{catalog["revision"]}`. Catalog SHA-256: `{catalog["action_ca
 
 
 def generated_files(root: Path) -> dict[Path, str]:
-    return {
-        root / SKILL_PATH: render_skill(),
-    }
+    doc = root / "docs/agent-gateway.md"
+    files = {root / SKILL_PATH: render_skill()}
+    if doc.exists():
+        before, rest = doc.read_text().split("<!-- orientation:start -->", 1)
+        _, after = rest.split("<!-- orientation:end -->", 1)
+        files[doc] = (
+            before + "<!-- orientation:start -->\n" + ORIENTATION
+            + "\n<!-- orientation:end -->" + after
+        )
+    return files
 
 
 def write_artifacts(root: Path) -> None:

@@ -46,11 +46,11 @@ def beads_service(tmp_path: Path):
     )
     runner = tmp_path / "bd"
     runner.write_text(f"""#!{sys.executable}
-import json,pathlib,sys
+import json,pathlib,sys,os
 args=sys.argv[1:]
 payload=json.load(sys.stdin) if 'owner' in args else None
 with pathlib.Path({str(log)!r}).open('a') as output:
-    output.write(json.dumps({{'argv':args,'payload':payload}})+'\\n')
+    output.write(json.dumps({{'argv':args,'payload':payload,'actor':os.environ.get('BEADS_ACTOR')}})+'\\n')
 root=args[args.index('--directory')+1]
 state=json.loads(pathlib.Path({str(state)!r}).read_text())
 if args[-1]=='where': value={{'path':{str(authority)!r},'database_path':{str(authority / "dolt")!r}}}
@@ -263,3 +263,20 @@ def test_date_order_is_named_newest_or_oldest_first(tmp_path):
         Order.model_validate({"field": "created", "reverse": True})
     with pytest.raises(ValidationError):
         Order(field="created", direction="ascending")
+
+
+def test_run_actor_reaches_beads_subprocess(tmp_path):
+    from sinnix_agent_gateway.calllog import RUN_ID
+
+    beads, log = beads_service(tmp_path)
+    token = RUN_ID.set("wfr_fixture")
+    try:
+        beads.native(
+            "fixture", "updateIssue",
+            {"path": {"id": "fixture-1"}, "body": {"patch": {"notes": "fixture"}}},
+            write=True,
+        )
+    finally:
+        RUN_ID.reset(token)
+    assert commands(log)
+    assert all(row["actor"] == "sinnix-gateway:operator:wfr_fixture" for row in commands(log))
