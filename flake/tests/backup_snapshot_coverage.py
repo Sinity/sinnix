@@ -1782,6 +1782,26 @@ class ProducerReceiptFixture(unittest.TestCase):
 
 
 class DrainFixture(unittest.TestCase):
+    def test_producer_timestamp_for_each_lane_and_collision(self):
+        for lane in ("realm", "genome"):
+            for suffix in ("", "-coverage-v3"):
+                with self.subTest(lane=lane, suffix=suffix):
+                    command = COVERAGE.expected_create_command(
+                        "/store/borg", Path("/source"),
+                        f"{lane}-{lane}.20260402T033000+0200{suffix}",
+                        "fixture-uuid", {"borg_excludes": []},
+                    )
+                    self.assertEqual(
+                        command[command.index("--timestamp") + 1],
+                        "2026-04-02T01:30:00",
+                    )
+        with self.assertRaisesRegex(ValueError, "no snapshot cut timestamp"):
+            COVERAGE.expected_create_command(
+                "/store/borg", Path("/source"),
+                "genome-realm.20260402T033000+0200", "fixture-uuid",
+                {"borg_excludes": []},
+            )
+
     @unittest.skipUnless(
         ARGS.scripts, "rendered Nix scripts supplied by the flake check"
     )

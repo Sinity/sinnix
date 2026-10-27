@@ -388,13 +388,16 @@ def previous_proof(marker, policy_hash, now, snapshot_directory):
 
 
 def expected_create_command(binary, source, archive, uuid, policy, *, timestamp=True):
-    """The exact Borg invocation allowed to justify a realm producer proof."""
+    """The exact Borg invocation allowed to justify a producer proof."""
     timestamp_args = []
     if timestamp:
-        match = re.match(r"^realm-(realm\.\d{8}T\d{6}[+-]\d{4})(?:-|$)", archive)
+        match = re.match(
+            r"^(?P<lane>realm|genome)-(?P<cut>(?P=lane)\.\d{8}T\d{6}[+-]\d{4})(?:-|$)",
+            archive,
+        )
         if match is None:
             raise ValueError("archive has no snapshot cut timestamp")
-        stamp = datetime.fromtimestamp(snapshot_epoch(match[1]), timezone.utc)
+        stamp = datetime.fromtimestamp(snapshot_epoch(match["cut"]), timezone.utc)
         timestamp_args = ["--timestamp", stamp.strftime("%Y-%m-%dT%H:%M:%S")]
     return [
         binary,
