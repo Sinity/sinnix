@@ -445,3 +445,12 @@ pool = "bulk"
 result = "exit"
 cache = "none"
 timeout_seconds = 28800
+
+[operations.codex]
+description = "Run one Codex worker in this checkout: codex-worker <effort> <prompt-file> <output-schema> <output-dir> [model]"
+exec = ["codex-worker"]
+arguments = "required"
+pool = "codex"
+result = "exit"
+timeout_seconds = 28800
+cache = "none"
