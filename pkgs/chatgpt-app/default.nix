@@ -135,7 +135,10 @@ let
         export NO_PROXY="127.0.0.1,localhost,::1" no_proxy="127.0.0.1,localhost,::1"
         export NODE_USE_ENV_PROXY=1
       fi
-      exec "$state/current/ChatGPT" --ozone-platform=wayland "''${proxy_args[@]}" "$@"
+      # Electron's default profile, ~/.config/Codex, sits on the ephemeral root
+      # SSD: it is lost at every boot, and the app wrote ~40 MB/s into it.
+      mkdir -p "$state/profile"
+      exec "$state/current/ChatGPT" --ozone-platform=wayland --user-data-dir="$state/profile" "''${proxy_args[@]}" "$@"
     '';
   };
   desktop = runCommand "chatgpt-desktop" { } ''
