@@ -740,3 +740,49 @@ def test_adaptive_width_does_not_touch_operator_pause_or_unknown_accounting(
         )[0]["status"]
         == "unavailable"
     )
+
+
+@pytest.mark.parametrize("stage", ["tick", "holds"])
+def test_whole_tick_deadline_includes_hold_release(monkeypatch, stage):
+    import signal
+    import time
+
+    monkeypatch.setattr(pressure_pause, "TICK_TIMEOUT_SECONDS", 0.05)
+
+    def stalled():
+        time.sleep(1)
+        pytest.fail("deadline did not interrupt the stall")
+
+    monkeypatch.setattr(
+        pressure_pause,
+        "_tick",
+        lambda **kwargs: stalled() if stage == "tick" else {"action": "clear"},
+    )
+    previous = signal.getsignal(signal.SIGALRM)
+    result = pressure_pause.tick(spool=None, release_holds=stalled)
+    assert result == {
+        "action": "unavailable",
+        "error": "pressure tick deadline exceeded",
+    }
+    assert signal.getsignal(signal.SIGALRM) == previous
+    assert signal.getitimer(signal.ITIMER_REAL) == (0, 0)
+
+
+def test_tick_stages_share_one_budget(monkeypatch):
+    import time
+
+    monkeypatch.setattr(pressure_pause, "TICK_TIMEOUT_SECONDS", 0.05)
+
+    def decide(**kwargs):
+        time.sleep(0.03)
+        return {"action": "clear"}
+
+    def release():
+        time.sleep(0.03)
+        return {"released": [], "waiting": []}
+
+    monkeypatch.setattr(pressure_pause, "_tick", decide)
+    assert (
+        pressure_pause.tick(spool=None, release_holds=release)["action"]
+        == "unavailable"
+    )

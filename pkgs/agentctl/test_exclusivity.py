@@ -293,3 +293,10 @@ def test_admission_and_release_do_not_load_terminal_history(
     assert hold["waiting_for"] == [worker]
     assert launch.release_holds(config) == {"released": [], "waiting": []}
     assert fake_pueue.enqueued == []
+
+
+def test_timer_hold_release_skips_busy_admission_lock(config):
+    with launch.admission_lock(config):
+        result = launch.release_holds(config, wait=False)
+    assert result["released"] == []
+    assert "admission lock busy" in result["waiting"][0]["error"]

@@ -104,6 +104,16 @@ has started. `job wait` follows a job across queue moves and resolves retained
 results after the queue entry is cleaned. An expired wait exits 4 without
 cancelling.
 
+Cancellation captures the unit's `ControlGroup` before stopping it and reads
+`cgroup.procs` afterwards, including child cgroups. Surviving members or an
+unreadable cgroup produce an incomplete cancellation disposition and a
+nonterminal job view and a refused `job cancel` exit status, even when systemd
+reports inactive or pueue is done.
+Retry, queue cleanup and worktree cleanup refuse while that cgroup remains
+populated or cannot be checked. They recheck the retained cgroup identity,
+so an observed empty or removed cgroup releases the guard. The original
+attempt outcome and cancellation request remain available.
+
 Launch inputs may set `unit_properties`, limited to resource limits
 (`MemoryMax`, `MemoryHigh`, `MemorySwapMax`, `MemoryZSwapMax`, `TasksMax`,
 `CPUWeight`, `IOWeight`, `IOReadBandwidthMax`, `IOWriteBandwidthMax`) and path
@@ -163,6 +173,12 @@ longer exist. The numbered place locks are released by the kernel on exit.
 the job starts and on each admission check, so a changed declaration applies
 to queued and waiting jobs. A reduction leaves existing holders running and
 counts their places until they finish, including places above the new width.
+
+The complete pressure tick, including adaptive widths and admission hold
+release, has a 20-second wall-clock deadline inside the unit's 30-second
+timeout. Pueue calls also have an 8-second cap. Hold release skips a busy
+admission lock instead of waiting up to 60 seconds. An exhausted tick reports
+`action: unavailable` and leaves remaining reconciliation to the next timer.
 
 **Pressure pauses.** `agentctl-pressure.timer` runs `pressure tick` every
 minute.

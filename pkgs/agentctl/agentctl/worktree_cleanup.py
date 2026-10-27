@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Sequence
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.procfs import held_paths
 
-from . import gitcmd, pueue, worktrunk
+from . import cgroups, gitcmd, job_queries, pueue, worktrunk
 from .batch_history import Run, list_runs, load, manifest_path, runs_dir
 from .limits import CALL_TIMEOUT_SECONDS
 from .projects import ProjectAdapter
@@ -658,6 +658,22 @@ def _drop_branch(
     tree = next((tree for tree in registry if tree.branch == branch), None)
     if tree is None and recorded_path is None:
         tree = worktrunk.worktrunk_find(project.root, branch)
+    target = tree.path if tree is not None else recorded_path
+    if target is not None:
+        for input_path in config.inputs_dir.glob("*.json"):
+            document = (
+                job_queries.read_outcome(input_path, job_queries.MAX_LAUNCH_INPUT_BYTES)
+                or {}
+            )
+            cwd = document.get("working_directory")
+            if not isinstance(cwd, str) or not _under(Path(cwd), target):
+                continue
+            disposition = job_queries.read_outcome(
+                job_queries.disposition_path(input_path),
+                job_queries.MAX_LAUNCH_INPUT_BYTES,
+            )
+            if cgroups.cancellation_obstacle(disposition) is not None:
+                return "worktree kept; job cancellation incomplete"
     process_users = process_users or _process_users
     if tree is not None and tree.locked:
         return "worktree kept; explicitly locked"

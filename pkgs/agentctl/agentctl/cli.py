@@ -467,7 +467,7 @@ def _job(arguments: argparse.Namespace, config: Config, out: Output) -> int:
             reason=arguments.reason,
         )
         out.write(job, f"{out.job_line(job)}; {job['state']}")
-        return EXIT_REFUSED if job["state"] == "failed" else EXIT_OK
+        return EXIT_REFUSED if job["state"] in {"failed", "incomplete"} else EXIT_OK
     if verb == "clean":
         if arguments.worktrees and not arguments.all_terminal:
             raise JobError("--worktrees requires --all-terminal")
@@ -853,17 +853,14 @@ def _dispatch(arguments: argparse.Namespace, config: Config, out: Output) -> int
     if verb == "pressure":
         checkpoint = config.state_dir / "pressure-state.json"
         decision = pressure.tick(
-            spool=config.event_spool, checkpoint=checkpoint, pools=config.pools
+            spool=config.event_spool,
+            checkpoint=checkpoint,
+            pools=config.pools,
+            release_holds=lambda: launch.release_holds(config, wait=False),
         )
-        holds = (
-            launch.release_holds(config)
-            if decision.get("action") in {"hold", "clear"}
-            else {"released": [], "waiting": []}
-        )
-        decision = {
-            **decision,
-            "holds_released": holds["released"],
-            "holds_waiting": holds["waiting"],
+        holds = {
+            "released": decision.get("holds_released", []),
+            "waiting": decision.get("holds_waiting", []),
         }
         summary = f"pressure {decision.get('action')}"
         if holds["released"] or holds["waiting"]:

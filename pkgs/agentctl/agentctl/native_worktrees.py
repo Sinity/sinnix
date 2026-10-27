@@ -12,6 +12,7 @@ from typing import Any
 
 from . import (
     artifacts,
+    cgroups,
     gitcmd,
     github,
     job_queries,
@@ -180,6 +181,12 @@ def _owners(config, project, tasks, selected=None) -> dict[Path, dict[str, Any]]
         ):
             continue
         owner = found.setdefault(cwd, {"terminal": True, "heads": set()})
+        disposition = job_queries.read_outcome(
+            job_queries.disposition_path(path), job_queries.MAX_LAUNCH_INPUT_BYTES
+        )
+        if cgroups.cancellation_obstacle(disposition) is not None:
+            owner["terminal"] = False
+            continue
         task = live.get(path.stem)
         if task is not None and not task.terminal:
             owner["terminal"] = False
@@ -200,7 +207,10 @@ def _owners(config, project, tasks, selected=None) -> dict[Path, dict[str, Any]]
             cancelled = (
                 disposition is not None
                 and disposition.get("outcome") == "cancelled"
-                and not disposition.get("unresolved")
+                and (
+                    not disposition.get("unresolved")
+                    or disposition.get("cancellation_incomplete")
+                )
             )
             if not cancelled and (task is None or not task.terminal):
                 owner["terminal"] = False

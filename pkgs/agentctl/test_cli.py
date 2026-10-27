@@ -595,7 +595,9 @@ def test_pressure_tick_reports_the_decision(
     monkeypatch.setattr(
         launch,
         "release_holds",
-        lambda config: calls.append(config) or {"released": [7], "waiting": []},
+        lambda config, **kwargs: (
+            calls.append(config) or {"released": [7], "waiting": []}
+        ),
     )
     assert cli.main(["pressure", "tick"]) == 0
     output = capsys.readouterr()
@@ -1042,3 +1044,21 @@ def test_queue_maintenance_reports_worktree_outcome_separately(
     assert observed["worktrees"] == result
     assert observed["worktree_cleanup"] == ("failed" if failure else "completed")
     assert code == (cli.EXIT_REFUSED if failure else cli.EXIT_OK)
+
+
+def test_incomplete_cancel_has_refused_exit_status(cli_config, monkeypatch, capsys):
+    from agentctl import launch
+
+    monkeypatch.setattr(
+        launch,
+        "cancel",
+        lambda *args, **kwargs: {
+            "task_id": 42,
+            "label": "fixture:check",
+            "phase": "unresolved",
+            "state": "incomplete",
+            "terminal": False,
+        },
+    )
+    assert cli.main(["job", "cancel", "42"]) == cli.EXIT_REFUSED
+    assert json.loads(capsys.readouterr().out)["terminal"] is False

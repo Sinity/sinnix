@@ -676,7 +676,7 @@ def test_cancel_waits_for_inflight_service_creation_then_stops_unit(
     assert stopped_units == [unit]
     assert json.loads(marker.read_text()) == {"attempt": 1}
     assert fake_pueue.killed == [started["task_id"]]
-    assert cancellation[0]["state"] == "unresolved"
+    assert cancellation[0]["state"] == "incomplete"
     assert cancellation[0]["unresolved"] is True
 
 
@@ -697,7 +697,7 @@ def test_cancel_fails_when_the_unit_is_still_active_afterwards(
 
     cancelled = launch.cancel(config, started["task_id"], settle_seconds=0)
 
-    assert cancelled["state"] == "unresolved"
+    assert cancelled["state"] == "incomplete"
     assert cancelled["unresolved"] is True
 
 
@@ -1931,3 +1931,150 @@ def test_retry_preserves_retired_executor_history_without_restarting(
     assert fake_pueue.restarted == []
     assert path.read_bytes() == original
     assert job_queries.get_job(task_id, config, job_id)["phase"] == "failed"
+
+
+@pytest.mark.parametrize(
+    "stop_error",
+    [None, PermissionError("fixture"), subprocess.TimeoutExpired("systemctl", 1)],
+)
+def test_cancel_retains_privileged_members_until_cgroup_drains(
+    fake_pueue, config, project_root, tmp_path, monkeypatch, stop_error
+):
+    from agentctl import cgroups, worktree_cleanup
+
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    task = fake_pueue.task(started["task_id"])
+    root = tmp_path / "cgroups"
+    group = root / "fixture.service"
+    group.mkdir(parents=True)
+    members = group / "cgroup.procs"
+    members.write_text("12345\n")
+    monkeypatch.setattr(cgroups, "CGROUP_ROOT", root)
+    monkeypatch.setattr(cgroups, "unit_cgroup", lambda _unit: "/fixture.service")
+    monkeypatch.setattr(launch, "_unit_state", lambda _unit: "stopped")
+
+    original_run = launch.subprocess.run
+
+    def stop(_unit):
+        if stop_error:
+            # Exercise the actual stop helper's permission/timeout handling.
+            monkeypatch.setattr(
+                launch.subprocess,
+                "run",
+                lambda *a, **k: (_ for _ in ()).throw(stop_error),
+            )
+            original_stop(_unit)
+
+    original_stop = launch._stop_unit
+    monkeypatch.setattr(launch, "_stop_unit", stop)
+    cancelled = launch.cancel(
+        config, task.task_id, job_id=started["job_id"], settle_seconds=0
+    )
+    assert cancelled["state"] == "incomplete"
+    assert cancelled["terminal"] is False
+    assert cancelled["cgroup_observation"]["pids"] == [12345]
+    assert job_queries.get_job(task.task_id, config)["terminal"] is False
+    waited = job_queries.wait(task.task_id, config=config, timeout_seconds=0)
+    assert waited["terminal"] is False and waited["wait_timed_out"] is True
+    assert launch.cancel(config, task.task_id)["state"] == "incomplete"
+    for action in (launch.retry, launch.clean):
+        with pytest.raises(JobError, match="cancellation incomplete"):
+            action(config, task.task_id, started["job_id"])
+    assert fake_pueue.restarted == []
+    # The checkout guard must work even after the pueue entry disappears.
+    kept = worktree_cleanup._drop_branch(
+        config,
+        project,
+        "fixture-branch",
+        base="unused",
+        recorded_path=project_root,
+        registry=[],
+    )
+    assert kept == "worktree kept; job cancellation incomplete"
+    members.write_text("")
+    assert (
+        job_queries.get_job(task.task_id, config).get("cancellation_incomplete")
+        is not True
+    )
+    # Identity is retained; retry is permitted only after actual drain.
+    monkeypatch.setattr(launch.subprocess, "run", original_run)
+    retried = launch.retry(config, task.task_id, started["job_id"])
+    assert retried["job_id"] == started["job_id"]
+    members.write_text("67890\n")
+    assert job_queries.get_job(task.task_id, config)["phase"] != "cancelled"
+    assert (
+        job_queries.get_job(task.task_id, config).get("cancellation_incomplete")
+        is not True
+    )
+
+
+@pytest.mark.parametrize(
+    "contents, expected",
+    [("", "empty"), ("42\n", "populated"), ("invalid\n", "unresolved")],
+)
+def test_cgroup_observation_includes_children_and_missing_groups(
+    tmp_path, monkeypatch, contents, expected
+):
+    from agentctl import cgroups
+
+    group = tmp_path / "fixture.service"
+    child = group / "child"
+    child.mkdir(parents=True)
+    (group / "cgroup.procs").write_text("")
+    (child / "cgroup.procs").write_text(contents)
+    monkeypatch.setattr(cgroups, "CGROUP_ROOT", tmp_path)
+    monkeypatch.setattr(cgroups, "unit_cgroup", lambda _unit: "/fixture.service")
+    assert cgroups.observe("fixture.service")["status"] == expected
+    assert cgroups.observe("fixture.service", "/missing.service")["status"] == "empty"
+
+
+def test_unreadable_cgroup_is_not_empty(tmp_path, monkeypatch):
+    from agentctl import cgroups
+
+    group = tmp_path / "fixture.service"
+    group.mkdir()
+    (group / "cgroup.procs").write_text("42\n")
+    read_text = Path.read_text
+
+    def unreadable(path, *args, **kwargs):
+        if path == group / "cgroup.procs":
+            raise PermissionError("synthetic cgroup permission failure")
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(cgroups, "CGROUP_ROOT", tmp_path)
+    monkeypatch.setattr(Path, "read_text", unreadable)
+    observed = cgroups.observe("fixture.service", "/fixture.service")
+    assert observed["status"] == "unresolved"
+    assert (
+        cgroups.cancellation_obstacle({"cancellation_incomplete": True, **observed})
+        is not None
+    )
+
+
+def test_native_cleanup_retains_incomplete_job_after_queue_removal(
+    fake_pueue, config, project_root, tmp_path, monkeypatch
+):
+    from agentctl import cgroups, native_worktrees
+
+    project = load_project_adapter(project_root)
+    workspace = tmp_path / "checkout"
+    workspace.mkdir()
+    started = launch.start_operation(
+        config,
+        project,
+        replace(project.operation("check"), checkout="any"),
+        workspace=workspace,
+    )
+    group = tmp_path / "fixture.service"
+    group.mkdir()
+    members = group / "cgroup.procs"
+    members.write_text("42\n")
+    monkeypatch.setattr(cgroups, "CGROUP_ROOT", tmp_path)
+    monkeypatch.setattr(cgroups, "unit_cgroup", lambda unit: "/fixture.service")
+    monkeypatch.setattr(launch, "_unit_state", lambda unit: "stopped")
+    monkeypatch.setattr(launch, "_stop_unit", lambda unit: None)
+    launch.cancel(config, started["task_id"], settle_seconds=0)
+    assert native_worktrees._owners(config, project, {})[workspace]["terminal"] is False
+    members.write_text("")
+    assert native_worktrees._owners(config, project, {})[workspace]["terminal"] is True

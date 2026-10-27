@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence, TextIO
 
-from . import artifacts, batch_history, gitcmd, job_queries, pools, pueue
+from . import artifacts, batch_history, cgroups, gitcmd, job_queries, pools, pueue
 from .config import Config
 from .launch_input import scratch_path, write_input
 from .limits import CALL_TIMEOUT_SECONDS, SHORT_ID, SYSTEMCTL_TIMEOUT_SECONDS
@@ -356,7 +356,7 @@ def enqueue(
 
 
 @contextmanager
-def admission_lock(config: Config) -> Iterator[None]:
+def admission_lock(config: Config, *, wait: bool = True) -> Iterator[None]:
     """Serialize the queue observation and enqueue that admission depends on."""
     path = config.state_dir / ADMISSION_LOCK_NAME
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -367,9 +367,9 @@ def admission_lock(config: Config) -> Iterator[None]:
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except BlockingIOError as error:
-                if time.monotonic() >= deadline:
+                if not wait or time.monotonic() >= deadline:
                     raise job_queries.JobError(
-                        f"another launch has held {path} for over 60s"
+                        f"admission lock busy: {path}"
                     ) from error
                 time.sleep(ADMISSION_LOCK_POLL_SECONDS)
         try:
@@ -438,10 +438,12 @@ def _consume_hold(config: Config, task: Task, expected: Mapping[str, Any]) -> bo
     return True
 
 
-def release_holds(config: Config) -> dict[str, list[dict[str, Any]]]:
+def release_holds(
+    config: Config, *, wait: bool = True
+) -> dict[str, list[dict[str, Any]]]:
     """Release only AgentCTL-created cross-pool holds whose partners drained."""
     try:
-        with admission_lock(config):
+        with admission_lock(config, wait=False) if not wait else admission_lock(config):
             tasks = pueue.live().tasks
             held = {
                 task.task_id: hold
@@ -754,6 +756,20 @@ def _write_disposition(
     with (path.with_name(path.name + ".lock")).open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         write_input(job_queries.disposition_path(path), dict(disposition))
+
+
+def _stop_unit(unit: str) -> None:
+    try:
+        subprocess.run(
+            ["systemctl", "--user", "stop", unit],
+            capture_output=True,
+            check=False,
+            timeout=CALL_TIMEOUT_SECONDS,
+            env=systemd_environment(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        # The cgroup observation below decides whether cancellation completed.
+        pass
 
 
 def _unit_state(unit: str) -> str:
@@ -1070,6 +1086,20 @@ def _cancel(
     task_id = task.task_id
     view = job_queries.job_view(task)
     if task.terminal:
+        obstacle = cgroups.cancellation_obstacle(
+            job_queries.read_disposition(config, task)
+        )
+        if obstacle is not None:
+            return {
+                **view,
+                "state": "incomplete",
+                "phase": "unresolved",
+                "terminal": False,
+                "unit": obstacle["unit"],
+                "cgroup_observation": obstacle,
+                "cancellation_incomplete": True,
+                "already_terminal": True,
+            }
         return {**view, "state": "terminal", "unit": None, "already_terminal": True}
     if task.started_at is None:
         stopped = _cancel_not_started(
@@ -1089,6 +1119,7 @@ def _cancel(
         task = live
         view = job_queries.job_view(task)
     unit = job_queries.unit_of(task)
+    cgroup = None
     declared_log = (job_queries.read_launch_input(config, task) or {}).get("log_path")
     log = (
         Path(declared_log)
@@ -1122,25 +1153,28 @@ def _cancel(
             )
             write_input(marker, {"attempt": active_attempt})
             if unit is not None:
-                subprocess.run(
-                    ["systemctl", "--user", "stop", unit],
-                    capture_output=True,
-                    check=False,
-                    timeout=CALL_TIMEOUT_SECONDS,
-                    env=systemd_environment(),
+                cgroup = cgroups.unit_cgroup(unit)
+                _write_disposition(
+                    config,
+                    task,
+                    {
+                        "outcome": Outcome.CANCELLED.value,
+                        "cancellation_incomplete": True,
+                        "unresolved": True,
+                        "started": True,
+                        "unit": unit,
+                        "cgroup": cgroup,
+                        "attempt": active_attempt,
+                    },
                 )
+                _stop_unit(unit)
         finally:
             if allocation_lock is None:
                 fcntl.flock(allocation, fcntl.LOCK_UN)
             allocation.close()
     elif unit is not None:
-        subprocess.run(
-            ["systemctl", "--user", "stop", unit],
-            capture_output=True,
-            check=False,
-            timeout=CALL_TIMEOUT_SECONDS,
-            env=systemd_environment(),
-        )
+        cgroup = cgroups.unit_cgroup(unit)
+        _stop_unit(unit)
     # The guard pins selection through publication of the stop request. The
     # wrapper needs the same lock to consume its marker and publish completion.
     if allocation_lock is not None:
@@ -1188,13 +1222,42 @@ def _cancel(
         sleep(CANCEL_POLL_SECONDS)
         current = pueue.task(task_id)
     state = _unit_state(unit) if unit is not None else "stopped"
+    observation = (
+        cgroups.observe(unit, cgroup) if unit is not None else {"status": "empty"}
+    )
+    incomplete = observation["status"] != "empty"
+    if incomplete:
+        state = "incomplete"
+    if log is not None and unit is not None:
+        _write_disposition(
+            config,
+            task,
+            {
+                "outcome": Outcome.CANCELLED.value,
+                "cancellation_incomplete": incomplete,
+                "unresolved": incomplete,
+                "started": True,
+                "attempt": active_attempt,
+                **observation,
+            },
+        )
     return {
         **(job_queries.job_view(current) if current is not None else view),
         "state": state,
-        **({"unresolved": True} if state == "unresolved" else {}),
+        **({"unresolved": True} if state in {"unresolved", "incomplete"} else {}),
         "unit": unit,
         **job_queries.outcome(
             config, current if current is not None else task, attempt=expected_attempt
+        ),
+        **(
+            {
+                "phase": "unresolved",
+                "terminal": False,
+                "cancellation_incomplete": True,
+                "cgroup_observation": observation,
+            }
+            if incomplete
+            else {}
         ),
         "already_terminal": False,
         **({"cancellation": request} if log is not None else {}),
@@ -1222,6 +1285,7 @@ def clean(config: Config, task_id: int, job_id: str | None = None) -> dict[str, 
             f"task {task.task_id} is still {task.status.lower()}; cancel it first"
         )
     view = job_queries.get_job(task.task_id, config, job_queries.job_id_of(task))
+    _require_cancellation_drained(config, task)
     if task.status != "Archived":
         pueue.remove([task.task_id])
     log = job_queries.artifact_path(config, task, ".log")
@@ -1283,6 +1347,12 @@ def clean_terminal(config: Config) -> list[dict[str, Any]]:
     ]
 
 
+def _require_cancellation_drained(config: Config, task: Task) -> None:
+    obstacle = cgroups.cancellation_obstacle(job_queries.read_disposition(config, task))
+    if obstacle is not None:
+        raise job_queries.JobError(f"cancellation incomplete: {obstacle}")
+
+
 def retry(config: Config, task_id: int, job_id: str | None = None) -> dict[str, Any]:
     """Restart in place, applying the same cross-pool admission as a new launch."""
     with admission_lock(config):
@@ -1291,6 +1361,7 @@ def retry(config: Config, task_id: int, job_id: str | None = None) -> dict[str, 
             raise job_queries.JobError(
                 f"task {task.task_id} is still {task.status.lower()}"
             )
+        _require_cancellation_drained(config, task)
         value = job_queries.read_launch_input(config, task) or {}
         binding = value.get("binding") or {}
         label_parts = task.label.split(":")
@@ -1306,6 +1377,10 @@ def retry(config: Config, task_id: int, job_id: str | None = None) -> dict[str, 
             raise job_queries.JobError(
                 "retired batch executor is history-only; start a declared operation for new work"
             )
+        # The old attempt's cancellation request stays in its artifact directory.
+        # A drained guard must not attach to the next attempt's reused unit name.
+        if job_queries.read_disposition(config, task):
+            _write_disposition(config, task, {})
         hold = _admission_hold(config, task.group, label=task.label)
         if hold is not None:
             value = job_queries.read_launch_input(config, task)

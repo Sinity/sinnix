@@ -11,11 +11,12 @@ from __future__ import annotations
 import json
 import math
 import os
+import signal
 import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from sinnix_lib.atomic_json import read_json, write_json_atomic
 from sinnix_lib.ledger import append_jsonl
@@ -24,9 +25,9 @@ from . import pueue
 from .config import PoolPolicy
 from .pueue import PueueError
 
-# Each pueue call in a tick, well inside the unit's 30 s TimeoutStartSec. A
-# tick that cannot reach pueue reports "unavailable" instead of being killed
-# mid-decision, which is what happened 14 times during the 10-18..10-27 stalls.
+# Bound the whole pass, including hold release, below TimeoutStartSec=30s.
+# The per-call cap alone cannot bound several sequential queue requests.
+TICK_TIMEOUT_SECONDS = 20
 TICK_CALL_TIMEOUT_SECONDS = 8
 
 MEMORY_FULL_FREEZE = 25.0
@@ -357,21 +358,55 @@ def adaptive_widths(pools, groups, pressure, spool):
     return observations
 
 
+class TickDeadline(Exception):
+    """The complete pressure pass exhausted its wall-clock budget."""
+
+
 def tick(
     *,
     spool: Path | None,
     pressure_root: Path = Path("/proc/pressure"),
     checkpoint: Path | None = None,
     pools: Mapping[str, PoolPolicy] | None = None,
+    release_holds: Callable[[], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Close or reopen one admission group. Never stops or stashes tasks."""
-    with pueue.call_deadline(TICK_CALL_TIMEOUT_SECONDS):
-        return _tick(
-            spool=spool,
-            pressure_root=pressure_root,
-            checkpoint=checkpoint,
-            pools=pools,
-        )
+    """Run the complete timer pass within one deadline (main thread only)."""
+
+    def expired(_signum, _frame):
+        raise TickDeadline("pressure tick deadline exceeded")
+
+    previous_handler = signal.signal(signal.SIGALRM, expired)
+    previous_timer = signal.setitimer(signal.ITIMER_REAL, TICK_TIMEOUT_SECONDS)
+    began = time.monotonic()
+    try:
+        with pueue.call_deadline(TICK_CALL_TIMEOUT_SECONDS):
+            decision = _tick(
+                spool=spool,
+                pressure_root=pressure_root,
+                checkpoint=checkpoint,
+                pools=pools,
+            )
+            if release_holds is not None:
+                holds = (
+                    release_holds()
+                    if decision.get("action") in {"hold", "clear"}
+                    else {"released": [], "waiting": []}
+                )
+                decision.update(
+                    holds_released=holds["released"], holds_waiting=holds["waiting"]
+                )
+            return decision
+    except TickDeadline as error:
+        return {"action": "unavailable", "error": str(error)}
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        if previous_timer[0]:
+            signal.setitimer(
+                signal.ITIMER_REAL,
+                max(0.000001, previous_timer[0] - (time.monotonic() - began)),
+                previous_timer[1],
+            )
 
 
 def _tick(

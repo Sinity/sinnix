@@ -18,7 +18,7 @@ from typing import Any, Mapping, Sequence
 
 from sinnix_lib.secrets import mask_secret_values, masked_window, secret_values
 
-from . import artifacts, pueue
+from . import artifacts, cgroups, pueue
 from .config import Config
 from .launch_input import secret_environment
 from .pueue import PueueError, PueueTimeout, Task
@@ -889,6 +889,23 @@ def _disposition_view(
     receipt: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Latest job disposition; a selected attempt keeps its own receipt."""
+    if (
+        attempt is not None
+        and isinstance(disposition.get("attempt"), int)
+        and disposition["attempt"] != attempt
+    ):
+        return {}
+    if disposition.get("cancellation_incomplete"):
+        obstacle = cgroups.cancellation_obstacle(disposition)
+        if obstacle is not None:
+            return {
+                "phase": "unresolved",
+                "started": True,
+                "terminal": False,
+                "cancellation_incomplete": True,
+                "cgroup_observation": obstacle,
+            }
+        disposition = {**disposition, "unresolved": False}
     if disposition.get("unresolved"):
         return {"phase": "unresolved", "started": True}
     if disposition.get("outcome") != Outcome.CANCELLED.value:
@@ -1044,7 +1061,12 @@ def wait(
                     f"job {job_id} is absent from pueue with no verified terminal outcome"
                 )
             return task, view
-        return task, job_view(task)
+        view = job_view(task)
+        if config is not None:
+            disposition = read_disposition(config, task)
+            if disposition:
+                view.update(_disposition_view(disposition, attempt=None, receipt={}))
+        return task, view
 
     task, view = observe()
     detail: str | None = None
@@ -1055,6 +1077,11 @@ def wait(
         if remaining <= 0 or detail is not None:
             timed_out = {**view, "wait_timed_out": True}
             return timed_out if detail is None else {**timed_out, "detail": detail}
+        if task.terminal:
+            # Queue completion can precede privileged descendant termination.
+            time.sleep(min(remaining, 0.5))
+            task, view = observe()
+            continue
         blocking = _wait_slice(task, remaining)
         try:
             pueue.wait(task.task_id, timeout_seconds=blocking)
