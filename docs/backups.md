@@ -55,9 +55,9 @@ paths. Neither measurement establishes that a directory is disposable.
 
 | Source                   | How                                                                    | When                                                  | Repository                         |
 | ------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------- |
-| `/realm`                 | btrbk read-only snapshot, archived by the Borg job                     | snapshots 00/06/12/18:00, drain hourly at :05 and :25 | `borg-realm-v2`                    |
+| `/realm`                 | btrbk read-only snapshot, archived by the Borg job                     | snapshots 00/06/12/18:00, drain nightly 03:05         | `borg-realm-v2`                    |
 | `/persist`               | btrbk read-only snapshot, archived by the Borg job                     | same as `/realm`                                      | `borg-persist-v1`                  |
-| HDD genome workspace     | dedicated btrbk cut, archived independently of `/realm`                | six-hour cuts, coordinated retries at :05 and :25     | `borg-realm-v2`, `genome-*` series |
+| HDD genome workspace     | dedicated btrbk cut, archived independently of `/realm`                | six-hour cuts, drained nightly with `/realm`          | `borg-realm-v2`, `genome-*` series |
 | The ephemeral root       | snapshot the initrd takes before each wipe                             | daily                                                 | `borg-root-snapshots-v1`           |
 | Sinex content stores     | read in place: the running store and the dated earlier one             | daily 05:40                                           | `borg-sinex-blobs-v1`              |
 | Sinex database dump      | `pg_dump` into `state/db-dumps/sinex`, archived with `/realm`          | dump daily at midnight                                | `borg-realm-v2`                    |
@@ -75,9 +75,10 @@ because coverage cannot waive what they drop. Root snapshots leave out
 `~/.cache`, `/root/.cache`, `/var/cache`, `/tmp` and every other mounted
 filesystem (`rootSnapshotExcludes` in `modules/lib/backup/acknowledgement.nix`).
 
-The drain checks hourly at :05 and :25 while source acquisition remains every
-six hours. A long maintenance pass can hold the Borg lock across both attempts
-in an acquisition hour; hourly retries prevent a six-hour wait after it releases.
+The drain runs nightly at 03:05, with a retry at 03:25 for a maintenance pass
+holding the Borg lock; a boot that missed the window runs it once on startup.
+Snapshots are still cut every six hours, so a night's drain archives up to
+four queued cuts per source.
 When no new cuts are queued, the drain validates its existing acknowledgements
 and leaves an ongoing repository integrity check running. Pending or unavailable
 local handoff evidence requests native drain validation and can preempt a resumable

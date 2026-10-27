@@ -211,9 +211,13 @@ in
       fi
       exit "$failed"
     '';
+    # Nightly, with one retry for a maintenance pass holding the Borg lock.
+    # Persistent catches up once after a boot that missed the window. The
+    # 20-minute cadence ran each lane ~120 times in 8 days and kept the
+    # genome HDD from ever spinning down.
     timer = {
-      onCalendar = "*-*-* *:05,25:00";
-      persistent = false;
+      onCalendar = "*-*-* 03:05,03:25:00";
+      persistent = true;
     };
   })
 
