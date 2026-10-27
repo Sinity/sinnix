@@ -1086,7 +1086,8 @@ def test_replaced_inode_same_content_is_rehashed_without_scoring_or_copying(
         raise AssertionError("already scored bytes were copied or scored again")
 
     glob.update(_payload_hash=observed, score_blob=forbidden)
-    monkeypatch.setattr(score["tempfile"], "TemporaryDirectory", forbidden)
+    # History and discovery may spill; an already-scored payload must not.
+    monkeypatch.setattr(score["tempfile"], "TemporaryFile", forbidden)
     assert score["cmd_run"](args) == 0
     assert calls == [True]
     rows = [
@@ -1281,7 +1282,8 @@ def test_imu_scorers_keep_reference_results(score, tmp_path, case):
                 source.write("invalid,accel,no,signal,here\n")
     for name in ["score_tremor", "score_sway"]:
         assert (
-            score["score_trace"](score[name], path) == IMU_REFERENCE_RESULTS[case][name]
+            json.dumps(score["score_trace"](score[name], path))
+        == json.dumps(IMU_REFERENCE_RESULTS[case][name])
         )
 
 
@@ -1403,7 +1405,9 @@ def test_ppg_scorer_keeps_pulse_hrv_and_rejection_results(score, tmp_path, case)
             source.write(f"{stamp},{value}\n")
             if case == "malformed" and i % 100 == 0:
                 source.write("invalid,no-signal\n")
-    assert score["score_trace"](score["score_ppg"], path) == PPG_REFERENCE_RESULTS[case]
+    assert json.dumps(score["score_trace"](score["score_ppg"], path)) == json.dumps(
+        PPG_REFERENCE_RESULTS[case]
+    )
 
 
 def test_ppg_huge_gap_refuses_before_jitter_overflow(score, tmp_path):
@@ -1461,3 +1465,98 @@ def test_huge_ppg_gap_records_refusal_and_processes_later_trace(score, tmp_path)
     assert [row["file"] for row in rows] == ["a.csv", "b.csv"]
     assert not rows[0]["ok"] and "resampled-sample limit" in rows[0]["reason"]
     assert rows[1]["ok"]
+
+
+@pytest.mark.parametrize("imu", [False, True])
+def test_raw_storage_memory_is_bounded_and_bytes_match(score, tmp_path, imu):
+    import struct
+    import tracemalloc
+
+    peaks = []
+    for count in (2000, 20000):
+        path = tmp_path / "samples.csv"
+        with path.open("w") as source:
+            source.write("ts,type,x,y,z\n" if imu else "ts,value\n")
+            for i in range(count):
+                source.write(f"{i * 10000000},accel,1,2,3\n" if imu else f"{i * 10000000},1\n")
+        tracemalloc.start()
+        reader = score["_imu_series"] if imu else score["_ppg_series"]
+        with reader(path) as result:
+            times, values = result[:2]
+            for i, (stamp, value) in enumerate(zip(times, values, strict=True)):
+                assert struct.pack("d", stamp) == struct.pack("d", i * 10000000 / 1e9)
+                assert value == ((1.0, 2.0, 3.0) if imu else 1.0)
+            assert len(times) == count
+        peaks.append(tracemalloc.get_traced_memory()[1])
+        tracemalloc.stop()
+    assert peaks[1] < peaks[0] + 200_000
+    assert peaks[1] < 1_000_000
+
+
+def test_history_and_discovery_memory_is_bounded(score, tmp_path):
+    import tracemalloc
+
+    peaks = []
+    for count in (1000, 10000):
+        root = tmp_path / str(count)
+        root.mkdir()
+        ledger = root / "ledger.jsonl"
+        with ledger.open("w") as source:
+            for i in range(count):
+                row = {"file": f"{i:05}.csv", "bytes": i}
+                source.write(json.dumps(row) + "\n")
+                source.write(json.dumps(row | {
+                    "sidecar_signature": "absent", "payload_sha256": "a" * 64,
+                    "payload_observation": "b" * 64,
+                }) + "\n")
+                (root / f"{i:05}.csv").touch()
+        score["ledger_seen"].__globals__["LEDGER"] = ledger
+        tracemalloc.start()
+        seen = score["ledger_seen"]()
+        try:
+            assert (f"{count - 1:05}.csv", count - 1, None) in seen
+            key = (f"{count - 1:05}.csv", count - 1, "absent")
+            assert seen.contains_payload(key, "a" * 64)
+            assert seen.observed_payload(key, "b" * 64)
+            for i, path in enumerate(score["_candidate_paths"](root)):
+                assert path.name == f"{i:05}.csv"
+            assert i + 1 == count
+        finally:
+            seen.close()
+        peaks.append(tracemalloc.get_traced_memory()[1])
+        tracemalloc.stop()
+    assert peaks[1] < peaks[0] + 200_000
+    assert peaks[1] < 1_000_000
+
+
+def test_spill_permissions_and_failure_cleanup(score):
+    import stat
+
+    path = None
+    with pytest.raises(RuntimeError):
+        with score["_scratch_db"]() as db:
+            path = Path(db.execute("PRAGMA database_list").fetchone()[2])
+            assert stat.S_IMODE(path.stat().st_mode) == 0o600
+            assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+            raise RuntimeError("synthetic failure")
+    assert not path.parent.exists()
+
+
+def test_event_inventory_memory_and_order(score, tmp_path):
+    import tracemalloc
+
+    peaks = []
+    for count in (1000, 10000):
+        root = tmp_path / str(count)
+        root.mkdir()
+        for i in range(count - 1, -1, -1):
+            (root / f"events-{i:05}.jsonl").write_text(json.dumps({"index": i}) + "\n")
+        score["iter_recent_events"].__globals__["EVENTS"] = root
+        tracemalloc.start()
+        for i, event in enumerate(score["iter_recent_events"]()):
+            assert event == {"index": i}
+        assert i + 1 == count
+        peaks.append(tracemalloc.get_traced_memory()[1])
+        tracemalloc.stop()
+    assert peaks[1] < peaks[0] + 200_000
+    assert peaks[1] < 1_000_000

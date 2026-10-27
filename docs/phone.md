@@ -212,7 +212,13 @@ staircases play both intervals from one audio buffer, so device latency
 cancels out.
 
 The phone timestamps and records raw signals; prime does the scoring
-(`scripts/sinnix-score`) and sends receipts back.
+(`scripts/sinnix-score`) and sends receipts back. Raw pulse and accelerometer
+samples spill to an unlinked temporary file; timing intervals, history keys,
+and sorted discovery inventories use temporary SQLite storage in owner-only
+directories removed when their reader closes, including on errors. SQLite uses
+a fixed 1 MiB page cache and disk-backed sorting. Signal arithmetic preserves
+sample and sorted-interval order. Derived signal grids retain the existing
+one-million-sample limit; parsing still allocates one complete input record.
 
 Deliberately not built: screen-based flicker fusion and contrast sensitivity
 (the display is not a calibrated light source), pupillometry and saccades
