@@ -136,9 +136,10 @@ mkServiceModule {
     default = {
       # Cargo builds across every pool. Five concurrent -j16 builds on this
       # 31 GiB host (2026-10-25) ran into memory pressure; oomd killed checks
-      # after 21-54 minutes and others hit their timeouts. Two at 5-8 GiB
-      # each fit the job plane's 12G inside the host's agent budget.
-      cargo = 2;
+      # after 21-54 minutes and others hit their timeouts. Three at -j8
+      # (CARGO_BUILD_JOBS in each project) fit the job plane's 17G: on
+      # 2026-10-27 two left the plane at 8 GiB while ~30 build jobs queued.
+      cargo = 3;
     };
     description = "Cross-pool caps: how many jobs whose operation names each cap run at once, whichever pools they queue in.";
   };
