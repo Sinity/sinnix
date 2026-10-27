@@ -255,6 +255,14 @@ rec {
       system = {
         IOAccounting = true;
         IODeviceLatencyTargetSec = interactiveIoLatency;
+        # memory.low is limited by every ancestor, so a service's own
+        # protection (Sinex PostgreSQL's below) only counts if this slice
+        # carries some. Without it, user.slice's 12G low (which recursive
+        # protection also hands to the agents inside it) made system
+        # services the first thing host reclaim took: on 2026-10-27
+        # PostgreSQL held 1.3G resident with 3.1G of shared buffers swapped
+        # and 5.4M anonymous refaults in 3.5 hours.
+        MemoryLow = "6G";
       };
       # memory.min and memory.low are limited by every ancestor. This
       # carries the desktop's guarantee (app, session and shell slices) to

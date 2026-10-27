@@ -136,6 +136,10 @@ in
           IOSchedulingPriority = 7;
           IOWeight = 20;
           MemoryHigh = "8G";
+          # Shared buffers (4GB) plus working memory stay resident when the
+          # host reclaims; swapping them turns every buffer hit into a
+          # swap-in. Needs system.slice's MemoryLow (runtime-defaults.nix).
+          MemoryLow = "5G";
         };
         notifyOnFailure = true;
         operatorRestart = false;
