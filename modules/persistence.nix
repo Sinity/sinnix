@@ -92,6 +92,7 @@ in
         "/var/lib/NetworkManager" # wired profiles, DHCP leases
         "/var/lib/nixos" # NixOS activation state
         "/var/lib/systemd" # timers, random-seed, rfkill, linger, timesync
+        "/root/.config/borg" # Borg repository trust and rollback baselines (root jobs)
       ];
       files = [
         "/etc/machine-id" # dbus + journal continuity
@@ -125,6 +126,14 @@ in
         mode = "0700";
       } # GCloud auth + credentials
       ".config/cachix" # cachix auth token
+      {
+        directory = ".config/kdeconnect";
+        mode = "0700";
+      } # KDE Connect device identity (private key, certificate)
+      {
+        directory = ".config/borg";
+        mode = "0700";
+      } # Borg repository trust baselines (user repos)
       {
         directory = ".android";
         mode = "0700";
@@ -164,6 +173,8 @@ in
       ".local/share/atuin" # shell history DB
       ".local/share/activitywatch" # AW SQLite DB
       ".local/state/devkit" # history.db and its SQLite WAL/SHM companions
+      ".local/state/sinex-session" # session capture spools and cursors, incl. unacknowledged frames
+      ".local/state/claude-quota" # timestamped usage samples
       ".config/activitywatch" # AW watcher configs (runtime-written)
       ".config/awatcher" # awatcher config.toml
 
