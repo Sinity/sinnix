@@ -18,7 +18,7 @@
 # Overlay expiry — "# recheck:" convention:
 # - Any overlay that works around a nixpkgs/upstream defect (as opposed to a
 #   permanent architecture choice — e.g. chromium.nix's cache-hit
-#   engineering, or sinex/polylogue/yt-polisher re-exporting the project's
+#   engineering, or sinex/yt-polisher re-exporting the project's
 #   own flake inputs) carries a `# recheck: <condition>` comment next to the
 #   workaround.
 # - Format: `# recheck: <concrete, checkable condition>`, for example:

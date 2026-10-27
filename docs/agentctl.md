@@ -336,29 +336,27 @@ schema = 1
 [project]
 id = "polylogue"
 display_name = "Polylogue"
-root_markers = ["pyproject.toml", "polylogue"]
+root_markers = ["Cargo.toml", "crates"]
 
 [environment]
-kind = "nix-develop"
-command = ["nix", "develop", "--accept-flake-config", "--command"]
-inherit = ["HOME", "USER", "PATH", "SSH_AUTH_SOCK", "XDG_RUNTIME_DIR"]
-unset = ["PYTHONPATH"]
-require = ["POLYLOGUE_ARCHIVE_ROOT"]
-
-[environment.values]
-POLYLOGUE_ARCHIVE_ROOT = "/realm/state/polylogue"
+kind = "direct"
+command = ["env"]
+inherit = ["HOME", "USER", "PATH", "XDG_RUNTIME_DIR", "CARGO_TARGET_DIR"]
+unset = ["PYTHONPATH", "PYTHONHOME"]
 
 [workspace]
 root = "/realm/worktree"
 default_base = "origin/master"
-[operations.verify_all]
-description = "Run the complete corpus"
-exec = ["devtools", "verify", "--all"]
-pool = "pytest"
-result = "pytest"
-timeout_seconds = 14400
-checkout = "default"
-admission = { memory_mib = 12288 }
+
+[operations.check]
+description = "Formatting, crate boundaries and the workspace test suite"
+exec = ["nix", "develop", "--command", "cargo", "run", "--locked", "-p", "xtask", "--", "check"]
+pool = "bulk"
+result = "exit"
+timeout_seconds = 1200
+scratch = "tmpfs"
+cap = "cargo"
+unit_properties = ["MemoryHigh=8G"]
 ```
 
 ### Operation fields

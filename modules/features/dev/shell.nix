@@ -329,7 +329,6 @@ mkFeatureModule {
                 pkgs.libglvnd
               ];
               LYNCHPIN_PYTHON = "${lynchpinRuntime}/bin/lynchpin-python";
-              POLYLOGUE_PYTHON = "${scriptPkgs.polylogue-python}/bin/polylogue-python";
             };
 
             home.packages =
@@ -360,7 +359,6 @@ mkFeatureModule {
               )
               ++ [
                 lynchpinRuntime
-                scriptPkgs.polylogue-python
                 findFlakeRoot
                 scriptPkgs.ccusage
                 scriptPkgs.lsp-root

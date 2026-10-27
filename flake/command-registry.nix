@@ -111,7 +111,7 @@ let
       append_override_arg sinex "$SINNIX_SINEX_OVERRIDE"
     fi
     if [ -n "''${SINNIX_POLYLOGUE_OVERRIDE:-}" ]; then
-      append_override_arg polylogue "$SINNIX_POLYLOGUE_OVERRIDE"
+      append_override_arg polylogue-rewrite "$SINNIX_POLYLOGUE_OVERRIDE"
     fi
     if [ -n "''${SINNIX_LYNCHPIN_OVERRIDE:-}" ]; then
       append_override_arg lynchpin "$SINNIX_LYNCHPIN_OVERRIDE"

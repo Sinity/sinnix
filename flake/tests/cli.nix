@@ -1,9 +1,4 @@
-# CLI feature runtime checks: Polylogue CLI wrapper and task-tracking
-# (taskwarrior/timewarrior) integration.
-#
-# cli-polylogue-runtime sits in the default `checks` tier: it evaluates the
-# cli.polylogue feature module through the full sinnix config tree and only
-# smoke-tests `--help` output with a minimal coreutils/gnugrep closure.
+# CLI feature runtime checks over the evaluated Home Manager packages.
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -50,28 +45,18 @@ in
         assertions = _config: [ ];
       };
 
-      # Provably fails when: the polylogue CLI or its python wrapper drops out
-      # of the feature's package set (verified by removing polylogue-cli), or
-      # a documented subcommand stops being reachable.
       cliPolylogueRuntime = mkHmRuntimeCheck system {
         name = "cli-polylogue-runtime-check";
         evaluated = evalTestSpec system cliPolylogueRuntimeSpec;
-        homePackages = [
-          "polylogue-cli"
-          "polylogue-python"
-        ];
-        nativeBuildInputs = [
-          pkgs.coreutils
-          pkgs.gnugrep
-        ];
+        homePackages = [ "polylogue" ];
+        nativeBuildInputs = [ pkgs.gnugrep ];
         script = ''
-          polylogue --help | grep -q '^Usage: polylogue'
-          polylogue find --help | grep -q 'Search the archive'
-          polylogue config --help | grep -q 'Show resolved Polylogue configuration'
-          polylogue-python - <<'EOF'
-          import sys
-          print(sys.executable)
-          EOF
+          polylogue --help > help
+          grep -q 'Usage: polylogue' help
+          polylogue read --help > read-help
+          grep -q 'Read one session' read-help
+          polylogue mcp --help > mcp-help
+          grep -q 'MCP' mcp-help
         '';
       };
       # Provably fails when: the rendered ssh config stops isolating the

@@ -29,7 +29,6 @@ let
       home-manager
       lynchpin
       sinex
-      polylogue
       polylogue-rewrite
       ;
     inherit (inputs)
