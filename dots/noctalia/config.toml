@@ -92,7 +92,10 @@ margin_ends = 75
 radius = 10
 font_weight = 300
 widget_spacing = 15
-start = ["session", "wallpaper", "control-center", "volume", "audio_visualizer", "media", "launcher"]
+# No audio_visualizer: in Noctalia 5.0.1 it leaks ~8 MB per minute of
+# playback (2026-10-27: +19/+25 MB per 3 min of audio with it, +1 MB without),
+# which grew the shell to 4.5-8.7 GB per boot and into swap.
+start = ["session", "wallpaper", "control-center", "volume", "media", "launcher"]
 center = ["tray", "notifications", "clock", "workspaces"]
 end = [
   "sinity/sinnix-bar:capture-strip",
