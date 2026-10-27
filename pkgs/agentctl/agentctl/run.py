@@ -831,6 +831,10 @@ def _cap_limit(launch: Mapping[str, Any], log: Any) -> tuple[Path, int] | None:
 
 def _cap_place(directory: Path, limit: int, ticket: Path) -> Any | None:
     """Check tickets and places while the caller holds the counter lock."""
+    # A waiter whose ticket vanished (the caps directory cleaned mid-wait)
+    # keeps its number rather than failing or jumping the queue.
+    if not ticket.exists():
+        atomic_publish(ticket, str(os.getpid()).encode(), fsync=False, mode=0o600)
     tickets = []
     for path in directory.glob("*.ticket"):
         pid = int(path.read_text())

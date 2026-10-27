@@ -216,6 +216,16 @@ def test_ticket_is_removed_when_waiting_raises(tmp_path, monkeypatch):
         held.close()
 
 
+def test_a_waiter_whose_ticket_vanished_keeps_its_number(tmp_path):
+    ticket = tmp_path / "7.ticket"
+    place = run._cap_place(tmp_path, 1, ticket)
+    try:
+        assert place is not None
+        assert not ticket.exists()
+    finally:
+        place.close()
+
+
 def test_width_changes_while_waiting_count_holders_above_the_new_width(
     tmp_path, monkeypatch
 ):
