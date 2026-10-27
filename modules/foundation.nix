@@ -334,7 +334,6 @@ in
       # checkout, so it belongs in the data lake rather than per-checkout state.
       # Every worktree and lane inherits this, which is what makes cross-lane
       # comparison possible at all.
-      POLYLOGUE_RETIRED_VERIFY_HISTORY_PATHS = "/realm/activity/dev/polylogue/verify-history.jsonl:/realm/activity/development/polylogue/verify-history.jsonl:/realm/projects/polylogue/source/development/verify-history.jsonl";
       POLYLOGUE_VERIFY_HISTORY_PATH = "/realm/project/polylogue/source/development/verify-history.jsonl";
       SINNIX_ROOT = cfg.projects.entries.sinnix.path;
       RAWLOG_FILE = "${cfg.paths.journalRoot}/raw-log.md";

@@ -10,10 +10,6 @@ export LC_ALL=C
 # systemd unit and the login session; fall back to the module defaults so
 # this also runs sanely when invoked by hand.
 CORPUS="${SINNIX_WALLPAPER_CORPUS:-/realm/library/image/wallpaper}"
-# Existing login sessions may retain the retired default after activation.
-if [[ "$CORPUS" == /realm/library/media/wallpaper ]]; then
-  CORPUS=/realm/library/image/wallpaper
-fi
 WALLPAPER_DIR="${HOME}/wallpaper"
 # Last-resort source for the dark/light links while the curated corpus is
 # still being filled. The flat legacy stash is the one directory guaranteed

@@ -607,26 +607,6 @@ def test_pressure_tick_reports_the_decision(
     assert "pressure clear" in output.err
 
 
-def test_default_state_dir_moves_the_previous_directory_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
-) -> None:
-    from agentctl.config import default_state_dir
-
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
-    previous = tmp_path / "sinnixd"
-    (previous / "jobs").mkdir(parents=True)
-
-    assert default_state_dir() == tmp_path / "agentctl"
-    assert (tmp_path / "agentctl" / "jobs").is_dir()
-    assert not previous.exists()
-    assert "moved state" in capsys.readouterr().err
-
-    (previous / "jobs").mkdir(parents=True)
-    assert default_state_dir() == tmp_path / "agentctl"
-    assert previous.is_dir()
-    assert capsys.readouterr().err == ""
-
-
 def _manifest(config: Config, run_id: str) -> None:
     manifest.runs_dir(config).mkdir(parents=True, exist_ok=True)
     manifest.manifest_path(config, run_id).write_text(

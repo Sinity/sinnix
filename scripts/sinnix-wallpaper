@@ -7,10 +7,6 @@ set -euo pipefail
 export LC_ALL=C
 
 CORPUS="${SINNIX_WALLPAPER_CORPUS:-/realm/library/image/wallpaper}"
-# Existing login sessions may retain the retired default after activation.
-if [[ "$CORPUS" == /realm/library/media/wallpaper ]]; then
-  CORPUS=/realm/library/image/wallpaper
-fi
 WALLPAPER_DIR="${HOME}/wallpaper"
 NOCTALIA_BIN="${SINNIX_NOCTALIA_BIN:-noctalia}"
 
