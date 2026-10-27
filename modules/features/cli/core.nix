@@ -106,6 +106,8 @@ mkFeatureModule {
         };
         services.atd.enable = true;
 
+        sinnix.persistence.home.directories = [ ".local/share/pueue" ]; # queue state and logs
+
         # Disable GNOME keyring - using GPG agent for SSH key management instead
         services.gnome.gnome-keyring.enable = lib.mkForce false;
 

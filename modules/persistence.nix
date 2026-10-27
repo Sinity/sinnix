@@ -109,6 +109,10 @@ in
       } # GPG keyring + git signing key
       ".ssh" # SSH identity keys
       {
+        directory = ".local/share/pki";
+        mode = "0700";
+      } # NSS certificate and key databases
+      {
         directory = ".config/gh";
         mode = "0700";
       } # GitHub CLI OAuth tokens
@@ -159,6 +163,7 @@ in
       # Telemetry (irreplaceable)
       ".local/share/atuin" # shell history DB
       ".local/share/activitywatch" # AW SQLite DB
+      ".local/state/devkit" # history.db and its SQLite WAL/SHM companions
       ".config/activitywatch" # AW watcher configs (runtime-written)
       ".config/awatcher" # awatcher config.toml
 
@@ -179,6 +184,7 @@ in
       ".local/share/nix" # trusted-settings.json (cachix substituters)
 
       # UX state
+      ".config/dconf" # runtime-written desktop settings database
       ".config/yazi" # file manager config (not HM managed)
       ".local/share/zoxide" # jump database
       ".local/share/direnv" # allowlist + env cache
