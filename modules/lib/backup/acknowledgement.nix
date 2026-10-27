@@ -211,12 +211,15 @@ in
       fi
       exit "$failed"
     '';
-    # Nightly, with one retry for a maintenance pass holding the Borg lock.
-    # Persistent catches up once after a boot that missed the window. The
-    # 20-minute cadence ran each lane ~120 times in 8 days and kept the
-    # genome HDD from ever spinning down.
+    # Ten minutes after each six-hourly btrbk cut, with one retry for a
+    # maintenance pass holding the Borg lock. The drain keeps the newest
+    # archived snapshot, which pins everything deleted since it: drained
+    # nightly (f163aac9d) that was a day of build churn, and /realm ran out
+    # of unallocated space on 2026-10-27. Draining after every cut bounds the
+    # pin to one six-hour interval. The 20-minute cadence before that ran
+    # each lane ~120 times in 8 days.
     timer = {
-      onCalendar = "*-*-* 03:05,25:00";
+      onCalendar = "*-*-* 00,06,12,18:10,40:00";
       persistent = true;
     };
   })
