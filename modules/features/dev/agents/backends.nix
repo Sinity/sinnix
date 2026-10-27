@@ -77,6 +77,9 @@ let
     case "$(< /proc/self/cgroup)" in
       ${runtimeDefaults.agentContainedCasePattern}) ;;
       *)
+        # Agent CLIs rank just above Chrome's foreground renderers (200) as
+        # global OOM victims, and below the jobs and tools they start.
+        echo 300 >/proc/self/oom_score_adj 2>/dev/null || true
         exec ${pkgs.systemd}/bin/systemd-run --user --scope --quiet \
           --slice=agent-cli.slice -- "$0" "$@"
         ;;

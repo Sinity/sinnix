@@ -39,6 +39,9 @@ esac
 
 # The scope keeps this PID, stdio and signals, so Claude's timeouts and
 # kills still reach the command. Without a user manager to ask, run in place.
+# Agent tool commands rank above browser tabs (200-300) as global OOM
+# victims; raising one's own oom_score_adj needs no privilege.
+echo 800 >/proc/self/oom_score_adj 2>/dev/null || true
 if [ -S "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/systemd/private" ]; then
   exec systemd-run --user --scope --quiet --collect \
     --expand-environment=no \

@@ -705,6 +705,11 @@ def _service_command(
         "KillMode=control-group",
         "RemainAfterExit=yes",
         "IOAccounting=yes",
+        # Job units are the first thing the kernel should take when the host
+        # runs out of memory. At 0 they ranked below Chrome's tab renderers
+        # (200-300), and on 2026-10-27 a global OOM killed a tab while a
+        # benchmark held 2.9G.
+        "OOMScoreAdjust=900",
         f"WorkingDirectory={launch['working_directory']}",
         f"StandardOutput={'append' if stdout == log_path else 'file'}:{stdout}",
         f"StandardError=append:{log_path}",

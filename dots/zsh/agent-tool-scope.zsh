@@ -9,6 +9,8 @@ if [[ ! -o interactive && -r /proc/$$/cgroup &&
     shell_argv=("${(@0)$(</proc/$$/cmdline)}")
     # /proc cmdline terminates its final argument with NUL.
     [[ ${shell_argv[-1]} == '' ]] && shell_argv[-1]=()
+    # Rank above browser tabs (200-300) as a global OOM victim.
+    print 800 >/proc/self/oom_score_adj 2>/dev/null
     exec /run/current-system/sw/bin/systemd-run --user --scope --quiet --collect \
       --expand-environment=no \
       --unit="agent-tool-$$" --slice=agent-tool.slice -- "${shell_argv[@]}"
