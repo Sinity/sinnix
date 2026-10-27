@@ -218,6 +218,13 @@ let
             buildGoModule = pkgs.buildGo126Module;
           }).overrideAttrs
             (old: {
+              # Accepted upstream-patch exception (sinnix-emq2): stock bd at
+              # this pin has transactional HTTP version guards, but lacks
+              # the analytical snapshot/closure contract and transaction-
+              # observed conflict versions consumed by the gateway. Explicit
+              # BEADS_DIR context also fails outside Git. Retire these when
+              # equivalent stock reads, conflict evidence and standalone
+              # context are proven; see ../pkgs/beads/README.md for the audit.
               patches = (old.patches or [ ]) ++ [
                 ../pkgs/beads/owner-contracts.patch
                 ../pkgs/beads/standalone-context.patch
