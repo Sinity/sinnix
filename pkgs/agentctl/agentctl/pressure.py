@@ -24,6 +24,11 @@ from . import pueue
 from .config import PoolPolicy
 from .pueue import PueueError
 
+# Each pueue call in a tick, well inside the unit's 30 s TimeoutStartSec. A
+# tick that cannot reach pueue reports "unavailable" instead of being killed
+# mid-decision, which is what happened 14 times during the 10-18..10-27 stalls.
+TICK_CALL_TIMEOUT_SECONDS = 8
+
 MEMORY_FULL_FREEZE = 25.0
 RESUME_BELOW = 10.0
 CLOSE_ORDER = {
@@ -360,6 +365,22 @@ def tick(
     pools: Mapping[str, PoolPolicy] | None = None,
 ) -> dict[str, Any]:
     """Close or reopen one admission group. Never stops or stashes tasks."""
+    with pueue.call_deadline(TICK_CALL_TIMEOUT_SECONDS):
+        return _tick(
+            spool=spool,
+            pressure_root=pressure_root,
+            checkpoint=checkpoint,
+            pools=pools,
+        )
+
+
+def _tick(
+    *,
+    spool: Path | None,
+    pressure_root: Path,
+    checkpoint: Path | None,
+    pools: Mapping[str, PoolPolicy] | None,
+) -> dict[str, Any]:
     pressure = read_pressure(pressure_root)
     state = event_state(spool, checkpoint=checkpoint)
     checkpoint_path = _checkpoint_path(spool, checkpoint)

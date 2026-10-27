@@ -205,7 +205,10 @@ mkServiceModule {
         }
         {
           manager = "user";
-          resourceClass = "background";
+          # Not the yielding background class: at Nice 10 and IO priority 7 the
+          # tick starved during the very stalls it exists to answer, and timed
+          # out 14 times over the 10-18..10-27 boot.
+          resourceClass = "ordinary";
           # The pass pauses and resumes pueue groups through the pueue client.
           path = [ pkgs.pueue ];
           execStart = "${scriptPkgs.agentctl}/bin/agentctl pressure tick";

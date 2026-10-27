@@ -10,11 +10,30 @@ import hashlib
 import json
 import os
 import subprocess
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
 
 from .limits import CALL_TIMEOUT_SECONDS
+
+_deadline: ContextVar[float | None] = ContextVar("pueue_call_deadline", default=None)
+
+
+@contextmanager
+def call_deadline(seconds: float) -> Iterator[None]:
+    """Bound every pueue call made inside the block to ``seconds``.
+
+    A caller with its own watchdog (the minute pressure tick runs under a 30 s
+    unit timeout) must fail a wedged call cleanly before the watchdog kills it.
+    """
+    token = _deadline.set(seconds)
+    try:
+        yield
+    finally:
+        _deadline.reset(token)
+
 
 # pueue records the environment of the `pueue add` client into its state file,
 # which is world-readable. A daemon that added tasks with its own environment
@@ -159,6 +178,9 @@ def daemon_tag() -> str:
 
 
 def _run(arguments: Sequence[str], *, timeout: float = CALL_TIMEOUT_SECONDS) -> str:
+    bound = _deadline.get()
+    if bound is not None:
+        timeout = min(timeout, bound)
     try:
         completed = subprocess.run(
             ["pueue", *arguments],
