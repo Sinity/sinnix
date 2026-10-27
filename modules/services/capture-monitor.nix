@@ -37,21 +37,23 @@ let
       capture_bin="$1"
       capture_root="$2"
 
-      # A monitor that stops answering DDC (cable unplugged, panel off,
-      # input switched to a source with no i2c passthrough) must look like
-      # an outage, not a calm reading -- so a failed detect exits non-zero.
-      detect="$(ddcutil detect --brief 2>&1)"
-      echo "$detect" | grep -q '^Display 1' || {
-        echo "capture-monitor: ddcutil detect found no display" >&2
+      # One getvcp call for all four features: every ddcutil invocation
+      # re-probes the I2C buses, so the former detect plus four getvcp calls
+      # cost 2.5 s of CPU per poll against 0.6 s for this (measured
+      # 2026-10-27). A monitor that answers none of them (cable unplugged,
+      # panel off, input without i2c passthrough) is an outage, not a calm
+      # reading, so no VCP lines exits non-zero.
+      # --brief prints "VCP <code> C <cur> <max>" for continuous features
+      # (10, 12; $4 decimal) and "VCP <code> SNC x<hex>" for simple ones
+      # (D6, 60); lines come back sorted by code, so match on the code.
+      vcp="$(ddcutil getvcp 10 12 d6 60 --brief 2>/dev/null)"
+      echo "$vcp" | grep -q '^VCP ' || {
+        echo "capture-monitor: no DDC/CI answer from the display" >&2
         exit 1
       }
-
-      # --brief has two shapes depending on VCP feature type:
-      #   continuous (0x10, 0x12):     "VCP 10 C 50 100"   -- $4 is decimal
-      #   simple non-continuous (0xd6, 0x60): "VCP D6 SNC x01" -- $4 is hex
       read_vcp() {
         local raw
-        raw="$(ddcutil getvcp "$1" --brief 2>/dev/null | awk '{print $4}')"
+        raw="$(echo "$vcp" | awk -v code="$1" 'toupper($2) == toupper(code) {print $4}')"
         if [[ "$raw" == x* ]]; then
           printf '%d' "0x''${raw#x}"
         else
