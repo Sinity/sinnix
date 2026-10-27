@@ -714,7 +714,7 @@
           "nixpkgs"
         ],
         "polylogueSrc": [
-          "polylogue"
+          "lynchpin-polylogue"
         ]
       },
       "locked": {
@@ -730,6 +730,23 @@
         "ref": "master",
         "type": "git",
         "url": "https://github.com/Sinity/sinity-lynchpin.git"
+      }
+    },
+    "lynchpin-polylogue": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791670091,
+        "narHash": "sha256-I7TW3WiLiCXir/VvV+cn23AuMz/EGrXWjYWI5C4EdZs=",
+        "owner": "Sinity",
+        "repo": "polylogue",
+        "rev": "3ee97894b0fed6d614fcb658e823da77c1255639",
+        "type": "github"
+      },
+      "original": {
+        "owner": "Sinity",
+        "repo": "polylogue",
+        "rev": "3ee97894b0fed6d614fcb658e823da77c1255639",
+        "type": "github"
       }
     },
     "mk-shell-bin": {
@@ -1247,27 +1264,6 @@
         "type": "github"
       }
     },
-    "polylogue": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1791670091,
-        "narHash": "sha256-I7TW3WiLiCXir/VvV+cn23AuMz/EGrXWjYWI5C4EdZs=",
-        "owner": "Sinity",
-        "repo": "polylogue",
-        "rev": "3ee97894b0fed6d614fcb658e823da77c1255639",
-        "type": "github"
-      },
-      "original": {
-        "owner": "Sinity",
-        "repo": "polylogue",
-        "rev": "3ee97894b0fed6d614fcb658e823da77c1255639",
-        "type": "github"
-      }
-    },
     "polylogue-rewrite": {
       "inputs": {
         "nixpkgs": "nixpkgs_2"
@@ -1322,6 +1318,7 @@
         "intercept-bounce": "intercept-bounce",
         "lanzaboote": "lanzaboote",
         "lynchpin": "lynchpin",
+        "lynchpin-polylogue": "lynchpin-polylogue",
         "nix-android": "nix-android",
         "nix-on-droid": "nix-on-droid",
         "nix-vscode-extensions": "nix-vscode-extensions",
@@ -1330,7 +1327,6 @@
         "nixpkgs-ai": "nixpkgs-ai",
         "noctalia": "noctalia",
         "phone-app": "phone-app",
-        "polylogue": "polylogue",
         "polylogue-rewrite": "polylogue-rewrite",
         "scribe-tap": "scribe-tap",
         "sinex": "sinex",

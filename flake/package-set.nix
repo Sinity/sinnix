@@ -147,8 +147,6 @@ let
       };
     };
 
-  polylogueSrc = inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.default;
-
   externalPackages = rec {
     # recheck: when unblob's fs dependency supports Python 3.14 and setuptools 82.
     firmware-unblob =
@@ -305,27 +303,6 @@ let
         }/bin/lynchpin-mcp";
       };
     };
-
-    # Upstream sanitizes its Python entry points, including polylogue-hook.
-    # Expose those wrappers directly and keep each package's command set narrow.
-    polylogue-cli = pkgs.runCommand "polylogue-cli" { } ''
-      mkdir -p "$out/bin"
-      ln -s "${polylogueSrc}/bin/polylogue" "$out/bin/polylogue"
-      ln -s "${polylogueSrc}/bin/polylogue-mcp" "$out/bin/polylogue-mcp"
-      ln -s "${polylogueSrc}/bin/polylogue-hook" "$out/bin/polylogue-hook"
-    '';
-
-    polylogue-python = pkgs.runCommand "polylogue-python" { } ''
-      mkdir -p "$out/bin"
-      ln -s "${
-        inputs.polylogue.packages.${pkgs.stdenv.hostPlatform.system}.api-python
-      }/bin/python" "$out/bin/polylogue-python"
-    '';
-
-    polylogued = pkgs.runCommand "polylogued" { } ''
-      mkdir -p "$out/bin"
-      ln -s "${polylogueSrc}/bin/polylogued" "$out/bin/polylogued"
-    '';
 
     mcp-github = mkNodeCliPackage {
       pname = "mcp-github";

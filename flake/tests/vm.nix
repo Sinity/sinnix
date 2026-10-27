@@ -75,7 +75,7 @@ in
             machine.succeed(f"{as_user} systemctl --user is-active --quiet polylogue-live.service")
             # The CLI exits 6 until the daemon answers on its socket.
             machine.wait_until_succeeds(
-                f"{as_user} sh -c '/etc/profiles/per-user/sinity/bin/polylogue-live status --json > /tmp/polylogue-status.json'",
+                f"{as_user} sh -c '/etc/profiles/per-user/sinity/bin/polylogue status --json > /tmp/polylogue-status.json'",
                 timeout=120,
             )
             machine.succeed("jq -e 'type == \"object\"' /tmp/polylogue-status.json >/dev/null")

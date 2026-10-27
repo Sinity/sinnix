@@ -1,5 +1,5 @@
 # Codex session-lifecycle hooks (SessionStart/UserPromptSubmit/Stop):
-# session recall, and Polylogue's live hooks (`polylogue-live hook`): its
+# session recall, and Polylogue's live hooks (`polylogue hook`): its
 # session-start brief, takeovers of pasted session IDs and live state.
 # Plain helper (not a NixOS module) imported directly by mcp.nix's configFn;
 # the generated file is exposed via the mcp-servers.codexHooksSource option
@@ -20,7 +20,7 @@ jsonFormat.generate "codex-hooks.json" {
           }
           {
             type = "command";
-            command = "polylogue-live hook SessionStart --harness codex";
+            command = "polylogue hook SessionStart --harness codex";
           }
         ];
       }
@@ -30,7 +30,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue-live hook UserPromptSubmit --harness codex";
+            command = "polylogue hook UserPromptSubmit --harness codex";
           }
         ];
       }
@@ -50,7 +50,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue-live hook PreToolUse --harness codex";
+            command = "polylogue hook PreToolUse --harness codex";
           }
         ];
       }
@@ -60,7 +60,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue-live hook PostToolUse --harness codex";
+            command = "polylogue hook PostToolUse --harness codex";
           }
         ];
       }
@@ -70,7 +70,7 @@ jsonFormat.generate "codex-hooks.json" {
         hooks = [
           {
             type = "command";
-            command = "polylogue-live hook Stop --harness codex";
+            command = "polylogue hook Stop --harness codex";
           }
         ];
       }

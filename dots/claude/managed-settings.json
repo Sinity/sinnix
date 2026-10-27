@@ -59,7 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "polylogue-live hook PreToolUse",
+            "command": "polylogue hook PreToolUse",
             "timeout": 5
           }
         ]
@@ -70,7 +70,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "polylogue-live hook PostToolUse",
+            "command": "polylogue hook PostToolUse",
             "timeout": 5
           }
         ]
@@ -94,7 +94,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "polylogue-live hook Stop",
+            "command": "polylogue hook Stop",
             "timeout": 5
           }
         ]
@@ -115,7 +115,7 @@
           },
           {
             "type": "command",
-            "command": "polylogue-live hook SessionStart",
+            "command": "polylogue hook SessionStart",
             "timeout": 10
           }
         ]
@@ -126,7 +126,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "polylogue-live hook UserPromptSubmit",
+            "command": "polylogue hook UserPromptSubmit",
             "timeout": 10
           }
         ]
