@@ -5,7 +5,7 @@ Everything is backed up locally to Borg repositories on the HDD at
 
 ## Retention
 
-`borgbackup-maintenance` runs after the 00:10 drain at 03:50, retrying at
+`borgbackup-maintenance` runs after the nightly drain at 03:50, retrying at
 04:50 (each with up to five minutes of jitter). A completed pass is due again
 after 20 hours. Lock contention leaves
 it due for the next attempt; missed timer events are caught up after boot.
@@ -57,9 +57,9 @@ paths. Neither measurement establishes that a directory is disposable.
 
 | Source                   | How                                                                    | When                                                  | Repository                         |
 | ------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------- |
-| `/realm`                 | btrbk read-only snapshot, archived by the Borg job                     | snapshots 00/06/12/18:00, drained after each cut      | `borg-realm-v2`                    |
+| `/realm`                 | btrbk read-only snapshot, archived by the Borg job                     | snapshots 00/06/12/18:00, drain nightly 03:05         | `borg-realm-v2`                    |
 | `/persist`               | btrbk read-only snapshot, archived by the Borg job                     | same as `/realm`                                      | `borg-persist-v1`                  |
-| HDD genome workspace     | dedicated btrbk cut, archived independently of `/realm`                | six-hour cuts only when changed, drained with them    | `borg-realm-v2`, `genome-*` series |
+| HDD genome workspace     | dedicated btrbk cut, archived independently of `/realm`                | six-hour cuts only when changed, drained nightly      | `borg-realm-v2`, `genome-*` series |
 | The ephemeral root       | snapshot the initrd takes before each wipe                             | daily                                                 | `borg-root-snapshots-v1`           |
 | Sinex content stores     | read in place: the running store and the dated earlier one             | daily 05:40                                           | `borg-sinex-blobs-v1`              |
 | Sinex database dump      | `pg_dump` into `state/db-dumps/sinex`, archived with `/realm`          | dump daily at midnight                                | `borg-realm-v2`                    |
@@ -77,11 +77,11 @@ because coverage cannot waive what they drop. Root snapshots leave out
 `~/.cache`, `/root/.cache`, `/var/cache`, `/tmp` and every other mounted
 filesystem (`rootSnapshotExcludes` in `modules/lib/backup/acknowledgement.nix`).
 
-The drain runs ten minutes after each six-hourly cut (00:10, 06:10, 12:10,
-18:10), with a retry half an hour later for a maintenance pass holding the Borg
-lock; a boot that missed a window runs it once on startup. The drain keeps the
-newest archived snapshot, and that snapshot pins everything deleted after it,
-so the interval between drains bounds how much build churn stays allocated.
+The drain runs nightly at 03:05, with a retry at 03:25 for a maintenance pass
+holding the Borg lock; a boot that missed the window runs it once on startup.
+Snapshots are still cut every six hours, so a night's drain archives up to four
+queued cuts per source. The drain keeps the newest archived snapshot, which
+holds anything deleted after it (until the next night's drain releases it).
 When no new cuts are queued, the drain validates its existing acknowledgements
 and leaves an ongoing repository integrity check running. Pending or unavailable
 local handoff evidence requests native drain validation and can preempt a resumable

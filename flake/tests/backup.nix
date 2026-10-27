@@ -668,7 +668,7 @@ assert lib.assertMsg (
           && builtins.hasAttr "borgbackup-drain-coordinator" backupRuntimeEval.config.systemd.timers
           &&
             backupRuntimeEval.config.systemd.timers.borgbackup-drain-coordinator.timerConfig.OnCalendar
-            == "*-*-* 00,06,12,18:10,40:00"
+            == "*-*-* 03:05,25:00"
           && backupRuntimeEval.config.systemd.timers.btrbk.timerConfig.OnCalendar == "*-*-* 00,06,12,18:00:00"
           &&
             backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.Slice

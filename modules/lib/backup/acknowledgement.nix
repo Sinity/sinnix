@@ -211,15 +211,16 @@ in
       fi
       exit "$failed"
     '';
-    # Ten minutes after each six-hourly btrbk cut, with one retry for a
-    # maintenance pass holding the Borg lock. The drain keeps the newest
-    # archived snapshot, which pins everything deleted since it: drained
-    # nightly (f163aac9d) that was a day of build churn, and /realm ran out
-    # of unallocated space on 2026-10-27. Draining after every cut bounds the
-    # pin to one six-hour interval. The 20-minute cadence before that ran
-    # each lane ~120 times in 8 days.
+    # Nightly, with one retry for a maintenance pass holding the Borg lock;
+    # Persistent catches up once after a boot that missed the window. The
+    # drain keeps the newest archived snapshot, which holds what is deleted
+    # after it until the next night. On 2026-10-27 that was suspected of
+    # filling /realm and the drain briefly ran after every six-hourly cut,
+    # but pruning two day-old snapshots then freed ~0 GB: the fill was live
+    # build data and an async-discard backlog, so nightly stands. The
+    # 20-minute cadence before that ran each lane ~120 times in 8 days.
     timer = {
-      onCalendar = "*-*-* 00,06,12,18:10,40:00";
+      onCalendar = "*-*-* 03:05,25:00";
       persistent = true;
     };
   })
