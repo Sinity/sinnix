@@ -154,7 +154,14 @@ in
     systemd.services = {
       postgresql = {
         unitConfig.RequiresMountsFor = [ root ];
-        serviceConfig = runtimeServiceConfig "postgresql.service";
+        serviceConfig = runtimeServiceConfig "postgresql.service" // {
+          # With 16GB of WAL between 30-minute checkpoints, the shutdown and
+          # end-of-recovery checkpoints write gigabytes at IO priority 7 on
+          # the QLC drive. Under the module's 120 s, an activation on
+          # 2026-10-27 killed the shutdown checkpoint, then killed the
+          # recovery checkpoint at start and left the unit start-limit-hit.
+          TimeoutSec = lib.mkForce 1800;
+        };
       };
       sinexd = {
         unitConfig.RequiresMountsFor = [ root ];
