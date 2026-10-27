@@ -244,6 +244,17 @@ capture-xiaomi-cloud` syncs once; `sinnix xiaomi-cloud-login` prints a
   Runs overlap seven days; `agentctl job start sinnix xiaomi_cloud_backfill`
   covers 35 days after an outage.
 
+## Screenshots
+
+`sinnix phone screenshot [--out PATH]` saves to `Pictures/sinnix-phone/`
+by default. Pictures follows the declared `sinnix.paths.photosRoot`, also
+used by phone camera uploads; the subdirectory records the CLI producer.
+Use `--out /realm/tmp/work/shot.png` for an explicitly disposable capture.
+The command pulls into a temporary file beside the destination, validates
+PNG framing and checksums, then renames atomically. Failed pulls or validation
+leave the device staging copy intact and preserve any existing destination.
+Only a published screenshot permits deletion of device staging.
+
 ## Continuity
 
 - **Desktop → phone clipboard:** `sinnix phone clip-push` sends the desktop
@@ -254,7 +265,11 @@ capture-xiaomi-cloud` syncs once; `sinnix xiaomi-cloud-login` prints a
 - **Phone → desktop notifications:** the dispatcher shows each newly uploaded
   phone notification on the desktop, skipping ongoing ones.
 - **Desktop → phone notifications:** `sinnix-phone-dispatcher notify TITLE
-BODY [--route R]` queues one; nothing sends them automatically yet.
+BODY [--route R]` queues one in the existing durable inbox. AgentCTL job
+  outcomes and health alarm transitions (including scheduled-unit failures)
+  also queue notifications there. The phone drains them when reachable.
+  The sink suppresses the same key for five minutes, bounds local enqueueing
+  to two seconds, and silently skips failures without caller retries.
 
 Whether KDE Connect should take over commodity continuity is open in
 `sinnix-z8iq.5`; remaining continuity work is `sinnix-uyvt.5`.

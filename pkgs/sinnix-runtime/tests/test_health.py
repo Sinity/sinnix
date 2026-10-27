@@ -105,9 +105,11 @@ UNIT_FIXTURES: dict[str, dict[str, str]] = {
 def without_reminder_clock(document: dict) -> dict:
     """The state file minus `notified_at`, the daily-reminder clock."""
     return {
-        key: {k: v for k, v in value.items() if k != "notified_at"}
-        if isinstance(value, dict)
-        else value
+        key: (
+            {k: v for k, v in value.items() if k != "notified_at"}
+            if isinstance(value, dict)
+            else value
+        )
         for key, value in document.items()
     }
 
@@ -1073,3 +1075,20 @@ def test_an_unresolved_failure_is_repeated_daily(tmp_path: Path, monkeypatch) ->
         force_confirm=True,
     )
     assert notifications[-1][0] == "normal"
+
+
+def test_default_alarm_fans_out_to_phone_and_desktop(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        health, "notify_phone", lambda *a, **kw: calls.append(("phone", a, kw))
+    )
+    monkeypatch.setattr(
+        health, "notify_desktop", lambda *a, **kw: calls.append(("desktop", a, kw))
+    )
+    health.Emitter._notify("critical", "failed fixture.service", "exit-code")
+    assert calls[0] == (
+        "phone",
+        ("failed fixture.service", "exit-code"),
+        {"key": "health:failed fixture.service:exit-code"},
+    )
+    assert calls[1][0] == "desktop"

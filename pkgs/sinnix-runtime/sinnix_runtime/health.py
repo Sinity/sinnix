@@ -3,7 +3,7 @@ runtime surface for staleness, failure, and recovery.
 
 The hub server already reads the runtime inventory and already runs on a clock,
 so the sweep runs here, on its own 60s tick inside the hub server's loop, with a
-deduplicated transition ledger plus a desktop notification as its output. Two
+deduplicated transition ledger plus desktop and phone notifications. Two
 properties that follow from living here rather than as a separate root
 oneshot:
 
@@ -57,7 +57,7 @@ from typing import Any
 
 from sinnix_lib.atomic_json import modify_json, read_json
 from sinnix_lib.ledger import append_jsonl, utc_ts
-from sinnix_lib.notify import notify_desktop
+from sinnix_lib.notify import notify_desktop, notify_phone
 from sinnix_lib.paths import runtime_dir
 from sinnix_lib.systemd import show_units
 
@@ -376,6 +376,7 @@ class Emitter:
 
     @staticmethod
     def _notify(urgency: str, title: str, body: str) -> None:
+        notify_phone(title, body, key=f"health:{title}:{body}")
         notify_desktop(title, body, urgency=urgency, app_name=APP_NAME)
 
     def observe(self, key: str) -> None:

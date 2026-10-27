@@ -12,12 +12,14 @@
   nix,
   systemd,
   sinnix-lib,
+  sinnix-phone-dispatcher,
   ...
 }:
 let
   # Shared by the CLI wrapper and in-process consumers such as the gateway.
   # Importing this Python package does not execute its command-line wrapper.
   runtimeDependencies = [
+    sinnix-phone-dispatcher
     bash
     coreutils
     findutils

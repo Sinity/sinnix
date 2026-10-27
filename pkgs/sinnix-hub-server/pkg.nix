@@ -2,6 +2,7 @@
   lib,
   python3Packages,
   sinnix-lib,
+  sinnix-phone-dispatcher,
   sinnix-runtime,
   nodejs,
 }:
@@ -19,6 +20,7 @@ python3Packages.buildPythonApplication {
     sinnix-lib
     sinnix-runtime
   ];
+  makeWrapperArgs = [ "--prefix PATH : ${lib.makeBinPath [ sinnix-phone-dispatcher ]}" ];
   nativeCheckInputs = [
     python3Packages.pytest
     nodejs

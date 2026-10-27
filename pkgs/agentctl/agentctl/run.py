@@ -1044,6 +1044,14 @@ def _run(
             },
         )
 
+        from sinnix_lib.notify import notify_phone
+
+        notify_phone(
+            f"Agent job {record['outcome']}",
+            f"{launch['project_id']}:{launch['operation']} ({launch['job_id']})",
+            key=f"job:{launch['job_id']}:{launch['attempt']}",
+        )
+
     def refused(*, scratch_error: str | None = None) -> int:
         record: dict[str, Any] = {
             "outcome": "refused",

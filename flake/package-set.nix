@@ -75,6 +75,7 @@ let
   agentctlPackage = pkgs.callPackage ../pkgs/agentctl/pkg.nix {
     inherit (pkgs) pueue;
     sinnix-lib = externalPackages.sinnix-lib;
+    sinnix-phone-dispatcher = externalPackages.sinnix-phone-dispatcher;
     beads = externalPackages.beads;
   };
   agentGatewayPackage = pkgs.callPackage ../pkgs/sinnix-agent-gateway/pkg.nix {
@@ -374,7 +375,7 @@ let
     };
 
     sinnix-hub-server = pkgs.callPackage ../pkgs/sinnix-hub-server/pkg.nix {
-      inherit sinnix-lib sinnix-runtime;
+      inherit sinnix-lib sinnix-runtime sinnix-phone-dispatcher;
     };
 
     # Shared Python library (importable, not a CLI): atomic state, ledgers,

@@ -34,6 +34,15 @@ from agentctl.run import (
 from conftest import FakePueue
 
 
+@pytest.fixture(autouse=True)
+def phone_notifications(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "sinnix_lib.notify.notify_phone", lambda *a, **kw: calls.append((a, kw))
+    )
+    return calls
+
+
 def user_manager() -> None:
     """Skip unless this test can start a real transient service."""
     if not Path(f"/run/user/{os.getuid()}/bus").exists():
@@ -360,7 +369,9 @@ def fake_systemd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeSystemd
     return fake
 
 
-def test_a_successful_command_spools_its_start_and_finish(tmp_path: Path) -> None:
+def test_a_successful_command_spools_its_start_and_finish(
+    tmp_path: Path, phone_notifications
+) -> None:
     launch = write_launch(tmp_path, argv=["sh", "-c", "echo out; echo err >&2"])
 
     assert main([str(launch)]) == 0
@@ -373,6 +384,9 @@ def test_a_successful_command_spools_its_start_and_finish(tmp_path: Path) -> Non
     assert {event["kind"] for event in spooled} == {"queue-task"}
     assert spooled[0]["job_id"] == "job-a"
     assert spooled[1]["outcome"] == "success"
+    assert phone_notifications == [
+        (("Agent job success", "fixture:check (job-a)"), {"key": "job:job-a:1"})
+    ]
     assert outcome_of(tmp_path)["outcome"] == "success"
     outcome = outcome_path_for(tmp_path / "job-a.log")
     assert outcome.stat().st_mode & 0o777 == 0o600
@@ -1587,10 +1601,11 @@ def test_worker_exports_observed_native_provenance(
         "PROJECT_ID": "fixture",
         "OPERATION": "check",
         "CHECKOUT_HEAD": head,
-        "CHECKOUT_ID": "worktree-"
-        + hashlib.sha256(str(tmp_path).encode()).hexdigest()[:16]
-        if linked
-        else "default",
+        "CHECKOUT_ID": (
+            "worktree-" + hashlib.sha256(str(tmp_path).encode()).hexdigest()[:16]
+            if linked
+            else "default"
+        ),
     }
 
 
@@ -2149,9 +2164,9 @@ def test_scratch_cleanup_failure_is_reported_without_hiding_command_status(
     monkeypatch.setattr(run_module.shutil, "rmtree", denied)
     launch = write_launch(
         tmp_path,
-        argv=["agentctl-no-such-command"]
-        if missing_command
-        else ["sh", "-c", "exit 7"],
+        argv=(
+            ["agentctl-no-such-command"] if missing_command else ["sh", "-c", "exit 7"]
+        ),
         scratch={"kind": "tmpfs", "path": str(scratch)},
     )
     expected = REFUSED_EXIT_CODE if missing_command else 7

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Reach the phone over the tailnet — status, shell, screen mirror, media pull, clipboard push
-# runtimeInputs: bash python3 coreutils util-linux openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl tailscale debootstrap zip avahi @sinnix-phone-dispatcher @sinnix-remote-command @sinnix-phone-keyguard
+# runtimeInputs: xdg-user-dirs bash python3 coreutils util-linux openssh rsync android-tools scrcpy iputils jq wl-clipboard gawk ffmpeg curl tailscale debootstrap zip avahi @sinnix-phone-dispatcher @sinnix-remote-command @sinnix-phone-keyguard
 
 # Use authenticated wireless ADB discovered through Avahi; its port changes.
 # USB is the recovery route. `adb-restore` enables trusted wireless debugging.
@@ -1305,7 +1305,7 @@ sinnix-phone <command>
   chroot-verify verify architecture, compiler, network, packages, and dpkg state
   shell [cmd]   Termux shell over the tailnet (interactive when no cmd)
   mirror        scrcpy screen mirror/control over the tailnet
-  screenshot    grab the current screen to /realm/tmp/work/
+  screenshot [--out PATH]  save screen under Pictures/sinnix-phone by default
   logcat        pull the phone's system log and preserve BCR calls over adb;
                 this is the scheduled foreign-app/system drain
   ambient-audit decode every undecoded ambient chunk in the lake and record
@@ -1769,12 +1769,58 @@ mirror)
   exec scrcpy -s "$ADB_TARGET" --window-title "phone" "$@"
   ;;
 screenshot)
+  out=""
+  if [ "${1:-}" = "--out" ] && [ "$#" -eq 2 ]; then
+    out="$2"
+  elif [ "$#" -ne 0 ]; then
+    echo "usage: sinnix-phone screenshot [--out PATH]" >&2
+    exit 2
+  fi
+  # Pictures is rendered from sinnix.paths.photosRoot, also used by phone
+  # camera uploads. Keep the CLI producer visible in its own subdirectory.
+  if [ -z "$out" ]; then
+    pictures=$(xdg-user-dir PICTURES)
+    [ -n "$pictures" ] || { echo "Pictures directory unavailable" >&2; exit 1; }
+    out="$pictures/sinnix-phone/phone-$(date +%Y%m%d-%H%M%S-%N).png"
+  fi
   ensure_adb
-  mkdir -p /realm/tmp/work
-  out="/realm/tmp/work/phone-$(date +%Y%m%d-%H%M%S).png" # sinnix-path: output
-  adb_phone shell screencap -p /sdcard/.sinnix-shot.png
-  adb_phone pull /sdcard/.sinnix-shot.png "$out" >/dev/null
-  adb_phone shell rm -f /sdcard/.sinnix-shot.png
+  mkdir -p "$(dirname "$out")"
+  transfer=$(mktemp "$(dirname "$out")/.phone-shot.XXXXXXXX.png")
+  trap 'rm -f -- "$transfer"' EXIT
+  staged="/sdcard/.sinnix-shot-$(basename "$transfer")"
+  adb_phone shell screencap -p "$staged"
+  adb_phone pull "$staged" "$transfer" >/dev/null
+  python3 - "$transfer" <<'PNG'
+import struct
+import sys
+import zlib
+from pathlib import Path
+
+# Check the PNG framing and CRCs, including a real header and terminal IEND.
+def require(ok, message):
+    if not ok:
+        raise SystemExit(message)
+
+
+data = Path(sys.argv[1]).read_bytes()
+require(data[:8] == b"\x89PNG\r\n\x1a\n", "screenshot is not PNG")
+pos = 8
+kinds = []
+while pos < len(data):
+    size = struct.unpack(">I", data[pos:pos + 4])[0]
+    kind = data[pos + 4:pos + 8]
+    payload = data[pos + 8:pos + 8 + size]
+    crc = struct.unpack(">I", data[pos + 8 + size:pos + 12 + size])[0]
+    require(zlib.crc32(kind + payload) == crc, "invalid PNG checksum")
+    kinds.append(kind)
+    if kind == b"IHDR":
+        require(size == 13 and all(struct.unpack(">II", payload[:8])), "invalid PNG header")
+    pos += size + 12
+require(pos == len(data) and kinds and kinds[0] == b"IHDR" and b"IDAT" in kinds and kinds[-1] == b"IEND", "incomplete PNG")
+PNG
+  mv -fT -- "$transfer" "$out"
+  trap - EXIT
+  adb_phone shell rm -f "$staged"
   echo "$out"
   ;;
 logcat)
