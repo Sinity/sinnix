@@ -360,3 +360,27 @@ def test_native_http_guard_before_upload_and_transcription(recordings, monkeypat
     monkeypatch.setattr(socketserver, "ThreadingTCPServer", Server)
     assert module.cmd_serve(argparse.Namespace(socket=None, listen="127.0.0.1:0")) == 0
     assert statuses == [403] * 10
+
+
+def test_windowed_segments_move_back_to_recording_time(recordings):
+    module = recordings[0]
+    shifted = module._shifted(
+        [
+            {
+                "start": 1.5,
+                "end": 4.0,
+                "text": "a",
+                "words": [{"w": "a", "t": 1.5, "d": 0.2}],
+            }
+        ],
+        120.0,
+    )
+    assert shifted == [
+        {
+            "start": 121.5,
+            "end": 124.0,
+            "text": "a",
+            "words": [{"w": "a", "t": 121.5, "d": 0.2}],
+        }
+    ]
+    assert module._windows(Path("x.wav"), 60.0, Path(".")) == [(0.0, Path("x.wav"))]

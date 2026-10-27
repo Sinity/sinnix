@@ -203,25 +203,30 @@ def transcribe_file(path: Path, *, vad: bool = True) -> dict:
             f"--num-threads={THREADS}",
         ]
         if vad:
-            argv = ["sherpa-onnx-vad-with-offline-asr", f"--silero-vad-model={SILERO}",
-                    *common, str(wav)]
+            binary = ["sherpa-onnx-vad-with-offline-asr", f"--silero-vad-model={SILERO}"]
         else:
-            argv = ["sherpa-onnx-offline", *common, str(wav)]
+            binary = ["sherpa-onnx-offline"]
 
         started = dt.datetime.now()
-        proc = subprocess.run(argv, capture_output=True, text=True)
+        segments: list[dict] = []
+        errors: list[str] = []
+        for offset, window in _windows(wav, audio_seconds, Path(tmp)):
+            proc = subprocess.run([*binary, *common, str(window)], capture_output=True, text=True)
+            if proc.returncode != 0:
+                errors.append(f"window at {offset:.0f}s: " + (proc.stderr or "").strip()[-200:])
+                continue
+            segments.extend(_shifted(_parse_segments(proc.stdout, vad=vad), offset))
         elapsed = (dt.datetime.now() - started).total_seconds()
 
-    if proc.returncode != 0:
+    if errors and not segments:
         return {
             "schema": SCHEMA,
             "file": path.name,
-            "error": (proc.stderr or "").strip()[-400:],
+            "error": "; ".join(errors)[-400:],
             "audio_seconds": audio_seconds,
             "transcribed_at": utc_ts(),
         }
 
-    segments = _parse_segments(proc.stdout, vad=vad)
     speech_seconds = round(sum(s["end"] - s["start"] for s in segments), 2)
     return {
         "schema": SCHEMA,
@@ -232,8 +237,44 @@ def transcribe_file(path: Path, *, vad: bool = True) -> dict:
         "segments": segments,
         "text": " ".join(s["text"] for s in segments).strip(),
         "rtf": round(elapsed / audio_seconds, 4) if audio_seconds else None,
+        **({"window_errors": errors} if errors else {}),
         "transcribed_at": utc_ts(),
     }
+
+
+#: Longest stretch handed to the recogniser at once. The VAD binary does not
+#: honour --silero-vad-max-speech-duration (sherpa-onnx 1.13.3): continuous
+#: speech grew its buffer past 120 s, and Parakeet decoding that one region
+#: passed the unit's 3G MemoryMax. On 2026-10-27 a 5-minute phone ambient
+#: chunk OOM-killed every pass from 11:40, and since the pass stops on that
+#: kill, all 38 later phone recordings waited behind it.
+WINDOW_SECONDS = 60
+
+
+def _windows(wav: Path, audio_seconds: float, tmp: Path) -> list[tuple[float, Path]]:
+    """The recording as (offset, wav) windows of at most WINDOW_SECONDS."""
+    if audio_seconds <= WINDOW_SECONDS:
+        return [(0.0, wav)]
+    pattern = tmp / "window-%04d.wav"
+    subprocess.run(
+        ["ffmpeg", "-nostdin", "-v", "error", "-i", str(wav), "-f", "segment",
+         "-segment_time", str(WINDOW_SECONDS), "-c", "copy", "-y", str(pattern)],
+        check=True, capture_output=True,
+    )
+    parts = sorted(tmp.glob("window-*.wav"))
+    return [(index * WINDOW_SECONDS, part) for index, part in enumerate(parts)]
+
+
+def _shifted(segments: list[dict], offset: float) -> list[dict]:
+    """Segments and word stamps moved from window time to recording time."""
+    if not offset:
+        return segments
+    for segment in segments:
+        segment["start"] = round(segment["start"] + offset, 2)
+        segment["end"] = round(segment["end"] + offset, 2)
+        for word in segment.get("words") or []:
+            word["t"] = round(word["t"] + offset, 2)
+    return segments
 
 
 def _parse_segments(stdout: str, *, vad: bool) -> list[dict]:
