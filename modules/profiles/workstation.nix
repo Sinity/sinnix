@@ -297,28 +297,27 @@ in
         services.earlyoom = {
           enable = true;
           enableNotifications = true;
-          # earlyoom acts only when memory AND swap are below threshold AND the
-          # machine is actually stalling (--mem-psi-min, sinnix patch). The
-          # memory gate is a % of physical MemTotal (overlay patch), ~1 GiB
-          # here. -m3 is the emergency floor for true exhaustion, not the first
-          # responder — PSI-scoped oomd (below) and the swap tiers handle
-          # pressure first. As first responder earlyoom produces kill storms.
-          freeMemThreshold = 3;
-          # Free-swap minimum: fire only once swap is genuinely nearly exhausted
-          # (<10% free ≈ 1.2 GiB of 12 GiB zram). The former 50 never bound — swap sits
-          # above 50% used for most of any active day, so the intended
-          # memory-AND-swap conjunction had collapsed to a bare free-memory
-          # trigger (2026-08-18 incident taxonomy; 98-day record).
+          # Last resort when swap is nearly full AND the host stalls. MemAvailable
+          # includes reclaimable cache, so -m3 could veto kills with RAM and zram
+          # full while memory.high held jobs in reclaim below every hard limit.
+          # -m100 deliberately removes that low-available-memory veto: -s10 and
+          # --mem-psi-min 10 are the meaningful conjunction. Cold swapped pages
+          # alone do not cause kills; zram reclaim stalls register as memory PSI.
+          # Scoped oomd targets job/tool descendants; this global fallback
+          # also covers pressure outside those trees and swap-ineligible jobs.
+          freeMemThreshold = 100;
+          # SIGTERM below 10% free swap (~1.2 GiB of 12 GiB zram), SIGKILL
+          # below the default half (5%) if SIGTERM cannot recover the host.
           freeSwapThreshold = 10;
           extraArgs = [
-            # No --prefer regex: at the -m3 floor oom_score-based choice is fine,
+            # No --prefer regex: at the stalled-swap floor oom_score ranks victims,
             # and slice-scoped oomd handles "kill the runaway build, not the
             # desktop" at cgroup granularity. Only recovery-critical surfaces are
             # avoided — agents stay eligible victims, since process-name avoidance
             # is not a containment boundary (per-scope MemoryHigh/Max is).
             "--avoid"
             earlyoomAvoidPattern
-            # At the memory-and-swap emergency floor, sustained full-memory PSI
+            # At the near-full-swap emergency floor, full-memory PSI
             # above 10 already makes the graphical session unreliable.
             "--mem-psi-min"
             "10"
@@ -330,9 +329,10 @@ in
           after = [ "swap.target" ];
         };
 
-        # systemd-oomd is the first-line kill policy: sacrificial slices
-        # Sacrificial workload slices carry their own pressure policy; earlyoom
-        # remains the global emergency floor at -m3.
+        # systemd-oomd is the first-line kill policy. Only sacrificial job/tool
+        # trees opt into pressure/swap monitoring in runtime-defaults.nix;
+        # coordinator and desktop trees stay outside their candidate sets.
+        # earlyoom covers global near-full swap with actual memory stalls.
         systemd.oomd.enable = true;
 
         # Devshell/agent scratch belongs on /realm NVMe, not the RAM-backed /tmp

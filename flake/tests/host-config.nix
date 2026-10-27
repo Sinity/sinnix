@@ -15,6 +15,45 @@
       journalSource = host.systemd.services.ensure-journal-source;
     in
     {
+      # Check the rendered host policy as well as the registry contract in
+      # agent-resource-policy: a renderer or profile override must not silently
+      # drop monitoring or enroll the desktop/coordinator as kill candidates.
+      checks.workstation-oom-policy =
+        let
+          inherit (inputs.nixpkgs) lib;
+          slices = host.systemd.user.units;
+          plane = slices."agent-ctl.slice".text;
+          tools = slices."agent-tool.slice".text;
+          earlyoomArgs = host.systemd.services.earlyoom.environment.EARLYOOM_ARGS;
+          unmonitored =
+            text:
+            !(lib.hasInfix "ManagedOOMMemoryPressure=kill" text) && !(lib.hasInfix "ManagedOOMSwap=kill" text);
+        in
+        assert lib.all (line: lib.hasInfix line plane) [
+          "ManagedOOMMemoryPressure=kill"
+          "ManagedOOMMemoryPressureLimit=40%"
+          "ManagedOOMMemoryPressureDurationSec=15s"
+          "ManagedOOMSwap=kill"
+        ];
+        assert lib.hasInfix "ManagedOOMSwap=kill" tools;
+        assert lib.all (name: unmonitored slices."${name}.slice".text) [
+          "agent"
+          "agent-cli"
+          "app"
+          "session"
+          "desktop"
+          "desktop-shell"
+        ];
+        assert !host.systemd.oomd.enableRootSlice;
+        assert !host.systemd.oomd.enableSystemSlice;
+        assert !host.systemd.oomd.enableUserSlices;
+        assert lib.all (arg: lib.hasInfix arg earlyoomArgs) [
+          "-m100"
+          "-s10"
+          "--mem-psi-min 10"
+        ];
+        pkgs.runCommand "workstation-oom-policy-check" { } "touch $out";
+
       checks.cargo-cache =
         let
           unit = host.systemd.services.sinnix-cargo-cache;

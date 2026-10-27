@@ -450,6 +450,7 @@ in
             && budget ? MemorySwapMax
             && budget ? TasksMax
             && !(budget ? ManagedOOMMemoryPressure)
+            && !(budget ? ManagedOOMSwap)
             &&
               sliceBytes budget.MemoryMax
               + sliceBytes userSlices.app.MemoryMin
@@ -465,8 +466,24 @@ in
             && sliceBytes managedWork.MemoryHigh < sliceBytes managedWork.MemoryMax
             && sliceBytes managedWork.MemoryMax <= sliceBytes budget.MemoryMax
             && sliceBytes managedWork.MemorySwapMax <= sliceBytes budget.MemorySwapMax
-            && !(managedWork ? ManagedOOMSwap)
-            && !(managedWork ? ManagedOOMMemoryPressure)
+            && managedWork.ManagedOOMSwap == "kill"
+            && managedWork.ManagedOOMMemoryPressure == "kill"
+            && managedWork.ManagedOOMMemoryPressureLimit == "40%"
+            && managedWork.ManagedOOMMemoryPressureDurationSec == "15s"
+            && userSlices.agent-tool.ManagedOOMSwap == "kill"
+            && userSlices.agent-tool.ManagedOOMMemoryPressure == "kill"
+            # These trees have no monitored ancestor either: no oomd candidate
+            # may contain the coordinator or basic desktop interactivity.
+            &&
+              lib.all
+                (name: !(userSlices.${name} ? ManagedOOMMemoryPressure) && !(userSlices.${name} ? ManagedOOMSwap))
+                [
+                  "agent-cli"
+                  "app"
+                  "session"
+                  "desktop"
+                  "desktop-shell"
+                ]
             # Interactive agents and whatever they shell out to are bounded:
             # they throttle before swapping, and never carry a pressure kill
             # that would take the coordinator.
@@ -480,8 +497,8 @@ in
             && !(poolSlices.agent-ctl-agent ? ManagedOOMMemoryPressure)
             && !(poolSlices.agent-ctl-agent ? ManagedOOMSwap)
             && poolSlices.agent-ctl-agent ? MemoryHigh
-            # The parent of the pytest leaves carries no pressure kill: its PSI
-            # is their aggregate, so a busy sibling would kill the corpus.
+            # No extra pytest-parent trigger; plane-wide monitoring still
+            # makes every eligible test job a candidate under sustained thrash.
             && !(poolSlices.agent-ctl-pytest ? ManagedOOMMemoryPressure)
             && poolSlices.agent-ctl-pytest.CPUWeight == 200
             && poolSlices.agent-ctl-pytest.IOWeight == 200
