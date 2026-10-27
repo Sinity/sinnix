@@ -818,6 +818,12 @@ let
     "project/sinnix/repo/.venv"
     "project/sinity-lynchpin/repo/.venv"
     "project/yt-polisher/repo/.venv"
+    # Polylogue's index.db is "everything parsed and derived", rebuilt from
+    # archive.db when deleted (polylogue docs/architecture.md). At 16 GB and
+    # rewritten continuously, it was reread by every realm drain.
+    "state/polylogue-live/data/polylogue/index.db"
+    "state/polylogue-live/data/polylogue/index.db-wal"
+    "state/polylogue-live/data/polylogue/index.db-shm"
     "state/stashbox/analysis-cache"
     "state/stashbox/generated"
     "state/stashbox/gpu-venv"
@@ -916,6 +922,12 @@ let
     "project/sinnix/repo/.venv"
     "project/sinity-lynchpin/repo/.venv"
     "project/yt-polisher/repo/.venv"
+    # Polylogue's index.db is "everything parsed and derived", rebuilt from
+    # archive.db when deleted (polylogue docs/architecture.md). At 16 GB and
+    # rewritten continuously, it was reread by every realm drain.
+    "state/polylogue-live/data/polylogue/index.db"
+    "state/polylogue-live/data/polylogue/index.db-wal"
+    "state/polylogue-live/data/polylogue/index.db-shm"
     "state/stashbox/analysis-cache"
     "state/stashbox/generated"
     "state/stashbox/gpu-venv"
