@@ -24,7 +24,7 @@ def test_full_observations_survive_restart_and_share_only_payload_bytes(tmp_path
     for index in range(2):
         responses.append(
             service.record(
-                action="sessions.orchestration",
+                action="mcp.call",
                 owner="polylogue",
                 route="owner",
                 outcome="ok",

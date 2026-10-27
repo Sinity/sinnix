@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Literal, Mapping
 
 import anyio
 from pydantic import Field, model_validator
@@ -20,14 +20,7 @@ if TYPE_CHECKING:
     from ..runtime import Runtime
 
 
-#: What the gateway can say about one owner's product. The four states are
-#: the owner's own terminal-outcome vocabulary, not a gateway invention:
-#: Polylogue decides {ok, empty, degraded, error} once at its operation
-#: boundary, and `degraded` deliberately outranks `empty` so that zero rows
-#: behind a named gap is never reported as an empty scope. Collapsing the
-#: middle two into `available` here erases exactly the distinction that
-#: contract exists to preserve -- it manufactures an authoritative "nothing
-#: to report" out of an answer the owner said was gap-shaped.
+# Owner outcomes distinguish complete empty results from unavailable evidence.
 Availability = Literal["available", "degraded", "empty", "unavailable"]
 
 #: The owner outcome tokens that mean the owner produced no valid answer.
@@ -42,41 +35,10 @@ OUTCOME_AVAILABILITY: dict[str, Availability] = {
     "partial": "degraded",
     "empty": "empty",
 }
-#: Worst-first, for composing several products into one.
-_AVAILABILITY_RANK = ("unavailable", "degraded", "empty", "available")
-
-
-def combine_availability(parts: Sequence[Availability]) -> Availability:
-    """The availability of an envelope that holds several owner products.
-
-    This mirrors the owners' own rule rather than inventing a second one: a
-    composite is only as honest as its worst part, so one part behind a named
-    gap makes the whole answer `degraded` even though the others carried real
-    data. `empty` survives only when every part completed over its scope and
-    found nothing, and `unavailable` only when nothing could answer at all.
-    """
-    states = set(parts)
-    if not states:
-        return "empty"
-    if states == {"unavailable"}:
-        return "unavailable"
-    if states & {"unavailable", "degraded"}:
-        return "degraded"
-    if states == {"empty"}:
-        return "empty"
-    return "available"
 
 
 def _component_failures(data: Mapping[str, Any]) -> dict[str, str]:
-    """The owner's per-component gap names, from the product or its result.
-
-    An owner that reports no terminal outcome can still name which of its
-    components failed (Polylogue's ContextPreamble carries
-    ``component_failures`` and no outcome field at all). Those names are the
-    only gap signal such a payload has, and dropping them is how a context
-    answer assembled from a failed lineage lookup reached a caller labelled
-    "ok + available".
-    """
+    """Preserve named component gaps from the owner product or its result."""
     for holder in (data, data.get("result"), data.get("preamble")):
         if not isinstance(holder, Mapping):
             continue
@@ -216,46 +178,6 @@ async def owner_product(
     )
 
 
-class OrchestrationInput(RequestControls):
-    session_refs: list[str] = Field(min_length=1, max_length=20)
-
-
-class OrchestrationResult(GatewayModel):
-    projection_version: int = 1
-    sessions: list[OwnerProduct]
-    next_actions: list[str] = Field(
-        default_factory=lambda: ["sessions.list", "context.compose"]
-    )
-
-
-async def _orchestration(
-    runtime: Runtime, inp: OrchestrationInput
-) -> OrchestrationResult:
-    sessions = []
-    for reference in dict.fromkeys(inp.session_refs):
-        if not reference.startswith("session:") or len(reference) > 8192:
-            raise ProtocolError(
-                "invalid_request",
-                "session_refs must contain canonical Polylogue session: references",
-            )
-        sessions.append(
-            await owner_product(
-                runtime,
-                "polylogue",
-                "query",
-                {
-                    "projection": "session-operations",
-                    "session_operation": {
-                        "operation": "sessions.orchestration",
-                        "ref": reference,
-                    },
-                },
-                deadline_at=inp.deadline_at,
-            )
-        )
-    return OrchestrationResult(sessions=sessions)
-
-
 class HistoricalSelector(GatewayModel):
     revision: str | None = Field(default=None, min_length=1, max_length=512)
     timestamp: str | None = Field(default=None, min_length=1, max_length=64)
@@ -284,7 +206,7 @@ class CampaignResult(GatewayModel):
         default_factory=lambda: [
             "beads.get",
             "beads.query",
-            "sessions.orchestration",
+            "mcp.tools",
             "context.compose",
         ]
     )
@@ -331,24 +253,6 @@ ACTIONS = (
             Example(
                 title="Campaign evidence",
                 input={"project": {"project": "sinnix"}, "roots": ["sinnix-1"]},
-            ),
-        ),
-    ),
-    Action(
-        name="sessions.orchestration",
-        family=VerbFamily.QUERY,
-        owner="polylogue",
-        summary="Read structured session topology, launches, observed model segments and usage from Polylogue.",
-        Input=OrchestrationInput,
-        Output=OrchestrationResult,
-        handler=_orchestration,
-        resource_kinds=(),
-        next_actions=("sessions.list", "context.compose"),
-        documentation="Native parent, model and token fields remain unknown when absent from stored evidence. Each owner product retains its coverage, provenance and ingestion watermark.",
-        examples=(
-            Example(
-                title="Session orchestration",
-                input={"session_refs": ["session:example"]},
             ),
         ),
     ),

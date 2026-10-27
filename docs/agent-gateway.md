@@ -29,7 +29,7 @@ operation. In ChatGPT, open Settings > Personalization > Custom Instructions,
 paste the block below and save. Account settings require this operator action.
 
 <!-- orientation:start -->
-For machine, project, work, agent, status, continue or what-next requests, discover enabled Sinnix actions with gateway.catalog and inspect schemas. Use context.compose for the intent and sessions.orchestration to find current work without remembered IDs; follow refs with campaign.progress and events.tail as relevant. Verify a harmless direct read before proposing another executor or reconnecting. Separate session activity, runtime jobs, task ownership, delivery and verification.
+For machine, project, work, agent, status, continue or what-next requests, discover enabled Sinnix actions with gateway.catalog and inspect schemas. Use context.compose for the intent and mcp.tools with server=polylogue to discover session query, read and status tools; follow refs with campaign.progress and events.tail as relevant. Verify a harmless direct read before proposing another executor or reconnecting. Separate session activity, runtime jobs, task ownership, delivery and verification.
 
 Separate observation time from source data dates and index watermarks. Distinguish empty data, missing coverage, policy denial and transport failure. For degraded composition or stale indexes, follow source refs and read the owner directly. If typed tools are missing, discover exact actions and use gateway.read, gateway.change or gateway.run with the action name and ordinary input in arguments. Use a local executor only for the exact missing direct capability; respect denials.
 
@@ -74,11 +74,7 @@ sinnix-agent-gateway catalog <action> --schema     # one action, live
 The family (`status`, `catalog`, `query`, `get`, `context`, `events`, `wait`,
 `change`, `operate`, `run`) sets the MCP annotations and the effect class.
 
-Session reads use `sessions.list`, `sessions.search`, `sessions.read` and the
-explicit `sessions.raw.*` actions. Original memory sources use
-`memory.raw.search` and `memory.raw.get`. Their input fields come from the
-Polylogue operation contract; native continuations, coverage and source guards
-remain in `owner_product`. These actions take their fields at the top level.
+Session search, reads and status use the rewrite's MCP tools through `mcp.tools` and `mcp.call`. Discover `server=polylogue`, then pass arguments matching the returned input schema. The gateway preserves the upstream response, references and cursors; read-only admission comes from the owner's tool annotations. For example, call `query` with `{"query":"messages where written_by:human hydrus"}`, then follow the returned message reference with `read` using its discovered schema.
 
 - **Reads** are audited and side-effect free.
 - **Effects** (`change`, `operate`, `run`) require an `idempotency_key` and
@@ -224,15 +220,14 @@ returns only new log bytes.
 - **Provenance.** Write `split_from` or `residual_of` as metadata on the new
   task (`bd update <id> --set-metadata 'split_from=<ref>'`).
   `discovered-from` and `supersedes` are native dependency edges.
-- **Sessions.** `sessions.*`, `timeline.query` and `memory.raw.search`
-  delegate to Polylogue.
+- **Sessions.** `mcp.tools` discovers Polylogue products; `mcp.call` invokes them.
 - **Context and progress.** `context.compose`, `projects.context` and
   `campaign.progress` delegate to Lynchpin.
 - **Machine.** `machine.snapshot` and `machine.query` delegate to
   `sinnix-observe`. `machine.prepare` and `machine.operate` send typed requests
   to the hub server.
 
-The checked-in Beads, Polylogue and Lynchpin input models are generated from the
+The checked-in Beads and Lynchpin input models are generated from the
 owners' published contracts (`generate_beads_inputs.py`,
 `generate_owner_inputs.py`); package checks compare them with the pinned
 sources.

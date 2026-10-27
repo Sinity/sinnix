@@ -1,9 +1,4 @@
-# CLI feature runtime checks: Polylogue CLI wrapper and task-tracking
-# (taskwarrior/timewarrior) integration.
-#
-# cli-polylogue-runtime sits in the default `checks` tier: it evaluates the
-# cli.polylogue feature module through the full sinnix config tree and only
-# smoke-tests `--help` output with a minimal coreutils/gnugrep closure.
+# CLI feature runtime checks over the evaluated Home Manager packages.
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -50,28 +45,18 @@ in
         assertions = _config: [ ];
       };
 
-      # Provably fails when: the polylogue CLI or its python wrapper drops out
-      # of the feature's package set (verified by removing polylogue-cli), or
-      # a documented subcommand stops being reachable.
       cliPolylogueRuntime = mkHmRuntimeCheck system {
         name = "cli-polylogue-runtime-check";
         evaluated = evalTestSpec system cliPolylogueRuntimeSpec;
-        homePackages = [
-          "polylogue-cli"
-          "polylogue-python"
-        ];
-        nativeBuildInputs = [
-          pkgs.coreutils
-          pkgs.gnugrep
-        ];
+        homePackages = [ "polylogue" ];
+        nativeBuildInputs = [ pkgs.gnugrep ];
         script = ''
-          polylogue --help | grep -q '^Usage: polylogue'
-          polylogue find --help | grep -q 'Search the archive'
-          polylogue config --help | grep -q 'Show resolved Polylogue configuration'
-          polylogue-python - <<'EOF'
-          import sys
-          print(sys.executable)
-          EOF
+          polylogue --help > help
+          grep -q 'Usage: polylogue' help
+          polylogue read --help > read-help
+          grep -q 'Read one session' read-help
+          polylogue mcp --help > mcp-help
+          grep -q 'MCP' mcp-help
         '';
       };
       # Provably fails when: the rendered ssh config stops isolating the
@@ -261,27 +246,43 @@ in
             EOF
             touch "$out"
           '';
-        cli-lynchpin-python-runtime = pkgs.runCommand "cli-lynchpin-python-runtime" { } ''
-          mkdir poisoned
-          printf 'raise RuntimeError("foreign Python path was inherited")\n' > poisoned/duckdb.py
-          export PYTHONPATH="$PWD/poisoned"
-          export _PYTHON_SYSCONFIGDATA_NAME=foreign_sysconfig
-          export _PYTHON_HOST_PLATFORM=foreign_platform
-          ${sinnixScriptRegistry.packageSet.lynchpin-python}/bin/lynchpin-python - <<'EOF'
-          import os
-          import sys
-          import duckdb
-          import polylogue.api.sync
-          import polylogue.analysis.archive
-          import lynchpin
-          assert sys.version_info[:2] == (3, 14)
-          assert "site-packages" in lynchpin.__file__
-          assert not any(name in os.environ for name in (
-              "PYTHONPATH", "_PYTHON_SYSCONFIGDATA_NAME", "_PYTHON_HOST_PLATFORM"
-          ))
-          EOF
-          touch "$out"
-        '';
+        cli-lynchpin-python-runtime =
+          let
+            cli = inputs.self.nixosConfigurations.sinnix-prime.config.system.build.polylogueCli;
+            privatePython = inputs.lynchpin.packages.${system}.api-python;
+          in
+          pkgs.runCommand "cli-lynchpin-python-runtime"
+            {
+              nativeBuildInputs = [ cli ];
+              EXPECTED_POLYLOGUE = "${cli}/bin/polylogue";
+            }
+            ''
+              export PATH="${privatePython}/bin:${cli}/bin:$PATH"
+              mkdir poisoned
+              printf 'raise RuntimeError("foreign Python path was inherited")\n' > poisoned/duckdb.py
+              export PYTHONPATH="$PWD/poisoned"
+              export _PYTHON_SYSCONFIGDATA_NAME=foreign_sysconfig
+              export _PYTHON_HOST_PLATFORM=foreign_platform
+              ${sinnixScriptRegistry.packageSet.lynchpin-python}/bin/lynchpin-python - <<'EOF'
+              import os
+              import sys
+              import shutil
+              import subprocess
+              from pathlib import Path
+              import duckdb
+              import polylogue.api.sync
+              import polylogue.analysis.archive
+              import lynchpin
+              assert sys.version_info[:2] == (3, 14)
+              assert "site-packages" in lynchpin.__file__
+              assert Path(shutil.which("polylogue")).resolve() == Path(os.environ["EXPECTED_POLYLOGUE"]).resolve()
+              subprocess.run(["polylogue", "read", "--help"], check=True, stdout=subprocess.DEVNULL)
+              assert not any(name in os.environ for name in (
+                  "PYTHONPATH", "_PYTHON_SYSCONFIGDATA_NAME", "_PYTHON_HOST_PLATFORM"
+              ))
+              EOF
+              touch "$out"
+            '';
       };
 
       checks = {

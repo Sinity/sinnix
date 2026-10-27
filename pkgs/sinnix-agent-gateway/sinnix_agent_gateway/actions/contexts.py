@@ -13,7 +13,7 @@ from ..locators import JobLocator, ProjectLocator, project_ref
 from ..payloads import canonical_size
 from ..results import ProtocolError
 from ..schemas import GatewayModel
-from .products import Availability, HistoricalSelector, combine_availability
+from .products import Availability, HistoricalSelector
 
 if TYPE_CHECKING:
     from ..runtime import Runtime
@@ -24,7 +24,6 @@ Intent = Literal[
     "job.review",
     "incident",
     "campaign.progress",
-    "session.orchestration",
     "verification.regression",
     "project.trajectory",
 ]
@@ -38,7 +37,6 @@ class ComposeInput(RequestControls):
     )
     job: JobLocator | None = Field(default=None, description="Required for job.review.")
     roots: list[str] = Field(default_factory=list, max_length=100)
-    session_refs: list[str] = Field(default_factory=list, max_length=20)
     at: HistoricalSelector | None = None
     baseline: HistoricalSelector | None = None
     refresh_id: str | None = None
@@ -52,8 +50,6 @@ class ComposeInput(RequestControls):
             raise ValueError(f"{self.intent} takes project and no job")
         if self.intent == "campaign.progress" and not self.roots:
             raise ValueError("campaign.progress requires explicit roots")
-        if self.intent == "session.orchestration" and not self.session_refs:
-            raise ValueError("session.orchestration requires session_refs")
         return self
 
 
@@ -96,9 +92,8 @@ class ComposedContext(GatewayModel):
 
 _NEXT_ACTIONS: dict[str, list[str]] = {
     "campaign.progress": ["campaign.progress", "beads.get"],
-    "session.orchestration": ["sessions.orchestration", "sessions.list"],
     "verification.regression": ["campaign.progress", "jobs.get"],
-    "project.trajectory": ["campaign.progress", "sessions.list"],
+    "project.trajectory": ["campaign.progress", "mcp.tools"],
     "project.overview": ["operations.run", "jobs.list", "events.tail"],
     "project.triage": ["operations.run", "jobs.list", "events.tail"],
     "job.review": ["jobs.logs", "jobs.retry", "jobs.cancel"],
@@ -116,10 +111,8 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
     from ..contexts import source_revision
     from .products import (
         CampaignInput,
-        OrchestrationInput,
         OwnerProduct,
         _campaign,
-        _orchestration,
         owner_product,
     )
 
@@ -170,42 +163,6 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
                 ),
             )
         ).product
-    elif inp.intent == "session.orchestration":
-        value = await _orchestration(
-            runtime,
-            OrchestrationInput(
-                session_refs=inp.session_refs,
-                deadline_at=inp.deadline_at,
-            ),
-        )
-        # The composite keeps its parts' worst state instead of asking only
-        # whether any part was available: one session behind a named gap makes
-        # the whole orchestration answer gap-shaped, and every part reporting
-        # an empty scope is an empty answer, not an available one.
-        availability = combine_availability(
-            [item.availability for item in value.sessions]
-        )
-        product = OwnerProduct(
-            owner="polylogue",
-            availability=availability,
-            reason=next(
-                (
-                    item.reason
-                    for item in value.sessions
-                    if item.availability != "available" and item.reason
-                ),
-                "Requested session products are unavailable"
-                if availability == "unavailable"
-                else None,
-            ),
-            data=value.model_dump(),
-            source_ref="sinnix://mcp/polylogue",
-            component_failures={
-                name: detail
-                for item in value.sessions
-                for name, detail in item.component_failures.items()
-            },
-        )
     elif inp.intent == "incident":
         value = await anyio.to_thread.run_sync(
             runtime.observe.machine_query, "overview"
@@ -386,7 +343,7 @@ ACTIONS: tuple[Action, ...] = (
         name="context.compose",
         family=VerbFamily.CONTEXT,
         owner="context",
-        summary="Compose bounded project, job, incident, campaign, orchestration, regression or trajectory evidence from its owners.",
+        summary="Compose bounded project, job, incident, campaign, regression or trajectory evidence from its owners.",
         Input=ComposeInput,
         Output=ComposedContext,
         handler=_compose,

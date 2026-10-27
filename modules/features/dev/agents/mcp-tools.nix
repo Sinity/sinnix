@@ -67,9 +67,7 @@ let
   };
   mcpPolylogueBin = pkgs.writeShellScriptBin "mcp-polylogue" ''
     set -euo pipefail
-    # The configured service data directory is the sole archive-root owner.
-    export POLYLOGUE_ARCHIVE_ROOT=${lib.escapeShellArg config.sinnix.services.polylogue.dataDir}
-    exec ${scriptPkgs.polylogue-cli}/bin/polylogue-mcp "$@"
+    exec ${config.system.build.polylogueCli}/bin/polylogue mcp "$@"
   '';
   # The user-facing files stay tiny out-of-store launchers, while the gateway
   # consumes the identical store-backed commands directly.
