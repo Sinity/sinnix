@@ -40,7 +40,7 @@ import tempfile
 import threading
 import time
 from contextvars import ContextVar
-from datetime import datetime
+from datetime import datetime, timezone
 from fnmatch import fnmatchcase
 from glob import escape as glob_escape
 from pathlib import Path, PurePosixPath
@@ -387,13 +387,21 @@ def previous_proof(marker, policy_hash, now, snapshot_directory):
     return proof
 
 
-def expected_create_command(binary, source, archive, uuid, policy):
+def expected_create_command(binary, source, archive, uuid, policy, *, timestamp=True):
     """The exact Borg invocation allowed to justify a realm producer proof."""
+    timestamp_args = []
+    if timestamp:
+        match = re.match(r"^realm-(realm\.\d{8}T\d{6}[+-]\d{4})(?:-|$)", archive)
+        if match is None:
+            raise ValueError("archive has no snapshot cut timestamp")
+        stamp = datetime.fromtimestamp(snapshot_epoch(match[1]), timezone.utc)
+        timestamp_args = ["--timestamp", stamp.strftime("%Y-%m-%dT%H:%M:%S")]
     return [
         binary,
         "create",
         "--json",
         "--quick-stats",
+        *timestamp_args,
         "--files-cache",
         "ctime,size,inode",
         "--files-changed",
@@ -473,7 +481,9 @@ def verify_created(source, archive, uuid, policy_path, receipt_path):
         or not receipt["command_line"]
         or receipt["command_line"]
         != expected_create_command(
-            receipt["command_line"][0], source, archive, uuid, policy
+            receipt["command_line"][0], source, archive, uuid, policy,
+            # Historical receipts still prove the original successful create.
+            timestamp="--timestamp" in receipt["command_line"],
         )
         or receipt["command_sha256"]
         != hashlib.sha256(json.dumps(receipt["command_line"]).encode()).hexdigest()

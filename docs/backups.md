@@ -182,6 +182,19 @@ The coverage sample checks only the newest archive, so files that exist only
 in older archives are covered by the repository check, not by a content
 comparison.
 
+The weekly repository checker has four hours of partial-check budgets and a
+4h30m service deadline. The main realm pass gets 7,200 seconds, plus another
+1,800-second pass from the no-argument check script. Checks resume Borg's
+saved segment cursor and verify segment CRCs. They do not cryptographically
+verify archive contents. The backup resource class sets I/O priority 7 and
+IOWeight 20; it sets no device bandwidth cap. A full-pass horizon therefore
+needs measured throughput; 40 MB/s is not an enforced limit.
+
+Snapshot archives use the source cut time for Borg retention, including delayed
+backfills. The drain and acknowledgement marker still order snapshots by native
+generation, so clock skew can make retention time differ from freshness order.
+Existing archives keep their recorded timestamps. Retention counts are unchanged.
+
 ## Restoring
 
 The repositories use `repokey-blake2`. The passphrase is the agenix secret

@@ -12,9 +12,8 @@ passphrase.
 - **The encrypted secrets** (`secret/*.age` and `secrets.nix`). They live in
   `/realm/state/secrets/sinnix/`, outside this repository. Their only backups
   are the local Borg repositories on `/outer-realm`, in the same machine.
-  Nothing is stored off-site; that is an accepted risk. Bead `sinnix-qn54`
-  tracks adding this directory to the escrow blob, which would give the
-  secrets an off-site copy.
+  Include this directory in the escrow blob and redistribute it to give the
+  ciphertexts an off-site copy. Existing blobs need refreshing.
 
 The repository itself is public (`github.com/Sinity/sinnix`), so it can be
 cloned over HTTPS without any key. The host key
@@ -24,8 +23,9 @@ per-host and regenerable, so it is not escrowed.
 ## The escrow blob
 
 `sinnix-keys.age` is a tar of the SSH keys in `~/.ssh` (`id_ed25519` and the
-GitHub push key `id_ed25519_github`, with their `.pub` files), encrypted with
-`age -p`. The same ciphertext goes on several media (pendrive, phone). The
+GitHub push key `id_ed25519_github`, with their `.pub` files) and
+`/realm/state/secrets/sinnix/`, encrypted with `age -p`. The same ciphertext
+goes on several media (pendrive, phone). The
 Google Drive copies were deleted in July 2026; check before relying on one.
 Safety comes from the passphrase, so no medium needs to be trusted.
 
@@ -37,13 +37,17 @@ store it next to a blob.
 Run this yourself; the passphrase prompt must not pass through an agent.
 
 ```bash
-cd /persist/home/sinity/.ssh
-tar -cf /tmp/keybundle.tar \
-    id_ed25519 id_ed25519.pub id_ed25519_github id_ed25519_github.pub
+set -o pipefail
+tar -cf /tmp/keybundle.tar -C /persist/home/sinity/.ssh \
+    id_ed25519 id_ed25519.pub id_ed25519_github id_ed25519_github.pub \
+    -C / realm/state/secrets/sinnix
 age -p /tmp/keybundle.tar > /tmp/sinnix-keys.age
 
 # Check the blob round-trips before distributing it:
-age -d /tmp/sinnix-keys.age | tar --compare -C /persist/home/sinity/.ssh \
+age -d /tmp/sinnix-keys.age | tar --compare \
+    -C /persist/home/sinity/.ssh \
+    id_ed25519 id_ed25519.pub id_ed25519_github id_ed25519_github.pub \
+    -C / realm/state/secrets/sinnix \
     && echo RESTORE_OK
 shred -u /tmp/keybundle.tar
 ```
@@ -55,17 +59,20 @@ plaintext keys from a USB stick, overwrite the whole device or destroy it.
 ## Recovery
 
 ```bash
-# 1. Recover the keys.
+# 1. Recover the keys and encrypted secrets from a refreshed blob.
 mkdir -p ~/.ssh && chmod 700 ~/.ssh
-age -d /path/to/sinnix-keys.age | tar -x -C ~/.ssh   # asks for the passphrase
+set -o pipefail
+age -d /path/to/sinnix-keys.age | tar -x \
+    -C ~/.ssh id_ed25519 id_ed25519.pub id_ed25519_github id_ed25519_github.pub \
+    -C / realm/state/secrets/sinnix   # asks for the passphrase
 chmod 600 ~/.ssh/id_ed25519 ~/.ssh/id_ed25519_github
 
 # 2. Get the configuration.
 git clone https://github.com/Sinity/sinnix.git
 
-# 3. Restore the encrypted secrets into /realm/state/secrets/sinnix/ from the
-#    /outer-realm Borg repositories (modules/backup.nix), if that drive
-#    survived. Without them there is nothing to decrypt.
+# 3. Older blobs contain only keys. For those, restore the encrypted secrets
+#    into /realm/state/secrets/sinnix/ from the /outer-realm Borg repositories
+#    (modules/backup.nix), if that drive survived.
 
 # 4. Decrypt with the recovered key, for example:
 cd /realm/state/secrets/sinnix
@@ -80,4 +87,4 @@ re-provision the host.
 
 - Keys, blob and passphrase are never committed.
 - Only the passphrase-wrapped blob may live on untrusted media.
-- Refresh and redistribute the blob after any key rotation.
+- Refresh and redistribute the blob after any key rotation or encrypted-secret change.

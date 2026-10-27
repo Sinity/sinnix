@@ -17,6 +17,7 @@ import time
 import tracemalloc
 import unittest
 import uuid
+from datetime import datetime, timezone
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
@@ -1550,7 +1551,7 @@ class ProducerReceiptFixture(unittest.TestCase):
                 )
             )
             uuid_value = str(uuid.uuid4())
-            archive = "realm-fixture"
+            archive = "realm-realm.20260402T033000+0200"
             archive_id = "a" * 64
             decoded = json.loads(policy.read_text())
             command = COVERAGE.expected_create_command(
@@ -2007,7 +2008,7 @@ else: sys.exit(1)
                 {"old-only": "historical", "same-name": "old"},
             )
             new = snapshot(
-                "realm.20260402T013000+0000",
+                "realm.20260402T033000+0200",
                 {
                     "same-name": "new",
                     "inbox/download": "canonical",
@@ -2049,6 +2050,26 @@ else: sys.exit(1)
             finally:
                 os.close(pin)
             run()
+            # Both cuts are backfilled long after capture, newest first. Borg
+            # must record source time and select the newer daily cut even
+            # though the older cut was created last.
+            repo = str(root / "repos/borg-realm-v2")
+            inventory = json.loads(subprocess.check_output(
+                ["borg", "list", "--json", repo], env=env, text=True
+            ))["archives"]
+            for cut in (old, new):
+                entry = next(a for a in inventory if a["name"] == "realm-" + cut.name)
+                recorded = datetime.fromisoformat(entry["time"])
+                self.assertEqual(int(recorded.replace(tzinfo=timezone.utc).timestamp()),
+                                 COVERAGE.snapshot_epoch(cut.name))
+            selection = subprocess.run(
+                ["borg", "prune", "--dry-run", "--list", "--keep-daily", "1",
+                 "--glob-archives", "realm-*", repo],
+                env=env, text=True, capture_output=True, check=True,
+            )
+            kept = [line for line in selection.stderr.splitlines() if "Keeping archive" in line]
+            self.assertTrue(any("realm-" + new.name in line for line in kept), selection.stderr)
+            self.assertFalse(any("realm-" + old.name in line for line in kept), selection.stderr)
             self.assertFalse(old.exists())
             self.assertTrue(new.exists())
             latest_marker = root / "state/borg-drain/realm.latest-archived"

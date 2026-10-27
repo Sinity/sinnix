@@ -316,7 +316,11 @@ in
           continue
         fi
 
+        # Initrd names root cuts in UTC, without btrbk's numeric offset.
+        cut="''${snap_name#root.}"
+        snapshot_timestamp="$(date --date="''${cut:0:4}-''${cut:4:2}-''${cut:6:2} ''${cut:9:2}:''${cut:11:2}:''${cut:13:2} UTC" --utc +%Y-%m-%dT%H:%M:%S)"
         if with_borg_lock borg create \
+          --timestamp "$snapshot_timestamp" \
           --compression auto,zstd,1 \
           --comment "sinnix-snapshot-v1:$snapshot_uuid" \
           --lock-wait ${toString borgLockWaitSec} \

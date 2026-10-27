@@ -468,6 +468,10 @@ let
         fi
         snapshot_path=${lib.escapeShellArg snapshotDir}/"$snapshot"
         archive_name=${lib.escapeShellArg archivePrefix}-"$snapshot"
+        # btrbk long-iso names carry the cut's offset. Retention follows
+        # source time even when a newest-first backlog is archived much later.
+        cut="''${snapshot#*.}"
+        snapshot_timestamp="$(date --date="''${cut:0:4}-''${cut:4:2}-''${cut:6:2} ''${cut:9:2}:''${cut:11:2}:''${cut:13:2} ''${cut:15}" --utc +%Y-%m-%dT%H:%M:%S)"
         original_archive_name="$archive_name"
         snapshot_details="$(${snapshotCoverage} details "$snapshot_path")"
         snapshot_filesystem="$(${snapshotCoverage} filesystem-identity "$snapshot_path")"
@@ -497,6 +501,7 @@ let
           create_started="$(date +%s)"
           if ! create_stats="$(with_borg_lock borg create \
             --json --quick-stats \
+            --timestamp "$snapshot_timestamp" \
             --files-cache ctime,size,inode --files-changed ctime \
             --compression auto,zstd,1 \
             --lock-wait ${toString borgLockWaitSec} \

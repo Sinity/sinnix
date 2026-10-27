@@ -621,6 +621,8 @@ assert lib.assertMsg (
               auditTimer = backupRuntimeEval.config.systemd.timers.borgbackup-coverage-audit-realm;
             in
             verify.description == "Borg repository integrity checks with bounded partial passes"
+            && lib.hasInfix ''--timestamp "$snapshot_timestamp"'' backupRuntimeEval.config.systemd.services.borgbackup-root-snapshots.script
+            && lib.hasInfix ''--timestamp "$snapshot_timestamp"'' realmBorgDrainScript
             && verify.serviceConfig.TimeoutStartSec == "4h30m"
             && timer.timerConfig.OnCalendar == "Sun 13:00:00"
             && lib.hasInfix "--max-duration 1800 file:///outer-realm/backup/borg-persist-v1" script
