@@ -80,9 +80,9 @@ mkServiceModule {
       agent.parallel = 6;
       # Codex workers: light, mostly waiting on capped builds elsewhere, so
       # the fleet is sized by available work, not by cores (2026-10-27).
-      # Raised live to 40 on 2026-10-27 for read-only research lanes queued
-      # behind implementation workers; builds stay bounded by the cargo cap.
-      codex.parallel = 40;
+      # 40 (2026-10-27 15:40) filled zram completely by 16:06 (5 MB free,
+      # 3.1 GB available) next to the job plane's builds; 32 recovered it.
+      codex.parallel = 32;
       pytest.parallel = 2;
       pytest-heavy = {
         parallel = 1;
