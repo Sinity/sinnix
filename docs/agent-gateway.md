@@ -242,7 +242,12 @@ sources.
 Every call, including reads, appends a receipt to a private SQLite ledger and
 stores its result. `audit.verify` checks the receipt chain. `events.tail` merges
 audit receipts, Git revisions, Beads revisions, job state and runtime
-transitions, rotating between sources so a busy one cannot starve the rest.
+transitions, rotating between sources so a busy one cannot starve the rest. Runtime
+continuations bind to the event log's device/inode generation. Replacing the
+log with `agentctl events compact` makes existing runtime cursors stale;
+restart `events.tail` without a cursor and continue with its new cursor. See
+[event log compaction](agentctl.md#event-log-compaction) for the maintenance
+procedure and CLI follower behavior.
 
 Each remote call also writes one `gateway.call` JSON line to the MCP unit's
 journal: action, outcome, redacted arguments, timings and the receipt id. Its

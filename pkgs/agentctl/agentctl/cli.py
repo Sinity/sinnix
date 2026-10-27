@@ -43,6 +43,7 @@ from . import (
 )
 from .batch_history import HistoryError, HistoryRefusal, list_runs, load, resolve_run_id
 from .config import Config, ConfigError, load_config, resolve_project
+from .event_compaction import CompactionError, compact_events
 from .github import GithubError
 from .job_queries import JobError
 from .operator_view import DEFAULT_JOB_ROWS, Output, local_clock, table
@@ -69,6 +70,7 @@ FOLLOW_POLL_SECONDS = 1.0
 MAX_EVENT_LINE_BYTES = 1024 * 1024
 
 _REFUSALS = (
+    CompactionError,
     HistoryRefusal,
     ConfigError,
     JobError,
@@ -290,6 +292,11 @@ def parser() -> argparse.ArgumentParser:
         "events", help="the event log: started and finished tasks, pressure pauses"
     )
     events_verbs = events.add_subparsers(dest="events_verb", required=True)
+    _output_arguments(
+        events_verbs.add_parser(
+            "compact", help="replace verified embedded receipts with outcome references"
+        )
+    )
     tail = events_verbs.add_parser("tail")
     tail.add_argument("--lines", type=int, default=DEFAULT_EVENT_LINES)
     tail.add_argument("--follow", action="store_true")
@@ -668,6 +675,14 @@ def _last_matching_lines(
 
 def _events(arguments: argparse.Namespace, config: Config, out: Output) -> int:
     spool = config.event_spool
+    if arguments.events_verb == "compact":
+        result = compact_events(spool, config.jobs_dir)
+        out.write(
+            result,
+            "events compacted: "
+            + ", ".join(f"{key}={value}" for key, value in result.items()),
+        )
+        return EXIT_OK
     project = arguments.project
     follow_lock: int | None = None
     if arguments.follow:
