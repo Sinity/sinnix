@@ -205,8 +205,10 @@ def main():
             "systemctl", "show", "basic.target", "--property=ActiveState", "--value"
         ).strip()
         if state != "inactive":
-            print("migration requires early boot, before basic.target", flush=True)
-            return 1
+            # A switch starts this newly wanted unit on a running system.
+            # Skip without failing: the next boot runs the migration.
+            print("not early boot (basic.target active); skipping until next boot", flush=True)
+            return 0
     failures = 0
     for value in paths:
         try:
