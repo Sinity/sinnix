@@ -61,6 +61,12 @@ mkFeatureModule {
 
       sinnixCfg = config.sinnix;
 
+      # Hook commands and their executables change in the same generation.
+      # Other dots links and the private writable client settings stay live.
+      claudeManagedSettings = pkgs.writeText "claude-managed-settings.json" (
+        builtins.readFile ../../../../dots/claude/managed-settings.json
+      );
+
       jsonFormat = pkgs.formats.json { };
       yamlFormat = pkgs.formats.yaml { };
       inherit (helpers.data) mcpRegistry agentProfiles runtimeDefaults;
@@ -262,9 +268,7 @@ mkFeatureModule {
       {
         sinnix.features.dev.agentTools.hermesConfigSource = hermesConfigFile;
         sinnix.features.dev.agentTools.hermesProfileConfigSources = hermesProfileConfigFiles;
-        # Durable Claude policy links directly to the live dots source.
-        environment.etc."claude-code/managed-settings.json".source =
-          "${sinnixCfg.paths.dotsRoot}/claude/managed-settings.json";
+        environment.etc."claude-code/managed-settings.json".source = claudeManagedSettings;
         sinnix.persistence.home = {
           directories = [
             {
@@ -347,7 +351,7 @@ mkFeatureModule {
             home.activation.claudeSymlink = lib.hm.dag.entryAfter [ "linkGeneration" ] ''
               run ${pkgs.python3}/bin/python ${./claude-state.py} \
                 "$HOME" \
-                ${lib.escapeShellArg "${sinnixCfg.paths.dotsRoot}/claude/managed-settings.json"} \
+                ${lib.escapeShellArg (toString claudeManagedSettings)} \
                 ${lib.escapeShellArg "${sinnixCfg.paths.dotsRoot}/claude/settings-seed.json"} \
                 ${lib.escapeShellArg "${sinnixCfg.paths.dotsRoot}/claude/hooks/sessionstart-beads-prime.sh"} \
                 ${

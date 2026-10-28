@@ -139,9 +139,12 @@ in
             }
             {
               assertion =
-                (config.environment.etc."claude-code/managed-settings.json".source or null)
-                == "${config.sinnix.paths.dotsRoot}/claude/managed-settings.json";
-              message = "Claude managed settings must be deployed to /etc/claude-code as a symlink into the live dots checkout.";
+                let
+                  source = toString config.environment.etc."claude-code/managed-settings.json".source;
+                in
+                lib.hasPrefix "${builtins.storeDir}/" source
+                && lib.hasInfix (lib.escapeShellArg source) activationText;
+              message = "Claude /etc policy and state activation must use the same generation-bound managed settings.";
             }
             {
               assertion = lib.hasInfix "export PATH=\"$HOME/.local/bin:" codexWrapperText;
@@ -881,7 +884,8 @@ in
                 | any(contains("sessionstart-sinex-recall.sh"))) and
               ([.hooks.Stop[].hooks[].command]
                 | any(. == "polylogue hook Stop"))
-            ' ${inputs.self}/dots/claude/managed-settings.json >/dev/null
+            ' ${agentToolsRuntimeEvaluated.config.environment.etc."claude-code/managed-settings.json".source} >/dev/null
+            cmp ${agentToolsRuntimeEvaluated.config.environment.etc."claude-code/managed-settings.json".source} ${inputs.self}/dots/claude/managed-settings.json
 
             # Rendered profile configs must match the registry's own computed
             # selection -- membership is derived from mcp-registry.nix at eval
