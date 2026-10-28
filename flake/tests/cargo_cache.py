@@ -42,7 +42,7 @@ class CargoCache(unittest.TestCase):
                         SINNIX_CARGO_CACHE_ROOT=str(self.cache))
         self.env.pop("CARGO_TARGET_DIR", None)
         self.direnv = self.root / "direnvrc"
-        self.direnv.write_text(DIRENV.read_text().replace("/var/cache/sinex/", str(self.root / "sinex-cache") + "/"))
+        self.direnv.write_text(DIRENV.read_text())
         self.checkout = self.root / "checkout"
         self.checkout.mkdir()
         subprocess.run(["git", "init", "-q", str(self.checkout)], check=True)
@@ -158,37 +158,36 @@ class CargoCache(unittest.TestCase):
             self.assertNotEqual(self.select(env=dict(self.env, **fields),
                                             check=False).returncode, 0)
 
-    def test_direnv_selects_for_both_projects_and_sinex_keeps_other_owners(self):
+    def test_direnv_routes_cargo_checkouts_and_preserves_shell_environment(self):
         self.provision()
+        (self.checkout / "Cargo.toml").touch()
         (self.bin / "sinnix-cargo-target").write_text(f'#!{shutil.which("bash")}\nexec bash "{SELECTOR}"\n')
         (self.bin / "sinnix-cargo-target").chmod(0o755)
-        for kind in ["polylogue", "sinex"]:
-            script = f'''
-                source "{self.direnv}"
-                _sinnix_project_kind() {{ echo {kind}; }}
-                _sinnix_project_root() {{ pwd; }}
-                export SINEX_DEV_CACHE_ROOT="$PWD/old-cache"
-                export SINEX_DEV_STATE_DIR="$PWD/test-state"
-                export SINEX_STATE_DIR="$PWD/runtime-state"
-                export SINEX_TEST_RESULTS_DIR="$PWD/durable-results"
-                _sinnix_project_environment_setup
-                printf '%s\\n' "$CARGO_TARGET_DIR" "$SINEX_TEST_RESULTS_DIR" "$SINEX_DEV_STATE_DIR"
-            '''
-            out = self.run_bash(script).stdout.splitlines()
-            self.assertTrue(Path(out[0]).is_relative_to(self.cache))
-            self.assertEqual(out[1], str(self.checkout / "durable-results"))
-            self.assertEqual(out[2], str(self.checkout / "test-state"))
-        # Default Sinex cache selection used to overwrite even explicit targets.
+        # Exercise the real use_flake wrapper before and after a product shell.
+        script = f'''
+            use_flake() {{
+                export DATABASE_URL="postgresql:///fixture"
+                export PGHOST="$PWD/socket"
+            }}
+            source "{self.direnv}"
+            use_flake
+            printf '%s\\n' "$CARGO_TARGET_DIR" "$DATABASE_URL" "$PGHOST"
+        '''
+        out = self.run_bash(script).stdout.splitlines()
+        self.assertTrue(Path(out[0]).is_relative_to(self.cache))
+        self.assertEqual(out[1:], ["postgresql:///fixture", str(self.checkout / "socket")])
+        explicit = dict(self.env, CARGO_TARGET_DIR=str(self.root / "leased"))
+        self.assertEqual(self.run_bash(script, env=explicit).stdout.splitlines()[0],
+                         explicit["CARGO_TARGET_DIR"])
+
+    def test_direnv_leaves_non_cargo_checkouts_alone(self):
         script = f'''
             source "{self.direnv}"
-            export CARGO_TARGET_DIR="$PWD/leased-target"
-            export SINEX_DEV_CACHE_ROOT="$PWD/.sinex/cache"
-            export SINEX_DEV_STATE_DIR="$PWD/test-state"
-            export SINEX_STATE_DIR="$PWD/runtime-state"
-            _sinnix_setup_sinex_dev_cache "$PWD"
-            test "$CARGO_TARGET_DIR" = "$PWD/leased-target"
+            _sinnix_project_environment_setup
+            test -z "$CARGO_TARGET_DIR"
         '''
         self.run_bash(script)
+        self.assertFalse(self.cache.exists())
 
 
 if __name__ == "__main__":

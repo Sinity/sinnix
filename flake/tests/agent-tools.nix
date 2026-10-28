@@ -1094,36 +1094,6 @@ in
             test "$(direct-command)" = direct
             touch "$out"
           '';
-      # Direnv selects development paths; the foreground Sinex lease owns
-      # service lifetime. Exercise custom state and connection preservation.
-      sinexDevPathsFixture =
-        pkgs.runCommand "sinex-dev-paths-fixture"
-          {
-            nativeBuildInputs = [
-              pkgs.bash
-              pkgs.coreutils
-            ];
-          }
-          ''
-            source ${../../scripts/sinnix-direnvrc}
-            _sinnix_register_sinex_dev_owner() {
-              echo "direnv tried to acquire service ownership" >&2
-              exit 1
-            }
-            project_root="$TMPDIR/project"
-            export SINEX_DEV_CACHE_ROOT="$TMPDIR/cache"
-            export SINEX_DEV_STATE_DIR="$TMPDIR/leased-state"
-            export SINEX_STATE_DIR="$TMPDIR/runtime-state"
-            export DATABASE_URL="postgresql:///fixture?host=$SINEX_DEV_STATE_DIR/run&port=15432"
-            export PGHOST="$SINEX_DEV_STATE_DIR/run"
-            expected_url="$DATABASE_URL"
-            _sinnix_setup_sinex_dev_cache "$project_root"
-            test "$SINEX_DEV_ROOT" = "$project_root"
-            test "$SINEX_DEV_STATE_DIR" = "$TMPDIR/leased-state"
-            test "$DATABASE_URL" = "$expected_url"
-            test "$PGHOST" = "$TMPDIR/leased-state/run"
-            touch "$out"
-          '';
       # The agent wrappers' scope decision, exercised against cgroup paths
       # taken from this host rather than re-asserted as wrapper text. A queued
       # task's scope is the boundary that carries the lane's MemoryMax and the
@@ -1685,7 +1655,6 @@ in
         agent-npm-bootstrap-recovery = agentNpmBootstrapRecovery;
         agent-scope-guard = agentScopeGuardFixture;
         direnv-direct-commands = direnvDirectCommandsFixture;
-        sinex-dev-paths = sinexDevPathsFixture;
         agentctl-operation-contract = agentctlOperationFixture;
         agentctl-operation-launch = agentctlOperationLaunchFixture;
         agentctl-runtime-tools = agentctlRuntimeFixture;

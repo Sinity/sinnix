@@ -179,14 +179,9 @@ in
       ];
     };
 
-    # Sinex devshell build caches (CARGO_TARGET_DIR + per-checkout dev-state;
-    # the /var/cache/sinex path itself is hardcoded by the sinex devshell and
-    # sinnix-direnvrc, so we relocate what backs it, not the path). Left on the
-    # ephemeral MX500 root this is maximum wear for zero benefit: the boot wipe
-    # destroys the warm cache and forces full recompiles that write it all
-    # again. /realm NVMe keeps caches warm across boots on the wear-tolerant
-    # disk; /realm/state/cache is excluded from the btrbk→borg pipeline (build caches
-    # are regenerable, see modules/backup.nix realmExcludes).
+    # Retained Sinex cache mount. Its retirement belongs to the product's
+    # storage migration. /realm/state/cache is excluded from backups
+    # (regenerable caches, see modules/backup.nix realmExcludes).
     "/var/cache/sinex" = {
       device = "/realm/state/cache/sinex";
       fsType = "none";
