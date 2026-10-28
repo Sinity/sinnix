@@ -31,7 +31,7 @@ Pipeline (three subcommands, chained by `run`):
 Build publishes current.json atomically after reopening and comparing the
 database, Parquet, coverage rows and statistics. Readers use `published` once
 per operation to select its immutable generation. Authored state stays outside
-generation cleanup. Previous generations remain retained; predecessor flat
+generation cleanup. Superseded derived generations are pruned; predecessor flat
 products move into history only after successful publication.
 
 Resumability: `resolve` is bounded per invocation (--max-seconds, with
@@ -961,6 +961,10 @@ def _build_products(args: argparse.Namespace) -> int:
             out.write(json.dumps(out_record) + "\n")
             total_urls += 1
 
+    # The coverage stream now owns every joined value. Release the Python
+    # checkpoint map before DuckDB allocates its JSON and columnar buffers.
+    del resolution
+
     duckdb_path = derived_dir / "url_ledger.duckdb"
     parquet_path = derived_dir / "url_ledger.parquet"
     stats_path = derived_dir / "coverage_stats.json"
@@ -1054,22 +1058,28 @@ def _query_json(binary: str, database: Path, sql: str) -> list[dict]:
 
 def _validate_products(path: Path, binary: str) -> int:
     database = path / "url_ledger.duckdb"
-    # Reopen the database and Parquet, comparing every row in both directions.
-    row = _query_json(binary, database, f"""
-        WITH parquet AS (SELECT * FROM read_parquet({sql_path(path / 'url_ledger.parquet')})),
-             coverage AS (SELECT * FROM read_json_auto({sql_path(path / 'coverage.jsonl')}, format='newline_delimited')),
-             differences AS (
-                 (SELECT * FROM url_ledger EXCEPT ALL SELECT * FROM parquet)
-                 UNION ALL (SELECT * FROM parquet EXCEPT ALL SELECT * FROM url_ledger)
-                 UNION ALL (SELECT * FROM url_ledger EXCEPT ALL SELECT * FROM coverage)
-                 UNION ALL (SELECT * FROM coverage EXCEPT ALL SELECT * FROM url_ledger))
+    # Compare exact multisets one direction at a time. A combined UNION of
+    # four EXCEPT ALL branches retains all their hash tables together. Each
+    # read-only child releases its buffers before the next comparison starts.
+    for reader in (
+        f"read_parquet({sql_path(path / 'url_ledger.parquet')})",
+        f"read_json_auto({sql_path(path / 'coverage.jsonl')}, format='newline_delimited')",
+    ):
+        for left, right in (("url_ledger", reader), (reader, "url_ledger")):
+            difference = _query_json(binary, database, f"""
+                SELECT count(*) AS different_rows FROM (
+                    SELECT * FROM {left} EXCEPT ALL SELECT * FROM {right}
+                )
+            """)[0]
+            if difference["different_rows"] != 0:
+                raise ValueError("URL-ledger products disagree")
+    row = _query_json(binary, database, """
         SELECT count(*) AS urls, sum(visit_count) AS visits,
             sum(any_snapshot_count > 0) AS urls_with_any_snapshot,
             sum(visits_with_snapshot_within_window) AS visits_with_snapshot_within_window,
             sum(visit_count) - sum(visits_with_snapshot_within_window) AS visits_with_coverage_gap,
             CASE WHEN sum(visit_count) > 0 THEN sum(visits_with_snapshot_within_window)::DOUBLE / sum(visit_count)
-                 ELSE NULL END AS visit_coverage_fraction,
-            (SELECT count(*) FROM differences) AS different_rows
+                 ELSE NULL END AS visit_coverage_fraction
         FROM url_ledger
     """)[0]
     # The CLI emits HUGEINT sums as decimal strings; COPY JSON emits numbers.
@@ -1079,7 +1089,7 @@ def _validate_products(path: Path, binary: str) -> int:
             if re.fullmatch(r"-?[0-9]+", row[key]) is None:
                 raise ValueError("invalid integer publication statistic")
             row[key] = int(row[key])
-    if row.pop("different_rows") != 0 or json.loads((path / "coverage_stats.json").read_text()) != [row]:
+    if json.loads((path / "coverage_stats.json").read_text()) != [row]:
         raise ValueError("URL-ledger products disagree")
     return row["urls"]
 

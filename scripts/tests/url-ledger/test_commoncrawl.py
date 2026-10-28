@@ -526,3 +526,55 @@ def test_local_coverage_matches_the_same_instant_across_offsets(tmp_path):
         0.0,
         0.0,
     ]
+
+
+@pytest.mark.parametrize("product", ["coverage", "parquet", "database"])
+def test_validation_rejects_changed_multisets_with_unchanged_totals(tmp_path, product):
+    state = tmp_path / "state"
+    state.mkdir()
+    records = [
+        {
+            "url": f"https://example.invalid/{name}",
+            "visits": ["2026-01-01T00:00:00Z"],
+            "visit_count": 1,
+        }
+        for name in ("first", "second")
+    ]
+    (state / "urls.jsonl").write_text("".join(json.dumps(row) + "\n" for row in records))
+    args = argparse.Namespace(
+        state_root=str(state),
+        derived_root=str(tmp_path / "derived"),
+        window_days=30,
+        duckdb_bin=shutil.which("duckdb"),
+    )
+    assert ledger.cmd_build(args) == 0
+    generation = ledger.published_generation(Path(args.derived_root))
+    # Replacing the second row with another first row preserves every published
+    # aggregate. Exact multiset comparison must still reject the changed URL.
+    if product == "coverage":
+        path = generation / "coverage.jsonl"
+        first = path.read_text().splitlines()[0]
+        path.write_text(first + "\n" + first + "\n")
+    else:
+        database = generation / "url_ledger.duckdb"
+        if product == "database":
+            sql = (
+                "DELETE FROM url_ledger WHERE normalized_url='https://example.invalid/second'; "
+                "INSERT INTO url_ledger SELECT * FROM url_ledger;"
+            )
+        else:
+            replacement = generation / "replacement.parquet"
+            sql = f"""
+                COPY (
+                    SELECT * FROM url_ledger
+                    WHERE normalized_url='https://example.invalid/first'
+                    UNION ALL
+                    SELECT * FROM url_ledger
+                    WHERE normalized_url='https://example.invalid/first'
+                ) TO {ledger.sql_path(replacement)} (FORMAT PARQUET);
+            """
+        subprocess.run([args.duckdb_bin, "-bail", str(database), "-c", sql], check=True)
+        if product == "parquet":
+            replacement.replace(generation / "url_ledger.parquet")
+    with pytest.raises(ValueError, match="products disagree"):
+        ledger._validate_products(generation, args.duckdb_bin)
