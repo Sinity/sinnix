@@ -10,8 +10,31 @@ in
       pkgs = inputs.nixpkgs.legacyPackages.${system};
       activitywatchOverlay = import ../overlay/package/activitywatch.nix { inherit inputs; } pkgs pkgs;
       awatcherPatched = activitywatchOverlay.awatcher;
+      lib = inputs.nixpkgs.lib;
+      testLib = import ../test-lib.nix { inherit inputs lib; };
+      evaluated = testLib.evalTestSpec system (testLib.mkFeatureTest {
+        name = "activitywatch-placement";
+        feature = "sinnix.features.desktop.activitywatch.enable";
+        assertions = _: [ ];
+      });
+      services = (testLib.hmFor evaluated.config).systemd.user.services;
+      server = services.activitywatch.Service;
+      watcher = services.activitywatch-watcher-awatcher.Service;
     in
     {
+      checks.activitywatch-placement =
+        assert builtins.all (
+          service:
+          service.Slice == "background.slice"
+          && service.CPUWeight == 20
+          && service.IOWeight == 20
+          && service.Nice == 10
+          && service.IOSchedulingPriority == 7
+          && service.MemoryHigh == "1G"
+        ) [ server watcher ];
+        assert server.MemoryMax == "2G" && watcher.MemoryMax == "3G";
+        assert watcher.Restart == "on-failure" && watcher.RestartSec == 5;
+        pkgs.runCommand "activitywatch-placement-check" { } ''touch "$out"'';
       checks.activitywatch-config = pkgs.runCommand "activitywatch-config-check" { } ''
         set -eu
         grep -Fq '"--config"' ${module}

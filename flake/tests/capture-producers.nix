@@ -52,6 +52,13 @@
       notifications =
         enabled.home-manager.users.${enabled.sinnix.user.name}.systemd.user.services.sinnix-capture-notifications;
       poller = enabled.systemd.user.services.sinnix-capture-awair;
+      producerServices = lib.mapAttrsToList (
+        name: producer:
+        if producer.poll != null then
+          enabled.systemd.user.services."sinnix-${name}".serviceConfig
+        else
+          enabled.home-manager.users.${enabled.sinnix.user.name}.systemd.user.services."sinnix-${name}".Service
+      ) enabled.sinnix.capture.producers;
       badField = builtins.tryEval (
         builtins.deepSeq
           (evaluate true {
@@ -83,6 +90,15 @@
     in
     {
       checks.capture-producers =
+        assert builtins.all (
+          service:
+          service.Slice == "background.slice"
+          && service.IOWeight == 20
+          && service.Nice == 10
+          && service.IOSchedulingPriority == 7
+          && service.MemoryHigh == "6G"
+          && service.MemoryMax == "8G"
+        ) producerServices;
         assert enabled.systemd.user.timers.sinnix-capture-awair.timerConfig.OnCalendar == "*:0/2";
         assert builtins.length (builtins.attrNames enabled.sinnix.capture.producers) == 12;
         assert (builtins.head enabled.sinnix.runtime.units.capture-awair.captures).cadenceSeconds == 120;

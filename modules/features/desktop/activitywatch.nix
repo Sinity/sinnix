@@ -126,6 +126,7 @@ mkFeatureModule {
               runtimeInventory = nixosConfig.sinnix.runtime.inventory;
               resourceClass = "background";
               overrides = {
+                Slice = "background.slice";
                 MemoryHigh = "1G";
                 MemoryMax = "2G";
               };
@@ -149,6 +150,7 @@ mkFeatureModule {
                 runtimeInventory = nixosConfig.sinnix.runtime.inventory;
                 unit = "activitywatch-watcher-awatcher.service";
                 manager = "user";
+                overrides.Slice = "background.slice";
               }
               // {
                 Restart = "on-failure";

@@ -65,6 +65,9 @@ let
       };
       overrides = {
         ExecStart = producer.execStart;
+        # These units record observations; their IO must yield outside the
+        # desktop application's protected ancestor, including timer pollers.
+        Slice = "background.slice";
         NoNewPrivileges = true;
       }
       // lib.optionalAttrs (producer.environment != [ ]) { Environment = producer.environment; }
