@@ -23,6 +23,7 @@ COUNTERS = (
     "metadata_bytes",
 )
 PROFILE_ROOT = Path("/etc/profiles/per-user")
+MAX_OWNERSHIP_RUNTIMES = 32
 
 
 def _context(pid: int) -> dict[str, object]:
@@ -115,6 +116,147 @@ def _validate(payload: object, pid: int, earliest_ms: int, latest_ms: int) -> di
     }
 
 
+def _ownership(payload: object, pid: int, earliest_ms: int, latest_ms: int) -> dict:
+    """Optional worker snapshots cannot invalidate sound allocator counters."""
+    unavailable = {
+        "schema_version": 1,
+        "status": "unavailable",
+        "collector_reason": "invalid_payload",
+    }
+    if payload is None:
+        return {**unavailable, "collector_reason": "not_provided"}
+    if not isinstance(payload, dict):
+        return unavailable
+    if type(payload.get("schema_version")) is not int or payload["schema_version"] != 1:
+        return {**unavailable, "collector_reason": "unsupported_schema"}
+
+    def unsigned(value: object) -> bool:
+        return type(value) is int and 0 <= value < 2**64
+
+    required = (
+        "schema_version",
+        "provider",
+        "status",
+        "pid",
+        "observed_at_unix_ms",
+        "units",
+        "runtime_count",
+        "reported_runtime_count",
+        "truncated_count",
+        "runtimes",
+    )
+    if any(key not in payload for key in required):
+        return unavailable
+    observed = payload["observed_at_unix_ms"]
+    if (
+        payload["provider"] != "luau"
+        or payload["units"] != "bytes"
+        or payload["status"] not in ("available", "partial", "unavailable")
+        or type(payload["pid"]) is not int
+        or payload["pid"] != pid
+        or type(observed) is not int
+        or not earliest_ms - 1000 <= observed <= latest_ms + 1000
+    ):
+        return unavailable
+    total, reported, truncated = (
+        payload[key]
+        for key in ("runtime_count", "reported_runtime_count", "truncated_count")
+    )
+    runtimes = payload["runtimes"]
+    if (
+        not all(unsigned(value) for value in (total, reported, truncated))
+        or not isinstance(runtimes, list)
+        or reported != len(runtimes)
+        or reported > MAX_OWNERSHIP_RUNTIMES
+        or total != reported + truncated
+    ):
+        return unavailable
+    runtime_keys = (
+        "state_token",
+        "runtime_id",
+        "host_generation",
+        "status",
+        "bytes",
+        "sampled_at_unix_ms",
+        "age_ms",
+        "reason",
+    )
+    snapshots = []
+    last_token = -1
+    for runtime in runtimes:
+        if not isinstance(runtime, dict) or any(
+            key not in runtime for key in runtime_keys
+        ):
+            return unavailable
+        token, identifier, generation = (
+            runtime[key] for key in ("state_token", "runtime_id", "host_generation")
+        )
+        status, value, sampled, age, reason = (
+            runtime[key]
+            for key in ("status", "bytes", "sampled_at_unix_ms", "age_ms", "reason")
+        )
+        if (
+            not unsigned(token)
+            or token <= last_token
+            or (
+                identifier is not None
+                and (
+                    not isinstance(identifier, str)
+                    or not re.fullmatch(r"[A-Za-z0-9_./:-]{1,128}", identifier)
+                )
+            )
+            or (generation is not None and not unsigned(generation))
+        ):
+            return unavailable
+        if status in ("available", "stale"):
+            if (
+                identifier is None
+                or generation is None
+                or not all(unsigned(item) for item in (value, sampled, age))
+                or (status == "available" and reason is not None)
+                or (status == "stale" and reason != "worker_in_flight")
+            ):
+                return unavailable
+        elif status == "unavailable":
+            if (
+                any(item is not None for item in (value, sampled, age))
+                or reason
+                not in (
+                    "not_observed",
+                    "host_absent",
+                    "worker_in_flight",
+                    "runtime_id_too_long",
+                    "runtime_id_invalid",
+                )
+                or (
+                    identifier is None
+                    and reason not in ("runtime_id_too_long", "runtime_id_invalid")
+                )
+            ):
+                return unavailable
+        else:
+            return unavailable
+        snapshots.append({key: runtime[key] for key in runtime_keys})
+        last_token = token
+    expected_status = (
+        "partial"
+        if truncated
+        else "available"
+        if all(item["status"] == "available" for item in snapshots)
+        else "partial"
+        if any(item["bytes"] is not None for item in snapshots)
+        else "unavailable"
+    )
+    if payload["status"] != expected_status:
+        return unavailable
+    # Worker snapshots can be old even when the report is fresh. Retain their
+    # status, sample time and age; never infer freshness or sum a current total.
+    return {
+        **{key: payload[key] for key in required if key != "runtimes"},
+        "runtimes": snapshots,
+    }
+
+
 def observe(row: dict[str, object], user_name: str) -> str:
     started = time.monotonic()
     result: dict[str, object] = {
@@ -192,6 +334,9 @@ def observe(row: dict[str, object], user_name: str) -> str:
                 pid,
                 earliest,
                 latest,
+            )
+            allocator["ownership"] = _ownership(
+                envelope.get("ownership"), pid, earliest, latest
             )
             result.update(
                 status=allocator["status"],

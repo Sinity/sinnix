@@ -152,7 +152,7 @@
             pkgs.coreutils
             pkgs.zstd
           ];
-          pytestArgs = "tests/test_collector_process_memory.py tests/test_segments.py tests/test_capacity.py";
+          pytestArgs = "tests/test_collector_process_memory.py tests/test_allocator.py tests/test_segments.py tests/test_capacity.py";
           beforeTests = ''
             export SINNIX_SQLITE_BACKUP="${sinnixScriptRegistry.packageSet.sinnix-sqlite-backup}/bin/sinnix-sqlite-backup"
           '';

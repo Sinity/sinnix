@@ -62,3 +62,17 @@ use bytes. Reading counters refreshes jemalloc statistics without purging memory
 The nullable column is added to the active SQLite database; sealed history stays
 unchanged. Compare allocated/active/resident counters with same-process PSS and
 private memory rather than treating resident growth alone as live allocations.
+
+The optional status `ownership` object is retained inside the stored allocator
+object. Its version 1 Luau snapshots identify up to 32 runtimes by copied state
+token, runtime ID and host generation, with explicit total/reported/truncated
+counts. The collector validates this payload separately: missing, unsupported or
+malformed ownership becomes `status: unavailable` with `collector_reason`, while
+valid base allocator counters remain available. Older allocator-only producers
+remain readable. The existing 16 KiB whole-response limit still applies.
+
+Ownership bytes are worker-boundary snapshots. Each row retains its sample
+timestamp and age; `stale` means an in-flight worker has a prior completed
+snapshot. These last-known bytes are not a current total. An unobserved or absent
+host keeps byte/time values null, while an observed zero stays numeric zero. No
+age threshold, extra sampler or timer changes this meaning.
