@@ -1,5 +1,6 @@
 # The HDD genome subvolume is outside the Realm snapshot boundary.
 {
+  genomeExcludes,
   pkgs,
   lib,
   genomeRoot,
@@ -11,20 +12,6 @@
   mkBackupJob,
   mkSnapshotDrainScript,
 }:
-let
-  # Preserve inputs, supplied alignments, vendor files, source/WIP, manifests
-  # and all analysis results. Only classified public resources and dependency
-  # environments are waived; unfamiliar cache children remain covered.
-  excluded = [
-    "cache/reference"
-    "cache/pgs_catalog"
-    "cache/tools"
-    "cache/pylibs"
-    "cache/snpeff"
-    "cache/gwas_sumstats"
-    ".direnv"
-  ];
-in
 [
   (lib.mkIf (genomeRoot != null) {
     assertions = [
@@ -67,8 +54,8 @@ in
         bindTarget = "/run/borgbackup-snapshot-inputs/genome";
         archivePrefix = "genome";
         producerProof = true;
-        exclude = excluded;
-        noncanonical = excluded;
+        exclude = genomeExcludes;
+        noncanonical = genomeExcludes;
       };
     }
   ))

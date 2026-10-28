@@ -253,9 +253,9 @@ assert lib.assertMsg (
         script;
       rewriteBackupHook =
         hook: replacements:
-        builtins.replaceStrings (map (replacement: replacement.from) replacements) (map (
-          replacement: replacement.to
-        ) replacements) hook;
+        builtins.replaceStrings (map (replacement: replacement.from) replacements)
+          (map (replacement: replacement.to) replacements)
+          (builtins.replaceStrings [ "install -d -m 0750 -o root -g users" ] [ "install -d -m 0750" ] hook);
       coordinatorScript =
         rewriteBackupHook backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.script
           [
@@ -680,7 +680,7 @@ assert lib.assertMsg (
         ) "Snapshot backlog drains must have a finite per-wake deadline";
         assert lib.assertMsg (
           backupRuntimeEval.config.systemd.services.borgbackup-drain-coordinator.serviceConfig.TimeoutStartSec
-          == "72h15m"
+          == "80h15m"
           &&
             backupRuntimeEval.config.systemd.services.borgbackup-job-realm.serviceConfig.TimeoutStartSec
             == "24h"
@@ -690,12 +690,12 @@ assert lib.assertMsg (
               "machine-telemetry-sqlite-backup.service"
               "polylogue-sqlite-backup.service"
               "btrbk.service"
+              "borgbackup-job-polylogue-state.service"
+              "borgbackup-job-sinex-blobs.service"
               "borgbackup-job-realm.service"
               "borgbackup-job-genome.service"
               "borgbackup-job-persist.service"
               "borgbackup-root-snapshots.service"
-              "borgbackup-job-polylogue-state.service"
-              "borgbackup-job-sinex-blobs.service"
               "borgbackup-maintenance.service"
               "borgbackup-coverage-audit-realm.service"
               "borgbackup-local-dumps.service"
@@ -752,6 +752,30 @@ assert lib.assertMsg (
           && telemetryOnlyEval.config.systemd.timers.machine-telemetry-sqlite-backup.enable
           && telemetryOnlyEval.config.sinnix.runtime.units ? machine-telemetry-sqlite-backup-timer
         ) "Optional or disabled producer jobs must not become dangling coordinator calls";
+        assert lib.assertMsg
+          (
+            let
+              units = backupRuntimeEval.config.sinnix.runtime.units;
+              probes = map (name: (builtins.head units.${name}.captures).livenessProbe.command) [
+                "borgbackup-job-realm"
+                "borgbackup-job-persist"
+              ];
+              genomeProbe = (builtins.head units.borgbackup-job-genome.captures).livenessProbe.command;
+              rules = backupRuntimeEval.config.systemd.tmpfiles.rules;
+            in
+            backupRuntimeEval.config.systemd.services.borgbackup-job-sinex-blobs.serviceConfig.TimeoutStartSec
+            == "6h"
+            && lib.all (lib.hasInfix " 129600") probes
+            && lib.hasInfix "acquisition-freshness" genomeProbe
+            && lib.hasInfix "--source /neo-outer-realm/content/genome" genomeProbe
+            && lib.hasInfix "--max-observation-age 64800" genomeProbe
+            && lib.hasInfix "--producer-unit btrbk.service" genomeProbe
+            && lib.hasInfix "observe-acquisitions" backupRuntimeEval.config.systemd.services.btrbk.script
+            && lib.hasInfix "--quiet --preserve-snapshots run" backupRuntimeEval.config.systemd.services.btrbk.script
+            && builtins.elem "d /persist/root/.cache/borg-drain 0750 root users -" rules
+            && builtins.elem "d /persist/root/.cache/borg 0700 root root -" rules
+          )
+          "Operator probes must read receipts with nightly/change-aware budgets while credentials stay private";
         mkRuntimeCheck system {
           name = "backup-borg-hook-runtime-check";
           nativeBuildInputs = [

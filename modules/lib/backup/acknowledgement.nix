@@ -42,14 +42,16 @@ let
     ++ lib.optional config.sinnix.services.polylogue.enable "polylogue-sqlite-backup"
   );
   archiveUnits = configured (
-    [
+    # Daily direct-path coverage must not wait behind a multi-day historical
+    # snapshot backlog. Native drain queues themselves remain lossless.
+    lib.optional config.sinnix.services.polylogue.enable "borgbackup-job-polylogue-state"
+    ++ [
+      "borgbackup-job-sinex-blobs"
       "borgbackup-job-realm"
       "borgbackup-job-genome"
       "borgbackup-job-persist"
       "borgbackup-root-snapshots"
     ]
-    ++ lib.optional config.sinnix.services.polylogue.enable "borgbackup-job-polylogue-state"
-    ++ [ "borgbackup-job-sinex-blobs" ]
   );
   finalUnits = configured [
     "borgbackup-maintenance"
@@ -189,7 +191,7 @@ in
     serviceConfig = {
       # Preserve child budgets, with room for dump/maintenance phases. The
       # coordinator also bounds children whose native start timeout is infinite.
-      TimeoutStartSec = if genomeRoot == null then "48h15m" else "72h15m";
+      TimeoutStartSec = if genomeRoot == null then "56h15m" else "80h15m";
       TimeoutStopSec = "15s";
     };
     path = with pkgs; [
@@ -200,9 +202,9 @@ in
       coreutils
     ];
     script = ''
-      now=$(date +%s)
       daily_fresh() {
-        local epoch policy
+        local epoch policy now
+        now=$(date +%s)
         [ -f "$1" ] || return 1
         epoch=$(sed -n 's/^epoch=//p' "$1")
         policy=$(sed -n 's/^policy_sha256=//p' "$1")
@@ -236,7 +238,7 @@ in
           # Only a completed acquisition makes these dumps eligible for reuse
           # by the boot catch-up after an interrupted archive phase.
           if run_step btrbk.service; then
-            install -d -m 0755 ${lib.escapeShellArg borgDrainStateRoot}
+            install -d -m 0750 -o root -g users ${lib.escapeShellArg borgDrainStateRoot}
             temporary=$(mktemp "$acquisition_marker.XXXXXXXX")
             printf 'epoch=%s\npolicy_sha256=%s\n' "$(date +%s)" ${lib.escapeShellArg acquisitionPolicy} > "$temporary"
             chmod 0644 "$temporary"
@@ -271,14 +273,23 @@ in
         systemctl stop borgbackup-verify.service
       fi
       for unit in ${serviceNames (archiveUnits ++ finalUnits)}; do
+        daily_marker=""
+        daily_policy=""
         case "$unit" in
           borgbackup-job-polylogue-state.service)
-            if daily_fresh ${lib.escapeShellArg "${borgDrainStateRoot}/polylogue-state.last-success"} ${lib.escapeShellArg coordinatorPolicies.polylogue}; then continue; fi ;;
+            daily_marker=${lib.escapeShellArg "${borgDrainStateRoot}/polylogue-state.last-success"}
+            daily_policy=${lib.escapeShellArg coordinatorPolicies.polylogue} ;;
           borgbackup-job-sinex-blobs.service)
-            if daily_fresh ${lib.escapeShellArg "${borgDrainStateRoot}/sinex-blobs.last-success"} ${lib.escapeShellArg coordinatorPolicies.sinex}; then continue; fi ;;
+            daily_marker=${lib.escapeShellArg "${borgDrainStateRoot}/sinex-blobs.last-success"}
+            daily_policy=${lib.escapeShellArg coordinatorPolicies.sinex} ;;
           borgbackup-local-dumps.service)
-            if daily_fresh ${lib.escapeShellArg "${borgDrainStateRoot}/local-dumps.last-success"} ${lib.escapeShellArg coordinatorPolicies.localDumps}; then continue; fi ;;
+            daily_marker=${lib.escapeShellArg "${borgDrainStateRoot}/local-dumps.last-success"}
+            daily_policy=${lib.escapeShellArg coordinatorPolicies.localDumps} ;;
         esac
+        if [ -n "$daily_marker" ] && daily_fresh "$daily_marker" "$daily_policy"; then
+          echo "backup_phase=coordinator unit=$unit status=skipped reason=already-fresh"
+          continue
+        fi
         run_step "$unit" || true
       done
       exit "$failed"

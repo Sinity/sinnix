@@ -65,6 +65,161 @@ class BorgHostIdentityFixture(unittest.TestCase):
             self.assertNotEqual(run().returncode, 0)
 
 
+class OnchangeFreshnessFixture(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.snapshots = self.root / "snapshots"
+        self.snapshots.mkdir()
+        self.marker = self.root / "latest"
+        self.policy = self.root / "policy.json"
+        self.policy.write_text(json.dumps({"noncanonical": [], "borg_excludes": []}))
+        self.old = "genome.20260101T000000+0000"
+        self.new = "genome.20260102T000000+0000"
+        self.young = "genome.20260102T230000+0000"
+        self.details = {
+            self.old: ("11111111-1111-1111-1111-111111111111", 10, 1),
+            self.new: ("22222222-2222-2222-2222-222222222222", 11, 2),
+            self.young: ("33333333-3333-3333-3333-333333333333", 12, 3),
+        }
+        (self.snapshots / self.old).mkdir()
+        self.filesystem = "44444444-4444-4444-4444-444444444444"
+        self.source_uuid = "55555555-5555-5555-5555-555555555555"
+        self.source = self.root / "source"
+        self.source.mkdir()
+        self.fields = {
+            "snapshot": self.old,
+            "archive": "genome-" + self.old,
+            "filesystem_uuid": self.filesystem,
+            "generation": "10",
+            "subvolume_id": "1",
+            "coverage": json.dumps({
+                "policy_sha256": COVERAGE.policy_identity(self.policy, require_borg_excludes=True),
+                "proof_mode": "created",
+                "producer": COVERAGE.REALM_PRODUCER_CONTRACT,
+                "create_receipt_sha256": "c" * 64,
+                "archive": "genome-" + self.old,
+                "archive_id": "a" * 64,
+                "snapshot_uuid": self.details[self.old][0],
+            }),
+        }
+        self.publish()
+        self.now = int(datetime(2026, 1, 3, tzinfo=timezone.utc).timestamp())
+        self.enterContext(patch.object(COVERAGE.time, "time", side_effect=lambda: self.now))
+        self.enterContext(patch.object(COVERAGE, "filesystem_identity", return_value=self.filesystem))
+        self.enterContext(patch.object(COVERAGE, "snapshot_details", side_effect=lambda p: self.details[Path(p).name]))
+        self.enterContext(patch.object(COVERAGE, "run", side_effect=self.metadata))
+        self.enterContext(patch.object(COVERAGE, "archive_identity", side_effect=AssertionError("health must not open Borg")))
+        self.inventory = self.root / "acquisition-inventory.json"
+        self.publish_inventory()
+
+    def publish(self):
+        payload = "".join(f"{key}={value}\n" for key, value in self.fields.items())
+        self.marker.write_text(payload)
+        receipts = COVERAGE.acknowledgement_directory(self.marker)
+        receipts.mkdir(exist_ok=True)
+        (receipts / self.old).write_text(payload)
+
+    def metadata(self, *args):
+        self.assertEqual(args[:3], ("btrfs", "subvolume", "show"))
+        if Path(args[3]) == self.source:
+            return f"UUID: {self.source_uuid}\n"
+        return f"Parent UUID: {self.source_uuid}\n"
+
+    def publish_inventory(self):
+        observed = COVERAGE.observe_acquisitions(self.snapshots, "genome.*", self.policy, self.source)
+        self.inventory.write_text(json.dumps(observed))
+
+    def probe(self):
+        return COVERAGE.acquisition_freshness(
+            self.inventory, "genome.*", self.marker, self.policy, 36 * 3600, self.source, 18 * 3600
+        )
+
+    def test_unchanged_old_cut_is_current_without_borg_io(self):
+        self.assertEqual(self.probe(), {"status": "accepted-current-observed-acquired-generation", "pending": 0})
+
+    def test_pending_debt_ages_oldest_acquisition_not_old_archive_or_new_arrival(self):
+        for name in (self.new, self.young):
+            (self.snapshots / name).mkdir()
+        self.publish_inventory()
+        self.assertEqual(self.probe()["oldest_pending_age_seconds"], 24 * 3600)
+        self.now += 13 * 3600
+        with self.assertRaisesRegex(ValueError, "pending onchange acquisition"):
+            self.probe()
+
+    def test_operator_reader_needs_no_snapshot_or_secret_access(self):
+        self.source.chmod(0)
+        self.snapshots.chmod(0)
+        try:
+            with patch.object(COVERAGE, "run", side_effect=AssertionError("reader must not run Btrfs/Borg")):
+                self.assertEqual(self.probe()["pending"], 0)
+        finally:
+            self.source.chmod(0o700)
+            self.snapshots.chmod(0o700)
+
+    def test_missing_unavailable_and_changed_inputs_fail(self):
+        self.marker.unlink()
+        with self.assertRaises(ValueError):
+            self.probe()
+        # Publishing immutable inventory precedes archive completion and does
+        # not need another acquisition after the new accepted marker appears.
+        self.publish_inventory()
+        self.publish()
+        self.assertEqual(self.probe()["pending"], 0)
+        self.inventory.unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.probe()
+        with patch.object(COVERAGE, "snapshot_names", side_effect=PermissionError("unavailable")):
+            with self.assertRaises(PermissionError):
+                self.publish_inventory()
+        with patch.object(COVERAGE, "run", side_effect=OSError("source unavailable")):
+            with self.assertRaises(OSError):
+                self.publish_inventory()
+        with patch.object(COVERAGE, "filesystem_identity", side_effect=[self.filesystem, "another-volume"]):
+            with self.assertRaises(ValueError):
+                self.publish_inventory()
+
+    def test_stale_future_corrupt_projection_or_identity_fails(self):
+        original = json.loads(self.inventory.read_text())
+        for key, value in (
+            ("schema", "unknown"), ("source_uuid", "66666666-6666-6666-6666-666666666666"),
+            ("policy_sha256", "b" * 64),
+            ("observed_at", datetime.fromtimestamp(self.now + 1, timezone.utc).isoformat()),
+            ("observed_at", datetime.fromtimestamp(self.now - 19 * 3600, timezone.utc).isoformat()),
+        ):
+            self.inventory.write_text(json.dumps(dict(original, **{key: value})))
+            with self.assertRaises(ValueError):
+                self.probe()
+        self.inventory.write_text(json.dumps(original))
+        future = "genome.20260104T000000+0000"
+        self.details[future] = ("77777777-7777-7777-7777-777777777777", 13, 4)
+        (self.snapshots / future).mkdir()
+        self.publish_inventory()
+        with self.assertRaisesRegex(ValueError, "future"):
+            self.probe()
+
+    def test_failed_native_producer_rejects_even_a_previous_fresh_projection(self):
+        argv = ["snapshot-coverage", "acquisition-freshness", str(self.inventory), "genome.*",
+                str(self.marker), str(self.policy), "129600", "--source", str(self.source),
+                "--max-observation-age", "64800", "--producer-unit", "btrbk.service"]
+        with patch.object(COVERAGE.sys, "argv", argv), patch.object(COVERAGE, "run", return_value="exit-code"):
+            with self.assertRaisesRegex(ValueError, "producer"):
+                COVERAGE.main()
+
+    def test_stale_policy_or_changed_receipt_binding_fails(self):
+        proof = json.loads(self.fields["coverage"])
+        for key, value in (("policy_sha256", "b" * 64), ("snapshot_uuid", self.details[self.new][0]), ("create_receipt_sha256", "invalid")):
+            altered = dict(proof, **{key: value})
+            self.fields["coverage"] = json.dumps(altered)
+            self.publish()
+            with self.assertRaises(ValueError):
+                self.probe()
+        self.fields["coverage"] = json.dumps(proof)
+        self.publish()
+        (COVERAGE.acknowledgement_directory(self.marker) / self.old).unlink()
+        with self.assertRaises(ValueError):
+            self.probe()
+
+
 class SnapshotInventoryFixture(unittest.TestCase):
     def test_empty_and_filtered_inventory(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -2841,18 +2996,25 @@ else: sys.exit(1)
                 finally:
                     holder.terminate()
 
+            daily_receipts = {}
+            for name in ("polylogue-state", "sinex-blobs", "local-dumps"):
+                policy = re.search(
+                    rf"daily_marker=[^\n]*{name}\.last-success\n\s*daily_policy=([0-9a-f]+)",
+                    scripts["coordinator"],
+                ).group(1)
+                daily_receipts[name] = f"archive=synthetic\nepoch={int(time.time())}\npolicy_sha256={policy}\n"
             for name in ("polylogue-state", "sinex-blobs", "local-dumps"):
                 (root / f"state/borg-drain/{name}.last-success").unlink(missing_ok=True)
             coordinator_steps = [
                 "machine-telemetry-sqlite-backup.service",
                 "polylogue-sqlite-backup.service",
                 "btrbk.service",
+                "borgbackup-job-polylogue-state.service",
+                "borgbackup-job-sinex-blobs.service",
                 "borgbackup-job-realm.service",
                 "borgbackup-job-genome.service",
                 "borgbackup-job-persist.service",
                 "borgbackup-root-snapshots.service",
-                "borgbackup-job-polylogue-state.service",
-                "borgbackup-job-sinex-blobs.service",
                 "borgbackup-maintenance.service",
                 "borgbackup-coverage-audit-realm.service",
                 "borgbackup-local-dumps.service",
@@ -2946,6 +3108,7 @@ else: sys.exit(1)
                 expected_starts,
                 "empty retries must leave an ongoing integrity check alone",
             )
+            acquisition_receipt = (empty / "state/borg-drain/coordinator.acquisition").read_text()
             # A local receipt routes scheduling without repository credentials.
             # The real children, tested above, still qualify their archives.
             admitted = "realm.20260403T070000+0000"
@@ -3006,6 +3169,34 @@ else: sys.exit(1)
             self.assertNotIn(["start", "btrbk.service"], calls)
             self.assertEqual(calls[-9:], expected_starts[3:])
             self.assertIn("reason=dump-failure", result.stderr)
+
+            # Eligibility is checked at each phase, not against a scheduler
+            # timestamp that can precede a long archive backlog by a full day.
+            (empty / "fail-dump").unlink()
+            (empty / "state/borg-drain/coordinator.acquisition").write_text(acquisition_receipt)
+            for name, payload in daily_receipts.items():
+                (empty / f"state/borg-drain/{name}.last-success").write_text(payload)
+            clock = empty / "mock-bin/date"
+            clock.write_text(
+                f"#!{sys.executable}\nimport os, pathlib\n"
+                "p=pathlib.Path(os.environ['TMPDIR'])/'clock-calls'\n"
+                "n=int(p.read_text()) if p.exists() else 0\n"
+                "p.write_text(str(n+1))\n"
+                f"print({int(time.time())}+(90000 if n else 0))\n"
+            )
+            clock.chmod(0o755)
+            (empty / "commands").unlink()
+            result = subprocess.run(
+                ["bash", str(root / "coordinator.sh")],
+                env=dict(env, TMPDIR=str(empty), PATH=str(empty / "mock-bin") + os.pathsep + env["PATH"]),
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            calls = [json.loads(line) for line in (empty / "commands").read_text().splitlines()]
+            self.assertNotIn(["start", "btrbk.service"], calls)
+            for unit in ("borgbackup-job-polylogue-state.service", "borgbackup-job-sinex-blobs.service"):
+                self.assertIn(["start", unit], calls)
 
 
 if __name__ == "__main__":

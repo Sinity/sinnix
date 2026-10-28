@@ -82,7 +82,7 @@
       run_id="''${INVOCATION_ID:-borg-check-$(date +%s)}"
       write_integrity_receipt() {
         state="$1"
-        install -d -m 0755 ${lib.escapeShellArg borgDrainStateRoot}
+        install -d -m 0750 -o root -g users ${lib.escapeShellArg borgDrainStateRoot}
         jq -cn \
           --arg operation_kind integrity_check \
           --arg run_id "$run_id" \
@@ -182,7 +182,7 @@
         ${realmCoveragePolicy} 604800 --mode sampled >/dev/null 2>&1; then
         exit 0
       fi
-      install -d -m 0755 ${lib.escapeShellArg borgDrainStateRoot}
+      install -d -m 0750 -o root -g users ${lib.escapeShellArg borgDrainStateRoot}
       if ! acquire_borg_global_lock_or_fail "realm coverage selection"; then
         printf '{"status":"deferred","reason":"borg-lock-contention","epoch":%s}\n' "$(date +%s)" \
           | publish_backup_marker ${lib.escapeShellArg "${borgDrainStateRoot}/realm.independent-coverage-audit-attempt.json"}

@@ -100,8 +100,9 @@ Direct Polylogue/Sinex archive calls and local dump expiry likewise reuse their
 existing success markers only within 20 hours and with matching input policy.
 Manual native unit calls retain their original behavior.
 
-The sequence then runs Realm, optional genome, Persist, root snapshot archival,
-Polylogue state and optional Sinex blobs, followed by retention maintenance,
+The sequence first archives daily Polylogue state and optional Sinex blobs,
+then runs Realm, optional genome, Persist and root snapshot archival, followed
+by retention maintenance,
 the due Realm coverage audit and verified local dump expiry. These jobs have
 no independent timers on backup hosts. Telemetry-only hosts retain their dump
 timer. Each native job keeps its own resources, proof, due checks and deadline.
@@ -112,9 +113,19 @@ Adding or re-enabling the boot timer on a machine already past 45 minutes
 can start this full sequence immediately during activation. Sequence that
 activation with other IO-heavy jobs and inspect the retained queue first.
 The coordinator is not restarted merely because its script changes.
-Its overall deadline is 48h15m, or 72h15m with genome, so a large retained
-backlog can extend beyond one night. A successful unit start alone is not
+Polylogue state keeps its 90-minute deadline; Sinex blobs have a six-hour
+start deadline instead of an infinite one. A timeout keeps canonical input
+and failed hook cuts for recovery. Its overall deadline is 56h15m, or
+80h15m with genome, so a large retained
+backlog can extend beyond one night. This maximum is not a nightly SLA or
+a waiver of the 36-hour source alert: a large retained backlog can fail that
+alert while remaining safely resumable. A successful unit start alone is not
 proof every source has an accepted archive; inspect the per-source receipts.
+
+Daily direct-path archives run before complete historical snapshot queues so
+a multi-day Realm/genome backlog cannot consume their daily start window.
+That trades their runtime before Realm's space-sensitive drain; no historical
+cut is dropped, and each native drain still processes its finite lossless queue.
 
 The drain keeps the newest archived snapshot for the independent audit.
 When no cuts are queued it validates existing acknowledgements and leaves a
@@ -180,6 +191,37 @@ with SQLite's structural check, both exactly once, with results kept under
 `verified/`. The daily backup compresses only the small active file. Dumps are written
 with `zstd --rsyncable`, so unchanged pages compress to identical bytes and
 Borg stores mostly new data; the `/realm` snapshots archive them.
+
+Receipt metadata under `/persist/root/.cache/borg-drain` is root-owned and
+traversable by the operator's `users` group (0750). Published receipts remain
+read-only to that group. Creating jobs and tmpfiles use the same directory
+policy; Borg repositories, key material and chunk caches remain root-private.
+
+Realm and Persist freshness alerts allow 36 hours from the accepted source
+cut: the approved 24-hour archival cadence plus 12 hours of grace. The former
+eight-hour check described a six-hour archive schedule that no longer exists.
+The broader coordinator timeout does not extend this alert budget or establish
+an eight-hour recovery-point objective.
+
+Genome acquisition is `onchange`, so an old accepted cut can remain current.
+On every successful native btrbk acquisition, including an unchanged source,
+the root producer atomically publishes a metadata-only inventory under the
+receipt directory. It records the observed UTC time, current policy and source
+identity, plus immutable snapshot UUIDs, generations, IDs and cut times. This
+runs on the existing six-hour schedule and the coordinator's acquisition;
+there is no extra observer timer. Private snapshot access stays with root.
+
+The operator's probe reads that projection and the matching current-policy
+accepted receipt. It opens neither private snapshots nor Borg credentials.
+A failed native producer, missing/corrupt/future observation or observation
+older than 18 hours (three acquisition periods) fails the probe. With no newer
+observed acquired generation it is healthy regardless of the old accepted
+cut's age; otherwise the oldest pending newer cut has the 36-hour archival
+budget. Future cut times fail, and new arrivals cannot reset old debt. An
+archive accepted after inventory publication can be recognized immediately
+without waiting for another acquisition. This describes the latest observed
+acquired generation, not instantaneous live contents, a repository integrity
+check or a claim that every write between acquisitions is already archived.
 
 ## Is it healthy?
 

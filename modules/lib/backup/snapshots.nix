@@ -1,5 +1,8 @@
 # Internal backup component. Public options and shared policy live in modules/backup.nix.
 {
+  snapshotCoverage,
+  genomeCoveragePolicy,
+  genomeAcquisitionInventory,
   pkgs,
   lib,
   borgRepoRoot,
@@ -49,7 +52,7 @@
       "d ${borgRepoRoot} 0750 root users -"
       "d ${borgRepoRootSnapshotsPath} 0700 root root -"
       "d ${borgCacheDir} 0700 root root -"
-      "d ${borgDrainStateRoot} 0700 root root -"
+      "d ${borgDrainStateRoot} 0750 root users -"
       "f ${borgGlobalLock} 0600 root root -"
     ];
   }
@@ -68,7 +71,29 @@
       ];
       unitConfig.RequiresMountsFor = lib.optional (genomeRoot != null) genomeRoot;
     };
-    execStart = "${pkgs.btrbk}/bin/btrbk --quiet --preserve-snapshots run";
+    path = with pkgs; [
+      coreutils
+      btrfs-progs
+      util-linux
+    ];
+    script = ''
+      ${pkgs.btrbk}/bin/btrbk --quiet --preserve-snapshots run
+      ${lib.optionalString (genomeRoot != null) ''
+        # Every successful acquisition, including unchanged onchange sources,
+        # publishes only immutable metadata for the unprivileged health reader.
+        install -d -m 0750 -o root -g users ${lib.escapeShellArg borgDrainStateRoot}
+        inventory=${lib.escapeShellArg genomeAcquisitionInventory}
+        temporary=$(mktemp "$inventory.XXXXXXXX")
+        trap 'rm -f -- "$temporary"' EXIT
+        ${snapshotCoverage} observe-acquisitions ${lib.escapeShellArg genomeSnapshots} 'genome.*' ${genomeCoveragePolicy} \
+          --source ${lib.escapeShellArg (toString genomeRoot)} > "$temporary"
+        chmod 0644 "$temporary"
+        sync -f "$temporary"
+        mv -f "$temporary" "$inventory"
+        sync -f ${lib.escapeShellArg borgDrainStateRoot}
+        trap - EXIT
+      ''}
+    '';
     serviceConfig = {
       TimeoutStopSec = "15s";
       ExecStartPre = lib.optional (

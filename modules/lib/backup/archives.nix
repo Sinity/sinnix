@@ -155,7 +155,11 @@ in
         ];
         unitConfig.RequiresMountsFor = sinexStorePaths;
       };
-      serviceConfig.TimeoutStopSec = "15s";
+      serviceConfig = {
+        # Bound the former infinite start without reducing archive coverage.
+        TimeoutStartSec = "6h";
+        TimeoutStopSec = "15s";
+      };
       path = with pkgs; [
         borgbackup
         coreutils
@@ -186,7 +190,7 @@ in
         # as the btrbk drain jobs' "$label.last-success" (mkSnapshotDrainScript
         # above) -- without it, sinex-blobs had zero freshness gating despite
         # being a separately invoked native lane.
-        install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
+        install -d -m 0750 -o root -g users ${lib.escapeShellArg borgDrainStateRoot}
         marker=${lib.escapeShellArg "${borgDrainStateRoot}/sinex-blobs.last-success"}
         {
           printf 'archive=%s\n' "$archive_name"
@@ -306,7 +310,7 @@ in
         ${lib.escapeShellArg polylogueStateRoot}
       echo "polylogue state backup complete: $archive_name"
 
-      install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
+      install -d -m 0750 -o root -g users ${lib.escapeShellArg borgDrainStateRoot}
       marker=${lib.escapeShellArg "${borgDrainStateRoot}/polylogue-state.last-success"}
       {
         printf 'archive=%s\n' "$archive_name"

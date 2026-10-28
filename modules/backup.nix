@@ -124,9 +124,11 @@ let
     rankingArchivePath
     "library/model/control-vector"
   ];
-  # A six-hour snapshot can take about an hour to archive after acquisition.
-  # Keep data age distinct from the last-success wall clock.
-  borgDataFreshnessMaxAgeSec = 8 * 60 * 60;
+  # Nightly archival permits a day between accepted source cuts, plus 12h
+  # grace. A longer preserved backlog must remain visible as stale.
+  borgDataFreshnessMaxAgeSec = (24 + 12) * 60 * 60;
+  borgAcquisitionObservationMaxAgeSec = 3 * 6 * 60 * 60;
+  genomeAcquisitionInventory = "${borgDrainStateRoot}/genome.acquisition-inventory.json";
   # Direct-path archives run nightly in the coordinator. Keep their existing
   # three-day freshness budget separate from snapshot source age.
   borgDailyArchiveMaxAgeSec = 3 * 24 * 60 * 60;
@@ -399,6 +401,23 @@ let
       )
     );
 
+  genomeExcludes = [
+    "cache/reference"
+    "cache/pgs_catalog"
+    "cache/tools"
+    "cache/pylibs"
+    "cache/snpeff"
+    "cache/gwas_sumstats"
+    ".direnv"
+  ];
+  genomeCoveragePolicy = mkCoveragePolicy {
+    label = "genome";
+    bindTarget = "/run/borgbackup-snapshot-inputs/genome";
+    exclude = genomeExcludes;
+    noncanonical = genomeExcludes;
+    producerProof = true;
+  };
+
   realmCoveragePolicy = mkCoveragePolicy {
     label = "realm";
     bindTarget = borgRealmSnapshotBind;
@@ -435,7 +454,7 @@ let
       set -euo pipefail
       export LC_ALL=C
       ${mkBorgCommonScript repo}
-      install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
+      install -d -m 0750 -o root -g users ${lib.escapeShellArg borgDrainStateRoot}
       latest_marker=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.latest-archived"}
       pending_receipt=${lib.escapeShellArg "${borgDrainStateRoot}/${label}.pending-create.json"}
       acquire_borg_global_lock_or_skip "${label} Borg drain"
@@ -1131,6 +1150,12 @@ in
             btrbk = {
               unit = "btrbk.service";
               resourceClass = "backup";
+              captures = lib.optional (backupCfg.genomeRoot != null) {
+                name = "genome-acquisition-inventory";
+                path = genomeAcquisitionInventory;
+                eventDriven = true;
+                staleAfterSeconds = borgAcquisitionObservationMaxAgeSec;
+              };
             };
             btrbk-timer = {
               unit = "btrbk.timer";
@@ -1194,7 +1219,7 @@ in
                   path = "${borgDrainStateRoot}/genome.latest-archived";
                   eventDriven = true;
                   livenessProbe = {
-                    command = "${snapshotCoverage} freshness ${borgDrainStateRoot}/genome.latest-archived ${toString borgDataFreshnessMaxAgeSec}";
+                    command = "${snapshotCoverage} acquisition-freshness ${genomeAcquisitionInventory} 'genome.*' ${borgDrainStateRoot}/genome.latest-archived ${genomeCoveragePolicy} ${toString borgDataFreshnessMaxAgeSec} --source ${lib.escapeShellArg (toString backupCfg.genomeRoot)} --max-observation-age ${toString borgAcquisitionObservationMaxAgeSec} --producer-unit btrbk.service";
                     timeoutSeconds = 15;
                   };
                 }
@@ -1360,6 +1385,9 @@ in
       ]
       ++ (import ./lib/backup/snapshots.nix {
         inherit
+          snapshotCoverage
+          genomeCoveragePolicy
+          genomeAcquisitionInventory
           pkgs
           lib
           borgRepoRoot
@@ -1451,6 +1479,7 @@ in
       })
       ++ (import ./lib/backup/genome.nix {
         inherit
+          genomeExcludes
           pkgs
           lib
           genomeSnapshots
