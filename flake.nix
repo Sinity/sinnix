@@ -95,7 +95,7 @@
     # deploys follow pushed history; non-flake — sinnix's flake/scripts.nix
     # calls its pkg.nix directly, same pattern as beads.
     phone-app = {
-      url = "github:Sinity/sinnix-phone-app/b93cd0d82863c9fade5cab35e17b5ee2486ae0f6";
+      url = "github:Sinity/sinnix-phone-app/aec35ef1a994fcbd2b21537b5d4c0d9782afbdc3";
       flake = false;
     };
 
