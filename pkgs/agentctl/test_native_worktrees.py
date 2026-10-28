@@ -13,7 +13,7 @@ from test_cleanup_hidden import git
 
 
 @pytest.fixture
-def owned(checkout, monkeypatch):
+def owned(checkout, fake_pueue, monkeypatch):
     config, project, path = checkout
     monkeypatch.setattr(
         native,

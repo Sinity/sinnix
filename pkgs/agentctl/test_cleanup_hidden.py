@@ -21,20 +21,24 @@ def git(root, *args):
 def checkout(config, project_root, tmp_path, monkeypatch):
     from agentctl.projects import load_project_adapter
 
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    for name in (
+        "GIT_AUTHOR_NAME",
+        "GIT_AUTHOR_EMAIL",
+        "GIT_COMMITTER_NAME",
+        "GIT_COMMITTER_EMAIL",
+    ):
+        monkeypatch.delenv(name, raising=False)
     git(project_root, "init", "-q", "-b", "master")
+    # Worktree commits share this repository's synthetic identity; the host's
+    # global Git configuration is not part of the fixture.
+    git(project_root, "config", "user.name", "Fixture")
+    git(project_root, "config", "user.email", "fixture@example.test")
     (project_root / "tracked.txt").write_text("committed")
     (project_root / ".gitignore").write_text("ignored*\n.agentctl/receipt*\n")
     git(project_root, "add", ".")
-    git(
-        project_root,
-        "-c",
-        "user.name=Fixture",
-        "-c",
-        "user.email=fixture@example.test",
-        "commit",
-        "-qm",
-        "fixture",
-    )
+    git(project_root, "commit", "-qm", "fixture")
     path = tmp_path / "checkout"
     git(project_root, "worktree", "add", "-qb", "candidate", str(path))
     tree = Worktree(branch="candidate", path=path)

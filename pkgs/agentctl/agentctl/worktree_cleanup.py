@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Callable, Iterator, Mapping, Sequence
 from sinnix_lib.atomic import atomic_publish
 from sinnix_lib.procfs import held_paths
 
-from . import cgroups, gitcmd, job_queries, pueue, worktrunk
+from . import gitcmd, pueue, worktrunk
 from .batch_history import Run, list_runs, load, manifest_path, runs_dir
 from .limits import CALL_TIMEOUT_SECONDS
 from .projects import ProjectAdapter
@@ -660,6 +660,10 @@ def _drop_branch(
         tree = worktrunk.worktrunk_find(project.root, branch)
     target = tree.path if tree is not None else recorded_path
     if target is not None:
+        # Native cancellation records are needed at the release boundary,
+        # not when importing the independent retained-history cleanup helpers.
+        from . import cgroups, job_queries
+
         for input_path in config.inputs_dir.glob("*.json"):
             document = (
                 job_queries.read_outcome(input_path, job_queries.MAX_LAUNCH_INPUT_BYTES)

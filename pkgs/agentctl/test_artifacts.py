@@ -332,11 +332,28 @@ def test_guarded_cancel_allows_real_wrapper_to_finalize(
         return run.Outcome.CANCELLED, run.CANCELLED_EXIT_CODE
 
     real_run = subprocess.run
+    systemctl_calls = []
+    unit = run.unit_for(input_path, task.group)
 
     def systemctl(command, **kwargs):
         if command[0] != "systemctl":
             return real_run(command, **kwargs)
-        assert command[:3] == ["systemctl", "--user", "stop"]
+        systemctl_calls.append(command[2])
+        if command[2] == "show":
+            assert command == [
+                "systemctl",
+                "--user",
+                "show",
+                "-p",
+                "ControlGroup",
+                "--",
+                unit,
+            ]
+            # This test runs a bare synthetic workload, with no kernel cgroup.
+            return subprocess.CompletedProcess(
+                command, 0, stdout="ControlGroup=\n", stderr=""
+            )
+        assert command == ["systemctl", "--user", "stop", unit]
         assert run.cancel_marker_for(document["log_path"]).exists()
         stopped.set()
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
@@ -370,6 +387,7 @@ def test_guarded_cancel_allows_real_wrapper_to_finalize(
         stopped.set()
         thread.join(2)
     assert not thread.is_alive() and not failures
+    assert systemctl_calls.index("show") < systemctl_calls.index("stop")
     assert not fake_pueue.killed, (
         "guarded canceller forced a kill while holding the finalizer's lock"
     )
