@@ -76,7 +76,7 @@
     };
 
     lynchpin = {
-      url = "github:Sinity/sinity-lynchpin/aab88a5b74ca2d3d361c4974127f2b99169ca29a";
+      url = "github:Sinity/sinity-lynchpin/df0ee7339b58519aa84ca8ea0dd2a21330b995b1";
       inputs.nixpkgs.follows = "nixpkgs";
       inputs.nixpkgsRepomix.follows = "nixpkgs";
     };
