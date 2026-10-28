@@ -110,14 +110,22 @@ The coordinator owns no Borg lock while waiting for children; the children
 acquire and release it themselves. Stopping the coordinator propagates to its
 children, preserving their existing failed-cut and unacknowledged-source rules.
 Adding or re-enabling the boot timer on a machine already past 45 minutes
-can start this full sequence immediately during activation. Sequence that
-activation with other IO-heavy jobs and inspect the retained queue first.
+can start this full sequence immediately during activation. With a retained
+persistent trigger timestamp, systemd can instead suppress that already-past
+boot expression; inspect the actual next trigger and native service state.
+The normal boot trigger is scheduled when the timer starts before 45 minutes.
+Use the declared `backup_drain` operation for deployment recovery when no
+automatic start is pending. Sequence activation and recovery with other
+IO-heavy jobs and inspect the retained queue first.
 The coordinator is not restarted merely because its script changes.
 Polylogue state keeps its 90-minute deadline; Sinex blobs have a six-hour
 start deadline instead of an infinite one. A timeout keeps canonical input
 and failed hook cuts for recovery. Its overall deadline is 56h15m, or
 80h15m with genome, so a large retained
-backlog can extend beyond one night. This maximum is not a nightly SLA or
+backlog can extend beyond one night. The declared `backup_drain` caller has
+an 81-hour finite timeout: the 80h15m native maximum plus 45 minutes for
+supervision. Systemd remains the owner of child deadlines and cancellation.
+This maximum is not a nightly SLA or
 a waiver of the 36-hour source alert: a large retained backlog can fail that
 alert while remaining safely resumable. A successful unit start alone is not
 proof every source has an accepted archive; inspect the per-source receipts.

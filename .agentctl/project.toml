@@ -453,7 +453,8 @@ exec = ["sudo", "-n", "systemctl", "start", "borgbackup-drain-coordinator.servic
 pool = "bulk"
 result = "exit"
 cache = "none"
-timeout_seconds = 28800
+# 80h15m maximum native coordinator bound plus 45m supervision margin.
+timeout_seconds = 291600
 
 [operations.codex]
 description = "Run one Codex worker in this checkout: codex-worker <effort> <prompt-file> <output-schema> <output-dir> [model]"
