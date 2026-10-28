@@ -1,0 +1,455 @@
+diff --git a/meson.build b/meson.build
+index 7a50411..e8127ad 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1127,6 +1127,7 @@ install_data(
+ if build_tests
+   _cpp_test_names = [
+     'allocator_stats',
++    'runtime_memory',
+     'animation_manager',
+     'app_identity',
+     'audio_glyphs',
+diff --git a/src/app/application_ipc.cpp b/src/app/application_ipc.cpp
+index 17ee3ff..6fd8a64 100644
+--- a/src/app/application_ipc.cpp
++++ b/src/app/application_ipc.cpp
+@@ -90,6 +90,7 @@
+ #include "ui/dialogs/glyph_picker_dialog.h"
+ #include "ui/style.h"
+ #include "util/allocator_stats.h"
++#include "scripting/runtime_memory.h"
+ #include "util/file_utils.h"
+ #include "util/string_utils.h"
+ 
+@@ -151,6 +152,8 @@ void Application::initIpc() {
+ #endif
+         json += ",\n  \"allocator\": ";
+         json += allocator.dump();
++        json += ",\n  \"ownership\": ";
++        json += scripting::diagnostics::RuntimeMemoryRegistry::instance().snapshot(::getpid()).dump();
+         json += "\n}\n";
+         return json;
+       },
+diff --git a/src/scripting/runtime_memory.h b/src/scripting/runtime_memory.h
+new file mode 100644
+index 0000000..7ba2749
+--- /dev/null
++++ b/src/scripting/runtime_memory.h
+@@ -0,0 +1,153 @@
++#pragma once
++
++#include <algorithm>
++#include <chrono>
++#include <cstdint>
++#include <map>
++#include <mutex>
++#include <optional>
++#include <string>
++#include <string_view>
++#include <vector>
++#include <nlohmann/json.hpp>
++
++namespace scripting::diagnostics {
++
++  struct MemoryStamp {
++    std::int64_t unixMs;
++    std::chrono::steady_clock::time_point monotonic;
++
++    static MemoryStamp now() {
++      return {
++          std::chrono::duration_cast<std::chrono::milliseconds>(
++              std::chrono::system_clock::now().time_since_epoch()
++          ).count(),
++          std::chrono::steady_clock::now(),
++      };
++    }
++  };
++
++  // Values only: this registry never owns or calls a runtime, VM or worker.
++  // Workers publish after serialized events; status copies at most 32 records.
++  class RuntimeMemoryRegistry {
++  public:
++    static constexpr std::size_t kMaxReported = 32;
++    static constexpr std::size_t kMaxIdBytes = 128;
++
++    static RuntimeMemoryRegistry& instance() {
++      // DeferredCall's static queue can release a State after ordinary static
++      // destruction. Keep this one registry alive until process exit; individual
++      // runtime records are still erased by State destruction.
++      static auto* const registry = new RuntimeMemoryRegistry;
++      return *registry;
++    }
++
++    void add(std::uint64_t token, std::string_view runtimeId) {
++      Entry entry;
++      if (runtimeId.size() > kMaxIdBytes) {
++        entry.identityError = "runtime_id_too_long";
++      } else if (!std::all_of(runtimeId.begin(), runtimeId.end(), [](unsigned char c) {
++                   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
++                          c == '/' || c == ':' || c == '.' || c == '_' || c == '-';
++                 }) || runtimeId.empty()) {
++        entry.identityError = "runtime_id_invalid";
++      } else {
++        entry.runtimeId = runtimeId;
++      }
++      std::scoped_lock lock(m_mutex);
++      m_entries.emplace(token, std::move(entry));
++    }
++
++    void erase(std::uint64_t token) {
++      std::scoped_lock lock(m_mutex);
++      m_entries.erase(token);
++    }
++
++    void begin(std::uint64_t token) {
++      std::scoped_lock lock(m_mutex);
++      if (auto it = m_entries.find(token); it != m_entries.end()) {
++        it->second.inFlight = true;
++      }
++    }
++
++    void publish(
++        std::uint64_t token, std::uint64_t hostGeneration, std::optional<std::size_t> bytes,
++        MemoryStamp stamp = MemoryStamp::now()
++    ) {
++      std::scoped_lock lock(m_mutex);
++      if (auto it = m_entries.find(token); it != m_entries.end()) {
++        auto& entry = it->second;
++        entry.hostGeneration = hostGeneration != 0 ? std::optional(hostGeneration) : std::nullopt;
++        entry.bytes = bytes;
++        entry.stamp = bytes.has_value() ? std::optional(stamp) : std::nullopt;
++        entry.observed = true;
++        entry.inFlight = false;
++      }
++    }
++
++    nlohmann::json snapshot(int pid, MemoryStamp stamp = MemoryStamp::now()) const {
++      std::vector<std::pair<std::uint64_t, Entry>> copied;
++      std::size_t total;
++      {
++        std::scoped_lock lock(m_mutex);
++        total = m_entries.size();
++        copied.reserve(std::min(total, kMaxReported));
++        for (const auto& value : m_entries) {
++          if (copied.size() == kMaxReported) break;
++          copied.push_back(value);
++        }
++      }
++      nlohmann::json result{
++          {"schema_version", 1}, {"provider", "luau"}, {"status", "available"},
++          {"pid", pid}, {"observed_at_unix_ms", stamp.unixMs}, {"units", "bytes"},
++          {"runtime_count", total}, {"reported_runtime_count", copied.size()},
++          {"truncated_count", total - copied.size()}, {"runtimes", nlohmann::json::array()},
++      };
++      std::size_t available = 0;
++      std::size_t observed = 0;
++      for (const auto& [token, entry] : copied) {
++        nlohmann::json row{
++            {"state_token", token}, {"runtime_id", nullptr}, {"host_generation", nullptr},
++            {"status", "unavailable"}, {"bytes", nullptr}, {"sampled_at_unix_ms", nullptr},
++            {"age_ms", nullptr}, {"reason", nullptr},
++        };
++        if (entry.runtimeId.has_value()) row["runtime_id"] = *entry.runtimeId;
++        if (entry.hostGeneration.has_value()) row["host_generation"] = *entry.hostGeneration;
++        if (!entry.identityError.empty()) {
++          row["reason"] = entry.identityError;
++        } else if (!entry.bytes.has_value() || !entry.stamp.has_value()) {
++          row["reason"] = entry.observed ? "host_absent" : "not_observed";
++        } else {
++          row["status"] = entry.inFlight ? "stale" : "available";
++          row["bytes"] = *entry.bytes;
++          row["sampled_at_unix_ms"] = entry.stamp->unixMs;
++          row["age_ms"] = std::max<std::int64_t>(0, std::chrono::duration_cast<std::chrono::milliseconds>(
++              stamp.monotonic - entry.stamp->monotonic
++          ).count());
++          if (entry.inFlight) row["reason"] = "worker_in_flight";
++          else ++available;
++          ++observed;
++        }
++        result["runtimes"].push_back(std::move(row));
++      }
++      if (total > copied.size()) result["status"] = "partial";
++      else if (total != 0 && observed == 0) result["status"] = "unavailable";
++      else if (available != total) result["status"] = "partial";
++      return result;
++    }
++
++  private:
++    struct Entry {
++      std::optional<std::string> runtimeId;
++      std::string identityError;
++      std::optional<std::uint64_t> hostGeneration;
++      std::optional<std::size_t> bytes;
++      std::optional<MemoryStamp> stamp;
++      bool observed = false;
++      bool inFlight = false;
++    };
++    mutable std::mutex m_mutex;
++    std::map<std::uint64_t, Entry> m_entries;
++  };
++
++} // namespace scripting::diagnostics
+diff --git a/src/scripting/script_runtime.cpp b/src/scripting/script_runtime.cpp
+index b5da458..089ae6b 100644
+--- a/src/scripting/script_runtime.cpp
++++ b/src/scripting/script_runtime.cpp
+@@ -1,4 +1,5 @@
+ #include "scripting/script_runtime.h"
++#include "scripting/runtime_memory.h"
+ 
+ #include "core/deferred_call.h"
+ #include "core/log.h"
+@@ -203,7 +204,11 @@ namespace scripting {
+         HttpClient* httpClientPtr, ClipboardService* clipboardService, TogglePanelCallback panelToggleCallback
+     )
+         : runtimeName(std::move(name)), settings(std::move(widgetSettings)), scriptApi(api), pluginDir(std::move(dir)),
+-          httpClient(httpClientPtr), clipboard(clipboardService), togglePanelCallback(std::move(panelToggleCallback)) {}
++          httpClient(httpClientPtr), clipboard(clipboardService), togglePanelCallback(std::move(panelToggleCallback)) {
++      diagnostics::RuntimeMemoryRegistry::instance().add(stateToken, runtimeName);
++    }
++
++    ~State() { diagnostics::RuntimeMemoryRegistry::instance().erase(stateToken); }
+ 
+     mutable std::mutex mutex;
+     std::condition_variable stopCv;
+@@ -216,6 +221,7 @@ namespace scripting {
+     std::deque<ScriptEvent> queue;
+     std::unordered_map<SubscriberId, ScriptResultCallback> subscribers;
+     std::unique_ptr<LuauHost> host;
++    std::uint64_t diagnosticHostGeneration = 0; // worker-owned, follows actual VM creation
+     PluginBindingContext bindingContext;
+     ClipboardService* clipboard = nullptr;
+     TogglePanelCallback togglePanelCallback;
+@@ -547,8 +553,10 @@ namespace scripting {
+           }
+         }
+ 
++        diagnostics::RuntimeMemoryRegistry::instance().begin(stateToken);
+         if (event.kind == ScriptEventKind::Stop) {
+           teardownHost(event.exitSignal, event.snapshot, event.exitReason);
++          publishMemory();
+           {
+             std::scoped_lock lock(mutex);
+             queue.clear();
+@@ -560,6 +568,7 @@ namespace scripting {
+         }
+ 
+         auto result = processEvent(event);
++        publishMemory();
+ 
+         {
+           std::scoped_lock lock(mutex);
+@@ -574,6 +583,14 @@ namespace scripting {
+       }
+     }
+ 
++    void publishMemory() {
++      // Only this serialized worker reads the VM's allocator accounting.
++      diagnostics::RuntimeMemoryRegistry::instance().publish(
++          stateToken, diagnosticHostGeneration,
++          host != nullptr ? std::optional(host->memoryUsedBytes()) : std::nullopt
++      );
++    }
++
+     std::optional<ScriptResult> processEvent(const ScriptEvent& event) {
+       if (event.kind == ScriptEventKind::Stop) {
+         return std::nullopt;
+@@ -733,6 +750,7 @@ namespace scripting {
+       }
+ 
+       host = std::make_unique<LuauHost>(scriptApi, runtimeName);
++      ++diagnosticHostGeneration;
+       reportedModuleCount = 0;
+       bindingContext.settings = &settings;
+       bindingContext.host = host.get();
+diff --git a/tests/runtime_memory_test.cpp b/tests/runtime_memory_test.cpp
+new file mode 100644
+index 0000000..52d435c
+--- /dev/null
++++ b/tests/runtime_memory_test.cpp
+@@ -0,0 +1,184 @@
++#include "scripting/runtime_memory.h"
++
++#include <atomic>
++#include <cassert>
++#include <future>
++#include <memory>
++#include <cstring>
++#include <vector>
++#include <sys/wait.h>
++#include <unistd.h>
++#include <limits>
++#include <iostream>
++#include <thread>
++
++using scripting::diagnostics::MemoryStamp;
++using scripting::diagnostics::RuntimeMemoryRegistry;
++using namespace std::chrono_literals;
++
++namespace {
++  MemoryStamp stamp(std::int64_t ms) {
++    return {ms, std::chrono::steady_clock::time_point(std::chrono::milliseconds(ms))};
++  }
++}
++
++namespace {
++  struct LateState {
++    ~LateState() { RuntimeMemoryRegistry::instance().erase(999); }
++  };
++
++  std::vector<std::unique_ptr<LateState>>& deferredStates() {
++    static std::vector<std::unique_ptr<LateState>> states;
++    return states;
++  }
++}
++
++int main(int argc, char** argv) {
++  if (argc == 2 && std::strcmp(argv[1], "--late-state") == 0) {
++    // Construct the deferred owner first so it destroys State after the registry
++    // would have been destroyed. This models upstream DeferredCall's queue.
++    auto& deferred = deferredStates();
++    RuntimeMemoryRegistry::instance().add(999, "example/plugin:late");
++    deferred.push_back(std::make_unique<LateState>());
++    return 0;
++  }
++  const pid_t child = ::fork();
++  assert(child >= 0);
++  if (child == 0) {
++    ::execl(argv[0], argv[0], "--late-state", static_cast<char*>(nullptr));
++    ::_exit(127);
++  }
++  int childStatus = 0;
++  assert(::waitpid(child, &childStatus, 0) == child);
++  assert(WIFEXITED(childStatus) && WEXITSTATUS(childStatus) == 0);
++
++  RuntimeMemoryRegistry registry;
++  assert(registry.snapshot(123, stamp(1000))["runtime_count"] == 0);
++  registry.add(7, "example/plugin:service");
++  auto data = registry.snapshot(123, stamp(1000));
++  assert(data["schema_version"] == 1 && data["provider"] == "luau");
++  assert(data["pid"] == 123 && data["units"] == "bytes");
++  assert(data["status"] == "unavailable");
++  assert(data["runtimes"][0]["bytes"].is_null());
++  assert(data["runtimes"][0]["host_generation"].is_null());
++  assert(data["runtimes"][0]["reason"] == "not_observed");
++
++  registry.begin(7);
++  registry.publish(7, 1, 0, stamp(1100));
++  data = registry.snapshot(123, stamp(1200));
++  assert(data["status"] == "available" && data["runtimes"][0]["bytes"] == 0);
++  assert(data["runtimes"][0]["host_generation"] == 1);
++  assert(data["runtimes"][0]["sampled_at_unix_ms"] == 1100);
++  assert(data["runtimes"][0]["age_ms"] == 100);
++#ifdef NOCTALIA_OWNERSHIP_FIXTURE
++  std::cout << data.dump() << '\n';
++#endif
++
++  registry.begin(7);
++  data = registry.snapshot(123, stamp(1300));
++  assert(data["status"] == "partial");
++  assert(data["runtimes"][0]["status"] == "stale");
++  assert(data["runtimes"][0]["reason"] == "worker_in_flight");
++  assert(data["runtimes"][0]["bytes"] == 0); // last observation, not a new read
++  registry.publish(7, 2, 8192, stamp(1400)); // actual host replacement
++  data = registry.snapshot(123, stamp(1500));
++  assert(data["runtimes"][0]["host_generation"] == 2);
++  assert(data["runtimes"][0]["bytes"] == 8192);
++  registry.publish(7, 2, std::nullopt, stamp(1600)); // worker teardown
++  data = registry.snapshot(123, stamp(1700));
++  assert(data["status"] == "unavailable");
++  assert(data["runtimes"][0]["reason"] == "host_absent");
++  assert(data["runtimes"][0]["host_generation"] == 2);
++  assert(data["runtimes"][0]["bytes"].is_null());
++  assert(data["runtimes"][0]["sampled_at_unix_ms"].is_null());
++  assert(data["runtimes"][0]["age_ms"].is_null());
++  registry.erase(7);
++  registry.publish(7, 3, 999, stamp(1800)); // late publication cannot revive a retired runtime
++  assert(registry.snapshot(123, stamp(1900))["runtime_count"] == 0);
++
++  // Repeated retirement bounds history, not only the reported output.
++  for (std::uint64_t token = 1; token <= 1000; ++token) {
++    registry.add(token, "example/plugin:service");
++    registry.publish(token, 1, token, stamp(2000));
++    registry.erase(token);
++  }
++  assert(registry.snapshot(123, stamp(2000))["runtime_count"] == 0);
++
++  // The main-thread snapshot never waits for the worker's execution boundary.
++  registry.add(1, "example/plugin:worker");
++  registry.publish(1, 1, 64, stamp(2000));
++  std::promise<void> started;
++  std::promise<void> release;
++  auto released = release.get_future();
++  std::thread blocked([&] {
++    registry.begin(1);
++    started.set_value();
++    released.wait();
++    registry.publish(1, 1, 128, stamp(2100));
++  });
++  started.get_future().wait();
++  auto read = std::async(std::launch::async, [&] { return registry.snapshot(123, stamp(2050)); });
++  assert(read.wait_for(1s) == std::future_status::ready);
++  assert(read.get()["runtimes"][0]["bytes"] == 64);
++  release.set_value();
++  blocked.join();
++  assert(registry.snapshot(123, stamp(2200))["runtimes"][0]["bytes"] == 128);
++  registry.erase(1);
++
++  // Published generation, timestamp and bytes are copied atomically as one record.
++  registry.add(1, "example/plugin:worker");
++  registry.publish(1, 1, 2, stamp(1));
++  std::atomic<bool> done = false;
++  std::thread writer([&] {
++    for (std::uint64_t n = 2; n < 3000; ++n) {
++      registry.begin(1);
++      registry.publish(1, n, n * 2, stamp(n));
++    }
++    done = true;
++  });
++  do {
++    auto row = registry.snapshot(123, stamp(5000))["runtimes"][0];
++    const auto generation = row["host_generation"].get<std::uint64_t>();
++    assert(row["bytes"] == generation * 2);
++    assert(row["sampled_at_unix_ms"] == generation);
++  } while (!done.load());
++  writer.join();
++  registry.erase(1);
++
++  // Worst-width numeric fields and labels fit the existing 16KiB IPC budget,
++  // leaving room for the six allocator counters and original status fields.
++  auto wideStamp = stamp(1000);
++  wideStamp.unixMs = 9000000000000000000LL;
++  for (std::uint64_t token = 1; token <= 40; ++token) {
++    registry.add(token, std::string(128, 'a'));
++    registry.publish(token, std::numeric_limits<std::uint64_t>::max(),
++                     std::numeric_limits<std::size_t>::max(), wideStamp);
++  }
++  data = registry.snapshot(123, wideStamp);
++  assert(data["status"] == "partial");
++  assert(data["runtime_count"] == 40 && data["reported_runtime_count"] == 32 && data["truncated_count"] == 8);
++  assert(data["runtimes"][0]["state_token"] == 1 && data["runtimes"][31]["state_token"] == 32);
++  nlohmann::json allocator{
++      {"schema_version", 1}, {"backend", "jemalloc"}, {"status", "available"},
++      {"pid", 123}, {"observed_at_unix_ms", wideStamp.unixMs}, {"units", "bytes"},
++      {"errors", nlohmann::json::array()},
++  };
++  for (const char* key : {"allocated_bytes", "active_bytes", "resident_bytes", "mapped_bytes", "retained_bytes", "metadata_bytes"}) {
++    allocator[key] = std::numeric_limits<std::size_t>::max();
++  }
++  const nlohmann::json envelope{
++      {"barVisible", true}, {"panelOpen", false}, {"activePanelId", nullptr}, {"locked", false},
++      {"allocator", allocator}, {"ownership", data},
++  };
++  assert(data.dump().size() < 14 * 1024);
++  assert(envelope.dump().size() < 16 * 1024);
++  for (std::uint64_t token = 1; token <= 40; ++token) registry.erase(token);
++  registry.add(1, std::string(129, 'a'));
++  registry.add(2, "bad\nname");
++  data = registry.snapshot(123, stamp(1000));
++  assert(data["runtimes"][0]["runtime_id"].is_null());
++  assert(data["runtimes"][0]["reason"] == "runtime_id_too_long");
++  assert(data["runtimes"][1]["runtime_id"].is_null());
++  assert(data["runtimes"][1]["reason"] == "runtime_id_invalid");
++  return 0;
++}

@@ -74,6 +74,7 @@ mkFeatureModule {
               # are pinned to the flake's upstream source and verified below.
               ./noctalia-automation-ipc.patch
               ./noctalia-memory-stats.patch
+              ./noctalia-luau-ownership.patch
             ];
             postPatch = (old.postPatch or "") + ''
               patch -p1 < ${./noctalia-pipewire-reconnect.patch}

@@ -28,3 +28,26 @@ then invoke the operator's installed Noctalia CLI with a bounded timeout.
 The CLI's own send/receive timeout is two seconds. Consumers should validate
 PID and timestamp against the selected process; an unavailable probe is a gap,
 not zero usage. No timer or independent sampler belongs to this interface.
+
+The optional root-level `ownership` object has `schema_version: 1`,
+`provider: "luau"`, process PID, observation time, byte units, runtime counts,
+and at most 32 records sorted by `state_token`. Each record identifies the
+runtime and actual host generation, with the VM's allocator byte count,
+`sampled_at_unix_ms` and `age_ms`. These are copied after existing serialized
+worker events; status never reads a live VM, waits for a worker or runs Lua/GC.
+An idle VM keeps its last observed values and time. A worker currently running
+marks its previous observation `stale` with reason `worker_in_flight`.
+An unobserved or absent host reports `unavailable` with null bytes and times.
+Retirement erases the record; reload creates a new host generation.
+The registry object lives until process exit so deferred State destruction can
+erase records during shutdown without relying on static destruction order.
+
+Top-level ownership status is `available` when all live records are available
+(including an empty registry), `partial` for stale/mixed/truncated records,
+and `unavailable` when no reported host has observed bytes. `runtime_count`,
+`reported_runtime_count` and `truncated_count` make omitted records explicit.
+Runtime labels use at most 128 ASCII identifier characters; invalid or longer
+labels become null with an unavailable reason. Tokens still identify those
+records. No guessed sum or fabricated zero replaces missing observations.
+The collector preserves valid ownership under `allocator.ownership`; old
+allocator responses remain valid when this optional diagnostic is absent.

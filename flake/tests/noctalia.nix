@@ -13,6 +13,7 @@
           ../../modules/features/desktop/noctalia-notification-prewarm.patch
           ../../modules/features/desktop/noctalia-automation-ipc.patch
           ../../modules/features/desktop/noctalia-memory-stats.patch
+          ../../modules/features/desktop/noctalia-luau-ownership.patch
         ];
         postPatch = (old.postPatch or "") + ''
           patch -p1 < ${../../modules/features/desktop/noctalia-pipewire-reconnect.patch}
@@ -43,6 +44,39 @@
     {
       checks = {
         noctalia-theme-defaults-migration = noctaliaThemeDefaultsMigration;
+        noctalia-luau-ownership =
+          pkgs.runCommand "noctalia-luau-ownership-check"
+            {
+              nativeBuildInputs = [
+                pkgs.stdenv.cc
+                pkgs.patch
+                pkgs.ripgrep
+              ];
+              buildInputs = [ pkgs.nlohmann_json ];
+            }
+            ''
+              mkdir -p source/src/app source/src/util source/src/scripting source/tests "$out"
+              cp ${inputs.noctalia}/meson.build source/
+              cp ${inputs.noctalia}/src/app/application_ipc.cpp source/src/app/
+              cp ${inputs.noctalia}/src/scripting/script_runtime.cpp source/src/scripting/
+              patch -d source -p1 < ${../../modules/features/desktop/noctalia-memory-stats.patch}
+              patch -d source -p1 < ${../../modules/features/desktop/noctalia-luau-ownership.patch}
+              c++ -std=c++23 -UNDEBUG -DNOCTALIA_OWNERSHIP_FIXTURE -pthread \
+                -fsanitize=address -fno-omit-frame-pointer -I source/src \
+                source/tests/runtime_memory_test.cpp -o runtime-memory-test
+              ./runtime-memory-test > "$out/ownership-fixture.json"
+              mkdir -p baseline/scripting
+              sed -e 's/static auto\* const registry = new RuntimeMemoryRegistry;/static RuntimeMemoryRegistry registry;/' \
+                -e 's/return \*registry;/return registry;/' \
+                source/src/scripting/runtime_memory.h > baseline/scripting/runtime_memory.h
+              c++ -std=c++23 -UNDEBUG -pthread -fsanitize=address -fno-omit-frame-pointer \
+                -I baseline source/tests/runtime_memory_test.cpp -o baseline-runtime-memory-test
+              if ./baseline-runtime-memory-test --late-state > "$out/shutdown-baseline.log" 2>&1; then
+                echo 'ordinary static registry unexpectedly survived late State destruction' >&2
+                exit 1
+              fi
+              rg -q 'AddressSanitizer: heap-use-after-free' "$out/shutdown-baseline.log"
+            '';
         noctalia-memory-stats =
           pkgs.runCommand "noctalia-memory-stats-check"
             {
@@ -141,7 +175,8 @@
                 ${../../scripts/sinnix-wallpaper} \
                 ${../../scripts/sinnix-wallpaper-timeofday} \
                 ${../../flake/tests/noctalia-wallpaper-timeofday.sh} \
-                ${../../modules/features/desktop/noctalia-memory-stats.patch}
+                ${../../modules/features/desktop/noctalia-memory-stats.patch} \
+                ${../../modules/features/desktop/noctalia-luau-ownership.patch}
               touch "$out"
             '';
       };
