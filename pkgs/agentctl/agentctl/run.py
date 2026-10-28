@@ -1025,7 +1025,7 @@ def _run(
     }
 
     def publish_outcome(record: Mapping[str, Any]) -> None:
-        # Inventories stay with the attempt owner. A notification references
+        # Inventories stay with the attempt owner. The finish event references
         # the exact published bytes, never the mutable latest-attempt alias.
         payload = json.dumps(record, sort_keys=True).encode()
         path = outcome_path_for(log_path)
@@ -1042,14 +1042,6 @@ def _run(
                     "sha256": hashlib.sha256(payload).hexdigest(),
                 },
             },
-        )
-
-        from sinnix_lib.notify import notify_phone
-
-        notify_phone(
-            f"Agent job {record['outcome']}",
-            f"{launch['project_id']}:{launch['operation']} ({launch['job_id']})",
-            key=f"job:{launch['job_id']}:{launch['attempt']}",
         )
 
     def refused(*, scratch_error: str | None = None) -> int:

@@ -139,6 +139,10 @@ attempt 1. A retry never overwrites an earlier attempt.
 | `slot_occupied` | 75   | a single-slot pool was held by another unit                      |
 | (refused)       | 125  | refused before starting (vanished workdir, unresolvable command) |
 
+Terminal outcomes publish retained records and finish events for the native
+event feed. They do not send phone notifications. Producers that require
+operator action use explicit alarm paths.
+
 `job cancel` removes a queued task. For a running one it writes the cancel
 marker, stops the unit and kills the task. `--actor` and `--reason` are
 recorded with the request. `--expected-attempt <n>` refuses if a newer retry

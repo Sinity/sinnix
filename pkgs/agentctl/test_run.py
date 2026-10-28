@@ -240,7 +240,7 @@ def test_large_receipt_completion_reaches_tail_and_follow(
     else:
         produce()
     arguments = argparse.Namespace(
-        project="fixture", follow=follow, lines=0 if follow else 40
+        events_verb="tail", project="fixture", follow=follow, lines=0 if follow else 40
     )
     assert cli._events(arguments, config, cli.Output(as_json=True, full=False)) == 0
     observed = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
@@ -384,13 +384,68 @@ def test_a_successful_command_spools_its_start_and_finish(
     assert {event["kind"] for event in spooled} == {"queue-task"}
     assert spooled[0]["job_id"] == "job-a"
     assert spooled[1]["outcome"] == "success"
-    assert phone_notifications == [
-        (("Agent job success", "fixture:check (job-a)"), {"key": "job:job-a:1"})
-    ]
+    assert phone_notifications == []
     assert outcome_of(tmp_path)["outcome"] == "success"
     outcome = outcome_path_for(tmp_path / "job-a.log")
     assert outcome.stat().st_mode & 0o777 == 0o600
     assert not list(outcome.parent.glob(f".{outcome.name}.atomic-tmp-*"))
+
+
+@pytest.mark.parametrize(
+    ("outcome", "exit_code"),
+    [
+        ("success", 0),
+        ("failed", 3),
+        ("timeout", TIMEOUT_EXIT_CODE),
+        ("cancelled", CANCELLED_EXIT_CODE),
+        ("vanished", VANISHED_EXIT_CODE),
+        ("refused", REFUSED_EXIT_CODE),
+        ("slot_occupied", SLOT_OCCUPIED_EXIT_CODE),
+    ],
+)
+def test_terminal_outcomes_publish_records_without_phone_interruptions(
+    tmp_path: Path,
+    fake_systemd: FakeSystemd,
+    fake_pueue: FakePueue,
+    phone_notifications,
+    outcome: str,
+    exit_code: int,
+) -> None:
+    overrides: dict[str, Any] = {"pool": "pytest"}
+    if outcome == "failed":
+        fake_systemd.terminal(Result="exit-code", ExecMainStatus=str(exit_code))
+        overrides["argv"] = ["sh", "-c", "exit 3"]
+    elif outcome == "timeout":
+        fake_systemd.terminal(Result="timeout")
+    elif outcome == "cancelled":
+        marker = cancel_marker_for(tmp_path / "job-a.log")
+        marker.write_text(json.dumps({"attempt": 1}))
+        overrides["argv"] = ["touch", str(marker)]
+    elif outcome == "vanished":
+        fake_systemd.show.write_text("LoadState=not-found\nResult=success\n")
+        overrides["argv"] = ["sh", "-c", "exit 3"]
+    elif outcome == "refused":
+        overrides["argv"] = [str(tmp_path / "absent-command")]
+    elif outcome == "slot_occupied":
+        fake_systemd.active(
+            ("agentctl-pytest-held-0123456789ab.service", described("pytest", 99))
+        )
+    launch = write_launch(tmp_path, **overrides)
+
+    assert main([str(launch)]) == exit_code
+
+    record = outcome_of(tmp_path)
+    assert record["outcome"] == outcome
+    assert record["exit_code"] == exit_code
+    finished = events(tmp_path)[-1]
+    assert finished["phase"] == "finished"
+    assert finished["outcome"] == outcome
+    assert finished["exit_code"] == exit_code
+    reference = finished["outcome_ref"]
+    retained = Path(reference["path"])
+    assert hashlib.sha256(retained.read_bytes()).hexdigest() == reference["sha256"]
+    assert retained.stat().st_mode & 0o777 == 0o600
+    assert phone_notifications == []
 
 
 def test_event_append_failure_preserves_the_completed_owner_result(
