@@ -1,6 +1,8 @@
 # Comprehensive Unified Backup Strategy
 #
-# 1. btrbk: Local snapshots for instant rollbacks (block-level, zero I/O overhead)
+# 1. btrbk: Local snapshots for fast rollbacks (copy-on-write, shared data extents)
+#    Creation writes metadata; rewritten/deleted extents remain referenced until
+#    the snapshots holding them are released.
 # 2. Borg: Off-disk incremental backups (file-level, with exclusions, deduplicated)
 #
 # Drive           Label            Mount            Purpose

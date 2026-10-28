@@ -59,6 +59,8 @@ in
             {
               assertion =
                 lib.hasInfix "--owner ${user}" sweeper.serviceConfig.ExecStart
+                && !(lib.hasInfix "--dry-run" sweeper.serviceConfig.ExecStart)
+                && sweeper.serviceConfig.TimeoutStartSec == "30min"
                 && sweeper.environment.TMPDIR == root
                 && sweeper.serviceConfig.NoNewPrivileges
                 && builtins.elem "CAP_SYS_PTRACE" sweeper.serviceConfig.CapabilityBoundingSet
@@ -90,7 +92,11 @@ in
 
       checks.tmp-sweep-visibility = mkRuntimeCheck system {
         name = "tmp-sweep-visibility";
-        nativeBuildInputs = [ inputs.nixpkgs.legacyPackages.${system}.python3 ];
+        nativeBuildInputs = with inputs.nixpkgs.legacyPackages.${system}; [
+          python3
+          git
+          util-linux
+        ];
         script = ''
           PYTHONPATH=${../../pkgs/sinnix-lib} \
           TMP_SWEEP_SOURCE=${../../scripts/sinnix-tmp-sweep} \

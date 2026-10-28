@@ -4,11 +4,12 @@
 # Product shells own their service, state, and database environment.
 # Route compiler output for Cargo checkouts through the shared cache selector.
 _sinnix_project_environment_setup() {
-  [ -z "${CARGO_TARGET_DIR:-}" ] || return 0
-  command -v sinnix-cargo-target >/dev/null 2>&1 || return 0
   local project_root cargo_target
   project_root="$(git rev-parse --show-toplevel 2>/dev/null)" || return 0
   [ -f "$project_root/Cargo.toml" ] || return 0
+  export CARGO_INCREMENTAL="${CARGO_INCREMENTAL:-0}"
+  [ -z "${CARGO_TARGET_DIR:-}" ] || return 0
+  command -v sinnix-cargo-target >/dev/null 2>&1 || return 0
   if cargo_target="$(sinnix-cargo-target)"; then
     export CARGO_TARGET_DIR="$cargo_target"
   fi

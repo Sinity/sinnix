@@ -34,7 +34,12 @@ A checkout's first selection seeds its new target from the repository's
 master-baseline checkout (Git config `sinnix.baselineCheckout`, which
 `sinnix-master-baseline` sets): a reflink copy taken while holding Cargo's
 build lock on the source, so it shares extents and Cargo reuses the
-dependency artifacts. Without reflinks, a baseline target, or the lock within
+dependency artifacts. With incremental compilation disabled, seeding prunes
+every profile's `incremental/` tree,
+including cross-compilation profiles. Cargo test scratch in `target/tmp/`
+and `.rustc_info.json` are always omitted before copying. Build-script output directories remain reusable.
+Disabled incremental state and checkout-specific compiler probes are regenerated.
+Without reflinks, a baseline target, or the lock within
 five minutes, the target starts empty. The selector writes the target's
 `CACHEDIR.TAG` (Cargo tags only a target directory it creates, and this one
 exists first), so worktree cleanup can retire it with its checkout.
@@ -44,3 +49,9 @@ snapshot references. Before activating a new cache root, inspect its existing
 contents and target holders, preserve needed artifacts, then verify the installed
 unit and effective target from a real declared job. Existing target leases remain
 explicit until their owners release them.
+
+Managed sessions and Cargo direnv environments default to `CARGO_INCREMENTAL=0`.
+An explicit `CARGO_INCREMENTAL=1` enables incremental rebuilds and preserves
+profile incremental state in new seeds. Declared AgentCTL operation values
+still take precedence over inherited values. Workspace manifests own debuginfo
+settings.

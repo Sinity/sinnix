@@ -120,7 +120,7 @@ in
         {
           inherit config;
           unitName = "sinnix-tmp-sweep";
-          description = "Remove unheld recognized scratch directories";
+          description = "Remove abandoned scratch with process and Git custody checks";
         }
         {
           # Root can observe non-dumpable holders. The program drops to the
@@ -132,7 +132,9 @@ in
           environment.TMPDIR = userTmpRoot;
           unit.unitConfig.RequiresMountsFor = [ userTmpRoot ];
           serviceConfig = {
-            TimeoutStartSec = "5min";
+            # Cold metadata scans can wait on the busy scratch filesystem.
+            # Deletion has its own short entry/time budget in the sweeper.
+            TimeoutStartSec = "30min";
             NoNewPrivileges = true;
             CapabilityBoundingSet = [
               "CAP_DAC_READ_SEARCH"
@@ -150,6 +152,7 @@ in
           timer = {
             # Nix scratch uses holder checks; PID-qualified producer scratch
             # also requires a dead allocator and a 24-hour age floor.
+            # Unclassified managed scratch is proposed in dry-run only.
             #
             # Persistent catches an elapse missed while logged out.
             intervalSec = 900;

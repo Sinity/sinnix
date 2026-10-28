@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # @sinnix-package
-# description: Remove unheld recognized scratch directories from TMPDIR and /tmp
-# runtimeInputs: coreutils
+# description: Reclaim abandoned scratch with process and Git custody checks
+# runtimeInputs: coreutils git openssh pueue util-linux
 # pythonPackages: @sinnix-lib
 """Reclaim leaked devshell and PID-qualified producer scratch trees.
 
@@ -27,19 +27,26 @@ starting mid-sweep safe.
 from __future__ import annotations
 
 import errno
+import json
 import os
 import pwd
 import re
-import shutil
+import shlex
+import subprocess
 import stat
 import sys
 import time
 
 from sinnix_lib.procfs import held_paths
 
-HOLDER_VARS = (b"TMPDIR=", b"TMP=", b"TEMP=", b"NIX_BUILD_TOP=")
+HOLDER_VARS = (b"TMPDIR=", b"TMP=", b"TEMP=", b"NIX_BUILD_TOP=", b"AGENTCTL_SCRATCH=")
 PREFIXES = ("nix-shell.", "nix-develop-")
 DEVELOP_MIN_AGE_SECONDS = 10 * 60
+MANAGED_ROOT = "/realm/tmp/work"
+STALE_SECONDS = 7 * 86400
+DELETE_LIMIT = 20000
+DELETE_SECONDS = 45
+
 OWNED_MIN_AGE_SECONDS = 24 * 60 * 60
 # These producers allocate a private directory with their actual shell PID.
 # Historical names without a PID remain outside this ownership contract.
@@ -56,7 +63,12 @@ A privileged scheduled scan
 uses --owner, then irreversibly drops to that user before deletion. Incomplete
 process visibility refuses deletion. PID-qualified ChatGPT and router scratch
 must also be at least 24 hours old and its allocating process must be dead.
-Unrecognized names, codex, and claude-* are never candidates.
+Dry-run also proposes old entries under /realm/tmp/work and its codex/
+children for owner classification: no file modified in seven days, no holders,
+no active queue lane, and no dirty or unpublished Git work. Real runs keep
+these unclassified entries. claude-* is always retained.
+Dry-run reports candidates and logical bytes. Real runs use idle I/O
+and remove at most 20000 entries over 45 seconds, pacing each unlink.
 """
 
 
@@ -144,19 +156,228 @@ def collect_candidates(root: str, uid: int) -> tuple[dict[str, tuple[int, int, i
     return candidates, skipped
 
 
+def managed_candidates(root: str, uid: int) -> dict[str, tuple[int, int, int]]:
+    """Only the declared managed root has the general seven-day policy."""
+    result = {}
+    if root != MANAGED_ROOT:
+        return result
+    for base in (root, root + "/codex"):
+        if os.path.islink(base) or not os.path.isdir(base):
+            continue
+        for entry in os.scandir(base):
+            if entry.name.startswith("claude-") or entry.path == root + "/codex":
+                continue
+            # A young devshell rejected by its owner must not fall back to
+            # file aging when its inputs were copied with old timestamps.
+            if (base == root and entry.is_dir(follow_symlinks=False)
+                    and (entry.name.startswith(PREFIXES) or OWNED_SCRATCH.fullmatch(entry.name))):
+                continue
+            observed = entry.stat(follow_symlinks=False)
+            if observed.st_uid == uid and not stat.S_ISLNK(observed.st_mode):
+                result[entry.path] = directory_identity(observed)
+    return result
+
+
+def git_custody(checkout: str) -> None:
+    """Cached remote branches must cover every local ref and detached HEAD."""
+    # Each discovered checkout owns its Git context, regardless of the caller.
+    environment = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    environment.update(
+        GIT_OPTIONAL_LOCKS="0", GIT_TERMINAL_PROMPT="0", GIT_NO_LAZY_FETCH="1",
+        GIT_ASKPASS="false", SSH_ASKPASS_REQUIRE="never",
+        GIT_SSH_COMMAND="ssh -oBatchMode=yes -oConnectTimeout=10",
+    )
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(
+            ["git", "-C", checkout, "-c", "core.fsmonitor=false", *args],
+            text=True, stderr=subprocess.PIPE, timeout=15, env=environment,
+        ).strip()
+
+    if os.path.realpath(git("rev-parse", "--show-toplevel")) != os.path.realpath(checkout):
+        raise VisibilityError("Git checkout root differs from the discovered tree")
+    lock = os.path.join(checkout, git("rev-parse", "--git-path", "index.lock"))
+    if os.path.lexists(lock):
+        raise VisibilityError("Git index lock may hold unfinished work")
+    if git("status", "--porcelain=v1", "--untracked-files=all", "--ignored"):
+        raise VisibilityError("Git has working changes, untracked or ignored files")
+    if git("rev-parse", "--is-shallow-repository") != "false":
+        raise VisibilityError("shallow Git history")
+    if not git("for-each-ref", "--format=%(refname)", "refs/remotes"):
+        raise VisibilityError("Git has no cached remote branches")
+    if git("rev-list", "--max-count=1", "HEAD", "--branches", "--tags",
+           "--not", "--remotes"):
+        raise VisibilityError("Git commits absent from cached remote branches")
+    # Include stash, recovery refs and reflog-only commits, not only HEAD.
+    if git("rev-list", "--max-count=1", "--all", "--reflog", "--not", "--remotes"):
+        raise VisibilityError("Git refs absent from cached remote branches")
+    # A stale remote-tracking ref can outlive a force-push or branch deletion.
+    # Only advertised heads which match cached objects prove remote custody.
+    remotes = git("remote").splitlines()
+    if not remotes:
+        raise VisibilityError("Git has no configured remote to verify custody")
+    advertised = set()
+    for remote in remotes:
+        for line in git("ls-remote", "--heads", "--", remote).splitlines():
+            fields = line.split()
+            if len(fields) != 2 or not fields[1].startswith("refs/heads/"):
+                raise VisibilityError("unrecognized remote branch advertisement")
+            advertised.add(fields[0])
+    cached = set(git("for-each-ref", "--format=%(objectname)", "refs/remotes").splitlines())
+    confirmed = sorted(cached & advertised)
+    if not confirmed:
+        raise VisibilityError("cached Git tips do not match current remote heads")
+    if git("rev-list", "--max-count=1", "HEAD", "--all", "--reflog", "--not", *confirmed):
+        raise VisibilityError("Git work is not covered by verified current remote heads")
+    # Unreferenced commits and staged blobs can survive only in the object
+    # database, outside every ref and reflog. Never discard that custody.
+    if git("fsck", "--unreachable", "--no-progress"):
+        raise VisibilityError("unreachable Git objects may contain unpublished work")
+
+
+
+
+def mount_points() -> set[str]:
+    """Mount aliases can expose non-scratch data on the same device."""
+    with open("/proc/self/mountinfo") as source:
+        return {
+            re.sub(r"\\([0-7]{3})", lambda m: chr(int(m[1], 8)), line.split()[4])
+            for line in source
+        }
+
+
+def inspect_tree(path: str, uid: int, aged: bool, mounts: set[str] | None = None) -> tuple[int, int, bool]:
+    """No symlink following or cross-device traversal; any uncertainty retains."""
+    mounts = mount_points() if mounts is None else mounts
+    if any(
+        m == path or m.startswith(path + "/")
+        or (m.startswith(MANAGED_ROOT + "/") and path.startswith(m + "/"))
+        for m in mounts
+    ):
+        raise VisibilityError("tree contains a mount point")
+    root_stat = os.lstat(path)
+    cutoff = time.time() - STALE_SECONDS
+    size = 0
+    count = 0
+    has_git = False
+    pending = [path]
+    while pending:
+        current = pending.pop()
+        observed = os.lstat(current)
+        count += 1
+        if observed.st_uid != uid or observed.st_dev != root_stat.st_dev:
+            raise VisibilityError("foreign owner or nested filesystem")
+        if stat.S_ISDIR(observed.st_mode):
+            entries = list(os.scandir(current))
+            if not entries and aged and observed.st_mtime > cutoff:
+                raise VisibilityError("recent empty directory")
+            names = {entry.name for entry in entries}
+            if (current == path or os.path.basename(current) != ".git") and {"HEAD", "objects", "refs"} <= names:
+                raise VisibilityError("bare Git repository requires owner reconciliation")
+            for entry in entries:
+                if entry.name.startswith("claude-"):
+                    raise VisibilityError("contains protected claude-* tree")
+                if entry.name == ".git":
+                    has_git = True
+                    git_custody(current)
+                pending.append(entry.path)
+        else:
+            if aged and observed.st_mtime > cutoff:
+                raise VisibilityError("file modified within seven days")
+            if stat.S_ISREG(observed.st_mode):
+                size += observed.st_size
+            elif not stat.S_ISLNK(observed.st_mode):
+                raise VisibilityError("special file")
+    return size, count, has_git
+
+
+
+def queue_path_values(value: object) -> list[str]:
+    """Keep typed argv paths intact, including spaces and symlink spellings."""
+    if isinstance(value, dict):
+        return [p for v in value.values() for p in queue_path_values(v)]
+    if isinstance(value, list):
+        return [p for v in value for p in queue_path_values(v)]
+    if not isinstance(value, str) or MANAGED_ROOT + "/" not in value:
+        return []
+    paths = []
+    if value.startswith(MANAGED_ROOT + "/"):
+        paths.append(os.path.realpath(value))
+    lexer = shlex.shlex(value, posix=True, punctuation_chars=";&|()<>")
+    lexer.whitespace_split = True
+    for word in lexer:
+        path = word if word.startswith(MANAGED_ROOT + "/") else word.partition("=")[2]
+        if path.startswith(MANAGED_ROOT + "/"):
+            paths.append(os.path.realpath(path))
+        elif word != value and MANAGED_ROOT + "/" in word:
+            paths.extend(queue_path_values(word))
+    return [p for p in paths if p != MANAGED_ROOT]
+
+
+def active_queue_paths() -> list[str]:
+    """Read the owner's pueue state, including AgentCTL launch arguments."""
+    state = json.loads(subprocess.check_output(
+        ["pueue", "status", "--json"], text=True, stderr=subprocess.PIPE, timeout=15,
+    ))
+    paths = []
+    for task in state["tasks"].values():
+        status = task["status"]
+        # Queued and paused tasks also keep custody of their scratch arguments.
+        if status == "Done" or isinstance(status, dict) and "Done" in status:
+            continue
+        paths.extend(queue_path_values(task))
+        command = shlex.split(task["command"])
+        if command and os.path.basename(command[0]) == "agentctl-run":
+            if len(command) != 2:
+                raise VisibilityError("unrecognized AgentCTL launch command")
+            with open(command[1]) as source:
+                paths.extend(queue_path_values(json.load(source)))
+    return paths
+
+
+def queue_holds(path: str, paths: list[str]) -> bool:
+    return any(p == path or p.startswith(path + "/") or path.startswith(p.rstrip("/") + "/")
+               for p in paths)
+
+
+def paced_remove(path: str, budget: list[int], deadline: float) -> bool:
+    """fd-relative traversal prevents following substituted directory symlinks."""
+    if not os.path.isdir(path):
+        if budget[0] <= 0 or time.monotonic() >= deadline:
+            return False
+        os.unlink(path)
+        budget[0] -= 1
+        time.sleep(0.001)
+        return True
+    for _, dirs, files, fd in os.fwalk(path, topdown=False, follow_symlinks=False):
+        for name in files + dirs:
+            if budget[0] <= 0 or time.monotonic() >= deadline:
+                return False
+            observed = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            if stat.S_ISDIR(observed.st_mode):
+                os.rmdir(name, dir_fd=fd)
+            else:
+                os.unlink(name, dir_fd=fd)
+            budget[0] -= 1
+            time.sleep(0.001)
+    if budget[0] <= 0 or time.monotonic() >= deadline:
+        return False
+    os.rmdir(path)
+    budget[0] -= 1
+    return True
+
+
 def held_directories(candidates: set[str], root_list: list[str]) -> set[str]:
     """One /proc walk; every path seen is reduced to the candidate containing it."""
     held: set[str] = set()
 
     def claim(path: str) -> None:
-        for root in root_list:
-            if not path.startswith(root + "/"):
-                continue
-            segment = path[len(root) + 1 :].partition("/")[0]
-            owner = root + "/" + segment
+        # Probe ancestors in O(path depth), independent of candidate count.
+        owner = path
+        while owner and owner != "/":
             if owner in candidates:
                 held.add(owner)
-            return
+            owner = os.path.dirname(owner)
 
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
@@ -176,6 +397,15 @@ def held_directories(candidates: set[str], root_list: list[str]) -> set[str]:
                     except ValueError:
                         continue
                 claim(path)
+            # A mapping can keep a file live after its descriptor is closed.
+            try:
+                with open(proc + "/maps") as mappings:
+                    for line in mappings:
+                        fields = line.split(maxsplit=5)
+                        if len(fields) == 6 and fields[5].startswith("/"):
+                            claim(fields[5].rstrip())
+            except OSError as error:
+                vanished_entry(error, proc + "/maps")
         except OSError as error:
             # Missing process records are normal churn. Denied reads are unknown.
             where = error.filename or proc
@@ -218,31 +448,56 @@ def main(argv: list[str]) -> int:
         return 1
     root_list = roots()
 
+    general: set[str] = set()
     candidates: dict[str, dict[str, tuple[int, int, int]]] = {}
     skipped: dict[str, int] = {}
     try:
         for root in root_list:
             candidates[root], skipped[root] = collect_candidates(root, uid)
+            extra = managed_candidates(root, uid) if dry_run else {}
+            general.update(set(extra) - set(candidates[root]))
+            candidates[root].update(extra)
         every = {path for paths in candidates.values() for path in paths}
         held = held_directories(every, root_list) if every else set()
         # Scanning may require root; removal never does. This must precede
         # every mutation, including a run with no recognized holders.
+        mounts = mount_points()
         drop_privileges(uid, owner)
-    except (OSError, VisibilityError) as error:
+        if owner:
+            os.environ.update(HOME=owner.pw_dir, XDG_RUNTIME_DIR=f"/run/user/{uid}",
+                              XDG_CONFIG_HOME=owner.pw_dir + "/.config")
+        queue_paths: list[str] = []
+        queue_unknown = False
+        if general:
+            try:
+                queue_paths = active_queue_paths()
+            except (OSError, ValueError, KeyError, subprocess.SubprocessError, VisibilityError) as error:
+                queue_unknown = True
+                print(f"sinnix-tmp-sweep: retaining managed scratch: queue unavailable: {error}")
+        if not dry_run:
+            subprocess.run(["ionice", "-c", "3", "-p", str(os.getpid())], check=True)
+    except (OSError, VisibilityError, subprocess.SubprocessError) as error:
         print(f"sinnix-tmp-sweep: retaining candidates: {error}", file=sys.stderr)
         return 1
 
     failed = False
+    total_count = total_bytes = 0
+    budget = [DELETE_LIMIT]
+    deadline = None
     for root in root_list:
         removed = 0
         kept = 0
         for path in candidates[root]:
-            if path in held:
+            if not dry_run and (budget[0] <= 0 or deadline is not None and time.monotonic() >= deadline):
+                print("sinnix-tmp-sweep: deletion budget reached; remaining candidates deferred")
+                break
+            if (path in held or queue_holds(path, queue_paths)
+                    or queue_unknown and path in general):
                 kept += 1
                 continue
             try:
                 observed = os.stat(path, follow_symlinks=False)
-                if (not stat.S_ISDIR(observed.st_mode) or observed.st_uid != uid
+                if (stat.S_ISLNK(observed.st_mode) or observed.st_uid != uid
                         or directory_identity(observed) != candidates[root][path]):
                     skipped[root] += 1
                     continue
@@ -261,26 +516,41 @@ def main(argv: list[str]) -> int:
                 print(f"sinnix-tmp-sweep: could not recheck owner of {path}: {error}", file=sys.stderr)
                 failed = True
                 continue
+            try:
+                size, entries, has_git = inspect_tree(path, uid, path in general, mounts)
+                if directory_identity(os.lstat(path)) != candidates[root][path]:
+                    skipped[root] += 1
+                    continue
+            except (OSError, VisibilityError, subprocess.SubprocessError) as error:
+                kept += 1
+                print(f"sinnix-tmp-sweep: retain {path}: {error}")
+                continue
+            total_count += 1
+            total_bytes += size
             if dry_run:
-                print(f"sinnix-tmp-sweep: would remove {path}")
+                action = "proposal requiring owner classification" if path in general else "would remove"
+                print(f"sinnix-tmp-sweep: {action} {path} bytes={size} GB={size / 1e9:.6f}")
             else:
-                errors: list[BaseException] = []
+                if deadline is None:
+                    deadline = time.monotonic() + DELETE_SECONDS
+                # Do not leave a partly deleted checkout looking like new WIP.
+                if has_git and (entries > budget[0] or entries * 0.001 > deadline - time.monotonic()):
+                    print(f"sinnix-tmp-sweep: defer {path}: Git tree exceeds remaining deletion budget")
+                    continue
                 try:
-                    shutil.rmtree(path, onerror=lambda _f, _p, info, errors=errors: errors.append(info[1]))
+                    if not paced_remove(path, budget, deadline):
+                        print(f"sinnix-tmp-sweep: deferred remainder {path}: deletion budget")
+                        continue
                 except OSError as error:
-                    errors.append(error)
-                if errors:
                     failed = True
-                    print(
-                        f"sinnix-tmp-sweep: could not remove {path}: {errors[0]}",
-                        file=sys.stderr,
-                    )
+                    print(f"sinnix-tmp-sweep: could not remove {path}: {error}", file=sys.stderr)
                     continue
             removed += 1
         print(
             f"sinnix-tmp-sweep: root={root} removed={removed} "
             f"held={kept} skipped={skipped[root]}"
         )
+    print(f"sinnix-tmp-sweep: reviewed={total_count} bytes={total_bytes} GB={total_bytes / 1e9:.6f}")
     return 1 if failed else 0
 
 

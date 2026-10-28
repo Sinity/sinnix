@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Select an isolated compiler target in the provisioned Realm cache subvolume
-# runtimeInputs: bash coreutils git util-linux
+# runtimeInputs: bash coreutils findutils git util-linux
 set -euo pipefail
 
 if [ -n "${CARGO_TARGET_DIR:-}" ]; then
@@ -40,8 +40,18 @@ if [ ! -e "$target" ] && [ -n "$seed_checkout" ] && [ -d "$seed_checkout" ]; the
     mkdir -p "$(dirname "$target")"
     staging="$(mktemp -d "$target.seed.XXXXXX")"
     trap 'rm -rf -- "$staging"' EXIT
-    if flock --wait 300 "$seed/debug/.cargo-lock" \
-      cp -a --reflink=always "$seed/." "$staging/" 2>/dev/null \
+    # Walk under the source lock. Prune before copying so disabled incremental
+    # state and Cargo test scratch never create destination inodes. rustc's probe cache belongs to
+    # the source checkout/toolchain and is cheap to regenerate.
+    if flock --wait 300 "$seed/debug/.cargo-lock" bash -euo pipefail -c '
+      cd "$1"
+      prune=( -path "./tmp" -o -path "./.rustc_info.json" )
+      if [ "$3" = 0 ]; then
+        prune+=( -o -type d -regex "./[^/]+(/[^/]+)?/incremental" )
+      fi
+      find . -regextype posix-extended \( "${prune[@]}" \) -prune -o \
+        \( ! -type d -o -empty \) -exec cp -a --parents --reflink=always --target-directory="$2/" -- {} +
+    ' bash "$seed" "$staging" "${CARGO_INCREMENTAL:-0}" 2>/dev/null \
       && mv -T "$staging" "$target" 2>/dev/null; then
       echo "sinnix-cargo-target: seeded $target from $seed_checkout" >&2
     fi

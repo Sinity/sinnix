@@ -109,10 +109,9 @@ in
       unit = "nix-gc.service";
     };
 
-    # sccache is not wired as RUSTC_WRAPPER: it bypasses incremental
-    # compilation, which every Rust consumer here relies on, and measured no
-    # benefit. Only worth revisiting for a non-incremental Rust workload
-    # needing cross-checkout caching.
+    # RUSTC_WRAPPER remains unset. Per-checkout targets reuse dependencies
+    # through reflink seeds; adding sccache needs measured cross-checkout hits
+    # and a bounded cache, including its artifact-materialization writes.
 
     systemd.tmpfiles.rules = lib.mkAfter [
       "d /var/cache/nix-build 0755 root root -"

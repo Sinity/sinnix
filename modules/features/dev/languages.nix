@@ -88,7 +88,12 @@ mkFeatureModule {
             chmod 0700 "$CARGO_CACHE_ROOT"
           '';
         };
-        home-manager.users.${user}.home.packages = [ cargoTarget ];
+        home-manager.users.${user}.home = {
+          packages = [ cargoTarget ];
+          # Short-lived checkouts otherwise retain a second compiler cache in
+          # each target. A caller can explicitly opt into incremental rebuilds.
+          sessionVariables.CARGO_INCREMENTAL = "0";
+        };
       }
 
       # Nix tooling
