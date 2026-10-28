@@ -773,6 +773,18 @@ assert lib.assertMsg (
             && lib.hasInfix "observe-acquisitions" backupRuntimeEval.config.systemd.services.btrbk.script
             && lib.hasInfix "--quiet --preserve-snapshots run" backupRuntimeEval.config.systemd.services.btrbk.script
             && builtins.elem "d /persist/root/.cache/borg-drain 0750 root users -" rules
+            &&
+              lib.all
+                (
+                  name:
+                  builtins.elem "d /persist/root/.cache/borg-drain/${name}.latest-archived.by-snapshot 0750 root users -" rules
+                )
+                [
+                  "realm"
+                  "persist"
+                  "genome"
+                ]
+            && lib.hasInfix ''install -d -m 0750 -o root -g users "$acknowledgement_root"'' backupRuntimeEval.config.systemd.services.borgbackup-job-realm.script
             && builtins.elem "d /persist/root/.cache/borg 0700 root root -" rules
           )
           "Operator probes must read receipts with nightly/change-aware budgets while credentials stay private";

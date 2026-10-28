@@ -156,6 +156,19 @@ class OnchangeFreshnessFixture(unittest.TestCase):
             self.source.chmod(0o700)
             self.snapshots.chmod(0o700)
 
+    def test_nested_receipt_permission_failure_is_not_healthy(self):
+        # The parent can be readable while an old per-snapshot namespace is
+        # still inaccessible. The reader must fail rather than accept latest.
+        receipts = COVERAGE.acknowledgement_directory(self.marker)
+        original_reader = COVERAGE.read_marker_fields
+        def guarded_reader(path):
+            if Path(path).parent == receipts:
+                raise PermissionError("nested receipt namespace unavailable")
+            return original_reader(path)
+        with patch.object(COVERAGE, "read_marker_fields", side_effect=guarded_reader):
+            with self.assertRaises(PermissionError):
+                self.probe()
+
     def test_missing_unavailable_and_changed_inputs_fail(self):
         self.marker.unlink()
         with self.assertRaises(ValueError):

@@ -53,6 +53,11 @@
       "d ${borgRepoRootSnapshotsPath} 0700 root root -"
       "d ${borgCacheDir} 0700 root root -"
       "d ${borgDrainStateRoot} 0750 root users -"
+      # Exact metadata namespaces: migrate existing receipts before operator
+      # probes run, without traversing private sources or changing file modes.
+      "d ${borgDrainStateRoot}/realm.latest-archived.by-snapshot 0750 root users -"
+      "d ${borgDrainStateRoot}/persist.latest-archived.by-snapshot 0750 root users -"
+      "d ${borgDrainStateRoot}/genome.latest-archived.by-snapshot 0750 root users -"
       "f ${borgGlobalLock} 0600 root root -"
     ];
   }

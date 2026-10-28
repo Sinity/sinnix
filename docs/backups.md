@@ -195,7 +195,10 @@ Borg stores mostly new data; the `/realm` snapshots archive them.
 Receipt metadata under `/persist/root/.cache/borg-drain` is root-owned and
 traversable by the operator's `users` group (0750). Published receipts remain
 read-only to that group. Creating jobs and tmpfiles use the same directory
-policy; Borg repositories, key material and chunk caches remain root-private.
+policy, including the exact Realm, Persist and Genome `.by-snapshot` receipt
+namespaces. Tmpfiles also migrates existing namespace directories before probes
+run; it does not recursively change receipt files. Borg repositories, key
+material and chunk caches remain root-private.
 
 Realm and Persist freshness alerts allow 36 hours from the accepted source
 cut: the approved 24-hour archival cadence plus 12 hours of grace. The former
