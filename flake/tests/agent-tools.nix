@@ -778,7 +778,8 @@ in
             dry_home="$TMPDIR/codex-skills-dry-run"
             mkdir -p "$dry_home/.codex/skills"
             touch "$dry_home/.codex/skills/app-installed-skill"
-            ln -s /realm/projects/sinnix/repo/dots/_ai/skills/agent-runtime "$dry_home/.codex/skills/agent-runtime"
+            # An explicitly owned link from the retired skill tree.
+            ln -s /realm/project/sinnix/repo/dots/codex/skills/agent-runtime "$dry_home/.codex/skills/agent-runtime"
             ln -s /private/owner/skill "$dry_home/.codex/skills/private-skill"
             (
               export HOME="$dry_home"
