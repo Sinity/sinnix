@@ -453,8 +453,9 @@ exec = ["sudo", "-n", "systemctl", "start", "borgbackup-drain-coordinator.servic
 pool = "bulk"
 result = "exit"
 cache = "none"
-# 80h15m maximum native coordinator bound plus 45m supervision margin.
-timeout_seconds = 291600
+# Native systemd coordinator owns the finite 80h15m maximum deadline.
+# AgentCTL supports bounded deadlines only up to 8h, so add no outer deadline.
+timeout_seconds = 0
 
 [operations.codex]
 description = "Run one Codex worker in this checkout: codex-worker <effort> <prompt-file> <output-schema> <output-dir> [model]"

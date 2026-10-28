@@ -122,9 +122,10 @@ Polylogue state keeps its 90-minute deadline; Sinex blobs have a six-hour
 start deadline instead of an infinite one. A timeout keeps canonical input
 and failed hook cuts for recovery. Its overall deadline is 56h15m, or
 80h15m with genome, so a large retained
-backlog can extend beyond one night. The declared `backup_drain` caller has
-an 81-hour finite timeout: the 80h15m native maximum plus 45 minutes for
-supervision. Systemd remains the owner of child deadlines and cancellation.
+backlog can extend beyond one night. The declared `backup_drain` caller uses `timeout_seconds = 0` (no outer
+AgentCTL deadline), because supported positive caller timeouts stop at eight
+hours. The native systemd coordinator retains its finite 80h15m maximum;
+systemd remains the owner of child deadlines and cancellation.
 This maximum is not a nightly SLA or
 a waiver of the 36-hour source alert: a large retained backlog can fail that
 alert while remaining safely resumable. A successful unit start alone is not
