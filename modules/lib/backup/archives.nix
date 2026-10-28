@@ -1,5 +1,6 @@
 # Internal backup component. Public options and shared policy live in modules/backup.nix.
 {
+  coordinatorPolicies,
   pkgs,
   lib,
   realmRoot,
@@ -58,7 +59,7 @@ let
       dry_run="''${SINNIX_BORG_MAINTENANCE_DRY_RUN:-0}"
       marker=${lib.escapeShellArg "${borgDrainStateRoot}/maintenance.last-success"}
       now=$(date +%s)
-      # Hourly attempts retry contention; a completed pass is due after 20h.
+      # The nightly coordinator retries contention; a pass is due after 20h.
       if [ "$dry_run" = 0 ] && [ -f "$marker" ] && [ $((now - $(cat "$marker"))) -lt 72000 ]; then
         exit 0
       fi
@@ -139,8 +140,7 @@ in
   # The content stores live outside the /realm snapshot stream, so Borg reads
   # them in place. Stored files are never rewritten, which makes this safe
   # without a snapshot; `RequiresMountsFor` keeps the source mount
-  # authoritative. The guard covers service AND timer: a timer whose service
-  # does not exist is a failed start, not a backup.
+  # authoritative. The coordinator includes this job only when it exists.
   (lib.mkIf (sinexStorePaths != [ ]) (
     mkBackupJob "borgbackup-job-sinex-blobs" {
       description = "Back up the Sinex content stores into Borg";
@@ -162,11 +162,6 @@ in
         gnugrep
         util-linux
       ];
-      timer = {
-        onCalendar = "*-*-* 05:40:00";
-        randomizedDelaySec = "10min";
-        persistent = true;
-      };
       script = ''
         set -euo pipefail
         ${mkBorgCommonScript borgRepoSinexBlobs}
@@ -190,12 +185,13 @@ in
         # captures, above) gates freshness off this marker, same convention
         # as the btrbk drain jobs' "$label.last-success" (mkSnapshotDrainScript
         # above) -- without it, sinex-blobs had zero freshness gating despite
-        # being on its own daily timer.
+        # being a separately invoked native lane.
         install -d -m 0755 -o root -g root ${lib.escapeShellArg borgDrainStateRoot}
         marker=${lib.escapeShellArg "${borgDrainStateRoot}/sinex-blobs.last-success"}
         {
           printf 'archive=%s\n' "$archive_name"
           printf 'epoch=%s\n' "$(date +%s)"
+          printf 'policy_sha256=%s\n' ${lib.escapeShellArg coordinatorPolicies.sinex}
         } | publish_backup_marker "$marker"
       '';
     }
@@ -234,13 +230,6 @@ in
       pkgs.gawk
       scriptPkgs.sinnix-sqlite-backup
     ];
-    timer = {
-      # Not 04:15: the Polylogue Borg job below starts then and both read the
-      # same state root.
-      onCalendar = "*-*-* 01:30:00";
-      randomizedDelaySec = "20min";
-      persistent = true;
-    };
     script = ''
       set -euo pipefail
 
@@ -289,14 +278,6 @@ in
       util-linux
       btrfs-progs
     ];
-    timer = {
-      # Leave 105 minutes before the drain coordinator; a 90-minute service
-      # deadline leaves time for Borg to stop and release its shared lock.
-      # Do not catch up a missed wake near the drain window on late boot.
-      onCalendar = "*-*-* 04:15:00";
-      randomizedDelaySec = "5min";
-      persistent = false;
-    };
     script = ''
       set -euo pipefail
       ${mkBorgCommonScript borgRepoPolylogueState}
@@ -330,24 +311,14 @@ in
       {
         printf 'archive=%s\n' "$archive_name"
         printf 'epoch=%s\n' "$(date +%s)"
+          printf 'policy_sha256=%s\n' ${lib.escapeShellArg coordinatorPolicies.polylogue}
       } | publish_backup_marker "$marker"
     '';
   })
 
   # Active series retain frequent recent cuts; retired series retain monthly
   # milestones for at most a year, rather than an immortal independent quota.
-  (mkBackupJob "borgbackup-maintenance" (
-    maintenanceJob
-    // {
-      timer = {
-        # After the nightly drain, with one retry for lock contention; a pass
-        # is due every 20 hours, so the second attempt no-ops after a success.
-        onCalendar = "*-*-* 03,04:50:00";
-        persistent = true;
-        randomizedDelaySec = "5min";
-      };
-    }
-  ))
+  (mkBackupJob "borgbackup-maintenance" maintenanceJob)
   (mkBackupJob "borgbackup-retention-plan" (
     maintenanceJob
     // {

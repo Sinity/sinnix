@@ -169,12 +169,6 @@
       TimeoutStartSec = "2h";
       TimeoutStopSec = "15s";
     };
-    timer = {
-      # After the nightly drain, with one retry; it no-ops unless due, and a
-      # successful coverage receipt lasts seven days.
-      onCalendar = "*-*-* 04,05:35:00";
-      persistent = false;
-    };
     path = with pkgs; [
       borgbackup
       btrfs-progs

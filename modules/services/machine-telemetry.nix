@@ -381,6 +381,10 @@ mkServiceModule {
         }
       )
       {
+        # Backup hosts acquire this dump through the nightly coordinator.
+        # Telemetry-only hosts keep the independent schedule above.
+        systemd.timers.machine-telemetry-sqlite-backup.enable = lib.mkIf config.sinnix.backup.enable false;
+
         systemd.tmpfiles.rules = [
           "d ${config.sinnix.paths.machinePaths.experiment} 0775 ${username} users -"
           "d ${dataDir}/legacy 0775 ${username} users -"
@@ -504,7 +508,7 @@ mkServiceModule {
           machine-telemetry-seal-timer = {
             unit = "machine-telemetry-seal.timer";
           };
-          machine-telemetry-sqlite-backup-timer = {
+          machine-telemetry-sqlite-backup-timer = lib.mkIf (!config.sinnix.backup.enable) {
             unit = "machine-telemetry-sqlite-backup.timer";
           };
         };

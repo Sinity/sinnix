@@ -1,7 +1,9 @@
 # Internal backup component. Public options and shared policy live in modules/backup.nix.
 {
+  coordinatorPolicies,
   lib,
   pkgs,
+  config,
   realmSnapshots,
   persistSnapshots,
   borgPersistSnapshotBind,
@@ -30,6 +32,38 @@
   genomeSnapshots,
 }:
 let
+  # Native units keep their own resource, proof and cancellation contracts.
+  # A producer module that is disabled contributes no job to this sequence.
+  configured = lib.filter (
+    name: builtins.hasAttr name config.systemd.services && config.systemd.services.${name}.enable
+  );
+  dumpUnits = configured (
+    lib.optional config.sinnix.services.machine-telemetry.enable "machine-telemetry-sqlite-backup"
+    ++ lib.optional config.sinnix.services.polylogue.enable "polylogue-sqlite-backup"
+  );
+  archiveUnits = configured (
+    [
+      "borgbackup-job-realm"
+      "borgbackup-job-genome"
+      "borgbackup-job-persist"
+      "borgbackup-root-snapshots"
+    ]
+    ++ lib.optional config.sinnix.services.polylogue.enable "borgbackup-job-polylogue-state"
+    ++ [ "borgbackup-job-sinex-blobs" ]
+  );
+  finalUnits = configured [
+    "borgbackup-maintenance"
+    "borgbackup-coverage-audit-realm"
+    "borgbackup-local-dumps"
+  ];
+  acquisitionPolicy = builtins.hashString "sha256" (
+    builtins.toJSON {
+      dumps = map (name: config.systemd.services.${name}.script) dumpUnits;
+      snapshots = config.environment.etc."btrbk/btrbk.conf".text;
+    }
+  );
+  childUnits = dumpUnits ++ [ "btrbk" ] ++ archiveUnits ++ finalUnits;
+  serviceNames = names: lib.escapeShellArgs (map (name: "${name}.service") names);
   # Root snapshot paths left out of the archive. One list feeds both the
   # `borg create` excludes and the coverage check, so an excluded root can
   # never be reported as missing canonical content: when `home/*/.cache` was
@@ -147,33 +181,75 @@ in
     };
   })
 
-  # One timer gives every fresh lane an attempt in each cycle. Archive /realm
-  # first so a long /persist full verification cannot delay its space-critical
-  # snapshot drain. A realm failure must still start persist.
-  # This unit never takes the Borg lock. The children own the archive gate.
+  # The coordinator owns the schedule, not the Borg lock. Waiting for a
+  # native child while holding that child's lock would deadlock the sequence.
   (mkBackupJob "borgbackup-drain-coordinator" {
-    description = "Run fresh snapshot drains in sequence";
-    unit.unitConfig.PropagatesStopTo = [
-      "borgbackup-job-persist.service"
-      "borgbackup-job-realm.service"
-    ]
-    ++ lib.optional (genomeRoot != null) "borgbackup-job-genome.service";
+    description = "Run nightly dumps, snapshot archives and backup maintenance in sequence";
+    unit.unitConfig.PropagatesStopTo = map (name: "${name}.service") childUnits;
     serviceConfig = {
-      # Cover each lane's budget plus coordination overhead.
-      TimeoutStartSec = if genomeRoot == null then "28h15m" else "52h15m";
+      # Preserve child budgets, with room for dump/maintenance phases. The
+      # coordinator also bounds children whose native start timeout is infinite.
+      TimeoutStartSec = if genomeRoot == null then "48h15m" else "72h15m";
       TimeoutStopSec = "15s";
     };
     path = with pkgs; [
+      gnused
       systemd
       btrfs-progs
       util-linux
       coreutils
     ];
     script = ''
-      # The timer owns retry cadence; explicit native drains can run anytime.
-      # Partial repository checks can resume at a later window. Independent
-      # full comparisons retain their lock and snapshot until they finish;
-      # lock-busy drains keep snapshots queued without acknowledging them.
+      now=$(date +%s)
+      daily_fresh() {
+        local epoch policy
+        [ -f "$1" ] || return 1
+        epoch=$(sed -n 's/^epoch=//p' "$1")
+        policy=$(sed -n 's/^policy_sha256=//p' "$1")
+        case "$epoch" in ""|*[!0-9]*) return 1 ;; esac
+        [ "''${#epoch}" -le 10 ] || return 1
+        epoch=$((10#$epoch))
+        [ "$policy" = "$2" ] && [ "$now" -ge "$epoch" ] && [ $((now - epoch)) -lt 72000 ]
+      }
+      acquisition_marker=${lib.escapeShellArg "${borgDrainStateRoot}/coordinator.acquisition"}
+      acquisition_due=1
+      if daily_fresh "$acquisition_marker" ${lib.escapeShellArg acquisitionPolicy}; then
+        acquisition_due=0
+      fi
+      failed=0
+      run_step() {
+        echo "backup_phase=coordinator unit=$1 status=starting"
+        if systemctl start "$1"; then
+          echo "backup_phase=coordinator unit=$1 status=finished"
+        else
+          echo "backup_phase=coordinator unit=$1 status=failed; continuing independent jobs" >&2
+          failed=1
+          return 1
+        fi
+      }
+      if [ "$acquisition_due" -eq 1 ]; then
+        dumps_failed=0
+        for unit in ${serviceNames dumpUnits}; do
+          if ! run_step "$unit"; then dumps_failed=1; fi
+        done
+        if [ "$dumps_failed" -eq 0 ]; then
+          # Only a completed acquisition makes these dumps eligible for reuse
+          # by the boot catch-up after an interrupted archive phase.
+          if run_step btrbk.service; then
+            install -d -m 0755 ${lib.escapeShellArg borgDrainStateRoot}
+            temporary=$(mktemp "$acquisition_marker.XXXXXXXX")
+            printf 'epoch=%s\npolicy_sha256=%s\n' "$(date +%s)" ${lib.escapeShellArg acquisitionPolicy} > "$temporary"
+            chmod 0644 "$temporary"
+            sync -f "$temporary"
+            mv -f "$temporary" "$acquisition_marker"
+            sync -f ${lib.escapeShellArg borgDrainStateRoot}
+          fi
+        else
+          echo "backup_phase=coordinator unit=btrbk.service status=skipped reason=dump-failure" >&2
+        fi
+      else
+        echo "backup_phase=coordinator acquisition=already-fresh"
+      fi
       needs_archival() {
         local queued
         if ! queued="$(${snapshotCoverage} pending-hint -- "$@")"; then
@@ -194,33 +270,24 @@ in
           }; then
         systemctl stop borgbackup-verify.service
       fi
-      failed=0
-      if ! systemctl start borgbackup-job-realm.service; then
-        echo "Realm snapshot drain failed; continuing to persist" >&2
-        failed=1
-      fi
-      ${lib.optionalString (genomeRoot != null) ''
-        if ! systemctl start borgbackup-job-genome.service; then
-          echo "Genome snapshot drain failed; continuing to persist" >&2
-          failed=1
-        fi
-      ''}
-      if ! systemctl start borgbackup-job-persist.service; then
-        echo "Persist snapshot drain failed" >&2
-        failed=1
-      fi
+      for unit in ${serviceNames (archiveUnits ++ finalUnits)}; do
+        case "$unit" in
+          borgbackup-job-polylogue-state.service)
+            if daily_fresh ${lib.escapeShellArg "${borgDrainStateRoot}/polylogue-state.last-success"} ${lib.escapeShellArg coordinatorPolicies.polylogue}; then continue; fi ;;
+          borgbackup-job-sinex-blobs.service)
+            if daily_fresh ${lib.escapeShellArg "${borgDrainStateRoot}/sinex-blobs.last-success"} ${lib.escapeShellArg coordinatorPolicies.sinex}; then continue; fi ;;
+          borgbackup-local-dumps.service)
+            if daily_fresh ${lib.escapeShellArg "${borgDrainStateRoot}/local-dumps.last-success"} ${lib.escapeShellArg coordinatorPolicies.localDumps}; then continue; fi ;;
+        esac
+        run_step "$unit" || true
+      done
       exit "$failed"
     '';
-    # Nightly, with one retry for a maintenance pass holding the Borg lock;
-    # Persistent catches up once after a boot that missed the window. The
-    # drain keeps the newest archived snapshot, which holds what is deleted
-    # after it until the next night. On 2026-10-27 that was suspected of
-    # filling /realm and the drain briefly ran after every six-hourly cut,
-    # but pruning two day-old snapshots then freed ~0 GB: the fill was live
-    # build data and an async-discard backlog, so nightly stands. The
-    # 20-minute cadence before that ran each lane ~120 times in 8 days.
     timer = {
-      onCalendar = "*-*-* 03:05,25:00";
+      # OnBootSec also resumes a night interrupted after the calendar fired.
+      # The phase receipts make an additional missed-calendar wake cheap.
+      onCalendar = "*-*-* 03:05:00";
+      onBootSec = "45min";
       persistent = true;
     };
   })
@@ -246,12 +313,6 @@ in
       BORG_PASSCOMMAND = "${pkgs.coreutils}/bin/cat ${borgPassphrasePath}";
       BORG_REPO = borgRepoRootSnapshots;
       BORG_CACHE_DIR = borgCacheDir;
-    };
-    timer = {
-      onBootSec = "45min";
-      onCalendar = "daily";
-      persistent = true;
-      randomizedDelaySec = 1800;
     };
     path = with pkgs; [
       btrfs-progs

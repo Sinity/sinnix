@@ -5,11 +5,10 @@ Everything is backed up locally to Borg repositories on the HDD at
 
 ## Retention
 
-`borgbackup-maintenance` runs after the nightly drain at 03:50, retrying at
-04:50 (each with up to five minutes of jitter). A completed pass is due again
-after 20 hours. Lock contention leaves
-it due for the next attempt; missed timer events are caught up after boot.
-A completion older than 48 hours is unhealthy.
+`borgbackup-maintenance` runs after the native archive jobs in the nightly
+coordinator. A completed pass is due again after 20 hours. Lock contention
+leaves it due for the next coordinator attempt. A completion older than 48
+hours is unhealthy.
 
 Active series retain every archive from the last 48 hours, then 14 daily,
 8 weekly and 12 monthly recovery points. These are counts of periods containing
@@ -60,11 +59,11 @@ paths. Neither measurement establishes that a directory is disposable.
 | `/realm`                 | btrbk read-only snapshot, archived by the Borg job                     | snapshots 00/06/12/18:00, drain nightly 03:05         | `borg-realm-v2`                    |
 | `/persist`               | btrbk read-only snapshot, archived by the Borg job                     | same as `/realm`                                      | `borg-persist-v1`                  |
 | HDD genome workspace     | dedicated btrbk cut, archived independently of `/realm`                | six-hour cuts only when changed, drained nightly      | `borg-realm-v2`, `genome-*` series |
-| The ephemeral root       | snapshot the initrd takes before each wipe                             | daily                                                 | `borg-root-snapshots-v1`           |
-| Sinex content stores     | read in place: the running store and the dated earlier one             | daily 05:40                                           | `borg-sinex-blobs-v1`              |
+| The ephemeral root       | snapshot the initrd takes before each wipe                             | nightly coordinator                                    | `borg-root-snapshots-v1`           |
+| Sinex content stores     | read in place: the running store and the dated earlier one             | nightly coordinator                                    | `borg-sinex-blobs-v1`              |
 | Sinex database dump      | `pg_dump` into `state/db-dumps/sinex`, archived with `/realm`          | dump daily at midnight                                | `borg-realm-v2`                    |
-| Polylogue state          | hooks archived directly from a read-only snapshot of its subvolume     | daily 04:15                                           | `borg-polylogue-state-v1`          |
-| Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm` | dumps 03:42, seal Sunday                              | `borg-realm-v2`                    |
+| Polylogue state          | hooks archived directly from a read-only snapshot of its subvolume     | nightly coordinator                                    | `borg-polylogue-state-v1`          |
+| Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm` | dumps before nightly cut, seal Sunday                   | `borg-realm-v2`                    |
 
 Left out of the `/realm` archive (`realmExcludes` in `modules/backup.nix`):
 downloaded model weights (including embeddings), Steam libraries and runtimes,
@@ -77,16 +76,52 @@ because coverage cannot waive what they drop. Root snapshots leave out
 `~/.cache`, `/root/.cache`, `/var/cache`, `/tmp` and every other mounted
 filesystem (`rootSnapshotExcludes` in `modules/lib/backup/acknowledgement.nix`).
 
-The drain runs nightly at 03:05, with a retry at 03:25 for a maintenance pass
-holding the Borg lock; a boot that missed the window runs it once on startup.
-Snapshots are still cut every six hours, so a night's drain archives up to four
-queued cuts per source. The drain keeps the newest archived snapshot, which
-holds anything deleted after it (until the next night's drain releases it).
-When no new cuts are queued, the drain validates its existing acknowledgements
-and leaves an ongoing repository integrity check running. Pending or unavailable
-local handoff evidence requests native drain validation and can preempt a resumable
-check. The coordinator uses local receipts for this scheduling hint; the native
-children qualify archives under the Borg lock with their own credentials.
+The coordinator runs nightly at 03:05 and once 45 minutes after boot. The
+persistent calendar catches a missed nightly window; the independent boot
+trigger also catches a night interrupted after its calendar event fired. Both
+triggers target the same native service, which cannot overlap itself. Resume
+an interrupted or failed pass manually with
+`agentctl job start sinnix backup_drain` after checking its native units and
+shared-lock holder.
+
+It starts the configured telemetry and Polylogue SQLite dump units, then asks
+`btrbk.service` for a normal acquisition containing those new dumps. If a dump
+fails, it skips that additional cut and still attempts the independent archive
+and maintenance jobs, returning failure at the end. The existing six-hour
+btrbk schedule remains; no queued restore point is dropped or coalesced.
+
+A durable acquisition receipt records only successful dumps plus a completed
+native btrbk acquisition. Its 20-hour freshness and dump/snapshot-policy hash
+avoid repeating dumps and extra cuts when the boot and calendar wakes follow
+each other. An interrupted archive phase reuses that acquisition while the
+native per-snapshot receipts govern its remaining queue. Changed policy,
+missing/invalid receipts or a stale acquisition make dumps and acquisition due.
+Direct Polylogue/Sinex archive calls and local dump expiry likewise reuse their
+existing success markers only within 20 hours and with matching input policy.
+Manual native unit calls retain their original behavior.
+
+The sequence then runs Realm, optional genome, Persist, root snapshot archival,
+Polylogue state and optional Sinex blobs, followed by retention maintenance,
+the due Realm coverage audit and verified local dump expiry. These jobs have
+no independent timers on backup hosts. Telemetry-only hosts retain their dump
+timer. Each native job keeps its own resources, proof, due checks and deadline.
+The coordinator owns no Borg lock while waiting for children; the children
+acquire and release it themselves. Stopping the coordinator propagates to its
+children, preserving their existing failed-cut and unacknowledged-source rules.
+Adding or re-enabling the boot timer on a machine already past 45 minutes
+can start this full sequence immediately during activation. Sequence that
+activation with other IO-heavy jobs and inspect the retained queue first.
+The coordinator is not restarted merely because its script changes.
+Its overall deadline is 48h15m, or 72h15m with genome, so a large retained
+backlog can extend beyond one night. A successful unit start alone is not
+proof every source has an accepted archive; inspect the per-source receipts.
+
+The drain keeps the newest archived snapshot for the independent audit.
+When no cuts are queued it validates existing acknowledgements and leaves a
+running repository integrity check alone. Pending or unavailable local
+handoff evidence can preempt the resumable weekly check; the independent
+coverage audit is never preempted. The coordinator uses local receipts for
+this scheduling hint; children qualify archives under the Borg lock.
 
 ### Snapshots are kept until their archive is checked
 
@@ -124,7 +159,7 @@ is archived as empty, while unavailable roots and nested subvolumes fail.
 
 ### Telemetry
 
-The nightly (04:40) `borgbackup-local-dumps` job keeps at least the seven newest daily
+The coordinator's final `borgbackup-local-dumps` job keeps at least the seven newest daily
 dumps in each telemetry or PostgreSQL environment stream. Additional dumps
 must be older than seven days by both filename timestamp and modification time.
 Before deleting each local file, the job restores its entire archived copy and

@@ -127,11 +127,8 @@ let
   # A six-hour snapshot can take about an hour to archive after acquisition.
   # Keep data age distinct from the last-success wall clock.
   borgDataFreshnessMaxAgeSec = 8 * 60 * 60;
-  # sinex-blobs runs on its own daily timer (05:40), independently of
-  # the persist/realm snapshot drain, so it needs its own budget rather than
-  # sharing the six-hour snapshot cadence: budget 3x cadence so one missed/delayed
-  # run doesn't false-positive, same convention as the capture
-  # staleAfterSeconds entries below.
+  # Direct-path archives run nightly in the coordinator. Keep their existing
+  # three-day freshness budget separate from snapshot source age.
   borgDailyArchiveMaxAgeSec = 3 * 24 * 60 * 60;
   # Every unit in this module is the same shape: a oneshot a timer wakes,
   # never restarted by activation (a switch mid-drain would abandon a bind
@@ -140,6 +137,24 @@ let
   # registered surface, which mkScheduledJob resolves by unit lookup. A
   # module-local serviceConfig helper used to recompute exactly that lookup
   # per unit; the class was never declared twice, only applied twice.
+  # Fingerprints qualify the existing daily markers after an input/policy move.
+  coordinatorPolicies = {
+    polylogue = builtins.hashString "sha256" (
+      builtins.toJSON {
+        root = polylogueStateRoot;
+        excludes = polylogueDbExcludes;
+        hooks = builtins.readFile ./lib/backup/cut-polylogue-hooks.py;
+      }
+    );
+    sinex = builtins.hashString "sha256" (builtins.toJSON sinexStorePaths);
+    localDumps = builtins.hashString "sha256" (
+      builtins.toJSON {
+        root = "${realmRoot}/state/db-dumps";
+        policy = realmCoveragePolicy;
+      }
+    );
+  };
+
   mkBackupJob =
     name:
     { description, ... }@job:
@@ -1198,9 +1213,8 @@ in
                   name = "borg-sinex-blobs-archive";
                   path = "${borgDrainStateRoot}/sinex-blobs.last-success";
                   eventDriven = true;
-                  # sinex-blobs runs on its own daily 05:40 timer, independently of the
-                  # persist/realm drain cadence, so it keeps the daily budget the
-                  # retired borgbackup-status check used for it (3x cadence).
+                  # The nightly coordinator invokes this lane after snapshot drains;
+                  # retain the existing three-day freshness budget.
                   staleAfterSeconds = borgDailyArchiveMaxAgeSec;
                 }
               ];
@@ -1209,9 +1223,6 @@ in
               unit = "polylogue-sqlite-backup.service";
               resourceClass = "backup";
               notifyOnFailure = true;
-            };
-            polylogue-sqlite-backup-timer = {
-              unit = "polylogue-sqlite-backup.timer";
             };
             borgbackup-job-polylogue-state = {
               unit = "borgbackup-job-polylogue-state.service";
@@ -1223,7 +1234,7 @@ in
                   name = "borg-polylogue-state-archive";
                   path = "${borgDrainStateRoot}/polylogue-state.last-success";
                   eventDriven = true;
-                  # Daily timer, same budget convention as sinex-blobs: 3x cadence.
+                  # Nightly coordinator, same three-day budget as sinex-blobs.
                   staleAfterSeconds = borgDailyArchiveMaxAgeSec;
                 }
               ];
@@ -1373,6 +1384,7 @@ in
       })
       ++ (import ./lib/backup/archives.nix {
         inherit
+          coordinatorPolicies
           pkgs
           lib
           realmRoot
@@ -1405,6 +1417,8 @@ in
       })
       ++ (import ./lib/backup/acknowledgement.nix {
         inherit
+          coordinatorPolicies
+          config
           lib
           pkgs
           realmSnapshots
@@ -1451,6 +1465,7 @@ in
       })
       ++ (import ./lib/backup/local-dumps.nix {
         inherit
+          coordinatorPolicies
           pkgs
           lib
           realmRoot

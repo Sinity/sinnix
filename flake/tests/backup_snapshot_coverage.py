@@ -1888,7 +1888,8 @@ if command=='borg':
     os.execv(REAL_BORG, [REAL_BORG,*args])
 if command=='systemctl':
     if args[0]=='stop': sys.exit(0)
-    lane={'borgbackup-job-persist.service':'persist', 'borgbackup-job-realm.service':'realm', 'borgbackup-job-genome.service':'genome'}[args[-1]]
+    lane={'borgbackup-job-persist.service':'persist', 'borgbackup-job-realm.service':'realm', 'borgbackup-job-genome.service':'genome'}.get(args[-1])
+    if lane is None: sys.exit(0)
     if lane=='persist' and (root/'fail-persist-unit').exists(): sys.exit(1)
     if lane=='genome' and (root/'fail-genome-unit').exists(): sys.exit(1)
     sys.exit(subprocess.run(['bash',str(root/(lane+'.sh'))],env=os.environ).returncode)
@@ -2840,6 +2841,23 @@ else: sys.exit(1)
                 finally:
                     holder.terminate()
 
+            for name in ("polylogue-state", "sinex-blobs", "local-dumps"):
+                (root / f"state/borg-drain/{name}.last-success").unlink(missing_ok=True)
+            coordinator_steps = [
+                "machine-telemetry-sqlite-backup.service",
+                "polylogue-sqlite-backup.service",
+                "btrbk.service",
+                "borgbackup-job-realm.service",
+                "borgbackup-job-genome.service",
+                "borgbackup-job-persist.service",
+                "borgbackup-root-snapshots.service",
+                "borgbackup-job-polylogue-state.service",
+                "borgbackup-job-sinex-blobs.service",
+                "borgbackup-maintenance.service",
+                "borgbackup-coverage-audit-realm.service",
+                "borgbackup-local-dumps.service",
+            ]
+            expected_starts = [["start", unit] for unit in coordinator_steps]
             queued_persist = snapshot(
                 "persist.20260406T010000+0000",
                 {"unique": "persist after retry"},
@@ -2866,15 +2884,13 @@ else: sys.exit(1)
                 if '"systemctl"' in line
             ]
             self.assertEqual(
-                calls[-3:],
-                [
-                    ["systemctl", "start", "borgbackup-job-realm.service"],
-                    ["systemctl", "start", "borgbackup-job-genome.service"],
-                    ["systemctl", "start", "borgbackup-job-persist.service"],
-                ],
-            )
-            self.assertEqual(
-                calls[-4], ["systemctl", "stop", "borgbackup-verify.service"]
+                calls[-13:],
+                [["systemctl", *call] for call in (
+                    expected_starts[:3]
+                    + [["stop", "borgbackup-verify.service"]]
+                    + expected_starts[3:]
+                )],
+                "failed native lanes must not suppress later independent jobs",
             )
             self.assertFalse(
                 any(
@@ -2885,8 +2901,20 @@ else: sys.exit(1)
             )
             (root / "fail-persist-unit").unlink()
             (root / "fail-genome-unit").unlink()
+            previous_calls = len(calls)
             run("coordinator")
             self.assertTrue(queued_persist.exists())
+            restarted_calls = [
+                json.loads(line)
+                for line in (root / "logs/commands").read_text().splitlines()
+                if '"systemctl"' in line
+            ][previous_calls:]
+            self.assertFalse(any(call[-1] in coordinator_steps[:3] for call in restarted_calls))
+            self.assertEqual(
+                restarted_calls[-9:],
+                [["systemctl", *call] for call in expected_starts[3:]],
+                "boot catch-up after an interrupted archive must reuse the completed dump/cut",
+            )
 
             empty = root / "empty-coordinator"
             (empty / "mock-bin").mkdir(parents=True)
@@ -2895,9 +2923,12 @@ else: sys.exit(1)
             (empty / "genome-snapshots").mkdir()
             control = empty / "mock-bin/systemctl"
             control.write_text(
-                f"#!{sys.executable}\nimport json, os, sys\n"
+                f"#!{sys.executable}\nimport fcntl, json, os, pathlib, sys\n"
                 "with open(os.environ['TMPDIR']+'/commands', 'a') as log:\n"
                 " log.write(json.dumps(sys.argv[1:])+'\\n')\n"
+                "with open(os.environ['TMPDIR']+'/coordinator-borg.lock', 'a') as lock:\n"
+                " fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+                "if sys.argv[1:] == ['start', 'polylogue-sqlite-backup.service'] and pathlib.Path(os.environ['TMPDIR']+'/fail-dump').exists(): sys.exit(1)\n"
             )
             control.chmod(0o755)
             result = subprocess.run(
@@ -2912,11 +2943,7 @@ else: sys.exit(1)
                     json.loads(line)
                     for line in (empty / "commands").read_text().splitlines()
                 ],
-                [
-                    ["start", "borgbackup-job-realm.service"],
-                    ["start", "borgbackup-job-genome.service"],
-                    ["start", "borgbackup-job-persist.service"],
-                ],
+                expected_starts,
                 "empty retries must leave an ongoing integrity check alone",
             )
             # A local receipt routes scheduling without repository credentials.
@@ -2924,7 +2951,7 @@ else: sys.exit(1)
             admitted = "realm.20260403T070000+0000"
             (empty / "realm-snapshots" / admitted).mkdir()
             state = empty / "state/borg-drain"
-            state.mkdir(parents=True)
+            state.mkdir(parents=True, exist_ok=True)
             latest = state / "realm.latest-archived"
             latest.write_text(f"snapshot={admitted}\n")
             receipts = Path(str(latest) + ".by-snapshot")
@@ -2943,11 +2970,7 @@ else: sys.exit(1)
                     json.loads(line)
                     for line in (empty / "commands").read_text().splitlines()
                 ],
-                [
-                    ["start", "borgbackup-job-realm.service"],
-                    ["start", "borgbackup-job-genome.service"],
-                    ["start", "borgbackup-job-persist.service"],
-                ],
+                expected_starts[3:],
                 "acknowledged cuts must not preempt checks or open Borg from the coordinator",
             )
             # A pending HDD cut alone must preempt the resumable integrity
@@ -2966,13 +2989,23 @@ else: sys.exit(1)
                     json.loads(line)
                     for line in (empty / "commands").read_text().splitlines()
                 ],
-                [
-                    ["stop", "borgbackup-verify.service"],
-                    ["start", "borgbackup-job-realm.service"],
-                    ["start", "borgbackup-job-genome.service"],
-                    ["start", "borgbackup-job-persist.service"],
-                ],
+                [["stop", "borgbackup-verify.service"]] + expected_starts[3:],
             )
+
+            (empty / "state/borg-drain/coordinator.acquisition").unlink()
+            (empty / "fail-dump").touch()
+            (empty / "commands").unlink()
+            result = subprocess.run(
+                ["bash", str(root / "coordinator.sh")],
+                env=dict(env, TMPDIR=str(empty)),
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+            calls = [json.loads(line) for line in (empty / "commands").read_text().splitlines()]
+            self.assertNotIn(["start", "btrbk.service"], calls)
+            self.assertEqual(calls[-9:], expected_starts[3:])
+            self.assertIn("reason=dump-failure", result.stderr)
 
 
 if __name__ == "__main__":

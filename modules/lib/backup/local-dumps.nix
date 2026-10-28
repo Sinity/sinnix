@@ -1,5 +1,6 @@
 # Local dump expiry is independent of source acquisition and archive admission.
 {
+  coordinatorPolicies,
   pkgs,
   lib,
   realmRoot,
@@ -21,12 +22,6 @@
       requires = [ outerRealmMountUnit ];
     };
     serviceConfig.TimeoutStartSec = "2h";
-    timer = {
-      # Dumps only become expirable after the nightly drain archives them.
-      onCalendar = "*-*-* 04:40:00";
-      persistent = true;
-      randomizedDelaySec = "5min";
-    };
     path = with pkgs; [
       borgbackup
       coreutils
@@ -51,6 +46,10 @@
         --archive-id "$(printf '%s' "$proof" | jq -er .archive_id)" \
         --snapshot-uuid "$(printf '%s' "$proof" | jq -er .snapshot_uuid)" \
         --apply
+      {
+        printf 'epoch=%s\n' "$(date +%s)"
+        printf 'policy_sha256=%s\n' ${lib.escapeShellArg coordinatorPolicies.localDumps}
+      } | publish_backup_marker ${lib.escapeShellArg "${borgDrainStateRoot}/local-dumps.last-success"}
     '';
   })
 ]
