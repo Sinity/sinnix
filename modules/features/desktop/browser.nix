@@ -5,6 +5,11 @@
   helpers,
   ...
 }@args:
+let
+  chromeCacheDir = "/run/sinnix-chrome-cache";
+  chromeTmpDir = "/run/sinnix-chrome-tmp";
+  chromeCacheBytes = 128 * 1024 * 1024;
+in
 mkFeatureModule {
   path = [
     "desktop"
@@ -106,6 +111,48 @@ mkFeatureModule {
     {
       programs.chromium.enable = true;
 
+      # HTTP cache isolation has a reasoned benefit, without a measured
+      # Chrome speedup. Keep regenerable cache IO off both SSDs without
+      # copying the multi-GiB profile into RAM. Chrome targets
+      # 128 MiB; the mount bounds all profiles together to 256 MiB of data
+      # plus metadata (8192 inodes). noswap keeps this out of the full zram
+      # tier. Profile databases, site storage and capture lanes stay durable.
+      fileSystems.${chromeCacheDir} = {
+        device = "tmpfs";
+        fsType = "tmpfs";
+        options = [
+          "size=256M"
+          "nr_inodes=8192"
+          "noswap"
+          "mode=0700"
+          "uid=${toString config.users.users.${user}.uid}"
+          "nodev"
+          "nosuid"
+        ];
+      };
+
+      # The 2026-10-28 path trace caught Chrome pwrite64 threads waiting in
+      # __reserve_bytes and btrfs_inode_lock on deleted .com.google.Chrome.*
+      # files in /realm/tmp/work. Open temporary files totalled about 60 MiB.
+      # Override the user manager's agent-oriented TMPDIR in the package
+      # wrapper, including direct launches. 512 MiB is on-demand headroom,
+      # not a reservation; the inode cap also bounds metadata growth. Live
+      # temporary allocations can fail at the cap, so this is separate from
+      # the HTTP cache. Never put profile state or captures on this mount.
+      fileSystems.${chromeTmpDir} = {
+        device = "tmpfs";
+        fsType = "tmpfs";
+        options = [
+          "size=512M"
+          "nr_inodes=4096"
+          "noswap"
+          "mode=0700"
+          "uid=${toString config.users.users.${user}.uid}"
+          "nodev"
+          "nosuid"
+        ];
+      };
+
       # Chrome merges every JSON file in its managed policy directory, so the
       # generated extension policy lands beside chromium's own extra.json.
       environment.etc."opt/chrome/policies/managed/sinnix-capture-browser-nav.json".source =
@@ -172,6 +219,8 @@ mkFeatureModule {
               "--remote-debugging-port=9222"
               "--remote-debugging-address=127.0.0.1"
               "--user-data-dir=${chromeUserDataDir}"
+              "--disk-cache-dir=${chromeCacheDir}"
+              "--disk-cache-size=${toString chromeCacheBytes}"
               # Chrome-family apps register with AT-SPI but expose an empty tree
               # unless renderer accessibility is forced on. Without it the
               # capture-a11y lane sees focus events from Chrome windows with no
@@ -186,9 +235,12 @@ mkFeatureModule {
               ))
             ]
           );
-          chromePkg = pkgs.google-chrome.override {
-            commandLineArgs = chromeArgs;
-          };
+          chromePkg = (pkgs.google-chrome.override { commandLineArgs = chromeArgs; }).overrideAttrs (old: {
+            nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.makeWrapper ];
+            postFixup = (old.postFixup or "") + ''
+              wrapProgram "$out/bin/google-chrome-stable" --set TMPDIR ${chromeTmpDir}
+            '';
+          });
           # Launch Chrome through a transient user service so browser children
           # stay in one cgroup for accounting and interactive policy. The
           # unit claims its part of app.slice's hard memory guarantee, so

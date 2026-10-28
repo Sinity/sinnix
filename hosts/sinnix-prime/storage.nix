@@ -22,7 +22,8 @@ let
   polylogueDbRoot = config.sinnix.services.polylogue.dataDir;
   polylogueShareMount = "/home/${username}/.local/share/polylogue";
 
-  realmFsDevice = "/dev/disk/by-uuid/43701cf7-7880-4e0c-9725-b6e12d91898a";
+  realmFsUuid = "43701cf7-7880-4e0c-9725-b6e12d91898a";
+  realmFsDevice = "/dev/disk/by-uuid/${realmFsUuid}";
 
   # Initrd scaffold: early-boot placeholders derived from persistence config
   scaffoldCfg = config.sinnix.persistence.initrdScaffold;
@@ -69,16 +70,10 @@ in
 {
   sinnix.backup.genomeRoot = "${neoOuterRealm}/content/genome";
   services = {
-    # The /realm QLC NVMe gets its own dirty-page budget (a quarter of the
-    # global limit in modules/profiles/workstation.nix), and strict_limit
-    # holds its writers to it. Without it a backlog on this slow drive used up
-    # the global limit and paused writers to every other disk, the desktop's
-    # root SSD included, in balance_dirty_pages.
     # The 12 TB genome HDD is idle apart from snapshot cuts and the nightly
     # drain; it parks after 10 idle minutes instead of spinning (and
     # vibrating) all day. hdparm -S is a drive setting lost at power-off.
     udev.extraRules = ''
-      ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="nvme*n*", ENV{DEVTYPE}=="disk", ATTRS{model}=="CT4000P3SSD8*", ATTR{bdi/strict_limit}="1", ATTR{bdi/max_ratio}="25"
       ACTION=="add", SUBSYSTEM=="block", KERNEL=="sd*", ENV{DEVTYPE}=="disk", ENV{ID_SERIAL}=="OOS14000G_00064481", RUN+="${pkgs.hdparm}/bin/hdparm -S 120 /dev/%k"
     '';
 
@@ -251,6 +246,33 @@ in
 
   systemd = {
     services.sinnix-fstrim = fstrimJob.systemd.services.sinnix-fstrim;
+
+    # Btrfs owns a filesystem BDI, separate from the block device's BDI.
+    # The 2026-10-28 interactive IO sample found the raw NVMe at 25/1 but
+    # /realm's btrfs BDI at 100/0 (max_ratio/strict_limit). The old block udev
+    # rule therefore never bounded /realm's buffered writes. Resolve the BDI
+    # through the mounted filesystem UUID; btrfs-N changes between boots.
+    # This restores the intended 256 MiB share of the global 1 GiB dirty
+    # budget, reserving headroom for writers on the desktop's other SSD.
+    # It does not remove shared Btrfs transaction or synchronous IO waits.
+    services.sinnix-realm-writeback = {
+      description = "Bound Realm Btrfs dirty writeback independently of the desktop SSD";
+      wantedBy = [ "multi-user.target" ];
+      requires = [ "realm.mount" ];
+      after = [
+        "realm.mount"
+        "systemd-sysctl.service"
+      ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        bdi=/sys/fs/btrfs/${realmFsUuid}/bdi
+        printf '25\n' > "$bdi/max_ratio"
+        printf '1\n' > "$bdi/strict_limit"
+      '';
+    };
 
     # One scrub a week rather than all three on the 1st at midnight, where they
     # met the snapshot and the realm Borg run.

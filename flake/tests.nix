@@ -33,6 +33,7 @@ in
     ./tests/agent-gateway-manifest.nix
     ./tests/chrome-agent-window.nix
     ./tests/browser-workflow.nix
+    ./tests/interactive-storage.nix
     ./tests/desktop-file-navigation.nix
     ./tests/terminal-capture.nix
     ./tests/capture-clipboard.nix
