@@ -290,3 +290,28 @@ first request. Inference runs on the workstation; the phone is only a browser. S
 
 - Media mirroring resumes from the newest acknowledged file; files that appear
   later with older timestamps need an explicit rescan.
+
+### System log chunks
+
+The timer writes raw UTC, year-bearing threadtime pulls under
+`/realm/device/shared/phone/logcat/logcat-YYYYMMDD-HHMMSS-<unique>.txt`.
+Readers must include both these chunks and historical `logcat-YYYYMMDD.txt`
+files. Each pull is staged on that filesystem and published by rename; old
+`.logcat-pull.*` files remain recovery evidence and are excluded from readers.
+Counts and the resume cursor come only from the new pull.
+
+A pull stops after 120 seconds or 256 MiB. A same-basename `.json` sidecar
+records the bound, byte count, complete record count, cursor and estimated
+most frequent tag; the journal also warns with that tag. The raw bytes remain
+unchanged, including any final partial line. Only complete timestamped lines
+advance the cursor. Logcat's inclusive `-T` resume can repeat boundary records;
+ring-buffer overwrite can still lose records if the phone produces faster than
+scheduled drains. Transport failures retain staging bytes and keep the old
+cursor. `SINNIX_LOGCAT_MAX_BYTES` and `SINNIX_LOGCAT_TIMEOUT_SECONDS` override
+the limits for controlled tests.
+
+After activation, check `nixos-version --configuration-revision`, then run
+`systemctl --user start sinnix-phone-logcat.service` and
+`journalctl --user -u sinnix-phone-logcat.service -n 50 --no-pager`.
+Confirm a new chunk under the path above, its last complete UTC timestamp
+against `/realm/state/sinnix-phone/logcat.cursor`, and any bound sidecar.

@@ -122,7 +122,14 @@ if args[:1] == ['logcat']:
         payload=pathlib.Path(os.environ['LOGCAT_CAPTURE']).read_bytes()
         if os.environ.get('LOGCAT_ARGS'): pathlib.Path(os.environ['LOGCAT_ARGS']).write_text(json.dumps(args))
         if os.environ.get('LOGCAT_ENFORCE_CURSOR') and '-T' in args and payload and args[args.index('-T')+1] > payload[:23].decode(): payload=b''
+        if os.environ.get('LOGCAT_STREAM'):
+            while True:
+                os.write(1, payload)
         sys.stdout.buffer.write(payload)
+        sys.stdout.buffer.flush()
+        if os.environ.get('LOGCAT_HANG'):
+            import time
+            time.sleep(60)
         sys.exit(int(os.environ.get('LOGCAT_STATUS','0')))
     sys.exit(0)
 mapping={'/sdcard/Oculus/Videoshots':str(pathlib.Path(os.environ['REMOTE'])/'Videoshots'),
@@ -395,8 +402,14 @@ def test_logcat_zero_matches_are_one_numeric_count(device, existing, incoming):
     result = run(device, "sinnix-phone", "logcat")
     assert result.returncode == 0, result.stderr
     expected = 1 if incoming.startswith(b"2026-") else 0
-    assert f"logcat: {expected} new lines ({expected} total)" in result.stdout
-    assert output.read_bytes() == (existing or b"") + incoming
+    assert f"logcat: {expected} new lines in " in result.stdout
+    chunks = list(output.parent.glob("logcat-????????-*.txt"))
+    assert len(chunks) == 1
+    assert chunks[0].read_bytes() == incoming
+    if existing is not None:
+        assert output.read_bytes() == existing
+    else:
+        assert not output.exists()
     cursor = root / "phone-state" / "logcat.cursor"
     if expected:
         assert cursor.read_text().strip() == "2026-10-09 00:00:01.123"
@@ -405,7 +418,8 @@ def test_logcat_zero_matches_are_one_numeric_count(device, existing, incoming):
 
 
 @pytest.mark.parametrize(
-    "incoming", [b"", b"2026-10-09 00:00:02.123 incomplete record"]
+    "incoming", [b"", b"2026-10-09 00:00:02.123 incomplete record",
+                 b"2026-10-09 00:00:02.123 complete record\npartial"]
 )
 def test_failed_logcat_pull_preserves_bytes_and_cursor_and_still_checks_bcr(
     device, incoming
@@ -525,3 +539,79 @@ def test_ambient_audit_missing_source_is_not_empty(device):
     result = run(device, "sinnix-phone", "ambient-audit")
     assert result.returncode != 0 and "source unavailable" in result.stderr
     assert not (root / "lake" / "ambient").exists()
+
+
+@pytest.mark.parametrize("bound", ["bytes", "timeout"])
+def test_logcat_bounded_stream_publishes_and_resumes(device, bound):
+    root, env = device
+    payload = b"2026-10-09 00:00:02.123  100  200 E NoisyTag: repeated error\n"
+    capture = root / "logcat-input"
+    capture.write_bytes(payload)
+    args = root / "logcat-args.json"
+    env.update(LOGCAT_CAPTURE=str(capture), LOGCAT_ARGS=str(args))
+    if bound == "bytes":
+        env.update(LOGCAT_STREAM="1", SINNIX_LOGCAT_MAX_BYTES=str(len(payload) * 4 + 9))
+    else:
+        env.update(LOGCAT_HANG="1", SINNIX_LOGCAT_TIMEOUT_SECONDS="0.3")
+    started = time.monotonic()
+    result = run(device, "sinnix-phone", "logcat")
+    assert result.returncode == 0, result.stderr
+    assert time.monotonic() - started < 10
+    directory = root / "lake" / "logcat"
+    chunks = list(directory.glob("logcat-*.txt"))
+    assert len(chunks) == 1
+    expected = payload * 4 + payload[:9] if bound == "bytes" else payload
+    assert chunks[0].read_bytes() == expected
+    metadata = json.loads(chunks[0].with_suffix(".json").read_text())
+    assert metadata["reason"] == ("byte-cap" if bound == "bytes" else "timeout")
+    assert metadata["top_tag"] == "NoisyTag"
+    assert "top repeated tag: NoisyTag" in result.stderr
+    assert (root / "phone-state" / "logcat.cursor").read_text().strip() == "2026-10-09 00:00:02.123"
+    assert not list(directory.glob(".logcat-pull.*"))
+    env.pop("LOGCAT_STREAM", None)
+    env.pop("LOGCAT_HANG", None)
+    result = run(device, "sinnix-phone", "logcat")
+    assert result.returncode == 0, result.stderr
+    arguments = json.loads(args.read_text())
+    assert arguments[arguments.index("-T") + 1] == "2026-10-09 00:00:02.123"
+    assert len(list(directory.glob("logcat-*.txt"))) == 2
+
+
+def test_logcat_publication_renames_the_pull_inode(device):
+    root, env = device
+    capture = root / "logcat-input"
+    capture.write_bytes(b"2026-10-09 00:00:01.123  100  200 I Neutral: normal\n")
+    env.update(LOGCAT_CAPTURE=str(capture))
+    # Record the inode from the writer's open descriptor before publication.
+    adb = root / "bin" / "adb"
+    source = adb.read_text().replace(
+        "payload=pathlib.Path(os.environ['LOGCAT_CAPTURE']).read_bytes()",
+        """payload=pathlib.Path(os.environ['LOGCAT_CAPTURE']).read_bytes()
+        stages=list((pathlib.Path(os.environ['FIXTURE_ROOT'])/'lake'/'logcat').glob('.logcat-pull.*'))
+        pathlib.Path(os.environ['FIXTURE_ROOT'],'pull-inode').write_text(str(stages[0].stat().st_ino))""",
+    )
+    adb.write_text(source)
+    result = run(device, "sinnix-phone", "logcat")
+    assert result.returncode == 0, result.stderr
+    chunk = next((root / "lake" / "logcat").glob("logcat-*.txt"))
+    assert chunk.stat().st_ino == int((root / "pull-inode").read_text())
+    assert chunk.read_bytes() == capture.read_bytes()
+
+
+def test_logcat_long_complete_line_advances_but_partial_does_not(device):
+    root, env = device
+    complete = b"2026-10-09 00:00:02.123  100  200 I Neutral: " + b"x" * 70000 + b"\n"
+    incoming = complete + b"2026-10-09 00:00:03.123 partial"
+    capture = root / "logcat-input"
+    capture.write_bytes(incoming)
+    env.update(LOGCAT_CAPTURE=str(capture))
+    directory = root / "lake" / "logcat"
+    directory.mkdir(parents=True)
+    old_stage = directory / ".logcat-pull.legacy"
+    old_stage.write_bytes(b"existing recovery evidence")
+    result = run(device, "sinnix-phone", "logcat")
+    assert result.returncode == 0, result.stderr
+    assert "logcat: 1 new lines" in result.stdout
+    assert next(directory.glob("logcat-*.txt")).read_bytes() == incoming
+    assert (root / "phone-state" / "logcat.cursor").read_text().strip() == "2026-10-09 00:00:02.123"
+    assert old_stage.read_bytes() == b"existing recovery evidence"
