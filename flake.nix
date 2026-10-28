@@ -67,7 +67,7 @@
 
     # The live application, CLI and MCP server. It keeps its
     # own nixpkgs: its shared crates need a newer rustc than Sinnix's.
-    polylogue-rewrite.url = "github:Sinity/polylogue/4595b51dd4ebfe533012ff6e1dbd863fd3ee4944";
+    polylogue-rewrite.url = "github:Sinity/polylogue/846626eb15b9dd905e946a5185cbd91319fbb0ff";
 
     # Private repo — fetch via HTTPS through the local gh/git credential helper.
     yt-polisher = {
