@@ -40,6 +40,15 @@ result = "exit"
 scratch = "nvme"
 timeout_seconds = 1800
 
+[operations.earlyoom_vm_verify]
+description = "Verify emergency earlyoom victim selection and real signals in an isolated VM"
+exec = ["nix", "build", "--no-link", "--max-jobs", "1", "--cores", "2", ".#heavyChecks.x86_64-linux.earlyoom-emergency-vm"]
+pool = "bulk"
+result = "exit"
+scratch = "nvme"
+timeout_seconds = 1800
+admission = { memory_mib = 4096 }
+
 [operations.verify_snapshot_restore]
 description = "Restore one small file from an exact Realm archive and verify its complete digest"
 exec = ["python3", "flake/tests/backup_native_restore.py"]

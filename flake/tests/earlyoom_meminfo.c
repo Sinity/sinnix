@@ -1,4 +1,4 @@
-/* Redirect only meminfo for the real, dry-run earlyoom executable. */
+/* Redirect only meminfo for earlyoom dry-run checks and the isolated VM. */
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <stdio.h>

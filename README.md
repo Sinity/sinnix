@@ -88,6 +88,11 @@ in `flake/tests/pkg-suites.nix`, so editing a test does not rebuild its package.
 Editing, publication, verification, and activation rules live in
 [AGENTS.md](AGENTS.md).
 
+`agentctl job start sinnix earlyoom_vm_verify` checks real emergency signal
+delivery and victim avoidance in a 1 GiB guest, with 4 GiB admission headroom.
+It injects memory and PSI readings inside the VM; it does not stress the host
+or establish responsiveness under real swap pressure.
+
 ## Subsystem guides
 
 - [Agent operations](docs/agentctl.md) and [gateway](docs/agent-gateway.md)

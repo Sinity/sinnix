@@ -75,6 +75,7 @@ in
     ./tests/machine-telemetry-cgroups.nix
     ./tests/dots-shell.nix
     ./tests/earlyoom.nix
+    ./tests/earlyoom-vm.nix
     ./tests/tmp-sweep.nix
     ./tests/activitywatch.nix
     ./tests/config-boundaries.nix
