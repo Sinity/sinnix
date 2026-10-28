@@ -91,8 +91,7 @@ sudo btrbk list snapshots
 snapshot=/realm/.btrfs/snapshot/realm.YYYYMMDDTHHMMSS+ZZZZ
 for relative in tmp worktree worktrees state/cache \
   project/polylogue/repo/target project/polylogue-sinex-common/repo/target \
-  project/sinex/repo/target inbox/spec/target \
-  inbox/spec/polylogue-spec/prototype/target \
+  project/sinex/repo/target \
   state/stashbox/analysis-cache state/stashbox/generated; do
   if test -d "/realm/$relative"; then
     sudo test -d "$snapshot/$relative" || exit 1

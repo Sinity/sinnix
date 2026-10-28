@@ -8,8 +8,6 @@
   "project/polylogue/repo/target"
   "project/polylogue-sinex-common/repo/target"
   "project/sinex/repo/target"
-  "inbox/spec/target"
-  "inbox/spec/polylogue-spec/prototype/target"
   "state/stashbox/analysis-cache"
   "state/stashbox/generated"
 ]
