@@ -177,7 +177,7 @@ def _perform(intent: dict, kind: str, token: str) -> dict:
         result = land_shared(intent)
         # No receipt: sharing is fire-and-forget by design, and a notification
         # per shared link would make the verb cost more than it saves.
-    elif kind in ("ema_answer", "mark", "voice_note", "trace"):
+    elif kind in ("mark", "voice_note", "trace"):
         # These are records, not requests. They reach the lake through the
         # events plane and the blob drain; there is nothing for prime to do
         # except acknowledge that they arrived.

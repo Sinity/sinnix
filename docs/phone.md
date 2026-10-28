@@ -69,10 +69,23 @@ phone unlocked for some package operations. When ADB is unavailable,
 `app-status` reads the newest uploaded events instead and says which source it
 used.
 
-`app-grants` applies `RECORD_AUDIO` and `POST_NOTIFICATIONS`,
-`MANAGE_EXTERNAL_STORAGE` as an appop at both package and uid scope, the Doze
-whitelist, and the notification-listener binding. `RECORD_AUDIO` is left at
-its default foreground mode, which a running microphone service satisfies.
+`app-grants` applies `RECORD_AUDIO`, `POST_NOTIFICATIONS`, `CAMERA`, legacy
+storage access, `READ_PHONE_STATE`, `BLUETOOTH_CONNECT`, and coarse, fine,
+then background location. It also applies `MANAGE_EXTERNAL_STORAGE` as an
+appop at both package and uid scope, the Doze whitelist, and the
+notification-listener binding. `RECORD_AUDIO` is left at its default
+foreground mode, which a running microphone service satisfies.
+
+The capture service records Wi-Fi, Bluetooth, call and network state,
+headset and airplane mode, unlocks, ringer/DND and doze transitions, and
+package installs/removals through the event log. The notification listener
+observes active MediaSessions. Initial state records carry `reason: snapshot`;
+permission/API failures emit `signal_unavailable`. SSID access also requires
+device location to be enabled. Call-state observations omit phone numbers.
+
+EMA check-ins are retired. App upgrades withdraw notification 4713 and remove
+channel `sinnix-ema`; historical EMA events remain readable. Prime no longer
+accepts new `ema_answer` intents.
 
 Nix-on-Droid owns the routine CLI profile; the `sinnix_debian_chroot` Magisk
 module provides Debian Trixie arm64 for native toolchains (`chroot-build`,

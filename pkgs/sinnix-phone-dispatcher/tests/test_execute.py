@@ -57,7 +57,7 @@ def test_only_voice_note_and_trace_trigger_scoring(monkeypatch) -> None:
     triggered = []
     monkeypatch.setattr(execute_mod, "trigger_score", lambda: triggered.append(True))
 
-    for kind in ("mark", "ema_answer", "voice_note", "trace"):
+    for kind in ("mark", "voice_note", "trace"):
         execute_mod.execute({"kind": kind, "send_token": f"tok-{kind}"})
 
     assert len(triggered) == 2
