@@ -67,6 +67,7 @@ in
     ./tests/noctalia.nix
     ./tests/scratch-subvolumes.nix
     ./tests/fstrim.nix
+    ./tests/devkit-pg.nix
     ./tests/host-config.nix
     ./tests/hyprland-rules.nix
     ./tests/hyprland-lua-tools.nix
