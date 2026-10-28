@@ -14,6 +14,28 @@
     in
     {
       checks = {
+        # Use the rendered workstation arguments and the unmodified executable.
+        # Only /proc/meminfo is redirected by the test preload; --dryrun keeps
+        # all victim selection and signal decisions observable without killing.
+        earlyoom-emergency-kill =
+          let
+            host = inputs.self.nixosConfigurations.sinnix-prime.config;
+          in
+          pkgs.runCommand "earlyoom-emergency-kill-check"
+            {
+              nativeBuildInputs = [
+                pkgs.stdenv.cc
+                pkgs.python3
+              ];
+              earlyoomArgs = host.systemd.services.earlyoom.environment.EARLYOOM_ARGS;
+            }
+            ''
+              $CC -shared -fPIC -Wall -Wextra -Werror ${./earlyoom_meminfo.c} -o meminfo.so -ldl
+              python ${./earlyoom_emergency.py} ${host.services.earlyoom.package}/bin/earlyoom "$PWD/meminfo.so" "$earlyoomArgs"
+              mkdir "$out"
+              cp *.log "$out/"
+            '';
+
         # Provably fails when: the PSI gate stops suppressing kills below
         # --mem-psi-min, stops admitting them at/above it, loses its
         # fail-open behavior on missing pressure data, or the gate flag

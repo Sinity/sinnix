@@ -51,7 +51,7 @@
         # crash-looped the service on 2026-10-27 while this check passed.
         assert host.services.earlyoom.freeMemThreshold <= 99;
         assert lib.all (arg: lib.hasInfix arg earlyoomArgs) [
-          "-m5"
+          "-m5,5"
           "-s10"
           "--mem-psi-min 10"
         ];

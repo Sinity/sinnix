@@ -311,6 +311,10 @@ in
           # Scoped oomd targets job/tool descendants; this global fallback
           # also covers pressure outside those trees and swap-ineligible jobs.
           freeMemThreshold = 5;
+          # Keep the same RAM floor for SIGKILL: a victim that survives SIGTERM
+          # must not hold a fully swapped host between 2.5% and 5% available RAM.
+          # Swap still gives it a grace band between 10% and 5% free.
+          freeMemKillThreshold = 5;
           # SIGTERM below 10% free swap (~1.2 GiB of 12 GiB zram), SIGKILL
           # below the default half (5%) if SIGTERM cannot recover the host.
           freeSwapThreshold = 10;
