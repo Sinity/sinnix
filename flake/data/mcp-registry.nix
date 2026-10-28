@@ -134,6 +134,8 @@ let
       transport = "stdio";
       tier = "recall";
       command = "mcp-polylogue";
+      # Let the daemon's default 30s read deadline return its typed refusal.
+      callTimeoutSeconds = 35;
       profiles = {
         full = { };
         evidence = { };
