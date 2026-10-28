@@ -1,12 +1,16 @@
 """Exercise screenshot custody with a synthetic adb executable."""
 
 import os
+import shutil
 import struct
 import subprocess
 import zlib
 from pathlib import Path
 
 import pytest
+
+# The Nix build sandbox has no /usr/bin/env, so fixtures name bash directly.
+BASH = shutil.which("bash") or "/bin/sh"
 
 SCRIPT = Path(__file__).resolve().parents[3] / "scripts/sinnix-phone"
 
@@ -38,7 +42,7 @@ def test_screenshot_preserves_staging_until_verified(tmp_path, mode, explicit):
         {"empty": b"", "invalid": b"not PNG", "truncated": png()[:-3]}.get(mode, png())
     )
     adb = binary / "adb"
-    adb.write_text("""#!/usr/bin/env bash
+    adb.write_text(f"""#!{BASH}
 printf '%s\\n' "$*" >> "$CALLS"
 if [ "$1" = pull ]; then
   cp "$PAYLOAD" "$3"
@@ -47,7 +51,7 @@ fi
 """)
     adb.chmod(0o755)
     xdg = binary / "xdg-user-dir"
-    xdg.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$PICTURES"\n')
+    xdg.write_text(f'#!{BASH}\nprintf "%s\\n" "$PICTURES"\n')
     xdg.chmod(0o755)
     body = SCRIPT.read_text().split("\nscreenshot)\n")[1].split("\n  ;;")[0]
     out = tmp_path / "explicit.png"
