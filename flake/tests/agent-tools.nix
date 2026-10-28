@@ -140,7 +140,9 @@ in
             {
               assertion =
                 let
-                  source = toString config.environment.etc."claude-code/managed-settings.json".source;
+                  source = builtins.unsafeDiscardStringContext (
+                    toString config.environment.etc."claude-code/managed-settings.json".source
+                  );
                 in
                 lib.hasPrefix "${builtins.storeDir}/" source
                 && lib.hasInfix (lib.escapeShellArg source) activationText;
