@@ -5,6 +5,7 @@
     { system, ... }:
     let
       pkgs = inputs.nixpkgs.legacyPackages.${system};
+      eglPlatform = import ../../modules/lib/noctalia-egl-platform.nix { inherit pkgs; };
       noctalia = pkgs.callPackage "${inputs.noctalia}/nix/package.nix" { };
       noctaliaThemeDefaultsMigration = noctalia.overrideAttrs (old: {
         # Match the deployed source, but opt into Meson's test targets only for
@@ -44,6 +45,51 @@
     in
     {
       checks = {
+        noctalia-egl-wayland2 = eglPlatform.package;
+        noctalia-egl-queues =
+          pkgs.runCommand "noctalia-egl-queues-check"
+            {
+              nativeBuildInputs = [
+                pkgs.stdenv.cc
+                pkgs.pkg-config
+                pkgs.binutils
+                pkgs.python3
+                pkgs.patch
+              ];
+              buildInputs = [ pkgs.wayland ];
+              BASELINE_EGL = pkgs.egl-wayland2;
+              PATCHED_EGL = eglPlatform.package;
+              EGL_PLATFORM_FILES = builtins.toJSON eglPlatform.files;
+            }
+            ''
+              ulimit -c 0
+              cp ${pkgs.egl-wayland2.src}/src/wayland/wayland-swapchain.c patched.c
+              mkdir -p source/src/wayland
+              mv patched.c source/src/wayland/wayland-swapchain.c
+              patch -d source -p1 < ${../../modules/features/desktop/noctalia-egl-wayland2-release-events.patch}
+              python3 ${./noctalia-egl-wayland2.py} \
+                ${pkgs.egl-wayland2.src}/src/wayland/wayland-swapchain.c \
+                source/src/wayland/wayland-swapchain.c \
+                ${./noctalia-egl-queues.c} ${./noctalia-wayland-release.c} "$out"
+            '';
+        noctalia-egl-options =
+          let
+            host = inputs.self.nixosConfigurations.sinnix-prime;
+            config = host.config;
+            other =
+              (host.extendModules {
+                modules = [
+                  ({ lib, ... }: { services.xserver.videoDrivers = lib.mkForce [ "modesetting" ]; })
+                ];
+              }).config;
+            service =
+              config: config.home-manager.users.${config.sinnix.user.name}.systemd.user.services.noctalia.Service;
+          in
+          assert builtins.elem eglPlatform.environment (service config).Environment;
+          assert
+            !(builtins.any (pkgs.lib.hasPrefix "__EGL_EXTERNAL_PLATFORM_CONFIG_FILENAMES=") (service other)
+            .Environment);
+          pkgs.runCommand "noctalia-egl-options-check" { } "touch $out";
         noctalia-theme-defaults-migration = noctaliaThemeDefaultsMigration;
         noctalia-heap-profile-options =
           let

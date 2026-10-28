@@ -74,6 +74,8 @@ mkFeatureModule {
         let
           mkDotsFile = mkDotsFileFor config;
           scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
+          nvidiaEgl = import ../../lib/noctalia-egl-platform.nix { inherit pkgs; };
+          usesNvidia = builtins.elem "nvidia" nixosConfig.services.xserver.videoDrivers;
           noctalia = pkgs.noctalia.overrideAttrs (old: {
             patches = (old.patches or [ ]) ++ [
               ./noctalia-notification-prewarm.patch
@@ -118,12 +120,14 @@ mkFeatureModule {
               # while the graphical session remains active. Explicit stops stay stopped.
               Restart = lib.mkForce "always";
               RestartSec = 2;
-            }
-            // lib.optionalAttrs cfg.heapProfiling.enable {
-              Environment = [
-                "MALLOC_CONF=prof:true,prof_active:false,prof_accum:false,prof_final:false,prof_gdump:false,lg_prof_interval:-1,lg_prof_sample:16,prof_prefix:"
-                "NOCTALIA_HEAP_PROFILE_DIR=${heapProfileDirectory}"
-              ];
+              # The vendor loader override belongs to this service and its
+              # future descendants, not the global graphics configuration.
+              Environment =
+                lib.optional usesNvidia nvidiaEgl.environment
+                ++ lib.optionals cfg.heapProfiling.enable [
+                  "MALLOC_CONF=prof:true,prof_active:false,prof_accum:false,prof_final:false,prof_gdump:false,lg_prof_interval:-1,lg_prof_sample:16,prof_prefix:"
+                  "NOCTALIA_HEAP_PROFILE_DIR=${heapProfileDirectory}"
+                ];
             };
 
           home.file.".local/share/noctalia/pinned/official/timer".source = "${officialPlugins}/timer";

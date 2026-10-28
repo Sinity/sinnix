@@ -91,3 +91,26 @@ After attribution, archive the session into its private owning analysis and
 set the option false for the next coordinated restart. No profiler starts on
 ordinary status reads, and no periodic sampler or automatic profile retention
 cleanup is installed.
+
+## NVIDIA release-event queues
+
+On NVIDIA hosts, the Noctalia service selects a local EGL Wayland 2 package
+with [upstream's explicit-sync release-queue fix](https://github.com/NVIDIA/egl-wayland2/commit/6235dd8200c52f81c55882bcaf5553715d9565cf)
+backported to 1.0.2. Explicit synchronization uses a temporary queue for DMA-BUF
+creation, then moves the buffer to the default queue so ignored release events
+are dispatched and freed. Implicit synchronization keeps its persistent queue
+and listener. DRM fence handling stays with the upstream synchronization code.
+
+`__EGL_EXTERNAL_PLATFORM_CONFIG_FILENAMES` selects an immutable manifest with
+the patched library's absolute path, followed by the existing legacy Wayland,
+GBM, XCB and Xlib manifests. This environment applies to `noctalia.service` and
+future applications it launches. Other running clients and the global graphics
+package keep their existing selection. Removing this service environment
+restores the host's platform discovery on the next coordinated restart.
+
+`noctalia-egl-queues` checks the actual patched queue code against an unpatched
+red control, explicit/implicit queue ownership and failure cleanup, a real
+Wayland socketpair with ignored release events, preserved exports/SONAME and
+all five manifests. `noctalia-egl-options` verifies the evaluated NVIDIA service
+selector and its absence on other graphics configurations. The production
+patched library is also exposed as `noctalia-egl-wayland2` for focused builds.
