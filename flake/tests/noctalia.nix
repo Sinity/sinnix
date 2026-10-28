@@ -12,6 +12,7 @@
         patches = (old.patches or [ ]) ++ [
           ../../modules/features/desktop/noctalia-notification-prewarm.patch
           ../../modules/features/desktop/noctalia-automation-ipc.patch
+          ../../modules/features/desktop/noctalia-memory-stats.patch
         ];
         postPatch = (old.postPatch or "") + ''
           patch -p1 < ${../../modules/features/desktop/noctalia-pipewire-reconnect.patch}
@@ -42,6 +43,30 @@
     {
       checks = {
         noctalia-theme-defaults-migration = noctaliaThemeDefaultsMigration;
+        noctalia-memory-stats =
+          pkgs.runCommand "noctalia-memory-stats-check"
+            {
+              nativeBuildInputs = [
+                pkgs.stdenv.cc
+                pkgs.patch
+              ];
+              buildInputs = [
+                pkgs.nlohmann_json
+                pkgs.jemalloc
+              ];
+            }
+            ''
+              mkdir -p source/src/app source/src/util source/tests
+              cp ${inputs.noctalia}/meson.build source/
+              cp ${inputs.noctalia}/src/app/application_ipc.cpp source/src/app/
+              patch -d source -p1 < ${../../modules/features/desktop/noctalia-memory-stats.patch}
+              # Preserve the real allocation for jemalloc observation.
+              c++ -std=c++23 -UNDEBUG -fno-builtin-malloc -fno-builtin-free \
+                -DNOCTALIA_ALLOCATOR_REAL_TEST -I source/src \
+                source/tests/allocator_stats_test.cpp -ljemalloc -o allocator-stats-test
+              ./allocator-stats-test
+              touch "$out"
+            '';
         noctalia-hub-bridge =
           pkgs.runCommand "noctalia-hub-bridge-check"
             {
@@ -115,7 +140,8 @@
                 ${../../modules/features/desktop/noctalia-pipewire-reconnect.patch} \
                 ${../../scripts/sinnix-wallpaper} \
                 ${../../scripts/sinnix-wallpaper-timeofday} \
-                ${../../flake/tests/noctalia-wallpaper-timeofday.sh}
+                ${../../flake/tests/noctalia-wallpaper-timeofday.sh} \
+                ${../../modules/features/desktop/noctalia-memory-stats.patch}
               touch "$out"
             '';
       };

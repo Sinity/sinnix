@@ -1,0 +1,248 @@
+diff --git a/meson.build b/meson.build
+index 62162ef..7a50411 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1126,6 +1126,7 @@ install_data(
+ 
+ if build_tests
+   _cpp_test_names = [
++    'allocator_stats',
+     'animation_manager',
+     'app_identity',
+     'audio_glyphs',
+diff --git a/src/app/application_ipc.cpp b/src/app/application_ipc.cpp
+index 71ce82a..17ee3ff 100644
+--- a/src/app/application_ipc.cpp
++++ b/src/app/application_ipc.cpp
+@@ -89,10 +89,12 @@
+ #include "ui/dialogs/file_dialog.h"
+ #include "ui/dialogs/glyph_picker_dialog.h"
+ #include "ui/style.h"
++#include "util/allocator_stats.h"
+ #include "util/file_utils.h"
+ #include "util/string_utils.h"
+ 
+ #include <algorithm>
++#include <chrono>
+ #include <cmath>
+ #include <csignal>
+ #include <cstdint>
+@@ -105,6 +107,11 @@
+ #include <stdexcept>
+ #include <string_view>
+ #include <utility>
++#include <unistd.h>
++
++#ifdef NOCTALIA_USE_JEMALLOC
++#include <jemalloc/jemalloc.h>
++#endif
+ 
+ namespace {
+   constexpr Logger kLog("app");
+@@ -134,6 +141,16 @@ void Application::initIpc() {
+         json += panelOpen ? ("\"" + m_panelManager.activePanelId() + "\"") : "null";
+         json += ",\n  \"locked\": ";
+         json += m_lockScreen.isActive() ? "true" : "false";
++        const auto observedAt = std::chrono::duration_cast<std::chrono::milliseconds>(
++            std::chrono::system_clock::now().time_since_epoch()
++        ).count();
++#ifdef NOCTALIA_USE_JEMALLOC
++        const auto allocator = noctalia::diagnostics::allocatorStats(&mallctl, observedAt, ::getpid());
++#else
++        const auto allocator = noctalia::diagnostics::allocatorStats(nullptr, observedAt, ::getpid());
++#endif
++        json += ",\n  \"allocator\": ";
++        json += allocator.dump();
+         json += "\n}\n";
+         return json;
+       },
+diff --git a/src/util/allocator_stats.h b/src/util/allocator_stats.h
+new file mode 100644
+index 0000000..88a0b5f
+--- /dev/null
++++ b/src/util/allocator_stats.h
+@@ -0,0 +1,70 @@
++#pragma once
++
++#include <array>
++#include <cerrno>
++#include <cstddef>
++#include <cstdint>
++#include <cstring>
++#include <string>
++#include <nlohmann/json.hpp>
++
++namespace noctalia::diagnostics {
++
++  using Mallctl = int (*)(const char*, void*, std::size_t*, void*, std::size_t);
++
++  // Refresh one cached epoch; publish byte counters only as a complete snapshot.
++  // This observes allocator bookkeeping without purging arenas or changing policy.
++  inline nlohmann::json allocatorStats(Mallctl query, std::int64_t observedAtUnixMs, int pid) {
++    constexpr std::array<const char*, 6> names{
++        "allocated", "active", "resident", "mapped", "retained", "metadata"
++    };
++    nlohmann::json result{
++        {"schema_version", 1},
++        {"backend", query != nullptr ? "jemalloc" : "unavailable"},
++        {"status", "unavailable"},
++        {"observed_at_unix_ms", observedAtUnixMs},
++        {"pid", pid},
++        {"units", "bytes"},
++        {"errors", nlohmann::json::array()},
++    };
++    for (const char* name : names) {
++      result[std::string(name) + "_bytes"] = nullptr;
++    }
++    const auto error = [&result](const char* field, int code, const char* message) {
++      result["errors"].push_back({{"field", field}, {"code", code}, {"message", message}});
++    };
++    if (query == nullptr) {
++      error("backend", ENOTSUP, "jemalloc statistics are not enabled in this build");
++      return result;
++    }
++
++    std::uint64_t epoch = 1;
++    std::size_t epochSize = sizeof(epoch);
++    const int epochError = query("epoch", &epoch, &epochSize, &epoch, sizeof(epoch));
++    if (epochError != 0 || epochSize != sizeof(epoch)) {
++      error("epoch", epochError != 0 ? epochError : EPROTO,
++            epochError != 0 ? std::strerror(epochError) : "unexpected epoch width");
++      return result;
++    }
++
++    std::array<std::size_t, names.size()> values{};
++    for (std::size_t i = 0; i < names.size(); ++i) {
++      std::size_t width = sizeof(values[i]);
++      const std::string control = std::string("stats.") + names[i];
++      const int readError = query(control.c_str(), &values[i], &width, nullptr, 0);
++      if (readError != 0 || width != sizeof(values[i])) {
++        error(names[i], readError != 0 ? readError : EPROTO,
++              readError != 0 ? std::strerror(readError) : "unexpected counter width");
++      }
++    }
++    if (!result["errors"].empty()) {
++      return result;
++    }
++    for (std::size_t i = 0; i < names.size(); ++i) {
++      result[std::string(names[i]) + "_bytes"] = values[i];
++    }
++    result["status"] = "available";
++    return result;
++  }
++
++} // namespace noctalia::diagnostics
+diff --git a/tests/allocator_stats_test.cpp b/tests/allocator_stats_test.cpp
+new file mode 100644
+index 0000000..b7bfd05
+--- /dev/null
++++ b/tests/allocator_stats_test.cpp
+@@ -0,0 +1,108 @@
++#include "util/allocator_stats.h"
++
++#include <cassert>
++#include <cerrno>
++#include <cstdint>
++#include <cstring>
++#include <string>
++#include <vector>
++
++#ifdef NOCTALIA_ALLOCATOR_REAL_TEST
++#include <cstdlib>
++#include <jemalloc/jemalloc.h>
++#endif
++
++namespace {
++  std::vector<std::string> calls;
++  std::string failure;
++  std::string wrongWidth;
++  bool zeros = false;
++
++  int query(const char* name, void* value, std::size_t* width, void* input, std::size_t inputSize) {
++    calls.emplace_back(name);
++    if (failure == name) return ENOENT;
++    if (std::strcmp(name, "epoch") == 0) {
++      assert(value != nullptr && width != nullptr && *width == sizeof(std::uint64_t));
++      assert(input != nullptr && inputSize == sizeof(std::uint64_t));
++      assert(*static_cast<std::uint64_t*>(input) == 1);
++      *static_cast<std::uint64_t*>(value) = 42;
++    } else {
++      assert(calls.front() == "epoch" && input == nullptr && inputSize == 0);
++      assert(width != nullptr && *width == sizeof(std::size_t));
++      *static_cast<std::size_t*>(value) = zeros ? 0 : (std::size_t{1} << 35) + calls.size();
++    }
++    if (wrongWidth == name) *width = 1;
++    return 0;
++  }
++
++  void reset() { calls.clear(); failure.clear(); wrongWidth.clear(); zeros = false; }
++
++  void assertUnavailable(const nlohmann::json& data) {
++    assert(data["status"] == "unavailable");
++    for (const char* key : {"allocated_bytes", "active_bytes", "resident_bytes", "mapped_bytes", "retained_bytes", "metadata_bytes"}) {
++      assert(data[key].is_null());
++    }
++    assert(!data["errors"].empty());
++  }
++}
++
++int main() {
++  reset();
++  auto data = noctalia::diagnostics::allocatorStats(query, 1234567890123LL, 123);
++  assert(data["schema_version"] == 1 && data["backend"] == "jemalloc");
++  assert(data["status"] == "available" && data["units"] == "bytes");
++  assert(data["pid"] == 123 && data["observed_at_unix_ms"] == 1234567890123LL);
++  assert(data["allocated_bytes"] == (std::uint64_t{1} << 35) + 2);
++  assert(data["metadata_bytes"] == (std::uint64_t{1} << 35) + 7);
++  assert(data["errors"].empty());
++  assert(calls == (std::vector<std::string>{"epoch", "stats.allocated", "stats.active", "stats.resident", "stats.mapped", "stats.retained", "stats.metadata"}));
++
++  reset(); zeros = true;
++  data = noctalia::diagnostics::allocatorStats(query, 0, 1);
++  assert(data["status"] == "available" && data["allocated_bytes"] == 0);
++
++  reset();
++  assertUnavailable(noctalia::diagnostics::allocatorStats(nullptr, 1, 1));
++  assert(calls.empty());
++
++  reset(); failure = "epoch";
++  data = noctalia::diagnostics::allocatorStats(query, 1, 1);
++  assertUnavailable(data);
++  assert(calls.size() == 1 && data["errors"][0]["field"] == "epoch");
++
++  reset(); failure = "stats.active";
++  data = noctalia::diagnostics::allocatorStats(query, 1, 1);
++  assertUnavailable(data);
++  assert(data["errors"][0]["field"] == "active" && data["errors"][0]["code"] == ENOENT);
++
++  reset(); wrongWidth = "epoch";
++  data = noctalia::diagnostics::allocatorStats(query, 1, 1);
++  assertUnavailable(data);
++  assert(data["errors"][0]["code"] == EPROTO && calls.size() == 1);
++
++  reset(); wrongWidth = "stats.resident";
++  data = noctalia::diagnostics::allocatorStats(query, 1, 1);
++  assertUnavailable(data);
++  assert(data["errors"][0]["field"] == "resident" && data["errors"][0]["code"] == EPROTO);
++
++  reset(); failure = "stats.retained";
++  data = noctalia::diagnostics::allocatorStats(query, 1, 1);
++  assertUnavailable(data);
++  assert(data["retained_bytes"].is_null() && data["allocated_bytes"].is_null());
++#ifdef NOCTALIA_ALLOCATOR_REAL_TEST
++  const auto before = noctalia::diagnostics::allocatorStats(&mallctl, 1, 1);
++  assert(before["status"] == "available");
++  constexpr std::size_t bytes = 8 * 1024 * 1024;
++  void* block = std::malloc(bytes);
++  assert(block != nullptr);
++  std::memset(block, 1, bytes);
++  const auto during = noctalia::diagnostics::allocatorStats(&mallctl, 2, 1);
++  assert(during["status"] == "available");
++  assert(during["allocated_bytes"].get<std::uint64_t>() >= before["allocated_bytes"].get<std::uint64_t>() + bytes);
++  std::free(block);
++  const auto after = noctalia::diagnostics::allocatorStats(&mallctl, 3, 1);
++  assert(after["status"] == "available");
++  assert(after["allocated_bytes"].get<std::uint64_t>() + bytes / 2 < during["allocated_bytes"].get<std::uint64_t>());
++#endif
++  return 0;
++}

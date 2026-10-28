@@ -8,6 +8,7 @@ audio_patch="$(realpath -e "${3:?audio patch required}")"
 wallpaper_script="$(realpath -e "${4:?wallpaper script required}")"
 timeofday_script="$(realpath -e "${5:?time-of-day script required}")"
 timeofday_contract="$(realpath -e "${6:?time-of-day behavior test required}")"
+memory_patch="$(realpath -e "${7:?allocator statistics patch required}")"
 
 work_root="$(mktemp -d)"
 trap 'rm -rf "$work_root"' EXIT
@@ -16,10 +17,15 @@ cp -a "$source_root/." "$work_root"
 chmod -R u+w "$work_root"
 git -C "$work_root" init -q
 git -C "$work_root" apply --check "$automation_patch"
+git -C "$work_root" apply "$automation_patch"
 (
   cd "$work_root"
   patch -p1 --dry-run <"$audio_patch"
+  patch -p1 <"$audio_patch"
 )
+
+git -C "$work_root" apply --check "$memory_patch"
+git -C "$work_root" apply "$memory_patch"
 
 bash -n "$wallpaper_script" "$timeofday_script"
 bash "$timeofday_contract" "$timeofday_script"

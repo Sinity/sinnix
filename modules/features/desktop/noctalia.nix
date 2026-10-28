@@ -73,6 +73,7 @@ mkFeatureModule {
               # Keep policy in Noctalia's typed state boundary. These patches
               # are pinned to the flake's upstream source and verified below.
               ./noctalia-automation-ipc.patch
+              ./noctalia-memory-stats.patch
             ];
             postPatch = (old.postPatch or "") + ''
               patch -p1 < ${./noctalia-pipewire-reconnect.patch}
