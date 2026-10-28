@@ -618,7 +618,11 @@ def _job_detail(
     disposition = read_disposition(config, task)
     if disposition:
         view["disposition"] = disposition
-        view.update(_disposition_view(disposition, attempt=attempt, receipt=receipt))
+        view.update(
+            _disposition_view(
+                disposition, attempt=attempt, receipt=receipt, queue_terminal=task.terminal
+            )
+        )
     if launch_input.get("log_path"):
         queued_cancel = (
             attempt is None and disposition and disposition.get("started") is False
@@ -887,6 +891,7 @@ def _disposition_view(
     *,
     attempt: int | None,
     receipt: Mapping[str, Any],
+    queue_terminal: bool = True,
 ) -> dict[str, Any]:
     """Latest job disposition; a selected attempt keeps its own receipt."""
     if (
@@ -895,7 +900,9 @@ def _disposition_view(
         and disposition["attempt"] != attempt
     ):
         return {}
-    if disposition.get("cancellation_incomplete"):
+    if disposition.get("cancellation_incomplete") or (
+        queue_terminal and "cgroup" in disposition
+    ):
         obstacle = cgroups.cancellation_obstacle(disposition)
         if obstacle is not None:
             return {
@@ -1065,7 +1072,11 @@ def wait(
         if config is not None:
             disposition = read_disposition(config, task)
             if disposition:
-                view.update(_disposition_view(disposition, attempt=None, receipt={}))
+                view.update(
+                    _disposition_view(
+                        disposition, attempt=None, receipt={}, queue_terminal=task.terminal
+                    )
+                )
         return task, view
 
     task, view = observe()

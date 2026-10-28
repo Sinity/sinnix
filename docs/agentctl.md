@@ -150,6 +150,15 @@ has started. `job wait` follows a job across queue moves and resolves retained
 results after the queue entry is cleaned. An expired wait exits 4 without
 cancelling.
 
+Before dispatch, the runner retains its exact unit and expected cgroup path
+under the attempt allocation lock. A killed launcher therefore leaves native
+custody evidence even without a cancellation request or outcome. A terminal
+queue entry with surviving or unreadable membership remains nonterminal in
+job reads and waits, and blocks retry and cleanup. Running jobs keep their
+ordinary running view. Scratch removal also requires observed cgroup drain,
+including after a timeout or a successful user-manager stop. Unavailable
+initial cgroup identity remains unresolved.
+
 Cancellation captures the unit's `ControlGroup` before stopping it and reads
 `cgroup.procs` afterwards, including child cgroups. Surviving members or an
 unreadable cgroup produce an incomplete cancellation disposition and a

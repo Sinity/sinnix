@@ -2100,3 +2100,60 @@ def test_operation_binding_persists_original_run_on_replay(
         )
         assert replay["job_id"] == started["job_id"]
         assert read_launch(config, fake_pueue.task(started["task_id"]))["binding"] == binding
+
+
+@pytest.mark.parametrize("terminal", [False, True])
+def test_retained_unit_custody_survives_launcher_death_without_cancel_request(
+    fake_pueue, config, project_root, tmp_path, monkeypatch, terminal
+):
+    from agentctl import cgroups
+
+    project = load_project_adapter(project_root)
+    started = launch.start_operation(config, project, project.operation("check"))
+    task_id, job_id = started["task_id"], started["job_id"]
+    task = fake_pueue.task(task_id)
+    group = tmp_path / "fixture.service"
+    group.mkdir()
+    members = group / "cgroup.procs"
+    members.write_text("12345\n")
+    monkeypatch.setattr(cgroups, "CGROUP_ROOT", tmp_path)
+    launch._write_disposition(
+        config, task,
+        {"unit": "fixture.service", "cgroup": "/fixture.service", "attempt": 1},
+    )
+    if terminal:
+        fake_pueue.kill_directly(task_id)
+    view = job_queries.get_job(task_id, config, job_id)
+    if not terminal:
+        assert view["phase"] == "running"
+        assert not view.get("cancellation_incomplete")
+        return
+    assert view["terminal"] is False and view["phase"] == "unresolved"
+    assert view["cgroup_observation"]["pids"] == [12345]
+    waited = job_queries.wait(task_id, config=config, job_id=job_id, timeout_seconds=0)
+    assert waited["terminal"] is False and waited["wait_timed_out"] is True
+    for action in (launch.retry, launch.clean):
+        with pytest.raises(JobError, match="cancellation incomplete"):
+            action(config, task_id, job_id)
+    members.write_text("")
+    assert job_queries.get_job(task_id, config, job_id)["terminal"] is True
+    retried = launch.retry(config, task_id, job_id)
+    assert retried["job_id"] == job_id
+
+
+@pytest.mark.parametrize("parent", [None, ""])
+def test_planned_cgroup_covers_inactive_slices(tmp_path, monkeypatch, parent):
+    from agentctl import cgroups
+
+    monkeypatch.setattr(
+        cgroups, "unit_cgroup", lambda name: "/fixture-user" if name == "-.slice" else parent
+    )
+    assert cgroups.planned_unit_cgroup("fixture.service", "agent-ctl-pytest-quick.slice") == (
+        "/fixture-user/agent.slice/agent-ctl.slice/agent-ctl-pytest.slice/"
+        "agent-ctl-pytest-quick.slice/fixture.service"
+    )
+    monkeypatch.setattr(cgroups, "unit_cgroup", lambda _: None)
+    assert cgroups.planned_unit_cgroup("fixture.service", "agent-ctl-normal.slice") is None
+    assert cgroups.cancellation_obstacle({
+        "unit": "fixture.service", "cgroup": None, "attempt": 1,
+    })["status"] == "unresolved"

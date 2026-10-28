@@ -190,7 +190,14 @@ def _attempt_root_for_marker(marker: Path) -> Path:
     return marker.parent / f"{stem}.attempts"
 
 
-def _start_service(command: Sequence[str], marker: Path, attempt: int, log: Any):
+def _start_service(
+    command: Sequence[str],
+    marker: Path,
+    attempt: int,
+    log: Any,
+    *,
+    before_start: Callable[[], None] | None = None,
+):
     """Serialize startup with cancellation; retry only a confirmed absent unit."""
     root = _attempt_root_for_marker(marker)
     unit = next(
@@ -212,6 +219,8 @@ def _start_service(command: Sequence[str], marker: Path, attempt: int, log: Any)
             fcntl.flock(lock, fcntl.LOCK_EX)
             if _marker_targets(marker, attempt):
                 return None
+            if before_start is not None:
+                before_start()
             # Keep client diagnostics separate from payload stderr: a payload
             # must never be able to print its way into a startup retry.
             with tempfile.TemporaryFile(dir=root) as errors:
@@ -450,11 +459,32 @@ class _Scratch:
     def __init__(self) -> None:
         self.path: Path | None = None
         self.unit: str | None = None
+        self.cgroup: str | None = None
         self.cleaned = False
+
+    def claim_unit(
+        self, unit: str, pool: str, launch_input: str, attempt: int
+    ) -> None:
+        from . import cgroups
+
+        # Persist custody before acceptance, under the allocation lock. Even a
+        # killed launcher must leave the kernel path after systemd forgets it.
+        self.cgroup = cgroups.planned_unit_cgroup(unit, pool_slice(pool))
+        record = {"unit": unit, "cgroup": self.cgroup, "attempt": attempt}
+        atomic_publish(
+            Path(launch_input + ".disposition"),
+            json.dumps(record, sort_keys=True).encode(),
+            fsync=True,
+            mode=0o600,
+        )
 
     def release_unit(self) -> str | None:
         if self.unit is None:
             return None
+        from . import cgroups
+
+        if self.cgroup is None:
+            self.cgroup = cgroups.unit_cgroup(self.unit)
         if _systemctl("stop", self.unit) is None:
             observed = _unit_snapshot(self.unit)
             if observed is None or (
@@ -462,6 +492,8 @@ class _Scratch:
                 and not _unit_is_terminal(observed)
             ):
                 return "unit termination unconfirmed; cleanup deferred"
+        if cgroups.observe(self.unit, self.cgroup)["status"] != "empty":
+            return "unit cgroup termination unconfirmed; cleanup deferred"
         _systemctl("reset-failed", self.unit)
         self.unit = None
         return None
@@ -1218,7 +1250,13 @@ def _run(
                             # Acceptance can precede a lost startup acknowledgement.
                             scratch_owner.unit = unit
                             client = _start_service(
-                                command, marker, launch["attempt"], log
+                                command,
+                                marker,
+                                launch["attempt"],
+                                log,
+                                before_start=lambda: scratch_owner.claim_unit(
+                                    unit, pool, launch_input, launch["attempt"]
+                                ),
                             )
                             if client is None:
                                 outcome, status = Outcome.CANCELLED, CANCELLED_EXIT_CODE

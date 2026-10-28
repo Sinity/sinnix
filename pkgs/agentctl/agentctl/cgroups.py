@@ -16,7 +16,7 @@ CGROUP_ROOT = Path("/sys/fs/cgroup")
 def unit_cgroup(unit: str) -> str | None:
     try:
         result = subprocess.run(
-            ["systemctl", "--user", "show", "-p", "ControlGroup", unit],
+            ["systemctl", "--user", "show", "-p", "ControlGroup", "--", unit],
             capture_output=True,
             text=True,
             check=False,
@@ -30,6 +30,19 @@ def unit_cgroup(unit: str) -> str | None:
     except (OSError, subprocess.SubprocessError):
         pass
     return None
+
+
+def planned_unit_cgroup(unit: str, slice_name: str) -> str | None:
+    """Keep the path before dispatch, including a slice not activated yet."""
+    parent = unit_cgroup(slice_name)
+    if not parent:
+        manager = unit_cgroup("-.slice")
+        if not manager:
+            return None
+        parts = slice_name.removesuffix(".slice").split("-")
+        hierarchy = ["-".join(parts[:end]) + ".slice" for end in range(1, len(parts) + 1)]
+        parent = manager.rstrip("/") + "/" + "/".join(hierarchy)
+    return parent.rstrip("/") + "/" + unit
 
 
 def observe(unit: str, cgroup: str | None = None) -> dict[str, Any]:
@@ -83,10 +96,14 @@ def observe(unit: str, cgroup: str | None = None) -> dict[str, Any]:
 def cancellation_obstacle(
     disposition: Mapping[str, Any] | None,
 ) -> dict[str, Any] | None:
-    if not disposition or not disposition.get("cancellation_incomplete"):
+    if not disposition or not (
+        disposition.get("cancellation_incomplete") or "cgroup" in disposition
+    ):
         return None
     unit = disposition.get("unit")
     if not isinstance(unit, str) or not unit:
         return {"status": "unresolved", "error": "cancellation has no unit identity"}
+    if "cgroup" in disposition and disposition["cgroup"] is None:
+        return {"unit": unit, "cgroup": None, "status": "unresolved"}
     observation = observe(unit, disposition.get("cgroup"))
     return observation if observation["status"] != "empty" else None

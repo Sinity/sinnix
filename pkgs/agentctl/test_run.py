@@ -316,6 +316,7 @@ class FakeSystemd:
     def terminal(self, **properties: str) -> None:
         shown = {
             "LoadState": "loaded",
+            "ControlGroup": "",
             "ActiveState": "inactive",
             "Result": "success",
             "ExecMainStatus": "0",
@@ -360,6 +361,7 @@ def fake_systemd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeSystemd
         "#!/bin/sh\n"
         f"printf 'systemctl %s\\n' \"$*\" >> {tmp_path / 'systemctl-calls'}\n"
         'case "$*" in\n'
+        "  *show*ControlGroup*.slice) echo ControlGroup=/fixture.slice ;;\n"
         f"  *show*) cat {fake.show} ;;\n"
         f"  *list-units*) cat {fake.units} ;;\n"
         "esac\n"
@@ -1896,9 +1898,9 @@ def refusing_startup_client(
     delegate = runner.with_name("systemd-run-delegate")
     runner.rename(delegate)
     counter = fake.root / "startup-attempts"
-    fake.show.write_text("LoadState=not-found\n")
+    fake.show.write_text("LoadState=not-found\nControlGroup=\n")
     result = "success" if exit_status == 0 else "exit-code"
-    terminal = f"LoadState=loaded\nActiveState=inactive\nResult={result}\nExecMainStatus={exit_status}\nExecMainCode=exited\n"
+    terminal = f"LoadState=loaded\nControlGroup=\nActiveState=inactive\nResult={result}\nExecMainStatus={exit_status}\nExecMainCode=exited\n"
     runner.write_text(
         f"#!{sys.executable}\n"
         "import os,sys\nfrom pathlib import Path\n"
@@ -2286,3 +2288,57 @@ def test_dirty_endpoints_with_different_content_are_changed() -> None:
     )
     changed = run_module.execution_receipt(start, {**start, "content_tree": "b"})
     assert changed["binding"] == "changed"
+
+
+@pytest.mark.parametrize("readable", [True, False])
+def test_scratch_retains_kernel_members_after_successful_unit_stop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, readable: bool
+) -> None:
+    from agentctl import cgroups
+
+    group = tmp_path / "fixture.service"
+    group.mkdir()
+    members = group / "cgroup.procs"
+    members.write_text("12345\n" if readable else "unknown membership\n")
+    monkeypatch.setattr(cgroups, "CGROUP_ROOT", tmp_path)
+    monkeypatch.setattr(run_module, "_systemctl", lambda *_: "")
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    (scratch / "evidence").write_text("still owned")
+    owner = run_module._Scratch()
+    owner.unit = "fixture.service"
+    owner.cgroup = "/fixture.service"
+    owner.path = scratch
+
+    assert owner.cleanup() == "unit cgroup termination unconfirmed; cleanup deferred"
+    assert owner.unit == "fixture.service"
+    assert (scratch / "evidence").read_text() == "still owned"
+
+
+def test_startup_retains_native_cgroup_identity_before_dispatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_systemd: FakeSystemd,
+    fake_pueue: FakePueue,
+) -> None:
+    from agentctl import cgroups
+
+    launch = write_launch(tmp_path, pool="pytest")
+    unit = unit_for(launch, "pytest")
+    monkeypatch.setattr(cgroups, "unit_cgroup", lambda _: "/fixture.slice")
+    monkeypatch.setattr(cgroups, "observe", lambda *_: {"status": "empty"})
+    original = subprocess.run
+    retained = []
+
+    def dispatch(command, *args, **kwargs):
+        if command[0] == "systemd-run":
+            owner = json.loads(Path(str(launch) + ".disposition").read_text())
+            assert owner == {
+                "attempt": 1, "unit": unit, "cgroup": "/fixture.slice/" + unit
+            }
+            retained.append(owner)
+        return original(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", dispatch)
+    assert main([str(launch)]) == 0
+    assert len(retained) == 1
