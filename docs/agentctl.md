@@ -82,17 +82,21 @@ The command leaves snapshots untouched and does not create a backup.
 Stop `agentctl events tail --follow` readers before running compaction, then
 restart them afterwards. They keep their open file descriptor on the old
 inode and cannot see subsequent appends to the replacement. Gateway
-`events.tail` cursors carry the runtime log's device/inode generation; after
-replacement, continuation returns a stale-cursor error. Start a new call without
-the old cursor and retain the returned new cursor. See also
-[the gateway event contract](agent-gateway.md).
+`events.tail` reads its configured `runtimeTransitions` ledger (by default
+`/run/sinnix/health-transitions.jsonl`), which is separate from the AgentCTL
+spool configured as `eventSpool`. Its cursors bind to that runtime ledger's
+device/inode generation. Compacting the AgentCTL spool leaves those cursors
+valid when the two paths are separate. If `runtimeTransitions` points at this
+spool, replacement makes its cursors stale; start a new call without the old
+cursor in that case. See also [the gateway event contract](agent-gateway.md).
 
 After activation, check `agentctl events compact --help`. During the approved
 maintenance window, run `agentctl events compact --json`, retain its summary,
 and check `agentctl events tail --lines 3 --json`. Restart followers and verify
-a subsequent real job transition appears; confirm an old gateway cursor is
-stale and a fresh `events.tail` call succeeds. Snapshot retirement is a separate
-operator action after review of the compaction summary.
+a subsequent real job transition appears. Check that a fresh gateway
+`events.tail` call succeeds and that old-cursor behavior matches the configured
+runtime ledger: it becomes stale only if that ledger was replaced. Snapshot
+retirement is a separate operator action after review of the compaction summary.
 
 ## Jobs
 

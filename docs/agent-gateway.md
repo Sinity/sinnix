@@ -242,10 +242,13 @@ sources.
 Every call, including reads, appends a receipt to a private SQLite ledger and
 stores its result. `audit.verify` checks the receipt chain. `events.tail` merges
 audit receipts, Git revisions, Beads revisions, job state and runtime
-transitions, rotating between sources so a busy one cannot starve the rest. Runtime
-continuations bind to the event log's device/inode generation. Replacing the
-log with `agentctl events compact` makes existing runtime cursors stale;
-restart `events.tail` without a cursor and continue with its new cursor. See
+transitions, rotating between sources so a busy one cannot starve the rest.
+Runtime continuations bind to the configured `runtimeTransitions` ledger's
+device/inode generation. The default `/run/sinnix/health-transitions.jsonl` is
+separate from the AgentCTL spool configured as `eventSpool`, so compacting that
+spool preserves existing gateway runtime cursors. Replacing the actual runtime
+ledger makes them stale; restart `events.tail` without a cursor and continue
+with its new cursor in that case. See
 [event log compaction](agentctl.md#event-log-compaction) for the maintenance
 procedure and CLI follower behavior.
 
