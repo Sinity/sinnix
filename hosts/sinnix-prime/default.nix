@@ -32,9 +32,6 @@
   sinnix.features.dev.editors.vscode.enable = true;
   sinnix.features.dev.editors.antigravity.enable = true;
 
-  # Diagnostic startup stays inactive until an explicitly bounded capture.
-  sinnix.features.desktop.noctalia.heapProfiling.enable = true;
-
   sinnix.persistence.enable = true;
   sinnix.services = {
     agent-gateway = {
