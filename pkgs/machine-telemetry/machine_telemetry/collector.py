@@ -31,6 +31,7 @@ from sinnix_lib.procfs import (
 from sinnix_lib.systemd import show_units, show_units_as_user
 from sinnix_lib.values import float_or_none, int_or_none, read_text
 
+from machine_telemetry import allocator
 from machine_telemetry import capacity as filesystem_capacity
 
 # Sampling cadence and probe targets. One host runs this collector and nothing
@@ -455,16 +456,16 @@ def insert_process_memory_rows(
           pid, process_start_time_ticks, comm, exe, cgroup, unit, scope,
           command_line, rss_kb, pss_kb, pss_anon_kb, pss_file_kb,
           pss_shmem_kb, private_clean_kb, private_dirty_kb,
-          shared_clean_kb, shared_dirty_kb, swap_kb
+          shared_clean_kb, shared_dirty_kb, swap_kb, allocator_json
         ) VALUES (
           :observed_at, :host, :boot_id, :schema_version,
           :pid, :process_start_time_ticks, :comm, :exe, :cgroup, :unit, :scope,
           :command_line, :rss_kb, :pss_kb, :pss_anon_kb, :pss_file_kb,
           :pss_shmem_kb, :private_clean_kb, :private_dirty_kb,
-          :shared_clean_kb, :shared_dirty_kb, :swap_kb
+          :shared_clean_kb, :shared_dirty_kb, :swap_kb, :allocator_json
         )
         """,
-        rows,
+        [{**row, "allocator_json": row.get("allocator_json")} for row in rows],
     )
 
 
@@ -1559,7 +1560,8 @@ def init_db(conn: sqlite3.Connection) -> None:
           private_dirty_kb INTEGER NOT NULL,
           shared_clean_kb INTEGER NOT NULL,
           shared_dirty_kb INTEGER NOT NULL,
-          swap_kb INTEGER NOT NULL
+          swap_kb INTEGER NOT NULL,
+          allocator_json TEXT
         );
         CREATE INDEX IF NOT EXISTS process_memory_sample_observed_at ON process_memory_sample(observed_at);
         CREATE INDEX IF NOT EXISTS process_memory_sample_unit_time ON process_memory_sample(unit, observed_at);
@@ -1666,6 +1668,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             "memory_zswapped_bytes": "INTEGER",
         },
     )
+    ensure_columns(conn, "process_memory_sample", {"allocator_json": "TEXT"})
     ensure_columns(
         conn,
         "process_io_delta_sample",
@@ -2442,7 +2445,6 @@ def collect(args: argparse.Namespace) -> int:
                         mb_temps.append(value)
 
             current_process_io = process_io_snapshot()
-            collector_duration_ms = (time.monotonic() - sample_start) * 1000.0
             observed_at = now_iso()
             process_io_rows = process_io_delta_rows(
                 observed_at,
@@ -2454,6 +2456,16 @@ def collect(args: argparse.Namespace) -> int:
                 limit=max(PROCESS_IO_TOP, 0),
             )
             prev_process_io = current_process_io
+            memory_rows = []
+            if PROCESS_MEMORY_INTERVAL_SEC > 0 and sample_start >= next_process_memory:
+                memory_rows = process_memory_rows(
+                    observed_at, args.host, boot_id, limit=max(PROCESS_MEMORY_TOP, 0)
+                )
+                # IPC must finish before the first SQLite write, so its timeout
+                # cannot hold the writer lock needed by the GPU sampler.
+                allocator.attach(memory_rows, args.user_name)
+                next_process_memory = sample_start + PROCESS_MEMORY_INTERVAL_SEC
+            collector_duration_ms = (time.monotonic() - sample_start) * 1000.0
             row = {
                 "observed_at": observed_at,
                 "host": args.host,
@@ -2597,17 +2609,7 @@ def collect(args: argparse.Namespace) -> int:
             )
             insert_block_device_stats(conn, observed_at, args.host, boot_id)
             insert_process_io_deltas(conn, process_io_rows)
-            if PROCESS_MEMORY_INTERVAL_SEC > 0 and sample_start >= next_process_memory:
-                insert_process_memory_rows(
-                    conn,
-                    process_memory_rows(
-                        observed_at,
-                        args.host,
-                        boot_id,
-                        limit=max(PROCESS_MEMORY_TOP, 0),
-                    ),
-                )
-                next_process_memory = sample_start + PROCESS_MEMORY_INTERVAL_SEC
+            insert_process_memory_rows(conn, memory_rows)
             if sample_start >= next_service:
                 insert_service_states(conn, args.host, boot_id, units, args.user_name)
                 insert_cgroup_memory_stats(

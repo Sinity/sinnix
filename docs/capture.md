@@ -45,3 +45,20 @@ its host manifest remains in the machine home. Lynchpin owns interpretation
 and its derived read model. Existing SQLite files, Below records and source
 archives remain available at original precision. No TTL, downsampling or
 rollup substitution is part of the shared runtime or capture refactors.
+
+### Noctalia allocator observations
+
+The existing 60-second top-PSS process sample optionally queries `noctalia msg
+status` once when the selected user Noctalia process is present. The collector
+uses that process's UID, start ticks and Wayland runtime, rechecks its identity
+after the query, and bounds the CLI to one second and 16 KiB of stdout. The
+existing collector owns this observation; it adds no timer.
+
+`process_memory_sample.allocator_json` retains the versioned allocator payload
+with probe status, reason and duration. Historical and unselected rows are NULL.
+An unavailable probe has explicit status and null counters; an available numeric
+zero remains zero. Provider timestamps use UTC epoch milliseconds and counters
+use bytes. Reading counters refreshes jemalloc statistics without purging memory.
+The nullable column is added to the active SQLite database; sealed history stays
+unchanged. Compare allocated/active/resident counters with same-process PSS and
+private memory rather than treating resident growth alone as live allocations.

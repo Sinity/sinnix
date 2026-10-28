@@ -143,6 +143,7 @@
             root = ../../pkgs/machine-telemetry;
             fileset = lib.fileset.unions [
               ../../pkgs/machine-telemetry/tests/test_collector_process_memory.py
+              ../../pkgs/machine-telemetry/tests/test_allocator.py
               ../../pkgs/machine-telemetry/tests/test_segments.py
               ../../pkgs/machine-telemetry/tests/test_capacity.py
             ];
