@@ -128,11 +128,10 @@ mkServiceModule {
           lib.stringToCharacters (builtins.substring 0 32 (builtins.hashString "sha256" extensionDir))
         );
 
-      # The retained Python CLI reads this file; the values are those its
-      # removed Home Manager module rendered.
-      # The capture class's CPU and IO yielding (without it the Home Manager
-      # unit ran in app.slice with the desktop's IOWeight), with its own
-      # memory bounds instead of the class's: start-up peaked at 15.6 GB on
+      # The capture class supplies CPU and IO yielding, but no slice placement.
+      # Keep this background daemon outside the user manager's default
+      # app.slice so it does not inherit the desktop's IO protection. Override
+      # the class's memory bounds: start-up peaked at 15.6 GB on
       # 2026-10-27, and at 16:09 that day host OOM pressure killed it.
       # 6G high / 9G max / 2G swap trades slower start-up under reclaim for a
       # host that stays up, until Polylogue's ingest bounds memory by work in
@@ -142,11 +141,14 @@ mkServiceModule {
         unit = "polylogue-live.service";
         manager = "user";
         overrides = {
+          Slice = "background.slice";
           MemoryHigh = "6G";
           MemoryMax = "9G";
           MemorySwapMax = "2G";
         };
       };
+      # The retained Python CLI reads this file; the values are those its
+      # removed Home Manager module rendered.
       pythonSettings = (pkgs.formats.toml { }).generate "polylogue.toml" {
         archive.root = cfg.dataDir;
         daemon = {

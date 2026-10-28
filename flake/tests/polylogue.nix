@@ -56,6 +56,7 @@ in
               nativeBuildInputs = [ pkgs.jq ];
               execStart = liveService.Service.ExecStart;
               wantedBy = builtins.toJSON liveService.Install.WantedBy;
+              servicePolicy = builtins.toJSON liveService.Service;
               inherit hostManifest liveRoot;
             }
             ''
@@ -69,6 +70,12 @@ in
               test "$execStart" = "$wrapper daemon"
               case "$wrapper" in */bin/polylogue-live) ;; *) exit 1 ;; esac
               jq -e 'index("default.target") != null' <<<"$wantedBy" >/dev/null
+              jq -e '
+                .Slice == "background.slice" and .IOWeight == 20 and
+                .Nice == 10 and .IOSchedulingPriority == 7 and
+                .MemoryHigh == "6G" and .MemoryMax == "9G" and
+                .MemorySwapMax == "2G"
+              ' <<<"$servicePolicy" >/dev/null
               jq -e --arg wrapper "$wrapper" --arg id "$id" '
                 .path == $wrapper and
                 .allowed_origins == ["chrome-extension://\($id)/"]
