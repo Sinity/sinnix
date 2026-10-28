@@ -59,6 +59,9 @@ mkFeatureModule {
         yaml-language-server
         pyright
         sysstat
+        # Attribute block latency and writeback to kernel paths as well as
+        # processes; per-process I/O omits Btrfs worker writes.
+        bpftrace
         strace
         py-spy
         gallery-dl
