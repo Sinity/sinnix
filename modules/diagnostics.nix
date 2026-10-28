@@ -38,6 +38,12 @@ let
     ];
     text = ''
       set -euo pipefail
+      # A long boot can outlast the timer and multi-user.target. Exit between
+      # attempts so this oneshot does not itself hold boot completion open.
+      if [ "$(systemctl show --property=FinishTimestampMonotonic --value)" = 0 ]; then
+        echo "Boot is still running; retrying capture after 30 seconds."
+        exit 75
+      fi
       BOOT_ID="$(cat /proc/sys/kernel/random/boot_id)"
       OUT_DIR="${bootMetricsDir}/$BOOT_ID"
       mkdir -p "$OUT_DIR"
@@ -96,10 +102,13 @@ in
       }
       {
         execStart = "${captureBootMetrics}/bin/sinnix-capture-boot-metrics";
+        serviceConfig = {
+          RestartForceExitStatus = [ 75 ];
+          RestartSec = "30s";
+        };
         unit = {
-          # systemd-analyze needs FinishTimestampMonotonic != 0, only set
-          # once every boot service has finished (2+ min with slow nofail
-          # mounts).
+          # The script checks actual manager boot completion; ordering after
+          # multi-user.target alone does not cover every pending startup job.
           after = [
             "systemd-journald.service"
             "multi-user.target"
