@@ -246,7 +246,13 @@ let
         if file == null then
           [ ]
         else
-          builtins.attrNames (lib.filterAttrs (_: owner: owner == file) surfaceOwners);
+          # Provenance includes mkIf-false declarations. Only effective units
+          # can be exported or selected as the service's singleton surface.
+          builtins.attrNames (
+            lib.filterAttrs (
+              name: owner: owner == file && builtins.hasAttr name config.sinnix.runtime.units
+            ) surfaceOwners
+          );
 
       surfaceOf =
         name: file:

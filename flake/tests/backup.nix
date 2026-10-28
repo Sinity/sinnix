@@ -788,6 +788,24 @@ assert lib.assertMsg (
             && builtins.elem "d /persist/root/.cache/borg 0700 root root -" rules
           )
           "Operator probes must read receipts with nightly/change-aware budgets while credentials stay private";
+        assert lib.assertMsg (
+          let
+            serviceSurfaces =
+              evaluated:
+              let
+                index = builtins.fromJSON evaluated.config.environment.etc."sinnix/capability-index.json".text;
+                service = builtins.head (
+                  builtins.filter (row: row.kind == "service" && row.name == "machine-telemetry") index.rows
+                );
+              in
+              map (surface: surface.name) service.surfaces;
+            backupSurfaces = serviceSurfaces backupRuntimeEval;
+            telemetrySurfaces = serviceSurfaces telemetryOnlyEval;
+          in
+          builtins.elem "machine-telemetry-sqlite-backup" backupSurfaces
+          && !(builtins.elem "machine-telemetry-sqlite-backup-timer" backupSurfaces)
+          && builtins.elem "machine-telemetry-sqlite-backup-timer" telemetrySurfaces
+        ) "Capability index must export effective producer units and omit disabled standalone timers";
         mkRuntimeCheck system {
           name = "backup-borg-hook-runtime-check";
           nativeBuildInputs = [
