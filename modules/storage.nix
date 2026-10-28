@@ -1,6 +1,7 @@
 # Storage Infrastructure
 #
-# Filesystem tools, btrfs maintenance.
+# Filesystem tools, btrfs maintenance. Boot-only scratch migration is documented
+# in docs/realm-scratch-subvolumes.md.
 # Distinct from features/desktop/storage.nix (user helpers).
 {
   pkgs,
@@ -34,6 +35,8 @@ let
   ];
 in
 {
+  imports = [ ./lib/storage/scratch-subvolumes.nix ];
+
   environment.systemPackages = lib.mkAfter (baseStoragePackages ++ storageMaintenancePackages);
 
   systemd.tmpfiles.rules = lib.mkAfter [

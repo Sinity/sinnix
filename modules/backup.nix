@@ -1089,6 +1089,15 @@ in
     lib.mkMerge (
       [
         {
+          assertions = [
+            {
+              assertion = lib.all (
+                path: builtins.elem path realmExcludes && builtins.elem path realmNoncanonical
+              ) (import ./lib/storage/scratch-roots.nix);
+              message = "Realm scratch subvolumes must name exact Borg-excluded regenerable roots.";
+            }
+          ];
+
           # The realm archive's observed working set paged heavily under the
           # 2G/4G background slice. Give this one low-I/O-priority Borg lane
           # memory headroom without raising limits for every backup service.

@@ -65,6 +65,7 @@ in
     ./tests/hub-server.nix
     ./tests/quota.nix
     ./tests/noctalia.nix
+    ./tests/scratch-subvolumes.nix
     ./tests/fstrim.nix
     ./tests/host-config.nix
     ./tests/hyprland-rules.nix
