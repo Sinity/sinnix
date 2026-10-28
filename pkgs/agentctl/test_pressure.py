@@ -281,6 +281,129 @@ def test_pressure_replay_read_failure_retains_previous_projection(
     assert recovered.cursor["offset"] == spool.stat().st_size
 
 
+@pytest.mark.parametrize("stage", ["read", "decode", "apply"])
+@pytest.mark.parametrize("rotate", [False, True])
+def test_deadline_replay_resumes_only_completed_records(
+    monkeypatch, tmp_path, stage, rotate
+):
+    spool = tmp_path / "events.jsonl"
+    checkpoint = tmp_path / "checkpoint.json"
+    first = (
+        json.dumps(
+            {"kind": "pressure", **_ours("bulk"), "detail": "α"}, ensure_ascii=False
+        )
+        + "\n"
+    ).encode()
+    second = (
+        json.dumps({"kind": "pressure", "action": "opened", "group": "bulk"}) + "\n"
+    ).encode()
+    spool.write_bytes(first + second)
+    original_open = Path.open
+    original_loads = json.loads
+    original_apply = pressure_pause.SpoolState.apply
+    interrupted = True
+    seeks = []
+    groups_calls = []
+    holds_calls = []
+
+    class ReplayRead:
+        def __init__(self, handle):
+            self.handle = handle
+            self.reads = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.handle.close()
+
+        def fileno(self):
+            return self.handle.fileno()
+
+        def seek(self, offset):
+            seeks.append(offset)
+            return self.handle.seek(offset)
+
+        def readline(self, limit):
+            self.reads += 1
+            if interrupted and stage == "read" and self.reads == 2:
+                raise pressure_pause.TickDeadline("synthetic replay deadline")
+            return self.handle.readline(limit)
+
+    def open_replay(path, *args, **kwargs):
+        handle = original_open(path, *args, **kwargs)
+        return ReplayRead(handle) if path == spool and args == ("rb",) else handle
+
+    def decode(raw, *args, **kwargs):
+        value = original_loads(raw, *args, **kwargs)
+        if interrupted and stage == "decode" and value.get("action") == "opened":
+            raise pressure_pause.TickDeadline("synthetic replay deadline")
+        return value
+
+    def apply(state, event):
+        original_apply(state, event)
+        if interrupted and stage == "apply" and event.get("action") == "opened":
+            raise pressure_pause.TickDeadline("synthetic replay deadline")
+
+    def groups():
+        groups_calls.append(True)
+        return {"bulk": "Paused", "normal": "Paused"}
+
+    def release_holds():
+        holds_calls.append(True)
+        return {"released": [], "waiting": []}
+
+    monkeypatch.setattr(Path, "open", open_replay)
+    monkeypatch.setattr(pressure_pause.json, "loads", decode)
+    monkeypatch.setattr(pressure_pause.SpoolState, "apply", apply)
+    monkeypatch.setattr(
+        pressure_pause,
+        "read_pressure",
+        lambda _: dict.fromkeys(
+            ["io_full_avg10", "io_full_avg60", "memory_full_avg10", "memory_full_avg60"],
+            0.0,
+        ),
+    )
+    monkeypatch.setattr(pressure_pause.pueue, "groups_status", groups)
+    monkeypatch.setattr(
+        pressure_pause.pueue, "pause", lambda _: pytest.fail("unexpected pause")
+    )
+    monkeypatch.setattr(
+        pressure_pause.pueue, "resume", lambda _: pytest.fail("unowned pause resumed")
+    )
+    decision = pressure_pause.tick(
+        spool=spool, checkpoint=checkpoint, release_holds=release_holds
+    )
+    assert decision == {"action": "unavailable", "error": "synthetic replay deadline"}
+    assert groups_calls == holds_calls == []
+    saved = original_loads(checkpoint.read_text())
+    assert saved["cursor"] == {
+        "device": spool.stat().st_dev,
+        "inode": spool.stat().st_ino,
+        "offset": len(first),
+    }
+    assert saved["pauses"] == {"bulk": {"owner": "agentctl", "signals": []}}
+
+    interrupted = False
+    if rotate:
+        replacement = tmp_path / "replacement.jsonl"
+        replacement.write_bytes(first + second)
+        replacement.replace(spool)
+    decision = pressure_pause.tick(
+        spool=spool, checkpoint=checkpoint, release_holds=release_holds
+    )
+    assert decision["action"] in {"hold", "clear"}
+    assert groups_calls == holds_calls == [True]
+    assert seeks == [0, 0 if rotate else len(first)]
+    saved = original_loads(checkpoint.read_text())
+    assert saved["cursor"] == {
+        "device": spool.stat().st_dev,
+        "inode": spool.stat().st_ino,
+        "offset": len(first) + len(second),
+    }
+    assert saved["pauses"] == {}
+
+
 def test_malformed_checkpoint_recovers_to_empty_state(tmp_path) -> None:
     checkpoint = tmp_path / "checkpoint.json"
     checkpoint.write_text("{not-json", encoding="utf-8")

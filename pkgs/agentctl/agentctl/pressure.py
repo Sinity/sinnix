@@ -135,6 +135,7 @@ def event_state(spool: Path | None, *, checkpoint: Path | None = None) -> SpoolS
             ):
                 offset = state.cursor["offset"]
             handle.seek(offset)
+            state.cursor = {**identity, "offset": offset}
             # Replay one complete record at a time, through the observed
             # size. A growing writer cannot keep this pass open forever.
             # Leave a partial final record for the next pass.
@@ -142,18 +143,29 @@ def event_state(spool: Path | None, *, checkpoint: Path | None = None) -> SpoolS
                 line = handle.readline(metadata.st_size - offset)
                 if not line.endswith(b"\n"):
                     break
-                offset += len(line)
                 try:
                     event = json.loads(line.decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError):
-                    continue
+                    event = None
+                # Commit projection and byte cursor together. A deadline during
+                # decode/apply must not checkpoint past an unprocessed record.
+                next_state = SpoolState(
+                    pauses=dict(state.pauses),
+                    cursor={**identity, "offset": offset + len(line)},
+                )
                 if isinstance(event, dict):
-                    state.apply(event)
+                    next_state.apply(event)
+                state = next_state
+                offset += len(line)
+    except TickDeadline:
+        # A large cold replay may outlast one tick. Keep verified progress so
+        # the next pass catches up instead of rereading the same prefix.
+        _save_checkpoint(checkpoint_path, state)
+        raise
     except OSError:
         # A failed replay cannot replace previously verified ownership or
         # publish a cursor past unread events.
         return previous
-    state.cursor = {**identity, "offset": offset}
     _save_checkpoint(checkpoint_path, state)
     return state
 
