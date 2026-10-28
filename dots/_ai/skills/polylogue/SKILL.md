@@ -29,7 +29,7 @@ hooks, browser host and `mcp-polylogue`.
 ## Develop Polylogue
 
 Read the target checkout's `AGENTS.md`, `README.md`, `docs/architecture.md`
-and `docs/development.md`. The main repository is
+and `docs/README.md`, then the design page for the area. The main repository is
 `/realm/project/polylogue/repo`. They own the current commands, crate
 boundaries, archive schema and verification policy.
 
