@@ -301,8 +301,16 @@ borg extract --stdout file:///outer-realm/backup/borg-realm-v2::<archive> state/
 ```
 
 Run Borg as root. To test a restore of a small file against its recorded
-digest, use `agentctl job start sinnix verify_snapshot_restore -- …`; for a
-compressed telemetry dump, `agentctl job start sinnix verify_telemetry_restore
+digest, use:
+
+```sh
+agentctl job start sinnix verify_snapshot_restore -- --scope realm --target <private-receipt.json> --version new
+```
+
+For a Persist archive, select `--scope persist`. The scope binds the archive name and
+installed backup owner together. The private receipt supplies the exact archive ID,
+snapshot UUID, relative path, byte count and complete SHA-256 digest. Extraction
+stays in memory and shares the backup mutex. For a compressed telemetry dump, `agentctl job start sinnix verify_telemetry_restore
 -- <file.sqlite.zst>`.
 
 ## Known gaps

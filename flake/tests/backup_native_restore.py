@@ -31,7 +31,15 @@ def load_target(path):
     return json.loads(raw)
 
 
-def selected_target(payload, version):
+SCOPES = {
+    "realm": "borgbackup-job-realm.service",
+    "persist": "borgbackup-job-persist.service",
+}
+
+
+def selected_target(payload, version, scope):
+    if scope not in SCOPES:
+        raise ValueError("restore scope must be realm or persist")
     archive = payload[version + "_archive"]
     archive_id = payload[version + "_archive_id"]
     snapshot_uuid = payload[version + "_snapshot_uuid"]
@@ -47,10 +55,11 @@ def selected_target(payload, version):
     ):
         raise ValueError("restore target must be one canonical archive-relative path")
     if not re.fullmatch(
-        r"realm-realm\.\d{8}T\d{6}[+-]\d{4}(?:-(?:coverage|producer)-v[1-9][0-9]*)?",
+        re.escape(f"{scope}-{scope}")
+        + r"\.\d{8}T\d{6}[+-]\d{4}(?:-(?:coverage|producer)-v[1-9][0-9]*)?",
         archive,
     ):
-        raise ValueError("restore target is not a named Realm snapshot archive")
+        raise ValueError(f"restore target is not a named {scope} snapshot archive")
     if not all(
         re.fullmatch(r"[0-9a-f]{64}", value) for value in (archive_id, expected_hash)
     ):
@@ -62,8 +71,8 @@ def selected_target(payload, version):
     return archive, archive_id, snapshot_uuid, expected_hash, size, relative
 
 
-def installed_owner():
-    unit = "borgbackup-job-realm.service"
+def installed_owner(scope):
+    unit = SCOPES[scope]
     start = subprocess.check_output(
         ["systemctl", "show", unit, "-p", "ExecStart", "--value"], text=True
     )
@@ -164,9 +173,9 @@ def owner_read(shell, values, argv, seconds, output_limit):
     return bytes(output)
 
 
-def verify_target(payload, version, read):
+def verify_target(payload, version, read, scope):
     archive, archive_id, snapshot_uuid, expected_hash, size, relative = selected_target(
-        payload, version
+        payload, version, scope
     )
     header_command = [
         "borg",
@@ -200,6 +209,7 @@ def verify_target(payload, version, read):
     check_identity()
     return {
         "outcome": "ok",
+        "scope": scope,
         "archive": archive,
         "archive_id": archive_id,
         "snapshot_uuid": snapshot_uuid,
@@ -211,6 +221,7 @@ def verify_target(payload, version, read):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--scope", choices=tuple(SCOPES), required=True)
     parser.add_argument("--target", type=Path, required=True)
     parser.add_argument("--version", choices=("old", "new"), required=True)
     args = parser.parse_args()
@@ -218,15 +229,16 @@ def main():
     try:
         payload = load_target(args.target)
         selected_target(
-            payload, args.version
+            payload, args.version, args.scope
         )  # Validate before reading privileged owner state.
-        shell, values = installed_owner()
+        shell, values = installed_owner(args.scope)
         proof = verify_target(
             payload,
             args.version,
             lambda argv, seconds, limit: owner_read(
                 shell, values, argv, seconds, limit
             ),
+            args.scope,
         )
         status = 0
     except (

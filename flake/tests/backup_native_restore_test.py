@@ -41,7 +41,7 @@ class RestoreProof(unittest.TestCase):
         return self.content
 
     def test_complete_restore_keeps_archive_and_content_identities(self):
-        proof = RESTORE.verify_target(self.payload, "old", self.read)
+        proof = RESTORE.verify_target(self.payload, "old", self.read, "realm")
         self.assertEqual(proof["outcome"], "ok")
         self.assertEqual(proof["sha256"], self.payload["old_sha256"])
         self.assertEqual(
@@ -50,22 +50,40 @@ class RestoreProof(unittest.TestCase):
         self.assertEqual(self.calls[1][1:], (300, len(self.content) + 1))
         self.assertIn("--", self.calls[1][0])
 
+    def test_persist_scope_restores_with_the_same_identity_checks(self):
+        self.payload["old_archive"] = "persist-persist.20260101T120000+0000"
+        self.header["name"] = self.payload["old_archive"]
+        proof = RESTORE.verify_target(self.payload, "old", self.read, "persist")
+        self.assertEqual(proof["scope"], "persist")
+        self.assertEqual(proof["sha256"], self.payload["old_sha256"])
+        self.assertEqual([call[0][1] for call in self.calls], ["list", "extract", "list"])
+
+    def test_scope_cannot_select_the_other_repository_archive(self):
+        for scope, archive in (("persist", "realm-realm"), ("realm", "persist-persist"),
+                               ("invalid", "realm-realm")):
+            with self.subTest(scope=scope), self.assertRaises(ValueError):
+                RESTORE.verify_target(
+                    self.payload | {"old_archive": archive + ".20260101T120000+0000"},
+                    "old", self.read, scope,
+                )
+        self.assertEqual(self.calls, [])
+
     def test_changed_archive_refuses_before_reading_payload(self):
         self.header["id"] = "b" * 64
         with self.assertRaisesRegex(ValueError, "archive identity changed"):
-            RESTORE.verify_target(self.payload, "old", self.read)
+            RESTORE.verify_target(self.payload, "old", self.read, "realm")
         self.assertEqual(len(self.calls), 1)
 
     def test_wrong_source_uuid_refuses_before_reading_payload(self):
         self.header["comment"] = "sinnix-snapshot-v1:other"
         with self.assertRaisesRegex(ValueError, "archive identity changed"):
-            RESTORE.verify_target(self.payload, "old", self.read)
+            RESTORE.verify_target(self.payload, "old", self.read, "realm")
         self.assertEqual(len(self.calls), 1)
 
     def test_partial_file_is_not_a_successful_restore(self):
         self.content = self.content[:-1]
         with self.assertRaisesRegex(ValueError, "complete source digest"):
-            RESTORE.verify_target(self.payload, "old", self.read)
+            RESTORE.verify_target(self.payload, "old", self.read, "realm")
 
     def test_source_selection_is_validated_before_any_read(self):
         for path in (
@@ -76,7 +94,7 @@ class RestoreProof(unittest.TestCase):
         ):
             with self.subTest(path=path), self.assertRaises(ValueError):
                 RESTORE.verify_target(
-                    self.payload | {"relative_path": path}, "old", self.read
+                    self.payload | {"relative_path": path}, "old", self.read, "realm"
                 )
         for field, value in (
             ("old_sha256", "prefix"),
@@ -84,7 +102,7 @@ class RestoreProof(unittest.TestCase):
             ("old_bytes", True),
         ):
             with self.subTest(field=field), self.assertRaises(ValueError):
-                RESTORE.verify_target(self.payload | {field: value}, "old", self.read)
+                RESTORE.verify_target(self.payload | {field: value}, "old", self.read, "realm")
         self.assertEqual(self.calls, [])
 
     def test_oversized_receipt_is_rejected_before_loading_its_payload(self):
@@ -111,7 +129,7 @@ class RestoreProof(unittest.TestCase):
             )
             responses = [f"{{ path={script} ; }}", "PATH=/synthetic/bin", ""]
             with (
-                patch.object(RESTORE.subprocess, "check_output", side_effect=responses),
+                patch.object(RESTORE.subprocess, "check_output", side_effect=responses) as output,
                 patch.object(
                     RESTORE.pwd,
                     "getpwnam",
@@ -119,7 +137,14 @@ class RestoreProof(unittest.TestCase):
                 ),
                 patch.dict(RESTORE.os.environ, {"TMPDIR": "/synthetic/task-scratch"}),
             ):
-                shell, values = RESTORE.installed_owner()
+                shell, values = RESTORE.installed_owner("realm")
+            self.assertTrue(all(call.args[0][2] == "borgbackup-job-realm.service"
+                                for call in output.call_args_list))
+            with patch.object(RESTORE.subprocess, "check_output", side_effect=responses) as output, \
+                 patch.dict(RESTORE.os.environ, {"TMPDIR": "/synthetic/task-scratch"}):
+                RESTORE.installed_owner("persist")
+            self.assertTrue(all(call.args[0][2] == "borgbackup-job-persist.service"
+                                for call in output.call_args_list))
             self.assertEqual(shell, "/bin/bash")
             self.assertEqual(
                 values["BORG_PASSCOMMAND"], "/synthetic/cat /run/secret/synthetic"

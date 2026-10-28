@@ -16,7 +16,7 @@ def main():
     args = parser.parse_args()
     if not args.archive or "::" in args.archive or "::" in args.repository:
         parser.error("one explicit repository and archive are required")
-    shell, values = installed_owner()
+    shell, values = installed_owner("realm")
     values["BORG_REPO"] = args.repository
     command = [
         "sudo",
