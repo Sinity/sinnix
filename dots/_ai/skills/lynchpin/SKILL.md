@@ -33,10 +33,9 @@ logic. Chisel builds the configured cross-project report portfolio.
 
 ## Boundaries
 
-Polylogue owns AI-session ingestion and archive-native inference. Lynchpin owns
-cross-source promotion and analysis over stable products. Never scrape
-Polylogue's disposable `.cache/verify` receipts; consume a declared export or
-mark that source unavailable.
+AI-session ingestion and interpretation belong to Polylogue. Lynchpin does not
+read its archives, products or live status. Git and Chisel may inspect its source
+repository like any registered project.
 
 Lint, type checks, and tests run as Lynchpin's declared operations
 (`agentctl job start lynchpin lint` or `check`), never inside an agent's own

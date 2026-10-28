@@ -712,41 +712,20 @@
         ],
         "nixpkgsRepomix": [
           "nixpkgs"
-        ],
-        "polylogueSrc": [
-          "lynchpin-polylogue"
         ]
       },
       "locked": {
-        "lastModified": 1793143191,
-        "narHash": "sha256-AJ8R+dizBzE62wt1mRBnofx7iPki7OzmQDE/WObOztk=",
-        "ref": "refs/pull/9/head",
-        "rev": "f002946b96ba4bdaab3ce9687e394969833abf8f",
-        "revCount": 815,
-        "type": "git",
-        "url": "https://github.com/Sinity/sinity-lynchpin.git"
-      },
-      "original": {
-        "ref": "refs/pull/9/head",
-        "rev": "f002946b96ba4bdaab3ce9687e394969833abf8f",
-        "type": "git",
-        "url": "https://github.com/Sinity/sinity-lynchpin.git"
-      }
-    },
-    "lynchpin-polylogue": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1791670091,
-        "narHash": "sha256-I7TW3WiLiCXir/VvV+cn23AuMz/EGrXWjYWI5C4EdZs=",
+        "lastModified": 1793182027,
+        "narHash": "sha256-vwdIEPhqdGxOModCtBv/Ee88ozXPCkEFTIuYSUFmLGY=",
         "owner": "Sinity",
-        "repo": "polylogue",
-        "rev": "3ee97894b0fed6d614fcb658e823da77c1255639",
+        "repo": "sinity-lynchpin",
+        "rev": "5e64ad27de4c524567e4814628b455b9d4c4f2a3",
         "type": "github"
       },
       "original": {
         "owner": "Sinity",
-        "repo": "polylogue",
-        "rev": "3ee97894b0fed6d614fcb658e823da77c1255639",
+        "repo": "sinity-lynchpin",
+        "rev": "5e64ad27de4c524567e4814628b455b9d4c4f2a3",
         "type": "github"
       }
     },
@@ -1319,7 +1298,6 @@
         "intercept-bounce": "intercept-bounce",
         "lanzaboote": "lanzaboote",
         "lynchpin": "lynchpin",
-        "lynchpin-polylogue": "lynchpin-polylogue",
         "nix-android": "nix-android",
         "nix-on-droid": "nix-on-droid",
         "nix-vscode-extensions": "nix-vscode-extensions",

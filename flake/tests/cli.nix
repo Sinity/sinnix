@@ -270,9 +270,9 @@ in
               import subprocess
               from pathlib import Path
               import duckdb
-              import polylogue.api.sync
-              import polylogue.analysis.archive
               import lynchpin
+              import lynchpin.sources.activitywatch
+              import lynchpin.sources.chisel_excerpts
               assert sys.version_info[:2] == (3, 14)
               assert "site-packages" in lynchpin.__file__
               assert Path(shutil.which("polylogue")).resolve() == Path(os.environ["EXPECTED_POLYLOGUE"]).resolve()

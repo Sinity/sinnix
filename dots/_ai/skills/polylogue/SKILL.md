@@ -41,5 +41,5 @@ declared AgentCTL operations.
 Sinnix owns installed commands, capture hooks, MCP launchers and the
 `polylogue-live.service` user unit. A source edit requires a separately
 authorized activation and verification of the installed executable and live
-archive. Lynchpin's private Python dependency still reads the predecessor's
-archive; its API and storage rules do not apply to the rewrite.
+archive. Lynchpin reads its other owner-native sources independently; it has
+no Polylogue archive or library dependency.

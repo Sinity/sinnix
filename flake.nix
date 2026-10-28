@@ -65,12 +65,6 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # Lynchpin still imports this Python library privately. It supplies no commands.
-    lynchpin-polylogue = {
-      url = "github:Sinity/polylogue/3ee97894b0fed6d614fcb658e823da77c1255639";
-      flake = false;
-    };
-
     # The live application, CLI and MCP server. It keeps its
     # own nixpkgs: its shared crates need a newer rustc than Sinnix's.
     polylogue-rewrite.url = "github:Sinity/polylogue/5cc347e17c9b462ad76160dd5879d4003bd67658";
@@ -82,9 +76,8 @@
     };
 
     lynchpin = {
-      url = "git+https://github.com/Sinity/sinity-lynchpin.git?ref=refs/pull/9/head&rev=f002946b96ba4bdaab3ce9687e394969833abf8f";
+      url = "github:Sinity/sinity-lynchpin/5e64ad27de4c524567e4814628b455b9d4c4f2a3";
       inputs.nixpkgs.follows = "nixpkgs";
-      inputs.polylogueSrc.follows = "lynchpin-polylogue";
       inputs.nixpkgsRepomix.follows = "nixpkgs";
     };
 

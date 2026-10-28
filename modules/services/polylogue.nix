@@ -47,8 +47,8 @@ mkServiceModule {
       type = lib.types.str;
       default = "${homeDir}/.local/share/polylogue";
       description = ''
-        The Python predecessor's archive root, retained for backups and
-        Lynchpin's private Python dependency. The live CLI uses liveRoot.
+        The Python predecessor's archive root, retained for backups.
+        The live CLI uses liveRoot.
       '';
     };
 
