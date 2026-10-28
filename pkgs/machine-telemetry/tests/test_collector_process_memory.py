@@ -3,7 +3,10 @@ from __future__ import annotations
 import fcntl
 import importlib.util
 import json
+import sqlite3
 import sys
+import threading
+from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -260,6 +263,7 @@ def test_kill_event_scan_keeps_cursor_on_bounded_failure(monkeypatch) -> None:
         (
             [
                 "journalctl",
+                "--system",
                 "-o",
                 "json",
                 "--no-pager",
@@ -278,24 +282,53 @@ def test_kill_event_scan_keeps_cursor_on_bounded_failure(monkeypatch) -> None:
     ]
 
 
-def test_kill_event_scan_parses_complete_bounded_output(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("message", "killer"),
+    [
+        (
+            'sending SIGKILL to process 42 uid 1000 "worker": oom_score 800, oom_score_adj 0, VmRSS 512 MiB',
+            "earlyoom",
+        ),
+        ("Killed process 42 (worker) total-vm:4096kB anon-rss:2048kB", "kernel-oom"),
+        (
+            "oom-kill:constraint=CONSTRAINT_MEMCG,task_memcg=/agent.slice,task=worker,pid=42",
+            "memcg-oom",
+        ),
+        (
+            "Killed /agent.slice/worker.service with pid 42 (worker) due to memory pressure",
+            "systemd-oomd",
+        ),
+    ],
+)
+@pytest.mark.parametrize("after_cursor", [None, "legacy-user-cursor"])
+def test_kill_event_scan_parses_complete_bounded_output(
+    monkeypatch, message, killer, after_cursor
+) -> None:
     collector = _collector()
     entry = {
         "__CURSOR": "next-cursor",
-        "MESSAGE": 'sending SIGKILL to process 42 uid 1000 "worker": oom_score 800, oom_score_adj 0, VmRSS 512 MiB',
+        "MESSAGE": message,
     }
+    calls = []
     monkeypatch.setattr(
         collector,
         "run_bounded",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            error=None, stdout=(json.dumps(entry) + "\n").encode()
+        lambda argv, **_kwargs: (
+            calls.append(argv)
+            or SimpleNamespace(error=None, stdout=(json.dumps(entry) + "\n").encode())
         ),
     )
 
-    rows, cursor = collector.scan_kill_events("host", "boot", None)
+    rows, cursor = collector.scan_kill_events("host", "boot", after_cursor)
     assert cursor == "next-cursor"
-    assert rows[0]["killer"] == "earlyoom"
+    assert rows[0]["killer"] == killer
     assert rows[0]["victim_pid"] == 42
+    assert "--system" in calls[0]
+    assert calls[0][-2:] == (
+        ["--after-cursor", after_cursor]
+        if after_cursor
+        else ["--since", collector.KILL_EVENT_BACKFILL_SINCE]
+    )
 
 
 def test_kill_event_scan_resumes_after_the_scanned_tail_without_matches(
@@ -314,6 +347,209 @@ def test_kill_event_scan_resumes_after_the_scanned_tail_without_matches(
         [],
         "tail-cursor",
     )
+
+
+class StopHeartbeat(Exception):
+    pass
+
+
+@pytest.fixture
+def heartbeat(tmp_path, monkeypatch):
+    """Run the production heartbeat against SQLite, with synthetic probes."""
+    collector = _collector()
+    args = SimpleNamespace(
+        db=str(tmp_path / "telemetry.sqlite"),
+        manifest=str(tmp_path / "manifest.json"),
+        host="fixture",
+        user_name="fixture",
+        units="",
+        cgroups="",
+        network_probe_once=False,
+    )
+    for name, replacement in {
+        "find_hwmon": lambda *args: None,
+        "discover_rapl": lambda: [],
+        "nvml_init": lambda: None,
+        "hardware_state": lambda *args: {},
+        "atomic_publish": lambda *args, **kwargs: None,
+        "read_text": lambda *args: None,
+        "read_rapl_energy": lambda *args: {},
+        "rapl_watts": lambda *args: {},
+        "gpu_metrics": lambda: ({"gpu_power_w": 1}, []),
+        "parse_psi": lambda *args: {},
+        "dstate_tasks": lambda: (0, ""),
+        "memory_metrics": lambda: defaultdict(lambda: None),
+        "vmstat_metrics": lambda: dict.fromkeys(
+            f"vmstat_{key}" for key in collector.VMSTAT_FIELDS
+        ),
+        "swap_tier_metrics": lambda: dict.fromkeys(
+            ["zram_orig_mb", "zram_compr_mb", "zram_mem_used_mb", "swaps_json"]
+        ),
+        "process_io_snapshot": lambda: {},
+        "block_device_stats": lambda *args: [],
+        "insert_service_states": lambda *args: None,
+        "cgroup_memory_samples": lambda *args: [],
+        "network_probe": lambda *args, **kwargs: network_row,
+        "scan_kill_events": lambda *args: ([], None),
+    }.items():
+        monkeypatch.setattr(collector, name, replacement)
+    monkeypatch.setattr(collector.filesystem_capacity, "insert_samples", lambda *a: None)
+    monkeypatch.setattr(collector, "PROCESS_MEMORY_INTERVAL_SEC", 0)
+    monkeypatch.setattr(collector, "GPU_INTERVAL_SEC", 0)
+    monkeypatch.setattr(collector, "GPU_SAMPLER_BUSY_TIMEOUT_S", 0.05)
+    network_row = dict.fromkeys(
+        ["boot_id", "bloat_json", "dns_ms", "pmtu_1492"]
+    )
+    network_row.update(
+        observed_at="2026-01-01T00:00:00+00:00",
+        host="fixture",
+        schema_version=collector.SCHEMA_VERSION,
+        interface="fixture0",
+        gateway_ip="192.0.2.1",
+        **dict.fromkeys(
+            ["ping_json", "iface_json", "nic_json", "tcp_json", "conntrack_json"],
+            "{}",
+        ),
+        gap_codes_json="[]",
+    )
+
+    def run(beats=1):
+        clock = {"now": 0, "beats": 0}
+
+        def sleep(_interval):
+            if clock["beats"] == beats:
+                raise StopHeartbeat
+            clock["beats"] += 1
+            clock["now"] += 31
+
+        monkeypatch.setattr(collector.time, "monotonic", lambda: clock["now"])
+        monkeypatch.setattr(collector.time, "sleep", sleep)
+        with pytest.raises(StopHeartbeat):
+            collector.collect(args)
+
+    with sqlite3.connect(args.db) as conn:
+        collector.init_db(conn)
+        collector.save_kill_event_cursor(conn, "legacy-user-cursor")
+    return collector, args, run
+
+
+@pytest.mark.parametrize("probe", ["journal", "network"])
+def test_optional_probe_allows_independent_gpu_writer(heartbeat, monkeypatch, probe):
+    collector, args, run = heartbeat
+
+    def slow_probe(*_args, **_kwargs):
+        # Keep the probe pending until the real independent GPU writer has
+        # committed. A heartbeat writer lock makes that sample fail instead.
+        done = threading.Event()
+        stop = threading.Event()
+
+        def one_sample():
+            try:
+                collector._gpu_sampler_thread(args.db, "fixture", "boot", 0, stop)
+            finally:
+                done.set()
+
+        monkeypatch.setattr(stop, "wait", lambda _interval: stop.set())
+        worker = threading.Thread(target=one_sample)
+        worker.start()
+        try:
+            assert done.wait(2), "GPU writer could not finish during the probe"
+            with sqlite3.connect(args.db) as conn:
+                assert conn.execute("SELECT count(*) FROM gpu_sample").fetchone() == (1,)
+        finally:
+            stop.set()
+            worker.join(2)
+            assert not worker.is_alive()
+        return ([], "scanned-system-tail") if probe == "journal" else network_row
+
+    if probe == "journal":
+        monkeypatch.setattr(collector, "scan_kill_events", slow_probe)
+    else:
+        network_row = collector.network_probe()
+        monkeypatch.setattr(collector, "network_probe", slow_probe)
+    run()
+    with sqlite3.connect(args.db) as conn:
+        assert conn.execute("SELECT count(*) FROM metric_sample").fetchone() == (1,)
+
+
+@pytest.mark.parametrize("failure", ["timeout", "stdout exceeded limit"])
+def test_heartbeat_retries_failed_journal_scan_without_advancing_cursor(
+    heartbeat, monkeypatch, failure
+):
+    collector, args, run = heartbeat
+    # The fixture stubs optional probes; exercise the actual bounded scanner.
+    real_scan = _collector().scan_kill_events
+    monkeypatch.setattr(collector, "scan_kill_events", real_scan)
+    # _collector loads standalone modules, so use the function's globals.
+    calls = []
+    entry = {
+        "__CURSOR": "system-kill-cursor",
+        "MESSAGE": 'sending SIGKILL to process 42 uid 1000 "worker": oom_score 800, oom_score_adj 0, VmRSS 512 MiB',
+    }
+
+    def bounded(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(
+            error=failure if len(calls) == 1 else None,
+            stdout=b'{"__CURSOR":"partial"' if len(calls) == 1 else (
+                json.dumps(entry) + "\n-- cursor: system-tail\n"
+            ).encode(),
+        )
+
+    monkeypatch.setitem(real_scan.__globals__, "run_bounded", bounded)
+    run(beats=2)
+    assert [argv[-2:] for argv in calls] == [["--after-cursor", "legacy-user-cursor"]] * 2
+    assert all("--system" in argv and "--since" not in argv for argv in calls)
+    with sqlite3.connect(args.db) as conn:
+        assert collector.load_kill_event_cursor(conn) == "system-tail"
+        assert conn.execute("SELECT journal_cursor FROM kill_event").fetchall() == [
+            ("system-kill-cursor",)
+        ]
+
+
+def test_heartbeat_rolls_back_kill_rows_and_cursor_together(heartbeat, monkeypatch):
+    collector, args, run = heartbeat
+    row = dict.fromkeys(
+        ["boot_id", "victim_comm", "victim_pid", "victim_rss_mib", "cgroup_path", "oom_score"]
+    )
+    row.update(
+        observed_at="2026-01-01T00:00:00+00:00",
+        host="fixture",
+        schema_version=collector.SCHEMA_VERSION,
+        killer="kernel-oom",
+        raw_line="Killed process 42 (worker) anon-rss:2048kB",
+        journal_cursor="system-kill-cursor",
+    )
+    seen_cursors = []
+
+    def scan(_host, _boot, cursor):
+        seen_cursors.append(cursor)
+        return [row], "system-tail"
+
+    monkeypatch.setattr(collector, "scan_kill_events", scan)
+    save = collector.save_kill_event_cursor
+
+    def fail_after_cursor_write(conn, cursor):
+        save(conn, cursor)
+        raise RuntimeError("synthetic transaction failure")
+
+    monkeypatch.setattr(collector, "save_kill_event_cursor", fail_after_cursor_write)
+    with pytest.raises(RuntimeError, match="synthetic transaction failure"):
+        run()
+    with sqlite3.connect(args.db) as conn:
+        assert collector.load_kill_event_cursor(conn) == "legacy-user-cursor"
+        assert conn.execute("SELECT count(*) FROM kill_event").fetchone() == (0,)
+        assert conn.execute("SELECT count(*) FROM metric_sample").fetchone() == (0,)
+
+    monkeypatch.setattr(collector, "save_kill_event_cursor", save)
+    run()
+    assert seen_cursors == ["legacy-user-cursor", "legacy-user-cursor"]
+    with sqlite3.connect(args.db) as conn:
+        assert collector.load_kill_event_cursor(conn) == "system-tail"
+        assert conn.execute("SELECT journal_cursor FROM kill_event").fetchall() == [
+            ("system-kill-cursor",)
+        ]
+        assert conn.execute("SELECT count(*) FROM metric_sample").fetchone() == (1,)
 
 
 def test_psi_adapter_keeps_telemetry_flat_float_fields(monkeypatch) -> None:

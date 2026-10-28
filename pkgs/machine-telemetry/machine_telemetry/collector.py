@@ -2170,6 +2170,9 @@ def scan_kill_events(
     # 2026-10-19, months after the last kill, growing every day.
     cmd = [
         "journalctl",
+        # Kernel, earlyoom and systemd-oomd events live in system journals.
+        # Opening user archives adds a cold mmap working set to every scan.
+        "--system",
         "-o",
         "json",
         "--no-pager",
@@ -2465,6 +2468,35 @@ def collect(args: argparse.Namespace) -> int:
                 # cannot hold the writer lock needed by the GPU sampler.
                 allocator.attach(memory_rows, args.user_name)
                 next_process_memory = sample_start + PROCESS_MEMORY_INTERVAL_SEC
+
+            # Optional probes may wait on subprocesses or cold journal pages.
+            # Finish them before any INSERT acquires SQLite's writer lock,
+            # which the independent GPU sampler also needs each second.
+            network_row = None
+            if NETWORK_INTERVAL_SEC > 0 and sample_start >= next_network:
+                do_bloat = (
+                    BUFFERBLOAT_INTERVAL_SEC > 0
+                    and sample_start - last_bloat >= BUFFERBLOAT_INTERVAL_SEC
+                )
+                network_row = network_probe(
+                    args.host,
+                    boot_id,
+                    NETWORK_INTERFACE,
+                    NETWORK_GATEWAY,
+                    do_bloat=do_bloat,
+                )
+                if do_bloat:
+                    last_bloat = sample_start
+                next_network = sample_start + NETWORK_INTERVAL_SEC
+
+            kill_rows = []
+            new_kill_cursor = None
+            if KILL_EVENT_INTERVAL_SEC > 0 and sample_start >= next_kill_event:
+                kill_rows, new_kill_cursor = scan_kill_events(
+                    args.host, boot_id, kill_event_cursor
+                )
+                next_kill_event = sample_start + KILL_EVENT_INTERVAL_SEC
+
             collector_duration_ms = (time.monotonic() - sample_start) * 1000.0
             row = {
                 "observed_at": observed_at,
@@ -2624,34 +2656,14 @@ def collect(args: argparse.Namespace) -> int:
                     conn, observed_at, args.host, boot_id
                 )
                 next_capacity = sample_start + filesystem_capacity.INTERVAL_SECONDS
-            if NETWORK_INTERVAL_SEC > 0 and sample_start >= next_network:
-                do_bloat = (
-                    BUFFERBLOAT_INTERVAL_SEC > 0
-                    and sample_start - last_bloat >= BUFFERBLOAT_INTERVAL_SEC
-                )
-                insert_network_sample(
-                    conn,
-                    network_probe(
-                        args.host,
-                        boot_id,
-                        NETWORK_INTERFACE,
-                        NETWORK_GATEWAY,
-                        do_bloat=do_bloat,
-                    ),
-                )
-                if do_bloat:
-                    last_bloat = sample_start
-                next_network = sample_start + NETWORK_INTERVAL_SEC
-            if KILL_EVENT_INTERVAL_SEC > 0 and sample_start >= next_kill_event:
-                kill_rows, new_cursor = scan_kill_events(
-                    args.host, boot_id, kill_event_cursor
-                )
-                insert_kill_events(conn, kill_rows)
-                if new_cursor and new_cursor != kill_event_cursor:
-                    kill_event_cursor = new_cursor
-                    save_kill_event_cursor(conn, new_cursor)
-                next_kill_event = sample_start + KILL_EVENT_INTERVAL_SEC
+            if network_row is not None:
+                insert_network_sample(conn, network_row)
+            insert_kill_events(conn, kill_rows)
+            if new_kill_cursor and new_kill_cursor != kill_event_cursor:
+                save_kill_event_cursor(conn, new_kill_cursor)
             conn.commit()
+            if new_kill_cursor:
+                kill_event_cursor = new_kill_cursor
             # PASSIVE autocheckpoints drain the WAL but never shrink the
             # file; TRUNCATE does both, so it runs here on a schedule.
             #
