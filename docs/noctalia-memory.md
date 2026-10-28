@@ -51,3 +51,43 @@ labels become null with an unavailable reason. Tokens still identify those
 records. No guessed sum or fabricated zero replaces missing observations.
 The collector preserves valid ownership under `allocator.ownership`; old
 allocator responses remain valid when this optional diagnostic is absent.
+
+## Bounded allocation-stack attribution
+
+`sinnix.features.desktop.noctalia.heapProfiling.enable` defaults to false.
+Enabling it adds profiling options only to `noctalia.service` at its next
+coordinated restart. The existing allocator policy stays unchanged. Profiling
+starts inactive, with a 64 KiB average sampling interval, no cumulative history
+and no automatic dumps. The private output root is
+`/realm/state/noctalia-heap-profiles` (operator-owned, mode 0700).
+
+`noctalia msg heap-profile status` reads copied control observations without
+starting a worker or activating profiling. `start <seconds>` accepts 1–300
+seconds; `stop <session>` stops that exact session. A single independent worker
+enforces the monotonic deadline even when the UI loop is blocked, disables
+profiling before dumping, and rejects another start until completion. IPC
+does not wait for allocator or filesystem work. At most four explicit sessions
+can run in one process. Shutdown signals and joins the worker.
+If three deactivation/write-readback attempts cannot confirm inactivity, the
+process exits with status 70 without a core. The existing service restart
+restores startup-inactive profiling; that interrupted run is not an accepted
+profile. This failure path does not wait for the UI loop or filesystem.
+
+Each server-generated PID/session directory is exclusive and mode 0700;
+`final.heap` and `metadata.json` are mode 0600. Directory traversal rejects
+symlinks. The dump writes through an exclusively created file descriptor,
+with no caller-supplied path. Status returns IDs, timestamps, capabilities,
+errors and completion metadata; it contains no dump paths or stack contents.
+Private metadata preserves executable/mapping identity and sample interval.
+
+Profiles contain sampled allocation stacks, not object contents. Their byte
+counts are weighted estimates: 64 KiB sampling gives roughly 25 retained samples
+for 1.6 MiB growth, with substantial uncertainty in small categories. Profiling
+also allocates bookkeeping, so its total allocated slope is not a clean
+baseline. Compare retained sampled stacks with the pre-profile growth evidence;
+do not attribute all profiler-enabled growth to application objects.
+
+After attribution, archive the session into its private owning analysis and
+set the option false for the next coordinated restart. No profiler starts on
+ordinary status reads, and no periodic sampler or automatic profile retention
+cleanup is installed.

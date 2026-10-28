@@ -1,0 +1,786 @@
+diff --git a/meson.build b/meson.build
+index 622e9f0..de4ffd6 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1127,6 +1127,7 @@ install_data(
+ if build_tests
+   _cpp_test_names = [
+     'allocator_stats',
++    'heap_profile',
+     'runtime_memory',
+     'animation_manager',
+     'app_identity',
+diff --git a/src/app/application.cpp b/src/app/application.cpp
+index f2123f2..47a769d 100644
+--- a/src/app/application.cpp
++++ b/src/app/application.cpp
+@@ -1,4 +1,5 @@
+ #include "application.h"
++#include "util/heap_profile.h"
+ 
+ #include "app/main_loop.h"
+ #include "compositors/compositor_detect.h"
+@@ -180,6 +181,8 @@ Application::Application()
+ }
+ 
+ Application::~Application() {
++  // Stop profiling and join its independent worker before application teardown.
++  m_heapProfiler.reset();
+   ColorPickerDialog::setPresenter(nullptr);
+   GlyphPickerDialog::setPresenter(nullptr);
+   FileDialog::setPresenter(nullptr);
+diff --git a/src/app/application.h b/src/app/application.h
+index abaf873..0fda18c 100644
+--- a/src/app/application.h
++++ b/src/app/application.h
+@@ -143,6 +143,8 @@ struct BluetoothState;
+ struct NetworkState;
+ struct PowerProfilesState;
+ 
++namespace noctalia::diagnostics { class HeapProfiler; }
++
+ class Application {
+ public:
+   Application();
+@@ -364,6 +366,7 @@ private:
+   std::unique_ptr<PipeWirePollSource> m_pipewirePollSource;
+   std::unique_ptr<PipeWireSpectrumPollSource> m_pipewireSpectrumPollSource;
+   std::unique_ptr<PolkitPollSource> m_polkitPollSource;
++  std::unique_ptr<noctalia::diagnostics::HeapProfiler> m_heapProfiler;
+   IpcService m_ipcService;
+   IpcPollSource m_ipcPollSource{m_ipcService};
+   DmenuIpcService m_dmenuIpc;
+diff --git a/src/app/application_ipc.cpp b/src/app/application_ipc.cpp
+index 6fd8a64..d189958 100644
+--- a/src/app/application_ipc.cpp
++++ b/src/app/application_ipc.cpp
+@@ -90,12 +90,15 @@
+ #include "ui/dialogs/glyph_picker_dialog.h"
+ #include "ui/style.h"
+ #include "util/allocator_stats.h"
++#include "util/heap_profile.h"
+ #include "scripting/runtime_memory.h"
+ #include "util/file_utils.h"
+ #include "util/string_utils.h"
+ 
+ #include <algorithm>
+ #include <chrono>
++#include <charconv>
++#include <cstdlib>
+ #include <cmath>
+ #include <csignal>
+ #include <cstdint>
+@@ -119,6 +122,14 @@ namespace {
+ } // namespace
+ 
+ void Application::initIpc() {
++  const char* profileDirectory = std::getenv("NOCTALIA_HEAP_PROFILE_DIR");
++#ifdef NOCTALIA_USE_JEMALLOC
++  m_heapProfiler = std::make_unique<noctalia::diagnostics::HeapProfiler>(
++      &mallctl, profileDirectory != nullptr ? profileDirectory : ""
++  );
++#else
++  m_heapProfiler = std::make_unique<noctalia::diagnostics::HeapProfiler>(nullptr, "");
++#endif
+   if (m_ipcService.start()) {
+     kLog.info("IPC socket at {}", m_ipcService.socketPath());
+   } else {
+@@ -129,6 +140,30 @@ void Application::initIpc() {
+   m_dmenuIpc.setPanelManager(&m_panelManager);
+   m_dmenuIpc.start();
+ 
++  m_ipcService.bind(
++      noctalia::cli::msg::heapProfile,
++      [this](const std::string& args) -> std::string {
++        std::istringstream input(args);
++        std::string action, value, extra;
++        input >> action >> value;
++        const auto invalid = [this]() {
++          auto result = m_heapProfiler->status();
++          result["request_error"] = "invalid_arguments";
++          return result.dump() + "\n";
++        };
++        if (input >> extra) return invalid();
++        if (action == "status" && value.empty()) return m_heapProfiler->status().dump() + "\n";
++        if (action == "stop" && !value.empty() && value.size() <= 96) return m_heapProfiler->stop(value).dump() + "\n";
++        if (action == "start" && !value.empty()) {
++          int seconds = 0;
++          const auto parsed = std::from_chars(value.data(), value.data() + value.size(), seconds);
++          if (parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size()) return m_heapProfiler->start(seconds).dump() + "\n";
++        }
++        return invalid();
++      },
++      IpcService::HandlerOptions{.actionEditorVisibility = IpcService::ActionEditorVisibility::Hidden}
++  );
++
+   m_ipcService.bind(
+       noctalia::cli::msg::status,
+       [this](const std::string&) -> std::string {
+diff --git a/src/cli/schema_msg.h b/src/cli/schema_msg.h
+index 41c072d..8581ee8 100644
+--- a/src/cli/schema_msg.h
++++ b/src/cli/schema_msg.h
+@@ -257,7 +257,16 @@ namespace noctalia::cli {
+       Positional{"direction", {}, kMsgWorkspaceSwitchDirectionChoices, true, false, false},
+   };
+ 
++  inline constexpr std::array<std::string_view, 3> kHeapProfileActions{"status", "start", "stop"};
++  inline constexpr std::array kHeapProfilePositionals{
++      Positional{"action", {}, kHeapProfileActions, true, false, false},
++      Positional{"seconds-or-session", {}, {}, false, false, false},
++  };
++
+   namespace msg {
++    inline constexpr Command heapProfile{
++        "heap-profile", "Control an explicitly enabled bounded heap profile", {}, {}, {}, kHeapProfilePositionals, {}, false
++    };
+     inline constexpr Command barAutoHideSet{
+         "bar-auto-hide-set", "Set auto-hide state for a bar", {}, {}, {}, kMsgBarAutoHideSetPositionals, {}, false
+     };
+@@ -914,6 +923,7 @@ namespace noctalia::cli {
+       msg::settingsOpenPlugin,
+       msg::settingsOpenWidget,
+       msg::settingsToggle,
++      msg::heapProfile,
+       msg::status,
+       msg::taskbarCycle,
+       msg::templatesApply,
+diff --git a/src/util/heap_profile.h b/src/util/heap_profile.h
+new file mode 100644
+index 0000000..419d665
+--- /dev/null
++++ b/src/util/heap_profile.h
+@@ -0,0 +1,416 @@
++#pragma once
++
++#include "util/allocator_stats.h"
++
++#include <array>
++#include <chrono>
++#include <condition_variable>
++#include <cstring>
++#include <cstdlib>
++#include <fcntl.h>
++#include <fstream>
++#include <memory>
++#include <mutex>
++#include <optional>
++#include <stdexcept>
++#include <string>
++#include <sys/stat.h>
++#include <thread>
++#include <utility>
++#include <sstream>
++#include <unistd.h>
++
++namespace noctalia::diagnostics {
++
++  // IPC is main-thread only. The worker owns every profiling write, deadline and
++  // filesystem operation. Its mailbox contains values, never Application/VM pointers.
++  class HeapProfiler {
++    using Clock = std::chrono::steady_clock;
++    struct Failure { const char* reason; int code; };
++    struct Fd {
++      int value = -1;
++      Fd() = default;
++      explicit Fd(int v) : value(v) {}
++      ~Fd() { if (value >= 0) ::close(value); }
++      Fd(Fd&& other) noexcept : value(std::exchange(other.value, -1)) {}
++      Fd& operator=(Fd&& other) noexcept {
++        if (value >= 0) ::close(value);
++        value = std::exchange(other.value, -1);
++        return *this;
++      }
++      Fd(const Fd&) = delete;
++      Fd& operator=(const Fd&) = delete;
++    };
++    struct Capabilities {
++      std::optional<bool> compiled;
++      std::optional<bool> enabled;
++      std::optional<bool> active;
++      std::optional<std::size_t> sampleLog2;
++      int error = 0;
++      std::int64_t observedAt = 0;
++    };
++    struct Request {
++      std::string id;
++      int seconds;
++      std::int64_t requestedAt;
++      Clock::time_point deadline;
++    };
++    struct Snapshot {
++      std::string phase = "idle";
++      std::string id;
++      std::string reason;
++      int error = 0;
++      Capabilities caps;
++      bool configured = false;
++      bool dumpAvailable = false;
++      std::optional<std::int64_t> requestedAt;
++      std::optional<std::int64_t> startedAt;
++      std::optional<std::int64_t> stoppedAt;
++      std::optional<std::int64_t> deadlineAt;
++      std::optional<std::uint64_t> dumpBytes;
++      std::optional<std::uint64_t> lateMs;
++      std::optional<unsigned> stopAttempts;
++    };
++    struct Mailbox {
++      std::mutex mutex;
++      std::condition_variable changed;
++      Snapshot snapshot;
++      std::optional<Request> pending;
++      bool stop = false;
++      bool shutdown = false;
++    };
++
++  public:
++    static constexpr int kMaximumSeconds = 300;
++    static constexpr std::size_t kSampleLog2 = 16;
++    static constexpr unsigned kMaximumSessions = 4;
++    static constexpr int kFailClosedExit = 70;
++
++    HeapProfiler(Mallctl query, std::string directory)
++        : m_query(query), m_directory(std::move(directory)), m_mailbox(std::make_shared<Mailbox>()) {
++      // Startup-only capability reads, before any worker/dump can exist.
++      m_mailbox->snapshot.caps = capabilities(query);
++      m_mailbox->snapshot.configured = !m_directory.empty();
++    }
++    ~HeapProfiler() {
++      {
++        std::scoped_lock lock(m_mailbox->mutex);
++        m_mailbox->shutdown = true;
++        m_mailbox->stop = true;
++      }
++      m_mailbox->changed.notify_all();
++      if (m_worker.joinable()) m_worker.join();
++    }
++    HeapProfiler(const HeapProfiler&) = delete;
++    HeapProfiler& operator=(const HeapProfiler&) = delete;
++
++    nlohmann::json status() const { return format(copy()); }
++
++    nlohmann::json start(int seconds) {
++      std::string rejection;
++      {
++        std::scoped_lock lock(m_mailbox->mutex);
++        auto& s = m_mailbox->snapshot;
++        if (seconds < 1 || seconds > kMaximumSeconds) rejection = "invalid_duration";
++        else if (!s.configured) rejection = "not_configured";
++        else if (s.caps.error != 0) rejection = "capabilities_unavailable";
++        else if (!s.caps.enabled.value_or(false)) rejection = "startup_disabled";
++        else if (m_mailbox->shutdown) rejection = "shutting_down";
++        else if (s.phase == "starting" || s.phase == "active" || s.phase == "stopping" || s.phase == "dumping") rejection = "busy";
++        else if (s.caps.active.value_or(true)) rejection = "active_or_unknown";
++        else if (m_sessions >= kMaximumSessions) rejection = "session_limit";
++        else {
++          ++m_sessions;
++          const auto now = unixMs();
++          const auto id = "p" + std::to_string(::getpid()) + "-" + std::to_string(now) + "-" + std::to_string(m_sessions);
++          const auto caps = s.caps;
++          s = Snapshot{};
++          s.caps = caps;
++          s.configured = true;
++          s.id = id;
++          s.phase = "starting";
++          s.requestedAt = now;
++          s.deadlineAt = now + seconds * 1000;
++          m_mailbox->stop = false;
++          m_mailbox->pending = Request{id, seconds, now, Clock::now() + std::chrono::seconds(seconds)};
++        }
++      }
++      if (!rejection.empty()) {
++        auto result = status();
++        result["request_error"] = rejection;
++        return result;
++      }
++      if (!m_worker.joinable()) {
++        try {
++          // No capture of this or any service/controller state.
++          m_worker = std::thread([mailbox = m_mailbox, query = m_query, directory = m_directory] {
++            run(std::move(mailbox), query, directory);
++          });
++        } catch (...) {
++          publish(m_mailbox, [](Snapshot& s) { s.phase = "error"; s.reason = "worker_start_failed"; s.error = EAGAIN; });
++          std::scoped_lock lock(m_mailbox->mutex);
++          m_mailbox->pending.reset();
++        }
++      }
++      m_mailbox->changed.notify_all();
++      return status();
++    }
++
++    nlohmann::json stop(std::string_view id) {
++      bool mismatch;
++      {
++        std::scoped_lock lock(m_mailbox->mutex);
++        mismatch = id != m_mailbox->snapshot.id || id.empty();
++        if (!mismatch) m_mailbox->stop = true;
++      }
++      if (!mismatch) m_mailbox->changed.notify_all();
++      auto result = status();
++      if (mismatch) result["request_error"] = "session_mismatch";
++      return result;
++    }
++
++  private:
++    static std::int64_t unixMs() {
++      return std::chrono::duration_cast<std::chrono::milliseconds>(
++          std::chrono::system_clock::now().time_since_epoch()).count();
++    }
++    template<typename T> static std::optional<T> read(Mallctl q, const char* name, int& error) {
++      if (q == nullptr) { error = ENOTSUP; return std::nullopt; }
++      T value{};
++      std::size_t width = sizeof(value);
++      const int code = q(name, &value, &width, nullptr, 0);
++      if (code != 0 || width != sizeof(value)) { error = code != 0 ? code : EPROTO; return std::nullopt; }
++      return value;
++    }
++    static Capabilities capabilities(Mallctl query) {
++      Capabilities c;
++      c.compiled = read<bool>(query, "config.prof", c.error);
++      c.enabled = read<bool>(query, "opt.prof", c.error);
++      c.active = read<bool>(query, "prof.active", c.error);
++      c.sampleLog2 = read<std::size_t>(query, "opt.lg_prof_sample", c.error);
++      c.observedAt = unixMs();
++      return c;
++    }
++    static void setActive(Mallctl query, bool value) {
++      const int code = query("prof.active", nullptr, nullptr, &value, sizeof(value));
++      if (code != 0) throw Failure{"active_write_failed", code};
++      int error = 0;
++      const auto observed = read<bool>(query, "prof.active", error);
++      if (!observed.has_value() || *observed != value) throw Failure{"active_readback_failed", error != 0 ? error : EPROTO};
++    }
++    static unsigned confirmStopped(Mallctl query, const std::shared_ptr<Mailbox>& mailbox) {
++      int lastError = EIO;
++      for (unsigned attempt = 1; attempt <= 3; ++attempt) {
++        try { setActive(query, false); return attempt; }
++        catch (const Failure& failure) { lastError = failure.code; }
++        catch (...) { lastError = EIO; }
++      }
++      // A diagnostic window must not silently become indefinite. Do not wait
++      // for a blocked IPC loop or filesystem to report this terminal failure.
++      try {
++        std::unique_lock lock(mailbox->mutex, std::try_to_lock);
++        if (lock.owns_lock()) {
++          auto& s = mailbox->snapshot;
++          s.phase = "failed_closed"; s.reason = "cannot_confirm_inactive";
++          s.error = lastError; s.caps.active.reset(); s.stopAttempts = 3;
++        }
++      } catch (...) {}
++      ::_exit(kFailClosedExit); // no core; systemd restores startup-inactive state
++    }
++
++    template<typename F> static void publish(const std::shared_ptr<Mailbox>& mailbox, F update) {
++      std::scoped_lock lock(mailbox->mutex);
++      update(mailbox->snapshot);
++    }
++    Snapshot copy() const {
++      std::scoped_lock lock(m_mailbox->mutex);
++      return m_mailbox->snapshot;
++    }
++    static nlohmann::json format(const Snapshot& s) {
++      nlohmann::json j{{"schema_version", 1}, {"pid", ::getpid()}, {"state", s.phase},
++          {"configured", s.configured}, {"session", s.id.empty() ? nlohmann::json(nullptr) : nlohmann::json(s.id)},
++          {"dump_available", s.dumpAvailable}, {"maximum_seconds", kMaximumSeconds},
++          {"maximum_sessions", kMaximumSessions}, {"reason", s.reason.empty() ? nlohmann::json(nullptr) : nlohmann::json(s.reason)},
++          {"error_code", s.error == 0 ? nlohmann::json(nullptr) : nlohmann::json(s.error)}};
++      const auto optional = [&j](const char* key, const auto& value) { j[key] = value.has_value() ? nlohmann::json(*value) : nlohmann::json(nullptr); };
++      j["capabilities_observed_at_unix_ms"] = s.caps.observedAt;
++      optional("compiled", s.caps.compiled); optional("enabled_at_startup", s.caps.enabled);
++      optional("last_observed_active", s.caps.active); optional("sample_interval_log2", s.caps.sampleLog2);
++      j["sample_interval_bytes"] = s.caps.sampleLog2.has_value() && *s.caps.sampleLog2 < 64
++          ? nlohmann::json(std::uint64_t{1} << *s.caps.sampleLog2) : nlohmann::json(nullptr);
++      optional("requested_at_unix_ms", s.requestedAt); optional("started_at_unix_ms", s.startedAt);
++      optional("stopped_at_unix_ms", s.stoppedAt); optional("deadline_at_unix_ms", s.deadlineAt);
++      optional("deadline_late_ms", s.lateMs); optional("dump_bytes", s.dumpBytes);
++      optional("deactivation_attempts", s.stopAttempts);
++      j["capability_error_code"] = s.caps.error == 0 ? nlohmann::json(nullptr) : nlohmann::json(s.caps.error);
++      return j;
++    }
++    static Fd openRoot(const std::string& path) {
++      if (path.empty() || path.front() != '/') throw Failure{"invalid_directory", EINVAL};
++      Fd directory(::open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC));
++      if (directory.value < 0) throw Failure{"directory_open_failed", errno};
++      std::size_t begin = 1;
++      while (begin < path.size()) {
++        const auto end = path.find('/', begin);
++        const auto part = path.substr(begin, end == std::string::npos ? end : end - begin);
++        if (part.empty() || part == "." || part == "..") throw Failure{"invalid_directory", EINVAL};
++        Fd next(::openat(directory.value, part.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
++        if (next.value < 0) throw Failure{"directory_open_failed", errno};
++        directory = std::move(next);
++        if (end == std::string::npos) break;
++        begin = end + 1;
++      }
++      struct stat st{};
++      if (::fstat(directory.value, &st) != 0) throw Failure{"directory_stat_failed", errno};
++      if (st.st_uid != ::geteuid() || (st.st_mode & 0777) != 0700) throw Failure{"directory_not_private", EACCES};
++      return directory;
++    }
++    static Fd createFile(int directory, const char* name) {
++      Fd file(::openat(directory, name, O_RDWR | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600));
++      if (file.value < 0) throw Failure{"file_create_failed", errno};
++      if (::fchmod(file.value, 0600) != 0) throw Failure{"file_mode_failed", errno};
++      return file;
++    }
++    static void writeAll(int fd, const std::string& bytes) {
++      std::size_t at = 0;
++      while (at < bytes.size()) {
++        const auto n = ::write(fd, bytes.data() + at, bytes.size() - at);
++        if (n < 0 && errno == EINTR) continue;
++        if (n <= 0) throw Failure{"metadata_write_failed", n < 0 ? errno : EIO};
++        at += static_cast<std::size_t>(n);
++      }
++    }
++    static std::pair<std::string, bool> maps() {
++      std::ifstream file("/proc/self/maps");
++      if (!file) throw Failure{"mapping_read_failed", EIO};
++      std::string bytes;
++      std::array<char, 4096> block;
++      while (file && bytes.size() <= 1024 * 1024) {
++        file.read(block.data(), block.size());
++        bytes.append(block.data(), static_cast<std::size_t>(file.gcount()));
++      }
++      const bool truncated = bytes.size() > 1024 * 1024;
++      if (truncated) bytes.resize(1024 * 1024);
++      return {std::move(bytes), truncated};
++    }
++    static void run(std::shared_ptr<Mailbox> mailbox, Mallctl query, const std::string& directory) {
++      bool mayBeActive = false;
++      for (;;) {
++        Request request;
++        {
++          std::unique_lock lock(mailbox->mutex);
++          mailbox->changed.wait(lock, [&] { return mailbox->shutdown || mailbox->pending.has_value() || (mailbox->stop && mayBeActive); });
++          if (mailbox->shutdown && !mayBeActive) return;
++          if (!mailbox->pending.has_value()) {
++            const bool shutdown = mailbox->shutdown;
++            lock.unlock();
++            if (mayBeActive) {
++              confirmStopped(query, mailbox); mayBeActive = false;
++            }
++            const auto caps = capabilities(query);
++            publish(mailbox, [&](Snapshot& s) { s.caps = caps; });
++            if (shutdown) return;
++            std::scoped_lock again(mailbox->mutex); mailbox->stop = false;
++            continue;
++          }
++          request = std::move(*mailbox->pending);
++          mailbox->pending.reset();
++        }
++        try {
++          auto caps = capabilities(query);
++          if (caps.error != 0 || !caps.compiled.value_or(false) || !caps.enabled.value_or(false)) throw Failure{"profiling_unavailable", caps.error != 0 ? caps.error : ENOTSUP};
++          if (caps.active.value_or(true)) throw Failure{"already_active", EBUSY};
++          if (caps.sampleLog2 != kSampleLog2) throw Failure{"sample_interval_mismatch", EINVAL};
++          Fd base = openRoot(directory);
++          if (::mkdirat(base.value, request.id.c_str(), 0700) != 0) throw Failure{"session_create_failed", errno};
++          Fd session(::openat(base.value, request.id.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
++          if (session.value < 0) throw Failure{"session_open_failed", errno};
++          struct stat sessionStat{};
++          if (::fstat(session.value, &sessionStat) != 0 || sessionStat.st_uid != ::geteuid() || (sessionStat.st_mode & 0777) != 0700) throw Failure{"session_not_private", EACCES};
++          Fd output = createFile(session.value, "final.heap");
++          Fd metadata = createFile(session.value, "metadata.json");
++          {
++            std::scoped_lock lock(mailbox->mutex);
++            if (mailbox->shutdown || mailbox->stop || Clock::now() >= request.deadline) throw Failure{"cancelled_before_activation", ECANCELED};
++          }
++          std::size_t sample = kSampleLog2;
++          const int reset = query("prof.reset", nullptr, nullptr, &sample, sizeof(sample));
++          if (reset != 0) throw Failure{"reset_failed", reset};
++          mayBeActive = true; // even a failed write must take the finally-stop path
++          setActive(query, true);
++          const auto started = unixMs();
++          caps = capabilities(query);
++          publish(mailbox, [&](Snapshot& s) { s.phase = "active"; s.startedAt = started; s.caps = caps; });
++          std::string stopReason;
++          {
++            std::unique_lock lock(mailbox->mutex);
++            mailbox->changed.wait_until(lock, request.deadline, [&] { return mailbox->stop || mailbox->shutdown; });
++            stopReason = mailbox->shutdown ? "shutdown" : mailbox->stop ? "requested" : "deadline";
++            mailbox->snapshot.phase = "stopping";
++          }
++          const auto stopAttempts = confirmStopped(query, mailbox);
++          mayBeActive = false;
++          const auto stopped = unixMs();
++          const auto late = std::max<std::int64_t>(0, std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - request.deadline).count());
++          caps = capabilities(query);
++          publish(mailbox, [&](Snapshot& s) { s.phase = "dumping"; s.caps = caps; s.stoppedAt = stopped; s.lateMs = late; s.reason = stopReason; s.stopAttempts = stopAttempts; });
++          const std::string filename = "/proc/self/fd/" + std::to_string(output.value);
++          const char* name = filename.c_str();
++          const int dumped = query("prof.dump", nullptr, nullptr, &name, sizeof(name));
++          if (dumped != 0) throw Failure{"dump_failed", dumped};
++          std::array<char, 128> header{};
++          const auto readBytes = ::pread(output.value, header.data(), header.size() - 1, 0);
++          if (readBytes < 0 || std::string_view(header.data(), static_cast<std::size_t>(readBytes)).find("heap_v2/65536") != 0) throw Failure{"profile_interval_unverified", EPROTO};
++          struct stat outStat{};
++          if (::fstat(output.value, &outStat) != 0) throw Failure{"profile_stat_failed", errno};
++          std::array<char, 4096> executable{};
++          const auto length = ::readlink("/proc/self/exe", executable.data(), executable.size() - 1);
++          if (length < 0) throw Failure{"executable_read_failed", errno};
++          const auto [mapping, truncated] = maps();
++          std::ifstream statFile("/proc/self/stat");
++          std::string statLine; std::getline(statFile, statLine);
++          const auto close = statLine.rfind(')');
++          if (close == std::string::npos) throw Failure{"identity_read_failed", EPROTO};
++          std::istringstream fields(statLine.substr(close + 2));
++          std::string startTicks;
++          for (int i = 0; i <= 19; ++i) if (!(fields >> startTicks)) throw Failure{"identity_read_failed", EPROTO};
++          const nlohmann::json meta{{"schema_version", 1}, {"pid", ::getpid()}, {"process_start_ticks", std::stoull(startTicks)}, {"session", request.id},
++              {"requested_at_unix_ms", request.requestedAt}, {"started_at_unix_ms", started}, {"stopped_at_unix_ms", stopped},
++              {"stop_reason", stopReason}, {"sample_interval_log2", sample}, {"sample_interval_bytes", std::uint64_t{1} << sample},
++              {"executable", std::string(executable.data(), static_cast<std::size_t>(length))},
++              {"mappings", mapping}, {"mappings_truncated", truncated}, {"profiling_adds_bookkeeping", true}};
++          writeAll(metadata.value, meta.dump(2) + "\n");
++          // Completion is published only after all owned filesystem handles close.
++          metadata = Fd{}; output = Fd{}; session = Fd{}; base = Fd{};
++          publish(mailbox, [&](Snapshot& s) { s.phase = "complete"; s.dumpAvailable = true; s.dumpBytes = static_cast<std::uint64_t>(outStat.st_size); });
++        } catch (const Failure& failure) {
++          if (mayBeActive) {
++            confirmStopped(query, mailbox); mayBeActive = false;
++          }
++          const auto caps = capabilities(query);
++          publish(mailbox, [&](Snapshot& s) { s.phase = "error"; s.error = failure.code; s.reason = failure.reason; s.caps = caps; });
++        } catch (...) {
++          if (mayBeActive) {
++            confirmStopped(query, mailbox); mayBeActive = false;
++          }
++          const auto caps = capabilities(query);
++          publish(mailbox, [&](Snapshot& s) { s.phase = "error"; s.error = EIO; s.reason = "worker_failed"; s.caps = caps; });
++        }
++        {
++          std::scoped_lock lock(mailbox->mutex);
++          // Completion can race a newly queued start+stop. Never clear that
++          // next session's stop request while finishing the preceding session.
++          if (!mailbox->pending.has_value()) mailbox->stop = false;
++          if (mailbox->shutdown && !mayBeActive) return;
++        }
++      }
++    }
++
++    Mallctl m_query;
++    std::string m_directory;
++    std::shared_ptr<Mailbox> m_mailbox;
++    std::thread m_worker;
++    unsigned m_sessions = 0;
++  };
++
++} // namespace noctalia::diagnostics
+diff --git a/tests/heap_profile_test.cpp b/tests/heap_profile_test.cpp
+new file mode 100644
+index 0000000..87c3ef4
+--- /dev/null
++++ b/tests/heap_profile_test.cpp
+@@ -0,0 +1,211 @@
++#include "util/heap_profile.h"
++
++#include <atomic>
++#include <cassert>
++#include <cstdlib>
++#include <filesystem>
++#include <fstream>
++#include <functional>
++#include <iostream>
++#include <vector>
++#include <sys/wait.h>
++#ifdef NOCTALIA_REAL_PROFILE_TEST
++#include <jemalloc/jemalloc.h>
++#endif
++
++using noctalia::diagnostics::HeapProfiler;
++using namespace std::chrono_literals;
++namespace fs = std::filesystem;
++
++namespace {
++  struct Temporary {
++    fs::path path;
++    Temporary() {
++      std::string value = (fs::temp_directory_path() / "heap-profile-XXXXXX").string();
++      assert(::mkdtemp(value.data()) != nullptr); path = value;
++    }
++    ~Temporary() { fs::remove_all(path); }
++  };
++  nlohmann::json waitFor(HeapProfiler& profiler, const std::function<bool(const nlohmann::json&)>& predicate) {
++    const auto until = std::chrono::steady_clock::now() + 5s;
++    do {
++      auto value = profiler.status();
++      if (predicate(value)) return value;
++      std::this_thread::sleep_for(2ms);
++    } while (std::chrono::steady_clock::now() < until);
++    assert(false && "profile state did not reach expected boundary");
++    return {};
++  }
++  nlohmann::json phase(HeapProfiler& profiler, const char* value) {
++    return waitFor(profiler, [value](const auto& j) { return j["state"] == value; });
++  }
++#ifndef NOCTALIA_REAL_PROFILE_TEST
++  struct Fake {
++    std::atomic<bool> active = false;
++    bool enabled = true;
++    std::atomic<bool> failActivate = false;
++    std::atomic<bool> failReset = false;
++    std::atomic<bool> failDump = false;
++    std::atomic<bool> failStopOnce = false;
++    std::atomic<bool> failStopAlways = false;
++    std::atomic<bool> failReadAfterStop = false;
++    std::atomic<bool> blockDump = false;
++    std::atomic<bool> blockRead = false;
++    std::atomic<unsigned> offWrites = 0;
++    std::atomic<unsigned> mainCalls = 0;
++    std::thread::id main = std::this_thread::get_id();
++    std::atomic<bool> forbidMain = false;
++    std::mutex mutex;
++    std::condition_variable changed;
++  };
++  Fake* fake;
++  int query(const char* name, void* old, std::size_t* width, void* input, std::size_t inputSize) {
++    if (fake->forbidMain && std::this_thread::get_id() == fake->main) ++fake->mainCalls;
++    if (std::strcmp(name, "config.prof") == 0) {
++      if (fake->blockRead && std::this_thread::get_id() != fake->main) {
++        std::unique_lock lock(fake->mutex); fake->changed.wait(lock, [] { return !fake->blockRead.load(); });
++      }
++      assert(*width == sizeof(bool)); *static_cast<bool*>(old) = true; return 0;
++    }
++    if (std::strcmp(name, "opt.prof") == 0) { assert(*width == sizeof(bool)); *static_cast<bool*>(old) = fake->enabled; return 0; }
++    if (std::strcmp(name, "opt.lg_prof_sample") == 0) { assert(*width == sizeof(std::size_t)); *static_cast<std::size_t*>(old) = 16; return 0; }
++    if (std::strcmp(name, "prof.active") == 0) {
++      if (input != nullptr) {
++        assert(inputSize == sizeof(bool)); const bool value = *static_cast<bool*>(input);
++        if (value && fake->failActivate.exchange(false)) return EIO;
++        if (!value) { ++fake->offWrites; if (fake->failStopOnce.exchange(false) || fake->failStopAlways) return EIO; }
++        fake->active = value;
++      }
++      if (old != nullptr && fake->failReadAfterStop && fake->offWrites > 0) return EIO;
++      if (old != nullptr) { assert(*width == sizeof(bool)); *static_cast<bool*>(old) = fake->active; }
++      return 0;
++    }
++    if (std::strcmp(name, "prof.reset") == 0) {
++      assert(!fake->active && inputSize == sizeof(std::size_t));
++      assert(*static_cast<std::size_t*>(input) == 16); return fake->failReset.exchange(false) ? EIO : 0;
++    }
++    if (std::strcmp(name, "prof.dump") == 0) {
++      assert(!fake->active && inputSize == sizeof(const char*));
++      if (fake->blockDump) { std::unique_lock lock(fake->mutex); fake->changed.wait(lock, [] { return !fake->blockDump.load(); }); }
++      if (fake->failDump.exchange(false)) return EIO;
++      const char* filename = *static_cast<const char**>(input);
++      assert(std::string_view(filename).starts_with("/proc/self/fd/"));
++      std::ofstream file(filename); file << "heap_v2/65536\nt*: 0: 0 [0: 0]\n"; return file.good() ? 0 : EIO;
++    }
++    return ENOENT;
++  }
++#endif
++}
++
++int main(int argc, char** argv) {
++#ifdef NOCTALIA_REAL_PROFILE_TEST
++  Temporary root;
++  HeapProfiler profiler(&mallctl, root.path.string());
++  if (argc == 2 && std::string_view(argv[1]) == "--disabled") {
++    const auto before = profiler.status(); assert(before["enabled_at_startup"] == false);
++    assert(before["last_observed_active"] == false);
++    assert(profiler.start(1)["request_error"] == "startup_disabled");
++    assert(fs::is_empty(root.path)); return 0;
++  }
++  assert(profiler.status()["enabled_at_startup"] == true);
++  assert(profiler.status()["last_observed_active"] == false);
++  auto first = profiler.start(5); const auto firstId = first["session"].get<std::string>(); phase(profiler, "active");
++  std::vector<void*> blocks;
++  for (int i = 0; i < 8; ++i) { auto* p = ::mallocx(1024 * 1024, 0); assert(p); std::memset(p, 23, 1024 * 1024); blocks.push_back(p); }
++  profiler.stop(firstId); const auto firstDone = phase(profiler, "complete"); assert(firstDone["last_observed_active"] == false);
++  const auto firstPath = root.path / firstId / "final.heap";
++  std::ifstream in(firstPath); std::string firstProfile((std::istreambuf_iterator<char>(in)), {});
++  assert(firstProfile.starts_with("heap_v2/65536")); assert(firstProfile.find("MAPPED_LIBRARIES:") != std::string::npos);
++  // Holding the first window's allocations across reset must not count them as
++  // new retained objects in the second window.
++  auto second = profiler.start(5); const auto secondId = second["session"].get<std::string>(); phase(profiler, "active");
++  profiler.stop(secondId); phase(profiler, "complete");
++  std::ifstream next(root.path / secondId / "final.heap"); std::string secondProfile((std::istreambuf_iterator<char>(next)), {});
++  const auto total = [](const std::string& text) {
++    const auto pos = text.find("t*:"); assert(pos != std::string::npos);
++    std::istringstream fields(text.substr(pos + 3)); std::uint64_t count, bytes; char colon;
++    fields >> count >> colon >> bytes; assert(colon == ':'); return bytes;
++  };
++  assert(total(firstProfile) >= 4 * 1024 * 1024);
++  assert(total(secondProfile) < total(firstProfile) / 2);
++  for (auto* p : blocks) ::dallocx(p, 0);
++  std::cout << nlohmann::json{{"first_live_bytes", total(firstProfile)}, {"after_reset_live_bytes", total(secondProfile)}, {"sample_interval_bytes", 65536}, {"active_after", profiler.status()["last_observed_active"]}}.dump() << '\n';
++#else
++  if (argc == 2 && (std::string_view(argv[1]) == "--persistent-stop-failure" || std::string_view(argv[1]) == "--persistent-readback-failure")) {
++    Fake f; fake = &f;
++    f.failStopAlways = std::string_view(argv[1]) == "--persistent-stop-failure";
++    f.failReadAfterStop = !f.failStopAlways.load();
++    Temporary root; HeapProfiler profiler(query, root.path.string());
++    const auto id = profiler.start(1)["session"].get<std::string>(); phase(profiler, "active");
++    profiler.stop(id); std::this_thread::sleep_for(2s);
++    return 99; // must have exited non-core rather than leaving profiling active/unknown
++  }
++  for (const char* mode : {"--persistent-stop-failure", "--persistent-readback-failure"}) {
++    const pid_t child = ::fork(); assert(child >= 0);
++    if (child == 0) { ::execl(argv[0], argv[0], mode, static_cast<char*>(nullptr)); ::_exit(127); }
++    int status = 0; assert(::waitpid(child, &status, 0) == child);
++    assert(WIFEXITED(status) && WEXITSTATUS(status) == HeapProfiler::kFailClosedExit);
++  }
++  {
++    Fake f; fake = &f; f.enabled = false; Temporary root; HeapProfiler profiler(query, root.path.string()); f.forbidMain = true;
++    for (int i = 0; i < 50; ++i) assert(profiler.status()["last_observed_active"] == false);
++    assert(profiler.start(1)["request_error"] == "startup_disabled"); assert(fs::is_empty(root.path)); assert(f.mainCalls == 0);
++  }
++  {
++    Fake f; fake = &f; Temporary root; HeapProfiler profiler(query, root.path.string()); f.forbidMain = true;
++    assert(profiler.start(0)["request_error"] == "invalid_duration"); assert(profiler.start(301)["request_error"] == "invalid_duration");
++    auto begun = profiler.start(1); const auto id = begun["session"].get<std::string>(); phase(profiler, "active");
++    assert(profiler.stop("wrong-session")["request_error"] == "session_mismatch"); assert(f.active);
++    // Deliberately leave the IPC/main thread idle across the deadline.
++    std::this_thread::sleep_for(1250ms); assert(!f.active);
++    auto done = phase(profiler, "complete"); assert(done["reason"] == "deadline"); assert(done["dump_available"] == true);
++    assert(done.dump().find(root.path.string()) == std::string::npos); assert(f.mainCalls == 0);
++    struct stat st{}; assert(::stat((root.path/id).c_str(), &st) == 0 && (st.st_mode & 0777) == 0700);
++    assert(::stat((root.path/id/"final.heap").c_str(), &st) == 0 && (st.st_mode & 0777) == 0600);
++  }
++  for (int failure = 0; failure < 4; ++failure) {
++    Fake f; fake = &f; Temporary root;
++    if (failure == 0) f.failActivate = true; if (failure == 1) f.failReset = true;
++    if (failure == 2) f.failDump = true; if (failure == 3) f.failStopOnce = true;
++    HeapProfiler profiler(query, root.path.string()); auto begun = profiler.start(1); const auto id = begun["session"].get<std::string>();
++    if (failure >= 2) { phase(profiler, "active"); profiler.stop(id); }
++    if (failure == 3) {
++      const auto done = phase(profiler, "complete");
++      assert(done["deactivation_attempts"] == 2 && done["dump_available"] == true);
++    } else {
++      phase(profiler, "error"); assert(profiler.status()["dump_available"] == false);
++    }
++    assert(!f.active);
++    if (failure != 1) assert(f.offWrites > 0);
++  }
++  {
++    Fake f; fake = &f; f.blockDump = true; Temporary root; auto profiler = std::make_unique<HeapProfiler>(query, root.path.string()); f.forbidMain = true;
++    auto begun = profiler->start(5); const auto id = begun["session"].get<std::string>(); phase(*profiler, "active"); profiler->stop(id); phase(*profiler, "dumping");
++    const auto before = std::chrono::steady_clock::now();
++    assert(profiler->start(1)["request_error"] == "busy");
++    for (int i = 0; i < 50; ++i) assert(profiler->status()["state"] == "dumping");
++    assert(std::chrono::steady_clock::now() - before < 500ms); assert(!f.active && f.mainCalls == 0);
++    std::atomic<bool> destroyed = false;
++    std::thread destroy([&] { profiler.reset(); destroyed = true; });
++    std::this_thread::sleep_for(20ms); assert(!destroyed);
++    f.blockDump = false; f.changed.notify_all(); destroy.join(); assert(destroyed && !f.active);
++  }
++  {
++    Fake f; fake = &f; Temporary root; HeapProfiler profiler(query, root.path.string()); f.blockRead = true;
++    auto begun = profiler.start(1); const auto id = begun["session"].get<std::string>();
++    fs::create_directory(root.path/id); ::chmod((root.path/id).c_str(), 0700);
++    std::ofstream(root.path/id/"keeper") << "synthetic preexisting custody";
++    assert(profiler.status()["state"] == "starting");
++    f.blockRead = false; f.changed.notify_all(); phase(profiler, "error"); assert(!f.active); assert(fs::exists(root.path/id/"keeper"));
++  }
++  {
++    Fake f; fake = &f; Temporary root; fs::create_directory_symlink(root.path, root.path/"alias"); HeapProfiler profiler(query, (root.path/"alias").string());
++    profiler.start(1); phase(profiler, "error"); assert(!f.active);
++  }
++  {
++    Fake f; fake = &f; Temporary root; ::chmod(root.path.c_str(), 0755); HeapProfiler profiler(query, root.path.string());
++    profiler.start(1); phase(profiler, "error"); assert(!f.active); assert(fs::is_empty(root.path));
++  }
++#endif
++  return 0;
++}

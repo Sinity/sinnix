@@ -14,6 +14,7 @@
           ../../modules/features/desktop/noctalia-automation-ipc.patch
           ../../modules/features/desktop/noctalia-memory-stats.patch
           ../../modules/features/desktop/noctalia-luau-ownership.patch
+          ../../modules/features/desktop/noctalia-heap-profile.patch
         ];
         postPatch = (old.postPatch or "") + ''
           patch -p1 < ${../../modules/features/desktop/noctalia-pipewire-reconnect.patch}
@@ -44,6 +45,79 @@
     {
       checks = {
         noctalia-theme-defaults-migration = noctaliaThemeDefaultsMigration;
+        noctalia-heap-profile-options =
+          let
+            host = inputs.self.nixosConfigurations.sinnix-prime;
+            variant =
+              enabled:
+              (host.extendModules {
+                modules = [
+                  ({ lib, ... }: {
+                    sinnix.features.desktop.noctalia.heapProfiling.enable = lib.mkForce enabled;
+                  })
+                ];
+              }).config;
+            off = variant false;
+            on = variant true;
+            service =
+              config: config.home-manager.users.${config.sinnix.user.name}.systemd.user.services.noctalia.Service;
+            offEnv = (service off).Environment or [ ];
+            onEnv = (service on).Environment or [ ];
+            directory = "${on.sinnix.paths.realmRoot}/state/noctalia-heap-profiles";
+          in
+          assert host.options.sinnix.features.desktop.noctalia.heapProfiling.enable.default == false;
+          assert
+            !builtins.any (
+              value:
+              pkgs.lib.hasPrefix "MALLOC_CONF=" value || pkgs.lib.hasPrefix "NOCTALIA_HEAP_PROFILE_DIR=" value
+            ) offEnv;
+          assert builtins.elem
+            "MALLOC_CONF=prof:true,prof_active:false,prof_accum:false,prof_final:false,prof_gdump:false,lg_prof_interval:-1,lg_prof_sample:16,prof_prefix:"
+            onEnv;
+          assert builtins.elem "NOCTALIA_HEAP_PROFILE_DIR=${directory}" onEnv;
+          assert
+            !builtins.any (rule: pkgs.lib.hasInfix "noctalia-heap-profiles" rule) off.systemd.tmpfiles.rules;
+          assert builtins.elem "d ${directory} 0700 ${on.sinnix.user.name} users - -"
+            on.systemd.tmpfiles.rules;
+          assert (service on).Restart == (service off).Restart;
+          assert (service on).RestartSec == (service off).RestartSec;
+          pkgs.runCommand "noctalia-heap-profile-options-check" { } "touch $out";
+        noctalia-heap-profile =
+          pkgs.runCommand "noctalia-heap-profile-check"
+            {
+              nativeBuildInputs = [
+                pkgs.stdenv.cc
+                pkgs.patch
+                pkgs.git
+              ];
+              buildInputs = [
+                pkgs.nlohmann_json
+                pkgs.jemalloc
+              ];
+            }
+            ''
+              mkdir -p source/src/app source/src/util source/src/cli source/tests "$out"
+              cp ${inputs.noctalia}/meson.build source/
+              cp ${inputs.noctalia}/src/app/application.h source/src/app/
+              cp ${inputs.noctalia}/src/app/application.cpp source/src/app/
+              cp ${inputs.noctalia}/src/app/application_ipc.cpp source/src/app/
+              cp ${inputs.noctalia}/src/cli/schema_msg.h source/src/cli/
+              patch -d source -p1 < ${../../modules/features/desktop/noctalia-memory-stats.patch}
+              git -C source init -q
+              git -C source apply --include=meson.build --include=src/app/application_ipc.cpp \
+                ${../../modules/features/desktop/noctalia-luau-ownership.patch}
+              git -C source apply --include=meson.build --include=src/cli/schema_msg.h \
+                ${../../modules/features/desktop/noctalia-automation-ipc.patch}
+              patch -d source -p1 < ${../../modules/features/desktop/noctalia-heap-profile.patch}
+              c++ -std=c++23 -UNDEBUG -pthread -fsanitize=address -fno-omit-frame-pointer \
+                -I source/src source/tests/heap_profile_test.cpp -o heap-profile-test
+              ./heap-profile-test
+              c++ -std=c++23 -UNDEBUG -pthread -DNOCTALIA_REAL_PROFILE_TEST -fno-omit-frame-pointer -g \
+                -I source/src source/tests/heap_profile_test.cpp -ljemalloc -o real-heap-profile-test
+              env -u MALLOC_CONF ./real-heap-profile-test --disabled
+              MALLOC_CONF='prof:true,prof_active:false,prof_accum:false,prof_final:false,prof_gdump:false,lg_prof_interval:-1,lg_prof_sample:16,prof_prefix:' \
+                ./real-heap-profile-test > "$out/real-control-proof.json"
+            '';
         noctalia-luau-ownership =
           pkgs.runCommand "noctalia-luau-ownership-check"
             {
@@ -176,7 +250,8 @@
                 ${../../scripts/sinnix-wallpaper-timeofday} \
                 ${../../flake/tests/noctalia-wallpaper-timeofday.sh} \
                 ${../../modules/features/desktop/noctalia-memory-stats.patch} \
-                ${../../modules/features/desktop/noctalia-luau-ownership.patch}
+                ${../../modules/features/desktop/noctalia-luau-ownership.patch} \
+                ${../../modules/features/desktop/noctalia-heap-profile.patch}
               touch "$out"
             '';
       };

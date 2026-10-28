@@ -10,6 +10,7 @@ timeofday_script="$(realpath -e "${5:?time-of-day script required}")"
 timeofday_contract="$(realpath -e "${6:?time-of-day behavior test required}")"
 memory_patch="$(realpath -e "${7:?allocator statistics patch required}")"
 ownership_patch="$(realpath -e "${8:?runtime allocation ownership patch required}")"
+profile_patch="$(realpath -e "${9:?bounded heap profile patch required}")"
 
 work_root="$(mktemp -d)"
 trap 'rm -rf "$work_root"' EXIT
@@ -29,6 +30,8 @@ git -C "$work_root" apply --check "$memory_patch"
 git -C "$work_root" apply "$memory_patch"
 git -C "$work_root" apply --check "$ownership_patch"
 git -C "$work_root" apply "$ownership_patch"
+git -C "$work_root" apply --check "$profile_patch"
+git -C "$work_root" apply "$profile_patch"
 
 bash -n "$wallpaper_script" "$timeofday_script"
 bash "$timeofday_contract" "$timeofday_script"

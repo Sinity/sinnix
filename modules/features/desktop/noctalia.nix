@@ -15,6 +15,7 @@
   pkgs,
   inputs,
   helpers,
+  lib,
   ...
 }@args:
 mkFeatureModule {
@@ -23,6 +24,7 @@ mkFeatureModule {
     "noctalia"
   ];
   description = "Noctalia Wayland shell (bar, launcher, notifications, lock, OSD, wallpaper, dynamic color)";
+  extraOptions.heapProfiling.enable = lib.mkEnableOption "explicit bounded Noctalia heap profiling";
   meta.dotfiles.configFile = {
     "noctalia/config.toml" = "noctalia/config.toml";
     "noctalia/plugins.toml" = "noctalia/plugins.toml";
@@ -35,12 +37,17 @@ mkFeatureModule {
       pkgs,
       inputs,
       user,
+      cfg,
       ...
     }:
     let
       nixosConfig = config;
+      heapProfileDirectory = "${config.sinnix.paths.realmRoot}/state/noctalia-heap-profiles";
     in
     {
+      systemd.tmpfiles.rules = lib.optionals cfg.heapProfiling.enable [
+        "d ${heapProfileDirectory} 0700 ${user} users - -"
+      ];
       sinnix.runtime.units.noctalia = {
         unit = "noctalia.service";
         manager = "user";
@@ -75,6 +82,7 @@ mkFeatureModule {
               ./noctalia-automation-ipc.patch
               ./noctalia-memory-stats.patch
               ./noctalia-luau-ownership.patch
+              ./noctalia-heap-profile.patch
             ];
             postPatch = (old.postPatch or "") + ''
               patch -p1 < ${./noctalia-pipewire-reconnect.patch}
@@ -110,6 +118,12 @@ mkFeatureModule {
               # while the graphical session remains active. Explicit stops stay stopped.
               Restart = lib.mkForce "always";
               RestartSec = 2;
+            }
+            // lib.optionalAttrs cfg.heapProfiling.enable {
+              Environment = [
+                "MALLOC_CONF=prof:true,prof_active:false,prof_accum:false,prof_final:false,prof_gdump:false,lg_prof_interval:-1,lg_prof_sample:16,prof_prefix:"
+                "NOCTALIA_HEAP_PROFILE_DIR=${heapProfileDirectory}"
+              ];
             };
 
           home.file.".local/share/noctalia/pinned/official/timer".source = "${officialPlugins}/timer";
