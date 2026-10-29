@@ -269,6 +269,10 @@ mkFeatureModule {
         sinnix.features.dev.agentTools.hermesConfigSource = hermesConfigFile;
         sinnix.features.dev.agentTools.hermesProfileConfigSources = hermesProfileConfigFiles;
         environment.etc."claude-code/managed-settings.json".source = claudeManagedSettings;
+        systemd.tmpfiles.rules = [
+          "d /realm/state/codex 0700 ${user} users -"
+          "d /realm/state/codex/logs 0700 ${user} users -"
+        ];
         sinnix.persistence.home = {
           directories = [
             {

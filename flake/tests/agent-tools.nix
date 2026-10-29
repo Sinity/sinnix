@@ -163,6 +163,13 @@ in
               message = "Codex defaults and MCP servers must share the generated system config.";
             }
             {
+              assertion = lib.all (rule: builtins.elem rule config.systemd.tmpfiles.rules) [
+                "d /realm/state/codex 0700 ${config.sinnix.user.name} users -"
+                "d /realm/state/codex/logs 0700 ${config.sinnix.user.name} users -"
+              ];
+              message = "Codex diagnostic logs must have a private, user-owned Realm directory.";
+            }
+            {
               assertion =
                 (config.environment.etc."codex/agents/explorer.toml".source or null)
                 == "${config.sinnix.paths.dotsRoot}/codex/agents/explorer.toml";
@@ -928,6 +935,8 @@ in
             assert private_config['private']['keep'] is True
             system_config = tomllib.loads(pathlib.Path('${agentToolsCodexConfigSource}').read_text())
             assert system_config['features']['hooks'] is True
+            assert system_config['log_dir'] == '/realm/state/codex/logs'
+            assert 'sqlite_home' not in system_config
 
             default = set(system_config['mcp_servers'])
             import json
