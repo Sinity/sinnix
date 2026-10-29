@@ -17,15 +17,6 @@ set -euo pipefail
 umask 077
 
 LEDGER_PARQUET="${SINNIX_URL_LEDGER_PARQUET:-}"
-if [[ -z "$LEDGER_PARQUET" ]]; then
-  ledger_args=()
-  if [[ -n "${SINNIX_URL_LEDGER_ROOT:-}" ]]; then
-    ledger_args=(--derived-root "$SINNIX_URL_LEDGER_ROOT")
-  fi
-  # Bind the immutable generation once before querying it.
-  ledger_generation=$(sinnix-url-ledger published "${ledger_args[@]}") || exit 1
-  LEDGER_PARQUET="$ledger_generation/url_ledger.parquet"
-fi
 ARCHIVE_ROOT="${SINNIX_VIDEO_ARCHIVE_ROOT:-/realm/activity/browser/recovery}"
 DL_ARCHIVE="$ARCHIVE_ROOT/.yt-dlp-archive"
 # Compatibility record from the first resolver implementation. It remains
@@ -41,23 +32,40 @@ LIMIT="${SINNIX_VIDEO_RESOLVE_LIMIT:-20}"
 # paths mention these domains.
 VIDEO_URL_PATTERN='^https?://((www\.|m\.)?youtube\.com/(watch\?|shorts/)|youtu\.be/[A-Za-z0-9_-]+|(www\.)?vimeo\.com/[0-9]+|(www\.)?twitch\.tv/videos/[0-9]+|streamable\.com/[A-Za-z0-9]+|(www\.)?dailymotion\.com/video/)'
 
-if [[ ! -f "$LEDGER_PARQUET" ]]; then
-  echo "sinnix-video-resolve: no ledger parquet at $LEDGER_PARQUET (run 'sinnix-url-ledger build' first)" >&2
-  exit 1
-fi
-
-# SQL string literals escape apostrophes by doubling them.
-ledger_sql=${LEDGER_PARQUET//\'/\'\'}
-if ! url_lines=$(
+# This function runs only the bounded extraction. The owner wrapper holds the
+# same kernel lock as publication/GC until DuckDB and its connection have closed.
+query_ledger() {
+  local ledger=$1 pattern=$2 limit=$3 ledger_sql
+  if [[ ! -f "$ledger" ]]; then
+    echo "sinnix-video-resolve: no ledger parquet at $ledger (run 'sinnix-url-ledger build' first)" >&2
+    return 1
+  fi
+  ledger_sql=${ledger//\'/\'\'}
   duckdb -list -noheader -c "
     SELECT normalized_url
     FROM read_parquet('$ledger_sql')
-    WHERE regexp_matches(normalized_url, '$VIDEO_URL_PATTERN')
+    WHERE regexp_matches(normalized_url, '$pattern')
     ORDER BY visit_count DESC, normalized_url
-    LIMIT $LIMIT;"
-); then
-  echo "sinnix-video-resolve: ledger query failed" >&2
-  exit 1
+    LIMIT $limit;"
+}
+
+if [[ -n "$LEDGER_PARQUET" ]]; then
+  # Explicit override lifetime belongs to its caller, outside managed GC.
+  if ! url_lines=$(query_ledger "$LEDGER_PARQUET" "$VIDEO_URL_PATTERN" "$LIMIT"); then
+    echo "sinnix-video-resolve: ledger query failed" >&2
+    exit 1
+  fi
+else
+  ledger_args=()
+  if [[ -n "${SINNIX_URL_LEDGER_ROOT:-}" ]]; then
+    ledger_args=(--derived-root "$SINNIX_URL_LEDGER_ROOT")
+  fi
+  export -f query_ledger
+  if ! url_lines=$(sinnix-url-ledger published "${ledger_args[@]}" --exec "$BASH" -c \
+    'query_ledger "$SINNIX_URL_LEDGER_GENERATION/url_ledger.parquet" "$@"' _ "$VIDEO_URL_PATTERN" "$LIMIT"); then
+    echo "sinnix-video-resolve: ledger query failed" >&2
+    exit 1
+  fi
 fi
 urls=()
 if [[ -n "$url_lines" ]]; then

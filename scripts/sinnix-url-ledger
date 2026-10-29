@@ -29,8 +29,10 @@ Pipeline (three subcommands, chained by `run`):
            nearest archived snapshot to each visit.
 
 Build publishes current.json atomically after reopening and comparing the
-database, Parquet, coverage rows and statistics. Readers use `published` once
-per operation to select its immutable generation. Authored state stays outside
+database, Parquet, coverage rows and statistics. Readers use
+`published --exec <command...>` to hold the publication lock through an
+operation; SINNIX_URL_LEDGER_GENERATION names its selected generation. Plain
+`published` resolves a path without extending its lifetime. Authored state stays outside
 generation cleanup. Superseded derived generations are pruned; predecessor flat
 products move into history only after successful publication.
 
@@ -1062,8 +1064,21 @@ def published_generation(root: Path) -> Path:
 
 def cmd_published(args: argparse.Namespace) -> int:
     try:
-        print(published_generation(Path(args.derived_root)))
-        return 0
+        root = Path(args.derived_root)
+        if args.reader is None:
+            print(published_generation(root))
+            return 0
+        if not args.reader:
+            raise ValueError("--exec requires a reader command")
+        # The same lock covers selection, the complete child read and writer GC.
+        # Share the lease with the reader so owner interruption cannot expose a
+        # still-running child to GC. Closing every copy releases the kernel lock.
+        with (root / ".build.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_SH)
+            generation = published_generation(root)
+            result = subprocess.run(args.reader, pass_fds=(lock.fileno(),),
+                                    env={**os.environ, "SINNIX_URL_LEDGER_GENERATION": str(generation)})
+        return result.returncode if result.returncode >= 0 else 128 - result.returncode
     except (OSError, ValueError, KeyError, TypeError) as error:
         print(f"sinnix-url-ledger: publication unavailable: {error}", file=sys.stderr)
         return 1
@@ -1128,8 +1143,8 @@ def cmd_build(args: argparse.Namespace) -> int:
 
     Superseded generations and abandoned .building-* directories are derived
     caches. Source state and preserved legacy flat preimages remain separate.
-    Readers should resolve the pointer for each operation; old paths expire
-    when a newer complete generation commits.
+    Readers use published --exec to hold this lock through their read; plain
+    resolved paths expire when a newer complete generation commits.
     """
     root = Path(args.derived_root)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -1272,6 +1287,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     published = sub.add_parser("published", help="Resolve one verified generation for a reader")
     published.add_argument("--derived-root", default=str(DEFAULT_DERIVED_ROOT))
+    published.add_argument("--exec", dest="reader", nargs=argparse.REMAINDER,
+                           help="Run a reader with SINNIX_URL_LEDGER_GENERATION set and GC excluded until it exits")
     published.set_defaults(func=cmd_published)
 
     run = sub.add_parser("run", help="ingest + resolve + build in one invocation (what the timer runs)")

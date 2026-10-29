@@ -175,7 +175,12 @@ def test_superseded_generation_is_pruned_and_flat_preimages_remain(tmp_path):
 @pytest.mark.parametrize("pointer", ['{"generation":"../outside"}', "[]", "null"])
 def test_reader_refuses_invalid_publication_pointer(tmp_path, pointer):
     (tmp_path / "current.json").write_text(pointer)
-    assert ledger.cmd_published(argparse.Namespace(derived_root=str(tmp_path))) != 0
+    assert (
+        ledger.cmd_published(
+            argparse.Namespace(derived_root=str(tmp_path), reader=None)
+        )
+        != 0
+    )
 
 
 def test_post_commit_durability_failure_keeps_complete_generation(
@@ -236,7 +241,12 @@ def test_reader_refuses_valid_digest_with_wrong_manifest_shape(tmp_path):
             }
         )
     )
-    assert ledger.cmd_published(argparse.Namespace(derived_root=str(tmp_path))) == 1
+    assert (
+        ledger.cmd_published(
+            argparse.Namespace(derived_root=str(tmp_path), reader=None)
+        )
+        == 1
+    )
 
 
 @pytest.mark.parametrize("directory", ["derived", "owner's derived"])
