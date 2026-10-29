@@ -156,6 +156,31 @@
             : > "$BUILD_LOG"
             DISCOVERY_JOBS="$good" ${builtins.head commands} --no-build
             test ! -s "$BUILD_LOG"
+            : > "$BUILD_LOG"
+            : > "$EVALUATION_LOG"
+            DISCOVERY_JOBS="$good" ${builtins.head commands} --max-jobs 1 --cores 2
+            test "$(wc -l < "$EVALUATION_LOG")" = 1
+            ${pkgs.python3}/bin/python3 - "$BUILD_LOG" <<'PY'
+            import pathlib, sys
+            args = pathlib.Path(sys.argv[1]).read_text().splitlines()
+            assert args == ["--no-link", "--accept-flake-config", "--max-jobs", "1", "--cores", "2",
+                            "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-one.drv^*",
+                            "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-two.drv^*"]
+            PY
+            for option in --max-jobs --cores; do
+              for value in missing 0 -1 auto invalid; do
+                : > "$BUILD_LOG"
+                : > "$EVALUATION_LOG"
+                args=("$option")
+                if [ "$value" != missing ]; then args+=("$value"); fi
+                if DISCOVERY_JOBS="$good" ${builtins.head commands} "''${args[@]}"; then
+                  echo "invalid resource option succeeded: $option $value" >&2
+                  exit 1
+                fi
+                test ! -s "$BUILD_LOG"
+                test ! -s "$EVALUATION_LOG"
+              done
+            done
             ${pkgs.python3}/bin/python3 ${./rebuild_guard_test.py} "$REBUILD_GUARD"
             export SUDO_HOME="$TMPDIR" ACTIVATION_LOG="$TMPDIR/activation"
             ${pkgs.git}/bin/git init -q --bare "$TMPDIR/remote.git"

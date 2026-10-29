@@ -53,6 +53,13 @@ document. Writes print JSON on stdout and a summary line on stderr. Exit status:
 0 done; 1 refused or failed; 2 usage; 3 a driven tool failed; 4 the waited job
 did not succeed.
 
+For Sinnix's default check, explicit build bounds follow the operation separator:
+`agentctl job start sinnix check --workspace <checkout> -- --max-jobs 1 --cores 2`.
+Both values are positive integers. Omitted values keep native Nix defaults;
+`--no-build` evaluates the same complete default target set without building.
+Discovery retains its recycled evaluator workers; the explicit bounds apply to
+the subsequent Nix build.
+
 ### Event log compaction
 
 `agentctl events compact --json` migrates legacy finished queue-task events

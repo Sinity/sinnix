@@ -649,16 +649,25 @@ in
           ${pkgs.util-linux}/bin/flock 9
         fi
         _check_no_build=0
-        for arg in "$@"; do
-          case "$arg" in
-            --no-build) _check_no_build=1 ;;
-            *) echo "sinnix check: unsupported argument '$arg'" >&2; exit 64 ;;
+        _check_build_args=()
+        while (( $# )); do
+          case "$1" in
+            --no-build) _check_no_build=1; shift ;;
+            --max-jobs|--cores)
+              if (( $# < 2 )) || ! [[ "$2" =~ ^[1-9][0-9]*$ ]]; then
+                echo "sinnix check: $1 requires a positive integer" >&2
+                exit 64
+              fi
+              _check_build_args+=("$1" "$2")
+              shift 2
+              ;;
+            *) echo "sinnix check: unsupported argument '$1'" >&2; exit 64 ;;
           esac
         done
         ${loadCheckTargets "checks"}
         cd "$_flake_dir"
         if [ "$_check_no_build" = 0 ]; then
-          ${pkgs.nix}/bin/nix build --no-link --accept-flake-config "''${checks_targets[@]}"
+          ${pkgs.nix}/bin/nix build --no-link --accept-flake-config "''${_check_build_args[@]}" "''${checks_targets[@]}"
         fi
         echo "Default check tier complete."
       '';
