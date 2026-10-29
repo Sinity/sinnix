@@ -49,6 +49,20 @@ scratch = "nvme"
 timeout_seconds = 1800
 admission = { memory_mib = 4096 }
 
+# Driver build is bounded to one builder/two cores; runtime QEMU is a direct
+# descendant, so these kernel limits cover the actual pressure workload.
+[operations.earlyoom_pressure_vm_verify]
+description = "Verify real guest memory/swap/IO pressure under explicit host limits"
+exec = ["python3", "flake/tests/earlyoom_pressure_host.py"]
+arguments = "required"
+pool = "bulk"
+result = "json"
+scratch = "nvme"
+cache = "none"
+timeout_seconds = 1800
+admission = { memory_mib = 4608 }
+unit_properties = ["MemoryMax=4G", "MemorySwapMax=0", "IOWeight=10", "IOReadBandwidthMax=/realm 8M", "IOWriteBandwidthMax=/realm 8M", "IOReadBandwidthMax=/nix 8M", "IOWriteBandwidthMax=/nix 8M"]
+
 [operations.verify_snapshot_restore]
 description = "Restore one small file from an exact scoped Realm or Persist archive and verify its complete digest"
 exec = ["python3", "flake/tests/backup_native_restore.py"]

@@ -1,5 +1,6 @@
-# Real signal delivery in a small guest. Host meminfo and PSI readings are
-# deterministic fixtures; this does not claim real swap/IO-stall reproduction.
+# Synthetic sensors with real signal delivery remain a separate check.
+# The companion real-pressure test exports only its driver; the declared
+# operation supplies host limits before running that driver.
 { inputs, ... }:
 {
   perSystem =
@@ -28,6 +29,8 @@
       };
     in
     {
+      packages.earlyoom-real-pressure-driver =
+        (import ./earlyoom-real-pressure.nix { inherit pkgs host; }).driver;
       heavyChecks.earlyoom-emergency-vm = pkgs.testers.runNixOSTest {
         name = "earlyoom-emergency";
         nodes.machine =
