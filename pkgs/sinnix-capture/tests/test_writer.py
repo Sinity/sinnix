@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from sinnix_capture.envelope import SCHEMA, SCHEMA_VERSION, build_envelope
-from sinnix_capture.writer import RECOVERY_CHUNK, HW_WIDTH, CaptureWriter, _max_ts
+from sinnix_capture.writer import HW_WIDTH, RECOVERY_CHUNK, CaptureWriter, _max_ts
 from sinnix_lib import ledger
 from sinnix_lib.atomic import atomic_publish
 

@@ -2,11 +2,10 @@
 
 import ctypes
 import os
-from pathlib import Path
 import select
 import signal
 import sys
-
+from pathlib import Path
 
 mode, *args = sys.argv[1:]
 if mode == "victim":

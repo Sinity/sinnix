@@ -272,11 +272,14 @@ def test_run_actor_reaches_beads_subprocess(tmp_path):
     token = RUN_ID.set("wfr_fixture")
     try:
         beads.native(
-            "fixture", "updateIssue",
+            "fixture",
+            "updateIssue",
             {"path": {"id": "fixture-1"}, "body": {"patch": {"notes": "fixture"}}},
             write=True,
         )
     finally:
         RUN_ID.reset(token)
     assert commands(log)
-    assert all(row["actor"] == "sinnix-gateway:operator:wfr_fixture" for row in commands(log))
+    assert all(
+        row["actor"] == "sinnix-gateway:operator:wfr_fixture" for row in commands(log)
+    )

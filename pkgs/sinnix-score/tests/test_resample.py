@@ -1281,9 +1281,8 @@ def test_imu_scorers_keep_reference_results(score, tmp_path, case):
             if case == "malformed":
                 source.write("invalid,accel,no,signal,here\n")
     for name in ["score_tremor", "score_sway"]:
-        assert (
-            json.dumps(score["score_trace"](score[name], path))
-        == json.dumps(IMU_REFERENCE_RESULTS[case][name])
+        assert json.dumps(score["score_trace"](score[name], path)) == json.dumps(
+            IMU_REFERENCE_RESULTS[case][name]
         )
 
 
@@ -1478,7 +1477,9 @@ def test_raw_storage_memory_is_bounded_and_bytes_match(score, tmp_path, imu):
         with path.open("w") as source:
             source.write("ts,type,x,y,z\n" if imu else "ts,value\n")
             for i in range(count):
-                source.write(f"{i * 10000000},accel,1,2,3\n" if imu else f"{i * 10000000},1\n")
+                source.write(
+                    f"{i * 10000000},accel,1,2,3\n" if imu else f"{i * 10000000},1\n"
+                )
         tracemalloc.start()
         reader = score["_imu_series"] if imu else score["_ppg_series"]
         with reader(path) as result:
@@ -1505,10 +1506,17 @@ def test_history_and_discovery_memory_is_bounded(score, tmp_path):
             for i in range(count):
                 row = {"file": f"{i:05}.csv", "bytes": i}
                 source.write(json.dumps(row) + "\n")
-                source.write(json.dumps(row | {
-                    "sidecar_signature": "absent", "payload_sha256": "a" * 64,
-                    "payload_observation": "b" * 64,
-                }) + "\n")
+                source.write(
+                    json.dumps(
+                        row
+                        | {
+                            "sidecar_signature": "absent",
+                            "payload_sha256": "a" * 64,
+                            "payload_observation": "b" * 64,
+                        }
+                    )
+                    + "\n"
+                )
                 (root / f"{i:05}.csv").touch()
         score["ledger_seen"].__globals__["LEDGER"] = ledger
         tracemalloc.start()

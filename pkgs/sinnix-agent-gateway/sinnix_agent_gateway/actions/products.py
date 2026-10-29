@@ -13,7 +13,6 @@ from ..contracts import VerbFamily
 from ..generated_lynchpin_inputs import CampaignInput as OwnerCampaignInput
 from ..locators import ProjectLocator
 from ..mcp_broker import McpBrokerError
-from ..results import ProtocolError
 from ..schemas import GatewayModel
 
 if TYPE_CHECKING:

@@ -2,10 +2,10 @@
 
 Chrome uses its persistent `~/.config/chrome-ws` profile and two private tmpfs mounts declared by `modules/features/desktop/browser.nix`:
 
-| Purpose | Path | File-data limit | Inode limit | Behavior |
-| --- | --- | --- | --- | --- |
-| HTTP cache | `/run/sinnix-chrome-cache` | 256 MiB | 8192 | Chrome targets 128 MiB; the filesystem bounds aggregate use across profiles |
-| Temporary files | `/run/sinnix-chrome-tmp` | 512 MiB | 4096 | The package wrapper sets `TMPDIR`, including direct `google-chrome` and `google-chrome-stable` launches |
+| Purpose         | Path                       | File-data limit | Inode limit | Behavior                                                                                                |
+| --------------- | -------------------------- | --------------- | ----------- | ------------------------------------------------------------------------------------------------------- |
+| HTTP cache      | `/run/sinnix-chrome-cache` | 256 MiB         | 8192        | Chrome targets 128 MiB; the filesystem bounds aggregate use across profiles                             |
+| Temporary files | `/run/sinnix-chrome-tmp`   | 512 MiB         | 4096        | The package wrapper sets `TMPDIR`, including direct `google-chrome` and `google-chrome-stable` launches |
 
 Both mounts allocate on demand, use `noswap`, and are accessible only to the configured desktop user. Maximum added file-data RAM is 768 MiB (2.4% of 32 GiB), plus kernel metadata bounded by the inode counts. Unused capacity consumes no file-data RAM. `noswap` prevents these files competing for the zram swap tier. See the [kernel tmpfs contract](https://docs.kernel.org/filesystems/tmpfs.html).
 

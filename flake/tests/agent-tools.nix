@@ -887,8 +887,12 @@ in
                 | any(contains("sessionstart-sinex-recall.sh"))) and
               ([.hooks.Stop[].hooks[].command]
                 | any(. == "polylogue hook Stop"))
-            ' ${agentToolsRuntimeEvaluated.config.environment.etc."claude-code/managed-settings.json".source} >/dev/null
-            cmp ${agentToolsRuntimeEvaluated.config.environment.etc."claude-code/managed-settings.json".source} ${inputs.self}/dots/claude/managed-settings.json
+            ' ${
+              agentToolsRuntimeEvaluated.config.environment.etc."claude-code/managed-settings.json".source
+            } >/dev/null
+            cmp ${
+              agentToolsRuntimeEvaluated.config.environment.etc."claude-code/managed-settings.json".source
+            } ${inputs.self}/dots/claude/managed-settings.json
 
             # Rendered profile configs must match the registry's own computed
             # selection -- membership is derived from mcp-registry.nix at eval

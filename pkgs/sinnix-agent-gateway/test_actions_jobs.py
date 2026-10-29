@@ -772,8 +772,13 @@ def test_queues_report_each_groups_occupancy(
 def test_remote_job_binding_is_visible_without_campaign_binding():
     from sinnix_agent_gateway.actions.jobs import _binding
 
-    binding = _binding({"binding": {
-        "remote_run_id": "wfr_fixture", "actor": "sinnix-gateway:operator:wfr_fixture"
-    }})
+    binding = _binding(
+        {
+            "binding": {
+                "remote_run_id": "wfr_fixture",
+                "actor": "sinnix-gateway:operator:wfr_fixture",
+            }
+        }
+    )
     assert binding.remote_run_id == "wfr_fixture"
     assert binding.actor == "sinnix-gateway:operator:wfr_fixture"

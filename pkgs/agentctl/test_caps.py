@@ -141,7 +141,9 @@ def _poll_waiter(connection, expected):
     assert connection.recv() == expected
 
 
-def test_cap_tickets_keep_fifo_order_when_later_waiters_poll_first(tmp_path, cap_waiters):
+def test_cap_tickets_keep_fifo_order_when_later_waiters_poll_first(
+    tmp_path, cap_waiters
+):
     held = run.hold_cap_place(tmp_path, 1, cancelled=lambda: False, log=io.BytesIO())
     workers = [cap_waiters(tmp_path) for _ in range(4)]
     try:

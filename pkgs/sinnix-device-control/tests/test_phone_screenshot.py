@@ -58,7 +58,7 @@ fi
     out.write_bytes(b"previous")
     env = {
         **os.environ,
-        "PATH": f'{binary}:{os.environ["PATH"]}',
+        "PATH": f"{binary}:{os.environ['PATH']}",
         "CALLS": str(tmp_path / "calls"),
         "PAYLOAD": str(payload),
         "MODE": mode,

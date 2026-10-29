@@ -1114,7 +1114,10 @@ def test_uncertain_adapter_is_never_replayed_as_success(tmp_path):
 
 def test_process_replaced_between_resolution_and_dispatch_is_not_signalled(tmp_path):
     identities = iter(
-        [(55, "fixture.scope", "agent-cli.slice"), (56, "fixture.scope", "agent-cli.slice")]
+        [
+            (55, "fixture.scope", "agent-cli.slice"),
+            (56, "fixture.scope", "agent-cli.slice"),
+        ]
     )
     signals = []
     actions = make_process_actions(

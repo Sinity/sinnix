@@ -246,9 +246,12 @@ for scenario in native-ok native-fail native-term; do
     FIXTURE_SCENARIO="$scenario" bash "$helper" full synthetic-page \
     >"$fixture/$scenario.json" 2>"$fixture/$scenario.err" || status=$?
   case "$scenario" in
-    native-ok) test "$status" -eq 0; jq -e '.page_id == "synthetic-page"' "$fixture/$scenario.json" ;;
-    native-fail) test "$status" -eq 37 ;;
-    native-term) test "$status" -eq 143 ;;
+  native-ok)
+    test "$status" -eq 0
+    jq -e '.page_id == "synthetic-page"' "$fixture/$scenario.json"
+    ;;
+  native-fail) test "$status" -eq 37 ;;
+  native-term) test "$status" -eq 143 ;;
   esac
   test -z "$(find "$fixture/work" -mindepth 1 -print -quit)"
 done

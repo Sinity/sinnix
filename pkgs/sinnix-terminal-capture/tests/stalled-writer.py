@@ -1,12 +1,13 @@
 """Exercise a real PTY/recorder while the destination cannot even open."""
+
 import json
 import os
-from pathlib import Path
 import shlex
 import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 helper = sys.argv[1]
 root = Path(os.environ["TMPDIR"])
@@ -19,17 +20,33 @@ shell.write_text(
     "sys.stdout.write('\\nSHELL-FINISHED\\n')\n"
     "sys.stdout.flush()\n"
 )
-command = [sys.executable, helper, "record", str(fifo), "asciinema", "rec",
-           "--quiet", "--return", "--output-format", "asciicast-v3",
-           "--command", shlex.join([sys.executable, str(shell)])]
+command = [
+    sys.executable,
+    helper,
+    "record",
+    str(fifo),
+    "asciinema",
+    "rec",
+    "--quiet",
+    "--return",
+    "--output-format",
+    "asciicast-v3",
+    "--command",
+    shlex.join([sys.executable, str(shell)]),
+]
 transcript = root / "terminal.log"
 with transcript.open("wb") as output:
-    process = subprocess.Popen(["script", "-qfec", shlex.join(command), "/dev/null"],
-                               stdout=output, stderr=subprocess.STDOUT)
+    process = subprocess.Popen(
+        ["script", "-qfec", shlex.join(command), "/dev/null"],
+        stdout=output,
+        stderr=subprocess.STDOUT,
+    )
     try:
         deadline = time.monotonic() + 10
         while b"SHELL-FINISHED" not in transcript.read_bytes():
-            assert process.poll() is None, transcript.read_text(errors="replace")[-2000:]
+            assert process.poll() is None, transcript.read_text(errors="replace")[
+                -2000:
+            ]
             assert time.monotonic() < deadline, "shell stalled behind destination"
             time.sleep(0.05)
         # Destination stays unread for another few seconds after shell output.
@@ -59,8 +76,12 @@ with transcript.open("wb") as output:
 # A failed disk write must fail the supervised recorder rather than silently
 # reporting the shell's successful exit.
 command[3] = "/dev/full"
-result = subprocess.run(["script", "-qfec", shlex.join(command), "/dev/null"],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+result = subprocess.run(
+    ["script", "-qfec", shlex.join(command), "/dev/null"],
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    timeout=15,
+)
 assert result.returncode != 0
 
 # Exercise exhaustion with a small bound instead of consuming 256 MiB in CI.
@@ -73,8 +94,11 @@ code = (
     "sys.exit(scope['write_capture'](sys.argv[2]))"
 )
 with (root / "exhaustion.log").open("wb") as errors:
-    writer = subprocess.Popen([sys.executable, "-c", code, helper, str(small_fifo)],
-                              stdin=subprocess.PIPE, stderr=errors)
+    writer = subprocess.Popen(
+        [sys.executable, "-c", code, helper, str(small_fifo)],
+        stdin=subprocess.PIPE,
+        stderr=errors,
+    )
     payload = b"bounded-capture\n" * 131072
     sent = threading.Event()
 

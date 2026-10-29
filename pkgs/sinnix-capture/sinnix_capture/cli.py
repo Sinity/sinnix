@@ -100,7 +100,9 @@ def _cmd_write(args: argparse.Namespace) -> int:
             emit(writer.write_batch(records, raw_ref=args.raw_ref))
         return 0
 
-    payload = json.loads(args.payload) if args.payload is not None else json.load(sys.stdin)
+    payload = (
+        json.loads(args.payload) if args.payload is not None else json.load(sys.stdin)
+    )
     emit([writer.write(payload, raw_ref=args.raw_ref, ts=args.ts)])
     return 0
 

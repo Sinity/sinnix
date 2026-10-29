@@ -360,7 +360,12 @@ def test_deadline_replay_resumes_only_completed_records(
         pressure_pause,
         "read_pressure",
         lambda _: dict.fromkeys(
-            ["io_full_avg10", "io_full_avg60", "memory_full_avg10", "memory_full_avg60"],
+            [
+                "io_full_avg10",
+                "io_full_avg60",
+                "memory_full_avg10",
+                "memory_full_avg60",
+            ],
             0.0,
         ),
     )

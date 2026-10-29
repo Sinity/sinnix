@@ -40,7 +40,9 @@ def planned_unit_cgroup(unit: str, slice_name: str) -> str | None:
         if not manager:
             return None
         parts = slice_name.removesuffix(".slice").split("-")
-        hierarchy = ["-".join(parts[:end]) + ".slice" for end in range(1, len(parts) + 1)]
+        hierarchy = [
+            "-".join(parts[:end]) + ".slice" for end in range(1, len(parts) + 1)
+        ]
         parent = manager.rstrip("/") + "/" + "/".join(hierarchy)
     return parent.rstrip("/") + "/" + unit
 

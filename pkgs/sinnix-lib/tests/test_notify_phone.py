@@ -44,6 +44,7 @@ def test_phone_sink_timeout_is_silent_and_not_retried(tmp_path, monkeypatch):
 
 def test_system_alarm_queues_as_session_owner(tmp_path, monkeypatch):
     from pathlib import Path
+
     from sinnix_lib import notify
 
     monkeypatch.setattr("os.geteuid", lambda: 0)

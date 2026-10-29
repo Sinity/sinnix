@@ -205,8 +205,7 @@ def test_stream_writes_one_batch_with_arrival_timestamps(
     monkeypatch.setattr(os, "fsync", counted)
     before = time.time()
     assert (
-        main(["write", "--capture-root", str(tmp_path), "--lane", "b", "--stream"])
-        == 0
+        main(["write", "--capture-root", str(tmp_path), "--lane", "b", "--stream"]) == 0
     )
     records = _records(tmp_path, "b")
     assert [r["seq"] for r in records] == [1, 2, 3, 4, 5]

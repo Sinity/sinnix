@@ -54,16 +54,16 @@ paths. Neither measurement establishes that a directory is disposable.
 
 ## What is backed up
 
-| Source                   | How                                                                    | When                                                  | Repository                         |
-| ------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------- |
-| `/realm`                 | btrbk read-only snapshot, archived by the Borg job                     | snapshots 00/06/12/18:00, drain nightly 03:05         | `borg-realm-v2`                    |
-| `/persist`               | btrbk read-only snapshot, archived by the Borg job                     | same as `/realm`                                      | `borg-persist-v1`                  |
-| HDD genome workspace     | dedicated btrbk cut, archived independently of `/realm`                | six-hour cuts only when changed, drained nightly      | `borg-realm-v2`, `genome-*` series |
-| The ephemeral root       | snapshot the initrd takes before each wipe                             | nightly coordinator                                    | `borg-root-snapshots-v1`           |
-| Sinex content stores     | read in place: the running store and the dated earlier one             | nightly coordinator                                    | `borg-sinex-blobs-v1`              |
-| Sinex database dump      | `pg_dump` into `state/db-dumps/sinex`, archived with `/realm`          | dump daily at midnight                                | `borg-realm-v2`                    |
-| Polylogue state          | hooks archived directly from a read-only snapshot of its subvolume     | nightly coordinator                                    | `borg-polylogue-state-v1`          |
-| Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm` | dumps before nightly cut, seal Sunday                   | `borg-realm-v2`                    |
+| Source                   | How                                                                    | When                                             | Repository                         |
+| ------------------------ | ---------------------------------------------------------------------- | ------------------------------------------------ | ---------------------------------- |
+| `/realm`                 | btrbk read-only snapshot, archived by the Borg job                     | snapshots 00/06/12/18:00, drain nightly 03:05    | `borg-realm-v2`                    |
+| `/persist`               | btrbk read-only snapshot, archived by the Borg job                     | same as `/realm`                                 | `borg-persist-v1`                  |
+| HDD genome workspace     | dedicated btrbk cut, archived independently of `/realm`                | six-hour cuts only when changed, drained nightly | `borg-realm-v2`, `genome-*` series |
+| The ephemeral root       | snapshot the initrd takes before each wipe                             | nightly coordinator                              | `borg-root-snapshots-v1`           |
+| Sinex content stores     | read in place: the running store and the dated earlier one             | nightly coordinator                              | `borg-sinex-blobs-v1`              |
+| Sinex database dump      | `pg_dump` into `state/db-dumps/sinex`, archived with `/realm`          | dump daily at midnight                           | `borg-realm-v2`                    |
+| Polylogue state          | hooks archived directly from a read-only snapshot of its subvolume     | nightly coordinator                              | `borg-polylogue-state-v1`          |
+| Telemetry database dumps | `--rsyncable` zstd copies in `state/db-dumps/`, archived with `/realm` | dumps before nightly cut, seal Sunday            | `borg-realm-v2`                    |
 
 Left out of the `/realm` archive (`realmExcludes` in `modules/backup.nix`):
 downloaded model weights (including embeddings), Steam libraries and runtimes,

@@ -297,15 +297,22 @@ in
     in
     {
       checks = {
-        terminal-capture-buffered-writer = pkgs.runCommand "terminal-capture-buffered-writer"
-          { nativeBuildInputs = [ pkgs.python3 pkgs.asciinema pkgs.util-linux ]; }
-          ''
-            export HOME="$TMPDIR/home"
-            mkdir -p "$HOME"
-            python3 ${../../pkgs/sinnix-terminal-capture/tests/stalled-writer.py} \
-              ${../../scripts/sinnix-terminal-capture-writer}
-            touch "$out"
-          '';
+        terminal-capture-buffered-writer =
+          pkgs.runCommand "terminal-capture-buffered-writer"
+            {
+              nativeBuildInputs = [
+                pkgs.python3
+                pkgs.asciinema
+                pkgs.util-linux
+              ];
+            }
+            ''
+              export HOME="$TMPDIR/home"
+              mkdir -p "$HOME"
+              python3 ${../../pkgs/sinnix-terminal-capture/tests/stalled-writer.py} \
+                ${../../scripts/sinnix-terminal-capture-writer}
+              touch "$out"
+            '';
         terminal-capture-runtime = terminalCaptureRuntime;
         terminal-capture-runtime-failure = terminalCaptureRuntimeFailure;
       };

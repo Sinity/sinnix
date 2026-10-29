@@ -540,7 +540,9 @@ def test_validation_rejects_changed_multisets_with_unchanged_totals(tmp_path, pr
         }
         for name in ("first", "second")
     ]
-    (state / "urls.jsonl").write_text("".join(json.dumps(row) + "\n" for row in records))
+    (state / "urls.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in records)
+    )
     args = argparse.Namespace(
         state_root=str(state),
         derived_root=str(tmp_path / "derived"),

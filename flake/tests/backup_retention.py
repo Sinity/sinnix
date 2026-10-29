@@ -44,7 +44,9 @@ with tempfile.TemporaryDirectory() as temporary:
     ]:
         moment = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=age)
         if "day-" in name:
-            moment = moment.replace(hour=12, minute=10 if name.endswith("-a") else 20, second=0)
+            moment = moment.replace(
+                hour=12, minute=10 if name.endswith("-a") else 20, second=0
+            )
         stamp = moment.strftime("%Y-%m-%dT%H:%M:%S")
         run(
             ["borg", "create", "--timestamp", stamp, f"{repo}::{name}", "payload"],

@@ -571,7 +571,9 @@ def test_remote_run_binding_reaches_job_owner(adapter, monkeypatch, shell):
     token = RUN_ID.set("wfr_fixture")
     try:
         if shell:
-            adapter.shell_start(project_id="fixture", argv=["true"], group="shell-quick")
+            adapter.shell_start(
+                project_id="fixture", argv=["true"], group="shell-quick"
+            )
         else:
             adapter.start(project_id="fixture", operation="verify")
     finally:

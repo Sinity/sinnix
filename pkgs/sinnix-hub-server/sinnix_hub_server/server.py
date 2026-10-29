@@ -414,7 +414,12 @@ class Handler(BaseHTTPRequestHandler):
                 payload = read_json_object(self.headers, self.rfile, max_bytes=4096)
                 focus(payload.get("pin"))
                 self._write(HTTPStatus.OK, {"status": "focused"})
-            except (RequestBodyError, ValueError, OSError, subprocess.SubprocessError) as error:
+            except (
+                RequestBodyError,
+                ValueError,
+                OSError,
+                subprocess.SubprocessError,
+            ) as error:
                 self._write(HTTPStatus.CONFLICT, {"error": str(error)[:240]})
             return
         if self.path == FEEDBACK_PATH:

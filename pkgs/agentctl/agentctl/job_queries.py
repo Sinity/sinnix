@@ -620,7 +620,10 @@ def _job_detail(
         view["disposition"] = disposition
         view.update(
             _disposition_view(
-                disposition, attempt=attempt, receipt=receipt, queue_terminal=task.terminal
+                disposition,
+                attempt=attempt,
+                receipt=receipt,
+                queue_terminal=task.terminal,
             )
         )
     if launch_input.get("log_path"):
@@ -1074,7 +1077,10 @@ def wait(
             if disposition:
                 view.update(
                     _disposition_view(
-                        disposition, attempt=None, receipt={}, queue_terminal=task.terminal
+                        disposition,
+                        attempt=None,
+                        receipt={},
+                        queue_terminal=task.terminal,
                     )
                 )
         return task, view

@@ -393,13 +393,13 @@ def heartbeat(tmp_path, monkeypatch):
         "scan_kill_events": lambda *args: ([], None),
     }.items():
         monkeypatch.setattr(collector, name, replacement)
-    monkeypatch.setattr(collector.filesystem_capacity, "insert_samples", lambda *a: None)
+    monkeypatch.setattr(
+        collector.filesystem_capacity, "insert_samples", lambda *a: None
+    )
     monkeypatch.setattr(collector, "PROCESS_MEMORY_INTERVAL_SEC", 0)
     monkeypatch.setattr(collector, "GPU_INTERVAL_SEC", 0)
     monkeypatch.setattr(collector, "GPU_SAMPLER_BUSY_TIMEOUT_S", 0.05)
-    network_row = dict.fromkeys(
-        ["boot_id", "bloat_json", "dns_ms", "pmtu_1492"]
-    )
+    network_row = dict.fromkeys(["boot_id", "bloat_json", "dns_ms", "pmtu_1492"])
     network_row.update(
         observed_at="2026-01-01T00:00:00+00:00",
         host="fixture",
@@ -455,7 +455,9 @@ def test_optional_probe_allows_independent_gpu_writer(heartbeat, monkeypatch, pr
         try:
             assert done.wait(2), "GPU writer could not finish during the probe"
             with sqlite3.connect(args.db) as conn:
-                assert conn.execute("SELECT count(*) FROM gpu_sample").fetchone() == (1,)
+                assert conn.execute("SELECT count(*) FROM gpu_sample").fetchone() == (
+                    1,
+                )
         finally:
             stop.set()
             worker.join(2)
@@ -491,14 +493,16 @@ def test_heartbeat_retries_failed_journal_scan_without_advancing_cursor(
         calls.append(argv)
         return SimpleNamespace(
             error=failure if len(calls) == 1 else None,
-            stdout=b'{"__CURSOR":"partial"' if len(calls) == 1 else (
-                json.dumps(entry) + "\n-- cursor: system-tail\n"
-            ).encode(),
+            stdout=b'{"__CURSOR":"partial"'
+            if len(calls) == 1
+            else (json.dumps(entry) + "\n-- cursor: system-tail\n").encode(),
         )
 
     monkeypatch.setitem(real_scan.__globals__, "run_bounded", bounded)
     run(beats=2)
-    assert [argv[-2:] for argv in calls] == [["--after-cursor", "legacy-user-cursor"]] * 2
+    assert [argv[-2:] for argv in calls] == [
+        ["--after-cursor", "legacy-user-cursor"]
+    ] * 2
     assert all("--system" in argv and "--since" not in argv for argv in calls)
     with sqlite3.connect(args.db) as conn:
         assert collector.load_kill_event_cursor(conn) == "system-tail"
@@ -510,7 +514,14 @@ def test_heartbeat_retries_failed_journal_scan_without_advancing_cursor(
 def test_heartbeat_rolls_back_kill_rows_and_cursor_together(heartbeat, monkeypatch):
     collector, args, run = heartbeat
     row = dict.fromkeys(
-        ["boot_id", "victim_comm", "victim_pid", "victim_rss_mib", "cgroup_path", "oom_score"]
+        [
+            "boot_id",
+            "victim_comm",
+            "victim_pid",
+            "victim_rss_mib",
+            "cgroup_path",
+            "oom_score",
+        ]
     )
     row.update(
         observed_at="2026-01-01T00:00:00+00:00",

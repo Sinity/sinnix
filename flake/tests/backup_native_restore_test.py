@@ -56,15 +56,22 @@ class RestoreProof(unittest.TestCase):
         proof = RESTORE.verify_target(self.payload, "old", self.read, "persist")
         self.assertEqual(proof["scope"], "persist")
         self.assertEqual(proof["sha256"], self.payload["old_sha256"])
-        self.assertEqual([call[0][1] for call in self.calls], ["list", "extract", "list"])
+        self.assertEqual(
+            [call[0][1] for call in self.calls], ["list", "extract", "list"]
+        )
 
     def test_scope_cannot_select_the_other_repository_archive(self):
-        for scope, archive in (("persist", "realm-realm"), ("realm", "persist-persist"),
-                               ("invalid", "realm-realm")):
+        for scope, archive in (
+            ("persist", "realm-realm"),
+            ("realm", "persist-persist"),
+            ("invalid", "realm-realm"),
+        ):
             with self.subTest(scope=scope), self.assertRaises(ValueError):
                 RESTORE.verify_target(
                     self.payload | {"old_archive": archive + ".20260101T120000+0000"},
-                    "old", self.read, scope,
+                    "old",
+                    self.read,
+                    scope,
                 )
         self.assertEqual(self.calls, [])
 
@@ -102,7 +109,9 @@ class RestoreProof(unittest.TestCase):
             ("old_bytes", True),
         ):
             with self.subTest(field=field), self.assertRaises(ValueError):
-                RESTORE.verify_target(self.payload | {field: value}, "old", self.read, "realm")
+                RESTORE.verify_target(
+                    self.payload | {field: value}, "old", self.read, "realm"
+                )
         self.assertEqual(self.calls, [])
 
     def test_oversized_receipt_is_rejected_before_loading_its_payload(self):
@@ -129,7 +138,9 @@ class RestoreProof(unittest.TestCase):
             )
             responses = [f"{{ path={script} ; }}", "PATH=/synthetic/bin", ""]
             with (
-                patch.object(RESTORE.subprocess, "check_output", side_effect=responses) as output,
+                patch.object(
+                    RESTORE.subprocess, "check_output", side_effect=responses
+                ) as output,
                 patch.object(
                     RESTORE.pwd,
                     "getpwnam",
@@ -138,13 +149,25 @@ class RestoreProof(unittest.TestCase):
                 patch.dict(RESTORE.os.environ, {"TMPDIR": "/synthetic/task-scratch"}),
             ):
                 shell, values = RESTORE.installed_owner("realm")
-            self.assertTrue(all(call.args[0][2] == "borgbackup-job-realm.service"
-                                for call in output.call_args_list))
-            with patch.object(RESTORE.subprocess, "check_output", side_effect=responses) as output, \
-                 patch.dict(RESTORE.os.environ, {"TMPDIR": "/synthetic/task-scratch"}):
+            self.assertTrue(
+                all(
+                    call.args[0][2] == "borgbackup-job-realm.service"
+                    for call in output.call_args_list
+                )
+            )
+            with (
+                patch.object(
+                    RESTORE.subprocess, "check_output", side_effect=responses
+                ) as output,
+                patch.dict(RESTORE.os.environ, {"TMPDIR": "/synthetic/task-scratch"}),
+            ):
                 RESTORE.installed_owner("persist")
-            self.assertTrue(all(call.args[0][2] == "borgbackup-job-persist.service"
-                                for call in output.call_args_list))
+            self.assertTrue(
+                all(
+                    call.args[0][2] == "borgbackup-job-persist.service"
+                    for call in output.call_args_list
+                )
+            )
             self.assertEqual(shell, "/bin/bash")
             self.assertEqual(
                 values["BORG_PASSCOMMAND"], "/synthetic/cat /run/secret/synthetic"

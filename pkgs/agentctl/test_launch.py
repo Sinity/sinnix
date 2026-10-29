@@ -2080,26 +2080,37 @@ def test_native_cleanup_retains_incomplete_job_after_queue_removal(
     assert native_worktrees._owners(config, project, {})[workspace]["terminal"] is True
 
 
-
-
 @pytest.mark.parametrize("key", [None, "fixture-remote-launch"])
 def test_operation_binding_persists_original_run_on_replay(
     fake_pueue: FakePueue, config: Config, project_root: Path, key
 ) -> None:
     project = load_project_adapter(project_root)
-    binding = {"remote_run_id": "wfr_fixture", "actor": "sinnix-gateway:operator:wfr_fixture"}
+    binding = {
+        "remote_run_id": "wfr_fixture",
+        "actor": "sinnix-gateway:operator:wfr_fixture",
+    }
     started = launch.start_operation(
-        config, project, project.operation("verify"), binding=binding, idempotency_key=key
+        config,
+        project,
+        project.operation("verify"),
+        binding=binding,
+        idempotency_key=key,
     )
     written = read_launch(config, fake_pueue.task(started["task_id"]))
     assert written["binding"] == binding
     if key:
         replay = launch.start_operation(
-            config, project, project.operation("verify"),
-            binding={"remote_run_id": "wfr_other"}, idempotency_key=key,
+            config,
+            project,
+            project.operation("verify"),
+            binding={"remote_run_id": "wfr_other"},
+            idempotency_key=key,
         )
         assert replay["job_id"] == started["job_id"]
-        assert read_launch(config, fake_pueue.task(started["task_id"]))["binding"] == binding
+        assert (
+            read_launch(config, fake_pueue.task(started["task_id"]))["binding"]
+            == binding
+        )
 
 
 @pytest.mark.parametrize("terminal", [False, True])
@@ -2118,7 +2129,8 @@ def test_retained_unit_custody_survives_launcher_death_without_cancel_request(
     members.write_text("12345\n")
     monkeypatch.setattr(cgroups, "CGROUP_ROOT", tmp_path)
     launch._write_disposition(
-        config, task,
+        config,
+        task,
         {"unit": "fixture.service", "cgroup": "/fixture.service", "attempt": 1},
     )
     if terminal:
@@ -2146,14 +2158,27 @@ def test_planned_cgroup_covers_inactive_slices(tmp_path, monkeypatch, parent):
     from agentctl import cgroups
 
     monkeypatch.setattr(
-        cgroups, "unit_cgroup", lambda name: "/fixture-user" if name == "-.slice" else parent
+        cgroups,
+        "unit_cgroup",
+        lambda name: "/fixture-user" if name == "-.slice" else parent,
     )
-    assert cgroups.planned_unit_cgroup("fixture.service", "agent-ctl-pytest-quick.slice") == (
+    assert cgroups.planned_unit_cgroup(
+        "fixture.service", "agent-ctl-pytest-quick.slice"
+    ) == (
         "/fixture-user/agent.slice/agent-ctl.slice/agent-ctl-pytest.slice/"
         "agent-ctl-pytest-quick.slice/fixture.service"
     )
     monkeypatch.setattr(cgroups, "unit_cgroup", lambda _: None)
-    assert cgroups.planned_unit_cgroup("fixture.service", "agent-ctl-normal.slice") is None
-    assert cgroups.cancellation_obstacle({
-        "unit": "fixture.service", "cgroup": None, "attempt": 1,
-    })["status"] == "unresolved"
+    assert (
+        cgroups.planned_unit_cgroup("fixture.service", "agent-ctl-normal.slice") is None
+    )
+    assert (
+        cgroups.cancellation_obstacle(
+            {
+                "unit": "fixture.service",
+                "cgroup": None,
+                "attempt": 1,
+            }
+        )["status"]
+        == "unresolved"
+    )

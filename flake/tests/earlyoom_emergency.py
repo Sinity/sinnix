@@ -1,12 +1,11 @@
 """Exercise the deployed earlyoom arguments with synthetic host pressure."""
 
 import os
-from pathlib import Path
 import shlex
 import signal
 import subprocess
 import sys
-
+from pathlib import Path
 
 binary, preload, arguments = sys.argv[1:]
 args = shlex.split(arguments)

@@ -582,12 +582,17 @@ class ManagedSweepTest(unittest.TestCase):
         self.old(path)
         fn = MODULE["main"]
         with (
-            patch.dict(fn.__globals__, {
-                "MANAGED_ROOT": str(self.root),
-                "roots": lambda: [str(self.root)],
-                "drop_privileges": lambda *_: None,
-                "paced_remove": lambda *_: self.fail("removed unclassified evidence"),
-            }),
+            patch.dict(
+                fn.__globals__,
+                {
+                    "MANAGED_ROOT": str(self.root),
+                    "roots": lambda: [str(self.root)],
+                    "drop_privileges": lambda *_: None,
+                    "paced_remove": lambda *_: self.fail(
+                        "removed unclassified evidence"
+                    ),
+                },
+            ),
             patch("subprocess.run"),
             contextlib.redirect_stdout(io.StringIO()),
         ):
@@ -601,17 +606,24 @@ class ManagedSweepTest(unittest.TestCase):
         (self.root / "general/payload").mkdir(parents=True)
         self.old(self.root)
         fn = MODULE["main"]
+
         def unavailable():
             raise PermissionError("queue unavailable")
+
         with (
-            patch.dict(fn.__globals__, {
-                "MANAGED_ROOT": str(self.root),
-                "roots": lambda: [str(self.root)],
-                "held_directories": lambda *_: set(),
-                "drop_privileges": lambda *_: None,
-                "active_queue_paths": unavailable,
-                "paced_remove": lambda *_: self.fail("unknown queue removed scratch"),
-            }),
+            patch.dict(
+                fn.__globals__,
+                {
+                    "MANAGED_ROOT": str(self.root),
+                    "roots": lambda: [str(self.root)],
+                    "held_directories": lambda *_: set(),
+                    "drop_privileges": lambda *_: None,
+                    "active_queue_paths": unavailable,
+                    "paced_remove": lambda *_: self.fail(
+                        "unknown queue removed scratch"
+                    ),
+                },
+            ),
             contextlib.redirect_stdout(io.StringIO()),
         ):
             if self.uid == 0:

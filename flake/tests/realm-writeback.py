@@ -1,10 +1,9 @@
 """Run the host's actual policy script against a synthetic sysfs layout."""
 
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
-
+from pathlib import Path
 
 with tempfile.TemporaryDirectory() as directory:
     root = Path(directory)

@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-
 SCRIPT = Path(__file__).resolve().parents[3] / "scripts/sinnix-borg-prune-dumps"
 loader = importlib.machinery.SourceFileLoader("dump_retention", str(SCRIPT))
 subject = types.ModuleType(loader.name)
@@ -34,7 +33,9 @@ def test_plan_keeps_seven_and_preserves_unclassified_files(tmp_path):
     (tmp_path / "telemetry-20260913T000000Z.sqlite.zst").touch()
     with opened(tmp_path) as directory:
         rows = subject.candidates(directory, subject.STREAMS["machine-telemetry"], NOW)
-    assert [name for name, _ in rows] == [f"telemetry-202609{day:02d}T000000Z.sqlite.zst" for day in range(1, 4)]
+    assert [name for name, _ in rows] == [
+        f"telemetry-202609{day:02d}T000000Z.sqlite.zst" for day in range(1, 4)
+    ]
 
 
 class opened:
@@ -67,7 +68,9 @@ def test_postgres_environments_keep_their_own_seven(tmp_path):
     assert all("20260901" in name for name, _ in rows)
 
 
-@pytest.mark.parametrize("failure", ["mismatch", "changed-file", "changed-archive", "restore-error"])
+@pytest.mark.parametrize(
+    "failure", ["mismatch", "changed-file", "changed-archive", "restore-error"]
+)
 def test_failed_proof_never_removes_dump(tmp_path, failure):
     file = dump(tmp_path, 1)
     expected = subject.identity(file.stat())
@@ -117,8 +120,21 @@ def test_native_borg_preview_then_apply_and_identity_guard(tmp_path, monkeypatch
     subprocess.run(["borg", "init", "--encryption=none"], check=True)
     name = "realm-realm.20261025T060000+0100"
     uuid = "11111111-2222-3333-4444-555555555555"
-    subprocess.run(["borg", "create", "--comment", "sinnix-snapshot-v1:" + uuid, "::" + name, "state"], cwd=realm, check=True)
-    archive_id = json.loads(subprocess.check_output(["borg", "list", "--json"]))["archives"][0]["id"]
+    subprocess.run(
+        [
+            "borg",
+            "create",
+            "--comment",
+            "sinnix-snapshot-v1:" + uuid,
+            "::" + name,
+            "state",
+        ],
+        cwd=realm,
+        check=True,
+    )
+    archive_id = json.loads(subprocess.check_output(["borg", "list", "--json"]))[
+        "archives"
+    ][0]["id"]
     subject.run(root, name, archive_id, uuid, False)
     assert len(list(stream.iterdir())) == 9
     subject.run(root, name, archive_id, uuid, True)
@@ -145,6 +161,8 @@ def test_complete_stdout_with_failed_borg_exit_is_not_a_proof(monkeypatch):
         def poll(self):
             return 1
 
-    monkeypatch.setattr(subject.subprocess, "Popen", lambda *args, **kwargs: FailedRestore())
+    monkeypatch.setattr(
+        subject.subprocess, "Popen", lambda *args, **kwargs: FailedRestore()
+    )
     with pytest.raises(ValueError, match="successfully"):
         subject.restored_digest("archive", "file", len(b"complete bytes"))

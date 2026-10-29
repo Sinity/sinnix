@@ -218,8 +218,11 @@ def generated_files(root: Path) -> dict[Path, str]:
         before, rest = doc.read_text().split("<!-- orientation:start -->", 1)
         _, after = rest.split("<!-- orientation:end -->", 1)
         files[doc] = (
-            before + "<!-- orientation:start -->\n" + ORIENTATION
-            + "\n<!-- orientation:end -->" + after
+            before
+            + "<!-- orientation:start -->\n"
+            + ORIENTATION
+            + "\n<!-- orientation:end -->"
+            + after
         )
     return files
 

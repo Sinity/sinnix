@@ -2334,7 +2334,9 @@ def test_startup_retains_native_cgroup_identity_before_dispatch(
         if command[0] == "systemd-run":
             owner = json.loads(Path(str(launch) + ".disposition").read_text())
             assert owner == {
-                "attempt": 1, "unit": unit, "cgroup": "/fixture.slice/" + unit
+                "attempt": 1,
+                "unit": unit,
+                "cgroup": "/fixture.slice/" + unit,
             }
             retained.append(owner)
         return original(command, *args, **kwargs)

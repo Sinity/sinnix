@@ -418,8 +418,12 @@ def test_logcat_zero_matches_are_one_numeric_count(device, existing, incoming):
 
 
 @pytest.mark.parametrize(
-    "incoming", [b"", b"2026-10-09 00:00:02.123 incomplete record",
-                 b"2026-10-09 00:00:02.123 complete record\npartial"]
+    "incoming",
+    [
+        b"",
+        b"2026-10-09 00:00:02.123 incomplete record",
+        b"2026-10-09 00:00:02.123 complete record\npartial",
+    ],
 )
 def test_failed_logcat_pull_preserves_bytes_and_cursor_and_still_checks_bcr(
     device, incoming
@@ -566,7 +570,9 @@ def test_logcat_bounded_stream_publishes_and_resumes(device, bound):
     assert metadata["reason"] == ("byte-cap" if bound == "bytes" else "timeout")
     assert metadata["top_tag"] == "NoisyTag"
     assert "top repeated tag: NoisyTag" in result.stderr
-    assert (root / "phone-state" / "logcat.cursor").read_text().strip() == "2026-10-09 00:00:02.123"
+    assert (
+        root / "phone-state" / "logcat.cursor"
+    ).read_text().strip() == "2026-10-09 00:00:02.123"
     assert not list(directory.glob(".logcat-pull.*"))
     env.pop("LOGCAT_STREAM", None)
     env.pop("LOGCAT_HANG", None)
@@ -613,5 +619,7 @@ def test_logcat_long_complete_line_advances_but_partial_does_not(device):
     assert result.returncode == 0, result.stderr
     assert "logcat: 1 new lines" in result.stdout
     assert next(directory.glob("logcat-*.txt")).read_bytes() == incoming
-    assert (root / "phone-state" / "logcat.cursor").read_text().strip() == "2026-10-09 00:00:02.123"
+    assert (
+        root / "phone-state" / "logcat.cursor"
+    ).read_text().strip() == "2026-10-09 00:00:02.123"
     assert old_stage.read_bytes() == b"existing recovery evidence"

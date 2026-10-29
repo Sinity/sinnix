@@ -222,7 +222,12 @@ def _binding(payload: Mapping[str, Any]) -> JobBinding | None:
     raw = payload.get("binding") if isinstance(payload.get("binding"), Mapping) else {}
     beads = [str(bead) for bead in raw.get("beads") or []]
     run_id = raw.get("run_id")
-    if not beads and not run_id and not raw.get("actor") and not raw.get("remote_run_id"):
+    if (
+        not beads
+        and not run_id
+        and not raw.get("actor")
+        and not raw.get("remote_run_id")
+    ):
         return None
     project_id = payload.get("project_id")
     return JobBinding(

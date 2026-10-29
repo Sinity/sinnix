@@ -91,15 +91,32 @@ def observe_acquisitions(directory, glob, policy_path, source):
         parent = re.search(r"^\s*Parent UUID:\s*([0-9a-f-]{36})\s*$", info, re.M)
         if not parent or parent[1] != source_uuid[1]:
             raise ValueError("acquired snapshot belongs to another source")
-        snapshots.append({"name": name, "uuid": uuid, "generation": generation,
-                          "subvolume_id": subvolume_id, "parent_uuid": parent[1], "cut_epoch": snapshot_epoch(name)})
-    return {"schema": ACQUISITION_SCHEMA, "observed_at": datetime.fromtimestamp(time.time(), timezone.utc).isoformat(),
-            "source": str(source), "source_uuid": source_uuid[1], "filesystem_uuid": filesystem,
-            "snapshot_directory": str(directory), "snapshot_glob": glob,
-            "policy_sha256": policy_identity(policy_path, require_borg_excludes=True), "snapshots": snapshots}
+        snapshots.append(
+            {
+                "name": name,
+                "uuid": uuid,
+                "generation": generation,
+                "subvolume_id": subvolume_id,
+                "parent_uuid": parent[1],
+                "cut_epoch": snapshot_epoch(name),
+            }
+        )
+    return {
+        "schema": ACQUISITION_SCHEMA,
+        "observed_at": datetime.fromtimestamp(time.time(), timezone.utc).isoformat(),
+        "source": str(source),
+        "source_uuid": source_uuid[1],
+        "filesystem_uuid": filesystem,
+        "snapshot_directory": str(directory),
+        "snapshot_glob": glob,
+        "policy_sha256": policy_identity(policy_path, require_borg_excludes=True),
+        "snapshots": snapshots,
+    }
 
 
-def acquisition_freshness(inventory, glob, marker, policy_path, budget, source, max_observation_age):
+def acquisition_freshness(
+    inventory, glob, marker, policy_path, budget, source, max_observation_age
+):
     """Operator reads the root producer's projection; no snapshot or Borg access."""
     observed = json.loads(Path(inventory).read_text())
     policy_hash = policy_identity(policy_path, require_borg_excludes=True)
@@ -108,13 +125,18 @@ def acquisition_freshness(inventory, glob, marker, policy_path, budget, source, 
     if stamp.tzinfo is None or stamp.utcoffset().total_seconds() != 0:
         raise ValueError("acquisition observation must have an explicit UTC timestamp")
     observed_epoch = stamp.timestamp()
-    if (observed.get("schema") != ACQUISITION_SCHEMA
-        or observed.get("source") != str(source) or observed.get("snapshot_glob") != glob
+    if (
+        observed.get("schema") != ACQUISITION_SCHEMA
+        or observed.get("source") != str(source)
+        or observed.get("snapshot_glob") != glob
         or observed.get("policy_sha256") != policy_hash
         or re.fullmatch(r"[0-9a-f-]{36}", observed.get("source_uuid", "")) is None
         or re.fullmatch(r"[0-9a-f-]{36}", observed.get("filesystem_uuid", "")) is None
-        or not 0 <= now - observed_epoch <= max_observation_age):
-        raise ValueError("acquisition observation is stale, future, unavailable or changed")
+        or not 0 <= now - observed_epoch <= max_observation_age
+    ):
+        raise ValueError(
+            "acquisition observation is stale, future, unavailable or changed"
+        )
     ready = audit_readiness(marker, policy_path)
     if not ready["ready"]:
         raise ValueError(ready["reason"])
@@ -122,41 +144,67 @@ def acquisition_freshness(inventory, glob, marker, policy_path, budget, source, 
     proof = json.loads(fields["coverage"])
     snapshot = ready["snapshot"]
     receipt = acknowledgement_directory(marker) / snapshot
-    if (not fnmatchcase(snapshot, glob) or marker_order(fields) is None
-        or receipt.is_symlink() or read_marker_fields(receipt) != fields):
+    if (
+        not fnmatchcase(snapshot, glob)
+        or marker_order(fields) is None
+        or receipt.is_symlink()
+        or read_marker_fields(receipt) != fields
+    ):
         raise ValueError("onchange acknowledgement receipt is unavailable or changed")
     entries = {}
     for row in observed["snapshots"]:
         name = row["name"]
-        if (not fnmatchcase(name, glob) or name in entries
+        if (
+            not fnmatchcase(name, glob)
+            or name in entries
             or re.fullmatch(r"[0-9a-f-]{36}", row["uuid"]) is None
             or row["parent_uuid"] != observed["source_uuid"]
-            or any(type(row[k]) is not int or row[k] <= 0 for k in ("generation", "subvolume_id"))
-            or row["cut_epoch"] != snapshot_epoch(name) or row["cut_epoch"] > now):
+            or any(
+                type(row[k]) is not int or row[k] <= 0
+                for k in ("generation", "subvolume_id")
+            )
+            or row["cut_epoch"] != snapshot_epoch(name)
+            or row["cut_epoch"] > now
+        ):
             raise ValueError("invalid or future acquired snapshot metadata")
         entries[name] = row
     accepted = entries.get(snapshot)
-    if (not accepted or proof.get("proof_mode") not in {"full", "created"}
+    if (
+        not accepted
+        or proof.get("proof_mode") not in {"full", "created"}
         or proof.get("archive") != fields["archive"]
         or re.fullmatch(r"[0-9a-f]{64}", proof.get("archive_id", "")) is None
         or (accepted["uuid"], accepted["generation"], accepted["subvolume_id"])
-            != (proof["snapshot_uuid"], *marker_order(fields))
-        or fields.get("filesystem_uuid") != observed["filesystem_uuid"]):
+        != (proof["snapshot_uuid"], *marker_order(fields))
+        or fields.get("filesystem_uuid") != observed["filesystem_uuid"]
+    ):
         raise ValueError("onchange acknowledgement does not bind the observed snapshot")
     if proof["proof_mode"] == "created":
-        if (proof.get("producer") != REALM_PRODUCER_CONTRACT
-            or re.fullmatch(r"[0-9a-f]{64}", proof.get("create_receipt_sha256", "")) is None):
+        if (
+            proof.get("producer") != REALM_PRODUCER_CONTRACT
+            or re.fullmatch(r"[0-9a-f]{64}", proof.get("create_receipt_sha256", ""))
+            is None
+        ):
             raise ValueError("onchange creation acknowledgement is incomplete")
     elif re.fullmatch(r"[0-9a-f]{64}", proof.get("content_sha256", "")) is None:
         raise ValueError("onchange content acknowledgement is incomplete")
-    newer = [row for row in entries.values()
-             if (row["generation"], row["subvolume_id"]) > marker_order(fields)]
+    newer = [
+        row
+        for row in entries.values()
+        if (row["generation"], row["subvolume_id"]) > marker_order(fields)
+    ]
     if not newer:
         return {"status": "accepted-current-observed-acquired-generation", "pending": 0}
     age = now - min(row["cut_epoch"] for row in newer)
     if not 0 <= age <= budget:
-        raise ValueError(f"pending onchange acquisition age {age}s is future or overdue")
-    return {"status": "pending-within-budget", "pending": len(newer), "oldest_pending_age_seconds": age}
+        raise ValueError(
+            f"pending onchange acquisition age {age}s is future or overdue"
+        )
+    return {
+        "status": "pending-within-budget",
+        "pending": len(newer),
+        "oldest_pending_age_seconds": age,
+    }
 
 
 def marker_order(fields):
@@ -570,7 +618,11 @@ def verify_created(source, archive, uuid, policy_path, receipt_path):
         or not receipt["command_line"]
         or receipt["command_line"]
         != expected_create_command(
-            receipt["command_line"][0], source, archive, uuid, policy,
+            receipt["command_line"][0],
+            source,
+            archive,
+            uuid,
+            policy,
             # Historical receipts still prove the original successful create.
             timestamp="--timestamp" in receipt["command_line"],
         )
@@ -1744,13 +1796,34 @@ def main():
             else "no"
         )
     elif args.command == "observe-acquisitions":
-        print(json.dumps(observe_acquisitions(args.directory, args.glob, args.policy, args.source)))
+        print(
+            json.dumps(
+                observe_acquisitions(
+                    args.directory, args.glob, args.policy, args.source
+                )
+            )
+        )
     elif args.command == "acquisition-freshness":
-        if run("systemctl", "show", "--value", "--property=Result", args.producer_unit).strip() != "success":
+        if (
+            run(
+                "systemctl", "show", "--value", "--property=Result", args.producer_unit
+            ).strip()
+            != "success"
+        ):
             raise ValueError("acquisition producer has failed or is unavailable")
-        print(json.dumps(acquisition_freshness(
-            args.inventory, args.glob, args.marker, args.policy, args.budget, args.source, args.max_observation_age
-        )))
+        print(
+            json.dumps(
+                acquisition_freshness(
+                    args.inventory,
+                    args.glob,
+                    args.marker,
+                    args.policy,
+                    args.budget,
+                    args.source,
+                    args.max_observation_age,
+                )
+            )
+        )
     elif args.command == "freshness":
         epoch = read_latest_epoch(args.latest_marker)
         if epoch is None:

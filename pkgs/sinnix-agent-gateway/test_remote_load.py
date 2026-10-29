@@ -780,7 +780,12 @@ def test_tool_dispatch_scopes_http_run_identity(tmp_path, monkeypatch, core):
         from sinnix_agent_gateway import server as server_module
         from sinnix_agent_gateway.actions import BY_NAME
         from sinnix_agent_gateway.app import create_server
-        monkeypatch.setattr(server_module, "ALL_ACTIONS", (*server_module.ALL_ACTIONS, BY_NAME["gateway.read"]))
+
+        monkeypatch.setattr(
+            server_module,
+            "ALL_ACTIONS",
+            (*server_module.ALL_ACTIONS, BY_NAME["gateway.read"]),
+        )
         server = create_server(runtime.config)
     seen = []
     original = calllog.run_id
@@ -797,7 +802,9 @@ def test_tool_dispatch_scopes_http_run_identity(tmp_path, monkeypatch, core):
 
     jobs.list = capture
     if core:
-        response = call(server, "gateway.read", {"action": "jobs.list", "arguments": {}})
+        response = call(
+            server, "gateway.read", {"action": "jobs.list", "arguments": {}}
+        )
     else:
         response = call(server, "jobs.list", {})
     assert response["result"]["outcome"] == "ok"

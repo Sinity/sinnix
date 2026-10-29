@@ -462,9 +462,7 @@ class _Scratch:
         self.cgroup: str | None = None
         self.cleaned = False
 
-    def claim_unit(
-        self, unit: str, pool: str, launch_input: str, attempt: int
-    ) -> None:
+    def claim_unit(self, unit: str, pool: str, launch_input: str, attempt: int) -> None:
         from . import cgroups
 
         # Persist custody before acceptance, under the allocation lock. Even a
@@ -888,9 +886,7 @@ def _cap_place(directory: Path, limit: int, ticket: Path) -> Any | None:
     # Places above a reduced width still count until their holders leave.
     indices = set(range(limit))
     indices.update(
-        int(path.stem)
-        for path in directory.glob("*.lock")
-        if path.stem.isdecimal()
+        int(path.stem) for path in directory.glob("*.lock") if path.stem.isdecimal()
     )
     available = []
     occupied = 0
