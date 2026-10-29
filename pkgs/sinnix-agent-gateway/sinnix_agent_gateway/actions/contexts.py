@@ -258,7 +258,9 @@ async def _finish_context(
     components = []
     for row in value["components"]:
         component = ContextComponent.model_validate({"snapshot_ref": "pending", **row})
-        components.append({**component.model_dump(exclude={"data"}), "data": component.data})
+        components.append(
+            {**component.model_dump(exclude={"data"}), "data": component.data}
+        )
     value = {**value, "components": components}
     context = await anyio.to_thread.run_sync(runtime.persist_context, value)
     # Leave room for the standard result envelope and include model defaults

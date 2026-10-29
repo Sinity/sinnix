@@ -1028,7 +1028,13 @@ def test_context_composes_orientation_and_triage(tmp_path: Path) -> None:
         assert [row["source_revision"] for row in stored["components"]] == [
             row["source_revision"] for row in context["components"]
         ]
-    assert [row["name"] for row in triage["components"]] == ["lynchpin"]
+    assert [row["name"] for row in triage["components"]] == [
+        "git",
+        "beads",
+        "agentctl",
+        "sinex",
+        "polylogue",
+    ]
     assert (
         error(
             server,
