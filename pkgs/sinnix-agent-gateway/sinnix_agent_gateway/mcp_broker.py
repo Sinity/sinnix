@@ -1032,14 +1032,14 @@ class McpBrokerService:
         stderr_directory.mkdir(mode=0o700, parents=True)
         stderr_path = stderr_directory / "stderr.log"
 
-        async def invoke_session(session: Any) -> dict[str, Any]:
+        async def invoke_session(session: Any) -> dict[str, Any] | McpBrokerError:
             tool: Any | None = None
             response: Any | None = None
             await session.initialize()
             tools, coverage = await self._list_tools(session)
             tool = self._tool(tools, tool_name)
             if tool is None and not coverage["complete"]:
-                raise McpBrokerError(
+                return McpBrokerError(
                     "MCP tool listing is incomplete; cannot determine "
                     f"whether the server exposes tool {tool_name!r}: "
                     f"{coverage['reason']}"
@@ -1052,21 +1052,21 @@ class McpBrokerService:
                     response = await session.call_tool(tool_name, arguments)
 
             if tool is None:
-                raise McpBrokerError(f"MCP server does not expose tool {tool_name!r}")
+                return McpBrokerError(f"MCP server does not expose tool {tool_name!r}")
             read_only = self._request_is_read_only(server, tool, arguments)
             if not write and read_only is not True:
-                raise McpBrokerError(
+                return McpBrokerError(
                     "MCP tool is not explicitly declared read-only; select mcp.change through change"
                 )
             if write and read_only is True:
-                raise McpBrokerError(
+                return McpBrokerError(
                     "MCP tool is declared read-only; invoke its read contract"
                 )
             if response is None:
-                raise McpBrokerError("MCP server returned no tool result")
+                return McpBrokerError("MCP server returned no tool result")
             return self._response_payload(response)
 
-        async def invoke() -> dict[str, Any]:
+        async def invoke() -> dict[str, Any] | McpBrokerError:
             persistent = await self._persistent_session(
                 server_name, server, self._environment(server), stderr_directory
             )
@@ -1082,6 +1082,10 @@ class McpBrokerService:
 
         try:
             response = await asyncio.wait_for(invoke(), timeout=timeout)
+            # Leave SDK task groups normally before raising a local policy
+            # refusal, so it cannot become an upstream ExceptionGroup.
+            if isinstance(response, McpBrokerError):
+                raise response
         except asyncio.TimeoutError as exc:
             artifact_id = self._store_upstream_stderr(
                 stderr_directory, server_name, tool_name

@@ -20,8 +20,6 @@ def test_compose_input_binds_target_to_intent():
 @pytest.mark.parametrize(
     "intent",
     [
-        "project.overview",
-        "project.triage",
         "project.trajectory",
         "verification.regression",
     ],
@@ -180,7 +178,7 @@ def test_oversized_orientation_uses_owner_projection_and_retains_exact_snapshot(
     response = call(
         server,
         "context.compose",
-        {"intent": "project.overview", "project": {"project": "fixture"}},
+        {"intent": "project.trajectory", "project": {"project": "fixture"}},
     )
     assert response["result"]["outcome"] == "ok", response
     value = response["data"]
@@ -227,7 +225,7 @@ def test_unusable_oversized_orientation_is_explicitly_unavailable(
     response = call(
         server,
         "context.compose",
-        {"intent": "project.overview", "project": {"project": "fixture"}},
+        {"intent": "project.trajectory", "project": {"project": "fixture"}},
     )
     assert response["result"]["outcome"] == "ok", response
     assert response["data"]["availability"] == "unavailable"
@@ -243,55 +241,7 @@ def test_unusable_oversized_orientation_is_explicitly_unavailable(
     assert saved["components"][0]["data"]["data"] == product
 
 
-def test_projects_context_uses_the_same_compact_component_contract(
-    tmp_path, monkeypatch
-):
-    from sinnix_agent_gateway import server as server_module
-    from sinnix_agent_gateway.actions import projects
-    from sinnix_agent_gateway.app import create_server
-    from test_actions_jobs import OWNED
-
-    _, runtime, _ = make_server(tmp_path, monkeypatch, with_git=True)
-    projection = {
-        "product": "project_context_compact",
-        "outcome": "partial",
-        "components": [
-            {
-                "name": "tasks",
-                "status": "available",
-                "sections": {
-                    "work": {
-                        "items": [{"id": "fixture-1"}],
-                        "observed_count": 1,
-                        "omitted_count": 0,
-                    }
-                },
-            }
-        ],
-    }
-    runtime.mcp_broker = Broker(
-        {
-            "ok": True,
-            "data": {
-                "outcome": "partial",
-                "evidence": "fixture" * 100000,
-                "presentation": projection,
-            },
-        }
-    )
-    monkeypatch.setattr(server_module, "ALL_ACTIONS", (*OWNED, *projects.ACTIONS))
-    server = create_server(runtime.config)
-    response = call(server, "projects.context", {"target": {"project": "fixture"}})
-    assert response["result"]["outcome"] == "ok", response
-    value = response["data"]
-    assert value["availability"] == "degraded"
-    assert value["components"][0]["presentation"] == "compact"
-    assert value["components"][0]["full_product_pointer"] == "/components/0/data/data"
-    assert value["components"][0]["data"]["data"] == projection
-    assert value["project_id"] == "fixture"
-
-
-def test_project_wrapper_metadata_cannot_hide_orientation_in_an_artifact(
+def test_projects_context_preserves_native_components_and_bounds_large_pages(
     tmp_path, monkeypatch
 ):
     from functools import partial
@@ -309,29 +259,32 @@ def test_project_wrapper_metadata_cannot_hide_orientation_in_an_artifact(
         "GatewayConfig",
         partial(GatewayConfig, max_result_bytes=16384),
     )
-    _, runtime, _ = make_server(tmp_path, monkeypatch, with_git=True)
-    projection = {
-        "product": "project_context_compact",
-        "outcome": "ok",
-        "components": [{"name": "tasks", "status": "available"}],
+    _, runtime, jobs = make_server(tmp_path, monkeypatch, with_git=True)
+    monkeypatch.setattr(
+        runtime.beads,
+        "task_authority_status",
+        lambda project: {"revision": "tasks", "summary": {"total_issues": 2}},
+    )
+    jobs.responses["job.list"] = {
+        "jobs": [{"output": "界" * 100000}],
+        "truncated": False,
     }
-    product = {"outcome": "ok", "evidence": "", "presentation": projection}
-    runtime.mcp_broker = Broker({"ok": True, "data": product})
+    runtime.mcp_broker = Broker(failure=True)
     monkeypatch.setattr(server_module, "ALL_ACTIONS", (*OWNED, *projects.ACTIONS))
     server = create_server(runtime.config)
-    arguments = {"intent": "project.overview", "project": {"project": "fixture"}}
-    initial = call(server, "context.compose", arguments)
-    assert initial["result"]["outcome"] == "ok", initial
-    product["evidence"] = "x" * (
-        16384 - 4096 - len(canonical_bytes(initial["data"])) - 16
-    )
-    composed = call(server, "context.compose", arguments)
-    assert composed["data"]["components"][0]["presentation"] == "full"
     response = call(server, "projects.context", {"target": {"project": "fixture"}})
     assert response["result"]["outcome"] == "ok", response
-    assert "truncated" not in response["data"]
-    assert response["data"]["components"][0]["presentation"] == "compact"
-    assert len(canonical_bytes(response["data"])) <= 16384 - 4096
+    value = response["data"]
+    assert value["availability"] == "degraded"
+    parts = {part["name"]: part for part in value["components"]}
+    assert parts["git"]["status"] == "available"
+    assert parts["agentctl"]["inline_omitted"]
+    assert parts["agentctl"]["data"] is None
+    saved = runtime.results.read(value["snapshot_ref"].rsplit("/", 1)[1])["rows"][0]
+    assert saved["components"][2]["data"]["jobs"][0]["output"] == "界" * 100000
+    assert value["project_id"] == "fixture"
+    assert len(canonical_bytes(value)) <= 16384 - 4096
+    assert not runtime.mcp_broker.calls
 
 
 @pytest.mark.parametrize("available", [True, False])
@@ -463,3 +416,106 @@ def test_context_budget_does_not_copy_complete_native_owner_tree():
     assert result["components"][0]["inline_omitted"]
     assert context["components"][0]["data"] is data
     assert len(data["rows"]) == 100000
+
+
+@pytest.mark.parametrize("intent", ["project.overview", "project.triage"])
+def test_live_project_context_reads_native_owners_without_lynchpin(
+    tmp_path, monkeypatch, intent
+):
+    server, runtime, jobs = make_server(tmp_path, monkeypatch, with_git=True)
+    runtime.mcp_broker = Broker(failure=True)
+    monkeypatch.setattr(
+        runtime.beads,
+        "task_authority_status",
+        lambda project: {
+            "project_id": project,
+            "revision": "current-tasks",
+            "summary": {"total_issues": 2},
+            "attested": True,
+        },
+    )
+    jobs.responses["job.list"] = {
+        "jobs": [],
+        "snapshot": {"source_revision": "queue-position"},
+        "truncated": False,
+    }
+    response = call(
+        server, "context.compose", {"intent": intent, "project": {"project": "fixture"}}
+    )
+    assert response["result"]["outcome"] == "ok", response
+    value = response["data"]
+    assert value["availability"] == "available"
+    assert value["context_schema"] == "sinnix.native-project-context.v1"
+    parts = {part["name"]: part for part in value["components"]}
+    assert parts["beads"]["source_revision"] == "current-tasks"
+    assert parts["agentctl"]["source_revision"] == "queue-position"
+    assert parts["git"]["data"]["latest_commit"]["id"]
+    assert parts["polylogue"]["coverage"]["requested"] is False
+    assert not runtime.mcp_broker.calls
+    snapshot = runtime.results.read(value["snapshot_ref"].rsplit("/", 1)[1])["rows"][0]
+    assert snapshot["components"][1]["data"] == parts["beads"]["data"]
+
+
+def test_native_context_preserves_available_code_when_tasks_fail(tmp_path, monkeypatch):
+    from sinnix_agent_gateway.beads import BeadsError
+
+    server, runtime, jobs = make_server(tmp_path, monkeypatch, with_git=True)
+
+    def unavailable(project):
+        raise BeadsError("task authority unavailable")
+
+    monkeypatch.setattr(runtime.beads, "task_authority_status", unavailable)
+    jobs.responses["job.list"] = {"jobs": [], "truncated": False}
+    response = call(
+        server,
+        "context.compose",
+        {"intent": "project.overview", "project": {"project": "fixture"}},
+    )
+    value = response["data"]
+    assert value["availability"] == "degraded", response
+    parts = {part["name"]: part for part in value["components"]}
+    assert parts["git"]["status"] == "available"
+    assert parts["beads"]["status"] == "unavailable"
+    assert parts["beads"]["source_revision"] is None
+    assert parts["beads"]["coverage"]["complete"] is False
+    assert "unavailable" in parts["beads"]["reason"]
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_optional_status_keeps_native_position_and_global_coverage(
+    tmp_path, monkeypatch, failure
+):
+    server, runtime, jobs = make_server(tmp_path, monkeypatch, with_git=True)
+    monkeypatch.setattr(
+        runtime.beads, "task_authority_status", lambda project: {"revision": "tasks"}
+    )
+    jobs.responses["job.list"] = {"jobs": [], "truncated": False}
+    runtime.mcp_broker = Broker(
+        {"commit_seq": 42, "search_index": {"position": 40, "behind": 2}},
+        failure=failure,
+    )
+    response = call(
+        server,
+        "context.compose",
+        {
+            "intent": "project.overview",
+            "project": {"project": "fixture"},
+            "evidence": ["sinex"],
+        },
+    )
+    part = next(p for p in response["data"]["components"] if p["name"] == "sinex")
+    if failure:
+        assert response["data"]["availability"] == "degraded"
+        assert part["status"] == "unavailable"
+        assert part["source_revision"] is None
+        assert part["coverage"]["requested"] is True
+        assert "unavailable" in part["reason"]
+        return
+    assert part["source_revision"] == "42"
+    assert part["revision_kind"] == "owner"
+    assert "global" in part["coverage"]["scope"]
+    assert part["data"]["data"]["search_index"]["behind"] == 2
+    assert part["observed_at"]
+    assert [call[:2] for call in runtime.mcp_broker.calls] == [
+        ("sinex", "sinex_status")
+    ]

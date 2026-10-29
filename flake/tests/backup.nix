@@ -5,14 +5,14 @@
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
-  defaultBeadsPath = "state/tasks/sinex/.beads";
+  defaultBeadsPath = "state/tasks/sinex-next/.beads";
   protectedPathMatches = import ../../modules/lib/backup/protected-paths.nix {
     inherit lib;
     paths = [
       defaultBeadsPath
       "${defaultBeadsPath}/metadata.json"
       "${defaultBeadsPath}/config.yaml"
-      "${defaultBeadsPath}/dolt/sinex/.dolt"
+      "${defaultBeadsPath}/embeddeddolt/sxnext/.dolt"
       "library/model/control-vector"
     ];
   };
@@ -21,10 +21,10 @@ assert lib.assertMsg (
   lib.all protectedPathMatches [
     "state"
     "state/tasks"
-    "state/tasks/sinex"
+    "state/tasks/sinex-next"
     defaultBeadsPath
-    "${defaultBeadsPath}/dolt"
-    "${defaultBeadsPath}/dolt/sinex/.dolt"
+    "${defaultBeadsPath}/embeddeddolt"
+    "${defaultBeadsPath}/embeddeddolt/sxnext/.dolt"
     "${defaultBeadsPath}/metadata.json"
     "state/**"
   ]

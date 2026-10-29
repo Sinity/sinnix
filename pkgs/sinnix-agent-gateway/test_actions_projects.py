@@ -1005,8 +1005,15 @@ def test_context_composes_orientation_and_triage(tmp_path: Path) -> None:
         and orientation["intent"] == "project.overview"
     )
     assert orientation["snapshot_ref"].startswith("sinnix://results/")
-    assert orientation["components"][0]["name"] == "lynchpin"
-    assert orientation["context_schema"] == "sinnix.owner-context.v2"
+    assert [c["name"] for c in orientation["components"]] == [
+        "git",
+        "beads",
+        "agentctl",
+        "sinex",
+        "polylogue",
+    ]
+    assert orientation["components"][0]["data"]["changes"]["unstaged"] == 1
+    assert orientation["context_schema"] == "sinnix.native-project-context.v1"
 
     triage = ok(
         server,
@@ -1377,3 +1384,28 @@ def test_patch_optional_verification_uses_declared_operation_and_retains_applied
     assert failed_launch.applied and failed_launch.verification is None
     assert failed_launch.verification_error["code"] == "invalid_request"
     assert (project / "README.md").read_text().startswith("fixture")
+
+
+def test_authority_does_not_read_unselected_worktree_contents(tmp_path, monkeypatch):
+    from sinnix_agent_gateway import projects as project_module
+
+    config, project, linked = fixture(tmp_path)
+    server = create_server(config)
+    observed = []
+
+    def revision(path):
+        observed.append(path)
+        assert path == project, "Authority read another actor's working files"
+        return "fixture-content-revision"
+
+    monkeypatch.setattr(project_module, "_content_revision", revision)
+    value = ok(
+        server,
+        "projects.get",
+        {"target": {"project": "fixture"}, "projection": "authority"},
+    )
+    assert observed == [project]
+    rows = {row["path"]: row for row in value["checkouts"]}
+    assert rows[str(project)]["dirty_sha256"] == "fixture-content-revision"
+    assert "dirty_sha256" not in rows[str(linked)]
+    assert rows[str(linked)]["head"]

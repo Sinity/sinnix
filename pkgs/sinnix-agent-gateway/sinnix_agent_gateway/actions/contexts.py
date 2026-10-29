@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal, Mapping
 
 import anyio
@@ -40,6 +41,11 @@ class ComposeInput(RequestControls):
     at: HistoricalSelector | None = None
     baseline: HistoricalSelector | None = None
     refresh_id: str | None = None
+    evidence: list[Literal["sinex", "polylogue"]] = Field(
+        default_factory=list,
+        max_length=2,
+        description="Optional live product status reads for project overview or triage.",
+    )
 
     @model_validator(mode="after")
     def target_matches_intent(self) -> ComposeInput:
@@ -50,6 +56,10 @@ class ComposeInput(RequestControls):
             raise ValueError(f"{self.intent} takes project and no job")
         if self.intent == "campaign.progress" and not self.roots:
             raise ValueError("campaign.progress requires explicit roots")
+        if self.evidence and self.intent not in {"project.overview", "project.triage"}:
+            raise ValueError(
+                "optional evidence takes a live project overview or triage"
+            )
         return self
 
 
@@ -59,6 +69,10 @@ class ContextComponent(GatewayModel):
     # `products.Availability`.
     status: Availability
     source_revision: str | None = None
+    revision_kind: Literal["owner", "observation"] = "owner"
+    coverage: dict[str, Any] = Field(default_factory=dict)
+    required: bool = True
+    observed_at: str | None = None
     snapshot_ref: str
     source_ref: str | None = None
     data: Any = None
@@ -147,6 +161,8 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
         assert inp.project is not None
         project = await anyio.to_thread.run_sync(_resolve_project, runtime, inp.project)
         ref = project_ref(project)
+    if inp.intent in {"project.overview", "project.triage"}:
+        return await _native_project_context(runtime, inp, project, ref)
     if inp.intent == "job.review":
         pass
     elif inp.intent == "campaign.progress":
@@ -199,8 +215,9 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
     # returned them; the snapshot holds the complete product whatever its
     # size, and `_within_budget` bounds only the copy returned in band.
     observed_product = product.model_dump()
-    context = await anyio.to_thread.run_sync(
-        runtime.persist_context,
+    return await _finish_context(
+        runtime,
+        inp,
         {
             "schema": "sinnix.owner-context.v2",
             "ref": ref,
@@ -213,6 +230,7 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
                     "name": product.owner,
                     "status": product.availability,
                     "source_revision": source_revision(observed_product),
+                    "revision_kind": "observation",
                     "source_ref": product.source_ref,
                     "data": observed_product,
                     "reason": product.reason,
@@ -220,12 +238,27 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
                 }
             ],
         },
+        product.availability,
     )
+
+
+async def _finish_context(
+    runtime: Runtime,
+    inp: ComposeInput,
+    value: dict[str, Any],
+    availability: Availability,
+) -> ComposedContext:
+    value = {
+        **value,
+        "availability": availability,
+        "next_actions": _NEXT_ACTIONS[inp.intent],
+    }
+    context = await anyio.to_thread.run_sync(runtime.persist_context, value)
     # Leave room for the standard result envelope and include model defaults
     # before measuring the presentation, rather than adding them afterwards.
     context["context_schema"] = context["schema"]
     context["next_actions"] = _NEXT_ACTIONS[inp.intent]
-    context["availability"] = product.availability
+    context["availability"] = availability
     bounded = _within_budget(context)
     return ComposedContext(
         **{
@@ -233,6 +266,137 @@ async def _compose(runtime: Runtime, inp: ComposeInput) -> ComposedContext:
             for key, value in bounded.items()
             if key in ComposedContext.model_fields
         },
+    )
+
+
+async def _native_project_context(
+    runtime: Runtime, inp: ComposeInput, project: str, ref: str
+) -> ComposedContext:
+    from ..beads import BeadsError
+    from ..contexts import source_revision
+    from ..projects import ProjectError
+    from .products import owner_product
+
+    if inp.at is not None or inp.baseline is not None or inp.refresh_id is not None:
+        raise ProtocolError(
+            "unsupported_capability",
+            "Native project orientation observes current owners; historical selectors require an owner historical product",
+        )
+    components: dict[str, dict[str, Any]] = {}
+
+    async def observe(name: str, source_ref: str, fn: Any) -> None:
+        try:
+            data = await anyio.to_thread.run_sync(fn)
+            revision = data.get("revision")
+            if name == "git":
+                revision = source_revision(data)
+            elif name == "agentctl":
+                revision = (data.get("snapshot") or {}).get("source_revision")
+            components[name] = {
+                "name": name,
+                "status": "degraded" if data.get("truncated") else "available",
+                "data": data,
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+                "source_ref": source_ref,
+                "source_revision": revision or source_revision(data),
+                "revision_kind": "owner"
+                if revision and name != "git"
+                else "observation",
+                "coverage": {
+                    "complete": not bool(data.get("truncated")),
+                    "scope": "current project",
+                },
+            }
+        except (BeadsError, ProjectError, ProtocolError, OSError) as exc:
+            components[name] = {
+                "name": name,
+                "status": "unavailable",
+                "source_ref": source_ref,
+                "reason": str(exc),
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+                "coverage": {"complete": False},
+            }
+
+    async with anyio.create_task_group() as group:
+        group.start_soon(observe, "git", ref, lambda: runtime.projects.summary(project))
+        group.start_soon(
+            observe,
+            "beads",
+            f"{ref}/task-authority",
+            lambda: runtime.beads.task_authority_status(project),
+        )
+        group.start_soon(
+            observe,
+            "agentctl",
+            "sinnix://gateway/actions/jobs.list",
+            lambda: runtime._job("job.list", {"project_id": project, "limit": 20}),
+        )
+    for name, tool in (("sinex", "sinex_status"), ("polylogue", "status")):
+        requested = name in inp.evidence
+        component: dict[str, Any] = {
+            "name": name,
+            "status": "unavailable",
+            "required": False,
+            "source_ref": f"sinnix://mcp/{name}/tools/{tool}",
+            "coverage": {
+                "requested": requested,
+                "scope": "global product status; project attribution unknown",
+            },
+            "reason": "Optional product evidence was not requested",
+        }
+        if requested:
+            product = await owner_product(
+                runtime, name, tool, {}, deadline_at=inp.deadline_at
+            )
+            component.update(
+                observed_at=datetime.now(timezone.utc).isoformat(),
+                status=product.availability,
+                data=product.model_dump(),
+                reason=product.reason,
+                component_failures=product.component_failures,
+            )
+            if product.data is not None:
+                position = product.data.get("commit_seq") if name == "sinex" else None
+                component.update(
+                    source_revision=str(position)
+                    if position is not None
+                    else source_revision(product.data),
+                    revision_kind="owner" if position is not None else "observation",
+                )
+        components[name] = component
+    ordered = [
+        components[name] for name in ("git", "beads", "agentctl", "sinex", "polylogue")
+    ]
+    required = ordered[:3]
+    failures = [
+        c
+        for c in ordered
+        if c["status"] in {"unavailable", "degraded"}
+        and (c.get("required", True) or c["coverage"].get("requested"))
+    ]
+    availability: Availability = (
+        "available"
+        if not failures
+        else "degraded"
+        if any(c["status"] == "available" for c in required)
+        else "unavailable"
+    )
+    return await _finish_context(
+        runtime,
+        inp,
+        {
+            "schema": "sinnix.native-project-context.v1",
+            "ref": ref,
+            "target_ref": ref,
+            "intent": inp.intent,
+            "total_budget_bytes": runtime.config.max_result_bytes,
+            "component_plan": [
+                {"name": c["name"], "required": c.get("required", True)}
+                for c in ordered
+            ],
+            "components": ordered,
+        },
+        availability,
     )
 
 
@@ -316,9 +480,17 @@ def _within_budget(
     bounded["components"] = components
     if size(bounded) <= budget:
         return bounded
-    components = []
-    for component in context["components"]:
-        entry = dict(component)
+    components = [dict(component) for component in bounded["components"]]
+    bounded["components"] = components
+    for entry in sorted(
+        components,
+        key=lambda c: canonical_size(c.get("data"), default=str),
+        reverse=True,
+    ):
+        if size(bounded) <= budget:
+            break
+        if entry.get("data") is None:
+            continue
         entry["data"] = None
         entry["inline_omitted"] = True
         entry["presentation"] = "unavailable"
@@ -328,9 +500,15 @@ def _within_budget(
             entry.get("reason")
             or f"inline data omitted: over the {budget}-byte context budget"
         )
-        components.append(entry)
-    bounded["components"] = components
-    bounded["availability"] = "unavailable"
+        bounded["availability"] = (
+            "degraded"
+            if any(
+                c.get("data") is not None
+                and c["status"] in {"available", "degraded", "empty"}
+                for c in components
+            )
+            else "unavailable"
+        )
     if size(bounded) > budget:
         # Even metadata can exceed one frame. Let the common result transport
         # retain the complete original and return its resumable artifact ref.

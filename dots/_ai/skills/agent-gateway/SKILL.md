@@ -5,7 +5,7 @@ description: Use when invoking, inspecting, or documenting Sinnix Agent Gateway 
 
 <!-- GENERATED FILE. DO NOT EDIT. -->
 <!-- gateway-catalog-revision: v3-typed-actions -->
-<!-- gateway-catalog-sha256: 1eefbc81e9c50e9c2016baec783b63bd280f1098a80e6d06e4285229c0309a7c -->
+<!-- gateway-catalog-sha256: fa8b34f232b027ba9517640a074b41f2ee37c6283f42d8baca83e9fe0edd29d0 -->
 
 # Agent Gateway
 
@@ -45,4 +45,4 @@ The live catalog owns action names, schemas, examples and follow-up actions. `si
 
 `gateway.status` compares live, packaged and last-recorded connector hashes. The saved connector snapshot does not prove which tools the current client loaded. After a refresh, inspect the client's actual schema before recording its observed hash. A numeric `job_id` schema is stale: the current contract uses a string and a separate numeric `task_id`.
 
-Catalog revision: `v3-typed-actions`. Catalog SHA-256: `1eefbc81e9c50e9c2016baec783b63bd280f1098a80e6d06e4285229c0309a7c`.
+Catalog revision: `v3-typed-actions`. Catalog SHA-256: `fa8b34f232b027ba9517640a074b41f2ee37c6283f42d8baca83e9fe0edd29d0`.

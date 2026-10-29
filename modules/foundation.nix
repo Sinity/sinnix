@@ -234,8 +234,9 @@ in
                   path = "${config.root}/sinex/repo";
                   remote = "https://github.com/Sinity/sinex.git";
                   taskAuthority = {
-                    workspace = "${cfg.paths.stateRoot}/tasks/sinex/.beads";
-                    database = "${cfg.paths.stateRoot}/tasks/sinex/.beads/dolt";
+                    workspace = "${cfg.paths.stateRoot}/tasks/sinex-next/.beads";
+                    projectUuid = "9a23622c-4af5-4f3a-99d9-467edd816653";
+                    database = "${cfg.paths.stateRoot}/tasks/sinex-next/.beads/embeddeddolt";
                     publicationPolicy = "dolt-sync";
                   };
                 };
@@ -243,8 +244,9 @@ in
                   path = "${config.root}/polylogue/repo";
                   remote = "https://github.com/Sinity/polylogue.git";
                   taskAuthority = {
-                    workspace = "${cfg.paths.stateRoot}/tasks/polylogue/.beads";
-                    database = "${cfg.paths.stateRoot}/tasks/polylogue/.beads/dolt";
+                    workspace = "${cfg.paths.stateRoot}/tasks/polylogue-next/.beads";
+                    projectUuid = "d06821b6-158a-4b18-add6-6d26e936a97e";
+                    database = "${cfg.paths.stateRoot}/tasks/polylogue-next/.beads/embeddeddolt";
                     publicationPolicy = "dolt-sync";
                   };
                 };

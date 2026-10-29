@@ -131,7 +131,10 @@ class ProjectView(Identity):
     checkout: dict[str, Any] | None = Field(
         default=None, description="The selected checkout: head, branch, dirty_sha256."
     )
-    checkouts: list[dict[str, Any]] | None = None
+    checkouts: list[dict[str, Any]] | None = Field(
+        default=None,
+        description="Live checkout identities. Authority includes content revisions only for the canonical and selected checkout.",
+    )
     canonical_checkout_ref: str | None = None
     code_revision: str | None = None
     task_authority: dict[str, Any] | None = None
@@ -151,7 +154,9 @@ def _get(runtime: Runtime, inp: GetInput) -> ProjectView:
         "beads.query",
     ]
     if inp.projection == "authority":
-        authority = owner(runtime.project_authority, resolved.project_id)
+        authority = owner(
+            runtime.project_authority, resolved.project_id, checkout_id=selected
+        )
         checkouts = authority["checkouts"]
         checkout = next(
             (row for row in checkouts if row["checkout_id"] == selected), None

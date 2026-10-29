@@ -210,7 +210,11 @@ returns only new log bytes.
 
 ## Beads, sessions and evidence
 
-- **Beads** actions use the typed contracts of the packaged `bd owner` command.
+- **Beads** actions attest the configured workspace and database against the
+  native owner, and compare the checkout redirect and configured project UUID
+  with the current store metadata. A mismatch refuses the read instead of
+  substituting a historical task store. Historical stores retain their own
+  identity. Actions use the typed contracts of the packaged `bd owner` command.
   `beads.read` exposes beads queries and paging; `beads.query` pages through a
   pinned revision and stores the pages as an immutable result. `beads.create`,
   `beads.update`, `beads.close` and `beads.dependencies.add` are the specific
@@ -221,8 +225,18 @@ returns only new log bytes.
   task (`bd update <id> --set-metadata 'split_from=<ref>'`).
   `discovered-from` and `supersedes` are native dependency edges.
 - **Sessions.** `mcp.tools` discovers Polylogue products; `mcp.call` invokes them.
-- **Context and progress.** `context.compose`, `projects.context` and
-  `campaign.progress` delegate to Lynchpin.
+- **Current project context.** `context.compose` with `project.overview` or
+  `project.triage`, and `projects.context`, read Git, the configured current
+  Beads authority and one bounded AgentCTL job page directly. Each component
+  records its coverage, revision, errors and immutable snapshot reference.
+  Optional `evidence` selects Sinex or Polylogue status; these global status
+  observations do not imply project-specific coverage. A missing task owner
+  leaves code and job evidence visible with degraded availability. Live
+  orientation refuses historical selectors rather than presenting current
+  state as historical evidence.
+- **Historical products and progress.** Campaign, regression and trajectory
+  products retain their owner adapters. Task closure, reported delivery and
+  independently verified acceptance remain distinct owner evidence.
 - **Machine.** `machine.snapshot` and `machine.query` delegate to
   `sinnix-observe`. `machine.prepare` and `machine.operate` send typed requests
   to the hub server.

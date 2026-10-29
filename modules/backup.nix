@@ -120,7 +120,7 @@ let
     sinexBeadsArchivePath
     "${sinexBeadsArchivePath}/metadata.json"
     "${sinexBeadsArchivePath}/config.yaml"
-    "${sinexBeadsArchivePath}/${sinexBeadsDatabaseRelativePath}/sinex/.dolt"
+    "${sinexBeadsArchivePath}/${sinexBeadsDatabaseRelativePath}"
     rankingArchivePath
     "library/model/control-vector"
   ];
@@ -1020,17 +1020,21 @@ let
     jq -e 'type == "object"' "$beads_path/metadata.json" >/dev/null
     test -s "$beads_path/config.yaml"
     database_path="$beads_path/${sinexBeadsDatabaseRelativePath}"
-    test -d "$database_path/sinex/.dolt"
+    database_name="$(jq -er '.dolt_database | select(type == "string" and test("^[A-Za-z0-9_-]+$"))' "$beads_path/metadata.json")"
+    ${lib.optionalString (sinexTaskAuthority.projectUuid != null) ''
+      jq -e --arg project_id ${lib.escapeShellArg sinexTaskAuthority.projectUuid} '.project_id == $project_id' "$beads_path/metadata.json" >/dev/null
+    ''}
+    test -d "$database_path/$database_name/.dolt"
 
     # A restored server configuration can name a live port. Open the database
     # in a separate scratch data directory without that configuration.
     offline_root="$restore_root/offline"
     mkdir "$offline_root"
-    mv "$database_path/sinex" "$offline_root/sinex"
-    dolt_commit="$(${pkgs.dolt}/bin/dolt --data-dir "$offline_root" --use-db sinex sql \
+    mv "$database_path/$database_name" "$offline_root/$database_name"
+    dolt_commit="$(${pkgs.dolt}/bin/dolt --data-dir "$offline_root" --use-db "$database_name" sql \
       -q 'SELECT commit_hash FROM dolt_log LIMIT 1' -r json \
       | jq -er '.rows[0].commit_hash | select(test("^[0-9a-v]{32}$"))')"
-    issue="$(${pkgs.dolt}/bin/dolt --data-dir "$offline_root" --use-db sinex sql \
+    issue="$(${pkgs.dolt}/bin/dolt --data-dir "$offline_root" --use-db "$database_name" sql \
       -q 'SELECT id, title FROM issues ORDER BY id LIMIT 1' -r json \
       | jq -cer '.rows[0] | select(.id != null and .id != "" and .title != null and .title != "")')"
 

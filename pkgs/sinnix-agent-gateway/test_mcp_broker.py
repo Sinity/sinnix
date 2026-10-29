@@ -1605,3 +1605,28 @@ for line in sys.stdin:
                 assert result["response"]["content"][0]["text"] == "None"
 
     anyio.run(calls)
+
+
+def test_real_stdio_policy_refusal_keeps_its_cause_and_never_calls_tool(tmp_path):
+    fixture = write_stdio_fixture(
+        tmp_path,
+        """import json, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if request["method"] == "initialize":
+        result = {"protocolVersion": request["params"]["protocolVersion"], "capabilities": {"tools": {}}, "serverInfo": {"name": "fixture", "version": "1"}}
+    elif request["method"] == "tools/list":
+        result = {"tools": [{"name": "write", "inputSchema": {"type": "object"}}]}
+    elif request["method"] == "tools/call":
+        raise AssertionError("A mutation reached the backend through the read route")
+    else:
+        continue
+    print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
+""",
+    )
+    broker = broker_service(tmp_path)
+    broker.config.mcp_broker_servers["fixture"].update(
+        command=sys.executable, args=[str(fixture)], sessionPolicy="per-call"
+    )
+    with pytest.raises(McpBrokerError, match="not explicitly declared read-only"):
+        anyio.run(lambda: broker.owner_result("fixture", "write", {}, write=False))

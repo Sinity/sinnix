@@ -274,8 +274,16 @@ class Runtime:
         project_id: str,
         *,
         project_summary: dict[str, Any] | None = None,
+        checkout_id: str = "default",
     ) -> dict[str, Any]:
-        checkouts = self.projects.checkouts(project_id)["checkouts"]
+        # Authority needs the selected and canonical content revisions, not
+        # hashes of every other actor's working files.
+        checkouts = self.projects.checkout_candidates(project_id)
+        for index, checkout in enumerate(checkouts):
+            if checkout["checkout_id"] in {"default", checkout_id}:
+                checkouts[index] = self.projects.checkout(
+                    project_id, checkout["checkout_id"]
+                )["checkout"]
         for checkout in checkouts:
             checkout["ref"] = REGISTRY.reference(
                 "checkout",

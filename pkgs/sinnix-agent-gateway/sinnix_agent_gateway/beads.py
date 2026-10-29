@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 import hashlib
 import json
 import os
@@ -14,8 +13,8 @@ from difflib import unified_diff
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from .config import GatewayConfig, ProjectConfig, TaskAuthorityConfig
 from .calllog import run_actor
+from .config import GatewayConfig, ProjectConfig, TaskAuthorityConfig
 from .contracts import PRINCIPAL
 from .owner_execution import ExecutionProfile, OwnerExecution, OwnerRoute
 from .results import ProtocolError, ResultError, ResultService
@@ -224,6 +223,34 @@ class BeadsService:
 
     def task_authority_status(self, project_id: str) -> dict[str, Any]:
         project, authority = self._authority(project_id, False)
+        # Configuration pins the current owner. A checkout redirect may attest
+        # that owner, but must never silently redirect gateway reads elsewhere.
+        observed_uuid = None
+        redirect = project.path / ".beads" / "redirect"
+        try:
+            if redirect.exists():
+                target = Path(redirect.read_text().strip())
+                if not target.is_absolute():
+                    target = redirect.parent / target
+                if target.resolve() != authority.workspace:
+                    raise BeadsError(
+                        "task_authority_mismatch: checkout redirect names another workspace"
+                    )
+            if authority.project_uuid is not None:
+                metadata = json.loads(
+                    (authority.workspace / "metadata.json").read_text()
+                )
+                observed_uuid = metadata.get("project_id")
+                if observed_uuid != authority.project_uuid:
+                    raise BeadsError(
+                        "task_authority_mismatch: Beads project identity does not match configuration"
+                    )
+        except BeadsError:
+            raise
+        except (OSError, ValueError, AttributeError) as exc:
+            raise BeadsError(
+                "task_authority_mismatch: Beads identity cannot be verified"
+            ) from exc
         where, status, state = (
             self._run(project, ["where"], False),
             self._run(project, ["status"], False),
@@ -257,7 +284,7 @@ class BeadsService:
             "ref": self.project_ref(project_id),
             "owner": authority.owner,
             "publication_policy": authority.publication_policy,
-            "project_uuid": authority.project_uuid,
+            "project_uuid": observed_uuid,
             "schema_version": where.get("schema_version"),
             "revision": revision,
             "committed_revision": self._committed_revision(project),
@@ -433,6 +460,10 @@ class BeadsService:
         rows = self._issues(owner)
         if not rows:
             raise BeadsError("Bead not found", "not_found")
+        if len(rows) != 1 or rows[0].get("id") != bead_id:
+            raise BeadsError(
+                "Beads owner returned another issue identity", "owner_failed"
+            )
         result = self._normalize(project_id, rows[0], owner["revision"])
         return {
             **result,
