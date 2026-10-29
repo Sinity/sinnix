@@ -165,6 +165,22 @@
             touch "$out"
           '';
 
+      checks.agentctl-boot-operation =
+        let
+          descriptor = builtins.fromTOML (builtins.readFile ../../.agentctl/project.toml);
+          boot = descriptor.operations.boot;
+          policy =
+            operation:
+            builtins.removeAttrs operation [
+              "description"
+              "exec"
+            ];
+        in
+        assert descriptor.environment.kind == "nix-develop";
+        assert boot.exec == [ "boot" ];
+        assert policy boot == policy descriptor.operations.switch;
+        pkgs.runCommand "agentctl-boot-operation" { } "touch $out";
+
       checks.xiaomi-cloud-owner-lock =
         let
           unit = host.systemd.user.services.sinnix-capture-xiaomi-cloud;

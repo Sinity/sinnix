@@ -194,6 +194,14 @@ result = "exit"
 scratch = "nvme"
 timeout_seconds = 28800
 
+[operations.boot]
+description = "Build and set the workstation boot default for the next reboot"
+exec = ["boot"]
+pool = "bulk"
+result = "exit"
+scratch = "nvme"
+timeout_seconds = 28800
+
 [operations.sinex_cache_prebuild]
 description = "Build and cache the pinned Sinex revision after an input move"
 exec = ["sinnix-sinex-cache-prebuild", "--flake-dir", "/realm/project/sinnix/repo", "--system", "x86_64-linux"]

@@ -425,6 +425,11 @@ cap = "cargo"
 unit_properties = ["MemoryHigh=8G"]
 ```
 
+Sinnix declares `switch` for immediate activation and `boot` for setting the
+next boot default. Both invoke the existing devshell wrappers with the same
+bulk pool, NVMe scratch and timeout. `agentctl job start sinnix boot` stages a
+generation; reboot remains a separate action.
+
 ### Operation fields
 
 | Field                 | Meaning                                                                                                  |
