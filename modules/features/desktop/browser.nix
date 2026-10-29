@@ -215,7 +215,7 @@ mkFeatureModule {
           chromeUserDataDir = "${config.home.homeDirectory}/${nixosConfig.sinnix.features.desktop.browser.chromeUserDataDir}";
           chromeArgs = lib.concatStringsSep " " (
             [
-              "--disable-features=WaylandWpColorManagerV1"
+              "--disable-features=WaylandWpColorManagerV1,PersistentHistograms"
               "--remote-debugging-port=9222"
               "--remote-debugging-address=127.0.0.1"
               "--user-data-dir=${chromeUserDataDir}"
