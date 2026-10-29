@@ -1,9 +1,10 @@
 --- /dev/null
 +++ b/cmd/bd/owner.go
-@@ -0,0 +1,137 @@
+@@ -0,0 +1,141 @@
 +package main
 +
 +import (
++	"context"
 +	"encoding/json"
 +	"fmt"
 +	"io"
@@ -113,24 +114,27 @@
 +	if err := ownerDecode(&in); err != nil {
 +		return err
 +	}
-+	source := store
-+	for {
-+		wrapped, ok := source.(interface{ Unwrap() storage.DoltStorage })
-+		if !ok {
-+			break
-+		}
-+		source = wrapped.Unwrap()
-+	}
-+	db, ok := source.(storage.RawDBAccessor)
-+	if !ok {
-+		return fmt.Errorf("owner read requires SQL snapshot access")
-+	}
-+	result, err := storageops.ReadOwner(rootCtx, db.DB(), in)
++	result, err := ownerReadSnapshot(rootCtx, store, in)
 +	if err != nil {
 +		return err
 +	}
 +	return outputJSON(result)
 +}}
++
++
++func ownerReadSnapshot(ctx context.Context, source storage.DoltStorage, in storageops.OwnerReadRequest) (map[string]any, error) {
++	source = storage.UnwrapStore(source)
++	if reader, ok := source.(interface {
++		ReadOwnerSnapshot(context.Context, storageops.OwnerReadRequest) (map[string]any, error)
++	}); ok {
++		return reader.ReadOwnerSnapshot(ctx, in)
++	}
++	db, ok := source.(storage.RawDBAccessor)
++	if !ok {
++		return nil, fmt.Errorf("owner read requires SQL snapshot access")
++	}
++	return storageops.ReadOwner(ctx, db.DB(), in)
++}
 +
 +func init() {
 +	readOnlyCommands["read"] = true
@@ -2792,5 +2796,104 @@
 +		if err := taskStoreMismatch(row[0], row[1], row[2], "/fixture/store"); err != nil {
 +			t.Fatalf("local control %v: %v", row, err)
 +		}
++	}
++}
+--- /dev/null
++++ b/internal/storage/embeddeddolt/owner_read.go
+@@ -0,0 +1,24 @@
++//go:build cgo
++
++package embeddeddolt
++
++import (
++	"context"
++	"errors"
++
++	storageops "github.com/steveyegge/beads/internal/storage/issueops"
++)
++
++// ReadOwnerSnapshot keeps the embedded engine's handle scoped to one owner
++// observation. It uses the same revision-pinned analytical read as server mode.
++func (s *EmbeddedDoltStore) ReadOwnerSnapshot(ctx context.Context, in storageops.OwnerReadRequest) (result map[string]any, err error) {
++	if s.closed.Load() {
++		return nil, errClosed
++	}
++	db, cleanup, err := OpenSQL(ctx, s.dataDir, s.database, s.branch)
++	if err != nil {
++		return nil, err
++	}
++	defer func() { err = errors.Join(err, cleanup()) }()
++	return storageops.ReadOwner(ctx, db, in)
++}
+--- /dev/null
++++ b/cmd/bd/owner_embedded_read_test.go
+@@ -0,0 +1,69 @@
++//go:build cgo
++
++package main
++
++import (
++	"path/filepath"
++	"testing"
++
++	"github.com/steveyegge/beads/internal/storage/embeddeddolt"
++	storageops "github.com/steveyegge/beads/internal/storage/issueops"
++)
++
++func TestOwnerContractEmbeddedCommandReadsCurrentAndHistoricalSnapshots(t *testing.T) {
++	t.Setenv("DOLT_ROOT_PATH", t.TempDir())
++	ctx := t.Context()
++	dir := filepath.Join(t.TempDir(), ".beads")
++	st, err := embeddeddolt.Open(ctx, dir, "oread", "main")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer st.Close()
++	if err := st.SetConfig(ctx, "issue_prefix", "oread"); err != nil {
++		t.Fatal(err)
++	}
++	seedBatchTestIssues(t, ctx, st, "oread-a")
++	if err := st.Commit(ctx, "seed owner command"); err != nil {
++		t.Fatal(err)
++	}
++	initial, err := ownerReadSnapshot(ctx, st, storageops.OwnerReadRequest{At: "HEAD", Roots: []string{"oread-a"}})
++	if err != nil {
++		t.Fatal(err)
++	}
++	revision := initial["revision"].(string)
++	if err := st.UpdateIssue(ctx, "oread-a", map[string]any{"title": "Changed"}, "test"); err != nil {
++		t.Fatal(err)
++	}
++	before, err := ownerReadSnapshot(ctx, st, storageops.OwnerReadRequest{Roots: []string{"oread-a"}})
++	if err != nil {
++		t.Fatal(err)
++	}
++	readOnly, err := embeddeddolt.OpenReadOnly(ctx, dir, "oread", "main")
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer readOnly.Close()
++	historical, err := ownerReadSnapshot(ctx, readOnly, storageops.OwnerReadRequest{At: revision, Roots: []string{"oread-a"}})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if historical["items"].([]map[string]any)[0]["title"] != "seed oread-a" {
++		t.Fatalf("historical read drifted: %v", historical)
++	}
++	current, err := ownerReadSnapshot(ctx, readOnly, storageops.OwnerReadRequest{Roots: []string{"oread-a"}})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if current["items"].([]map[string]any)[0]["title"] != "Changed" {
++		t.Fatalf("working read lost change: %v", current)
++	}
++	if current["revision"] != before["revision"] {
++		t.Fatal("read-only observation changed the working state")
++	}
++	if err := readOnly.Close(); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := ownerReadSnapshot(ctx, readOnly, storageops.OwnerReadRequest{}); err == nil {
++		t.Fatal("closed embedded store reopened")
 +	}
 +}

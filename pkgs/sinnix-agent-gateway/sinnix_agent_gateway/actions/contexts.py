@@ -253,6 +253,13 @@ async def _finish_context(
         "availability": availability,
         "next_actions": _NEXT_ACTIONS[inp.intent],
     }
+    # Persist the same explicit unknown/default metadata the typed client sees,
+    # while sharing potentially large owner data until the snapshot is written.
+    components = []
+    for row in value["components"]:
+        component = ContextComponent.model_validate({"snapshot_ref": "pending", **row})
+        components.append({**component.model_dump(exclude={"data"}), "data": component.data})
+    value = {**value, "components": components}
     context = await anyio.to_thread.run_sync(runtime.persist_context, value)
     # Leave room for the standard result envelope and include model defaults
     # before measuring the presentation, rather than adding them afterwards.

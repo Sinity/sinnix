@@ -115,8 +115,9 @@ recorded connector hash, and per-route availability.
 
 **Components.** Composite answers (`context.compose`, `projects.context`)
 report each part's own status: `available`, `degraded` (answered with named
-gaps in `component_failures`), `empty` or `unavailable`. The whole answer takes
-the worst part's status.
+gaps in `component_failures`), `empty` or `unavailable`. Current project context
+reports unrequested optional parts with `coverage.requested: false`; its overall
+availability reflects the required and requested parts.
 
 ## CLI
 

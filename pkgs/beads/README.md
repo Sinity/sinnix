@@ -27,6 +27,8 @@ The patch also fixes generic JSON wrapping to preserve authored numeric values a
 
 Two other changes in `owner-contracts.patch` affect native routed `bd show`: foreign stores use their own database despite the caller's environment, and unresolved foreign prefixes report `task_store_mismatch` with the searched store. The gateway's Beads adapter does not call `show` or rely on those diagnostics; it selects an explicit authority for every call. They are not reasons for this gateway feasibility decision. The patch's text-batch close fix likewise is not on the gateway's `owner call applyBatch` route.
 
+The owner-read command uses a backend-owned snapshot lifecycle. Server stores lend their existing SQL accessor; embedded stores open and close a short-lived handle for the same revision-pinned analytical engine. Read-only opening preserves the current store mode and schema, and a closed embedded store refuses a new observation.
+
 ## Generated native action inventory
 
 `generate_beads_inputs.py` selects the following stock HTTP operation identities. Their local transport and token/error projection currently come from `owner call`; `actions/beads.py` generates the corresponding actions from these contracts:
