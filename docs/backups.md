@@ -162,7 +162,12 @@ snapshot does not cross that mount. The genome subvolume therefore has its
 own immutable cuts, archive receipts and freshness check. Its `genome-*`
 archives (`genome-genome.*`) share the Realm repository for deduplication and have independent
 retention, so a Realm recovery point cannot displace a genome recovery point
-from the same day. Raw reads, supplied alignments, vendor files, manifests,
+from the same day. Genome uses native `BORG_FILES_CACHE_SUFFIX=genome` to
+keep its files metadata cache independent of Realm create-count aging. The
+repository and chunk index stay shared, and `ctime,size,inode` validation
+remains unchanged. This namespace starts cold; its first create can reread
+the source before later unchanged cuts can benefit. No live cache is migrated.
+Raw reads, supplied alignments, vendor files, manifests,
 source/WIP and analysis results stay covered. Exclusions name the public
 reference/catalogue caches, downloaded tools and dependency environments;
 unclassified cache children remain covered.

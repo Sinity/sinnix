@@ -25,6 +25,9 @@
     mkBackupJob "borgbackup-job-genome" {
       description = "Archive verified genome snapshots from the HDD";
       unit = {
+        # Realm backlogs must not age Genome entries out of its files cache.
+        # The repository and chunk cache remain shared.
+        environment.BORG_FILES_CACHE_SUFFIX = "genome";
         after = [ outerRealmMountUnit ];
         requires = [ outerRealmMountUnit ];
         unitConfig.RequiresMountsFor = [

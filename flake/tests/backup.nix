@@ -886,6 +886,25 @@ assert lib.assertMsg (
     in
     {
       checks = {
+        backup-genome-files-cache =
+          assert
+            backupRuntimeEval.config.systemd.services.borgbackup-job-genome.environment.BORG_FILES_CACHE_SUFFIX
+            == "genome";
+          assert
+            !(
+              backupRuntimeEval.config.systemd.services.borgbackup-job-realm.environment ? BORG_FILES_CACHE_SUFFIX
+            );
+          pkgs.runCommand "backup-genome-files-cache-check"
+            {
+              nativeBuildInputs = [
+                pkgs.python3
+                pkgs.borgbackup
+              ];
+            }
+            ''
+              python3 ${./backup_files_cache.py}
+              touch "$out"
+            '';
         backup-borg-hook-runtime = backupBorgHookRuntime;
         backup-health-lanes-runtime = borgHealthLanesRuntime;
         backup-polylogue-hook-cut = polylogueHookCutRuntime;
