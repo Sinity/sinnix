@@ -312,6 +312,11 @@ let
       };
     };
 
+    sinex-mcp-cli = pkgs.callPackage ../pkgs/sinex-mcp/pkg.nix {
+      upstream = inputs.sinex.packages.${pkgs.stdenv.hostPlatform.system}.sinexctl;
+      sourceRevision = inputs.sinex.rev;
+    };
+
     mcp-github = mkNodeCliPackage {
       pname = "mcp-github";
       version = "2025.4.8";

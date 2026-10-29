@@ -43,6 +43,7 @@ let
       # frontmatter gets pkgs.beads (1.0.3), whose `export` has no -C flag --
       # which failed as a usage dump swallowed by `|| true`.
       beads = externalPackages.beads;
+      sinex-mcp-cli = externalPackages.sinex-mcp-cli;
       # Native runtime and HTTP presentation are separate Python packages;
       # scripts resolve their entry points through this dependency map.
       sinnix-hub-server = externalPackages.sinnix-hub-server;

@@ -30,6 +30,7 @@ in
     ./tests/bootstrap-outcome.nix
     ./tests/aichat-roster.nix
     ./tests/dependency-recovery.nix
+    ./tests/sinex-mcp.nix
     ./tests/agent-gateway-manifest.nix
     ./tests/chrome-agent-window.nix
     ./tests/browser-workflow.nix

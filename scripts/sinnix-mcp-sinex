@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # @sinnix-package
 # description: Serve the Sinex MCP tools of the running sinexd (sinexctl mcp)
-# runtimeInputs: bash
+# runtimeInputs: bash @sinex-mcp-cli
 #
-# sinexctl comes from the installed Sinex package. MCP clients may start this
-# without a login shell, so the daemon's loopback API and the agent token are named
-# here when the environment does not name them.
+# The provider carries the reviewed MCP-only patch at the installed daemon pin.
+# Non-login MCP clients use the daemon's loopback API and agent token by
+# default; explicit connection settings keep their usual meaning.
 set -euo pipefail
 
 export SINEX_ENDPOINT="${SINEX_ENDPOINT:-http://127.0.0.1:7171}"
 export SINEX_TOKEN_FILE="${SINEX_TOKEN_FILE:-/var/lib/sinex/daemon/tokens/agent.token}"
-exec /run/current-system/sw/bin/sinexctl mcp "$@"
+exec sinexctl mcp "$@"
