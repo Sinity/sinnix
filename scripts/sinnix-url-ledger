@@ -37,7 +37,9 @@ products move into history only after successful publication.
 Resumability: `resolve` is bounded per invocation (--max-seconds, with
 --max-requests as a backstop) and skips any (url, provider) pair already
 terminally resolved in state/resolution.jsonl, so a killed run or the next
-timer tick picks up where the last left off.
+timer tick picks up where the last left off. The resolver retains only the
+latest status for each pair; a later nonterminal status makes the pair eligible
+for retry. Builds replay full records to preserve all snapshot evidence.
 
 Common Crawl note (see `CommonCrawlProvider`): index.commoncrawl.org, which
 served both collinfo.json and every CDX endpoint, refuses connections outright.
@@ -737,6 +739,26 @@ def load_resolution_state(state_dir: Path) -> dict[tuple[str, str], dict]:
 TERMINAL_STATUSES = {"ok", "unavailable"}
 
 
+def load_resolution_statuses(state_dir: Path) -> dict[tuple[str, str], object]:
+    """Replay only latest statuses needed by the resolver's skip decision."""
+    resolution_path = state_dir / "resolution.jsonl"
+    latest: dict[tuple[str, str], object] = {}
+    if not resolution_path.exists():
+        return latest
+    with resolution_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            key = (record.get("url"), record.get("provider"))
+            latest[key] = record.get("status")
+    return latest
+
+
 def cmd_resolve(args: argparse.Namespace) -> int:
     state_dir = Path(args.state_root)
     urls_path = state_dir / "urls.jsonl"
@@ -765,7 +787,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         for name, provider in providers.items()
     }
 
-    resolved = load_resolution_state(state_dir)
+    resolved = load_resolution_statuses(state_dir)
     resolution_path = state_dir / "resolution.jsonl"
     resolution_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -804,8 +826,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 if requests_made >= args.max_requests:
                     break
                 key = (normalized_url, provider_name)
-                existing = resolved.get(key)
-                if existing and existing.get("status") in TERMINAL_STATUSES and not args.refresh:
+                if key in resolved and resolved[key] in TERMINAL_STATUSES and not args.refresh:
                     already_resolved += 1
                     continue
 
@@ -837,7 +858,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 }
                 out.write(json.dumps(out_record, sort_keys=True) + "\n")
                 out.flush()
-                resolved[key] = out_record
+                resolved[key] = out_record["status"]
                 if result.status == "error":
                     errors += 1
                 else:
