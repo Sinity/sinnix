@@ -14,6 +14,7 @@ def test_default_reader_pins_generation_during_replacement(tmp_path):
     state.mkdir()
     root = tmp_path / "derived"
     pointers = []
+    retained = tmp_path / "retained-first"
     for name in ("first", "second"):
         (state / "urls.jsonl").write_text(
             json.dumps(
@@ -40,6 +41,14 @@ def test_default_reader_pins_generation_during_replacement(tmp_path):
         )
         assert build.returncode == 0, build.stderr
         pointers.append((root / "current.json").read_bytes())
+        if name == "first":
+            first_generation = json.loads(pointers[0])["generation"]
+            shutil.copytree(root / "generations" / first_generation, retained)
+    # The publisher retires previous generations. Keep this fixture's first
+    # payload available so the test isolates pointer selection during a swap.
+    shutil.copytree(
+        retained, root / "generations" / first_generation, dirs_exist_ok=True
+    )
     (root / "current.json").write_bytes(pointers[0])
     replacement = tmp_path / "replacement.json"
     replacement.write_bytes(pointers[1])
