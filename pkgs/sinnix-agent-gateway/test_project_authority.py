@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import io
 import stat
 import subprocess
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -314,16 +316,17 @@ def test_project_sources_refuse_symlinked_parent(
 
 
 def test_project_export_preserves_leaf_symlink_payload(tmp_path: Path) -> None:
-    import zipfile
-
     projects, project, _linked = project_service(tmp_path)
     outside = tmp_path / "outside.txt"
     outside.write_text("outside fixture\n")
     (project / "link.txt").symlink_to(outside)
-    result = projects.export("fixture")
-    with zipfile.ZipFile(result["archive"]) as archive:
-        assert archive.read("link.txt") == str(outside).encode()
-        assert stat.S_ISLNK(archive.getinfo("link.txt").external_attr >> 16)
+    result = projects.export("fixture", mode="tracked+untracked")
+    with (
+        zipfile.ZipFile(result["archive"]) as bundle,
+        zipfile.ZipFile(io.BytesIO(bundle.read("extras.zip"))) as extras,
+    ):
+        assert extras.read("link.txt") == str(outside).encode()
+        assert stat.S_ISLNK(extras.getinfo("link.txt").external_attr >> 16)
 
 
 def test_project_sources_allow_deleted_parent(tmp_path: Path) -> None:
@@ -336,15 +339,24 @@ def test_project_sources_allow_deleted_parent(tmp_path: Path) -> None:
     (nested / "data.txt").unlink()
     nested.rmdir()
     assert projects_module._content_revision(project)
-    assert "nested/data.txt" not in {
-        row["path"] for row in projects.export("fixture")["manifest"]["files"]
-    }
+    result = projects.export("fixture")
+    restored = tmp_path / "restored"
+    restored.mkdir()
+    patch = tmp_path / "working-tree.patch"
+    with zipfile.ZipFile(result["archive"]) as bundle:
+        with zipfile.ZipFile(io.BytesIO(bundle.read("HEAD.zip"))) as head:
+            assert head.read("nested/data.txt") == b"fixture\n"
+            head.extractall(restored)
+        patch.write_bytes(bundle.read("working-tree.patch"))
+    git(restored, "init", "--quiet")
+    git(restored, "apply", "--binary", str(patch))
+    assert not (restored / "nested" / "data.txt").exists()
 
 
 def test_project_source_read_pins_parent_during_replacement(
     tmp_path: Path, monkeypatch
 ) -> None:
-    projects, project, _linked = project_service(tmp_path)
+    _projects, project, _linked = project_service(tmp_path)
     nested = project / "nested"
     nested.mkdir()
     (nested / "data.txt").write_text("fixture\n")
@@ -359,13 +371,15 @@ def test_project_source_read_pins_parent_during_replacement(
         return original(path)
 
     monkeypatch.setattr(projects_module, "_open_source_file", replace_parent)
-    with projects_module._source_path(project, Path("nested/data.txt")) as path:
-        with projects_module._open_source_file(path) as handle:
-            assert handle.read() == b"fixture\n"
+    with (
+        projects_module._source_path(project, Path("nested/data.txt")) as path,
+        projects_module._open_source_file(path) as handle,
+    ):
+        assert handle.read() == b"fixture\n"
 
 
 def test_project_source_read_refuses_leaf_replaced_with_symlink(tmp_path: Path) -> None:
-    projects, project, _linked = project_service(tmp_path)
+    _projects, project, _linked = project_service(tmp_path)
     outside = tmp_path / "outside.txt"
     outside.write_text("outside fixture\n")
     with projects_module._source_path(project, Path("README.md")) as path:
