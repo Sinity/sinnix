@@ -23,6 +23,25 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   userTmpRoot = "/realm/tmp/work";
   earlyoomAvoidPattern = runtimeInventory.earlyoomEmergencyAvoidPattern;
+  # IOCost owns all physical devices here, including every path alias. Its
+  # fixed-delay API must not share blkcg state with IOLatency's counted delays.
+  latencyTargetUnits =
+    let
+      active =
+        policy:
+        lib.any (target: target != null && target != "") (
+          lib.toList (policy.IODeviceLatencyTargetSec or [ ])
+        );
+      collect =
+        label: field: units:
+        lib.mapAttrsToList (name: unit: if active unit.${field} then "${label} ${name}" else null) units;
+    in
+    lib.filter (name: name != null) (
+      (collect "system slice" "sliceConfig" config.systemd.slices)
+      ++ (collect "user slice" "sliceConfig" config.systemd.user.slices)
+      ++ (collect "system service" "serviceConfig" config.systemd.services)
+      ++ (collect "user service" "serviceConfig" config.systemd.user.services)
+    );
   forbiddenEarlyoomAvoidTokens = [
     "bash"
     "chrome"
@@ -61,13 +80,9 @@ let
     text = ''
       set -eu
 
-      # io.cost makes IOWeight declarations in the cgroup hierarchy actually
-      # effective on NVMe drives. Without it, the kernel ignores IOWeight for
-      # any device running the 'none' (passthrough) scheduler — which is the
-      # NVMe default — so every IOWeight config in the slice tree is silently
-      # discarded. Setting the scheduler to mq-deadline lets the block layer
-      # mediate between cgroups, and ctrl=auto calibrates the cost model from
-      # the device's actual latency characteristics.
+      # IOCost enforces the hierarchy's relative IOWeight policy on every
+      # physical device. Do not combine it with IOLatency: their kernel delay
+      # modes share state and must not mix. Keep the existing scheduler choice.
       for dev_path in /sys/block/*/; do
         dev=$(basename "$dev_path")
         echo "$dev" | grep -q "^loop" && continue
@@ -80,8 +95,8 @@ let
           echo "mq-deadline" > "$dev_path/queue/scheduler" || true
         fi
 
-        # Auto-calibrate the cost model from device latency, making IOWeight
-        # proportional and work-conserving rather than nominal.
+        # Auto selects/adapts predefined profiles and virtual rates; it is not
+        # a measured per-device calibration of the cost-model coefficients.
         printf '%s enable=1 ctrl=auto\n' "$major_minor" > /sys/fs/cgroup/io.cost.qos || true
       done
     '';
@@ -163,6 +178,10 @@ in
       )
       {
         assertions = [
+          {
+            assertion = !config.systemd.services.sinnix-iocost-init.enable || latencyTargetUnits == [ ];
+            message = "All-device IOCost cannot mix with IOLatency delay targets (including device aliases): ${lib.concatStringsSep ", " latencyTargetUnits}";
+          }
           {
             assertion = lib.all (
               token: !(lib.hasInfix token earlyoomAvoidPattern)

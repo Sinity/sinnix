@@ -4,13 +4,9 @@ let
     inherit description serviceConfig;
   };
 
-  # Protect interactive reads on both the store/home SSD and Realm NVMe.
-  # io.latency only arbitrates siblings, so the root user slice and the
-  # desktop parent must carry this policy as well as app/session children.
-  interactiveIoLatency = [
-    "/nix 20ms"
-    "/realm 20ms"
-  ];
+  # The workstation's IOCost initializer owns every physical block device.
+  # IOLatency shares incompatible blkcg delay state with IOCost, so these
+  # policies use relative weights rather than simultaneous latency targets.
 
   # Nix evaluation and builds: low weights so they yield, a memory ceiling
   # sized for two parallel jobs on a 32 GB host, and no pressure kill. On
@@ -249,12 +245,9 @@ rec {
 
   slices = {
     system = {
-      # Input and other critical system services share system.slice. Give
-      # that ancestor the same target so protecting the user slice cannot
-      # throttle the input route at their root-level competition.
+      # Input and other critical system services share this accounted ancestor.
       system = {
         IOAccounting = true;
-        IODeviceLatencyTargetSec = interactiveIoLatency;
         # memory.low is limited by every ancestor, so a service's own
         # protection (Sinex PostgreSQL's below) only counts if this slice
         # carries some. Without it, user.slice's 12G low (which recursive
@@ -270,7 +263,6 @@ rec {
       # and user@<uid>.service.
       user = {
         IOAccounting = true;
-        IODeviceLatencyTargetSec = interactiveIoLatency;
         # The desktop lives here, and the agents inside it carry their own
         # low weight one level down. With the default 100 the user slice
         # shared a saturated disk evenly with system services and builds,
@@ -288,9 +280,7 @@ rec {
       };
       # The daemon and every build it runs live here (nix-build.slice is
       # its only child), so this weight is the builds' share at the root
-      # level. It used to carry the desktop's latency target so store
-      # queries were never throttled, but that also put builds level with
-      # the desktop. Builds and devshells are agent work and yield to it.
+      # level. Builds and devshells are agent work and yield to the desktop.
       nix = {
         IOAccounting = true;
         IOWeight = 25;
@@ -298,7 +288,6 @@ rec {
       nix-build = buildSlicePolicy;
       system-critical = {
         IOAccounting = true;
-        IODeviceLatencyTargetSec = interactiveIoLatency;
         CPUWeight = 400;
         IOWeight = 300;
         MemoryLow = "2G";
@@ -413,10 +402,8 @@ rec {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 300;
-        # Weights share bandwidth only while both sides issue IO; a latency
-        # target throttles batch whenever the desktop's own requests wait,
-        # which is what swap-in feels like under six lanes.
-        IODeviceLatencyTargetSec = interactiveIoLatency;
+        # IOCost lends idle shares and prefers foreground work under contention;
+        # these relative weights are not a hard latency guarantee.
         # Chrome alone measured 6.6G on 2026-10-19, when 6G of MemoryLow let
         # it be swapped out (3 GB) and video stuttered. The guarantee covers
         # Chrome's resident core (the launcher claims desktopMemory.chromeMin
@@ -429,7 +416,6 @@ rec {
         IOAccounting = true;
         CPUWeight = 100;
         IOWeight = 300;
-        IODeviceLatencyTargetSec = interactiveIoLatency;
         # Hyprland (its unit claims desktopMemory.compositorMin), kitty,
         # PipeWire and the portals: 0.9 GiB together on 2026-10-27, when
         # Hyprland's 0.6 GiB was mostly swapped out. The 2026-09 figure of
@@ -441,7 +427,6 @@ rec {
       # Carry the shell policy to its competition with the other user slices.
       desktop = {
         IOAccounting = true;
-        IODeviceLatencyTargetSec = interactiveIoLatency;
         CPUWeight = 400;
         IOWeight = 300;
         MemoryMin = mib desktopMemory.shellMin;
@@ -450,7 +435,6 @@ rec {
       # The noctalia shell: 1.0 GiB on 2026-10-27, 0.7 GiB of it swapped out.
       desktop-shell = {
         IOAccounting = true;
-        IODeviceLatencyTargetSec = interactiveIoLatency;
         CPUWeight = 400;
         IOWeight = 300;
         MemoryMin = mib desktopMemory.shellMin;

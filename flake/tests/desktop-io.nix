@@ -1,4 +1,4 @@
-# Check the rendered policy at both hierarchy levels and on both SSDs.
+# Check the rendered IOCost hierarchy without inventing a hard latency promise.
 { inputs, ... }:
 let
   inherit (inputs.nixpkgs) lib;
@@ -29,15 +29,27 @@ in
                   "desktop-shell"
                 ]);
             in
-            map (policy: {
-              assertion =
-                policy.IOAccounting
-                && builtins.all (target: builtins.elem target policy.IODeviceLatencyTargetSec) [
-                  "/nix 20ms"
-                  "/realm 20ms"
-                ];
-              message = "Interactive disk latency protection must reach both SSDs, the shell, and root peer slices including the input ancestor";
-            }) protected;
+            (map (policy: {
+              assertion = policy.IOAccounting;
+              message = "Interactive I/O accounting must reach the shell and root peer slices";
+            }) protected)
+            ++ [
+              {
+                assertion = config.systemd.slices.user.sliceConfig.IOWeight == 400;
+                message = "The root user slice must retain its foreground IOCost weight";
+              }
+              {
+                assertion = lib.all (policy: policy.IOWeight == 300) (lib.drop 2 protected);
+                message = "Critical services and desktop routes must retain their IOCost weights";
+              }
+              {
+                assertion =
+                  config.systemd.user.slices.agent.sliceConfig.IOWeight == 25
+                  && config.systemd.user.slices.agent-tool.sliceConfig.IOWeight == 90
+                  && config.systemd.user.slices.agent-ctl.sliceConfig.IOWeight == 100;
+                message = "The agent hierarchy must retain its existing relative I/O weights";
+              }
+            ];
         }
       );
     in

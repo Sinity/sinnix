@@ -24,9 +24,11 @@ in
                 ++ (map (unit: unit.sliceConfig) (lib.attrValues config.systemd.user.slices))
                 ++ (map (unit: unit.serviceConfig) (lib.attrValues config.systemd.services))
                 ++ (map (unit: unit.serviceConfig) (lib.attrValues config.systemd.user.services));
-              hasLatencyTarget = policy:
-                lib.any (target: target != null && target != "")
-                  (lib.toList (policy.IODeviceLatencyTargetSec or [ ]));
+              hasLatencyTarget =
+                policy:
+                lib.any (target: target != null && target != "") (
+                  lib.toList (policy.IODeviceLatencyTargetSec or [ ])
+                );
             in
             [
               {
