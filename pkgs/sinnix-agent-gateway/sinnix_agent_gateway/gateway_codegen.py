@@ -219,7 +219,7 @@ def generated_files(root: Path) -> dict[Path, str]:
         _, after = rest.split("<!-- orientation:end -->", 1)
         files[doc] = (
             before
-            + "<!-- orientation:start -->\n"
+            + "<!-- orientation:start -->\n\n"
             + ORIENTATION
             + "\n<!-- orientation:end -->"
             + after
