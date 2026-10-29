@@ -32,7 +32,8 @@ target="$(target_of "$checkout")"
 # (`sinnix.baselineCheckout`, set by sinnix-master-baseline). Reflinks share
 # the extents, and Cargo reuses dependency artifacts across checkout paths.
 # Cargo's build lock on the source is held for the copy, so no build writes
-# it meanwhile; without reflinks or the lock, the target starts empty.
+# it meanwhile. Seeding is optional: a busy baseline or unavailable reflinks
+# leaves an empty independent target, without delaying shell entry or fmt.
 seed_checkout="$(git config --get sinnix.baselineCheckout || true)"
 if [ ! -e "$target" ] && [ -n "$seed_checkout" ] && [ -d "$seed_checkout" ]; then
   seed="$(target_of "$(realpath "$seed_checkout")")"
@@ -43,7 +44,7 @@ if [ ! -e "$target" ] && [ -n "$seed_checkout" ] && [ -d "$seed_checkout" ]; the
     # Walk under the source lock. Prune before copying so disabled incremental
     # state and Cargo test scratch never create destination inodes. rustc's probe cache belongs to
     # the source checkout/toolchain and is cheap to regenerate.
-    if flock --wait 300 "$seed/debug/.cargo-lock" bash -euo pipefail -c '
+    if flock --nonblock "$seed/debug/.cargo-lock" bash -euo pipefail -c '
       cd "$1"
       prune=( -path "./tmp" -o -path "./.rustc_info.json" )
       if [ "$3" = 0 ]; then

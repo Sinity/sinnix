@@ -194,7 +194,10 @@ class CargoCache(unittest.TestCase):
         def select_in(path, **extra):
             return Path(
                 subprocess.check_output(
-                    ["bash", str(SELECTOR)], cwd=path, env=dict(self.env, **extra), text=True
+                    ["bash", str(SELECTOR)],
+                    cwd=path,
+                    env=dict(self.env, **extra),
+                    text=True,
                 ).strip()
             )
 
@@ -241,7 +244,8 @@ class CargoCache(unittest.TestCase):
         opted_in = select_in(worktree("incremental-lane"), CARGO_INCREMENTAL="1")
         for profile in ("debug", "release", "aarch64-unknown-linux-gnu/debug"):
             self.assertEqual(
-                (opted_in / profile / "incremental/session/state").read_bytes(), b"stale"
+                (opted_in / profile / "incremental/session/state").read_bytes(),
+                b"stale",
             )
         self.assertFalse((opted_in / "tmp").exists())
         self.assertFalse((opted_in / ".rustc_info.json").exists())
@@ -254,6 +258,46 @@ class CargoCache(unittest.TestCase):
         self.assertEqual(select_in(self.root / "lane"), target)
         self.assertEqual(
             (target / "debug" / "deps" / "libdep.rlib").read_bytes(), b"rebuilt"
+        )
+
+    def test_busy_baseline_does_not_block_a_new_target(self):
+        import fcntl
+
+        self.cache.mkdir()
+        (self.cache / ".subvolume").touch()
+        seed = Path(self.select().stdout.strip())
+        (seed / "debug" / "deps").mkdir(parents=True)
+        (seed / "debug" / "deps" / "active.rlib").write_bytes(b"in progress")
+        lane = self.root / "lane"
+        subprocess.run(["git", "init", "-q", str(lane)], check=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(lane),
+                "config",
+                "sinnix.baselineCheckout",
+                str(self.checkout),
+            ],
+            check=True,
+        )
+        with (seed / "debug" / ".cargo-lock").open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            result = subprocess.run(
+                ["timeout", "2s", "bash", str(SELECTOR)],
+                cwd=lane,
+                env=self.env,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            target = Path(result.stdout.strip())
+            self.assertNotEqual(target, seed)
+            self.assertTrue((target / "CACHEDIR.TAG").exists())
+            self.assertFalse((target / "debug" / "deps" / "active.rlib").exists())
+            self.assertEqual([p.name for p in target.parent.iterdir()], ["target"])
+        self.assertEqual(
+            (seed / "debug" / "deps" / "active.rlib").read_bytes(), b"in progress"
         )
 
     def test_selection_needs_no_privileged_tree_search(self):
