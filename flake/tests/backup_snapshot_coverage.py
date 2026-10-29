@@ -17,8 +17,8 @@ import time
 import tracemalloc
 import unittest
 import uuid
-from datetime import datetime, timezone
 from contextlib import redirect_stdout
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -92,23 +92,43 @@ class OnchangeFreshnessFixture(unittest.TestCase):
             "filesystem_uuid": self.filesystem,
             "generation": "10",
             "subvolume_id": "1",
-            "coverage": json.dumps({
-                "policy_sha256": COVERAGE.policy_identity(self.policy, require_borg_excludes=True),
-                "proof_mode": "created",
-                "producer": COVERAGE.REALM_PRODUCER_CONTRACT,
-                "create_receipt_sha256": "c" * 64,
-                "archive": "genome-" + self.old,
-                "archive_id": "a" * 64,
-                "snapshot_uuid": self.details[self.old][0],
-            }),
+            "coverage": json.dumps(
+                {
+                    "policy_sha256": COVERAGE.policy_identity(
+                        self.policy, require_borg_excludes=True
+                    ),
+                    "proof_mode": "created",
+                    "producer": COVERAGE.REALM_PRODUCER_CONTRACT,
+                    "create_receipt_sha256": "c" * 64,
+                    "archive": "genome-" + self.old,
+                    "archive_id": "a" * 64,
+                    "snapshot_uuid": self.details[self.old][0],
+                }
+            ),
         }
         self.publish()
         self.now = int(datetime(2026, 1, 3, tzinfo=timezone.utc).timestamp())
-        self.enterContext(patch.object(COVERAGE.time, "time", side_effect=lambda: self.now))
-        self.enterContext(patch.object(COVERAGE, "filesystem_identity", return_value=self.filesystem))
-        self.enterContext(patch.object(COVERAGE, "snapshot_details", side_effect=lambda p: self.details[Path(p).name]))
+        self.enterContext(
+            patch.object(COVERAGE.time, "time", side_effect=lambda: self.now)
+        )
+        self.enterContext(
+            patch.object(COVERAGE, "filesystem_identity", return_value=self.filesystem)
+        )
+        self.enterContext(
+            patch.object(
+                COVERAGE,
+                "snapshot_details",
+                side_effect=lambda p: self.details[Path(p).name],
+            )
+        )
         self.enterContext(patch.object(COVERAGE, "run", side_effect=self.metadata))
-        self.enterContext(patch.object(COVERAGE, "archive_identity", side_effect=AssertionError("health must not open Borg")))
+        self.enterContext(
+            patch.object(
+                COVERAGE,
+                "archive_identity",
+                side_effect=AssertionError("health must not open Borg"),
+            )
+        )
         self.inventory = self.root / "acquisition-inventory.json"
         self.publish_inventory()
 
@@ -126,16 +146,27 @@ class OnchangeFreshnessFixture(unittest.TestCase):
         return f"Parent UUID: {self.source_uuid}\n"
 
     def publish_inventory(self):
-        observed = COVERAGE.observe_acquisitions(self.snapshots, "genome.*", self.policy, self.source)
+        observed = COVERAGE.observe_acquisitions(
+            self.snapshots, "genome.*", self.policy, self.source
+        )
         self.inventory.write_text(json.dumps(observed))
 
     def probe(self):
         return COVERAGE.acquisition_freshness(
-            self.inventory, "genome.*", self.marker, self.policy, 36 * 3600, self.source, 18 * 3600
+            self.inventory,
+            "genome.*",
+            self.marker,
+            self.policy,
+            36 * 3600,
+            self.source,
+            18 * 3600,
         )
 
     def test_unchanged_old_cut_is_current_without_borg_io(self):
-        self.assertEqual(self.probe(), {"status": "accepted-current-observed-acquired-generation", "pending": 0})
+        self.assertEqual(
+            self.probe(),
+            {"status": "accepted-current-observed-acquired-generation", "pending": 0},
+        )
 
     def test_pending_debt_ages_oldest_acquisition_not_old_archive_or_new_arrival(self):
         for name in (self.new, self.young):
@@ -150,7 +181,11 @@ class OnchangeFreshnessFixture(unittest.TestCase):
         self.source.chmod(0)
         self.snapshots.chmod(0)
         try:
-            with patch.object(COVERAGE, "run", side_effect=AssertionError("reader must not run Btrfs/Borg")):
+            with patch.object(
+                COVERAGE,
+                "run",
+                side_effect=AssertionError("reader must not run Btrfs/Borg"),
+            ):
                 self.assertEqual(self.probe()["pending"], 0)
         finally:
             self.source.chmod(0o700)
@@ -161,10 +196,12 @@ class OnchangeFreshnessFixture(unittest.TestCase):
         # still inaccessible. The reader must fail rather than accept latest.
         receipts = COVERAGE.acknowledgement_directory(self.marker)
         original_reader = COVERAGE.read_marker_fields
+
         def guarded_reader(path):
             if Path(path).parent == receipts:
                 raise PermissionError("nested receipt namespace unavailable")
             return original_reader(path)
+
         with patch.object(COVERAGE, "read_marker_fields", side_effect=guarded_reader):
             with self.assertRaises(PermissionError):
                 self.probe()
@@ -181,23 +218,36 @@ class OnchangeFreshnessFixture(unittest.TestCase):
         self.inventory.unlink()
         with self.assertRaises(FileNotFoundError):
             self.probe()
-        with patch.object(COVERAGE, "snapshot_names", side_effect=PermissionError("unavailable")):
+        with patch.object(
+            COVERAGE, "snapshot_names", side_effect=PermissionError("unavailable")
+        ):
             with self.assertRaises(PermissionError):
                 self.publish_inventory()
         with patch.object(COVERAGE, "run", side_effect=OSError("source unavailable")):
             with self.assertRaises(OSError):
                 self.publish_inventory()
-        with patch.object(COVERAGE, "filesystem_identity", side_effect=[self.filesystem, "another-volume"]):
+        with patch.object(
+            COVERAGE,
+            "filesystem_identity",
+            side_effect=[self.filesystem, "another-volume"],
+        ):
             with self.assertRaises(ValueError):
                 self.publish_inventory()
 
     def test_stale_future_corrupt_projection_or_identity_fails(self):
         original = json.loads(self.inventory.read_text())
         for key, value in (
-            ("schema", "unknown"), ("source_uuid", "66666666-6666-6666-6666-666666666666"),
+            ("schema", "unknown"),
+            ("source_uuid", "66666666-6666-6666-6666-666666666666"),
             ("policy_sha256", "b" * 64),
-            ("observed_at", datetime.fromtimestamp(self.now + 1, timezone.utc).isoformat()),
-            ("observed_at", datetime.fromtimestamp(self.now - 19 * 3600, timezone.utc).isoformat()),
+            (
+                "observed_at",
+                datetime.fromtimestamp(self.now + 1, timezone.utc).isoformat(),
+            ),
+            (
+                "observed_at",
+                datetime.fromtimestamp(self.now - 19 * 3600, timezone.utc).isoformat(),
+            ),
         ):
             self.inventory.write_text(json.dumps(dict(original, **{key: value})))
             with self.assertRaises(ValueError):
@@ -211,16 +261,35 @@ class OnchangeFreshnessFixture(unittest.TestCase):
             self.probe()
 
     def test_failed_native_producer_rejects_even_a_previous_fresh_projection(self):
-        argv = ["snapshot-coverage", "acquisition-freshness", str(self.inventory), "genome.*",
-                str(self.marker), str(self.policy), "129600", "--source", str(self.source),
-                "--max-observation-age", "64800", "--producer-unit", "btrbk.service"]
-        with patch.object(COVERAGE.sys, "argv", argv), patch.object(COVERAGE, "run", return_value="exit-code"):
+        argv = [
+            "snapshot-coverage",
+            "acquisition-freshness",
+            str(self.inventory),
+            "genome.*",
+            str(self.marker),
+            str(self.policy),
+            "129600",
+            "--source",
+            str(self.source),
+            "--max-observation-age",
+            "64800",
+            "--producer-unit",
+            "btrbk.service",
+        ]
+        with (
+            patch.object(COVERAGE.sys, "argv", argv),
+            patch.object(COVERAGE, "run", return_value="exit-code"),
+        ):
             with self.assertRaisesRegex(ValueError, "producer"):
                 COVERAGE.main()
 
     def test_stale_policy_or_changed_receipt_binding_fails(self):
         proof = json.loads(self.fields["coverage"])
-        for key, value in (("policy_sha256", "b" * 64), ("snapshot_uuid", self.details[self.new][0]), ("create_receipt_sha256", "invalid")):
+        for key, value in (
+            ("policy_sha256", "b" * 64),
+            ("snapshot_uuid", self.details[self.new][0]),
+            ("create_receipt_sha256", "invalid"),
+        ):
             altered = dict(proof, **{key: value})
             self.fields["coverage"] = json.dumps(altered)
             self.publish()
@@ -1955,9 +2024,11 @@ class DrainFixture(unittest.TestCase):
             for suffix in ("", "-coverage-v3"):
                 with self.subTest(lane=lane, suffix=suffix):
                     command = COVERAGE.expected_create_command(
-                        "/store/borg", Path("/source"),
+                        "/store/borg",
+                        Path("/source"),
                         f"{lane}-{lane}.20260402T033000+0200{suffix}",
-                        "fixture-uuid", {"borg_excludes": []},
+                        "fixture-uuid",
+                        {"borg_excludes": []},
                     )
                     self.assertEqual(
                         command[command.index("--timestamp") + 1],
@@ -1965,8 +2036,10 @@ class DrainFixture(unittest.TestCase):
                     )
         with self.assertRaisesRegex(ValueError, "no snapshot cut timestamp"):
             COVERAGE.expected_create_command(
-                "/store/borg", Path("/source"),
-                "genome-realm.20260402T033000+0200", "fixture-uuid",
+                "/store/borg",
+                Path("/source"),
+                "genome-realm.20260402T033000+0200",
+                "fixture-uuid",
                 {"borg_excludes": []},
             )
 
@@ -2243,22 +2316,46 @@ else: sys.exit(1)
             # must record source time and select the newer daily cut even
             # though the older cut was created last.
             repo = str(root / "repos/borg-realm-v2")
-            inventory = json.loads(subprocess.check_output(
-                ["borg", "list", "--json", repo], env=env, text=True
-            ))["archives"]
+            inventory = json.loads(
+                subprocess.check_output(
+                    ["borg", "list", "--json", repo], env=env, text=True
+                )
+            )["archives"]
             for cut in (old, new):
                 entry = next(a for a in inventory if a["name"] == "realm-" + cut.name)
                 recorded = datetime.fromisoformat(entry["time"])
-                self.assertEqual(int(recorded.replace(tzinfo=timezone.utc).timestamp()),
-                                 COVERAGE.snapshot_epoch(cut.name))
+                self.assertEqual(
+                    int(recorded.replace(tzinfo=timezone.utc).timestamp()),
+                    COVERAGE.snapshot_epoch(cut.name),
+                )
             selection = subprocess.run(
-                ["borg", "prune", "--dry-run", "--list", "--keep-daily", "1",
-                 "--glob-archives", "realm-*", repo],
-                env=env, text=True, capture_output=True, check=True,
+                [
+                    "borg",
+                    "prune",
+                    "--dry-run",
+                    "--list",
+                    "--keep-daily",
+                    "1",
+                    "--glob-archives",
+                    "realm-*",
+                    repo,
+                ],
+                env=env,
+                text=True,
+                capture_output=True,
+                check=True,
             )
-            kept = [line for line in selection.stderr.splitlines() if "Keeping archive" in line]
-            self.assertTrue(any("realm-" + new.name in line for line in kept), selection.stderr)
-            self.assertFalse(any("realm-" + old.name in line for line in kept), selection.stderr)
+            kept = [
+                line
+                for line in selection.stderr.splitlines()
+                if "Keeping archive" in line
+            ]
+            self.assertTrue(
+                any("realm-" + new.name in line for line in kept), selection.stderr
+            )
+            self.assertFalse(
+                any("realm-" + old.name in line for line in kept), selection.stderr
+            )
             self.assertFalse(old.exists())
             self.assertTrue(new.exists())
             latest_marker = root / "state/borg-drain/realm.latest-archived"
@@ -2577,7 +2674,9 @@ else: sys.exit(1)
             receipt = next((root / "realm-data").rglob("borg_beads_drill.jsonl"))
             evidence = json.loads(receipt.read_text())
             self.assertTrue(evidence["ok"])
-            self.assertEqual(evidence["authority_path"], "state/tasks/sinex-next/.beads")
+            self.assertEqual(
+                evidence["authority_path"], "state/tasks/sinex-next/.beads"
+            )
             self.assertEqual(
                 evidence["issue"], {"id": "canonical-task", "title": "Current task"}
             )
@@ -3015,7 +3114,9 @@ else: sys.exit(1)
                     rf"daily_marker=[^\n]*{name}\.last-success\n\s*daily_policy=([0-9a-f]+)",
                     scripts["coordinator"],
                 ).group(1)
-                daily_receipts[name] = f"archive=synthetic\nepoch={int(time.time())}\npolicy_sha256={policy}\n"
+                daily_receipts[name] = (
+                    f"archive=synthetic\nepoch={int(time.time())}\npolicy_sha256={policy}\n"
+                )
             for name in ("polylogue-state", "sinex-blobs", "local-dumps"):
                 (root / f"state/borg-drain/{name}.last-success").unlink(missing_ok=True)
             coordinator_steps = [
@@ -3060,11 +3161,14 @@ else: sys.exit(1)
             ]
             self.assertEqual(
                 calls[-13:],
-                [["systemctl", *call] for call in (
-                    expected_starts[:3]
-                    + [["stop", "borgbackup-verify.service"]]
-                    + expected_starts[3:]
-                )],
+                [
+                    ["systemctl", *call]
+                    for call in (
+                        expected_starts[:3]
+                        + [["stop", "borgbackup-verify.service"]]
+                        + expected_starts[3:]
+                    )
+                ],
                 "failed native lanes must not suppress later independent jobs",
             )
             self.assertFalse(
@@ -3084,7 +3188,9 @@ else: sys.exit(1)
                 for line in (root / "logs/commands").read_text().splitlines()
                 if '"systemctl"' in line
             ][previous_calls:]
-            self.assertFalse(any(call[-1] in coordinator_steps[:3] for call in restarted_calls))
+            self.assertFalse(
+                any(call[-1] in coordinator_steps[:3] for call in restarted_calls)
+            )
             self.assertEqual(
                 restarted_calls[-9:],
                 [["systemctl", *call] for call in expected_starts[3:]],
@@ -3121,7 +3227,9 @@ else: sys.exit(1)
                 expected_starts,
                 "empty retries must leave an ongoing integrity check alone",
             )
-            acquisition_receipt = (empty / "state/borg-drain/coordinator.acquisition").read_text()
+            acquisition_receipt = (
+                empty / "state/borg-drain/coordinator.acquisition"
+            ).read_text()
             # A local receipt routes scheduling without repository credentials.
             # The real children, tested above, still qualify their archives.
             admitted = "realm.20260403T070000+0000"
@@ -3178,7 +3286,10 @@ else: sys.exit(1)
                 text=True,
             )
             self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-            calls = [json.loads(line) for line in (empty / "commands").read_text().splitlines()]
+            calls = [
+                json.loads(line)
+                for line in (empty / "commands").read_text().splitlines()
+            ]
             self.assertNotIn(["start", "btrbk.service"], calls)
             self.assertEqual(calls[-9:], expected_starts[3:])
             self.assertIn("reason=dump-failure", result.stderr)
@@ -3186,7 +3297,9 @@ else: sys.exit(1)
             # Eligibility is checked at each phase, not against a scheduler
             # timestamp that can precede a long archive backlog by a full day.
             (empty / "fail-dump").unlink()
-            (empty / "state/borg-drain/coordinator.acquisition").write_text(acquisition_receipt)
+            (empty / "state/borg-drain/coordinator.acquisition").write_text(
+                acquisition_receipt
+            )
             for name, payload in daily_receipts.items():
                 (empty / f"state/borg-drain/{name}.last-success").write_text(payload)
             clock = empty / "mock-bin/date"
@@ -3201,14 +3314,24 @@ else: sys.exit(1)
             (empty / "commands").unlink()
             result = subprocess.run(
                 ["bash", str(root / "coordinator.sh")],
-                env=dict(env, TMPDIR=str(empty), PATH=str(empty / "mock-bin") + os.pathsep + env["PATH"]),
+                env=dict(
+                    env,
+                    TMPDIR=str(empty),
+                    PATH=str(empty / "mock-bin") + os.pathsep + env["PATH"],
+                ),
                 capture_output=True,
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            calls = [json.loads(line) for line in (empty / "commands").read_text().splitlines()]
+            calls = [
+                json.loads(line)
+                for line in (empty / "commands").read_text().splitlines()
+            ]
             self.assertNotIn(["start", "btrbk.service"], calls)
-            for unit in ("borgbackup-job-polylogue-state.service", "borgbackup-job-sinex-blobs.service"):
+            for unit in (
+                "borgbackup-job-polylogue-state.service",
+                "borgbackup-job-sinex-blobs.service",
+            ):
                 self.assertIn(["start", unit], calls)
 
 

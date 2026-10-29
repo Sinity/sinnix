@@ -36,7 +36,7 @@ never cancels a job, and a queue cleanup retains its historical artifacts.
 | `evidence list \| get`                                               | read original retained native evidence                                                                                                               |
 | `view [p]`                                                           | queue groups, failures, active jobs, open runs and ready tasks                                                                                       |
 | `events tail [--lines N] [--follow] [--project p]`                   | the event log (`/realm/state/agentctl/events.jsonl`)                                                                                                 |
-| `events compact [--json]`                                         | one-shot replacement of verified embedded receipts with outcome references |
+| `events compact [--json]`                                            | one-shot replacement of verified embedded receipts with outcome references                                                                           |
 | `pools apply`                                                        | write the declared pool widths into the running pueued                                                                                               |
 | `pressure tick`                                                      | one pass pausing or reopening groups against memory pressure                                                                                         |
 
