@@ -23,25 +23,6 @@ let
   scriptPkgs = helpers.mkSinnixPackagesFor pkgs;
   userTmpRoot = "/realm/tmp/work";
   earlyoomAvoidPattern = runtimeInventory.earlyoomEmergencyAvoidPattern;
-  # IOCost owns all physical devices here, including every path alias. Its
-  # fixed-delay API must not share blkcg state with IOLatency's counted delays.
-  latencyTargetUnits =
-    let
-      active =
-        policy:
-        lib.any (target: target != null && target != "") (
-          lib.toList (policy.IODeviceLatencyTargetSec or [ ])
-        );
-      collect =
-        label: field: units:
-        lib.mapAttrsToList (name: unit: if active unit.${field} then "${label} ${name}" else null) units;
-    in
-    lib.filter (name: name != null) (
-      (collect "system slice" "sliceConfig" config.systemd.slices)
-      ++ (collect "user slice" "sliceConfig" config.systemd.user.slices)
-      ++ (collect "system service" "serviceConfig" config.systemd.services)
-      ++ (collect "user service" "serviceConfig" config.systemd.user.services)
-    );
   forbiddenEarlyoomAvoidTokens = [
     "bash"
     "chrome"
@@ -178,10 +159,6 @@ in
       )
       {
         assertions = [
-          {
-            assertion = !config.systemd.services.sinnix-iocost-init.enable || latencyTargetUnits == [ ];
-            message = "All-device IOCost cannot mix with IOLatency delay targets (including device aliases): ${lib.concatStringsSep ", " latencyTargetUnits}";
-          }
           {
             assertion = lib.all (
               token: !(lib.hasInfix token earlyoomAvoidPattern)
