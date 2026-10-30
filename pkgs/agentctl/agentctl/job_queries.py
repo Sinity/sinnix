@@ -572,6 +572,19 @@ def get_job(
     return _job_detail(config, task, attempt, attempt_offset, attempt_limit)
 
 
+def launch_selection(launch_input: Mapping[str, Any]) -> dict[str, Any]:
+    """Public selection provenance from the retained input, never its environment."""
+    selected = {
+        key: launch_input[key]
+        for key in ("descriptor_path", "project_root", "working_directory")
+        if isinstance(launch_input.get(key), str) and launch_input[key]
+    }
+    timeout = launch_input.get("timeout_seconds")
+    if isinstance(timeout, int) and not isinstance(timeout, bool) and timeout > 0:
+        selected["timeout_seconds"] = timeout
+    return selected
+
+
 def _job_detail(
     config: Config,
     task: Task,
@@ -581,6 +594,7 @@ def _job_detail(
 ) -> dict[str, Any]:
     view = job_view(task)
     launch_input = read_launch_input(config, task) or {}
+    view.update(launch_selection(launch_input))
     binding = launch_input.get("binding")
     if binding:
         view["binding"] = binding

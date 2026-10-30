@@ -270,6 +270,7 @@ def enqueue(
         "job_id": job_id,
         "project_id": project.project_id,
         "project_root": str(project.root),
+        "descriptor_path": str(project.descriptor),
         "operation": operation,
         "pool": group,
         "kind": kind,
@@ -348,11 +349,13 @@ def enqueue(
                 {"kind": "pool-hold", "action": "held", "task_id": task_id, **hold},
             )
     task = pueue.task(task_id)
-    return (
+    view = (
         job_queries.job_view(task)
         if task is not None
         else {"task_id": task_id, "label": label, "job_id": job_id}
     )
+    view.update(job_queries.launch_selection(launch))
+    return view
 
 
 @contextmanager
@@ -693,6 +696,7 @@ def _start_operation(
                 existing_input = job_queries.read_launch_input(config, existing) or {}
                 return {
                     **job_queries.job_view(existing),
+                    **job_queries.launch_selection(existing_input),
                     "reused": True,
                     **{
                         key: existing_input[key]

@@ -173,7 +173,7 @@ def parser() -> argparse.ArgumentParser:
     start.add_argument(
         "--workspace",
         type=Path,
-        help="run in this worktree instead of the project root",
+        help="execution cwd only; use --project CHECKOUT to select its descriptor",
     )
     start.add_argument("--wait", action="store_true")
     start.add_argument("--timeout-seconds", type=int, default=DEFAULT_WAIT_SECONDS)

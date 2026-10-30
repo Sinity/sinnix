@@ -17,7 +17,7 @@ import pytest
 from agentctl import batch_history as manifest
 from agentctl import cli, github, operator_view, pueue
 from agentctl.config import Config
-from conftest import SELF_REVIEW, FakePueue, read_launch
+from conftest import SELF_REVIEW, FakePueue, read_launch, write_project
 
 
 @pytest.fixture
@@ -1072,3 +1072,95 @@ def test_events_compact_cli(cli_config, capsys):
     assert result["events_kept"] == 1
     assert result["events_rewritten"] == 0
     assert result["bytes_before"] == result["bytes_after"]
+
+
+def test_launch_and_get_expose_the_bound_descriptor_not_the_workspace_descriptor(
+    fake_pueue: FakePueue,
+    cli_config: Config,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    registered = cli_config.project_roots[0]
+    checkout = write_project(tmp_path / "candidate")
+    for root, timeout in ((registered, 900), (checkout, 1800)):
+        descriptor = root / ".agentctl/project.toml"
+        descriptor.write_text(
+            descriptor.read_text().replace(
+                'exec = ["true"]', f'exec = ["true"]\ntimeout_seconds = {timeout}'
+            )
+            + '\n[environment.values]\nBOUND_SELECTION_TEST_VALUE = "synthetic-private-value"\n'
+        )
+    for project, root, timeout in (
+        ("fixture", registered, 900),
+        (str(checkout), checkout, 1800),
+    ):
+        assert (
+            cli.main(
+                [
+                    "job",
+                    "start",
+                    "--project",
+                    project,
+                    "check",
+                    "--workspace",
+                    str(checkout),
+                ]
+            )
+            == 0
+        )
+        captured = capsys.readouterr()
+        started = json.loads(captured.out)
+        expected = {
+            "descriptor_path": str(root / ".agentctl/project.toml"),
+            "project_root": str(root),
+            "working_directory": str(checkout),
+            "timeout_seconds": timeout,
+        }
+        assert {key: started[key] for key in expected} == expected
+        persisted = read_launch(cli_config, fake_pueue.task(started["task_id"]))
+        assert {key: persisted[key] for key in expected} == expected
+        assert (
+            persisted["environment"]["BOUND_SELECTION_TEST_VALUE"]
+            == "synthetic-private-value"
+        )
+        assert "environment" not in started
+        assert "synthetic-private-value" not in captured.out + captured.err
+        for text in (
+            str(root / ".agentctl/project.toml"),
+            f"descriptor root {root}",
+            f"workspace {checkout}",
+            f"timeout {timeout}s",
+        ):
+            assert text in captured.err
+        descriptor = root / ".agentctl/project.toml"
+        descriptor.write_text(
+            descriptor.read_text().replace(
+                f"timeout_seconds = {timeout}", "timeout_seconds = 42"
+            )
+        )
+        assert (
+            cli.main(
+                [
+                    "job",
+                    "get",
+                    str(started["task_id"]),
+                    "--job-id",
+                    started["job_id"],
+                    "--json",
+                ]
+            )
+            == 0
+        )
+        detail = json.loads(capsys.readouterr().out)
+        assert {key: detail[key] for key in expected} == expected
+        assert "environment" not in detail
+        assert "synthetic-private-value" not in json.dumps(detail)
+        assert (
+            cli.main(
+                ["job", "get", str(started["task_id"]), "--job-id", started["job_id"]]
+            )
+            == 0
+        )
+        text = capsys.readouterr().out
+        assert f"timeout {timeout}s" in text
+        assert f"descriptor root {root}" in text

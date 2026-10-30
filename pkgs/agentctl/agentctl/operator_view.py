@@ -741,9 +741,27 @@ class Output:
             if isinstance(scratch, Mapping)
             else ""
         )
+        selection_text = ""
+        if any(
+            key in job
+            for key in (
+                "descriptor_path",
+                "project_root",
+                "working_directory",
+                "timeout_seconds",
+            )
+        ):
+            timeout = job.get("timeout_seconds")
+            budget = f"{timeout}s" if timeout is not None else "unknown"
+            selection_text = (
+                f"; descriptor {job.get('descriptor_path', 'unknown')}"
+                f"; descriptor root {job.get('project_root', 'unknown')}"
+                f"; workspace {job.get('working_directory', 'unknown')}"
+                f"; timeout {budget}"
+            )
         return (
             f"job {job['task_id']} {job['label']} {job['phase']}{exit_text} "
-            f"{when}{scratch_text}"
+            f"{when}{scratch_text}{selection_text}"
         )
 
     def jobs_table(self, rows: Sequence[Mapping[str, Any]]) -> str:

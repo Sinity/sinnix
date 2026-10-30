@@ -48,6 +48,13 @@ The project is `--project`, a leading positional naming a project or checkout
 path, or the checkout around the working directory. A run is named by its full
 id or its 8-character suffix.
 
+A named project selects the descriptor in its registered project root.
+`--workspace CHECKOUT` changes only the execution working directory; it does
+not select the checkout's descriptor or its operation limits. To use the
+checkout's descriptor explicitly, pass its path as the project:
+`agentctl job start --project CHECKOUT check --workspace CHECKOUT`.
+The same registry resolution, descriptor trust and checkout policies apply.
+
 Reads print tables (local time, with an age column); `--json` prints the
 document. Writes print JSON on stdout and a summary line on stderr. Exit status:
 0 done; 1 refused or failed; 2 usage; 3 a driven tool failed; 4 the waited job
@@ -119,7 +126,12 @@ resolved environment, working directory, timeout, result kind and artifact
 paths. It then runs `pueue add` with the command `agentctl-run <input>`.
 `pueue add` runs with a scrubbed environment because pueue stores the adding
 client's environment world-readably. The real environment rides in the launch
-input. `job start --idempotency-key` binds a caller's request to one launch:
+input. Launch summaries and `job get` show the retained `descriptor_path`,
+`project_root` (the descriptor root), `working_directory` (the workspace), and
+`timeout_seconds`. Human output labels all four; JSON includes the same fields.
+Historical inputs lacking a field do not reconstruct it from today's descriptor.
+Environment values and credentials are not part of this public selection view.
+`job start --idempotency-key` binds a caller's request to one launch:
 a replay reuses the accepted launch, and an unprovable submission raises
 instead of resubmitting.
 

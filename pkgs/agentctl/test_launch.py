@@ -192,6 +192,11 @@ def test_cached_operation_reuses_an_active_and_completed_exact_receipt(
     assert second["task_id"] == first["task_id"]
     assert third["task_id"] == first["task_id"]
     assert second["reused"] is True and third["reused"] is True
+    for selected in (first, second, third):
+        assert selected["descriptor_path"] == str(descriptor)
+        assert selected["project_root"] == str(project_root)
+        assert selected["working_directory"] == str(project_root)
+        assert selected["timeout_seconds"] == 120
     written = read_launch(config, fake_pueue.task(first["task_id"]))
     assert written["tree_receipt"] == {
         "head": "a" * 40,
@@ -2107,6 +2112,13 @@ def test_operation_binding_persists_original_run_on_replay(
             idempotency_key=key,
         )
         assert replay["job_id"] == started["job_id"]
+        for field in (
+            "descriptor_path",
+            "project_root",
+            "working_directory",
+            "timeout_seconds",
+        ):
+            assert replay[field] == started[field]
         assert (
             read_launch(config, fake_pueue.task(started["task_id"]))["binding"]
             == binding
