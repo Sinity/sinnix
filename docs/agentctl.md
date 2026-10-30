@@ -512,7 +512,10 @@ with each pool as `{parallel, ...}`. It installs `agentctl`, `wt`, `pueue` and
   `masterBaselines`): `sinnix-master-baseline` fetches the default branch and,
   when its head is new and no baseline job is active, moves the reserved
   detached checkout `<workspace root>/<project>-master` there and queues the
-  project's `baseline` operation in it. Lanes read the newest
+  checkout's own `baseline` operation using `--project CHECKOUT`, with that
+  same checkout as `--workspace`. Its descriptor supplies the environment and
+  operation limits; its ProjectID must match the registered project. A failed
+  launch leaves the head unmarked for the next scheduled attempt. Lanes read the newest
   `<project>:baseline` job to learn whether a failure is already on master;
   its warm target seeds new checkouts' targets (`docs/worktree-cleanup.md`).
 

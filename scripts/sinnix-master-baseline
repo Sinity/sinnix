@@ -21,8 +21,8 @@ if ! jq -e '.operations | any(.name == "baseline")' <<<"$descriptor" >/dev/null;
   exit 0
 fi
 
-active="$("$agentctl" job list --project "$project" --active --json \
-  | jq --arg label "$project:baseline" '[.[] | select(.label == $label)] | length')"
+active="$("$agentctl" job list --project "$project" --active --json |
+  jq --arg label "$project:baseline" '[.[] | select(.label == $label)] | length')"
 if [ "$active" -ne 0 ]; then
   exit 0
 fi
@@ -41,6 +41,13 @@ if [ "$(cat "$stamp" 2>/dev/null || true)" = "$head" ]; then
   exit 0
 fi
 git -C "$checkout" checkout --quiet --detach "$head"
-"$agentctl" job start "$project" baseline --workspace "$checkout" >/dev/null
+# The execution directory does not select its descriptor. Resolve the moved
+# checkout through agentctl, retaining the registered project identity.
+selected="$("$agentctl" project get "$checkout" --json)"
+if ! jq -e --arg id "$(jq -r '.id' <<<"$descriptor")" '.id == $id' <<<"$selected" >/dev/null; then
+  echo "$checkout declares a different project ID than $project" >&2
+  exit 1
+fi
+"$agentctl" job start --project "$checkout" baseline --workspace "$checkout" >/dev/null
 printf '%s\n' "$head" >"$stamp"
 echo "queued $project baseline at $head"

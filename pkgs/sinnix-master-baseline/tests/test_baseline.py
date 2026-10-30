@@ -2,8 +2,8 @@
 
 import json
 import os
-import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -34,14 +34,30 @@ def world(tmp_path: Path) -> dict:
     active = tmp_path / "active.json"
     active.write_text("[]")
     agentctl = tmp_path / "agentctl"
+    descriptor = {
+        "id": "fixture",
+        "root": str(root),
+        "workspace": {"root": str(workspaces), "default_base": "origin/master"},
+        "operations": [{"name": "baseline"}],
+    }
     agentctl.write_text(
-        f"#!{shutil.which('bash')}\nset -eu\n"
-        f'case "$1 $2" in\n'
-        f"  'project get') printf '%s' '{json.dumps({'root': str(root), 'workspace': {'root': str(workspaces), 'default_base': 'origin/master'}, 'operations': [{'name': 'baseline'}]})}' ;;\n"
-        f"  'job list') cat '{active}' ;;\n"
-        f"  'job start') printf '%s\\n' \"$*\" >>'{started}' ;;\n"
-        "  *) exit 9 ;;\n"
-        "esac\n"
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        f"descriptor = json.loads({json.dumps(descriptor)!r})\n"
+        "args = sys.argv[1:]\n"
+        "if args[:2] == ['project', 'get']:\n"
+        "    if args[2] != 'fixture':\n"
+        "        descriptor['id'] = os.environ.get('BASELINE_CHECKOUT_ID', 'fixture')\n"
+        "    print(json.dumps(descriptor))\n"
+        "elif args[:2] == ['job', 'list']:\n"
+        f"    print(open({str(active)!r}).read())\n"
+        "elif args[:2] == ['job', 'start']:\n"
+        "    if failure := int(os.environ.get('BASELINE_START_FAIL', '0')):\n"
+        "        sys.exit(failure)\n"
+        f"    with open({str(started)!r}, 'a') as output:\n"
+        "        output.write(json.dumps(args) + '\\n')\n"
+        "else:\n"
+        "    sys.exit(9)\n"
     )
     agentctl.chmod(0o755)
     env = dict(os.environ, AGENTCTL=str(agentctl))
@@ -54,13 +70,23 @@ def world(tmp_path: Path) -> dict:
     }
 
 
-def baseline(world: dict) -> None:
-    subprocess.run(["bash", str(SCRIPT), "fixture"], env=world["env"], check=True)
+def baseline(world: dict, *, check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["bash", str(SCRIPT), "fixture"],
+        env=world["env"],
+        check=check,
+        capture_output=True,
+        text=True,
+    )
 
 
-def started(world: dict) -> list[str]:
+def started(world: dict) -> list[list[str]]:
     path = world["started"]
-    return path.read_text().splitlines() if path.exists() else []
+    return (
+        [json.loads(line) for line in path.read_text().splitlines()]
+        if path.exists()
+        else []
+    )
 
 
 def test_a_new_head_is_queued_once_in_the_reserved_checkout(world: dict) -> None:
@@ -68,7 +94,17 @@ def test_a_new_head_is_queued_once_in_the_reserved_checkout(world: dict) -> None
     checkout = world["checkout"]
     head = git("rev-parse", "origin/master", cwd=world["root"])
     assert git("rev-parse", "HEAD", cwd=checkout) == head
-    assert started(world) == [f"job start fixture baseline --workspace {checkout}"]
+    assert started(world) == [
+        [
+            "job",
+            "start",
+            "--project",
+            str(checkout),
+            "baseline",
+            "--workspace",
+            str(checkout),
+        ]
+    ]
     assert git("config", "--get", "sinnix.baselineCheckout", cwd=world["root"]) == str(
         checkout
     )
@@ -106,7 +142,48 @@ def test_the_checkout_follows_master_but_never_moves_under_an_active_baseline(
 
 def test_a_project_without_a_baseline_operation_is_left_alone(world: dict) -> None:
     agentctl = Path(world["env"]["AGENTCTL"])
-    agentctl.write_text(agentctl.read_text().replace('"baseline"', '"check"'))
+    agentctl.write_text(agentctl.read_text().replace("baseline", "check"))
     baseline(world)
     assert started(world) == []
     assert not world["checkout"].exists()
+
+
+def test_a_refused_launch_does_not_stamp_the_head_or_suppress_the_next_attempt(
+    world: dict,
+) -> None:
+    world["env"]["BASELINE_START_FAIL"] = "37"
+    assert baseline(world, check=False).returncode == 37
+    stamp = Path(
+        git(
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "baseline-head",
+            cwd=world["checkout"],
+        )
+    )
+    assert not stamp.exists()
+    assert started(world) == []
+    del world["env"]["BASELINE_START_FAIL"]
+    baseline(world)
+    assert stamp.read_text().strip() == git("rev-parse", "HEAD", cwd=world["checkout"])
+    baseline(world)
+    assert len(started(world)) == 1
+
+
+def test_a_checkout_cannot_queue_a_different_project_identity(world: dict) -> None:
+    world["env"]["BASELINE_CHECKOUT_ID"] = "other-project"
+    result = baseline(world, check=False)
+    assert result.returncode == 1
+    assert "different project ID" in result.stderr
+    assert started(world) == []
+    stamp = Path(
+        git(
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "baseline-head",
+            cwd=world["checkout"],
+        )
+    )
+    assert not stamp.exists()
