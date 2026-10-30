@@ -379,7 +379,7 @@ async def _native_project_context(
                 "reason": "Current Git, task status and retained job receipts do not establish delivery, acceptance, historical trajectory or regression",
             }
         )
-    required = ordered[:3]
+    required = [c for c in ordered if c.get("required", True)]
     failures = [
         c
         for c in ordered
