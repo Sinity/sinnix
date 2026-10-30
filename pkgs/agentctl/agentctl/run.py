@@ -1145,6 +1145,8 @@ def _run(
         environment.pop(f"AGENTCTL_{field}", None)
     environment.update(
         {
+            "DEVKIT_JOB_RUNNER": "agentctl",
+            "DEVKIT_JOB_ID": str(launch["job_id"]),
             "AGENTCTL_CORRELATION_ID": str(launch["job_id"]),
             "AGENTCTL_JOB_ID": str(launch["job_id"]),
             "AGENTCTL_PROJECT_ID": str(launch["project_id"]),
@@ -1169,8 +1171,10 @@ def _run(
         environment["AGENTCTL_CHECKOUT_HEAD"] = start_git["head"]
     if pool:
         environment["AGENTCTL_POOL"] = pool
+    environment.pop("DEVKIT_SCRATCH", None)
     if scratch_dir is not None:
         environment["AGENTCTL_SCRATCH"] = str(scratch_dir)
+        environment["DEVKIT_SCRATCH"] = str(scratch_dir)
         environment["TMPDIR"] = str(scratch_dir)
     argv = list(launch["argv"])
     executable = shutil.which(argv[0], path=environment.get("PATH", os.defpath))

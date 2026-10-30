@@ -141,6 +141,8 @@ instead of resubmitting.
 job ends when the unit's cgroup is empty, so a surviving descendant still holds
 the pool slot. The unit environment carries `AGENTCTL_JOB_ID`, the project,
 operation, `AGENTCTL_CHECKOUT_ID` and `AGENTCTL_CHECKOUT_HEAD`.
+The same authoritative job identity is exported through the runner-neutral
+`DEVKIT_JOB_RUNNER=agentctl` and `DEVKIT_JOB_ID` interfaces for product tooling.
 
 Each invocation gets `jobs/<ref>.attempts/<n>/`:
 
@@ -201,7 +203,8 @@ access (`ReadOnlyPaths`, `ReadWritePaths`, `InaccessiblePaths`).
 
 An operation with `scratch = "tmpfs"` or `"nvme"` gets one job-owned directory,
 `/dev/shm/agentctl/<ref>` or `/realm/tmp/work/agentctl/<ref>` (mode 0700),
-exported as `AGENTCTL_SCRATCH` and `TMPDIR`. After the unit exits, agentctl
+exported as `AGENTCTL_SCRATCH`, `DEVKIT_SCRATCH` and `TMPDIR`. An invocation
+without declared scratch does not inherit `DEVKIT_SCRATCH`. After the unit exits, agentctl
 records its size in the outcome and deletes it. If deletion fails, the outcome
 records `scratch.cleanup_error` and the command's exit status is unchanged.
 An existing path is never reused or removed. Cleanup also runs if result

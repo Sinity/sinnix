@@ -473,13 +473,19 @@ def test_worker_exports_queue_identity_to_the_child(
         argv=[
             "sh",
             "-c",
-            'printf \'%s %s %s %s\' "$AGENTCTL_JOB_ID" "$AGENTCTL_PROJECT_ID" "$AGENTCTL_OPERATION" "$AGENTCTL_POOL"',
+            'printf \'%s %s %s %s %s %s %s\' "$AGENTCTL_JOB_ID" "$AGENTCTL_PROJECT_ID" "$AGENTCTL_OPERATION" "$AGENTCTL_POOL" "$DEVKIT_JOB_RUNNER" "$DEVKIT_JOB_ID" "${DEVKIT_SCRATCH-unset}"',
         ],
         pool="pytest",
+        environment={
+            "PATH": os.environ["PATH"],
+            "DEVKIT_JOB_RUNNER": "parent",
+            "DEVKIT_JOB_ID": "parent-job",
+            "DEVKIT_SCRATCH": "/parent/scratch",
+        },
     )
 
     assert main([str(launch)]) == 0
-    assert log_of(tmp_path) == "job-a fixture check pytest"
+    assert log_of(tmp_path) == "job-a fixture check pytest agentctl job-a unset"
 
 
 def test_a_declared_pool_runs_the_child_as_a_service(
@@ -652,6 +658,7 @@ def test_a_declared_scratch_is_created_exported_measured_and_removed(
             "sh",
             "-c",
             'test "$TMPDIR" = "$AGENTCTL_SCRATCH" '
+            '&& test "$DEVKIT_SCRATCH" = "$AGENTCTL_SCRATCH" '
             "&& temporary=$(mktemp) "
             '&& dd if=/dev/zero of="$temporary" bs=1024 count=4 '
             "2>/dev/null "
