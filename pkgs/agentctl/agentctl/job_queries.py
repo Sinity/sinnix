@@ -580,7 +580,7 @@ def launch_selection(launch_input: Mapping[str, Any]) -> dict[str, Any]:
         if isinstance(launch_input.get(key), str) and launch_input[key]
     }
     timeout = launch_input.get("timeout_seconds")
-    if isinstance(timeout, int) and not isinstance(timeout, bool) and timeout > 0:
+    if isinstance(timeout, int) and not isinstance(timeout, bool) and timeout >= 0:
         selected["timeout_seconds"] = timeout
     return selected
 

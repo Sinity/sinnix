@@ -1074,15 +1074,17 @@ def test_events_compact_cli(cli_config, capsys):
     assert result["bytes_before"] == result["bytes_after"]
 
 
+@pytest.mark.parametrize("timeouts", [(900, 1800), (0, 0)])
 def test_launch_and_get_expose_the_bound_descriptor_not_the_workspace_descriptor(
     fake_pueue: FakePueue,
     cli_config: Config,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
+    timeouts: tuple[int, int],
 ) -> None:
     registered = cli_config.project_roots[0]
     checkout = write_project(tmp_path / "candidate")
-    for root, timeout in ((registered, 900), (checkout, 1800)):
+    for root, timeout in ((registered, timeouts[0]), (checkout, timeouts[1])):
         descriptor = root / ".agentctl/project.toml"
         descriptor.write_text(
             descriptor.read_text().replace(
@@ -1091,8 +1093,8 @@ def test_launch_and_get_expose_the_bound_descriptor_not_the_workspace_descriptor
             + '\n[environment.values]\nBOUND_SELECTION_TEST_VALUE = "synthetic-private-value"\n'
         )
     for project, root, timeout in (
-        ("fixture", registered, 900),
-        (str(checkout), checkout, 1800),
+        ("fixture", registered, timeouts[0]),
+        (str(checkout), checkout, timeouts[1]),
     ):
         assert (
             cli.main(
@@ -1125,11 +1127,12 @@ def test_launch_and_get_expose_the_bound_descriptor_not_the_workspace_descriptor
         )
         assert "environment" not in started
         assert "synthetic-private-value" not in captured.out + captured.err
+        timeout_text = "no runtime deadline" if timeout == 0 else f"{timeout}s"
         for text in (
             str(root / ".agentctl/project.toml"),
             f"descriptor root {root}",
             f"workspace {checkout}",
-            f"timeout {timeout}s",
+            f"timeout {timeout_text}",
         ):
             assert text in captured.err
         descriptor = root / ".agentctl/project.toml"
@@ -1162,5 +1165,22 @@ def test_launch_and_get_expose_the_bound_descriptor_not_the_workspace_descriptor
             == 0
         )
         text = capsys.readouterr().out
-        assert f"timeout {timeout}s" in text
+        assert f"timeout {timeout_text}" in text
         assert f"descriptor root {root}" in text
+
+
+def test_unknown_timeout_is_not_reported_as_an_unlimited_deadline() -> None:
+    from agentctl import job_queries
+
+    recorded = {"project_root": "/synthetic/project"}
+    missing = job_queries.launch_selection(recorded)
+    assert "timeout_seconds" not in missing
+    zero = job_queries.launch_selection({**recorded, "timeout_seconds": 0})
+    assert zero["timeout_seconds"] == 0
+    assert "timeout_seconds" not in job_queries.launch_selection(
+        {**recorded, "timeout_seconds": False}
+    )
+    output = operator_view.Output(as_json=False, full=False)
+    base = {"task_id": 1, "label": "fixture:check", "phase": "queued"}
+    assert "timeout unknown" in output.job_line({**base, **missing})
+    assert "timeout no runtime deadline" in output.job_line({**base, **zero})

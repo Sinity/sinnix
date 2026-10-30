@@ -156,15 +156,19 @@ def test_an_argument_requiring_operation_is_refused_without_supplied_argv(
     assert written["argv"] == ["env", "true", "--sel"]
 
 
+@pytest.mark.parametrize("timeout", [120, 0])
 def test_cached_operation_reuses_an_active_and_completed_exact_receipt(
     fake_pueue: FakePueue,
     config: Config,
     project_root: Path,
     monkeypatch: pytest.MonkeyPatch,
+    timeout: int,
 ) -> None:
     descriptor = project_root / ".agentctl" / "project.toml"
     descriptor.write_text(
-        descriptor.read_text().replace(
+        descriptor.read_text()
+        .replace("timeout_seconds = 120", f"timeout_seconds = {timeout}")
+        .replace(
             '[operations.verify]\ndescription = "Fixture typed verification"',
             '[operations.verify]\ndescription = "Fixture typed verification"\ncache = "tree+environment"',
         )
@@ -196,7 +200,7 @@ def test_cached_operation_reuses_an_active_and_completed_exact_receipt(
         assert selected["descriptor_path"] == str(descriptor)
         assert selected["project_root"] == str(project_root)
         assert selected["working_directory"] == str(project_root)
-        assert selected["timeout_seconds"] == 120
+        assert selected["timeout_seconds"] == timeout
     written = read_launch(config, fake_pueue.task(first["task_id"]))
     assert written["tree_receipt"] == {
         "head": "a" * 40,

@@ -752,7 +752,11 @@ class Output:
             )
         ):
             timeout = job.get("timeout_seconds")
-            budget = f"{timeout}s" if timeout is not None else "unknown"
+            budget = (
+                "no runtime deadline"
+                if timeout == 0
+                else f"{timeout}s" if timeout is not None else "unknown"
+            )
             selection_text = (
                 f"; descriptor {job.get('descriptor_path', 'unknown')}"
                 f"; descriptor root {job.get('project_root', 'unknown')}"
